@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "10.11.35",
+        "changelog": "## Features\r\n- Support non-admin user tokens for library and user fetching with automatic fallback\r\n\r\n## Improvements\r\n- Use external URL for filter browser images (whitelist/blacklist)\r\n- Mobile responsive sync tables — compact layout on small screens\r\n- Allow external URL mapping for Sync Table images\r\n\r\n## Fixes\r\n- TestConnection now falls back to /System/Info/Public for non-admin tokens",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.35/jellyfin-plugin-serversync-10.11.35.zip",
+        "checksum": "8af35ee54ebec39193199a9f86d38343",
+        "timestamp": "2026-02-10T03:14:21Z"
+      },
+      {
         "version": "10.11.34",
         "changelog": "## Improvements\r\n- Allow external URL mapping for Sync Table images",
         "targetAbi": "10.11.0.0",
