@@ -1,4 +1,4 @@
-# Server Sync
+![Server Sync](Jellyfin.Plugin.ServerSync/Assets/Logo.png)
 
 A Jellyfin plugin for one-way synchronization between Jellyfin servers. Keep your **Content**, **Watch History**, **Metadata**, and **User Settings** in sync across multiple Jellyfin installations.
 
