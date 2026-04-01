@@ -23,6 +23,7 @@
                             <option value="history" data-config-key="EnableHistorySync">History</option>
                             <option value="metadata" data-config-key="EnableMetadataSync">Metadata</option>
                             <option value="users" data-config-key="EnableUserSync">Users</option>
+                            <option value="people" data-config-key="EnablePeopleSync">People</option>
                         </select>
                         <div class="selectArrowContainer"><div style="display:none;">0</div><span class="selectArrow material-icons keyboard_arrow_down" aria-hidden="true"></span></div>
                     </div>
@@ -32,7 +33,7 @@
                         <div class="emptyState-card">
                             <span class="material-icons emptyState-icon">sync_disabled</span>
                             <div class="emptyState-title">No Sync Types Enabled</div>
-                            <div class="emptyState-subtitle">Enable Content, History, Metadata, or User syncing in the Settings tab to get started.</div>
+                            <div class="emptyState-subtitle">Enable Content, History, Metadata, User, or People syncing in the Settings tab to get started.</div>
                             <a is="emby-linkbutton" class="raised button-primary emptyState-button" href="configurationpage?name=serversync_settings">
                                 <span class="material-icons" style="font-size:18px; margin-right:6px;">settings</span>
                                 <span>Go to Settings</span>
@@ -601,6 +602,117 @@
                         </div>
                     </div>
 
+                    <!-- ====================================================
+                         VIEW: People Sync
+                         ==================================================== -->
+                    <div id="syncView-people" class="syncView hidden">
+
+                        <!-- Status Summary Cards -->
+                        <div id="peopleSyncStatusSummary">
+                            <div class="statusCards">
+                                <div class="statusCard statusCard-synced" id="peopleStatusGroupSynced" title="">
+                                    <span class="statusCard-count" id="peopleSyncedCount">0</span>
+                                    <span class="statusCard-label">Synced</span>
+                                </div>
+                                <div class="statusCard statusCard-queued" id="peopleStatusGroupQueued" title="">
+                                    <span class="statusCard-count" id="peopleQueuedCount">0</span>
+                                    <span class="statusCard-label">Queued</span>
+                                </div>
+                                <div class="statusCard statusCard-errored" id="peopleStatusGroupErrored" title="">
+                                    <span class="statusCard-count" id="peopleErroredCount">0</span>
+                                    <span class="statusCard-label">Errored</span>
+                                </div>
+                                <div class="statusCard statusCard-ignored" id="peopleStatusGroupIgnored" title="">
+                                    <span class="statusCard-count" id="peopleIgnoredCount">0</span>
+                                    <span class="statusCard-label">Ignored</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Health Dashboard -->
+                        <div id="peopleHealthDashboard" class="healthDashboard">
+                            <div class="healthRow">
+                                <div class="healthCard">
+                                    <span class="healthLabel">Last Sync</span>
+                                    <span class="healthValue" id="peopleHealthLastSync">Never</span>
+                                </div>
+                                <div class="healthCard">
+                                    <span class="healthLabel">People Tracked</span>
+                                    <span class="healthValue" id="peopleHealthPersonCount">0</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="syncActionButtonRow">
+                            <button is="emby-button" type="button" id="btnRefreshPeopleItems" class="raised syncActionButton">
+                                <span>Refresh</span>
+                            </button>
+                            <button is="emby-button" type="button" id="btnTriggerPeopleSync" class="raised button-primary syncActionButton">
+                                <span>Sync</span>
+                            </button>
+                            <button is="emby-button" type="button" id="btnRetryPeopleErrors" class="raised button-primary syncActionButton hidden">
+                                <span>Retry Errors</span>
+                            </button>
+                        </div>
+
+                        <div class="syncSectionSeparator"></div>
+
+                        <!-- Paginated Table Container -->
+                        <div id="peopleSyncItemsTableContainer">
+                            <!-- PaginatedTable generates its structure here -->
+                        </div>
+
+                        <!-- People Item Detail Modal -->
+                        <div id="peopleSyncItemDetailModal" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="peopleSyncModalTitle">
+                            <div class="dialogContent peopleSyncModal-dialog modal-relative">
+                                <button type="button" id="btnPeopleSyncModalClose" class="dialogCloseBtn" title="Close" aria-label="Close">&times;</button>
+                                <h2 id="peopleSyncModalTitle" class="modal-title"></h2>
+                                <div class="modal-body">
+                                    <div class="peopleSyncModal-topRow">
+                                        <span id="peopleSyncModalStatusBadge" class="itemModal-statusBadge"></span>
+                                    </div>
+                                    <div id="peopleSyncModalInfoGrid" class="peopleSyncModal-infoGrid hidden">
+                                        <div class="peopleSyncModal-infoItem">
+                                            <div class="peopleSyncModal-infoLabel">Last Sync</div>
+                                            <div id="peopleSyncModalLastSync" class="peopleSyncModal-infoValue"></div>
+                                        </div>
+                                    </div>
+                                    <div id="peopleSyncModalErrorSection" class="modal-field hidden">
+                                        <div class="modal-field-label">Error</div>
+                                        <div id="peopleSyncModalError" class="errorMessage"></div>
+                                    </div>
+                                    <div id="peopleSyncModalChangesSummary" class="peopleSyncModal-changesSummary"></div>
+
+                                    <!-- Comparison Table -->
+                                    <div class="peopleSyncModal-compareSection">
+                                        <table class="peopleSyncModal-compareTable">
+                                            <thead>
+                                                <tr>
+                                                    <th class="peopleSyncModal-property">Property</th>
+                                                    <th class="peopleSyncModal-server">Source</th>
+                                                    <th class="peopleSyncModal-server">Local</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="peopleSyncModalTableBody">
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <!-- Modal Action Buttons -->
+                                    <div class="modal-buttons">
+                                        <button is="emby-button" type="button" id="btnPeopleSyncModalIgnore" class="raised modalButton">
+                                            <span>Ignore</span>
+                                        </button>
+                                        <button is="emby-button" type="button" id="btnPeopleSyncModalQueue" class="raised button-primary modalButton">
+                                            <span>Queue</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </form>
         </div>
@@ -613,10 +725,12 @@
     <style>
         /* ===== Shared Modal Base Patterns ===== */
         .contentModal-dialog, .historyModal-dialog,
-        .metadataSyncModal-dialog, .userSyncModal-dialog { max-width: 900px; width: 95vw; }
+        .metadataSyncModal-dialog, .userSyncModal-dialog,
+        .peopleSyncModal-dialog { max-width: 900px; width: 95vw; }
 
         .contentModal-topRow, .historyModal-topRow,
-        .metadataSyncModal-topRow, .userSyncModal-topRow {
+        .metadataSyncModal-topRow, .userSyncModal-topRow,
+        .peopleSyncModal-topRow {
             display: flex; align-items: center; gap: 16px; margin-bottom: 16px;
         }
         .contentModal-serverMapping, .historyModal-serverMapping,
@@ -624,29 +738,33 @@
             font-size: 0.9em; opacity: 0.8;
         }
         .contentModal-infoGrid, .historyModal-infoGrid,
-        .metadataSyncModal-infoGrid, .userSyncModal-infoGrid {
+        .metadataSyncModal-infoGrid, .userSyncModal-infoGrid,
+        .peopleSyncModal-infoGrid {
             display: flex; gap: 24px; margin-bottom: 16px;
             padding: 12px 16px; background: rgba(0, 0, 0, 0.2); border-radius: 8px;
         }
         .contentModal-infoItem, .historyModal-infoItem,
-        .metadataSyncModal-infoItem, .userSyncModal-infoItem { flex: 1; }
+        .metadataSyncModal-infoItem, .userSyncModal-infoItem,
+        .peopleSyncModal-infoItem { flex: 1; }
 
         .contentModal-infoLabel, .historyModal-infoLabel,
-        .metadataSyncModal-infoLabel, .userSyncModal-infoLabel {
+        .metadataSyncModal-infoLabel, .userSyncModal-infoLabel,
+        .peopleSyncModal-infoLabel {
             font-size: 0.75em; text-transform: uppercase;
             letter-spacing: 0.5px; opacity: 0.6; margin-bottom: 4px;
         }
         .contentModal-infoValue, .historyModal-infoValue,
-        .metadataSyncModal-infoValue, .userSyncModal-infoValue {
+        .metadataSyncModal-infoValue, .userSyncModal-infoValue,
+        .peopleSyncModal-infoValue {
             font-family: var(--font-mono);
             font-size: 1em; font-weight: 500;
         }
 
         /* ===== Shared Changed Row Highlight ===== */
         .historySyncModal-changedRow, .metadataSyncModal-changedRow,
-        .userSyncModal-changedRow { background: var(--status-queued-bg); }
+        .userSyncModal-changedRow, .peopleSyncModal-changedRow { background: var(--status-queued-bg); }
         .historySyncModal-changedRow td:first-child, .metadataSyncModal-changedRow td:first-child,
-        .userSyncModal-changedRow td:first-child { border-left: 3px solid var(--status-queued-color); }
+        .userSyncModal-changedRow td:first-child, .peopleSyncModal-changedRow td:first-child { border-left: 3px solid var(--status-queued-color); }
 
         /* ===== Shared Section Header / Disabled Row ===== */
         .metadataSyncModal-sectionHeader td, .userSyncModal-sectionHeader td {
@@ -658,17 +776,20 @@
         .userSyncModal-disabledRow td { padding: 8px 12px; }
 
         /* ===== Shared Changes Badge ===== */
-        .metadataSyncModal-changesSummary, .userSyncModal-changesSummary {
+        .metadataSyncModal-changesSummary, .userSyncModal-changesSummary,
+        .peopleSyncModal-changesSummary {
             display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 16px;
         }
-        .metadataSyncModal-changesBadge, .userSyncModal-changesBadge {
+        .metadataSyncModal-changesBadge, .userSyncModal-changesBadge, .peopleSyncBadge {
             display: inline-flex; align-items: center; gap: 6px;
             padding: 6px 12px; border-radius: 4px; font-size: 0.85em; font-weight: 500;
         }
-        .metadataSyncModal-changesBadge.has-changes, .userSyncModal-changesBadge.has-changes {
+        .metadataSyncModal-changesBadge.has-changes, .userSyncModal-changesBadge.has-changes,
+        .peopleSyncBadge.has-changes {
             background: var(--status-queued-bg); color: var(--status-queued-color);
         }
-        .metadataSyncModal-changesBadge.no-changes, .userSyncModal-changesBadge.no-changes {
+        .metadataSyncModal-changesBadge.no-changes, .userSyncModal-changesBadge.no-changes,
+        .peopleSyncBadge.no-changes {
             background: var(--status-synced-bg); color: var(--status-synced-color);
         }
         .metadataSyncModal-changesBadge.disabled, .userSyncModal-changesBadge.disabled {
@@ -764,6 +885,26 @@
         .userSyncModal-userId {
             font-family: var(--font-mono);
             font-size: 0.8em; opacity: 0.5;
+        }
+
+        /* ===== People Sync Modal Specifics ===== */
+        .peopleSyncModal-compareSection { margin-top: 16px; }
+        .peopleSyncModal-compareTable {
+            width: 100%; border-collapse: collapse;
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;
+        }
+        .peopleSyncModal-compareTable th,
+        .peopleSyncModal-compareTable td { padding: 8px 12px; text-align: left; }
+        .peopleSyncModal-compareTable th {
+            background: rgba(255,255,255,0.08); font-size: 0.85em;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .peopleSyncModal-compareTable td { border-top: 1px solid rgba(255,255,255,0.06); }
+        .peopleSyncModal-property { width: 25%; font-weight: 500; }
+        .peopleSyncModal-server { width: 37.5%; }
+        .peopleSyncModal-value {
+            font-family: var(--font-mono); font-size: 0.9em;
+            word-break: break-word; max-width: 300px;
         }
     </style>
 </div>

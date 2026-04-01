@@ -54,6 +54,16 @@ public class MetadataSyncItem
     /// </summary>
     public string? LocalPath { get; set; }
 
+    /// <summary>
+    /// Gets or sets the item type (e.g., "Movie", "Series", "Season").
+    /// </summary>
+    public string? ItemType { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this is a folder-type item.
+    /// </summary>
+    public bool IsFolder { get; set; }
+
     // ===== Metadata Category =====
 
     /// <summary>

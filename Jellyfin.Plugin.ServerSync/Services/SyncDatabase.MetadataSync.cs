@@ -264,7 +264,8 @@ public partial class SyncDatabase
                     SourceImagesValue, LocalImagesValue, SourceImagesHash, SyncedImagesHash,
                     SourcePeopleValue, LocalPeopleValue,
                     SourceStudiosValue, LocalStudiosValue,
-                    Status, StatusDate, LastSyncTime, ErrorMessage, SourceETag
+                    Status, StatusDate, LastSyncTime, ErrorMessage, SourceETag,
+                    ItemType, IsFolder
                 ) VALUES (
                     @sourceLibraryId, @localLibraryId, @sourceItemId, @localItemId,
                     @itemName, @sourcePath, @localPath,
@@ -272,7 +273,8 @@ public partial class SyncDatabase
                     @sourceImagesValue, @localImagesValue, @sourceImagesHash, @syncedImagesHash,
                     @sourcePeopleValue, @localPeopleValue,
                     @sourceStudiosValue, @localStudiosValue,
-                    @status, @statusDate, @lastSyncTime, @errorMessage, @sourceETag
+                    @status, @statusDate, @lastSyncTime, @errorMessage, @sourceETag,
+                    @itemType, @isFolder
                 )
                 ON CONFLICT(SourceLibraryId, SourceItemId) DO UPDATE SET
                     LocalLibraryId = @localLibraryId,
@@ -309,7 +311,9 @@ public partial class SyncDatabase
                         WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.ErrorMessage
                         ELSE @errorMessage
                     END,
-                    SourceETag = @sourceETag
+                    SourceETag = @sourceETag,
+                    ItemType = @itemType,
+                    IsFolder = @isFolder
             ";
 
             command.Parameters.AddWithValue("@sourceLibraryId", item.SourceLibraryId);
@@ -335,6 +339,8 @@ public partial class SyncDatabase
             command.Parameters.AddWithValue("@errorMessage", item.ErrorMessage ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("@ignoredStatus", (int)BaseSyncStatus.Ignored);
             command.Parameters.AddWithValue("@sourceETag", item.SourceETag ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@itemType", item.ItemType ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@isFolder", item.IsFolder ? 1 : 0);
 
             command.ExecuteNonQuery();
         }
@@ -611,6 +617,19 @@ public partial class SyncDatabase
         if (sourceETagOrdinal >= 0 && !reader.IsDBNull(sourceETagOrdinal))
         {
             item.SourceETag = reader.GetString(sourceETagOrdinal);
+        }
+
+        // Folder item support fields
+        var itemTypeOrdinal = TryGetOrdinal(reader, "ItemType");
+        if (itemTypeOrdinal >= 0 && !reader.IsDBNull(itemTypeOrdinal))
+        {
+            item.ItemType = reader.GetString(itemTypeOrdinal);
+        }
+
+        var isFolderOrdinal = TryGetOrdinal(reader, "IsFolder");
+        if (isFolderOrdinal >= 0 && !reader.IsDBNull(isFolderOrdinal))
+        {
+            item.IsFolder = reader.GetInt32(isFolderOrdinal) != 0;
         }
 
         var lastSyncTimeOrdinal = reader.GetOrdinal("LastSyncTime");

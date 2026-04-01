@@ -26,6 +26,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddTransient<LocalServerClient>();
         serviceCollection.AddTransient<UserSyncTableService>();
         serviceCollection.AddTransient<UserSyncStateService>();
+        serviceCollection.AddTransient<PeopleSyncTableService>();
 
         // Named HttpClient for source server communication
         serviceCollection.AddHttpClient(SourceServerClient.HttpClientName);

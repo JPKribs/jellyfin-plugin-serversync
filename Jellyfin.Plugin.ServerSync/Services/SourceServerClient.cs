@@ -667,6 +667,105 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
+    /// Gets folder-type items (Series, Season, MusicAlbum, MusicArtist, BoxSet) with full metadata fields.
+    /// Used for syncing metadata on container/parent items.
+    /// </summary>
+    /// <param name="libraryId">Library ID.</param>
+    /// <param name="startIndex">Pagination start index.</param>
+    /// <param name="limit">Page size.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Query result with folder items.</returns>
+    public async Task<BaseItemDtoQueryResult?> GetLibraryFolderItemsWithMetadataAsync(
+        Guid libraryId,
+        int startIndex = 0,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = GetApiClient();
+            return await client.Items.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.ParentId = libraryId;
+                    config.QueryParameters.Recursive = true;
+                    config.QueryParameters.IncludeItemTypes = new[]
+                    {
+                        BaseItemKind.Series,
+                        BaseItemKind.Season,
+                        BaseItemKind.MusicAlbum,
+                        BaseItemKind.MusicArtist,
+                        BaseItemKind.BoxSet
+                    };
+                    config.QueryParameters.Fields = new[]
+                    {
+                        ItemFields.Path,
+                        ItemFields.DateCreated,
+                        ItemFields.Overview,
+                        ItemFields.Genres,
+                        ItemFields.Tags,
+                        ItemFields.Studios,
+                        ItemFields.People,
+                        ItemFields.ProviderIds,
+                        ItemFields.OriginalTitle,
+                        ItemFields.SortName,
+                        ItemFields.ProductionLocations,
+                        ItemFields.Taglines,
+                        ItemFields.Settings,
+                        ItemFields.CustomRating,
+                        ItemFields.Etag
+                    };
+                    config.QueryParameters.StartIndex = startIndex;
+                    config.QueryParameters.Limit = limit;
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get folder items with metadata from library {LibraryId}", libraryId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the total count of folder-type items in a library.
+    /// </summary>
+    /// <param name="libraryId">Library ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Total folder item count or 0 if failed.</returns>
+    public async Task<int> GetLibraryFolderItemCountAsync(Guid libraryId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = GetApiClient();
+            var result = await client.Items.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.ParentId = libraryId;
+                    config.QueryParameters.Recursive = true;
+                    config.QueryParameters.IncludeItemTypes = new[]
+                    {
+                        BaseItemKind.Series,
+                        BaseItemKind.Season,
+                        BaseItemKind.MusicAlbum,
+                        BaseItemKind.MusicArtist,
+                        BaseItemKind.BoxSet
+                    };
+                    config.QueryParameters.StartIndex = 0;
+                    config.QueryParameters.Limit = 0;
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return result?.TotalRecordCount ?? 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get folder item count for library {LibraryId}", libraryId);
+            return 0;
+        }
+    }
+
+    /// <summary>
     /// GetItemDetailsAsync
     /// Gets detailed item info including media sources and streams.
     /// </summary>
@@ -1023,6 +1122,81 @@ public class SourceServerClient : IDisposable
             request?.Dispose();
             _logger.LogDebug(ex, "Failed to download image {ImageType}/{Index} for item {ItemId}", imageType, imageIndex, itemId);
             return (null, null);
+        }
+    }
+
+    // ===== People Sync Methods =====
+
+    /// <summary>
+    /// Gets all Person items from the source server with metadata fields.
+    /// Uses the /Persons endpoint to list all people.
+    /// </summary>
+    /// <param name="startIndex">Pagination start index.</param>
+    /// <param name="limit">Page size.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>JSON document with Items array and TotalRecordCount, or null on failure.</returns>
+    public async Task<System.Text.Json.JsonDocument?> GetPersonsAsync(
+        int startIndex = 0,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var url = $"{_serverUrl}/Persons?StartIndex={startIndex}&Limit={limit}&Fields=Overview,ProviderIds";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            AddAuthorizationHeader(request);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return System.Text.Json.JsonDocument.Parse(json);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get persons from source server");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the total count of Person items on the source server.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Total person count or 0 on failure.</returns>
+    public async Task<int> GetPersonCountAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var url = $"{_serverUrl}/Persons?StartIndex=0&Limit=0";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            AddAuthorizationHeader(request);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+            if (doc.RootElement.TryGetProperty("TotalRecordCount", out var totalProp))
+            {
+                return totalProp.GetInt32();
+            }
+
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get person count from source server");
+            return 0;
         }
     }
 

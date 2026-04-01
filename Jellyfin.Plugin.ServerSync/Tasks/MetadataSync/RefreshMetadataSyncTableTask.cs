@@ -89,6 +89,7 @@ public class RefreshMetadataSyncTableTask : IScheduledTask
         var syncImages = config.MetadataSyncImages;
         var syncPeople = config.MetadataSyncPeople;
         var syncStudios = config.MetadataSyncStudios;
+        var syncFolderItems = config.MetadataSyncFolderItems;
         var refreshMode = config.MetadataRefreshMode;
 
         if (!syncMetadata && !syncImages && !syncPeople && !syncStudios)
@@ -122,7 +123,8 @@ public class RefreshMetadataSyncTableTask : IScheduledTask
         var totalItems = await _metadataService.GetTotalItemCountAsync(
             client,
             enabledLibraryMappings,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            includeFolderItems: syncFolderItems).ConfigureAwait(false);
 
         progress.Report(InitProgress);
 
@@ -154,7 +156,8 @@ public class RefreshMetadataSyncTableTask : IScheduledTask
                         var itemProgress = (double)processedItems / totalItems * ProcessingProgress;
                         progress.Report(InitProgress + itemProgress);
                     }
-                }).ConfigureAwait(false);
+                },
+                syncFolderItems: syncFolderItems).ConfigureAwait(false);
         }
 
         progress.Report(100);

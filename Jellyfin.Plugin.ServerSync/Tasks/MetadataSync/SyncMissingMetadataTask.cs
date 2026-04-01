@@ -110,8 +110,22 @@ public class SyncMissingMetadataTask : IScheduledTask
         // Apply queued changes
         _logger.LogInformation("Applying queued metadata changes");
 
-        // Get all queued metadata items
+        // Get all queued metadata items, ordered so parents sync before children
         var queuedItems = database.GetMetadataSyncItemsByStatus(BaseSyncStatus.Queued);
+
+        // Sort: folder items first (by hierarchy depth), then leaf items
+        queuedItems.Sort((a, b) =>
+        {
+            var orderA = GetItemTypeOrder(a.ItemType);
+            var orderB = GetItemTypeOrder(b.ItemType);
+            if (orderA != orderB)
+            {
+                return orderA.CompareTo(orderB);
+            }
+
+            return string.Compare(a.ItemName, b.ItemName, StringComparison.OrdinalIgnoreCase);
+        });
+
         var totalItems = queuedItems.Count;
 
         if (totalItems == 0)
@@ -978,6 +992,20 @@ public class SyncMissingMetadataTask : IScheduledTask
             _logger.LogError(ex, "Failed to apply studios for {ItemName}", item.ItemName);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Returns a sort order for item types to ensure parents sync before children.
+    /// Lower values sync first.
+    /// </summary>
+    private static int GetItemTypeOrder(string? itemType)
+    {
+        return itemType switch
+        {
+            "Series" or "MusicArtist" => 0,
+            "Season" or "MusicAlbum" or "BoxSet" => 1,
+            _ => 2 // Episodes, Movies, Audio, Video, and unknown types
+        };
     }
 
     /// <inheritdoc />

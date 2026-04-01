@@ -890,6 +890,7 @@ export default function (view) {
         setChecked('chkMetadataSyncStudios', config.MetadataSyncStudios !== false);
         setChecked('chkMetadataSyncPeople', config.MetadataSyncPeople === true);
         setChecked('chkMetadataSyncImages', config.MetadataSyncImages !== false);
+        setChecked('chkMetadataSyncFolderItems', config.MetadataSyncFolderItems === true);
         setValue('selMetadataRefreshMode', config.MetadataRefreshMode || 'FullRefresh');
     }
 
@@ -902,12 +903,32 @@ export default function (view) {
         config.MetadataSyncStudios = getChecked('chkMetadataSyncStudios');
         config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
         config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
+        config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
         config.MetadataRefreshMode = getValue('selMetadataRefreshMode', 'FullRefresh');
 
         ServerSyncShared.saveConfig(config).then(function() {
             Dashboard.alert('Metadata settings saved');
         }).catch(function() {
             Dashboard.alert('Failed to save metadata settings');
+        });
+    }
+
+    // --- People Sync Settings ---
+
+    function loadPeopleSettings(config) {
+        setChecked('chkEnablePeopleSync', config.EnablePeopleSync === true);
+        setChecked('chkPeopleSyncImages', config.PeopleSyncImages !== false);
+    }
+
+    function savePeopleSettings() {
+        var config = currentConfig || {};
+        config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
+        config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
+
+        ServerSyncShared.saveConfig(config).then(function() {
+            Dashboard.alert('People settings saved');
+        }).catch(function() {
+            Dashboard.alert('Failed to save people settings');
         });
     }
 
@@ -983,6 +1004,7 @@ export default function (view) {
             loadContentSettings(config);
             loadHistorySettings(config);
             loadMetadataSettings(config);
+            loadPeopleSettings(config);
             loadUserSyncSettings(config);
 
             if (config.SourceServerUrl && config.SourceServerApiKey) {
@@ -1065,6 +1087,7 @@ export default function (view) {
                 bindClick('btnSaveContentSettings', saveContentSettings);
                 bindClick('btnSaveHistorySettings', saveHistorySettings);
                 bindClick('btnSaveMetadataSettings', saveMetadataSettings);
+                bindClick('btnSavePeopleSettings', savePeopleSettings);
                 bindClick('btnSaveUserSyncSettings', saveUserSyncSettings);
 
                 // Troubleshooting: Database reset actions
@@ -1072,6 +1095,7 @@ export default function (view) {
                 bindClick('btnResetHistoryTable', function() { resetTable('ResetHistorySyncDatabase', 'history sync'); });
                 bindClick('btnResetMetadataTable', function() { resetTable('ResetMetadataSyncDatabase', 'metadata sync'); });
                 bindClick('btnResetUserTable', function() { resetTable('ResetUserSyncDatabase', 'user sync'); });
+                bindClick('btnResetPeopleTable', function() { resetTable('ResetPeopleSyncDatabase', 'people sync'); });
                 bindClick('btnResetEntireDatabase', resetEntireDatabase);
             }
 

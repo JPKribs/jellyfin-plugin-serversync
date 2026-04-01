@@ -9,6 +9,9 @@
     <CodeAnalysisRuleSet>../jellyfin.ruleset</CodeAnalysisRuleSet>
     <NoWarn>NU1605;CA1002;CA2227;CA1305;CA2213</NoWarn>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <Version>10.11.36.0</Version>
+    <AssemblyVersion>10.11.36.0</AssemblyVersion>
+    <FileVersion>10.11.36.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

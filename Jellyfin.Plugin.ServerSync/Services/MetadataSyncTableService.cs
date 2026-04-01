@@ -60,7 +60,8 @@ public class MetadataSyncTableService
         bool syncStudios,
         MetadataRefreshMode refreshMode,
         CancellationToken cancellationToken,
-        Action? onItemProcessed = null)
+        Action? onItemProcessed = null,
+        bool syncFolderItems = false)
     {
         var sourceLibraryId = Guid.Parse(libraryMapping.SourceLibraryId);
 
@@ -140,6 +141,48 @@ public class MetadataSyncTableService
             cancellationToken: cancellationToken,
             onItemProcessed: onItemProcessed).ConfigureAwait(false);
 
+        // Process folder-type items (Series, Season, MusicAlbum, MusicArtist, BoxSet)
+        if (syncFolderItems)
+        {
+            _logger.LogInformation("Processing folder items for library {Library}", libraryMapping.SourceLibraryName);
+
+            var folderItemsProcessed = await PaginatedFetchUtility.FetchAllPagesAsync(
+                fetchPage: (startIndex, batchSize, ct) => client.GetLibraryFolderItemsWithMetadataAsync(sourceLibraryId, startIndex, batchSize, ct),
+                processItem: async (sourceItem, ct) =>
+                {
+                    var sid = sourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
+                    seenSourceItemIds.Add(sid);
+
+                    await ProcessMetadataItemAsync(
+                        client,
+                        database,
+                        libraryMapping,
+                        sourceItem,
+                        syncMetadata,
+                        syncImages,
+                        syncPeople,
+                        syncStudios,
+                        refreshMode,
+                        existingItems,
+                        ct,
+                        isFolder: true).ConfigureAwait(false);
+                    return true;
+                },
+                libraryName: libraryMapping.SourceLibraryName,
+                sourceRootPath: libraryMapping.SourceRootPath,
+                filterMode: libraryMapping.FilterMode,
+                filteredItems: libraryMapping.FilteredItems,
+                logger: _logger,
+                cancellationToken: cancellationToken,
+                onItemProcessed: onItemProcessed).ConfigureAwait(false);
+
+            processedItems += folderItemsProcessed;
+
+            _logger.LogInformation(
+                "Processed {Count} folder metadata items for library {Library}",
+                folderItemsProcessed, libraryMapping.SourceLibraryName);
+        }
+
         // Remove metadata records for items no longer present on the source server
         var staleCount = 0;
         foreach (var kvp in existingItems)
@@ -178,16 +221,24 @@ public class MetadataSyncTableService
         bool syncStudios,
         MetadataRefreshMode refreshMode,
         Dictionary<string, MetadataSyncItem> existingItems,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool isFolder = false)
     {
         var sourceItemId = sourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
-        var sourcePath = sourceItem.Path!;
+        var sourcePath = sourceItem.Path;
+
+        // Folder items may not always have a path (e.g., virtual Seasons, some MusicArtists)
+        if (string.IsNullOrEmpty(sourcePath))
+        {
+            _logger.LogDebug("Skipping {ItemType} '{Name}' — no path available for matching", sourceItem.Type, sourceItem.Name);
+            return;
+        }
 
         // Translate path to local path
         var localPath = PathUtilities.TranslatePath(sourcePath, libraryMapping.SourceRootPath, libraryMapping.LocalRootPath);
 
         // Try to find the local item by path
-        var localItem = _libraryManager.FindByPath(localPath, isFolder: false);
+        var localItem = _libraryManager.FindByPath(localPath, isFolder: isFolder);
         string? localItemId = localItem?.Id.ToString("N", CultureInfo.InvariantCulture);
 
         // Get existing item for this source item
@@ -219,6 +270,8 @@ public class MetadataSyncTableService
             // Update existing item with all category values
             await UpdateMetadataItemAsync(existingItem, sourceItem, localItem, localPath, localItemId, syncMetadata, syncImages, syncPeople, syncStudios, client, cancellationToken).ConfigureAwait(false);
             existingItem.SourceETag = sourceItem.Etag;
+            existingItem.ItemType = sourceItem.Type?.ToString();
+            existingItem.IsFolder = isFolder;
             database.UpsertMetadataSyncItem(existingItem);
         }
         else
@@ -240,6 +293,8 @@ public class MetadataSyncTableService
                 cancellationToken).ConfigureAwait(false);
 
             newItem.SourceETag = sourceItem.Etag;
+            newItem.ItemType = sourceItem.Type?.ToString();
+            newItem.IsFolder = isFolder;
             database.UpsertMetadataSyncItem(newItem);
         }
     }
@@ -854,7 +909,8 @@ public class MetadataSyncTableService
     public async Task<int> GetTotalItemCountAsync(
         SourceServerClient client,
         IEnumerable<LibraryMapping> libraryMappings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeFolderItems = false)
     {
         var totalCount = 0;
 
@@ -871,6 +927,15 @@ public class MetadataSyncTableService
                 cancellationToken).ConfigureAwait(false);
 
             totalCount += count;
+
+            if (includeFolderItems)
+            {
+                var folderCount = await client.GetLibraryFolderItemCountAsync(
+                    sourceLibraryId,
+                    cancellationToken).ConfigureAwait(false);
+
+                totalCount += folderCount;
+            }
         }
 
         return totalCount;

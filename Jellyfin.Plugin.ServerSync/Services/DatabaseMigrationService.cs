@@ -14,7 +14,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 15;
+    public const int CurrentSchemaVersion = 16;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -125,7 +125,34 @@ public static class DatabaseMigrationService
         ";
         userCmd.ExecuteNonQuery();
 
-        // Create MetadataSyncItems table (Metadata Sync) - v15 schema: includes SourceETag for change detection
+        // Create PeopleSyncItems table (People Sync)
+        using var peopleCmd = connection.CreateCommand();
+        peopleCmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS PeopleSyncItems (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                PersonName TEXT NOT NULL,
+                SourcePersonId TEXT,
+                LocalPersonId TEXT,
+                SourceOverview TEXT,
+                LocalOverview TEXT,
+                SourceProviderIds TEXT,
+                LocalProviderIds TEXT,
+                SourceImagesValue TEXT,
+                LocalImagesValue TEXT,
+                SourceImagesHash TEXT,
+                SyncedImagesHash TEXT,
+                Status INTEGER NOT NULL DEFAULT 1,
+                StatusDate TEXT NOT NULL,
+                LastSyncTime TEXT,
+                ErrorMessage TEXT,
+                UNIQUE(PersonName)
+            );
+            CREATE INDEX IF NOT EXISTS idx_people_sync_name ON PeopleSyncItems(PersonName);
+            CREATE INDEX IF NOT EXISTS idx_people_sync_status ON PeopleSyncItems(Status);
+        ";
+        peopleCmd.ExecuteNonQuery();
+
+        // Create MetadataSyncItems table (Metadata Sync) - v16 schema: includes folder item support
         using var metadataCmd = connection.CreateCommand();
         metadataCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS MetadataSyncItems (
@@ -152,6 +179,8 @@ public static class DatabaseMigrationService
                 LastSyncTime TEXT,
                 ErrorMessage TEXT,
                 SourceETag TEXT,
+                ItemType TEXT,
+                IsFolder INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(SourceLibraryId, SourceItemId)
             );
             CREATE INDEX IF NOT EXISTS idx_metadata_sync_item ON MetadataSyncItems(SourceItemId);
@@ -159,6 +188,7 @@ public static class DatabaseMigrationService
             CREATE INDEX IF NOT EXISTS idx_metadata_sync_library ON MetadataSyncItems(SourceLibraryId);
         ";
         metadataCmd.ExecuteNonQuery();
+
     }
 
     /// <summary>
@@ -268,6 +298,11 @@ public static class DatabaseMigrationService
             if (fromVersion < 15)
             {
                 MigrateToV15(connection, transaction, logger);
+            }
+
+            if (fromVersion < 16)
+            {
+                MigrateToV16(connection, transaction, logger);
             }
 
             SetSchemaVersion(connection, CurrentSchemaVersion);
@@ -733,6 +768,53 @@ public static class DatabaseMigrationService
             logger);
 
         logger.LogInformation("Migration v15: Added SourceETag column to MetadataSyncItems for change detection");
+    }
+
+    /// <summary>
+    /// Migration to v16: Add folder item support columns to MetadataSyncItems.
+    /// </summary>
+    private static void MigrateToV16(SqliteConnection connection, SqliteTransaction transaction, ILogger logger)
+    {
+        var alterStatements = new[]
+        {
+            "ALTER TABLE MetadataSyncItems ADD COLUMN ItemType TEXT",
+            "ALTER TABLE MetadataSyncItems ADD COLUMN IsFolder INTEGER NOT NULL DEFAULT 0"
+        };
+
+        foreach (var statement in alterStatements)
+        {
+            ExecuteAlterIfColumnMissing(connection, transaction, statement, logger);
+        }
+
+        // Create PeopleSyncItems table
+        using var peopleCmd = connection.CreateCommand();
+        peopleCmd.Transaction = transaction;
+        peopleCmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS PeopleSyncItems (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                PersonName TEXT NOT NULL,
+                SourcePersonId TEXT,
+                LocalPersonId TEXT,
+                SourceOverview TEXT,
+                LocalOverview TEXT,
+                SourceProviderIds TEXT,
+                LocalProviderIds TEXT,
+                SourceImagesValue TEXT,
+                LocalImagesValue TEXT,
+                SourceImagesHash TEXT,
+                SyncedImagesHash TEXT,
+                Status INTEGER NOT NULL DEFAULT 1,
+                StatusDate TEXT NOT NULL,
+                LastSyncTime TEXT,
+                ErrorMessage TEXT,
+                UNIQUE(PersonName)
+            );
+            CREATE INDEX IF NOT EXISTS idx_people_sync_name ON PeopleSyncItems(PersonName);
+            CREATE INDEX IF NOT EXISTS idx_people_sync_status ON PeopleSyncItems(Status);
+        ";
+        peopleCmd.ExecuteNonQuery();
+
+        logger.LogInformation("Migration v16: Added ItemType, IsFolder columns and PeopleSyncItems table");
     }
 
     /// <summary>

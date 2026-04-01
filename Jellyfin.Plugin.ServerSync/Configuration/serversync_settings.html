@@ -506,6 +506,14 @@
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription">Sync primary, backdrop, logo, and other images.</div>
                                     </div>
+
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncFolderItems" />
+                                            <span class="checkboxLabel">Folder Items (Series, Seasons, Albums, Artists, BoxSets)</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Sync metadata for container/folder-type items in addition to leaf items. Matches by translated file path.</div>
+                                    </div>
                                 </div>
 
                                 <!-- Refresh Mode Subsection -->
@@ -526,6 +534,46 @@
                             <div class="collapsibleActions">
                                 <button is="emby-button" type="button" id="btnSaveMetadataSettings" class="raised button-primary">
                                     <span>Save Metadata Settings</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- COLLAPSIBLE SECTION: People Sync Settings -->
+                    <div class="collapsibleSection">
+                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="peopleSyncSettingsContent">
+                            <span class="collapsibleTitle">People</span>
+                            <span class="collapsibleIcon">&#9660;</span>
+                        </button>
+                        <div id="peopleSyncSettingsContent" class="collapsibleContent collapsed">
+
+                            <!-- Enable People Sync -->
+                            <div class="settingsGroup">
+                                <div class="checkboxContainer checkboxContainer-withDescription">
+                                    <label class="emby-checkbox-label">
+                                        <input type="checkbox" is="emby-checkbox" id="chkEnablePeopleSync" />
+                                        <span class="checkboxLabel">Enable People Sync</span>
+                                    </label>
+                                    <div class="fieldDescription checkboxFieldDescription">Sync person metadata (biography, provider IDs, images) from source to local server. People are matched by name.</div>
+                                </div>
+                            </div>
+
+                            <div id="peopleSyncOptions">
+                                <h3 class="subsectionHeader">Sync Parameters</h3>
+                                <div class="settingsGroup">
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkPeopleSyncImages" checked />
+                                            <span class="checkboxLabel">Images</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Sync person images (primary photo) from source server.</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="collapsibleActions">
+                                <button is="emby-button" type="button" id="btnSavePeopleSettings" class="raised button-primary">
+                                    <span>Save People Settings</span>
                                 </button>
                             </div>
                         </div>
@@ -641,6 +689,15 @@
                                         <div class="fieldDescription">Remove all user sync tracking data. You will need to re-scan users.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetUserTable" class="raised button-destructive button-small">
+                                        <span>Reset</span>
+                                    </button>
+                                </div>
+                                <div class="resetButtonRow">
+                                    <div class="resetButtonInfo">
+                                        <div>People Sync</div>
+                                        <div class="fieldDescription">Remove all people sync tracking data. You will need to re-scan people.</div>
+                                    </div>
+                                    <button is="emby-button" type="button" id="btnResetPeopleTable" class="raised button-destructive button-small">
                                         <span>Reset</span>
                                     </button>
                                 </div>

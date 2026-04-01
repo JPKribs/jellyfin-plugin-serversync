@@ -39,7 +39,7 @@ export default function (view) {
         _activePollIntervals.length = 0;
 
         // Disconnect IntersectionObservers on all PaginatedTable instances
-        var modules = [SyncTableModule, HistorySyncTableModule, MetadataSyncTableModule, UserSyncTableModule];
+        var modules = [SyncTableModule, HistorySyncTableModule, MetadataSyncTableModule, UserSyncTableModule, PeopleSyncTableModule];
         modules.forEach(function(mod) {
             if (mod.table && mod.table.disconnectObserver) {
                 mod.table.disconnectObserver();
@@ -184,6 +184,7 @@ export default function (view) {
                 case 'history': return HistorySyncTableModule;
                 case 'metadata': return MetadataSyncTableModule;
                 case 'users': return UserSyncTableModule;
+                case 'people': return PeopleSyncTableModule;
                 default: return null;
             }
         },
@@ -251,6 +252,9 @@ export default function (view) {
                             break;
                         case 'users':
                             UsersPageController.init();
+                            break;
+                        case 'people':
+                            PeoplePageController.init();
                             break;
                     }
                 });
@@ -3088,6 +3092,459 @@ export default function (view) {
                 UserSyncTableModule.loadUserStatus();
                 UserSyncTableModule.loadUserItems();
                 UserSyncTableModule.loadHealthStats();
+            });
+        }
+    };
+
+    // ============================================
+    // PEOPLE SYNC TABLE MODULE
+    // ============================================
+
+    var PeopleSyncTableModule = {
+        table: null,
+        currentModalItem: null,
+        currentConfig: null,
+        _initialized: false,
+
+        init: function(config) {
+            if (this._initialized) return;
+            this._initialized = true;
+
+            var self = this;
+            self.currentConfig = config;
+
+            this.table = createPaginatedTable(view, ServerSyncShared, {
+                containerId: 'peopleSyncItemsTableContainer',
+                endpoint: 'PeopleItems',
+
+                columns: [
+                    {
+                        key: 'person',
+                        label: 'Person',
+                        type: 'custom',
+                        className: 'pt-cell-with-thumb',
+                        render: function(item) {
+                            var errorPreview = '';
+                            if (item.Status === 'Errored' && item.ErrorMessage) {
+                                errorPreview = '<div class="syncItemError" title="' +
+                                    ServerSyncShared.escapeHtml(item.ErrorMessage) + '">' +
+                                    ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
+                            }
+                            return '<div class="syncItemInfo">' +
+                                '<div class="syncItemName">' + ServerSyncShared.escapeHtml(item.PersonName || 'Unknown') + '</div>' +
+                                errorPreview +
+                                '</div>';
+                        }
+                    },
+                    {
+                        key: 'changes',
+                        label: 'Changes',
+                        type: 'custom',
+                        className: 'pt-cell-details',
+                        render: function(item) {
+                            if (!item.HasChanges) {
+                                return '<span style="opacity: 0.5;">No Changes</span>';
+                            }
+                            var badges = [];
+                            if (item.HasOverviewChanges) badges.push('<span class="peopleSyncBadge has-changes">Overview</span>');
+                            if (item.HasProviderIdChanges) badges.push('<span class="peopleSyncBadge has-changes">Provider IDs</span>');
+                            if (item.HasImagesChanges) badges.push('<span class="peopleSyncBadge has-changes">Images</span>');
+                            return badges.length > 0 ? badges.join(' ') : '<span style="opacity: 0.5;">No Changes</span>';
+                        }
+                    },
+                    {
+                        key: 'Status',
+                        label: 'Status',
+                        type: 'status'
+                    }
+                ],
+
+                selection: {
+                    enabled: true,
+                    idKey: function(item) { return String(item.Id); },
+                    onSelectionChange: function(selectedIds) {
+                        self.updateBulkActionsVisibility(selectedIds.length);
+                    }
+                },
+
+                pagination: { pageSize: 50 },
+
+                filters: {
+                    options: [
+                        { value: 'Synced', label: 'Synced' },
+                        { value: 'Queued', label: 'Queued' },
+                        { value: 'Errored', label: 'Errored' },
+                        { value: 'Ignored', label: 'Ignored' }
+                    ],
+                    buildParams: function(filterValue) {
+                        return { status: filterValue };
+                    }
+                },
+
+                search: { placeholder: 'Search people...' },
+
+                actions: {
+                    onRowClick: function(item) { self.showPersonDetail(item); },
+                    onReload: function() {
+                        self.loadPeopleStatus();
+                        self.loadHealthStats();
+                    }
+                },
+
+                emptyState: {
+                    message: 'No people sync items found. Run a refresh to scan for people.'
+                }
+            });
+
+            this._bindModuleEvents();
+            this._injectBulkActions();
+        },
+
+        _bindModuleEvents: function() {
+            var self = this;
+            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'PeopleSyncTableModule'); };
+
+            bind('btnRefreshPeopleItems', function() { self.triggerRefresh(); });
+            bind('btnTriggerPeopleSync', function() { self.triggerSync(); });
+            bind('btnRetryPeopleErrors', function() { self.retryErrors(); });
+
+            bind('btnPeopleSyncModalIgnore', function() { self.modalIgnore(); });
+            bind('btnPeopleSyncModalQueue', function() { self.modalQueue(); });
+            bind('btnPeopleSyncModalClose', function() { self.closeModal(); });
+        },
+
+        _injectBulkActions: function() {
+            var self = this;
+            var bulkContainer = this.table.getBulkActionsContainer();
+            if (!bulkContainer) return;
+
+            bulkContainer.innerHTML =
+                '<button is="emby-button" type="button" id="btnPeopleBulkIgnore" class="raised pt-bulk-icon-btn" title="Ignore" disabled><span class="material-icons">block</span></button>' +
+                '<button is="emby-button" type="button" id="btnPeopleBulkQueue" class="raised button-primary pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
+
+            view.querySelector('#btnPeopleBulkIgnore').addEventListener('click', function() { self.bulkIgnore(); });
+            view.querySelector('#btnPeopleBulkQueue').addEventListener('click', function() { self.bulkQueue(); });
+        },
+
+        loadPeopleStatus: function() {
+            return ServerSyncShared.apiRequest('PeopleStatus', 'GET').then(function(status) {
+                view.querySelector('#peopleSyncedCount').textContent = status.Synced || 0;
+                view.querySelector('#peopleQueuedCount').textContent = status.Queued || 0;
+                view.querySelector('#peopleErroredCount').textContent = status.Errored || 0;
+                view.querySelector('#peopleIgnoredCount').textContent = status.Ignored || 0;
+
+                view.querySelector('#peopleStatusGroupSynced').setAttribute('title', 'Synced: ' + (status.Synced || 0));
+                view.querySelector('#peopleStatusGroupQueued').setAttribute('title', 'Queued: ' + (status.Queued || 0));
+                view.querySelector('#peopleStatusGroupErrored').setAttribute('title', 'Errored: ' + (status.Errored || 0));
+                view.querySelector('#peopleStatusGroupIgnored').setAttribute('title', 'Ignored: ' + (status.Ignored || 0));
+
+                var retryBtn = view.querySelector('#btnRetryPeopleErrors');
+                if ((status.Errored || 0) > 0) {
+                    retryBtn.classList.remove('hidden');
+                } else {
+                    retryBtn.classList.add('hidden');
+                }
+            }).catch(function() {});
+        },
+
+        loadHealthStats: function() {
+            return ServerSyncShared.apiRequest('PeopleStatus', 'GET').then(function(status) {
+                if (status) {
+                    var lastSyncEl = view.querySelector('#peopleHealthLastSync');
+                    if (status.LastSyncTime) {
+                        lastSyncEl.textContent = ServerSyncShared.formatRelativeTime(new Date(status.LastSyncTime));
+                        lastSyncEl.className = 'healthValue success';
+                    } else {
+                        lastSyncEl.textContent = 'Never';
+                        lastSyncEl.className = 'healthValue';
+                    }
+
+                    var personCount = status.PersonCount || 0;
+                    var personCountEl = view.querySelector('#peopleHealthPersonCount');
+                    personCountEl.textContent = personCount;
+                    personCountEl.className = personCount > 0 ? 'healthValue success' : 'healthValue warning';
+                }
+            }).catch(function() {});
+        },
+
+        loadPeopleItems: function() {
+            return this.table.reload();
+        },
+
+        triggerRefresh: function() {
+            var self = this;
+            var btn = view.querySelector('#btnRefreshPeopleItems');
+            btn.disabled = true;
+            btn.querySelector('span').textContent = 'Starting...';
+
+            ServerSyncShared.apiRequest('TriggerPeopleRefresh', 'POST').then(function() {
+                _activePollIntervals.push(ServerSyncShared.pollTaskProgress(btn, 'ServerSyncRefreshPeopleTable', 'Refresh', function() {
+                    self.loadPeopleStatus();
+                    self.loadPeopleItems();
+                    self.loadHealthStats();
+                }));
+            }).catch(function() {
+                ServerSyncShared.showAlert('Failed to start people refresh task');
+                btn.querySelector('span').textContent = 'Refresh';
+                btn.disabled = false;
+            });
+        },
+
+        triggerSync: function() {
+            var self = this;
+            var btn = view.querySelector('#btnTriggerPeopleSync');
+            btn.disabled = true;
+            btn.querySelector('span').textContent = 'Starting...';
+
+            ServerSyncShared.apiRequest('TriggerPeopleSync', 'POST').then(function() {
+                _activePollIntervals.push(ServerSyncShared.pollTaskProgress(btn, 'ServerSyncMissingPeople', 'Sync', function() {
+                    self.loadPeopleStatus();
+                    self.loadPeopleItems();
+                    self.loadHealthStats();
+                }));
+            }).catch(function() {
+                ServerSyncShared.showAlert('Failed to start people sync task');
+                btn.querySelector('span').textContent = 'Sync';
+                btn.disabled = false;
+            });
+        },
+
+        retryErrors: function() {
+            var self = this;
+            // Get all errored items and queue them
+            ServerSyncShared.apiRequest('PeopleItems?status=Errored&take=200', 'GET').then(function(result) {
+                if (result && result.Items && result.Items.length > 0) {
+                    var ids = result.Items.map(function(item) { return item.Id; });
+                    ServerSyncShared.apiRequest('PeopleItems/Queue', 'POST', { Ids: ids }).then(function() {
+                        ServerSyncShared.showAlert('Errored people queued for retry');
+                        self.loadPeopleStatus();
+                        self.loadPeopleItems();
+                    });
+                }
+            }).catch(function() {
+                ServerSyncShared.showAlert('Failed to retry errored items');
+            });
+        },
+
+        updateBulkActionsVisibility: function(count) {
+            var hasSelection = count > 0;
+            var ignoreBtn = view.querySelector('#btnPeopleBulkIgnore');
+            var queueBtn = view.querySelector('#btnPeopleBulkQueue');
+            if (ignoreBtn) ignoreBtn.disabled = !hasSelection;
+            if (queueBtn) queueBtn.disabled = !hasSelection;
+        },
+
+        bulkIgnore: function() {
+            var self = this;
+            var selectedKeys = this.table.getSelectedIds();
+            if (selectedKeys.length === 0) return;
+
+            var ids = selectedKeys.map(function(k) { return parseInt(k, 10); });
+
+            ServerSyncShared.apiRequest('PeopleItems/Ignore', 'POST', { Ids: ids }).then(function() {
+                self.table.clearSelection();
+                self.loadPeopleStatus();
+                self.loadPeopleItems();
+                ServerSyncShared.showAlert(selectedKeys.length + ' person(s) ignored');
+            }).catch(function() {
+                ServerSyncShared.showAlert('Failed to ignore people');
+            });
+        },
+
+        bulkQueue: function() {
+            var self = this;
+            var selectedKeys = this.table.getSelectedIds();
+            if (selectedKeys.length === 0) return;
+
+            var ids = selectedKeys.map(function(k) { return parseInt(k, 10); });
+
+            ServerSyncShared.apiRequest('PeopleItems/Queue', 'POST', { Ids: ids }).then(function() {
+                self.table.clearSelection();
+                self.loadPeopleStatus();
+                self.loadPeopleItems();
+                ServerSyncShared.showAlert(selectedKeys.length + ' person(s) queued');
+            }).catch(function() {
+                ServerSyncShared.showAlert('Failed to queue people');
+            });
+        },
+
+        showPersonDetail: function(item) {
+            var self = this;
+
+            ServerSyncShared.apiRequest('PeopleItems/' + item.Id).then(function(detail) {
+                if (!detail) {
+                    ServerSyncShared.showAlert('Person not found');
+                    return;
+                }
+
+                self.currentModalItem = detail;
+
+                view.querySelector('#peopleSyncModalTitle').textContent = detail.PersonName || 'Unknown';
+
+                var statusBadge = view.querySelector('#peopleSyncModalStatusBadge');
+                statusBadge.textContent = detail.Status || 'Unknown';
+                statusBadge.className = 'itemModal-statusBadge ' + (detail.Status || 'unknown');
+
+                var infoGrid = view.querySelector('#peopleSyncModalInfoGrid');
+                if (detail.LastSyncTime) {
+                    infoGrid.classList.remove('hidden');
+                    view.querySelector('#peopleSyncModalLastSync').textContent =
+                        ServerSyncShared.formatRelativeTime(new Date(detail.LastSyncTime));
+                } else {
+                    infoGrid.classList.add('hidden');
+                }
+
+                var errorSection = view.querySelector('#peopleSyncModalErrorSection');
+                if (detail.Status === 'Errored' && detail.ErrorMessage) {
+                    errorSection.classList.remove('hidden');
+                    view.querySelector('#peopleSyncModalError').textContent = detail.ErrorMessage;
+                } else {
+                    errorSection.classList.add('hidden');
+                }
+
+                // Build changes summary badges
+                var summaryHtml = '';
+                summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasOverviewChanges ? 'has-changes' : 'no-changes') + '">Overview: ' + (detail.HasOverviewChanges ? 'Changes' : 'Synced') + '</span> ';
+                summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasProviderIdChanges ? 'has-changes' : 'no-changes') + '">Provider IDs: ' + (detail.HasProviderIdChanges ? 'Changes' : 'Synced') + '</span> ';
+                summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasImagesChanges ? 'has-changes' : 'no-changes') + '">Images: ' + (detail.HasImagesChanges ? 'Changes' : 'Synced') + '</span>';
+                view.querySelector('#peopleSyncModalChangesSummary').innerHTML = summaryHtml;
+
+                // Build comparison table
+                var tbody = view.querySelector('#peopleSyncModalTableBody');
+                tbody.innerHTML = '';
+
+                // Overview row
+                self._addComparisonRow(tbody, 'Overview',
+                    self._truncate(detail.SourceOverview, 200),
+                    self._truncate(detail.LocalOverview, 200),
+                    detail.HasOverviewChanges);
+
+                // Provider IDs rows
+                var sourceProviders = self._parseJson(detail.SourceProviderIds);
+                var localProviders = self._parseJson(detail.LocalProviderIds);
+                if (sourceProviders || localProviders) {
+                    var allKeys = new Set();
+                    if (sourceProviders) Object.keys(sourceProviders).forEach(function(k) { allKeys.add(k); });
+                    if (localProviders) Object.keys(localProviders).forEach(function(k) { allKeys.add(k); });
+
+                    allKeys.forEach(function(key) {
+                        var sv = sourceProviders ? (sourceProviders[key] || '-') : '-';
+                        var lv = localProviders ? (localProviders[key] || '-') : '-';
+                        self._addComparisonRow(tbody, key, String(sv), String(lv), sv !== lv);
+                    });
+                } else {
+                    self._addComparisonRow(tbody, 'Provider IDs', '-', '-', false);
+                }
+
+                // Images row
+                self._addComparisonRow(tbody, 'Images',
+                    detail.HasImagesChanges ? 'Different' : 'Match',
+                    detail.HasImagesChanges ? 'Different' : 'Match',
+                    detail.HasImagesChanges);
+
+                view.querySelector('#peopleSyncItemDetailModal').classList.remove('hidden');
+            }).catch(function(err) {
+                console.error('Failed to load person detail:', err);
+                ServerSyncShared.showAlert('Failed to load person details');
+            });
+        },
+
+        _addComparisonRow: function(tbody, property, sourceVal, localVal, isChanged) {
+            var row = document.createElement('tr');
+            if (isChanged) row.className = 'peopleSyncModal-changedRow';
+
+            var propCell = document.createElement('td');
+            propCell.className = 'peopleSyncModal-property';
+            propCell.textContent = property;
+
+            var sourceCell = document.createElement('td');
+            sourceCell.className = 'peopleSyncModal-value';
+            sourceCell.textContent = sourceVal || '-';
+
+            var localCell = document.createElement('td');
+            localCell.className = 'peopleSyncModal-value';
+            localCell.textContent = localVal || '-';
+
+            row.appendChild(propCell);
+            row.appendChild(sourceCell);
+            row.appendChild(localCell);
+            tbody.appendChild(row);
+        },
+
+        _parseJson: function(str) {
+            if (!str || typeof str !== 'string') return null;
+            try { return JSON.parse(str); } catch (e) { return null; }
+        },
+
+        _truncate: function(str, maxLen) {
+            if (!str) return '-';
+            return str.length > maxLen ? str.substring(0, maxLen) + '...' : str;
+        },
+
+        closeModal: function() {
+            view.querySelector('#peopleSyncItemDetailModal').classList.add('hidden');
+            this.currentModalItem = null;
+            this.table.reload();
+            this.loadPeopleStatus();
+        },
+
+        modalIgnore: function() {
+            var self = this;
+            var item = self.currentModalItem;
+            if (!item) return;
+
+            ServerSyncShared.apiRequest('PeopleItems/Ignore', 'POST', { Ids: [item.Id] }).then(function() {
+                self.closeModal();
+                ServerSyncShared.showAlert('Person ignored');
+            }).catch(function() {
+                ServerSyncShared.showAlert('Failed to ignore person');
+            });
+        },
+
+        modalQueue: function() {
+            var self = this;
+            var item = self.currentModalItem;
+            if (!item) return;
+
+            ServerSyncShared.apiRequest('PeopleItems/Queue', 'POST', { Ids: [item.Id] }).then(function() {
+                self.closeModal();
+                ServerSyncShared.showAlert('Person queued');
+            }).catch(function() {
+                ServerSyncShared.showAlert('Failed to queue person');
+            });
+        }
+    };
+
+    // ============================================
+    // PEOPLE PAGE CONTROLLER
+    // ============================================
+
+    var PeoplePageController = {
+        currentConfig: null,
+
+        init: function() {
+            this.loadConfig();
+        },
+
+        loadConfig: function() {
+            var self = this;
+
+            ServerSyncShared.fetchLocalServerName().then(function() {
+                return ServerSyncShared.getConfig();
+            }).then(function(config) {
+                self.currentConfig = config;
+
+                PeopleSyncTableModule.currentConfig = config;
+                PeopleSyncTableModule.init(config);
+
+                PeopleSyncTableModule.loadPeopleStatus();
+                PeopleSyncTableModule.loadPeopleItems();
+                PeopleSyncTableModule.loadHealthStats();
+            }).catch(function() {
+                PeopleSyncTableModule.init(null);
+                PeopleSyncTableModule.loadPeopleStatus();
+                PeopleSyncTableModule.loadPeopleItems();
+                PeopleSyncTableModule.loadHealthStats();
             });
         }
     };

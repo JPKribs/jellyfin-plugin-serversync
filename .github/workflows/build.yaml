@@ -14,5 +14,58 @@ on:
   workflow_dispatch:
 
 jobs:
-  call:
+  build:
     uses: jellyfin/jellyfin-meta-plugins/.github/workflows/build.yaml@master
+
+  patch-artifact:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifact
+          path: artifact
+
+      - name: Patch meta.json with imagePath
+        run: |
+          cd artifact
+          ZIP_FILE=$(ls *.zip 2>/dev/null | head -1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No zip file found, skipping"
+            exit 0
+          fi
+
+          TMPDIR=$(mktemp -d)
+          unzip -o "$ZIP_FILE" -d "$TMPDIR"
+
+          # If meta.json has "image" but not "imagePath", add imagePath for Jellyfin runtime
+          if [ -f "$TMPDIR/meta.json" ]; then
+            if python3 -c "
+          import json, sys
+          with open('$TMPDIR/meta.json') as f:
+              meta = json.load(f)
+          if 'image' in meta and 'imagePath' not in meta:
+              meta['imagePath'] = meta['image']
+              with open('$TMPDIR/meta.json', 'w') as f:
+                  json.dump(meta, f, indent=2)
+              print('Added imagePath to meta.json')
+          else:
+              print('No patching needed')
+          "; then
+              # Rebuild the zip
+              cd "$TMPDIR"
+              zip -j "../artifact/$ZIP_FILE" *
+              cd -
+            fi
+          fi
+
+          rm -rf "$TMPDIR"
+
+      - name: Re-upload patched artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifact
+          path: artifact
+          overwrite: true
+          retention-days: 30

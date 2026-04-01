@@ -336,9 +336,33 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool MetadataSyncImages { get; set; } = true;
 
     /// <summary>
+    /// Sync metadata for folder-type items (Series, Season, Album, Artist, BoxSet).
+    /// When enabled, metadata for container items is synced in addition to leaf items.
+    /// </summary>
+    public bool MetadataSyncFolderItems { get; set; }
+
+    /// <summary>
     /// Timestamp when the last metadata sync completed.
     /// </summary>
     public DateTime? LastMetadataSyncTime { get; set; }
+
+    // ===== People Sync Configuration =====
+
+    /// <summary>
+    /// Enable people entity synchronization between servers.
+    /// Syncs person metadata (biography, provider IDs, images) by matching people by name.
+    /// </summary>
+    public bool EnablePeopleSync { get; set; }
+
+    /// <summary>
+    /// Sync person images (Primary, etc.) from source to local.
+    /// </summary>
+    public bool PeopleSyncImages { get; set; } = true;
+
+    /// <summary>
+    /// Timestamp when the last people sync completed.
+    /// </summary>
+    public DateTime? LastPeopleSyncTime { get; set; }
 
     /// <summary>
     /// Controls how metadata items are refreshed during sync.

@@ -1,7 +1,7 @@
 ---
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
-version: "10.11.35"
+version: "10.11.36  "
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -12,6 +12,7 @@ description: >
   translation, ETag-based change detection, configurable approval workflows, bandwidth throttling
   with time-based scheduling, and companion file support (subtitles, etc.).
 category: "General"
+image: "Assets/Logo.png"
 owner: "JPKribs"
 artifacts:
 - "Jellyfin.Plugin.ServerSync.dll"
@@ -25,10 +26,9 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   features:
-  - Support non-admin user tokens for library and user fetching with automatic fallback
+  - People Sync — sync person metadata (overview, provider IDs, images) from source server
   improvements:
-  - Use external URL for filter browser images (whitelist/blacklist)
-  - Mobile responsive sync tables — compact layout on small screens
-  - Allow external URL mapping for Sync Table images
+  - Added People Sync settings section with enable toggle and image sync option
+  - Added MetadataSyncFolderItems toggle for folder-type item syncing
   fixes:
-  - TestConnection now falls back to /System/Info/Public for non-admin tokens
+  - Plugin logo displayed in Jellyfin plugin dashboard
