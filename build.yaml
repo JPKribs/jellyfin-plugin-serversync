@@ -12,7 +12,7 @@ description: >
   translation, ETag-based change detection, configurable approval workflows, bandwidth throttling
   with time-based scheduling, and companion file support (subtitles, etc.).
 category: "General"
-image: "Assets/Logo.png"
+image: "/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
 owner: "JPKribs"
 artifacts:
 - "Jellyfin.Plugin.ServerSync.dll"
