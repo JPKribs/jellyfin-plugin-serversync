@@ -30,6 +30,7 @@ jobs:
       - name: Patch meta.json with imagePath
         run: |
           cd artifact
+          ARTIFACT_DIR=$(pwd)
           ZIP_FILE=$(ls *.zip 2>/dev/null | head -1)
           if [ -z "$ZIP_FILE" ]; then
             echo "No zip file found, skipping"
@@ -39,7 +40,6 @@ jobs:
           TMPDIR=$(mktemp -d)
           unzip -o "$ZIP_FILE" -d "$TMPDIR"
 
-          # If meta.json has "image" but not "imagePath", add imagePath for Jellyfin runtime
           if [ -f "$TMPDIR/meta.json" ]; then
             if python3 -c "
           import json, sys
@@ -53,9 +53,8 @@ jobs:
           else:
               print('No patching needed')
           "; then
-              # Rebuild the zip
               cd "$TMPDIR"
-              zip -j "../artifact/$ZIP_FILE" *
+              zip -j "$ARTIFACT_DIR/$ZIP_FILE" *
               cd -
             fi
           fi
