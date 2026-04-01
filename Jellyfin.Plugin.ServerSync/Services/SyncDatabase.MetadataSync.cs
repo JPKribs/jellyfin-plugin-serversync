@@ -221,6 +221,32 @@ public partial class SyncDatabase
     /// <summary>
     /// Gets metadata sync status counts.
     /// </summary>
+    /// <summary>
+    /// Gets all non-empty SourcePeopleValue JSON strings from the metadata sync table.
+    /// Lightweight query that avoids loading full MetadataSyncItem objects.
+    /// </summary>
+    public List<string> GetAllSourcePeopleValues()
+    {
+        return ExecuteRead(() =>
+        {
+            var values = new List<string>();
+            using var command = _connection!.CreateCommand();
+            command.CommandText = "SELECT SourcePeopleValue FROM MetadataSyncItems WHERE SourcePeopleValue IS NOT NULL AND SourcePeopleValue != '[]'";
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var val = reader.GetString(0);
+                if (!string.IsNullOrEmpty(val))
+                {
+                    values.Add(val);
+                }
+            }
+
+            return values;
+        }, fallbackValue: new List<string>());
+    }
+
     public Dictionary<BaseSyncStatus, int> GetMetadataSyncStatusCounts()
     {
         return ExecuteRead(() =>

@@ -86,14 +86,15 @@ public class RefreshPeopleSyncTableTask : IScheduledTask
 
         var database = _databaseProvider.Database;
 
-        const double InitProgress = 1.0;
-        const double ProcessingProgress = 98.0;
-
         progress.Report(0);
 
-        var totalItems = await _peopleService.GetTotalPersonCountAsync(client, cancellationToken).ConfigureAwait(false);
+        // Extract unique person names from synced metadata items for progress tracking
+        var uniqueNames = _peopleService.ExtractUniquePersonNames(database);
+        var totalItems = uniqueNames.Count;
 
-        progress.Report(InitProgress);
+        _logger.LogInformation("Found {Count} unique people in synced metadata items", totalItems);
+
+        progress.Report(1);
 
         var processedItems = 0;
 
@@ -107,8 +108,8 @@ public class RefreshPeopleSyncTableTask : IScheduledTask
                 processedItems++;
                 if (totalItems > 0)
                 {
-                    var itemProgress = (double)processedItems / totalItems * ProcessingProgress;
-                    progress.Report(InitProgress + itemProgress);
+                    var itemProgress = (double)processedItems / totalItems * 98.0;
+                    progress.Report(1.0 + itemProgress);
                 }
             }).ConfigureAwait(false);
 

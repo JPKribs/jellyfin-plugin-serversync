@@ -8,14 +8,13 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
 /// Service for synchronizing the people sync table with source and local servers.
-/// Matches people by name (unique across servers).
+/// Derives the person list from synced metadata items rather than the global /Persons endpoint.
 /// </summary>
 public class PeopleSyncTableService
 {
@@ -34,8 +33,8 @@ public class PeopleSyncTableService
     }
 
     /// <summary>
-    /// Refreshes the people sync table by fetching all people from the source server
-    /// and comparing with local people by name.
+    /// Refreshes the people sync table by extracting unique person names from synced metadata items,
+    /// then fetching each person individually from the source server.
     /// </summary>
     /// <param name="client">Source server client.</param>
     /// <param name="database">Sync database.</param>
@@ -50,9 +49,20 @@ public class PeopleSyncTableService
         CancellationToken cancellationToken,
         Action? onItemProcessed = null)
     {
-        _logger.LogInformation("Refreshing people sync table");
+        _logger.LogInformation("Refreshing people sync table from synced metadata items");
 
-        // Load existing people sync items into a lookup by name
+        // Step 1: Extract unique person names from all synced metadata items
+        var uniqueNames = ExtractUniquePersonNames(database);
+
+        if (uniqueNames.Count == 0)
+        {
+            _logger.LogInformation("No people found in synced metadata items. Run a metadata refresh first");
+            return 0;
+        }
+
+        _logger.LogInformation("Found {Count} unique people across synced metadata items", uniqueNames.Count);
+
+        // Step 2: Load existing people sync items into a lookup by name
         var existingItems = new Dictionary<string, PeopleSyncItem>(StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -67,62 +77,23 @@ public class PeopleSyncTableService
             return 0;
         }
 
-        // Build a lookup of all local people by name for matching
-        var localPeopleLookup = BuildLocalPeopleLookup();
-
-        // Fetch all source persons page by page
+        // Step 3: For each unique person, fetch from source and compare with local
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var processedCount = 0;
-        var startIndex = 0;
-        const int PageSize = 100;
 
-        while (!cancellationToken.IsCancellationRequested)
+        foreach (var name in uniqueNames)
         {
-            using var doc = await client.GetPersonsAsync(startIndex, PageSize, cancellationToken).ConfigureAwait(false);
-            if (doc == null)
-            {
-                _logger.LogWarning("Failed to fetch persons page at index {StartIndex}", startIndex);
-                break;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (!doc.RootElement.TryGetProperty("Items", out var itemsArray))
-            {
-                break;
-            }
+            seenNames.Add(name);
 
-            var pageCount = 0;
-            foreach (var personElement in itemsArray.EnumerateArray())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
+            await ProcessPersonAsync(name, client, database, existingItems, syncImages, cancellationToken).ConfigureAwait(false);
 
-                var name = personElement.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() : null;
-                if (string.IsNullOrEmpty(name))
-                {
-                    continue;
-                }
-
-                seenNames.Add(name);
-                pageCount++;
-
-                ProcessSourcePerson(personElement, name, existingItems, localPeopleLookup, syncImages, client, database);
-
-                processedCount++;
-                onItemProcessed?.Invoke();
-            }
-
-            // Check if we've fetched all pages
-            var totalRecordCount = doc.RootElement.TryGetProperty("TotalRecordCount", out var totalProp)
-                ? totalProp.GetInt32()
-                : 0;
-
-            startIndex += pageCount;
-            if (startIndex >= totalRecordCount || pageCount == 0)
-            {
-                break;
-            }
+            processedCount++;
+            onItemProcessed?.Invoke();
         }
 
-        // Remove stale records for people no longer on source
+        // Step 4: Remove stale records for people no longer in any synced item
         var staleCount = 0;
         foreach (var kvp in existingItems)
         {
@@ -130,7 +101,7 @@ public class PeopleSyncTableService
             {
                 database.DeletePeopleSyncItemByName(kvp.Key);
                 staleCount++;
-                _logger.LogDebug("Removed stale people record for {PersonName} (no longer on source)", kvp.Key);
+                _logger.LogDebug("Removed stale people record for {PersonName} (no longer in synced items)", kvp.Key);
             }
         }
 
@@ -139,96 +110,96 @@ public class PeopleSyncTableService
             _logger.LogInformation("Removed {Count} stale people sync records", staleCount);
         }
 
-        _logger.LogInformation("Processed {Count} people from source server", processedCount);
+        _logger.LogInformation("Processed {Count} people from synced metadata items", processedCount);
         return processedCount;
     }
 
     /// <summary>
-    /// Gets the total count of persons on the source server.
+    /// Extracts unique person names from all SourcePeopleValue JSON in the metadata sync table.
     /// </summary>
-    public async Task<int> GetTotalPersonCountAsync(
-        SourceServerClient client,
-        CancellationToken cancellationToken)
+    public HashSet<string> ExtractUniquePersonNames(SyncDatabase database)
     {
-        return await client.GetPersonCountAsync(cancellationToken).ConfigureAwait(false);
-    }
+        var uniqueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Builds a lookup of local people (Person entities) by name.
-    /// Uses ILibraryManager to query for all Person-type items.
-    /// </summary>
-    private Dictionary<string, MediaBrowser.Controller.Entities.BaseItem> BuildLocalPeopleLookup()
-    {
-        var lookup = new Dictionary<string, MediaBrowser.Controller.Entities.BaseItem>(StringComparer.OrdinalIgnoreCase);
+        var allPeopleJsons = database.GetAllSourcePeopleValues();
 
-        try
+        foreach (var jsonStr in allPeopleJsons)
         {
-            var query = new MediaBrowser.Controller.Entities.InternalPeopleQuery();
-            var localPeople = _libraryManager.GetPeopleNames(query);
-
-            foreach (var personName in localPeople)
+            try
             {
-                if (string.IsNullOrEmpty(personName))
+                using var doc = JsonDocument.Parse(jsonStr);
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
                 {
                     continue;
                 }
 
-                // GetPerson returns the Person entity by name
-                var personItem = _libraryManager.GetPerson(personName);
-                if (personItem != null)
+                foreach (var personElement in doc.RootElement.EnumerateArray())
                 {
-                    lookup[personName] = personItem;
+                    if (personElement.TryGetProperty("Name", out var nameProp))
+                    {
+                        var name = nameProp.GetString();
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            uniqueNames.Add(name);
+                        }
+                    }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to build local people lookup");
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse people JSON from metadata sync item");
+            }
         }
 
-        return lookup;
+        return uniqueNames;
     }
 
     /// <summary>
-    /// Processes a single source person and upserts to the sync table.
+    /// Processes a single person: fetches from source server, compares with local, and upserts.
     /// </summary>
-    private void ProcessSourcePerson(
-        JsonElement personElement,
+    private async Task ProcessPersonAsync(
         string name,
-        Dictionary<string, PeopleSyncItem> existingItems,
-        Dictionary<string, MediaBrowser.Controller.Entities.BaseItem> localPeopleLookup,
-        bool syncImages,
         SourceServerClient client,
-        SyncDatabase database)
+        SyncDatabase database,
+        Dictionary<string, PeopleSyncItem> existingItems,
+        bool syncImages,
+        CancellationToken cancellationToken)
     {
-        var sourcePersonId = personElement.TryGetProperty("Id", out var idProp) ? idProp.GetString() : null;
-        var sourceOverview = personElement.TryGetProperty("Overview", out var overviewProp) ? overviewProp.GetString() : null;
-
-        // Extract provider IDs
+        // Fetch person details from source server
+        string? sourcePersonId = null;
+        string? sourceOverview = null;
         string? sourceProviderIds = null;
-        if (personElement.TryGetProperty("ProviderIds", out var providerIdsProp) && providerIdsProp.ValueKind == JsonValueKind.Object)
-        {
-            var providerDict = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var prop in providerIdsProp.EnumerateObject())
-            {
-                var val = prop.Value.GetString();
-                if (!string.IsNullOrEmpty(val))
-                {
-                    providerDict[prop.Name] = val;
-                }
-            }
 
-            if (providerDict.Count > 0)
+        using var doc = await client.GetPersonByNameAsync(name, cancellationToken).ConfigureAwait(false);
+        if (doc != null)
+        {
+            sourcePersonId = doc.RootElement.TryGetProperty("Id", out var idProp) ? idProp.GetString() : null;
+            sourceOverview = doc.RootElement.TryGetProperty("Overview", out var overviewProp) ? overviewProp.GetString() : null;
+
+            if (doc.RootElement.TryGetProperty("ProviderIds", out var providerIdsProp) && providerIdsProp.ValueKind == JsonValueKind.Object)
             {
-                sourceProviderIds = JsonSerializer.Serialize(providerDict);
+                var providerDict = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in providerIdsProp.EnumerateObject())
+                {
+                    var val = prop.Value.GetString();
+                    if (!string.IsNullOrEmpty(val))
+                    {
+                        providerDict[prop.Name] = val;
+                    }
+                }
+
+                if (providerDict.Count > 0)
+                {
+                    sourceProviderIds = JsonSerializer.Serialize(providerDict);
+                }
             }
         }
 
         // Find local person by name
-        localPeopleLookup.TryGetValue(name, out var localPerson);
+        var localPerson = _libraryManager.GetPerson(name);
         var localPersonId = localPerson?.Id.ToString("N", CultureInfo.InvariantCulture);
 
-        // Extract local overview and provider IDs if local person exists
+        // Extract local overview and provider IDs
         string? localOverview = null;
         string? localProviderIds = null;
 
@@ -259,7 +230,6 @@ public class PeopleSyncTableService
 
         if (existingItem != null)
         {
-            // Update existing
             existingItem.SourcePersonId = sourcePersonId;
             existingItem.LocalPersonId = localPersonId;
             existingItem.SourceOverview = sourceOverview;
@@ -267,16 +237,9 @@ public class PeopleSyncTableService
             existingItem.SourceProviderIds = sourceProviderIds;
             existingItem.LocalProviderIds = localProviderIds;
 
-            // Preserve Ignored status
             if (existingItem.Status != BaseSyncStatus.Ignored)
             {
-                if (localPerson == null)
-                {
-                    // No local match — can't sync
-                    existingItem.Status = BaseSyncStatus.Queued;
-                    existingItem.StatusDate = DateTime.UtcNow;
-                }
-                else if (existingItem.HasChanges)
+                if (existingItem.HasChanges)
                 {
                     existingItem.Status = BaseSyncStatus.Queued;
                     existingItem.StatusDate = DateTime.UtcNow;
@@ -293,7 +256,6 @@ public class PeopleSyncTableService
         }
         else
         {
-            // Create new
             var newItem = new PeopleSyncItem
             {
                 PersonName = name,
@@ -306,11 +268,7 @@ public class PeopleSyncTableService
                 StatusDate = DateTime.UtcNow
             };
 
-            if (localPerson == null)
-            {
-                newItem.Status = BaseSyncStatus.Queued;
-            }
-            else if (newItem.HasChanges)
+            if (newItem.HasChanges)
             {
                 newItem.Status = BaseSyncStatus.Queued;
             }

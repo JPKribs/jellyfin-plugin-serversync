@@ -1128,26 +1128,28 @@ public class SourceServerClient : IDisposable
     // ===== People Sync Methods =====
 
     /// <summary>
-    /// Gets all Person items from the source server with metadata fields.
-    /// Uses the /Persons endpoint to list all people.
+    /// Gets a single Person by name from the source server with metadata fields.
+    /// Uses the /Persons/{name} endpoint.
     /// </summary>
-    /// <param name="startIndex">Pagination start index.</param>
-    /// <param name="limit">Page size.</param>
+    /// <param name="name">Person name to look up.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>JSON document with Items array and TotalRecordCount, or null on failure.</returns>
-    public async Task<System.Text.Json.JsonDocument?> GetPersonsAsync(
-        int startIndex = 0,
-        int limit = 100,
+    /// <returns>JSON document with the person object, or null on failure.</returns>
+    public async Task<System.Text.Json.JsonDocument?> GetPersonByNameAsync(
+        string name,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var url = $"{_serverUrl}/Persons?StartIndex={startIndex}&Limit={limit}&Fields=Overview,ProviderIds";
+            var url = $"{_serverUrl}/Persons/{Uri.EscapeDataString(name)}?Fields=Overview,ProviderIds";
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             AddAuthorizationHeader(request);
 
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Person not found on source server: {PersonName} (HTTP {StatusCode})", name, response.StatusCode);
+                return null;
+            }
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             return System.Text.Json.JsonDocument.Parse(json);
@@ -1158,45 +1160,8 @@ public class SourceServerClient : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get persons from source server");
+            _logger.LogWarning(ex, "Failed to get person {PersonName} from source server", name);
             return null;
-        }
-    }
-
-    /// <summary>
-    /// Gets the total count of Person items on the source server.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Total person count or 0 on failure.</returns>
-    public async Task<int> GetPersonCountAsync(CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var url = $"{_serverUrl}/Persons?StartIndex=0&Limit=0";
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            AddAuthorizationHeader(request);
-
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-
-            if (doc.RootElement.TryGetProperty("TotalRecordCount", out var totalProp))
-            {
-                return totalProp.GetInt32();
-            }
-
-            return 0;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get person count from source server");
-            return 0;
         }
     }
 
