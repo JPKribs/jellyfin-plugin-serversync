@@ -1,10 +1,10 @@
-![Server Sync](Jellyfin.Plugin.ServerSync/Assets/Logo.png)
+![Server Sync](Jellyfin.Plugin.ServerSync/Assets/Logo-README.png)
 
 A Jellyfin plugin for one-way synchronization between Jellyfin servers. Keep your **Content**, **Watch History**, **Metadata**, and **User Settings** in sync across multiple Jellyfin installations.
 
 ## How It Works
 
-Server Sync runs on your Local (destination) server and pulls data from a Source server using standard Jellyfin APIs. You configure library and user mappings, then scheduled tasks handle the synchronization. Content is matched by file path, allowing the plugin to track what needs to be downloaded, updated, or removed. No modifications are required on the Source server—just an API key.
+Server Sync runs on your Local (destination) server and pulls data from a Source server using standard Jellyfin APIs. You configure library and user mappings, then scheduled tasks handle the synchronization. Content is matched by file path, allowing the plugin to track what needs to be downloaded, updated, or removed. No modifications are required on the Source server.
 
 ## Use At Your Own Risk
 
