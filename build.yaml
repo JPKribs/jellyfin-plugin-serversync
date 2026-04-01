@@ -1,7 +1,7 @@
 ---
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
-version: "10.11.36"
+version: "10.11.37"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -25,10 +25,5 @@ artifacts:
 - "Microsoft.Kiota.Serialization.Text.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  features:
-  - People Sync — sync person metadata (overview, provider IDs, images) from source server
-  improvements:
-  - Added People Sync settings section with enable toggle and image sync option
-  - Added MetadataSyncFolderItems toggle for folder-type item syncing
   fixes:
-  - Plugin logo displayed in Jellyfin plugin dashboard
+  - Fix missing build packages
