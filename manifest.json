@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "10.11.37",
+        "changelog": "## Fixes\r\n- Fix missing build packages",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.37/jellyfin-plugin-serversync-10.11.37.zip",
+        "checksum": "4764d445c692f01a9cc1d4f26f253032",
+        "timestamp": "2026-04-01T22:05:47Z"
+      },
+      {
         "version": "10.11.36",
         "changelog": "## Features\r\n- People Sync — sync person metadata (overview, provider IDs, images) from source server\r\n\r\n## Improvements\r\n- Added People Sync settings section with enable toggle and image sync option\r\n- Added MetadataSyncFolderItems toggle for folder-type item syncing\r\n\r\n## Fixes\r\n- Plugin logo displayed in Jellyfin plugin dashboard",
         "targetAbi": "10.11.0.0",
