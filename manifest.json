@@ -6,7 +6,7 @@
     "overview": "Synchronize media content between Jellyfin servers",
     "imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png",
     "owner": "JPKribs",
-    "category": "General",
+    "category": "Administration",
     "versions": [
       {
         "version": "10.11.37",

@@ -101,6 +101,19 @@ export function createServerSyncShared(view) {
                 '<div class="pt-row-thumb-user-placeholder" style="display:none"><span class="material-icons">person</span></div>';
         },
 
+        // Render a portrait thumbnail for a person with fallback placeholder.
+        // Always portrait (no landscape auto-detection) since person images are headshots.
+        renderPersonThumb: function(serverUrl, apiKey, personId) {
+            var imgUrl = this.buildSourceImageUrl(serverUrl, apiKey, personId, 'Primary', 80);
+            if (!imgUrl) {
+                return '<div class="pt-row-thumb-placeholder"><span class="material-icons">person</span></div>';
+            }
+            return '<img class="pt-row-thumb pt-row-thumb-portrait" src="' + this.escapeHtml(imgUrl) +
+                '" loading="lazy"' +
+                ' onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" />' +
+                '<div class="pt-row-thumb-placeholder" style="display:none"><span class="material-icons">person</span></div>';
+        },
+
         // Show alert using Dashboard
         showAlert: function(message) {
             Dashboard.alert(message);

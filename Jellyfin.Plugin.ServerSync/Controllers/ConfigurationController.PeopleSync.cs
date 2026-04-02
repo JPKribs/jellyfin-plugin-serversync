@@ -246,8 +246,9 @@ public partial class ConfigurationController
     /// <summary>
     /// Maps a PeopleSyncItem to a DTO.
     /// </summary>
-    private static PeopleSyncItemDto MapToPeopleSyncItemDto(PeopleSyncItem item)
+    private PeopleSyncItemDto MapToPeopleSyncItemDto(PeopleSyncItem item)
     {
+        var config = _configManager.Configuration;
         return new PeopleSyncItemDto
         {
             Id = item.Id,
@@ -265,7 +266,11 @@ public partial class ConfigurationController
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,
-            ErrorMessage = item.ErrorMessage
+            ErrorMessage = item.ErrorMessage,
+            SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl)
+                ? config.SourceServerExternalUrl
+                : config.SourceServerUrl,
+            SourceServerApiKey = config.SourceServerApiKey
         };
     }
 }

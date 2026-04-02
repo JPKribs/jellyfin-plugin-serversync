@@ -3130,7 +3130,8 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '">' +
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
-                            return '<div class="syncItemInfo">' +
+                            return ServerSyncShared.renderPersonThumb(item.SourceServerUrl, item.SourceServerApiKey, item.SourcePersonId) +
+                                '<div class="syncItemInfo">' +
                                 '<div class="syncItemName">' + ServerSyncShared.escapeHtml(item.PersonName || 'Unknown') + '</div>' +
                                 errorPreview +
                                 '</div>';

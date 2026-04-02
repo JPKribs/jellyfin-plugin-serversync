@@ -1,13 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -115,6 +120,118 @@ public class PeopleSyncTableService
     }
 
     /// <summary>
+    /// Populates source and local image data for a person.
+    /// Returns (sourceImagesValue, sourceImagesHash, localImagesValue).
+    /// </summary>
+    private async Task<(string? SourceImagesValue, string? SourceImagesHash, string? LocalImagesValue)> PopulateImageDataAsync(
+        string? sourcePersonId,
+        MediaBrowser.Controller.Entities.BaseItem? localPerson,
+        SourceServerClient client,
+        CancellationToken cancellationToken)
+    {
+        string? sourceImagesValue = null;
+        string? sourceImagesHash = null;
+        string? localImagesValue = null;
+
+        // Source images - fetch via API using sourcePersonId
+        if (!string.IsNullOrEmpty(sourcePersonId) && Guid.TryParse(sourcePersonId, out var sourceGuid))
+        {
+            try
+            {
+                var imageInfoList = await client.GetItemImageInfoAsync(sourceGuid, cancellationToken).ConfigureAwait(false);
+                if (imageInfoList != null && imageInfoList.Count > 0)
+                {
+                    var sourceImagesByType = new Dictionary<string, List<ImageInfoDto>>();
+                    foreach (var img in imageInfoList)
+                    {
+                        var imageTypeName = img.ImageType?.ToString() ?? "Unknown";
+                        if (!sourceImagesByType.TryGetValue(imageTypeName, out var imageList))
+                        {
+                            imageList = new List<ImageInfoDto>();
+                            sourceImagesByType[imageTypeName] = imageList;
+                        }
+
+                        imageList.Add(new ImageInfoDto
+                        {
+                            ImageType = imageTypeName,
+                            ImageIndex = img.ImageIndex ?? 0,
+                            Size = img.Size ?? 0,
+                            Width = img.Width ?? 0,
+                            Height = img.Height ?? 0,
+                            Tag = img.ImageTag
+                        });
+                    }
+
+                    if (sourceImagesByType.Count > 0)
+                    {
+                        sourceImagesValue = JsonSerializer.Serialize(sourceImagesByType);
+
+                        var hashInput = string.Join(";", sourceImagesByType
+                            .OrderBy(k => k.Key)
+                            .Select(k => $"{k.Key}:{string.Join(",", k.Value.Select(v => $"{v.Size}_{v.Width}x{v.Height}"))}"));
+                        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
+                        sourceImagesHash = Convert.ToHexString(hashBytes).ToLowerInvariant()[..32];
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to fetch image info for person {PersonName}", sourcePersonId);
+            }
+        }
+
+        // Local images - people typically only have Primary images
+        if (localPerson != null)
+        {
+            var localImagesByType = new Dictionary<string, List<ImageInfoDto>>();
+            var images = localPerson.GetImages(ImageType.Primary).ToList();
+            if (images.Count > 0)
+            {
+                var imageInfoList = new List<ImageInfoDto>();
+                for (int idx = 0; idx < images.Count; idx++)
+                {
+                    var img = images[idx];
+                    long fileSize = 0;
+
+                    if (!string.IsNullOrEmpty(img.Path) && File.Exists(img.Path))
+                    {
+                        try
+                        {
+                            fileSize = new FileInfo(img.Path).Length;
+                        }
+                        catch (IOException)
+                        {
+                            // Ignore file access errors
+                        }
+                    }
+
+                    imageInfoList.Add(new ImageInfoDto
+                    {
+                        ImageType = ImageType.Primary.ToString(),
+                        ImageIndex = idx,
+                        Size = fileSize,
+                        Width = img.Width,
+                        Height = img.Height
+                    });
+                }
+
+                localImagesByType[ImageType.Primary.ToString()] = imageInfoList;
+            }
+
+            if (localImagesByType.Count > 0)
+            {
+                localImagesValue = JsonSerializer.Serialize(localImagesByType);
+            }
+        }
+
+        return (sourceImagesValue, sourceImagesHash, localImagesValue);
+    }
+
+    /// <summary>
     /// Extracts unique person names from all SourcePeopleValue JSON in the metadata sync table.
     /// </summary>
     public HashSet<string> ExtractUniquePersonNames(SyncDatabase database)
@@ -195,11 +312,14 @@ public class PeopleSyncTableService
             }
         }
 
-        // Find local person by name
-        var localPerson = _libraryManager.GetPerson(name);
+        // Find local person by name, then get the fully-loaded entity via GetItemById.
+        // GetPerson returns an incomplete Person (missing Overview, etc.); GetItemById
+        // retrieves the full BaseItem from the database.
+        var personStub = _libraryManager.GetPerson(name);
+        var localPerson = personStub != null ? _libraryManager.GetItemById(personStub.Id) : null;
         var localPersonId = localPerson?.Id.ToString("N", CultureInfo.InvariantCulture);
 
-        // Extract local overview and provider IDs
+        // Extract local overview and provider IDs from the fully-loaded entity
         string? localOverview = null;
         string? localProviderIds = null;
 
@@ -225,6 +345,17 @@ public class PeopleSyncTableService
             }
         }
 
+        // Populate image comparison data when syncImages is enabled
+        string? sourceImagesValue = null;
+        string? sourceImagesHash = null;
+        string? localImagesValue = null;
+
+        if (syncImages)
+        {
+            (sourceImagesValue, sourceImagesHash, localImagesValue) = await PopulateImageDataAsync(
+                sourcePersonId, localPerson, client, cancellationToken).ConfigureAwait(false);
+        }
+
         // Build or update the sync item
         var existingItem = existingItems.GetValueOrDefault(name);
 
@@ -236,6 +367,9 @@ public class PeopleSyncTableService
             existingItem.LocalOverview = localOverview;
             existingItem.SourceProviderIds = sourceProviderIds;
             existingItem.LocalProviderIds = localProviderIds;
+            existingItem.SourceImagesValue = sourceImagesValue;
+            existingItem.LocalImagesValue = localImagesValue;
+            existingItem.SourceImagesHash = sourceImagesHash;
 
             if (existingItem.Status != BaseSyncStatus.Ignored)
             {
@@ -265,6 +399,9 @@ public class PeopleSyncTableService
                 LocalOverview = localOverview,
                 SourceProviderIds = sourceProviderIds,
                 LocalProviderIds = localProviderIds,
+                SourceImagesValue = sourceImagesValue,
+                LocalImagesValue = localImagesValue,
+                SourceImagesHash = sourceImagesHash,
                 StatusDate = DateTime.UtcNow
             };
 
