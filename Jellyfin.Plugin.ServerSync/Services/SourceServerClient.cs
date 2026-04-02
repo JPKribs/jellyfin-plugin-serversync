@@ -1128,31 +1128,20 @@ public class SourceServerClient : IDisposable
     // ===== People Sync Methods =====
 
     /// <summary>
-    /// Gets a single Person by name from the source server with metadata fields.
-    /// Uses the /Persons/{name} endpoint.
+    /// Gets a single Person by name from the source server as a full BaseItemDto.
+    /// Uses the SDK typed Persons endpoint.
     /// </summary>
     /// <param name="name">Person name to look up.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>JSON document with the person object, or null on failure.</returns>
-    public async Task<System.Text.Json.JsonDocument?> GetPersonByNameAsync(
+    /// <returns>BaseItemDto for the person, or null on failure.</returns>
+    public async Task<BaseItemDto?> GetPersonByNameAsync(
         string name,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var url = $"{_serverUrl}/Persons/{Uri.EscapeDataString(name)}?Fields=Overview,ProviderIds";
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            AddAuthorizationHeader(request);
-
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogDebug("Person not found on source server: {PersonName} (HTTP {StatusCode})", name, response.StatusCode);
-                return null;
-            }
-
-            var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            return System.Text.Json.JsonDocument.Parse(json);
+            var client = GetApiClient();
+            return await client.Persons[name].GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1160,7 +1149,7 @@ public class SourceServerClient : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to get person {PersonName} from source server", name);
+            _logger.LogDebug(ex, "Person not found or failed to fetch from source server: {PersonName}", name);
             return null;
         }
     }

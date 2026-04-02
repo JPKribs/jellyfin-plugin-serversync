@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -55,7 +56,7 @@ public class SyncMissingPeopleTask : IScheduledTask
     public string Key => "ServerSyncMissingPeople";
 
     /// <inheritdoc />
-    public string Description => "Applies queued people sync changes (overview, provider IDs, images) to local person entities.";
+    public string Description => "Applies queued people sync changes (metadata, images) to local person entities.";
 
     /// <inheritdoc />
     public string Category => "People Sync";
@@ -154,45 +155,32 @@ public class SyncMissingPeopleTask : IScheduledTask
         SourceServerClient? imageClient,
         CancellationToken cancellationToken)
     {
-        // Find local person by name
-        var localPerson = _libraryManager.GetPerson(item.PersonName);
-        if (localPerson == null)
+        // Find local person by name, then get full entity via GetItemById
+        var personStub = _libraryManager.GetPerson(item.PersonName);
+        if (personStub == null)
         {
             _logger.LogDebug("Local person not found for {PersonName}, skipping", item.PersonName);
             database.UpdatePeopleSyncItemStatusById(item.Id, BaseSyncStatus.Errored, "Local person not found");
             return false;
         }
 
-        var hasChanges = false;
-
-        // Apply overview
-        if (item.HasOverviewChanges)
+        var localPerson = _libraryManager.GetItemById(personStub.Id);
+        if (localPerson == null)
         {
-            localPerson.Overview = item.SourceOverview;
-            hasChanges = true;
-            _logger.LogDebug("Updated overview for person {PersonName}", item.PersonName);
+            _logger.LogDebug("Could not load full person entity for {PersonName}, skipping", item.PersonName);
+            database.UpdatePeopleSyncItemStatusById(item.Id, BaseSyncStatus.Errored, "Could not load person entity");
+            return false;
         }
 
-        // Apply provider IDs
-        if (item.HasProviderIdChanges && !string.IsNullOrEmpty(item.SourceProviderIds))
-        {
-            try
-            {
-                var providerIds = JsonSerializer.Deserialize<Dictionary<string, string>>(item.SourceProviderIds);
-                if (providerIds != null)
-                {
-                    foreach (var kvp in providerIds)
-                    {
-                        localPerson.SetProviderId(kvp.Key, kvp.Value);
-                    }
+        var hasChanges = false;
 
-                    hasChanges = true;
-                    _logger.LogDebug("Updated provider IDs for person {PersonName}", item.PersonName);
-                }
-            }
-            catch (JsonException ex)
+        // Apply metadata from JSON blob
+        if (item.HasMetadataChanges)
+        {
+            var metadataApplied = await ApplyMetadataAsync(localPerson, item, cancellationToken).ConfigureAwait(false);
+            if (metadataApplied)
             {
-                _logger.LogWarning(ex, "Failed to parse provider IDs for person {PersonName}", item.PersonName);
+                hasChanges = true;
             }
         }
 
@@ -218,6 +206,224 @@ public class SyncMissingPeopleTask : IScheduledTask
 
         database.UpdatePeopleSyncItemStatusById(item.Id, BaseSyncStatus.Synced);
         return true;
+    }
+
+    /// <summary>
+    /// Applies metadata fields from SourceMetadataValue JSON blob to a local person entity.
+    /// </summary>
+    private async Task<bool> ApplyMetadataAsync(
+        BaseItem localPerson,
+        PeopleSyncItem item,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(item.SourceMetadataValue))
+        {
+            return false;
+        }
+
+        try
+        {
+            var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.SourceMetadataValue);
+            if (metadata == null)
+            {
+                return false;
+            }
+
+            var hasChanges = false;
+
+            // Name
+            if (metadata.TryGetValue("Name", out var nameValue) && nameValue.ValueKind == JsonValueKind.String)
+            {
+                var name = nameValue.GetString();
+                if (!string.IsNullOrEmpty(name) && localPerson.Name != name)
+                {
+                    localPerson.Name = name;
+                    hasChanges = true;
+                }
+            }
+
+            // OriginalTitle
+            if (metadata.TryGetValue("OriginalTitle", out var origTitleValue) && origTitleValue.ValueKind == JsonValueKind.String)
+            {
+                var origTitle = origTitleValue.GetString();
+                if (localPerson.OriginalTitle != origTitle)
+                {
+                    localPerson.OriginalTitle = origTitle;
+                    hasChanges = true;
+                }
+            }
+
+            // SortName
+            if (metadata.TryGetValue("SortName", out var sortNameValue) && sortNameValue.ValueKind == JsonValueKind.String)
+            {
+                var sortName = sortNameValue.GetString();
+                if (localPerson.SortName != sortName)
+                {
+                    localPerson.SortName = sortName ?? string.Empty;
+                    hasChanges = true;
+                }
+            }
+
+            // ForcedSortName
+            if (metadata.TryGetValue("ForcedSortName", out var forcedSortNameValue) && forcedSortNameValue.ValueKind == JsonValueKind.String)
+            {
+                var forcedSortName = forcedSortNameValue.GetString();
+                if (localPerson.ForcedSortName != forcedSortName)
+                {
+                    localPerson.ForcedSortName = forcedSortName;
+                    hasChanges = true;
+                }
+            }
+
+            // Overview (biography)
+            if (metadata.TryGetValue("Overview", out var overviewValue) && overviewValue.ValueKind == JsonValueKind.String)
+            {
+                var overview = overviewValue.GetString();
+                if (localPerson.Overview != overview)
+                {
+                    localPerson.Overview = overview;
+                    hasChanges = true;
+                }
+            }
+
+            // PremiereDate (birth date)
+            if (metadata.TryGetValue("PremiereDate", out var premiereDateValue))
+            {
+                DateTime? premiereDate = null;
+                if (premiereDateValue.ValueKind == JsonValueKind.String)
+                {
+                    var dateStr = premiereDateValue.GetString();
+                    if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+                    {
+                        premiereDate = parsed;
+                    }
+                }
+
+                if (localPerson.PremiereDate != premiereDate)
+                {
+                    localPerson.PremiereDate = premiereDate;
+                    hasChanges = true;
+                }
+            }
+
+            // EndDate (death date)
+            if (metadata.TryGetValue("EndDate", out var endDateValue))
+            {
+                DateTime? endDate = null;
+                if (endDateValue.ValueKind == JsonValueKind.String)
+                {
+                    var dateStr = endDateValue.GetString();
+                    if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+                    {
+                        endDate = parsed;
+                    }
+                }
+
+                if (localPerson.EndDate != endDate)
+                {
+                    localPerson.EndDate = endDate;
+                    hasChanges = true;
+                }
+            }
+
+            // ProductionYear
+            if (metadata.TryGetValue("ProductionYear", out var yearValue))
+            {
+                int? year = yearValue.ValueKind == JsonValueKind.Number
+                    ? yearValue.GetInt32()
+                    : null;
+                if (localPerson.ProductionYear != year)
+                {
+                    localPerson.ProductionYear = year;
+                    hasChanges = true;
+                }
+            }
+
+            // Tags
+            if (metadata.TryGetValue("Tags", out var tagsValue) && tagsValue.ValueKind == JsonValueKind.Array)
+            {
+                var tags = new List<string>();
+                foreach (var tag in tagsValue.EnumerateArray())
+                {
+                    if (tag.ValueKind == JsonValueKind.String)
+                    {
+                        tags.Add(tag.GetString()!);
+                    }
+                }
+
+                localPerson.Tags = tags.ToArray();
+                hasChanges = true;
+            }
+
+            // ProviderIds
+            if (metadata.TryGetValue("ProviderIds", out var providerIdsValue) && providerIdsValue.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in providerIdsValue.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.String)
+                    {
+                        var providerValue = prop.Value.GetString();
+                        if (!string.IsNullOrEmpty(providerValue))
+                        {
+                            localPerson.SetProviderId(prop.Name, providerValue);
+                            hasChanges = true;
+                        }
+                    }
+                }
+            }
+
+            // LockedFields
+            if (metadata.TryGetValue("LockedFields", out var lockedValue) && lockedValue.ValueKind == JsonValueKind.Array)
+            {
+                var lockedFieldsList = new List<MetadataField>();
+                foreach (var f in lockedValue.EnumerateArray())
+                {
+                    if (f.ValueKind == JsonValueKind.String)
+                    {
+                        var fieldStr = f.GetString();
+                        if (!string.IsNullOrEmpty(fieldStr) && Enum.TryParse<MetadataField>(fieldStr, out var field))
+                        {
+                            lockedFieldsList.Add(field);
+                        }
+                    }
+                }
+
+                localPerson.LockedFields = lockedFieldsList.ToArray();
+                hasChanges = true;
+            }
+
+            // LockData (IsLocked)
+            if (metadata.TryGetValue("LockData", out var lockDataValue))
+            {
+                bool? lockData = null;
+                if (lockDataValue.ValueKind == JsonValueKind.True)
+                {
+                    lockData = true;
+                }
+                else if (lockDataValue.ValueKind == JsonValueKind.False)
+                {
+                    lockData = false;
+                }
+
+                if (lockData.HasValue && localPerson.IsLocked != lockData.Value)
+                {
+                    localPerson.IsLocked = lockData.Value;
+                    hasChanges = true;
+                }
+            }
+
+            if (hasChanges)
+            {
+                await localPerson.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+            }
+
+            return hasChanges;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to apply metadata for person {PersonName}", item.PersonName);
+            return false;
+        }
     }
 
     private async Task<bool> ApplyPersonImagesAsync(

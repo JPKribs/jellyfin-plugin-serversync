@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 
 namespace Jellyfin.Plugin.ServerSync.Models.PeopleSync;
@@ -33,24 +36,14 @@ public class PeopleSyncItem
     // ===== Metadata =====
 
     /// <summary>
-    /// Gets or sets the source person overview/biography.
+    /// Gets or sets the source person metadata (JSON blob with all person fields).
     /// </summary>
-    public string? SourceOverview { get; set; }
+    public string? SourceMetadataValue { get; set; }
 
     /// <summary>
-    /// Gets or sets the local person overview/biography.
+    /// Gets or sets the local person metadata (JSON blob with all person fields).
     /// </summary>
-    public string? LocalOverview { get; set; }
-
-    /// <summary>
-    /// Gets or sets the source provider IDs (JSON dictionary, e.g. TMDB, IMDB person IDs).
-    /// </summary>
-    public string? SourceProviderIds { get; set; }
-
-    /// <summary>
-    /// Gets or sets the local provider IDs (JSON dictionary).
-    /// </summary>
-    public string? LocalProviderIds { get; set; }
+    public string? LocalMetadataValue { get; set; }
 
     // ===== Images =====
 
@@ -99,29 +92,94 @@ public class PeopleSyncItem
     // ===== Computed Properties =====
 
     /// <summary>
-    /// Gets a value indicating whether the overview/bio has changes.
+    /// Gets a value indicating whether metadata has changes.
     /// </summary>
-    public bool HasOverviewChanges =>
-        !string.IsNullOrEmpty(SourceOverview)
-        && !string.Equals(SourceOverview, LocalOverview, StringComparison.Ordinal);
+    public bool HasMetadataChanges
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(SourceMetadataValue))
+            {
+                return false;
+            }
 
-    /// <summary>
-    /// Gets a value indicating whether provider IDs have changes.
-    /// </summary>
-    public bool HasProviderIdChanges =>
-        !string.IsNullOrEmpty(SourceProviderIds)
-        && !JsonComparisonUtility.JsonEquals(SourceProviderIds, LocalProviderIds);
+            return !JsonComparisonUtility.JsonEquals(SourceMetadataValue, LocalMetadataValue);
+        }
+    }
 
     /// <summary>
     /// Gets a value indicating whether images have changes.
+    /// Compares source images against local images by type count and file size.
     /// </summary>
-    public bool HasImagesChanges =>
-        !string.IsNullOrEmpty(SourceImagesValue)
-        && (string.IsNullOrEmpty(LocalImagesValue)
-            || !JsonComparisonUtility.JsonEquals(SourceImagesValue, LocalImagesValue));
+    public bool HasImagesChanges
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(SourceImagesValue))
+            {
+                return false;
+            }
+
+            // No local images but source has images — needs sync
+            if (string.IsNullOrEmpty(LocalImagesValue))
+            {
+                return true;
+            }
+
+            return !ImagesMatch(SourceImagesValue, LocalImagesValue);
+        }
+    }
+
+    /// <summary>
+    /// Compares source and local image collections by type, count, and file size.
+    /// </summary>
+    private static bool ImagesMatch(string sourceJson, string localJson)
+    {
+        try
+        {
+            var source = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(sourceJson);
+            var local = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(localJson);
+
+            if (source == null || local == null)
+            {
+                return source == null && local == null;
+            }
+
+            // Check that local has every image type that source has
+            foreach (var kvp in source)
+            {
+                if (!local.TryGetValue(kvp.Key, out var localImages))
+                {
+                    return false; // Missing image type locally
+                }
+
+                if (kvp.Value.Count != localImages.Count)
+                {
+                    return false; // Different number of images for this type
+                }
+
+                // Compare by size — if local file size doesn't match source, needs re-sync
+                for (int i = 0; i < kvp.Value.Count; i++)
+                {
+                    if (kvp.Value[i].Size > 0 && localImages[i].Size > 0
+                        && kvp.Value[i].Size != localImages[i].Size)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+        catch
+        {
+            // If we can't parse, assume changes exist
+            return false;
+        }
+    }
 
     /// <summary>
     /// Gets a value indicating whether there are any changes to sync.
     /// </summary>
-    public bool HasChanges => HasOverviewChanges || HasProviderIdChanges || HasImagesChanges;
+    public bool HasChanges => HasMetadataChanges || HasImagesChanges;
 }

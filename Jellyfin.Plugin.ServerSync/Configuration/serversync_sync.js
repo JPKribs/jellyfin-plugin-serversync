@@ -3147,8 +3147,7 @@ export default function (view) {
                                 return '<span style="opacity: 0.5;">No Changes</span>';
                             }
                             var badges = [];
-                            if (item.HasOverviewChanges) badges.push('<span class="peopleSyncBadge has-changes">Overview</span>');
-                            if (item.HasProviderIdChanges) badges.push('<span class="peopleSyncBadge has-changes">Provider IDs</span>');
+                            if (item.HasMetadataChanges) badges.push('<span class="peopleSyncBadge has-changes">Metadata</span>');
                             if (item.HasImagesChanges) badges.push('<span class="peopleSyncBadge has-changes">Images</span>');
                             return badges.length > 0 ? badges.join(' ') : '<span style="opacity: 0.5;">No Changes</span>';
                         }
@@ -3405,8 +3404,7 @@ export default function (view) {
 
                 // Build changes summary badges
                 var summaryHtml = '';
-                summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasOverviewChanges ? 'has-changes' : 'no-changes') + '">Overview: ' + (detail.HasOverviewChanges ? 'Changes' : 'Synced') + '</span> ';
-                summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasProviderIdChanges ? 'has-changes' : 'no-changes') + '">Provider IDs: ' + (detail.HasProviderIdChanges ? 'Changes' : 'Synced') + '</span> ';
+                summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasMetadataChanges ? 'has-changes' : 'no-changes') + '">Metadata: ' + (detail.HasMetadataChanges ? 'Changes' : 'Synced') + '</span> ';
                 summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasImagesChanges ? 'has-changes' : 'no-changes') + '">Images: ' + (detail.HasImagesChanges ? 'Changes' : 'Synced') + '</span>';
                 view.querySelector('#peopleSyncModalChangesSummary').innerHTML = summaryHtml;
 
@@ -3414,40 +3412,126 @@ export default function (view) {
                 var tbody = view.querySelector('#peopleSyncModalTableBody');
                 tbody.innerHTML = '';
 
-                // Overview row
-                self._addComparisonRow(tbody, 'Overview',
-                    self._truncate(detail.SourceOverview, 200),
-                    self._truncate(detail.LocalOverview, 200),
-                    detail.HasOverviewChanges);
+                var sourceMetadata = self._parseJson(detail.SourceMetadataValue) || {};
+                var localMetadata = self._parseJson(detail.LocalMetadataValue) || {};
+
+                // Metadata section header
+                self._addSectionHeader(tbody, 'Metadata');
+
+                // Metadata fields
+                var metadataFields = [
+                    { key: 'Name', label: 'Name' },
+                    { key: 'OriginalTitle', label: 'Original Title' },
+                    { key: 'SortName', label: 'Sort Name' },
+                    { key: 'ForcedSortName', label: 'Forced Sort Name' },
+                    { key: 'Overview', label: 'Overview', truncate: true },
+                    { key: 'PremiereDate', label: 'Birth Date', isDate: true },
+                    { key: 'EndDate', label: 'Death Date', isDate: true },
+                    { key: 'ProductionYear', label: 'Year' },
+                    { key: 'LockData', label: 'Lock Item' },
+                    { key: 'LockedFields', label: 'Locked Fields' }
+                ];
+
+                metadataFields.forEach(function(field) {
+                    var sv = sourceMetadata[field.key];
+                    var lv = localMetadata[field.key];
+                    var sourceDisplay = self._formatFieldValue(sv, field);
+                    var localDisplay = self._formatFieldValue(lv, field);
+                    var isChanged = sourceDisplay !== localDisplay;
+                    self._addComparisonRow(tbody, field.label, sourceDisplay, localDisplay, isChanged);
+                });
+
+                // Tags row
+                var sourceTags = Array.isArray(sourceMetadata.Tags) ? sourceMetadata.Tags : [];
+                var localTags = Array.isArray(localMetadata.Tags) ? localMetadata.Tags : [];
+                var tagsChanged = JSON.stringify(sourceTags.slice().sort()) !== JSON.stringify(localTags.slice().sort());
+                self._addComparisonRow(tbody, 'Tags',
+                    sourceTags.length > 0 ? ServerSyncShared.escapeHtml(sourceTags.join(', ')) : '-',
+                    localTags.length > 0 ? ServerSyncShared.escapeHtml(localTags.join(', ')) : '-',
+                    tagsChanged);
 
                 // Provider IDs rows
-                var sourceProviders = self._parseJson(detail.SourceProviderIds);
-                var localProviders = self._parseJson(detail.LocalProviderIds);
-                if (sourceProviders || localProviders) {
-                    var allKeys = new Set();
-                    if (sourceProviders) Object.keys(sourceProviders).forEach(function(k) { allKeys.add(k); });
-                    if (localProviders) Object.keys(localProviders).forEach(function(k) { allKeys.add(k); });
+                var sourceProviders = sourceMetadata.ProviderIds || {};
+                var localProviders = localMetadata.ProviderIds || {};
+                var allKeys = Object.keys(sourceProviders).concat(Object.keys(localProviders));
+                var uniqueKeys = [];
+                allKeys.forEach(function(k) { if (uniqueKeys.indexOf(k) === -1) uniqueKeys.push(k); });
+                uniqueKeys.sort();
 
-                    allKeys.forEach(function(key) {
-                        var sv = sourceProviders ? (sourceProviders[key] || '-') : '-';
-                        var lv = localProviders ? (localProviders[key] || '-') : '-';
-                        self._addComparisonRow(tbody, key, String(sv), String(lv), sv !== lv);
+                if (uniqueKeys.length > 0) {
+                    uniqueKeys.forEach(function(key) {
+                        var sv = sourceProviders[key] != null ? String(sourceProviders[key]) : '-';
+                        var lv = localProviders[key] != null ? String(localProviders[key]) : '-';
+                        self._addComparisonRow(tbody, key, sv, lv, sv !== lv);
                     });
                 } else {
                     self._addComparisonRow(tbody, 'Provider IDs', '-', '-', false);
                 }
 
-                // Images row
-                self._addComparisonRow(tbody, 'Images',
-                    detail.HasImagesChanges ? 'Different' : 'Match',
-                    detail.HasImagesChanges ? 'Different' : 'Match',
-                    detail.HasImagesChanges);
+                // Images section
+                self._addSectionHeader(tbody, 'Images');
+
+                var sourceImages = self._parseJson(detail.SourceImagesValue);
+                var localImages = self._parseJson(detail.LocalImagesValue);
+                if (sourceImages) {
+                    Object.keys(sourceImages).forEach(function(imageType) {
+                        var sourceList = sourceImages[imageType] || [];
+                        var localList = (localImages && localImages[imageType]) || [];
+                        var sourceSize = sourceList.reduce(function(sum, img) { return sum + (img.Size || 0); }, 0);
+                        var localSize = localList.reduce(function(sum, img) { return sum + (img.Size || 0); }, 0);
+                        var sizeChanged = sourceList.length !== localList.length || (sourceSize > 0 && localSize > 0 && sourceSize !== localSize);
+                        self._addComparisonRow(tbody, imageType,
+                            sourceList.length + ' (' + self._formatBytes(sourceSize) + ')',
+                            localList.length + ' (' + self._formatBytes(localSize) + ')',
+                            sizeChanged);
+                    });
+                } else {
+                    self._addComparisonRow(tbody, 'Images', '-', localImages ? 'Present' : '-', false);
+                }
 
                 view.querySelector('#peopleSyncItemDetailModal').classList.remove('hidden');
             }).catch(function(err) {
                 console.error('Failed to load person detail:', err);
                 ServerSyncShared.showAlert('Failed to load person details');
             });
+        },
+
+        _addSectionHeader: function(tbody, title) {
+            var row = document.createElement('tr');
+            row.className = 'peopleSyncModal-sectionHeader';
+            var cell = document.createElement('td');
+            cell.colSpan = 3;
+            cell.textContent = title;
+            row.appendChild(cell);
+            tbody.appendChild(row);
+        },
+
+        _formatFieldValue: function(val, field) {
+            if (val == null) return '-';
+            if (field && field.isDate && typeof val === 'string') {
+                try {
+                    var d = new Date(val);
+                    return isNaN(d.getTime()) ? val : d.toLocaleDateString();
+                } catch (e) { return String(val); }
+            }
+            if (field && field.truncate && typeof val === 'string' && val.length > 200) {
+                return ServerSyncShared.escapeHtml(val.substring(0, 200) + '...');
+            }
+            if (Array.isArray(val)) {
+                return val.length > 0 ? ServerSyncShared.escapeHtml(val.join(', ')) : '-';
+            }
+            if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+            if (typeof val === 'object') return JSON.stringify(val);
+            return ServerSyncShared.escapeHtml(String(val));
+        },
+
+        _formatBytes: function(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            var units = ['B', 'KB', 'MB', 'GB'];
+            var i = 0;
+            var size = bytes;
+            while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+            return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
         },
 
         _addComparisonRow: function(tbody, property, sourceVal, localVal, isChanged) {

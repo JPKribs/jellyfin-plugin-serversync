@@ -14,7 +14,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 16;
+    public const int CurrentSchemaVersion = 17;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -125,7 +125,7 @@ public static class DatabaseMigrationService
         ";
         userCmd.ExecuteNonQuery();
 
-        // Create PeopleSyncItems table (People Sync)
+        // Create PeopleSyncItems table (People Sync) - v17 schema: metadata blob
         using var peopleCmd = connection.CreateCommand();
         peopleCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS PeopleSyncItems (
@@ -137,6 +137,8 @@ public static class DatabaseMigrationService
                 LocalOverview TEXT,
                 SourceProviderIds TEXT,
                 LocalProviderIds TEXT,
+                SourceMetadataValue TEXT,
+                LocalMetadataValue TEXT,
                 SourceImagesValue TEXT,
                 LocalImagesValue TEXT,
                 SourceImagesHash TEXT,
@@ -303,6 +305,11 @@ public static class DatabaseMigrationService
             if (fromVersion < 16)
             {
                 MigrateToV16(connection, transaction, logger);
+            }
+
+            if (fromVersion < 17)
+            {
+                MigrateToV17(connection, transaction, logger);
             }
 
             SetSchemaVersion(connection, CurrentSchemaVersion);
@@ -815,6 +822,25 @@ public static class DatabaseMigrationService
         peopleCmd.ExecuteNonQuery();
 
         logger.LogInformation("Migration v16: Added ItemType, IsFolder columns and PeopleSyncItems table");
+    }
+
+    /// <summary>
+    /// Migration to v17: Add SourceMetadataValue and LocalMetadataValue columns to PeopleSyncItems.
+    /// </summary>
+    private static void MigrateToV17(SqliteConnection connection, SqliteTransaction transaction, ILogger logger)
+    {
+        var alterStatements = new[]
+        {
+            "ALTER TABLE PeopleSyncItems ADD COLUMN SourceMetadataValue TEXT",
+            "ALTER TABLE PeopleSyncItems ADD COLUMN LocalMetadataValue TEXT"
+        };
+
+        foreach (var statement in alterStatements)
+        {
+            ExecuteAlterIfColumnMissing(connection, transaction, statement, logger);
+        }
+
+        logger.LogInformation("Migration v17: Added SourceMetadataValue and LocalMetadataValue columns to PeopleSyncItems");
     }
 
     /// <summary>

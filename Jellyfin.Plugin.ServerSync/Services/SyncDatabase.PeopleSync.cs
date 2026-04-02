@@ -115,15 +115,13 @@ public partial class SyncDatabase
             command.CommandText = @"
                 INSERT INTO PeopleSyncItems (
                     PersonName, SourcePersonId, LocalPersonId,
-                    SourceOverview, LocalOverview,
-                    SourceProviderIds, LocalProviderIds,
+                    SourceMetadataValue, LocalMetadataValue,
                     SourceImagesValue, LocalImagesValue,
                     SourceImagesHash, SyncedImagesHash,
                     Status, StatusDate, LastSyncTime, ErrorMessage
                 ) VALUES (
                     @personName, @sourcePersonId, @localPersonId,
-                    @sourceOverview, @localOverview,
-                    @sourceProviderIds, @localProviderIds,
+                    @sourceMetadataValue, @localMetadataValue,
                     @sourceImagesValue, @localImagesValue,
                     @sourceImagesHash, @syncedImagesHash,
                     @status, @statusDate, @lastSyncTime, @errorMessage
@@ -131,10 +129,8 @@ public partial class SyncDatabase
                 ON CONFLICT(PersonName) DO UPDATE SET
                     SourcePersonId = @sourcePersonId,
                     LocalPersonId = @localPersonId,
-                    SourceOverview = @sourceOverview,
-                    LocalOverview = @localOverview,
-                    SourceProviderIds = @sourceProviderIds,
-                    LocalProviderIds = @localProviderIds,
+                    SourceMetadataValue = @sourceMetadataValue,
+                    LocalMetadataValue = @localMetadataValue,
                     SourceImagesValue = @sourceImagesValue,
                     LocalImagesValue = @localImagesValue,
                     SourceImagesHash = @sourceImagesHash,
@@ -163,10 +159,8 @@ public partial class SyncDatabase
             command.Parameters.AddWithValue("@personName", item.PersonName);
             command.Parameters.AddWithValue("@sourcePersonId", item.SourcePersonId ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("@localPersonId", item.LocalPersonId ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@sourceOverview", item.SourceOverview ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@localOverview", item.LocalOverview ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@sourceProviderIds", item.SourceProviderIds ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@localProviderIds", item.LocalProviderIds ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@sourceMetadataValue", item.SourceMetadataValue ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@localMetadataValue", item.LocalMetadataValue ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("@sourceImagesValue", item.SourceImagesValue ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("@localImagesValue", item.LocalImagesValue ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("@sourceImagesHash", item.SourceImagesHash ?? (object)DBNull.Value);
@@ -459,28 +453,16 @@ public partial class SyncDatabase
             item.LocalPersonId = reader.GetString(localPersonIdOrdinal);
         }
 
-        var sourceOverviewOrdinal = reader.GetOrdinal("SourceOverview");
-        if (!reader.IsDBNull(sourceOverviewOrdinal))
+        var sourceMetadataOrdinal = reader.GetOrdinal("SourceMetadataValue");
+        if (!reader.IsDBNull(sourceMetadataOrdinal))
         {
-            item.SourceOverview = reader.GetString(sourceOverviewOrdinal);
+            item.SourceMetadataValue = reader.GetString(sourceMetadataOrdinal);
         }
 
-        var localOverviewOrdinal = reader.GetOrdinal("LocalOverview");
-        if (!reader.IsDBNull(localOverviewOrdinal))
+        var localMetadataOrdinal = reader.GetOrdinal("LocalMetadataValue");
+        if (!reader.IsDBNull(localMetadataOrdinal))
         {
-            item.LocalOverview = reader.GetString(localOverviewOrdinal);
-        }
-
-        var sourceProviderIdsOrdinal = reader.GetOrdinal("SourceProviderIds");
-        if (!reader.IsDBNull(sourceProviderIdsOrdinal))
-        {
-            item.SourceProviderIds = reader.GetString(sourceProviderIdsOrdinal);
-        }
-
-        var localProviderIdsOrdinal = reader.GetOrdinal("LocalProviderIds");
-        if (!reader.IsDBNull(localProviderIdsOrdinal))
-        {
-            item.LocalProviderIds = reader.GetString(localProviderIdsOrdinal);
+            item.LocalMetadataValue = reader.GetString(localMetadataOrdinal);
         }
 
         var sourceImagesOrdinal = reader.GetOrdinal("SourceImagesValue");

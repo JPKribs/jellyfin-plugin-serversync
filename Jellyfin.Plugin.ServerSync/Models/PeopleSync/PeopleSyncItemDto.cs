@@ -28,34 +28,29 @@ public class PeopleSyncItemDto
     public string? LocalPersonId { get; set; }
 
     /// <summary>
-    /// Gets or sets the source overview/biography.
+    /// Gets or sets the source metadata (JSON blob).
     /// </summary>
-    public string? SourceOverview { get; set; }
+    public string? SourceMetadataValue { get; set; }
 
     /// <summary>
-    /// Gets or sets the local overview/biography.
+    /// Gets or sets the local metadata (JSON blob).
     /// </summary>
-    public string? LocalOverview { get; set; }
+    public string? LocalMetadataValue { get; set; }
 
     /// <summary>
-    /// Gets or sets the source provider IDs (JSON).
+    /// Gets or sets the source images value (JSON).
     /// </summary>
-    public string? SourceProviderIds { get; set; }
+    public string? SourceImagesValue { get; set; }
 
     /// <summary>
-    /// Gets or sets the local provider IDs (JSON).
+    /// Gets or sets the local images value (JSON).
     /// </summary>
-    public string? LocalProviderIds { get; set; }
+    public string? LocalImagesValue { get; set; }
 
     /// <summary>
-    /// Gets or sets whether the overview has changes.
+    /// Gets or sets whether metadata has changes.
     /// </summary>
-    public bool HasOverviewChanges { get; set; }
-
-    /// <summary>
-    /// Gets or sets whether provider IDs have changes.
-    /// </summary>
-    public bool HasProviderIdChanges { get; set; }
+    public bool HasMetadataChanges { get; set; }
 
     /// <summary>
     /// Gets or sets whether images have changes.

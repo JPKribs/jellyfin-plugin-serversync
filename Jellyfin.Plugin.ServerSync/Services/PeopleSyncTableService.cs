@@ -11,8 +11,11 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
+using Jellyfin.Sdk.Generated.Models;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
+using LocalImageType = MediaBrowser.Model.Entities.ImageType;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -120,12 +123,218 @@ public class PeopleSyncTableService
     }
 
     /// <summary>
+    /// Extracts unique person names from all SourcePeopleValue JSON in the metadata sync table.
+    /// </summary>
+    public HashSet<string> ExtractUniquePersonNames(SyncDatabase database)
+    {
+        var uniqueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var allPeopleJsons = database.GetAllSourcePeopleValues();
+
+        foreach (var jsonStr in allPeopleJsons)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonStr);
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var personElement in doc.RootElement.EnumerateArray())
+                {
+                    if (personElement.TryGetProperty("Name", out var nameProp))
+                    {
+                        var name = nameProp.GetString();
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            uniqueNames.Add(name);
+                        }
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse people JSON from metadata sync item");
+            }
+        }
+
+        return uniqueNames;
+    }
+
+    /// <summary>
+    /// Processes a single person: fetches from source server as BaseItemDto, compares with local, and upserts.
+    /// </summary>
+    private async Task ProcessPersonAsync(
+        string name,
+        SourceServerClient client,
+        SyncDatabase database,
+        Dictionary<string, PeopleSyncItem> existingItems,
+        bool syncImages,
+        CancellationToken cancellationToken)
+    {
+        // Fetch person as full BaseItemDto from source server via SDK
+        var sourcePerson = await client.GetPersonByNameAsync(name, cancellationToken).ConfigureAwait(false);
+        var sourcePersonId = sourcePerson?.Id?.ToString("N", CultureInfo.InvariantCulture);
+
+        // Build source metadata blob
+        string? sourceMetadataValue = null;
+        if (sourcePerson != null)
+        {
+            sourceMetadataValue = BuildSourceMetadata(sourcePerson);
+        }
+
+        // Find local person by name, then get the fully-loaded entity via GetItemById.
+        // GetPerson returns an incomplete Person (missing Overview, etc.); GetItemById
+        // retrieves the full BaseItem from the database.
+        var personStub = _libraryManager.GetPerson(name);
+        var localPerson = personStub != null ? _libraryManager.GetItemById(personStub.Id) : null;
+        var localPersonId = localPerson?.Id.ToString("N", CultureInfo.InvariantCulture);
+
+        // Build local metadata blob
+        string? localMetadataValue = null;
+        if (localPerson != null)
+        {
+            localMetadataValue = BuildLocalMetadata(localPerson);
+        }
+
+        // Populate image comparison data when syncImages is enabled
+        string? sourceImagesValue = null;
+        string? sourceImagesHash = null;
+        string? localImagesValue = null;
+
+        if (syncImages)
+        {
+            (sourceImagesValue, sourceImagesHash, localImagesValue) = await PopulateImageDataAsync(
+                sourcePersonId, localPerson, client, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Build or update the sync item
+        var existingItem = existingItems.GetValueOrDefault(name);
+
+        if (existingItem != null)
+        {
+            existingItem.SourcePersonId = sourcePersonId;
+            existingItem.LocalPersonId = localPersonId;
+            existingItem.SourceMetadataValue = sourceMetadataValue;
+            existingItem.LocalMetadataValue = localMetadataValue;
+            existingItem.SourceImagesValue = sourceImagesValue;
+            existingItem.LocalImagesValue = localImagesValue;
+            existingItem.SourceImagesHash = sourceImagesHash;
+
+            if (existingItem.Status != BaseSyncStatus.Ignored)
+            {
+                if (existingItem.HasChanges)
+                {
+                    existingItem.Status = BaseSyncStatus.Queued;
+                    existingItem.StatusDate = DateTime.UtcNow;
+                }
+                else if (existingItem.Status == BaseSyncStatus.Queued)
+                {
+                    existingItem.Status = BaseSyncStatus.Synced;
+                    existingItem.StatusDate = DateTime.UtcNow;
+                    existingItem.LastSyncTime = DateTime.UtcNow;
+                }
+            }
+
+            database.UpsertPeopleSyncItem(existingItem);
+        }
+        else
+        {
+            var newItem = new PeopleSyncItem
+            {
+                PersonName = name,
+                SourcePersonId = sourcePersonId,
+                LocalPersonId = localPersonId,
+                SourceMetadataValue = sourceMetadataValue,
+                LocalMetadataValue = localMetadataValue,
+                SourceImagesValue = sourceImagesValue,
+                LocalImagesValue = localImagesValue,
+                SourceImagesHash = sourceImagesHash,
+                StatusDate = DateTime.UtcNow
+            };
+
+            if (newItem.HasChanges)
+            {
+                newItem.Status = BaseSyncStatus.Queued;
+            }
+            else
+            {
+                newItem.Status = BaseSyncStatus.Synced;
+                newItem.LastSyncTime = DateTime.UtcNow;
+            }
+
+            database.UpsertPeopleSyncItem(newItem);
+        }
+    }
+
+    /// <summary>
+    /// Builds a metadata JSON blob from a source BaseItemDto (person).
+    /// Matches the same pattern as MetadataSyncTableService.SetMetadataFieldValues.
+    /// </summary>
+    private static string BuildSourceMetadata(BaseItemDto sourcePerson)
+    {
+        var sourceProviderIds = sourcePerson.ProviderIds?.AdditionalData?
+            .Where(kvp => kvp.Value != null)
+            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString());
+
+        var metadata = new Dictionary<string, object?>
+        {
+            ["Name"] = sourcePerson.Name,
+            ["OriginalTitle"] = sourcePerson.OriginalTitle,
+            ["SortName"] = sourcePerson.SortName,
+            ["ForcedSortName"] = sourcePerson.ForcedSortName,
+            ["Overview"] = sourcePerson.Overview,
+            ["PremiereDate"] = sourcePerson.PremiereDate,
+            ["EndDate"] = sourcePerson.EndDate,
+            ["ProductionYear"] = sourcePerson.ProductionYear,
+            ["Tags"] = sourcePerson.Tags,
+            ["ProviderIds"] = sourceProviderIds,
+            ["LockedFields"] = sourcePerson.LockedFields?.Select(f => f.ToString()).ToArray(),
+            ["LockData"] = sourcePerson.LockData
+        };
+
+        return JsonSerializer.Serialize(metadata);
+    }
+
+    /// <summary>
+    /// Builds a metadata JSON blob from a local BaseItem (person).
+    /// Matches the same pattern as MetadataSyncTableService.SetMetadataFieldValues.
+    /// </summary>
+    private static string BuildLocalMetadata(BaseItem localPerson)
+    {
+        var localProviderIds = localPerson.ProviderIds?
+            .Where(kvp => !string.IsNullOrEmpty(kvp.Value))
+            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+        var metadata = new Dictionary<string, object?>
+        {
+            ["Name"] = localPerson.Name,
+            ["OriginalTitle"] = localPerson.OriginalTitle,
+            ["SortName"] = localPerson.SortName,
+            ["ForcedSortName"] = localPerson.ForcedSortName,
+            ["Overview"] = localPerson.Overview,
+            ["PremiereDate"] = localPerson.PremiereDate,
+            ["EndDate"] = localPerson.EndDate,
+            ["ProductionYear"] = localPerson.ProductionYear,
+            ["Tags"] = localPerson.Tags,
+            ["ProviderIds"] = localProviderIds,
+            ["LockedFields"] = localPerson.LockedFields?.Select(f => f.ToString()).ToArray(),
+            ["LockData"] = localPerson.IsLocked
+        };
+
+        return JsonSerializer.Serialize(metadata);
+    }
+
+    /// <summary>
     /// Populates source and local image data for a person.
     /// Returns (sourceImagesValue, sourceImagesHash, localImagesValue).
     /// </summary>
     private async Task<(string? SourceImagesValue, string? SourceImagesHash, string? LocalImagesValue)> PopulateImageDataAsync(
         string? sourcePersonId,
-        MediaBrowser.Controller.Entities.BaseItem? localPerson,
+        BaseItem? localPerson,
         SourceServerClient client,
         CancellationToken cancellationToken)
     {
@@ -180,7 +389,7 @@ public class PeopleSyncTableService
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to fetch image info for person {PersonName}", sourcePersonId);
+                _logger.LogDebug(ex, "Failed to fetch image info for person {PersonId}", sourcePersonId);
             }
         }
 
@@ -188,7 +397,7 @@ public class PeopleSyncTableService
         if (localPerson != null)
         {
             var localImagesByType = new Dictionary<string, List<ImageInfoDto>>();
-            var images = localPerson.GetImages(ImageType.Primary).ToList();
+            var images = localPerson.GetImages(LocalImageType.Primary).ToList();
             if (images.Count > 0)
             {
                 var imageInfoList = new List<ImageInfoDto>();
@@ -211,7 +420,7 @@ public class PeopleSyncTableService
 
                     imageInfoList.Add(new ImageInfoDto
                     {
-                        ImageType = ImageType.Primary.ToString(),
+                        ImageType = LocalImageType.Primary.ToString(),
                         ImageIndex = idx,
                         Size = fileSize,
                         Width = img.Width,
@@ -219,7 +428,7 @@ public class PeopleSyncTableService
                     });
                 }
 
-                localImagesByType[ImageType.Primary.ToString()] = imageInfoList;
+                localImagesByType[LocalImageType.Primary.ToString()] = imageInfoList;
             }
 
             if (localImagesByType.Count > 0)
@@ -229,193 +438,5 @@ public class PeopleSyncTableService
         }
 
         return (sourceImagesValue, sourceImagesHash, localImagesValue);
-    }
-
-    /// <summary>
-    /// Extracts unique person names from all SourcePeopleValue JSON in the metadata sync table.
-    /// </summary>
-    public HashSet<string> ExtractUniquePersonNames(SyncDatabase database)
-    {
-        var uniqueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var allPeopleJsons = database.GetAllSourcePeopleValues();
-
-        foreach (var jsonStr in allPeopleJsons)
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(jsonStr);
-                if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                {
-                    continue;
-                }
-
-                foreach (var personElement in doc.RootElement.EnumerateArray())
-                {
-                    if (personElement.TryGetProperty("Name", out var nameProp))
-                    {
-                        var name = nameProp.GetString();
-                        if (!string.IsNullOrEmpty(name))
-                        {
-                            uniqueNames.Add(name);
-                        }
-                    }
-                }
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Failed to parse people JSON from metadata sync item");
-            }
-        }
-
-        return uniqueNames;
-    }
-
-    /// <summary>
-    /// Processes a single person: fetches from source server, compares with local, and upserts.
-    /// </summary>
-    private async Task ProcessPersonAsync(
-        string name,
-        SourceServerClient client,
-        SyncDatabase database,
-        Dictionary<string, PeopleSyncItem> existingItems,
-        bool syncImages,
-        CancellationToken cancellationToken)
-    {
-        // Fetch person details from source server
-        string? sourcePersonId = null;
-        string? sourceOverview = null;
-        string? sourceProviderIds = null;
-
-        using var doc = await client.GetPersonByNameAsync(name, cancellationToken).ConfigureAwait(false);
-        if (doc != null)
-        {
-            sourcePersonId = doc.RootElement.TryGetProperty("Id", out var idProp) ? idProp.GetString() : null;
-            sourceOverview = doc.RootElement.TryGetProperty("Overview", out var overviewProp) ? overviewProp.GetString() : null;
-
-            if (doc.RootElement.TryGetProperty("ProviderIds", out var providerIdsProp) && providerIdsProp.ValueKind == JsonValueKind.Object)
-            {
-                var providerDict = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var prop in providerIdsProp.EnumerateObject())
-                {
-                    var val = prop.Value.GetString();
-                    if (!string.IsNullOrEmpty(val))
-                    {
-                        providerDict[prop.Name] = val;
-                    }
-                }
-
-                if (providerDict.Count > 0)
-                {
-                    sourceProviderIds = JsonSerializer.Serialize(providerDict);
-                }
-            }
-        }
-
-        // Find local person by name, then get the fully-loaded entity via GetItemById.
-        // GetPerson returns an incomplete Person (missing Overview, etc.); GetItemById
-        // retrieves the full BaseItem from the database.
-        var personStub = _libraryManager.GetPerson(name);
-        var localPerson = personStub != null ? _libraryManager.GetItemById(personStub.Id) : null;
-        var localPersonId = localPerson?.Id.ToString("N", CultureInfo.InvariantCulture);
-
-        // Extract local overview and provider IDs from the fully-loaded entity
-        string? localOverview = null;
-        string? localProviderIds = null;
-
-        if (localPerson != null)
-        {
-            localOverview = localPerson.Overview;
-
-            if (localPerson.ProviderIds != null && localPerson.ProviderIds.Count > 0)
-            {
-                var localDict = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var kvp in localPerson.ProviderIds)
-                {
-                    if (!string.IsNullOrEmpty(kvp.Value))
-                    {
-                        localDict[kvp.Key] = kvp.Value;
-                    }
-                }
-
-                if (localDict.Count > 0)
-                {
-                    localProviderIds = JsonSerializer.Serialize(localDict);
-                }
-            }
-        }
-
-        // Populate image comparison data when syncImages is enabled
-        string? sourceImagesValue = null;
-        string? sourceImagesHash = null;
-        string? localImagesValue = null;
-
-        if (syncImages)
-        {
-            (sourceImagesValue, sourceImagesHash, localImagesValue) = await PopulateImageDataAsync(
-                sourcePersonId, localPerson, client, cancellationToken).ConfigureAwait(false);
-        }
-
-        // Build or update the sync item
-        var existingItem = existingItems.GetValueOrDefault(name);
-
-        if (existingItem != null)
-        {
-            existingItem.SourcePersonId = sourcePersonId;
-            existingItem.LocalPersonId = localPersonId;
-            existingItem.SourceOverview = sourceOverview;
-            existingItem.LocalOverview = localOverview;
-            existingItem.SourceProviderIds = sourceProviderIds;
-            existingItem.LocalProviderIds = localProviderIds;
-            existingItem.SourceImagesValue = sourceImagesValue;
-            existingItem.LocalImagesValue = localImagesValue;
-            existingItem.SourceImagesHash = sourceImagesHash;
-
-            if (existingItem.Status != BaseSyncStatus.Ignored)
-            {
-                if (existingItem.HasChanges)
-                {
-                    existingItem.Status = BaseSyncStatus.Queued;
-                    existingItem.StatusDate = DateTime.UtcNow;
-                }
-                else if (existingItem.Status == BaseSyncStatus.Queued)
-                {
-                    existingItem.Status = BaseSyncStatus.Synced;
-                    existingItem.StatusDate = DateTime.UtcNow;
-                    existingItem.LastSyncTime = DateTime.UtcNow;
-                }
-            }
-
-            database.UpsertPeopleSyncItem(existingItem);
-        }
-        else
-        {
-            var newItem = new PeopleSyncItem
-            {
-                PersonName = name,
-                SourcePersonId = sourcePersonId,
-                LocalPersonId = localPersonId,
-                SourceOverview = sourceOverview,
-                LocalOverview = localOverview,
-                SourceProviderIds = sourceProviderIds,
-                LocalProviderIds = localProviderIds,
-                SourceImagesValue = sourceImagesValue,
-                LocalImagesValue = localImagesValue,
-                SourceImagesHash = sourceImagesHash,
-                StatusDate = DateTime.UtcNow
-            };
-
-            if (newItem.HasChanges)
-            {
-                newItem.Status = BaseSyncStatus.Queued;
-            }
-            else
-            {
-                newItem.Status = BaseSyncStatus.Synced;
-                newItem.LastSyncTime = DateTime.UtcNow;
-            }
-
-            database.UpsertPeopleSyncItem(newItem);
-        }
     }
 }
