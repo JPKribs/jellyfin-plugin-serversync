@@ -4,6 +4,7 @@
     "name": "Server Sync",
     "description": "Server Sync is a Jellyfin plugin that enables synchronization of media content between multiple Jellyfin servers. Supports parent-child relationships where children sync back to the parent, and peer-to-peer relationships for bi-directional synchronization.",
     "overview": "Synchronize media content between Jellyfin servers",
+    "imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png",
     "owner": "JPKribs",
     "category": "General",
     "versions": [
