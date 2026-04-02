@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.38",
+        "changelog": "## Chores\r\n- Documentation cleanup\r\n\r\n## Fixes\r\n- Fix incorrect categories\r\n- Get full people records for syncing\r\n\r\n## Features\r\n- Link new image for the plugin image\r\n- Add people images for reference",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.38/jellyfin-plugin-serversync-10.11.38.zip",
+        "checksum": "7044a7dba1fe9a36e6a2757801837f40",
+        "timestamp": "2026-04-02T22:48:05Z"
+      },
+      {
         "version": "10.11.37",
         "changelog": "## Fixes\r\n- Fix missing build packages",
         "targetAbi": "10.11.0.0",
