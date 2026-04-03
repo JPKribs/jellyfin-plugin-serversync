@@ -1129,7 +1129,8 @@ public class SourceServerClient : IDisposable
 
     /// <summary>
     /// Gets a single Person by name from the source server as a full BaseItemDto.
-    /// Uses the SDK typed Persons endpoint.
+    /// First resolves the person ID via the Persons endpoint, then fetches the full
+    /// item with all metadata fields via the Items endpoint.
     /// </summary>
     /// <param name="name">Person name to look up.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -1141,7 +1142,31 @@ public class SourceServerClient : IDisposable
         try
         {
             var client = GetApiClient();
-            return await client.Persons[name].GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var personStub = await client.Persons[name].GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (personStub?.Id == null)
+            {
+                return null;
+            }
+
+            var result = await client.Items.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.Ids = new Guid?[] { personStub.Id };
+                    config.QueryParameters.Fields = new[]
+                    {
+                        ItemFields.Overview,
+                        ItemFields.ProviderIds,
+                        ItemFields.Tags,
+                        ItemFields.OriginalTitle,
+                        ItemFields.SortName,
+                        ItemFields.Settings,
+                        ItemFields.DateCreated
+                    };
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            return result?.Items?.FirstOrDefault();
         }
         catch (OperationCanceledException)
         {

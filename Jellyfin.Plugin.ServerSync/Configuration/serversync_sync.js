@@ -3385,13 +3385,11 @@ export default function (view) {
                 statusBadge.textContent = detail.Status || 'Unknown';
                 statusBadge.className = 'itemModal-statusBadge ' + (detail.Status || 'unknown');
 
-                var infoGrid = view.querySelector('#peopleSyncModalInfoGrid');
                 if (detail.LastSyncTime) {
-                    infoGrid.classList.remove('hidden');
                     view.querySelector('#peopleSyncModalLastSync').textContent =
                         ServerSyncShared.formatRelativeTime(new Date(detail.LastSyncTime));
                 } else {
-                    infoGrid.classList.add('hidden');
+                    view.querySelector('#peopleSyncModalLastSync').textContent = '-';
                 }
 
                 var errorSection = view.querySelector('#peopleSyncModalErrorSection');
@@ -3401,6 +3399,13 @@ export default function (view) {
                 } else {
                     errorSection.classList.add('hidden');
                 }
+
+                // Set server names in headers and mapping
+                var sourceServerName = (self.currentConfig && self.currentConfig.SourceServerName) || 'Source';
+                var localServerName = ServerSyncShared.localServerName || 'Local';
+                view.querySelector('#peopleSyncModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
+                view.querySelector('#peopleSyncModalSourceHeader').textContent = sourceServerName;
+                view.querySelector('#peopleSyncModalLocalHeader').textContent = localServerName;
 
                 // Build changes summary badges
                 var summaryHtml = '';
@@ -3498,9 +3503,9 @@ export default function (view) {
 
         _addSectionHeader: function(tbody, title) {
             var row = document.createElement('tr');
-            row.className = 'peopleSyncModal-sectionHeader';
+            row.className = 'metadataSyncModal-sectionHeader';
             var cell = document.createElement('td');
-            cell.colSpan = 3;
+            cell.colSpan = 4;
             cell.textContent = title;
             row.appendChild(cell);
             tbody.appendChild(row);
@@ -3536,23 +3541,28 @@ export default function (view) {
 
         _addComparisonRow: function(tbody, property, sourceVal, localVal, isChanged) {
             var row = document.createElement('tr');
-            if (isChanged) row.className = 'peopleSyncModal-changedRow';
+            if (isChanged) row.className = 'metadataSyncModal-changedRow';
 
             var propCell = document.createElement('td');
-            propCell.className = 'peopleSyncModal-property';
+            propCell.className = 'historyCompareTable-property';
             propCell.textContent = property;
 
             var sourceCell = document.createElement('td');
-            sourceCell.className = 'peopleSyncModal-value';
+            sourceCell.className = 'historyCompareTable-value';
             sourceCell.textContent = sourceVal || '-';
 
             var localCell = document.createElement('td');
-            localCell.className = 'peopleSyncModal-value';
+            localCell.className = 'historyCompareTable-value';
             localCell.textContent = localVal || '-';
+
+            var afterSyncCell = document.createElement('td');
+            afterSyncCell.className = 'historyCompareTable-value historyCompareTable-merged';
+            afterSyncCell.textContent = sourceVal || '-';
 
             row.appendChild(propCell);
             row.appendChild(sourceCell);
             row.appendChild(localCell);
+            row.appendChild(afterSyncCell);
             tbody.appendChild(row);
         },
 

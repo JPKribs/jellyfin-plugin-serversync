@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.38"
+version: "10.11.39"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -27,9 +27,15 @@ artifacts:
 changelog:
   chores:
   - Documentation cleanup
+  - Add People Syncing section to README
   fixes:
   - Fix incorrect categories
   - Get full people records for syncing
+  - Fix metadata sync false positives for people Type field comparison
+  - Fix people sync fetching incomplete person data from source server
   features:
   - Link new image for the plugin image
   - Add people images for reference
+  - People sync modal now shows server names, After Sync column, and matches metadata modal styling
+  - People sync stores full metadata blob (Overview, dates, tags, provider IDs, lock status)
+  - People sync image comparison uses file size instead of raw JSON equality

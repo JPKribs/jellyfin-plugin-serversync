@@ -1,6 +1,6 @@
 ![Server Sync](Jellyfin.Plugin.ServerSync/Assets/Logo.png)
 
-A Jellyfin plugin for one-way synchronization between Jellyfin servers. Keep your **Content**, **Watch History**, **Metadata**, and **User Settings** in sync across multiple Jellyfin installations.
+A Jellyfin plugin for one-way synchronization between Jellyfin servers. Keep your **Content**, **Watch History**, **Metadata**, **People**, and **User Settings** in sync across multiple Jellyfin installations.
 
 ## How It Works
 
@@ -75,13 +75,13 @@ The Source Server is the Jellyfin Server you want to sync content **from**. This
 
 # Syncing Types
 
+| Sync Table |
+| :--- |
+| ![Sync Table](Documentation/Screenshots/Sync%20Table.png) |
+
 ## Content Syncing
 
 Content Syncing copies media files from the Source Server and mirrors them on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync Content**.
-
-| Content Sync Table |
-| :--- |
-| ![Content Sync Table](Documentation/Screenshots/ContentSync/Table.png) |
 
 ### Refresh Sync Table
 
@@ -106,10 +106,6 @@ Using the files found in the Sync Table, all Queued files are downloaded using J
 ## History Syncing
 
 History Syncing copies watch history from the Source Server and mirrors it on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync History**.
-
-| History Sync Table |
-| :--- |
-| ![History Sync Table](Documentation/Screenshots/HistorySync/Table.png) |
 
 ### Refresh Sync Table
 
@@ -137,10 +133,6 @@ Using the watch history found in the Sync Table, all Queued records update conte
 
 Metadata Syncing copies media metadata from the Source Server and mirrors them on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync Metadata**.
 
-| Metadata Sync Table |
-| :--- |
-| ![Metadata Sync Table](Documentation/Screenshots/MetadataSync/Table.png) |
-
 ### Refresh Sync Table
 
 The Plugin builds a table of all content that exists on both the Source Server and the Local Server. Source Server metadata is compared, **by file path**, against the Local Server. The following metadata categories are tracked individually:
@@ -164,13 +156,32 @@ Using the metadata found in the Sync Table, all Queued records update content me
 
 ---
 
+## People Syncing
+
+People Syncing copies person metadata from the Source Server and mirrors it on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync People**.
+
+### Refresh Sync Table
+
+The Plugin builds a table of all people associated with your synced metadata items (actors, directors, writers). Each person's full record is fetched from the Source Server and compared against the Local Server's person entity. People are matched across servers **by name**. The following categories are tracked:
+
+* Metadata (Name, Overview, Birth/Death Dates, Sort Names, Provider IDs, Tags, Lock Status)
+* Images (compared by type count and file size)
+
+People with metadata or images that vary from the Source Server are Queued for import.
+
+Setting a person to Ignored will skip any future actions.
+
+### Sync People
+
+Using the people found in the Sync Table, all Queued records update person metadata and images using Jellyfin's internal APIs.
+
+#### For complete information, please see our **[People Syncing Documentation](Documentation/People.md)**!
+
+---
+
 ## User Syncing
 
 User Syncing copies user images, settings, and configuration from the Source Server and mirrors them on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync Users**.
-
-| User Sync Table |
-| :--- |
-| ![User Sync Table](Documentation/Screenshots/UserSync/Table.png) |
 
 ### Refresh Sync Table
 

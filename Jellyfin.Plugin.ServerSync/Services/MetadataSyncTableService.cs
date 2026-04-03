@@ -826,7 +826,10 @@ public class MetadataSyncTableService
                         personDict["Role"] = person.Role;
                     }
 
-                    personDict["Type"] = person.Type.ToString();
+                    if (person.Type != default)
+                    {
+                        personDict["Type"] = person.Type.ToString();
+                    }
 
                     if (personDict.ContainsKey("Name"))
                     {

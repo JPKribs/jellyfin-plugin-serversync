@@ -22,8 +22,8 @@
                             <option value="content" data-config-key="EnableContentSync">Content</option>
                             <option value="history" data-config-key="EnableHistorySync">History</option>
                             <option value="metadata" data-config-key="EnableMetadataSync">Metadata</option>
-                            <option value="users" data-config-key="EnableUserSync">Users</option>
                             <option value="people" data-config-key="EnablePeopleSync">People</option>
+                            <option value="users" data-config-key="EnableUserSync">Users</option>
                         </select>
                         <div class="selectArrowContainer"><div style="display:none;">0</div><span class="selectArrow material-icons keyboard_arrow_down" aria-hidden="true"></span></div>
                     </div>
@@ -671,11 +671,12 @@
                                 <div class="modal-body">
                                     <div class="peopleSyncModal-topRow">
                                         <span id="peopleSyncModalStatusBadge" class="itemModal-statusBadge"></span>
+                                        <span id="peopleSyncModalServerMapping" class="metadataSyncModal-serverMapping"></span>
                                     </div>
-                                    <div id="peopleSyncModalInfoGrid" class="peopleSyncModal-infoGrid hidden">
+                                    <div id="peopleSyncModalInfoGrid" class="peopleSyncModal-infoGrid">
                                         <div class="peopleSyncModal-infoItem">
                                             <div class="peopleSyncModal-infoLabel">Last Sync</div>
-                                            <div id="peopleSyncModalLastSync" class="peopleSyncModal-infoValue"></div>
+                                            <div id="peopleSyncModalLastSync" class="peopleSyncModal-infoValue">-</div>
                                         </div>
                                     </div>
                                     <div id="peopleSyncModalErrorSection" class="modal-field hidden">
@@ -685,29 +686,29 @@
                                     <div id="peopleSyncModalChangesSummary" class="peopleSyncModal-changesSummary"></div>
 
                                     <!-- Comparison Table -->
-                                    <div class="peopleSyncModal-compareSection">
-                                        <table class="peopleSyncModal-compareTable">
+                                    <div class="peopleSyncModal-tableContainer">
+                                        <table class="historyCompareTable">
                                             <thead>
                                                 <tr>
-                                                    <th class="peopleSyncModal-property">Property</th>
-                                                    <th class="peopleSyncModal-server">Source</th>
-                                                    <th class="peopleSyncModal-server">Local</th>
+                                                    <th class="historyCompareTable-property">Property</th>
+                                                    <th id="peopleSyncModalSourceHeader" class="historyCompareTable-server">Source</th>
+                                                    <th id="peopleSyncModalLocalHeader" class="historyCompareTable-server">Local</th>
+                                                    <th class="historyCompareTable-merged">After Sync</th>
                                                 </tr>
                                             </thead>
-                                            <tbody id="peopleSyncModalTableBody">
-                                            </tbody>
+                                            <tbody id="peopleSyncModalTableBody"></tbody>
                                         </table>
                                     </div>
-
+                                    
                                     <!-- Modal Action Buttons -->
-                                    <div class="modal-buttons">
-                                        <button is="emby-button" type="button" id="btnPeopleSyncModalIgnore" class="raised modalButton">
-                                            <span>Ignore</span>
-                                        </button>
-                                        <button is="emby-button" type="button" id="btnPeopleSyncModalQueue" class="raised button-primary modalButton">
-                                            <span>Queue</span>
-                                        </button>
-                                    </div>
+                                </div>
+                                <div class="modalButtonRow">
+                                    <button is="emby-button" type="button" id="btnPeopleSyncModalIgnore" class="raised modalButton">
+                                        <span>Ignore</span>
+                                    </button>
+                                    <button is="emby-button" type="button" id="btnPeopleSyncModalQueue" class="raised button-primary modalButton">
+                                        <span>Queue</span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -797,12 +798,15 @@
         }
 
         /* ===== Shared Scrollable Table Container ===== */
-        .metadataSyncModal-tableContainer, .userSyncModal-tableContainer {
+        .metadataSyncModal-tableContainer, .userSyncModal-tableContainer,
+        .peopleSyncModal-tableContainer {
             max-height: 400px; overflow-y: auto;
             border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;
         }
-        .metadataSyncModal-tableContainer table, .userSyncModal-tableContainer table { margin: 0; }
-        .metadataSyncModal-tableContainer thead, .userSyncModal-tableContainer thead {
+        .metadataSyncModal-tableContainer table, .userSyncModal-tableContainer table,
+        .peopleSyncModal-tableContainer table { margin: 0; }
+        .metadataSyncModal-tableContainer thead, .userSyncModal-tableContainer thead,
+        .peopleSyncModal-tableContainer thead {
             position: sticky; top: 0; background: var(--theme-background-primary, #1c1c1c); z-index: 1;
         }
 
@@ -885,26 +889,6 @@
         .userSyncModal-userId {
             font-family: var(--font-mono);
             font-size: 0.8em; opacity: 0.5;
-        }
-
-        /* ===== People Sync Modal Specifics ===== */
-        .peopleSyncModal-compareSection { margin-top: 16px; }
-        .peopleSyncModal-compareTable {
-            width: 100%; border-collapse: collapse;
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;
-        }
-        .peopleSyncModal-compareTable th,
-        .peopleSyncModal-compareTable td { padding: 8px 12px; text-align: left; }
-        .peopleSyncModal-compareTable th {
-            background: rgba(255,255,255,0.08); font-size: 0.85em;
-            text-transform: uppercase; letter-spacing: 0.5px;
-        }
-        .peopleSyncModal-compareTable td { border-top: 1px solid rgba(255,255,255,0.06); }
-        .peopleSyncModal-property { width: 25%; font-weight: 500; }
-        .peopleSyncModal-server { width: 37.5%; }
-        .peopleSyncModal-value {
-            font-family: var(--font-mono); font-size: 0.9em;
-            word-break: break-word; max-width: 300px;
         }
     </style>
 </div>
