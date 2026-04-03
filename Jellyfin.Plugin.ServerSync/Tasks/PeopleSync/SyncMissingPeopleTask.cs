@@ -187,9 +187,15 @@ public class SyncMissingPeopleTask : IScheduledTask
         // Apply images
         if (syncImages && item.HasImagesChanges && imageClient != null && !string.IsNullOrEmpty(item.SourcePersonId))
         {
+            if (!Guid.TryParse(item.SourcePersonId, out var sourcePersonGuid))
+            {
+                _logger.LogWarning("Invalid source person ID format for {PersonName}: {SourcePersonId}", item.PersonName, item.SourcePersonId);
+                return false;
+            }
+
             var imageSuccess = await ApplyPersonImagesAsync(
                 localPerson,
-                Guid.Parse(item.SourcePersonId),
+                sourcePersonGuid,
                 imageClient,
                 cancellationToken).ConfigureAwait(false);
 
@@ -470,12 +476,13 @@ public class SyncMissingPeopleTask : IScheduledTask
                 var tempPath = Path.GetTempFileName();
                 try
                 {
-                    using (var fileStream = File.Create(tempPath))
+                    await using (stream.ConfigureAwait(false))
                     {
-                        await stream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
+                        using (var fileStream = File.Create(tempPath))
+                        {
+                            await stream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
+                        }
                     }
-
-                    await using var _ = stream.ConfigureAwait(false);
 
                     // Parse the image type enum
                     if (Enum.TryParse<ImageType>(imageType, true, out var parsedImageType))

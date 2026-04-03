@@ -59,7 +59,6 @@ public class PeopleSyncTableService
     {
         _logger.LogInformation("Refreshing people sync table from synced metadata items");
 
-        // Step 1: Extract unique person names from all synced metadata items
         var uniqueNames = ExtractUniquePersonNames(database);
 
         if (uniqueNames.Count == 0)
@@ -70,7 +69,6 @@ public class PeopleSyncTableService
 
         _logger.LogInformation("Found {Count} unique people across synced metadata items", uniqueNames.Count);
 
-        // Step 2: Load existing people sync items into a lookup by name
         var existingItems = new Dictionary<string, PeopleSyncItem>(StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -85,17 +83,23 @@ public class PeopleSyncTableService
             return 0;
         }
 
-        // Step 3: For each unique person, fetch from source and compare with local
+        var namesList = uniqueNames.ToList();
+        var sourcePersons = await client.GetPersonsByNamesAsync(namesList, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation("Batch-fetched {Resolved}/{Total} people from source server", sourcePersons.Count, namesList.Count);
+
+        // Step 4: For each unique person, compare with local using pre-fetched data
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var processedCount = 0;
 
-        foreach (var name in uniqueNames)
+        foreach (var name in namesList)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             seenNames.Add(name);
 
-            await ProcessPersonAsync(name, client, database, existingItems, syncImages, cancellationToken).ConfigureAwait(false);
+            sourcePersons.TryGetValue(name, out var sourcePerson);
+            await ProcessPersonAsync(name, sourcePerson, client, database, existingItems, syncImages, cancellationToken).ConfigureAwait(false);
 
             processedCount++;
             onItemProcessed?.Invoke();
@@ -163,18 +167,17 @@ public class PeopleSyncTableService
     }
 
     /// <summary>
-    /// Processes a single person: fetches from source server as BaseItemDto, compares with local, and upserts.
+    /// Processes a single person: compares pre-fetched source data with local, and upserts.
     /// </summary>
     private async Task ProcessPersonAsync(
         string name,
+        BaseItemDto? sourcePerson,
         SourceServerClient client,
         SyncDatabase database,
         Dictionary<string, PeopleSyncItem> existingItems,
         bool syncImages,
         CancellationToken cancellationToken)
     {
-        // Fetch person as full BaseItemDto from source server via SDK
-        var sourcePerson = await client.GetPersonByNameAsync(name, cancellationToken).ConfigureAwait(false);
         var sourcePersonId = sourcePerson?.Id?.ToString("N", CultureInfo.InvariantCulture);
 
         // Build source metadata blob
@@ -275,9 +278,9 @@ public class PeopleSyncTableService
     private static string BuildSourceMetadata(BaseItemDto sourcePerson)
     {
         var sourceProviderIds = sourcePerson.ProviderIds?.AdditionalData?
-            .Where(kvp => kvp.Value != null)
+            .Where(kvp => kvp.Value != null && !string.IsNullOrEmpty(kvp.Value.ToString()))
             .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString());
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value!.ToString()!);
 
         var metadata = new Dictionary<string, object?>
         {

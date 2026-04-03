@@ -1179,6 +1179,111 @@ public class SourceServerClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gets multiple persons by name from the source server as full BaseItemDtos.
+    /// Uses the bulk /Persons endpoint with Fields to fetch all persons in paginated calls,
+    /// then filters to the requested names. This avoids unreliable per-name URL lookups.
+    /// </summary>
+    /// <param name="names">Person names to look up.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Dictionary of person name to BaseItemDto.</returns>
+    public async Task<Dictionary<string, BaseItemDto>> GetPersonsByNamesAsync(
+        IReadOnlyList<string> names,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, BaseItemDto>(StringComparer.OrdinalIgnoreCase);
+
+        if (names.Count == 0)
+        {
+            return result;
+        }
+
+        // Build a lookup set for the names we need
+        var neededNames = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+
+        // Fetch all persons from source server in a single call with full metadata fields.
+        // The /Persons endpoint does not support StartIndex pagination, so we use a high
+        // Limit to retrieve the full catalog. For a typical library this is a few thousand.
+        var client = GetApiClient();
+        int totalFetched = 0;
+
+        try
+        {
+            var personsResult = await client.Persons.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.Limit = neededNames.Count + 1000;
+                    config.QueryParameters.Fields = new[]
+                    {
+                        ItemFields.Overview,
+                        ItemFields.ProviderIds,
+                        ItemFields.Tags,
+                        ItemFields.OriginalTitle,
+                        ItemFields.SortName,
+                        ItemFields.Settings,
+                        ItemFields.DateCreated
+                    };
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            if (personsResult?.Items != null)
+            {
+                totalFetched = personsResult.Items.Count;
+                foreach (var person in personsResult.Items)
+                {
+                    if (!string.IsNullOrEmpty(person.Name) && neededNames.Contains(person.Name))
+                    {
+                        result[person.Name] = person;
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to bulk-fetch persons from source server");
+        }
+
+        _logger.LogDebug(
+            "Fetched {Total} persons from source, matched {Matched}/{Needed} requested names",
+            totalFetched,
+            result.Count,
+            neededNames.Count);
+
+        // If some names weren't found in the bulk fetch, try individual lookups as fallback
+        if (result.Count < neededNames.Count)
+        {
+            var missingNames = neededNames.Where(n => !result.ContainsKey(n)).ToList();
+            _logger.LogDebug("Falling back to individual lookups for {Count} unresolved person(s)", missingNames.Count);
+
+            await Parallel.ForEachAsync(
+                missingNames,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = 4,
+                    CancellationToken = cancellationToken
+                },
+                async (name, ct) =>
+                {
+                    var person = await GetPersonByNameAsync(name, ct).ConfigureAwait(false);
+                    if (person != null && !string.IsNullOrEmpty(person.Name))
+                    {
+                        lock (result)
+                        {
+                            result[name] = person;
+                        }
+                    }
+                }).ConfigureAwait(false);
+
+            _logger.LogDebug("After fallback: matched {Matched}/{Needed} requested names", result.Count, neededNames.Count);
+        }
+
+        return result;
+    }
+
     // ===== History Sync Methods =====
 
     /// <summary>
