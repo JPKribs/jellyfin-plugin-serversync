@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.39",
+        "changelog": "## Chores\r\n- Documentation cleanup\r\n- Add People Syncing section to README\r\n\r\n## Fixes\r\n- Fix incorrect categories\r\n- Get full people records for syncing\r\n- Fix metadata sync false positives for people Type field comparison\r\n- Fix people sync fetching incomplete person data from source server\r\n- Performance fixes for redundant people calls\r\n\r\n## Features\r\n- Link new image for the plugin image\r\n- Add people images for reference\r\n- People sync modal now shows server names, After Sync column, and matches metadata modal styling\r\n- People sync stores full metadata blob (Overview, dates, tags, provider IDs, lock status)\r\n- People sync image comparison uses file size instead of raw JSON equality",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.39/jellyfin-plugin-serversync-10.11.39.zip",
+        "checksum": "c1effa08af0e7ff1f4f508a8d755e25b",
+        "timestamp": "2026-04-03T19:17:00Z"
+      },
+      {
         "version": "10.11.38",
         "changelog": "## Chores\r\n- Documentation cleanup\r\n\r\n## Fixes\r\n- Fix incorrect categories\r\n- Get full people records for syncing\r\n\r\n## Features\r\n- Link new image for the plugin image\r\n- Add people images for reference",
         "targetAbi": "10.11.0.0",
