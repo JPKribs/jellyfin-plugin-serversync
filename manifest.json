@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.41",
+        "changelog": "## Fixes\r\n- Paginated bulk fetch of persons via /Items?IncludeItemTypes=Person for larger servers",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.41/jellyfin-plugin-serversync-10.11.41.zip",
+        "checksum": "88151bfb659c21fdefddc26fd16bb745",
+        "timestamp": "2026-04-03T20:49:30Z"
+      },
+      {
         "version": "10.11.40",
         "changelog": "## Fixes\r\n- Fix redundant database writes in people sync (duplicate UpdateToRepository, unconditional hasChanges)\r\n- Fix stream disposal leak in people image sync\r\n- Fix unvalidated Guid.Parse for source person ID (use TryParse)\r\n- Fix ProviderIds filtering asymmetry between source and local metadata comparison\r\n\r\n## Features\r\n- Bulk fetch all persons from source server via /Persons endpoint with fallback for missing names",
         "targetAbi": "10.11.0.0",
