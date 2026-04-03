@@ -33,6 +33,7 @@ changelog:
   - Get full people records for syncing
   - Fix metadata sync false positives for people Type field comparison
   - Fix people sync fetching incomplete person data from source server
+  - Performance fixes for redundant people calls
   features:
   - Link new image for the plugin image
   - Add people images for reference

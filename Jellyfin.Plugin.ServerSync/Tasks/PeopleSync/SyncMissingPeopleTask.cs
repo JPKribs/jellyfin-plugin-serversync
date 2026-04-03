@@ -211,14 +211,14 @@ public class SyncMissingPeopleTask : IScheduledTask
     /// <summary>
     /// Applies metadata fields from SourceMetadataValue JSON blob to a local person entity.
     /// </summary>
-    private async Task<bool> ApplyMetadataAsync(
+    private Task<bool> ApplyMetadataAsync(
         BaseItem localPerson,
         PeopleSyncItem item,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(item.SourceMetadataValue))
         {
-            return false;
+            return Task.FromResult(false);
         }
 
         try
@@ -226,7 +226,7 @@ public class SyncMissingPeopleTask : IScheduledTask
             var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.SourceMetadataValue);
             if (metadata == null)
             {
-                return false;
+                return Task.FromResult(false);
             }
 
             var hasChanges = false;
@@ -351,8 +351,12 @@ public class SyncMissingPeopleTask : IScheduledTask
                     }
                 }
 
-                localPerson.Tags = tags.ToArray();
-                hasChanges = true;
+                var tagsArray = tags.ToArray();
+                if (!localPerson.Tags.SequenceEqual(tagsArray, StringComparer.Ordinal))
+                {
+                    localPerson.Tags = tagsArray;
+                    hasChanges = true;
+                }
             }
 
             // ProviderIds
@@ -363,7 +367,7 @@ public class SyncMissingPeopleTask : IScheduledTask
                     if (prop.Value.ValueKind == JsonValueKind.String)
                     {
                         var providerValue = prop.Value.GetString();
-                        if (!string.IsNullOrEmpty(providerValue))
+                        if (!string.IsNullOrEmpty(providerValue) && localPerson.GetProviderId(prop.Name) != providerValue)
                         {
                             localPerson.SetProviderId(prop.Name, providerValue);
                             hasChanges = true;
@@ -388,8 +392,12 @@ public class SyncMissingPeopleTask : IScheduledTask
                     }
                 }
 
-                localPerson.LockedFields = lockedFieldsList.ToArray();
-                hasChanges = true;
+                var lockedFieldsArray = lockedFieldsList.ToArray();
+                if (!localPerson.LockedFields.SequenceEqual(lockedFieldsArray))
+                {
+                    localPerson.LockedFields = lockedFieldsArray;
+                    hasChanges = true;
+                }
             }
 
             // LockData (IsLocked)
@@ -412,17 +420,12 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            if (hasChanges)
-            {
-                await localPerson.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-            }
-
-            return hasChanges;
+            return Task.FromResult(hasChanges);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to apply metadata for person {PersonName}", item.PersonName);
-            return false;
+            return Task.FromResult(false);
         }
     }
 
