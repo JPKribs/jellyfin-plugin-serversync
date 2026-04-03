@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.40"
+version: "10.11.41"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -26,9 +26,4 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   fixes:
-  - Fix redundant database writes in people sync (duplicate UpdateToRepository, unconditional hasChanges)
-  - Fix stream disposal leak in people image sync
-  - Fix unvalidated Guid.Parse for source person ID (use TryParse)
-  - Fix ProviderIds filtering asymmetry between source and local metadata comparison
-  features:
-  - Bulk fetch all persons from source server via /Persons endpoint with fallback for missing names
+  -  Paginated bulk fetch of persons via /Items?IncludeItemTypes=Person for larger servers

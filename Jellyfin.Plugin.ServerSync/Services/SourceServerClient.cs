@@ -1181,15 +1181,17 @@ public class SourceServerClient : IDisposable
 
     /// <summary>
     /// Gets multiple persons by name from the source server as full BaseItemDtos.
-    /// Uses the bulk /Persons endpoint with Fields to fetch all persons in paginated calls,
-    /// then filters to the requested names. This avoids unreliable per-name URL lookups.
+    /// Uses the /Items endpoint with IncludeItemTypes=Person and paginated StartIndex/Limit
+    /// to fetch all persons with full metadata, then filters to the requested names.
     /// </summary>
     /// <param name="names">Person names to look up.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="pageSize">Number of persons to fetch per page.</param>
     /// <returns>Dictionary of person name to BaseItemDto.</returns>
     public async Task<Dictionary<string, BaseItemDto>> GetPersonsByNamesAsync(
         IReadOnlyList<string> names,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int pageSize = 500)
     {
         var result = new Dictionary<string, BaseItemDto>(StringComparer.OrdinalIgnoreCase);
 
@@ -1198,62 +1200,84 @@ public class SourceServerClient : IDisposable
             return result;
         }
 
-        // Build a lookup set for the names we need
         var neededNames = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
-
-        // Fetch all persons from source server in a single call with full metadata fields.
-        // The /Persons endpoint does not support StartIndex pagination, so we use a high
-        // Limit to retrieve the full catalog. For a typical library this is a few thousand.
         var client = GetApiClient();
+        int startIndex = 0;
         int totalFetched = 0;
 
-        try
+        // Paginate through all Person items on the source server
+        while (true)
         {
-            var personsResult = await client.Persons.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.Limit = neededNames.Count + 1000;
-                    config.QueryParameters.Fields = new[]
-                    {
-                        ItemFields.Overview,
-                        ItemFields.ProviderIds,
-                        ItemFields.Tags,
-                        ItemFields.OriginalTitle,
-                        ItemFields.SortName,
-                        ItemFields.Settings,
-                        ItemFields.DateCreated
-                    };
-                },
-                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (personsResult?.Items != null)
+            try
             {
-                totalFetched = personsResult.Items.Count;
-                foreach (var person in personsResult.Items)
+                var page = await client.Items.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Person };
+                        config.QueryParameters.StartIndex = startIndex;
+                        config.QueryParameters.Limit = pageSize;
+                        config.QueryParameters.Recursive = true;
+                        config.QueryParameters.Fields = new[]
+                        {
+                            ItemFields.Overview,
+                            ItemFields.ProviderIds,
+                            ItemFields.Tags,
+                            ItemFields.OriginalTitle,
+                            ItemFields.SortName,
+                            ItemFields.Settings,
+                            ItemFields.DateCreated
+                        };
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                if (page?.Items == null || page.Items.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (var person in page.Items)
                 {
                     if (!string.IsNullOrEmpty(person.Name) && neededNames.Contains(person.Name))
                     {
                         result[person.Name] = person;
                     }
                 }
+
+                totalFetched += page.Items.Count;
+                startIndex += page.Items.Count;
+
+                _logger.LogDebug(
+                    "Fetched person page: {PageCount} items (total {Total}), matched {Matched}/{Needed} so far",
+                    page.Items.Count, totalFetched, result.Count, neededNames.Count);
+
+                // Stop if we've received fewer items than requested (last page)
+                // or we've found all the names we need
+                if (page.Items.Count < pageSize || result.Count >= neededNames.Count)
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch persons page at offset {StartIndex}", startIndex);
+                break;
             }
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to bulk-fetch persons from source server");
-        }
 
-        _logger.LogDebug(
-            "Fetched {Total} persons from source, matched {Matched}/{Needed} requested names",
+        _logger.LogInformation(
+            "Fetched {Total} persons from source in {Pages} page(s), matched {Matched}/{Needed} requested names",
             totalFetched,
+            (totalFetched + pageSize - 1) / pageSize,
             result.Count,
             neededNames.Count);
 
-        // If some names weren't found in the bulk fetch, try individual lookups as fallback
+        // Fallback: individual lookups for names not found in the paginated fetch
         if (result.Count < neededNames.Count)
         {
             var missingNames = neededNames.Where(n => !result.ContainsKey(n)).ToList();
@@ -1278,7 +1302,7 @@ public class SourceServerClient : IDisposable
                     }
                 }).ConfigureAwait(false);
 
-            _logger.LogDebug("After fallback: matched {Matched}/{Needed} requested names", result.Count, neededNames.Count);
+            _logger.LogInformation("After fallback: matched {Matched}/{Needed} requested names", result.Count, neededNames.Count);
         }
 
         return result;
