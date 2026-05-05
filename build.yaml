@@ -27,6 +27,7 @@ artifacts:
 changelog:
   fixes:
   - Check content size instead of trusting metadata
+  - Update versioning and tracking
   features:
   - Filter out watched content from whitelisted syncing
   - Treat watched content as `ignored` so it's visible in the listing but not synced
