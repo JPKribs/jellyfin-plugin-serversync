@@ -206,6 +206,19 @@
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription">Also download external subtitles and other companion files when available.</div>
                                     </div>
+
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkSkipWatchedByAllUsers" />
+                                            <span class="checkboxLabel">Skip Items Watched by All Selected Users</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Skip items that have been watched by every user selected below. If at least one selected user has not watched the item, it remains eligible to sync. Items already synced are not affected.</div>
+                                    </div>
+
+                                    <div id="watchedFilterUsersSettings" class="nested-settings hidden">
+                                        <div class="fieldDescription">Source users whose watched status determines the filter. Only items unwatched by at least one checked user will sync.</div>
+                                        <div id="watchedFilterUsersList"></div>
+                                    </div>
                                 </div>
 
                                 <!-- Approval Preferences Subsection -->
@@ -288,6 +301,12 @@
                                         <label for="txtMaxRetryCount">Max Retry Count:</label>
                                         <input is="emby-input" type="number" id="txtMaxRetryCount" min="1" max="10" />
                                         <div class="fieldDescription">Maximum number of times to retry failed downloads (1-10).</div>
+                                    </div>
+
+                                    <div class="inputContainer">
+                                        <label for="txtSizeMatchToleranceBytes">Size Match Tolerance (bytes):</label>
+                                        <input is="emby-input" type="number" id="txtSizeMatchToleranceBytes" min="0" />
+                                        <div class="fieldDescription">Tolerance in bytes when comparing local file size against the source's recorded size. 0 (default) requires exact match. Increase if Jellyfin metadata drift on the source is causing files to be re-queued unnecessarily. Post-download integrity is always verified against the HTTP Content-Length, regardless of this value.</div>
                                     </div>
 
                                     <div class="inputContainer">
@@ -951,6 +970,13 @@
         }
         .filterItemCheck {
             flex: 0 0 auto;
+        }
+        .filterItemThumb.filterItemThumbSquare,
+        .filterItemThumbPlaceholder.filterItemThumbSquare {
+            width: 50px;
+            height: 50px;
+            flex: 0 0 50px;
+            border-radius: 50%;
         }
         .filterLoadMore {
             display: block;

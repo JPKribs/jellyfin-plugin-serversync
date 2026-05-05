@@ -13,6 +13,25 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 public static class FileValidationService
 {
     /// <summary>
+    /// Returns true if a local file's byte count is close enough to the recorded source size
+    /// to be considered the same file. Use this instead of strict equality whenever the
+    /// "source size" comes from Jellyfin metadata rather than an HTTP Content-Length.
+    /// </summary>
+    /// <param name="localSize">Actual size of the local file in bytes.</param>
+    /// <param name="sourceSize">Recorded source size in bytes.</param>
+    /// <param name="toleranceBytes">Tolerance in bytes (0 = strict equality required).</param>
+    /// <returns>True if sizes are equal or within the drift tolerance.</returns>
+    public static bool IsSizeWithinDriftTolerance(long localSize, long sourceSize, long toleranceBytes)
+    {
+        if (sourceSize <= 0)
+        {
+            return true;
+        }
+
+        return Math.Abs(localSize - sourceSize) <= Math.Max(0, toleranceBytes);
+    }
+
+    /// <summary>
     /// Validates a path for download operations.
     /// Checks for empty path, path traversal, library boundaries, and collisions.
     /// </summary>
@@ -89,9 +108,10 @@ public static class FileValidationService
     /// Checks if a download should be skipped because the local file already exists and is valid.
     /// </summary>
     /// <param name="item">Sync item to check.</param>
+    /// <param name="sizeMatchToleranceBytes">Tolerance in bytes for size comparison (0 = strict).</param>
     /// <param name="skipReason">Output parameter with reason for skipping.</param>
     /// <returns>True if download should be skipped.</returns>
-    public static bool ShouldSkipDownload(SyncItem item, out string? skipReason)
+    public static bool ShouldSkipDownload(SyncItem item, long sizeMatchToleranceBytes, out string? skipReason)
     {
         skipReason = null;
 
@@ -109,8 +129,7 @@ public static class FileValidationService
         {
             var localInfo = new FileInfo(item.LocalPath);
 
-            // If source size is unknown or sizes match, the file is likely valid
-            if (item.SourceSize == 0 || localInfo.Length == item.SourceSize)
+            if (IsSizeWithinDriftTolerance(localInfo.Length, item.SourceSize, sizeMatchToleranceBytes))
             {
                 skipReason = item.SourceSize == 0
                     ? $"Local file already exists (source size unknown, local size: {FormatUtilities.FormatBytes(localInfo.Length)})"
@@ -118,7 +137,7 @@ public static class FileValidationService
                 return true;
             }
 
-            // Size mismatch - needs re-download
+            // Size differs beyond drift tolerance - needs re-download
             return false;
         }
         catch (IOException)

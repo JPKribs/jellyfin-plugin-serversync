@@ -664,9 +664,93 @@ export default function (view) {
         return apiRequest('GetSourceUsers', 'POST', { ServerUrl: serverUrl, ApiKey: apiKey }).then(function(users) {
             sourceUsers = users || [];
             updateUserSelects();
+            renderWatchedFilterUsers(getCurrentWatchedFilterUserIds());
         }).catch(function() {
             sourceUsers = [];
+            renderWatchedFilterUsers(getCurrentWatchedFilterUserIds());
         });
+    }
+
+    function getCurrentWatchedFilterUserIds() {
+        var rendered = collectWatchedFilterUsers();
+        if (rendered.length > 0) {
+            return rendered;
+        }
+
+        return (currentConfig && currentConfig.WatchedFilterUserIds) || [];
+    }
+
+    function renderWatchedFilterUsers(selectedIds) {
+        var container = view.querySelector('#watchedFilterUsersList');
+        if (!container) return;
+
+        var selectedSet = {};
+        (selectedIds || []).forEach(function(id) { selectedSet[id] = true; });
+
+        container.innerHTML = '';
+
+        if (!sourceUsers || sourceUsers.length === 0) {
+            container.innerHTML = '<div class="filterBrowserStatus">No source users available. Connect to the source server to load users.</div>';
+            return;
+        }
+
+        var list = document.createElement('div');
+        list.className = 'filterItemsList';
+
+        var serverUrl = currentConfig ? currentConfig.SourceServerUrl : '';
+        var apiKey = currentConfig ? currentConfig.SourceServerApiKey : '';
+
+        sourceUsers.forEach(function(user) {
+            var isSelected = !!selectedSet[user.Id];
+
+            var itemEl = document.createElement('div');
+            itemEl.className = 'filterItem watchedFilterUserItem' + (isSelected ? ' selected' : '');
+            itemEl.dataset.userId = user.Id;
+
+            var thumbHtml;
+            var imgUrl = ServerSyncShared.buildSourceUserImageUrl(serverUrl, apiKey, user.Id, 120);
+            if (imgUrl) {
+                thumbHtml = '<img class="filterItemThumb filterItemThumbSquare" src="' + escapeHtml(imgUrl) +
+                    '" onerror="this.outerHTML=\'<div class=&quot;filterItemThumbPlaceholder filterItemThumbSquare&quot;><span class=material-icons>person</span></div>\'" />';
+            } else {
+                thumbHtml = '<div class="filterItemThumbPlaceholder filterItemThumbSquare"><span class="material-icons">person</span></div>';
+            }
+
+            itemEl.innerHTML = thumbHtml +
+                '<div class="filterItemInfo">' +
+                    '<div class="filterItemName">' + escapeHtml(user.Name || '') + '</div>' +
+                '</div>' +
+                '<div class="filterItemCheck"><span class="material-icons">' + (isSelected ? 'check_box' : 'check_box_outline_blank') + '</span></div>';
+
+            itemEl.addEventListener('click', function() {
+                toggleWatchedFilterUser(itemEl);
+            });
+
+            list.appendChild(itemEl);
+        });
+
+        container.appendChild(list);
+    }
+
+    function toggleWatchedFilterUser(itemEl) {
+        var icon = itemEl.querySelector('.filterItemCheck .material-icons');
+        if (itemEl.classList.contains('selected')) {
+            itemEl.classList.remove('selected');
+            if (icon) icon.textContent = 'check_box_outline_blank';
+        } else {
+            itemEl.classList.add('selected');
+            if (icon) icon.textContent = 'check_box';
+        }
+    }
+
+    function collectWatchedFilterUsers() {
+        var ids = [];
+        view.querySelectorAll('.watchedFilterUserItem.selected').forEach(function(row) {
+            if (row.dataset.userId) {
+                ids.push(row.dataset.userId);
+            }
+        });
+        return ids;
     }
 
     function fetchLocalUsers() {
@@ -799,6 +883,8 @@ export default function (view) {
         setChecked('chkDetectUpdatedFiles', config.DetectUpdatedFiles !== false);
         setValue('selChangeDetectionPolicy', config.ChangeDetectionPolicy || 'SizeOnly');
         setChecked('chkIncludeExtras', config.IncludeCompanionFiles || false);
+        setChecked('chkSkipWatchedByAllUsers', config.SkipWatchedByAllUsers || false);
+        renderWatchedFilterUsers(config.WatchedFilterUserIds || []);
         setValue('selDownloadNewContentMode', config.DownloadNewContentMode || 'Enabled');
         setValue('selReplaceExistingContentMode', config.ReplaceExistingContentMode || 'Enabled');
         setValue('selDeleteMissingContentMode', config.DeleteMissingContentMode || 'Disabled');
@@ -808,6 +894,7 @@ export default function (view) {
         setChecked('chkRemoveEmptyFolders', config.RemoveEmptyFoldersOnDelete || false);
         setValue('txtMaxConcurrentDownloads', config.MaxConcurrentDownloads || 2);
         setValue('txtMaxRetryCount', config.MaxRetryCount || 3);
+        setValue('txtSizeMatchToleranceBytes', config.SizeMatchToleranceBytes || 0);
         setValue('txtTempDownloadPath', config.TempDownloadPath || '');
         setValue('txtMaxDownloadSpeed', config.MaxDownloadSpeed || 0);
         setValue('selDownloadSpeedUnit', config.DownloadSpeedUnit || 'MB');
@@ -827,6 +914,8 @@ export default function (view) {
         config.DetectUpdatedFiles = getChecked('chkDetectUpdatedFiles');
         config.ChangeDetectionPolicy = getValue('selChangeDetectionPolicy', 'SizeOnly');
         config.IncludeCompanionFiles = getChecked('chkIncludeExtras');
+        config.SkipWatchedByAllUsers = getChecked('chkSkipWatchedByAllUsers');
+        config.WatchedFilterUserIds = collectWatchedFilterUsers();
         config.DownloadNewContentMode = getValue('selDownloadNewContentMode', 'Enabled');
         config.ReplaceExistingContentMode = getValue('selReplaceExistingContentMode', 'Enabled');
         config.DeleteMissingContentMode = getValue('selDeleteMissingContentMode', 'Disabled');
@@ -836,6 +925,7 @@ export default function (view) {
         config.RemoveEmptyFoldersOnDelete = getChecked('chkRemoveEmptyFolders');
         config.MaxConcurrentDownloads = getIntValue('txtMaxConcurrentDownloads', 2);
         config.MaxRetryCount = getIntValue('txtMaxRetryCount', 3);
+        config.SizeMatchToleranceBytes = getIntValue('txtSizeMatchToleranceBytes', 0);
         config.TempDownloadPath = getValue('txtTempDownloadPath') || null;
         config.MaxDownloadSpeed = getIntValue('txtMaxDownloadSpeed', 0);
         config.DownloadSpeedUnit = getValue('selDownloadSpeedUnit', 'MB');
@@ -959,6 +1049,7 @@ export default function (view) {
 
     function updateNestedVisibility() {
         setVisible('detectUpdatedFilesSettings', getChecked('chkDetectUpdatedFiles'));
+        setVisible('watchedFilterUsersSettings', getChecked('chkSkipWatchedByAllUsers'));
         setVisible('recyclingBinSettings', getChecked('chkEnableRecyclingBin'));
         setVisible('bandwidthScheduleContainer', getChecked('chkEnableBandwidthScheduling'));
     }
@@ -989,9 +1080,11 @@ export default function (view) {
 
     function initNestedVisibilityHandlers() {
         var chkDetect = view.querySelector('#chkDetectUpdatedFiles');
+        var chkWatched = view.querySelector('#chkSkipWatchedByAllUsers');
         var chkRecycle = view.querySelector('#chkEnableRecyclingBin');
         var chkBandwidth = view.querySelector('#chkEnableBandwidthScheduling');
         if (chkDetect) chkDetect.addEventListener('change', updateNestedVisibility);
+        if (chkWatched) chkWatched.addEventListener('change', updateNestedVisibility);
         if (chkRecycle) chkRecycle.addEventListener('change', updateNestedVisibility);
         if (chkBandwidth) chkBandwidth.addEventListener('change', updateNestedVisibility);
     }

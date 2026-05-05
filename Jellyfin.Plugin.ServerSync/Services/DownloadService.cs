@@ -65,28 +65,40 @@ public class DownloadService
             await RetryPolicy.ExecuteWithRetryAsync(
                 async ct =>
                 {
-                    using var sourceStream = await client.DownloadFileAsync(itemId, ct).ConfigureAwait(false);
+                    var download = await client.DownloadFileAsync(itemId, ct).ConfigureAwait(false);
 
-                    if (sourceStream == null)
+                    if (download == null)
                     {
                         throw new InvalidOperationException("No response from server");
                     }
 
-                    // Ensure we don't have a partial file from previous attempt
-                    CleanupTempFile(tempFilePath);
-
-                    using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    var (sourceStream, contentLength) = download.Value;
+                    using (sourceStream)
                     {
-                        await StreamUtilities.CopyWithSpeedLimitAsync(sourceStream, fileStream, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
+                        // Ensure we don't have a partial file from previous attempt
+                        CleanupTempFile(tempFilePath);
+
+                        using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            await StreamUtilities.CopyWithSpeedLimitAsync(sourceStream, fileStream, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
+                        }
                     }
 
-                    // Verify size after download
                     var downloadedInfo = new FileInfo(tempFilePath);
-                    if (item.SourceSize > 0 && downloadedInfo.Length != item.SourceSize)
+                    if (contentLength.HasValue && downloadedInfo.Length != contentLength.Value)
                     {
-                        var errorMsg = $"Size mismatch: expected {FormatUtilities.FormatBytes(item.SourceSize)}, got {FormatUtilities.FormatBytes(downloadedInfo.Length)}";
+                        var errorMsg = $"Truncated download: expected {contentLength.Value} bytes, got {downloadedInfo.Length} bytes";
                         CleanupTempFile(tempFilePath);
                         throw new InvalidOperationException(errorMsg);
+                    }
+
+                    if (item.SourceSize > 0 && downloadedInfo.Length != item.SourceSize)
+                    {
+                        _logger.LogDebug(
+                            "Downloaded {FileName}: actual {Actual} bytes differs from recorded SourceSize {Expected} bytes (likely stale source metadata)",
+                            fileName,
+                            downloadedInfo.Length,
+                            item.SourceSize);
                     }
                 },
                 networkRetries,
@@ -285,11 +297,12 @@ public class DownloadService
     /// Checks if a download should be skipped because the local file already exists and is valid.
     /// </summary>
     /// <param name="item">Sync item to check.</param>
+    /// <param name="sizeMatchToleranceBytes">Tolerance in bytes for size comparison (0 = strict).</param>
     /// <param name="skipReason">Output parameter with reason for skipping.</param>
     /// <returns>True if download should be skipped.</returns>
-    public static bool ShouldSkipDownload(SyncItem item, out string? skipReason)
+    public static bool ShouldSkipDownload(SyncItem item, long sizeMatchToleranceBytes, out string? skipReason)
     {
-        return FileValidationService.ShouldSkipDownload(item, out skipReason);
+        return FileValidationService.ShouldSkipDownload(item, sizeMatchToleranceBytes, out skipReason);
     }
 
     /// <summary>

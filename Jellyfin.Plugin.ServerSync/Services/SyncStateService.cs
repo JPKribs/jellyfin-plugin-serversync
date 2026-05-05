@@ -25,6 +25,7 @@ public static class SyncStateService
     /// <param name="sourceETag">Source ETag for change detection.</param>
     /// <param name="localPath">Translated local path.</param>
     /// <param name="downloadMode">Approval mode for new downloads.</param>
+    /// <param name="sizeMatchToleranceBytes">Tolerance in bytes for size comparison (0 = strict).</param>
     /// <returns>Transition result.</returns>
     public static TransitionResult ProcessNewItem(
         SyncDatabase database,
@@ -35,7 +36,8 @@ public static class SyncStateService
         DateTime sourceCreateDate,
         string? sourceETag,
         string localPath,
-        ApprovalMode downloadMode)
+        ApprovalMode downloadMode,
+        long sizeMatchToleranceBytes)
     {
         // If download new content is disabled, don't track new items at all
         if (downloadMode == ApprovalMode.Disabled)
@@ -63,7 +65,7 @@ public static class SyncStateService
         if (File.Exists(localPath))
         {
             var localInfo = new FileInfo(localPath);
-            if (sourceSize == 0 || localInfo.Length == sourceSize)
+            if (FileValidationService.IsSizeWithinDriftTolerance(localInfo.Length, sourceSize, sizeMatchToleranceBytes))
             {
                 syncItem.Status = SyncStatus.Synced;
                 syncItem.PendingType = null;
@@ -93,6 +95,7 @@ public static class SyncStateService
     /// <param name="replaceMode">Approval mode for replacements.</param>
     /// <param name="detectUpdatedFiles">Whether to check local file integrity.</param>
     /// <param name="changeDetectionPolicy">Policy for detecting source changes.</param>
+    /// <param name="sizeMatchToleranceBytes">Tolerance in bytes for size comparison (0 = strict).</param>
     /// <param name="logger">Logger for status messages.</param>
     /// <returns>Transition result.</returns>
     public static TransitionResult ProcessExistingItem(
@@ -106,6 +109,7 @@ public static class SyncStateService
         ApprovalMode replaceMode,
         bool detectUpdatedFiles,
         ChangeDetectionPolicy changeDetectionPolicy,
+        long sizeMatchToleranceBytes,
         ILogger logger)
     {
         // Ignored items stay in their state
@@ -150,7 +154,7 @@ public static class SyncStateService
                 if (File.Exists(localPath))
                 {
                     var localInfo = new FileInfo(localPath);
-                    if (sourceSize == 0 || localInfo.Length == sourceSize)
+                    if (FileValidationService.IsSizeWithinDriftTolerance(localInfo.Length, sourceSize, sizeMatchToleranceBytes))
                     {
                         existingItem.Status = SyncStatus.Synced;
                         existingItem.PendingType = null;
@@ -202,7 +206,7 @@ public static class SyncStateService
         // For Synced items with detectUpdatedFiles enabled, verify local file integrity
         if (existingItem.Status == SyncStatus.Synced && detectUpdatedFiles)
         {
-            return VerifyLocalFileIntegrity(database, existingItem, localPath, sourceSize, replaceMode, logger);
+            return VerifyLocalFileIntegrity(database, existingItem, localPath, sourceSize, replaceMode, sizeMatchToleranceBytes, logger);
         }
 
         return new TransitionResult(false, "No changes");
@@ -324,6 +328,7 @@ public static class SyncStateService
         string localPath,
         long sourceSize,
         ApprovalMode replaceMode,
+        long sizeMatchToleranceBytes,
         ILogger logger)
     {
         try
@@ -331,7 +336,7 @@ public static class SyncStateService
             if (File.Exists(localPath))
             {
                 var localInfo = new FileInfo(localPath);
-                if (sourceSize > 0 && localInfo.Length != sourceSize)
+                if (sourceSize > 0 && !FileValidationService.IsSizeWithinDriftTolerance(localInfo.Length, sourceSize, sizeMatchToleranceBytes))
                 {
                     // If replace is disabled, don't queue
                     if (replaceMode == ApprovalMode.Disabled)

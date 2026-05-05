@@ -806,8 +806,8 @@ public class SourceServerClient : IDisposable
     /// </summary>
     /// <param name="itemId">Item ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Stream of file content or null on failure.</returns>
-    public async Task<Stream?> DownloadFileAsync(Guid itemId, CancellationToken cancellationToken = default)
+    /// <returns>Stream of file content and the response Content-Length when the server provided one, or null on failure.</returns>
+    public async Task<(Stream Stream, long? ContentLength)?> DownloadFileAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
         HttpResponseMessage? response = null;
         HttpRequestMessage? request = null;
@@ -820,10 +820,11 @@ public class SourceServerClient : IDisposable
             response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
+            var contentLength = response.Content.Headers.ContentLength;
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
             // Transfer ownership of request and response to the stream wrapper
-            return new ResponseDisposingStream(stream, response, request);
+            return (new ResponseDisposingStream(stream, response, request), contentLength);
         }
         catch (OperationCanceledException)
         {
@@ -1308,6 +1309,66 @@ public class SourceServerClient : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Re-fetches persons by their IDs via /Items?Ids=... in batches.
+    /// Used to get complete metadata for persons where the bulk IncludeItemTypes=Person
+    /// fetch returned incomplete data (e.g., missing Overview).
+    /// </summary>
+    /// <param name="ids">Person IDs to fetch.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="batchSize">Number of IDs per request.</param>
+    /// <returns>List of fully-populated BaseItemDto results.</returns>
+    public async Task<List<BaseItemDto>> GetPersonsByIdsAsync(
+        IReadOnlyList<Guid> ids,
+        CancellationToken cancellationToken,
+        int batchSize = 50)
+    {
+        var result = new List<BaseItemDto>();
+
+        for (int i = 0; i < ids.Count; i += batchSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
+
+            try
+            {
+                var client = GetApiClient();
+                var itemsResult = await client.Items.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.Ids = chunk;
+                        config.QueryParameters.Fields = new[]
+                        {
+                            ItemFields.Overview,
+                            ItemFields.ProviderIds,
+                            ItemFields.Tags,
+                            ItemFields.OriginalTitle,
+                            ItemFields.SortName,
+                            ItemFields.Settings,
+                            ItemFields.DateCreated
+                        };
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                if (itemsResult?.Items != null)
+                {
+                    result.AddRange(itemsResult.Items);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch persons by IDs at batch offset {Index}", i);
+            }
+        }
+
+        return result;
+    }
+
     // ===== History Sync Methods =====
 
     /// <summary>
@@ -1354,6 +1415,52 @@ public class SourceServerClient : IDisposable
             _logger.LogError(ex, "Failed to get user items for user {UserId} in library {LibraryId}", userId, libraryId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Fetches the full set of item IDs played by a user within a library, paginating internally.
+    /// Returns an empty set on failure so callers can treat it as "no items played."
+    /// </summary>
+    /// <param name="userId">User ID on the source server.</param>
+    /// <param name="libraryId">Library ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Set of item IDs the user has played in the library.</returns>
+    public async Task<HashSet<Guid>> GetUserPlayedItemIdsAsync(
+        Guid userId,
+        Guid libraryId,
+        CancellationToken cancellationToken = default)
+    {
+        const int pageSize = 200;
+        var ids = new HashSet<Guid>();
+        var startIndex = 0;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var page = await GetUserPlayedItemsAsync(userId, libraryId, startIndex, pageSize, cancellationToken).ConfigureAwait(false);
+            if (page?.Items == null || page.Items.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var item in page.Items)
+            {
+                if (item.Id.HasValue)
+                {
+                    ids.Add(item.Id.Value);
+                }
+            }
+
+            if (page.Items.Count < pageSize)
+            {
+                break;
+            }
+
+            startIndex += pageSize;
+        }
+
+        return ids;
     }
 
     /// <summary>

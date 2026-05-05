@@ -88,7 +88,34 @@ public class PeopleSyncTableService
 
         _logger.LogInformation("Batch-fetched {Resolved}/{Total} people from source server", sourcePersons.Count, namesList.Count);
 
-        // Step 4: For each unique person, compare with local using pre-fetched data
+        // Step 4: Re-fetch persons with incomplete metadata (null Overview despite having an ID).
+        // The bulk /Items?IncludeItemTypes=Person fetch occasionally returns incomplete data for
+        // a small number of persons. Fetching by specific ID via /Items?Ids=... returns full data.
+        var incompleteIds = sourcePersons
+            .Where(kvp => kvp.Value.Overview == null && kvp.Value.Id != null)
+            .Select(kvp => kvp.Value.Id!.Value)
+            .ToList();
+
+        if (incompleteIds.Count > 0)
+        {
+            _logger.LogInformation("Re-fetching {Count} persons with incomplete metadata", incompleteIds.Count);
+
+            var refetched = await client.GetPersonsByIdsAsync(incompleteIds, cancellationToken).ConfigureAwait(false);
+            var updateCount = 0;
+
+            foreach (var person in refetched)
+            {
+                if (!string.IsNullOrEmpty(person.Name) && sourcePersons.ContainsKey(person.Name))
+                {
+                    sourcePersons[person.Name] = person;
+                    updateCount++;
+                }
+            }
+
+            _logger.LogInformation("Updated {Count}/{Total} persons with complete metadata from re-fetch", updateCount, incompleteIds.Count);
+        }
+
+        // Step 5: For each unique person, compare with local using pre-fetched data
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var processedCount = 0;
 

@@ -39,6 +39,9 @@ public class SyncTableService
     /// <param name="deleteMissingMode">Mode for handling missing items.</param>
     /// <param name="detectUpdatedFiles">Whether to detect updated files.</param>
     /// <param name="changeDetectionPolicy">Policy for detecting source changes.</param>
+    /// <param name="sizeMatchToleranceBytes">Tolerance in bytes for size comparison (0 = strict).</param>
+    /// <param name="skipWatchedByAllUsers">When true, skip items watched by every user in <paramref name="watchedFilterUserIds"/>.</param>
+    /// <param name="watchedFilterUserIds">Source-server user IDs whose watched status determines the watched filter. Empty disables the filter.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="onItemProcessed">Optional callback invoked after each item is processed.</param>
     /// <returns>Number of items processed.</returns>
@@ -51,6 +54,9 @@ public class SyncTableService
         ApprovalMode deleteMissingMode,
         bool detectUpdatedFiles,
         ChangeDetectionPolicy changeDetectionPolicy,
+        long sizeMatchToleranceBytes,
+        bool skipWatchedByAllUsers,
+        IReadOnlyCollection<string> watchedFilterUserIds,
         CancellationToken cancellationToken,
         Action? onItemProcessed = null)
     {
@@ -98,13 +104,23 @@ public class SyncTableService
 
         var sourceLibraryGuid = Guid.Parse(mapping.SourceLibraryId);
 
+        var watchedByAllSet = await BuildWatchedByAllSetAsync(
+            client, sourceLibraryGuid, skipWatchedByAllUsers, watchedFilterUserIds, cancellationToken).ConfigureAwait(false);
+
         processedItems = await PaginatedFetchUtility.FetchAllPagesAsync(
             fetchPage: (startIndex, batchSize, ct) => client.GetLibraryItemsAsync(sourceLibraryGuid, startIndex, batchSize, ct),
             processItem: (item, _) =>
             {
                 var sourceItemId = item.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
                 seenSourceItemIds.Add(sourceItemId);
-                ProcessItem(database, mapping, item, existingItems, downloadNewMode, replaceExistingMode, detectUpdatedFiles, changeDetectionPolicy);
+
+                if (watchedByAllSet != null && watchedByAllSet.Contains(item.Id.Value))
+                {
+                    MarkWatchedFiltered(database, mapping, item, existingItems);
+                    return Task.FromResult(true);
+                }
+
+                ProcessItem(database, mapping, item, existingItems, downloadNewMode, replaceExistingMode, detectUpdatedFiles, changeDetectionPolicy, sizeMatchToleranceBytes);
                 return Task.FromResult(true);
             },
             libraryName: mapping.SourceLibraryName,
@@ -217,7 +233,8 @@ public class SyncTableService
         ApprovalMode downloadNewMode,
         ApprovalMode replaceExistingMode,
         bool detectUpdatedFiles,
-        ChangeDetectionPolicy changeDetectionPolicy)
+        ChangeDetectionPolicy changeDetectionPolicy,
+        long sizeMatchToleranceBytes)
     {
         var sourceItemId = item.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
         var sourceSize = MediaItemUtilities.GetItemSize(item);
@@ -240,6 +257,7 @@ public class SyncTableService
                 replaceExistingMode,
                 detectUpdatedFiles,
                 changeDetectionPolicy,
+                sizeMatchToleranceBytes,
                 _logger);
         }
         else
@@ -253,7 +271,113 @@ public class SyncTableService
                 sourceCreateDate,
                 sourceETag,
                 localPath,
-                downloadNewMode);
+                downloadNewMode,
+                sizeMatchToleranceBytes);
         }
+    }
+
+    /// <summary>
+    /// Builds the set of item IDs that every selected user has played in the given library.
+    /// Returns null when the filter is disabled or no users are selected. An empty set means
+    /// the filter is active but at least one user has no played items in the library.
+    /// </summary>
+    private async Task<HashSet<Guid>?> BuildWatchedByAllSetAsync(
+        SourceServerClient client,
+        Guid libraryId,
+        bool skipWatchedByAllUsers,
+        IReadOnlyCollection<string> watchedFilterUserIds,
+        CancellationToken cancellationToken)
+    {
+        if (!skipWatchedByAllUsers || watchedFilterUserIds == null || watchedFilterUserIds.Count == 0)
+        {
+            return null;
+        }
+
+        HashSet<Guid>? intersection = null;
+
+        foreach (var userIdStr in watchedFilterUserIds)
+        {
+            if (!Guid.TryParse(userIdStr, out var userId))
+            {
+                _logger.LogWarning("Skipping watched-filter user with invalid ID: {UserId}", userIdStr);
+                continue;
+            }
+
+            var played = await client.GetUserPlayedItemIdsAsync(userId, libraryId, cancellationToken).ConfigureAwait(false);
+
+            if (intersection == null)
+            {
+                intersection = played;
+            }
+            else
+            {
+                intersection.IntersectWith(played);
+            }
+
+            if (intersection.Count == 0)
+            {
+                break;
+            }
+        }
+
+        return intersection ?? new HashSet<Guid>();
+    }
+
+    /// <summary>
+    /// Marks an item as Ignored because every selected user has played it.
+    /// Persists a new tracking row for items not yet in the database so the user can see
+    /// what was skipped, and updates pre-existing rows that aren't already Ignored or Synced.
+    /// </summary>
+    private void MarkWatchedFiltered(
+        SyncDatabase database,
+        LibraryMapping mapping,
+        BaseItemDto item,
+        Dictionary<string, SyncItem> existingItems)
+    {
+        var sourceItemId = item.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
+        var sourceSize = MediaItemUtilities.GetItemSize(item);
+        var sourceCreateDate = item.DateCreated?.DateTime ?? DateTime.UtcNow;
+        var sourceETag = item.Etag;
+        var localPath = PathUtilities.TranslatePath(item.Path!, mapping.SourceRootPath, mapping.LocalRootPath);
+
+        var existing = existingItems.GetValueOrDefault(sourceItemId);
+        if (existing != null)
+        {
+            // Leave Synced and already-Ignored items alone.
+            if (existing.Status == SyncStatus.Ignored || existing.Status == SyncStatus.Synced)
+            {
+                return;
+            }
+
+            existing.Status = SyncStatus.Ignored;
+            existing.PendingType = null;
+            existing.StatusDate = DateTime.UtcNow;
+            existing.SourcePath = item.Path!;
+            existing.SourceSize = sourceSize;
+            existing.SourceCreateDate = sourceCreateDate;
+            existing.SourceETag = sourceETag;
+            existing.LocalPath = localPath;
+            database.Upsert(existing);
+            _logger.LogInformation("Marked {FileName} as ignored (watched by all selected users)", System.IO.Path.GetFileName(item.Path));
+            return;
+        }
+
+        var syncItem = new SyncItem
+        {
+            SourceLibraryId = mapping.SourceLibraryId,
+            LocalLibraryId = mapping.LocalLibraryId,
+            SourceItemId = sourceItemId,
+            SourcePath = item.Path!,
+            SourceSize = sourceSize,
+            SourceCreateDate = sourceCreateDate,
+            SourceETag = sourceETag,
+            LocalPath = localPath,
+            StatusDate = DateTime.UtcNow,
+            Status = SyncStatus.Ignored
+        };
+
+        database.Upsert(syncItem);
+        existingItems[sourceItemId] = syncItem;
+        _logger.LogInformation("Tracked {FileName} as ignored (watched by all selected users)", System.IO.Path.GetFileName(item.Path));
     }
 }

@@ -349,7 +349,7 @@ public class DownloadMissingContentTask : IScheduledTask
             return new DownloadResult(false, validationError);
         }
 
-        if (DownloadService.ShouldSkipDownload(item, out var skipReason))
+        if (DownloadService.ShouldSkipDownload(item, config.SizeMatchToleranceBytes, out var skipReason))
         {
             database.UpdateStatus(item.SourceItemId, SyncStatus.Synced,
                 localPath: item.LocalPath, sourceETag: item.SourceETag, sourceSize: item.SourceSize);

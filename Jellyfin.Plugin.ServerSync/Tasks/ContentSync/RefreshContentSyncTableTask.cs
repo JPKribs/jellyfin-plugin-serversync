@@ -137,6 +137,9 @@ public class UpdateSyncTablesTask : IScheduledTask
                 config.DeleteMissingContentMode,
                 config.DetectUpdatedFiles,
                 config.ChangeDetectionPolicy,
+                config.SizeMatchToleranceBytes,
+                config.SkipWatchedByAllUsers,
+                config.WatchedFilterUserIds,
                 cancellationToken,
                 onItemProcessed: () =>
                 {

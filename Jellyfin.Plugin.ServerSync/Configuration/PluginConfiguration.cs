@@ -233,6 +233,30 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public int MaxRetryCount { get; set; } = 3;
 
+    /// <summary>
+    /// When enabled, items watched by every user in <see cref="WatchedFilterUserIds"/>
+    /// are skipped during content sync (not queued for download). If at least one selected
+    /// user has not watched the item, it is still eligible to sync.
+    /// Has no effect when <see cref="WatchedFilterUserIds"/> is empty.
+    /// </summary>
+    public bool SkipWatchedByAllUsers { get; set; }
+
+    /// <summary>
+    /// Source-server user IDs whose watched status determines whether an item is skipped
+    /// when <see cref="SkipWatchedByAllUsers"/> is enabled.
+    /// </summary>
+    public List<string> WatchedFilterUserIds { get; set; } = new();
+
+    /// <summary>
+    /// Tolerance in bytes for treating a local file as matching the source's recorded size.
+    /// 0 (default) means strict equality. Non-zero values allow minor drift between Jellyfin's
+    /// MediaSources.Size and the actual on-disk file size (e.g., after tag rewrites or remux)
+    /// without re-queueing the file for download.
+    /// Post-download integrity is always validated against the HTTP Content-Length, so this
+    /// setting only affects skip decisions on existing local files.
+    /// </summary>
+    public long SizeMatchToleranceBytes { get; set; }
+
     // ===== History Sync Configuration =====
 
     /// <summary>
@@ -433,6 +457,11 @@ public class PluginConfiguration : BasePluginConfiguration
             errors.Add("Minimum free disk space must be between 0 and 1000 GB");
         }
 
+        if (SizeMatchToleranceBytes < 0)
+        {
+            errors.Add("Size match tolerance cannot be negative");
+        }
+
         // Validate bandwidth scheduling
         if (EnableBandwidthScheduling)
         {
@@ -619,6 +648,7 @@ public class PluginConfiguration : BasePluginConfiguration
         ScheduledDownloadSpeed = Math.Max(0, ScheduledDownloadSpeed);
         RecyclingBinRetentionDays = Math.Clamp(RecyclingBinRetentionDays, 1, 365);
         MaxRetryCount = Math.Clamp(MaxRetryCount, 1, 10);
+        SizeMatchToleranceBytes = Math.Max(0, SizeMatchToleranceBytes);
 
         // Normalize URLs
         if (!string.IsNullOrWhiteSpace(SourceServerUrl))
