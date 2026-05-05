@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.42",
+        "changelog": "## Fixes\r\n- Check content size instead of trusting metadata\r\n- Update versioning and tracking\r\n\r\n## Features\r\n- Filter out watched content from whitelisted syncing\r\n- Treat watched content as  so it's visible in the listing but not synced",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.42/jellyfin-plugin-serversync-10.11.42.zip",
+        "checksum": "8c9d3f656b92018d1388708c45f5427f",
+        "timestamp": "2026-05-05T03:09:17Z"
+      },
+      {
         "version": "10.11.41",
         "changelog": "## Fixes\r\n- Paginated bulk fetch of persons via /Items?IncludeItemTypes=Person for larger servers",
         "targetAbi": "10.11.0.0",
