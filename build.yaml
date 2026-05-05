@@ -26,4 +26,7 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   fixes:
-  -  Paginated bulk fetch of persons via /Items?IncludeItemTypes=Person for larger servers
+  - Check content size instead of trusting metadata
+  features:
+  - Filter out watched content from whitelisted syncing
+  - Treat watched content as `ignored` so it's visible in the listing but not synced
