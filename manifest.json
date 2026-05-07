@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.43",
+        "changelog": "## Important\r\n- You will need to reset your plugin database in troubleshooting as the schema has shifted dramatically and many previous values need to be re-pulled for accuracy!\r\n\r\n## Technical\r\n- Long overdue rewrite to better share processes\r\n- Standardize the Refresh > Compare > Sync pipeline between data types\r\n- Settings cleanup for unused settings\r\n- Web cleanup for settings that were removed as they are not needed\r\n\r\n## Fixes\r\n- Change the people endpoint to get the full person details instead of relying on BaseItemDTO\r\n- Treat all dates in UTC instead of dealing with TZ comparisons\r\n- Handle process percentages more accurately by stages instead of by guessing\r\n- Handle race conditions for downloads/recycling where an item could be deleted too soon\r\n- Reset the retry count when moving to the next item instead of setting overall retries\r\n- Fix stale modals on syncs\r\n\r\n## Features\r\n- Compare values by hashes instead of raw JSON",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.43/jellyfin-plugin-serversync-10.11.43.zip",
+        "checksum": "0ac92f667b1a690528e0451f0d43a1c8",
+        "timestamp": "2026-05-07T07:10:41Z"
+      },
+      {
         "version": "10.11.42",
         "changelog": "## Fixes\r\n- Check content size instead of trusting metadata\r\n- Update versioning and tracking\r\n\r\n## Features\r\n- Filter out watched content from whitelisted syncing\r\n- Treat watched content as  so it's visible in the listing but not synced",
         "targetAbi": "10.11.0.0",
