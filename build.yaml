@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.47"
+version: "10.11.48"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -26,6 +26,4 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   fixes:
-  - PremiereDate (and other date-only fields) no longer trigger perpetual verify failures from timezone artifacts — JSON comparator now treats whole-hour UTC values that resolve to the same calendar date as equal (handles the "source serializes midnight-local-TZ as T06:00:00+00:00, local has T00:00:00Z" case)
-  - Source-empty image manifests are no longer treated as a diff — was triggering a no-op apply (nothing to download) followed by a guaranteed verify failure for every person whose source had no images but local did
-  - Profile image type filtered from the metadata sync source manifest — Jellyfin silently rejects Profile writes on non-Person items (Movies, Series, Episodes), which was causing perpetual verify failures on items whose source DTO included a stray Profile tag
+  - Expanding logging has unlocked a whole host of image download issues that I am now working through

@@ -894,7 +894,15 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         var imagesComparator = record.Images.Comparator as Models.Common.Comparators.ImageManifestComparator;
         if (imagesComparator != null)
         {
-            var diff = imagesComparator.DescribeDifference(record.Images.Source, record.Images.Local);
+            // Strip Profile entries from the source side before comparing.
+            // Metadata sync only writes to non-Person items, where Jellyfin
+            // silently rejects Profile saves; if a record was built before
+            // PopulateSourceImagesFromTags learned to filter Profile (or
+            // ever drifts back), we'd be stuck reporting an unsyncable diff
+            // forever. Strip here so the verify reflects what's actually
+            // syncable instead of what's on the wire from source.
+            var sanitizedSource = StripUnsyncableImageTypes(record.Images.Source);
+            var diff = imagesComparator.DescribeDifference(sanitizedSource, record.Images.Local);
             if (diff == null)
             {
                 return (true, null);
@@ -1004,6 +1012,35 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// content otherwise. If the key is absent, returns false and does not
     /// invoke the assigner.
     /// </summary>
+    /// <summary>
+    /// Removes image types that the metadata sync apply path can't actually
+    /// write to a non-Person item. Currently filters out <c>Profile</c>:
+    /// Jellyfin's repository silently drops Profile writes on Movie/Series/
+    /// Episode/etc, so a Profile entry in the source manifest can never
+    /// stick on local. Stripping it here keeps already-cached records (built
+    /// before the source-side filter landed) from getting pinned in Errored
+    /// over a divergence that's unsyncable by design.
+    /// </summary>
+    private static string? StripUnsyncableImageTypes(string? sourceManifest)
+    {
+        if (string.IsNullOrEmpty(sourceManifest)) return sourceManifest;
+        try
+        {
+            var map = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(sourceManifest);
+            if (map == null || map.Count == 0) return sourceManifest;
+            var removed = map.Keys
+                .Where(k => string.Equals(k, "Profile", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (removed.Count == 0) return sourceManifest;
+            foreach (var key in removed) map.Remove(key);
+            return JsonSerializer.Serialize(map);
+        }
+        catch (JsonException)
+        {
+            return sourceManifest;
+        }
+    }
+
     private static bool ArraysEqualOrdinal(string[]? a, string[]? b)
     {
         var aArr = a ?? Array.Empty<string>();

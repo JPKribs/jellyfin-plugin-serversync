@@ -130,7 +130,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                 anyApplyAttempted = true;
                 try
                 {
-                    imagesChanged = await ApplyPersonImagesAsync(localPerson, sourceGuid, Client, cancellationToken).ConfigureAwait(false);
+                    imagesChanged = await ApplyPersonImagesAsync(localPerson, sourceGuid, record, Client, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -383,33 +383,136 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
     private async Task<bool> ApplyPersonImagesAsync(
         BaseItem localPerson,
         Guid sourcePersonId,
+        PeopleSyncItem record,
         SourceServerClient imageClient,
         CancellationToken cancellationToken)
     {
+        // Build the list of (type, index) tuples to download. Prefer the
+        // info call (it gives us per-image dimensions for richer logging),
+        // but fall back to the source manifest we already cached during
+        // refresh when the info call comes back empty. On Jellyfin source
+        // servers we sometimes see /Items/{personId}/Images return zero
+        // entries even though /Persons reported ImageTags for that person —
+        // appears to be an indexing inconsistency on the source side.
+        // Without this fallback, the apply was a no-op for ~15 records per
+        // run, leaving them pinned in Errored forever despite source clearly
+        // having an image.
+        var work = new List<(string ImageType, int? ImageIndex)>();
         var sourceImages = await imageClient.GetItemImageInfoAsync(sourcePersonId, cancellationToken).ConfigureAwait(false);
-        if (sourceImages == null || sourceImages.Count == 0)
+        var fellBack = false;
+        if (sourceImages != null && sourceImages.Count > 0)
+        {
+            foreach (var info in sourceImages)
+            {
+                var t = info.ImageType?.ToString();
+                if (!string.IsNullOrEmpty(t))
+                {
+                    work.Add((t, info.ImageIndex));
+                }
+            }
+        }
+
+        if (work.Count == 0)
+        {
+            // Fall back to the cached ImageTags-derived manifest. Type and
+            // index are all the download endpoint needs.
+            if (!string.IsNullOrEmpty(record.Images.Source))
+            {
+                try
+                {
+                    var manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(record.Images.Source);
+                    if (manifest != null)
+                    {
+                        foreach (var (type, list) in manifest)
+                        {
+                            if (string.IsNullOrEmpty(type) || list == null) continue;
+                            foreach (var entry in list)
+                            {
+                                work.Add((type, entry.ImageIndex));
+                            }
+                        }
+
+                        if (work.Count > 0)
+                        {
+                            fellBack = true;
+                            Logger.LogInformation(
+                                "Image apply for {PersonName}: /Items/{Id}/Images returned no entries; falling back to cached ImageTags manifest with {Count} type(s)",
+                                record.PersonName, sourcePersonId, work.Count);
+                        }
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    Logger.LogWarning(ex, "Could not parse cached image manifest for {PersonName}; falling back to no-op", record.PersonName);
+                }
+            }
+        }
+
+        if (work.Count == 0)
         {
             return false;
         }
 
-        var appliedAny = false;
-
-        foreach (var imageInfo in sourceImages)
+        // Clear local images for any type we're about to write, so a source
+        // count of 1 doesn't leave behind extra local images and produce a
+        // "source has 1, local has 2" verify failure (e.g. when local picked
+        // up a second Primary from a prior provider scrape). RemoveImage
+        // mutates the in-memory ImageInfos list; call UpdateToRepositoryAsync
+        // afterward so the repo reflects the cleared state before SaveImage
+        // runs (without this, SaveImage's own DB write doesn't see our
+        // removals and the old rows survive).
+        var typesBeingWritten = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (t, _) in work) typesBeingWritten.Add(t);
+        var anyRemoved = false;
+        foreach (var typeName in typesBeingWritten)
         {
-            var imageType = imageInfo.ImageType?.ToString();
-            if (string.IsNullOrEmpty(imageType))
+            if (Enum.TryParse<ImageType>(typeName, true, out var parsed))
             {
-                continue;
+                var existing = localPerson.GetImages(parsed).ToList();
+                foreach (var img in existing)
+                {
+                    try
+                    {
+                        localPerson.RemoveImage(img);
+                        anyRemoved = true;
+                    }
+                    catch (InvalidOperationException ex) { Logger.LogDebug(ex, "Could not remove existing {Type} for {PersonName}", typeName, record.PersonName); }
+                    catch (IOException ex) { Logger.LogDebug(ex, "Could not remove existing {Type} file for {PersonName}", typeName, record.PersonName); }
+                }
             }
+        }
 
+        if (anyRemoved)
+        {
+            try
+            {
+                await localPerson.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Persisting pre-clear of images for {PersonName} threw; SaveImage may still see stale rows", record.PersonName);
+            }
+        }
+
+        var appliedAny = false;
+        var downloadFailures = 0;
+        var saveFailures = 0;
+
+        foreach (var (imageType, imageIndex) in work)
+        {
             var (stream, contentType) = await imageClient.DownloadItemImageAsync(
                 sourcePersonId,
                 imageType,
-                imageInfo.ImageIndex,
+                imageIndex,
                 cancellationToken).ConfigureAwait(false);
 
             if (stream == null)
             {
+                downloadFailures++;
+                Logger.LogWarning(
+                    "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned null (404/timeout/network — see prior LogDebug for details). Source manifest claims this image exists; source server may have stale ImageTags pointing at deleted image data.",
+                    record.PersonName, imageType, imageIndex, sourcePersonId);
                 continue;
             }
 
@@ -425,21 +528,41 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                 if (Enum.TryParse<ImageType>(imageType, true, out var parsedImageType))
                 {
                     using var fileStream = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    await _providerManager.SaveImage(
-                        localPerson,
-                        fileStream,
-                        contentType ?? "image/jpeg",
-                        parsedImageType,
-                        imageInfo.ImageIndex,
-                        cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await _providerManager.SaveImage(
+                            localPerson,
+                            fileStream,
+                            contentType ?? "image/jpeg",
+                            parsedImageType,
+                            imageIndex,
+                            cancellationToken).ConfigureAwait(false);
 
-                    appliedAny = true;
+                        appliedAny = true;
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        saveFailures++;
+                        Logger.LogWarning(ex, "Image apply for {PersonName}: SaveImage threw for {Type}/{Index}", record.PersonName, imageType, imageIndex);
+                    }
+                }
+                else
+                {
+                    Logger.LogWarning("Image apply for {PersonName}: unknown image type '{Type}' returned by source", record.PersonName, imageType);
                 }
             }
             finally
             {
                 try { File.Delete(tempPath); } catch (IOException) { }
             }
+        }
+
+        if (!appliedAny)
+        {
+            Logger.LogWarning(
+                "Image apply for {PersonName} produced no successful saves: {Total} attempted, {DownloadFails} download failures, {SaveFails} save failures, fellBack={FellBack}",
+                record.PersonName, work.Count, downloadFailures, saveFailures, fellBack);
         }
 
         return appliedAny;

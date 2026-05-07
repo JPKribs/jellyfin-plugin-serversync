@@ -1444,7 +1444,11 @@ public class SourceServerClient : IDisposable
         {
             response?.Dispose();
             request?.Dispose();
-            _logger.LogDebug(ex, "Failed to download image {ImageType}/{Index} for item {ItemId}", imageType, imageIndex, itemId);
+            // Bumped from LogDebug — failures here were invisible at the
+            // default Jellyfin log level and made "verify says local empty,
+            // source non-empty" failures impossible to root-cause without
+            // turning on plugin debug logs.
+            _logger.LogWarning(ex, "Failed to download image {ImageType}/{Index} for item {ItemId}", imageType, imageIndex, itemId);
             return (null, null);
         }
     }
