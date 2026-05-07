@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.49",
+        "changelog": "## Fixes\r\n- Expanding logging has unlocked a whole host of image download issues that I am now working through",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.49/jellyfin-plugin-serversync-10.11.49.zip",
+        "checksum": "b2467b1dfa51d050fad6ddd19dd5d0a1",
+        "timestamp": "2026-05-07T23:16:27Z"
+      },
+      {
         "version": "10.11.47",
         "changelog": "## Fixes\r\n- PremiereDate (and other date-only fields) no longer trigger perpetual verify failures from timezone artifacts — JSON comparator now treats whole-hour UTC values that resolve to the same calendar date as equal (handles the source serializes midnight-local-TZ as T06:00:00+00:00, local has T00:00:00Z case)\r\n- Source-empty image manifests are no longer treated as a diff — was triggering a no-op apply (nothing to download) followed by a guaranteed verify failure for every person whose source had no images but local did\r\n- Profile image type filtered from the metadata sync source manifest — Jellyfin silently rejects Profile writes on non-Person items (Movies, Series, Episodes), which was causing perpetual verify failures on items whose source DTO included a stray Profile tag",
         "targetAbi": "10.11.0.0",
