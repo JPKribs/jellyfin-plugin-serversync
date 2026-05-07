@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.44",
+        "changelog": "## Technical\r\n- File reorganization since things have gotten hectic\r\n- Ran this against an AI to ask for potential issues and cleanup so there are some cleanup steps inspired by AI\r\n- Reduce duplicate calls to catches / writes\r\n- Remove code that was found to be dead or uncalled\r\n- Break out some code into helpers instead of recreating it each time\r\n\r\n## Fixes\r\n- Better metadata batching to only required syncs\r\n- Better people batching to only required syncs\r\n- Better handling for failed image uploads (mostly for folders)\r\n\r\n## Features\r\n- More descriptive error messages and statuses",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.44/jellyfin-plugin-serversync-10.11.44.zip",
+        "checksum": "533737d24a859d828e87b8a22f002f94",
+        "timestamp": "2026-05-07T17:15:25Z"
+      },
+      {
         "version": "10.11.43",
         "changelog": "## Important\r\n- You will need to reset your plugin database in troubleshooting as the schema has shifted dramatically and many previous values need to be re-pulled for accuracy!\r\n\r\n## Technical\r\n- Long overdue rewrite to better share processes\r\n- Standardize the Refresh > Compare > Sync pipeline between data types\r\n- Settings cleanup for unused settings\r\n- Web cleanup for settings that were removed as they are not needed\r\n\r\n## Fixes\r\n- Change the people endpoint to get the full person details instead of relying on BaseItemDTO\r\n- Treat all dates in UTC instead of dealing with TZ comparisons\r\n- Handle process percentages more accurately by stages instead of by guessing\r\n- Handle race conditions for downloads/recycling where an item could be deleted too soon\r\n- Reset the retry count when moving to the next item instead of setting overall retries\r\n- Fix stale modals on syncs\r\n\r\n## Features\r\n- Compare values by hashes instead of raw JSON",
         "targetAbi": "10.11.0.0",
