@@ -66,6 +66,27 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
+    /// Looks up a scheduled task by its <see cref="IScheduledTask.Key"/>
+    /// and triggers it. Returns 200 OK with the supplied success message
+    /// or 404 with <paramref name="notFoundMessage"/> if the key isn't
+    /// registered. Centralizes the "trigger X task" pattern that every
+    /// per-module controller exposes.
+    /// </summary>
+    private ActionResult ExecuteScheduledTaskByKey(string taskKey, string successMessage, string notFoundMessage)
+    {
+        var task = _taskManager.ScheduledTasks
+            .FirstOrDefault(t => t.ScheduledTask.Key == taskKey);
+
+        if (task == null)
+        {
+            return NotFound(notFoundMessage);
+        }
+
+        _taskManager.Execute(task, new TaskOptions());
+        return Ok(new { Message = successMessage });
+    }
+
+    /// <summary>
     /// SanitizeForLog
     /// Sanitizes user input to prevent log injection attacks.
     /// </summary>
@@ -97,29 +118,29 @@ public partial class ConfigurationController : ControllerBase
     /// </summary>
     /// <param name="statusValues">Individual sync status values to aggregate.</param>
     /// <returns>The computed overall status string.</returns>
-    private static string ComputeOverallStatus(params BaseSyncStatus?[] statusValues)
+    private static string ComputeOverallStatus(params SyncStatus?[] statusValues)
     {
         var statuses = statusValues
             .Where(s => s.HasValue)
             .Select(s => s!.Value)
             .ToList();
 
-        if (statuses.Any(s => s == BaseSyncStatus.Errored))
+        if (statuses.Any(s => s == SyncStatus.Errored))
         {
             return "Errored";
         }
 
-        if (statuses.Any(s => s == BaseSyncStatus.Queued))
+        if (statuses.Any(s => s == SyncStatus.Queued))
         {
             return "Queued";
         }
 
-        if (statuses.Any(s => s == BaseSyncStatus.Pending))
+        if (statuses.Any(s => s == SyncStatus.Pending))
         {
             return "Pending";
         }
 
-        if (statuses.Count > 0 && statuses.All(s => s == BaseSyncStatus.Ignored))
+        if (statuses.Count > 0 && statuses.All(s => s == SyncStatus.Ignored))
         {
             return "Ignored";
         }
@@ -181,11 +202,12 @@ public partial class ConfigurationController : ControllerBase
     /// <returns>Action result with resolved count.</returns>
     [HttpPost("ResolveLocalItemIds")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResolveLocalItemIds()
+    public ActionResult ResolveLocalItemIds([FromServices] ContentSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         try
         {
-            var syncedItems = _databaseProvider.Database.GetByStatus(SyncStatus.Synced);
+            var syncedItems = manager.GetByStatus(SyncStatus.Synced);
             var resolvedCount = 0;
             var alreadyResolvedCount = 0;
 
@@ -210,7 +232,7 @@ public partial class ConfigurationController : ControllerBase
                     var localItem = _libraryManager.FindByPath(item.LocalPath, isFolder: false);
                     if (localItem != null)
                     {
-                        _databaseProvider.Database.UpdateStatus(
+                        manager.UpdateStatus(
                             item.SourceItemId,
                             item.Status,
                             localPath: item.LocalPath,
@@ -265,12 +287,13 @@ public partial class ConfigurationController : ControllerBase
     /// <returns>Action result with success status.</returns>
     [HttpPost("ResetContentSyncDatabase")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetContentSyncDatabase()
+    public ActionResult ResetContentSyncDatabase([FromServices] ContentSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         try
         {
-            _databaseProvider.Database.ResetContentSyncTable();
-            _logger.LogInformation("Content sync table has been reset");
+            var deleted = manager.ResetTable();
+            _logger.LogInformation("Content sync table has been reset, {Count} rows deleted", deleted);
             return Ok(new { Success = true, Message = "Content sync table reset successfully" });
         }
         catch (Exception ex)
@@ -287,12 +310,13 @@ public partial class ConfigurationController : ControllerBase
     /// <returns>Action result with success status.</returns>
     [HttpPost("ResetHistorySyncDatabase")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetHistorySyncDatabase()
+    public ActionResult ResetHistorySyncDatabase([FromServices] HistorySyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         try
         {
-            _databaseProvider.Database.ResetHistoryDatabase();
-            _logger.LogInformation("History sync database has been reset");
+            var deleted = manager.ResetTable();
+            _logger.LogInformation("History sync database has been reset, {Count} rows deleted", deleted);
             return Ok(new { Success = true, Message = "History database reset successfully" });
         }
         catch (Exception ex)

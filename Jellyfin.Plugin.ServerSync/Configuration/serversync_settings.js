@@ -881,8 +881,7 @@ export default function (view) {
     function loadContentSettings(config) {
         setChecked('chkEnableContentSync', config.EnableContentSync || false);
         setChecked('chkDetectUpdatedFiles', config.DetectUpdatedFiles !== false);
-        setValue('selChangeDetectionPolicy', config.ChangeDetectionPolicy || 'SizeOnly');
-        setChecked('chkIncludeExtras', config.IncludeCompanionFiles || false);
+        setChecked('chkIncludeCompanionFiles', config.IncludeCompanionFiles || false);
         setChecked('chkSkipWatchedByAllUsers', config.SkipWatchedByAllUsers || false);
         renderWatchedFilterUsers(config.WatchedFilterUserIds || []);
         setValue('selDownloadNewContentMode', config.DownloadNewContentMode || 'Enabled');
@@ -912,8 +911,7 @@ export default function (view) {
         var config = currentConfig || {};
         config.EnableContentSync = getChecked('chkEnableContentSync');
         config.DetectUpdatedFiles = getChecked('chkDetectUpdatedFiles');
-        config.ChangeDetectionPolicy = getValue('selChangeDetectionPolicy', 'SizeOnly');
-        config.IncludeCompanionFiles = getChecked('chkIncludeExtras');
+        config.IncludeCompanionFiles = getChecked('chkIncludeCompanionFiles');
         config.SkipWatchedByAllUsers = getChecked('chkSkipWatchedByAllUsers');
         config.WatchedFilterUserIds = collectWatchedFilterUsers();
         config.DownloadNewContentMode = getValue('selDownloadNewContentMode', 'Enabled');
@@ -947,21 +945,21 @@ export default function (view) {
 
     function loadHistorySettings(config) {
         setChecked('chkEnableHistorySync', config.EnableHistorySync || false);
-        setChecked('chkHistorySyncPlayedStatus', config.SyncPlayedStatus !== false);
-        setChecked('chkHistorySyncPlaybackPosition', config.SyncPlaybackPosition !== false);
-        setChecked('chkHistorySyncPlayCount', config.SyncPlayCount !== false);
-        setChecked('chkHistorySyncLastPlayedDate', config.SyncLastPlayedDate !== false);
-        setChecked('chkHistorySyncFavorites', config.SyncFavorites !== false);
+        setChecked('chkHistorySyncPlayedStatus', config.HistorySyncPlayedStatus !== false);
+        setChecked('chkHistorySyncPlaybackPosition', config.HistorySyncPlaybackPosition !== false);
+        setChecked('chkHistorySyncPlayCount', config.HistorySyncPlayCount !== false);
+        setChecked('chkHistorySyncLastPlayedDate', config.HistorySyncLastPlayedDate !== false);
+        setChecked('chkHistorySyncFavorites', config.HistorySyncFavorites !== false);
     }
 
     function saveHistorySettings() {
         var config = currentConfig || {};
         config.EnableHistorySync = getChecked('chkEnableHistorySync');
-        config.SyncPlayedStatus = getChecked('chkHistorySyncPlayedStatus');
-        config.SyncPlaybackPosition = getChecked('chkHistorySyncPlaybackPosition');
-        config.SyncPlayCount = getChecked('chkHistorySyncPlayCount');
-        config.SyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
-        config.SyncFavorites = getChecked('chkHistorySyncFavorites');
+        config.HistorySyncPlayedStatus = getChecked('chkHistorySyncPlayedStatus');
+        config.HistorySyncPlaybackPosition = getChecked('chkHistorySyncPlaybackPosition');
+        config.HistorySyncPlayCount = getChecked('chkHistorySyncPlayCount');
+        config.HistorySyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
+        config.HistorySyncFavorites = getChecked('chkHistorySyncFavorites');
 
         ServerSyncShared.saveConfig(config).then(function() {
             Dashboard.alert('History settings saved');
@@ -981,7 +979,6 @@ export default function (view) {
         setChecked('chkMetadataSyncPeople', config.MetadataSyncPeople === true);
         setChecked('chkMetadataSyncImages', config.MetadataSyncImages !== false);
         setChecked('chkMetadataSyncFolderItems', config.MetadataSyncFolderItems === true);
-        setValue('selMetadataRefreshMode', config.MetadataRefreshMode || 'FullRefresh');
     }
 
     function saveMetadataSettings() {
@@ -994,7 +991,6 @@ export default function (view) {
         config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
         config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
         config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
-        config.MetadataRefreshMode = getValue('selMetadataRefreshMode', 'FullRefresh');
 
         ServerSyncShared.saveConfig(config).then(function() {
             Dashboard.alert('Metadata settings saved');
@@ -1026,17 +1022,17 @@ export default function (view) {
 
     function loadUserSyncSettings(config) {
         setChecked('chkEnableUserSync', config.EnableUserSync || false);
-        setChecked('chkUserSyncPolicy', config.SyncUserPolicy !== false);
-        setChecked('chkUserSyncConfiguration', config.SyncUserConfiguration !== false);
-        setChecked('chkUserSyncProfileImage', config.SyncUserProfileImage !== false);
+        setChecked('chkUserSyncPolicy', config.UserSyncPolicy !== false);
+        setChecked('chkUserSyncConfiguration', config.UserSyncConfiguration !== false);
+        setChecked('chkUserSyncProfileImage', config.UserSyncProfileImage !== false);
     }
 
     function saveUserSyncSettings() {
         var config = currentConfig || {};
         config.EnableUserSync = getChecked('chkEnableUserSync');
-        config.SyncUserPolicy = getChecked('chkUserSyncPolicy');
-        config.SyncUserConfiguration = getChecked('chkUserSyncConfiguration');
-        config.SyncUserProfileImage = getChecked('chkUserSyncProfileImage');
+        config.UserSyncPolicy = getChecked('chkUserSyncPolicy');
+        config.UserSyncConfiguration = getChecked('chkUserSyncConfiguration');
+        config.UserSyncProfileImage = getChecked('chkUserSyncProfileImage');
 
         ServerSyncShared.saveConfig(config).then(function() {
             Dashboard.alert('User sync settings saved');
@@ -1048,7 +1044,6 @@ export default function (view) {
     // --- Nested Visibility ---
 
     function updateNestedVisibility() {
-        setVisible('detectUpdatedFilesSettings', getChecked('chkDetectUpdatedFiles'));
         setVisible('watchedFilterUsersSettings', getChecked('chkSkipWatchedByAllUsers'));
         setVisible('recyclingBinSettings', getChecked('chkEnableRecyclingBin'));
         setVisible('bandwidthScheduleContainer', getChecked('chkEnableBandwidthScheduling'));
@@ -1079,11 +1074,9 @@ export default function (view) {
     }
 
     function initNestedVisibilityHandlers() {
-        var chkDetect = view.querySelector('#chkDetectUpdatedFiles');
         var chkWatched = view.querySelector('#chkSkipWatchedByAllUsers');
         var chkRecycle = view.querySelector('#chkEnableRecyclingBin');
         var chkBandwidth = view.querySelector('#chkEnableBandwidthScheduling');
-        if (chkDetect) chkDetect.addEventListener('change', updateNestedVisibility);
         if (chkWatched) chkWatched.addEventListener('change', updateNestedVisibility);
         if (chkRecycle) chkRecycle.addEventListener('change', updateNestedVisibility);
         if (chkBandwidth) chkBandwidth.addEventListener('change', updateNestedVisibility);

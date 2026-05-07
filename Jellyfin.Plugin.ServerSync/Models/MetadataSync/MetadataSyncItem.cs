@@ -1,26 +1,27 @@
-using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 using Jellyfin.Plugin.ServerSync.Utilities;
 
 namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 
 /// <summary>
-/// Represents a metadata sync record for an item.
-/// One record per item, containing all three categories (Metadata, Images, People).
-/// Matches items by file path using library mappings.
+/// One sync record per (source library, source item). Carries four parallel
+/// JSON-blob fields — <see cref="Metadata"/>, <see cref="Images"/>,
+/// <see cref="People"/>, <see cref="Studios"/> — each with its own
+/// Source/Local/Synced snapshots and content hashes for the change-detection
+/// short-circuit. Refresh populates the source side and recomputes hashes;
+/// Sync applies the source values to local and calls
+/// <see cref="SyncableValue{T}.MarkSynced"/> on each successfully-applied
+/// category.
 /// </summary>
-public class MetadataSyncItem
+public class MetadataSyncItem : SyncRecord
 {
-    /// <summary>
-    /// Gets or sets the unique database identifier.
-    /// </summary>
-    public long Id { get; set; }
-
     // ===== Item Identification =====
 
     /// <summary>
-    /// Gets or sets the source library ID.
+    /// Gets or sets the source library ID — first component of the natural key.
     /// </summary>
     public string SourceLibraryId { get; set; } = string.Empty;
 
@@ -30,263 +31,128 @@ public class MetadataSyncItem
     public string LocalLibraryId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the source server item ID.
+    /// Gets or sets the source server item ID — second component of the
+    /// natural key.
     /// </summary>
     public string SourceItemId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the local server item ID (if matched).
+    /// Gets or sets the local server item ID (resolved by path lookup).
     /// </summary>
     public string? LocalItemId { get; set; }
 
     /// <summary>
-    /// Gets or sets the item name for display.
+    /// Gets or sets the item display name.
     /// </summary>
     public string? ItemName { get; set; }
 
     /// <summary>
-    /// Gets or sets the source file path (for matching).
+    /// Gets or sets the source file path (used for path-based matching).
     /// </summary>
     public string? SourcePath { get; set; }
 
     /// <summary>
-    /// Gets or sets the local file path (translated from source).
+    /// Gets or sets the local file path (translated from source via library mapping).
     /// </summary>
     public string? LocalPath { get; set; }
 
     /// <summary>
-    /// Gets or sets the item type (e.g., "Movie", "Series", "Season").
+    /// Gets or sets the item type (Movie, Series, Season, Episode, etc.).
     /// </summary>
     public string? ItemType { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether this is a folder-type item.
+    /// Gets or sets a value indicating whether this is a folder-type item
+    /// (Series, Season, MusicAlbum, MusicArtist, BoxSet).
     /// </summary>
     public bool IsFolder { get; set; }
 
-    // ===== Metadata Category =====
+    // ===== Syncable JSON-blob categories =====
 
     /// <summary>
-    /// Gets or sets the source metadata value (JSON).
+    /// Gets the metadata blob (name, overview, ratings, dates, genres, tags,
+    /// provider IDs, etc.). JSON-equality comparison.
     /// </summary>
-    public string? SourceMetadataValue { get; set; }
+    public SyncableValue<string> Metadata { get; } = new() { Comparator = new JsonBlobComparator() };
 
     /// <summary>
-    /// Gets or sets the local metadata value (JSON).
+    /// Gets the image manifest. Per-type counts and file sizes; uses the
+    /// dedicated <see cref="ImageManifestComparator"/>.
     /// </summary>
-    public string? LocalMetadataValue { get; set; }
-
-    // ===== Images Category =====
+    public SyncableValue<string> Images { get; } = new() { Comparator = new ImageManifestComparator() };
 
     /// <summary>
-    /// Gets or sets the source images value (JSON with image tags).
+    /// Gets the people array (cast / crew, by Name+Role+Type). JSON-equality
+    /// comparison.
     /// </summary>
-    public string? SourceImagesValue { get; set; }
+    public SyncableValue<string> People { get; } = new() { Comparator = new JsonBlobComparator() };
 
     /// <summary>
-    /// Gets or sets the local images value (JSON).
+    /// Gets the studios array (just studio names). JSON-equality comparison.
     /// </summary>
-    public string? LocalImagesValue { get; set; }
+    public SyncableValue<string> Studios { get; } = new() { Comparator = new JsonBlobComparator() };
+
+    // ===== Per-category change detection =====
 
     /// <summary>
-    /// Gets or sets the source images hash (for change detection).
-    /// </summary>
-    public string? SourceImagesHash { get; set; }
-
-    /// <summary>
-    /// Gets or sets the last synced images hash.
-    /// </summary>
-    public string? SyncedImagesHash { get; set; }
-
-    // ===== People Category =====
-
-    /// <summary>
-    /// Gets or sets the source people value (JSON array of {Name, Role, Type}).
-    /// </summary>
-    public string? SourcePeopleValue { get; set; }
-
-    /// <summary>
-    /// Gets or sets the local people value (JSON array of {Name, Role, Type}).
-    /// </summary>
-    public string? LocalPeopleValue { get; set; }
-
-    // ===== Studios Category =====
-
-    /// <summary>
-    /// Gets or sets the source studios value (JSON array of studio names).
-    /// </summary>
-    public string? SourceStudiosValue { get; set; }
-
-    /// <summary>
-    /// Gets or sets the local studios value (JSON array of studio names).
-    /// </summary>
-    public string? LocalStudiosValue { get; set; }
-
-    // ===== Sync Tracking =====
-
-    /// <summary>
-    /// Gets or sets the sync status.
-    /// </summary>
-    public BaseSyncStatus Status { get; set; }
-
-    /// <summary>
-    /// Gets or sets when the status was last changed.
-    /// </summary>
-    public DateTime StatusDate { get; set; }
-
-    /// <summary>
-    /// Gets or sets when the item was last synced.
-    /// </summary>
-    public DateTime? LastSyncTime { get; set; }
-
-    /// <summary>
-    /// Gets or sets the error message if status is Errored.
-    /// </summary>
-    public string? ErrorMessage { get; set; }
-
-    /// <summary>
-    /// Gets or sets the ETag from the source server for change detection.
-    /// Used by SkipUnchanged refresh mode to avoid reprocessing items that haven't changed.
-    /// </summary>
-    public string? SourceETag { get; set; }
-
-    // ===== Computed Properties =====
-
-    /// <summary>
-    /// Gets a value indicating whether metadata has changes.
+    /// Gets a value indicating whether the metadata blob has changes worth
+    /// syncing. False until a local match exists, since metadata can't be
+    /// applied without a local item.
     /// </summary>
     public bool HasMetadataChanges
-    {
-        get
-        {
-            if (string.IsNullOrEmpty(LocalItemId) || string.IsNullOrEmpty(SourceMetadataValue))
-            {
-                return false;
-            }
-
-            return !JsonComparisonUtility.JsonEquals(SourceMetadataValue, LocalMetadataValue);
-        }
-    }
+        => !string.IsNullOrEmpty(LocalItemId) && !string.IsNullOrEmpty(Metadata.Source) && Metadata.HasChanges;
 
     /// <summary>
-    /// Gets a value indicating whether images have changes.
-    /// Compares source images against local images by type count and file size.
+    /// Gets a value indicating whether the image manifest has changes worth
+    /// syncing.
     /// </summary>
     public bool HasImagesChanges
-    {
-        get
-        {
-            if (string.IsNullOrEmpty(LocalItemId) || string.IsNullOrEmpty(SourceImagesValue))
-            {
-                return false;
-            }
-
-            // No local images but source has images — needs sync
-            if (string.IsNullOrEmpty(LocalImagesValue))
-            {
-                return true;
-            }
-
-            return !ImagesMatch(SourceImagesValue, LocalImagesValue);
-        }
-    }
+        => !string.IsNullOrEmpty(LocalItemId) && !string.IsNullOrEmpty(Images.Source) && Images.HasChanges;
 
     /// <summary>
-    /// Compares source and local image collections by type, count, and file size.
-    /// </summary>
-    private static bool ImagesMatch(string sourceJson, string localJson)
-    {
-        try
-        {
-            var source = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(sourceJson);
-            var local = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(localJson);
-
-            if (source == null || local == null)
-            {
-                return source == null && local == null;
-            }
-
-            // Check that local has every image type that source has
-            foreach (var kvp in source)
-            {
-                if (!local.TryGetValue(kvp.Key, out var localImages))
-                {
-                    return false; // Missing image type locally
-                }
-
-                if (kvp.Value.Count != localImages.Count)
-                {
-                    return false; // Different number of images for this type
-                }
-
-                // Compare by size — if local file size doesn't match source, needs re-sync
-                for (int i = 0; i < kvp.Value.Count; i++)
-                {
-                    if (kvp.Value[i].Size > 0 && localImages[i].Size > 0
-                        && kvp.Value[i].Size != localImages[i].Size)
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return true;
-        }
-        catch
-        {
-            // If we can't parse, assume changes exist
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Gets a value indicating whether people have changes.
-    /// Compares by Name, Role, and Type (not GUID).
+    /// Gets a value indicating whether the people array has changes worth
+    /// syncing.
     /// </summary>
     public bool HasPeopleChanges
-    {
-        get
-        {
-            if (string.IsNullOrEmpty(LocalItemId) || string.IsNullOrEmpty(SourcePeopleValue))
-            {
-                return false;
-            }
-
-            return !JsonComparisonUtility.JsonEquals(SourcePeopleValue, LocalPeopleValue);
-        }
-    }
+        => !string.IsNullOrEmpty(LocalItemId) && !string.IsNullOrEmpty(People.Source) && People.HasChanges;
 
     /// <summary>
-    /// Gets a value indicating whether studios have changes.
-    /// Compares by studio name only. Only flags changes if source has studios to sync.
+    /// Gets a value indicating whether the studios array has changes worth
+    /// syncing. An empty <c>"[]"</c> source is treated as "nothing to sync"
+    /// to avoid wiping out local studio assignments when the source has none.
     /// </summary>
     public bool HasStudiosChanges
     {
         get
         {
-            // No local item to sync to
             if (string.IsNullOrEmpty(LocalItemId))
             {
                 return false;
             }
 
-            // No source studios data, or source has empty array - nothing to sync
-            if (string.IsNullOrEmpty(SourceStudiosValue) || SourceStudiosValue == "[]")
+            if (string.IsNullOrEmpty(Studios.Source) || Studios.Source == "[]")
             {
                 return false;
             }
 
-            return !JsonComparisonUtility.JsonEquals(SourceStudiosValue, LocalStudiosValue);
+            return Studios.HasChanges;
         }
     }
 
-    /// <summary>
-    /// Gets a value indicating whether there are any changes to sync.
-    /// </summary>
-    public bool HasChanges => HasMetadataChanges || HasImagesChanges || HasPeopleChanges || HasStudiosChanges;
+    /// <inheritdoc />
+    public override bool HasChanges => HasMetadataChanges || HasImagesChanges || HasPeopleChanges || HasStudiosChanges;
+
+    /// <inheritdoc />
+    public override void MarkSynced()
+    {
+        Metadata.MarkSynced();
+        Images.MarkSynced();
+        People.MarkSynced();
+        Studios.MarkSynced();
+    }
 
     /// <summary>
-    /// Gets a display-friendly summary of the changes.
+    /// Gets a display-friendly summary of which categories have changes.
     /// </summary>
     public string ChangesSummary
     {
@@ -302,11 +168,11 @@ public class MetadataSyncItem
                 return "No changes";
             }
 
-            var changes = new System.Collections.Generic.List<string>();
+            var changes = new List<string>();
 
             if (HasMetadataChanges)
             {
-                var diffCount = JsonComparisonUtility.CountDifferences(SourceMetadataValue, LocalMetadataValue);
+                var diffCount = JsonComparisonUtility.CountDifferences(Metadata.Source, Metadata.Local);
                 changes.Add(diffCount == 1 ? "1 metadata field" : $"{diffCount} metadata fields");
             }
 
@@ -326,6 +192,29 @@ public class MetadataSyncItem
             }
 
             return string.Join(", ", changes);
+        }
+    }
+
+    /// <summary>
+    /// Tries to deserialize <see cref="Images"/>.<see cref="SyncableValue{T}.Source"/>
+    /// as an image manifest. Returns false if missing or malformed.
+    /// </summary>
+    public bool TryGetSourceImageManifest(out Dictionary<string, List<ImageInfoDto>>? manifest)
+    {
+        manifest = null;
+        if (string.IsNullOrEmpty(Images.Source))
+        {
+            return false;
+        }
+
+        try
+        {
+            manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(Images.Source);
+            return manifest != null;
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 }

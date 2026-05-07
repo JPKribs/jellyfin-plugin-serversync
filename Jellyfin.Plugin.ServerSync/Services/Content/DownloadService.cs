@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Microsoft.Extensions.Logging;
@@ -112,14 +113,84 @@ public class DownloadService
                 Directory.CreateDirectory(targetDir);
             }
 
-            // If file exists and recycling bin is enabled, move old file to bin before replacing
-            if (File.Exists(item.LocalPath) && config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
+            // Two-phase replacement so a rename failure does not leave the user
+            // with the previous version stuck in the recycling bin and no working
+            // file at the target path:
+            //   1. Move existing file (and its companions) to *.replacing.<guid>
+            //      sidecars on the same volume — atomic, so rolling back is fast.
+            //   2. Atomically rename the just-downloaded temp file into place.
+            //   3. Only after step 2 succeeds, archive sidecars to the recycling
+            //      bin (or delete them).
+            // If step 2 throws, the catch block restores the sidecars so the
+            // user's previous version stays intact at item.LocalPath.
+            string? backupMain = null;
+            var backupCompanions = new List<(string Original, string Backup)>();
+            var existingFile = File.Exists(item.LocalPath);
+
+            try
             {
-                RecyclingBinService.MoveWithCompanionsToRecyclingBin(item.LocalPath, config.RecyclingBinPath, _logger);
+                if (existingFile)
+                {
+                    backupMain = item.LocalPath + ".replacing." + Guid.NewGuid().ToString("N");
+                    File.Move(item.LocalPath, backupMain);
+
+                    foreach (var companionPath in FileOperationUtilities.GetCompanionFiles(item.LocalPath))
+                    {
+                        try
+                        {
+                            var companionBackup = companionPath + ".replacing." + Guid.NewGuid().ToString("N");
+                            File.Move(companionPath, companionBackup);
+                            backupCompanions.Add((companionPath, companionBackup));
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to move existing companion aside: {CompanionPath}", companionPath);
+                        }
+                    }
+                }
+
+                await FileOperationUtilities.MoveFileWithOverwriteAsync(tempFilePath, item.LocalPath, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Roll back so the user keeps their previous version.
+                try
+                {
+                    if (backupMain != null && File.Exists(backupMain) && !File.Exists(item.LocalPath))
+                    {
+                        File.Move(backupMain, item.LocalPath);
+                        backupMain = null;
+                    }
+                }
+                catch (Exception restoreEx)
+                {
+                    _logger.LogError(restoreEx, "Failed to restore previous file from sidecar to {Path}", item.LocalPath);
+                }
+
+                foreach (var (orig, bk) in backupCompanions)
+                {
+                    try
+                    {
+                        if (File.Exists(bk) && !File.Exists(orig))
+                        {
+                            File.Move(bk, orig);
+                        }
+                    }
+                    catch (Exception restoreEx)
+                    {
+                        _logger.LogError(restoreEx, "Failed to restore companion from sidecar to {Path}", orig);
+                    }
+                }
+
+                throw;
             }
 
-            // Use atomic move with overwrite
-            await FileOperationUtilities.MoveFileWithOverwriteAsync(tempFilePath, item.LocalPath, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
+            // Rename succeeded — archive or delete the sidecars.
+            ArchiveOrDeleteSidecar(backupMain, item.LocalPath, config);
+            foreach (var (orig, bk) in backupCompanions)
+            {
+                ArchiveOrDeleteSidecar(bk, orig, config);
+            }
 
             string? companionFilesList = null;
             if (includeCompanionFiles)
@@ -185,7 +256,7 @@ public class DownloadService
                 return downloadedFiles;
             }
 
-            _logger.LogInformation("Downloading {Count} companion files for item {ItemId}", companions.Count, itemId);
+            _logger.LogDebug("Downloading {Count} companion files for item {ItemId}", companions.Count, itemId);
 
             foreach (var companion in companions)
             {
@@ -237,7 +308,7 @@ public class DownloadService
 
                     await FileOperationUtilities.MoveFileWithOverwriteAsync(tempFilePath, targetPath, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
                     downloadedFiles.Add(companion.FileName);
-                    _logger.LogInformation("Downloaded companion file {FileName}", companion.FileName);
+                    _logger.LogDebug("Downloaded companion file {FileName}", companion.FileName);
                 }
                 catch (OperationCanceledException)
                 {
@@ -264,15 +335,16 @@ public class DownloadService
     /// </summary>
     /// <param name="item">Sync item to validate.</param>
     /// <param name="config">Plugin configuration.</param>
-    /// <param name="database">Sync database for collision checking.</param>
+    /// <param name="manager">Sync table manager for collision checking.</param>
     /// <returns>Validation result with error message if invalid.</returns>
     public static (bool IsValid, string? ErrorMessage) ValidateForDownload(
         SyncItem item,
         PluginConfiguration config,
-        SyncDatabase database)
+        ContentSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(item);
         // Validate path
-        var pathValidation = FileValidationService.ValidatePath(item.LocalPath, item.SourceItemId, config, database);
+        var pathValidation = FileValidationService.ValidatePath(item.LocalPath, item.SourceItemId, config, manager);
         if (!pathValidation.IsValid)
         {
             return (false, pathValidation.ErrorMessage);
@@ -320,6 +392,39 @@ public class DownloadService
             {
                 // Ignore cleanup errors - temp file will be cleaned up by OS
             }
+            catch (UnauthorizedAccessException)
+            {
+                // File is read-only or ACL denies; leave for OS cleanup.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Archives a sidecar (the file we kept aside while replacing) to the
+    /// recycling bin under the original file's name, or deletes it outright if
+    /// the recycling bin is disabled. Quiet on missing sidecars (caller may
+    /// have already cleaned up via rollback).
+    /// </summary>
+    private void ArchiveOrDeleteSidecar(string? sidecarPath, string originalDisplayPath, PluginConfiguration config)
+    {
+        if (string.IsNullOrEmpty(sidecarPath) || !File.Exists(sidecarPath))
+        {
+            return;
+        }
+
+        if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
+        {
+            RecyclingBinService.ArchiveBackupToRecyclingBin(sidecarPath, originalDisplayPath, config.RecyclingBinPath, _logger);
+            return;
+        }
+
+        try
+        {
+            File.Delete(sidecarPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete sidecar {Path}", sidecarPath);
         }
     }
 }

@@ -137,6 +137,37 @@ public static class JsonComparisonUtility
     }
 
     /// <summary>
+    /// Compares two nullable DateTime values as date-only (calendar date),
+    /// ignoring time-of-day and Kind/timezone differences. Use for date-only
+    /// semantic fields like birthdays, premiere dates, and end dates.
+    /// </summary>
+    /// <param name="a">First value.</param>
+    /// <param name="b">Second value.</param>
+    /// <returns>True if equal as calendar dates, false otherwise.</returns>
+    public static bool DateOnlyEquals(DateTime? a, DateTime? b)
+    {
+        if (!a.HasValue && !b.HasValue)
+        {
+            return true;
+        }
+
+        if (!a.HasValue || !b.HasValue)
+        {
+            return false;
+        }
+
+        return AsUtcSafe(a.Value).Date == AsUtcSafe(b.Value).Date;
+    }
+
+    // DateTime.ToUniversalTime() on a Kind=Unspecified value silently interprets it
+    // as local time and shifts. We treat Unspecified as already-UTC instead, which
+    // matches how Jellyfin commonly stores date-only fields.
+    private static DateTime AsUtcSafe(DateTime dt) =>
+        dt.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(dt, DateTimeKind.Utc)
+            : dt.ToUniversalTime();
+
+    /// <summary>
     /// Recursively compares two JsonElements for equality.
     /// Treats null, undefined, empty string, empty array, and empty object as equivalent.
     /// </summary>
@@ -241,12 +272,31 @@ public static class JsonComparisonUtility
                     return true;
                 }
 
-                // Try to parse as dates and compare (handles timezone format differences)
-                if (DateTime.TryParse(s1, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var dt1) &&
-                    DateTime.TryParse(s2, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var dt2))
+                // Try to parse as dates and compare. Uses DateTimeOffset to avoid the
+                // DateTimeKind.Unspecified pitfall: DateTime.ToUniversalTime() on an
+                // Unspecified value silently treats it as local time and shifts by the
+                // server's TZ offset, producing spurious diffs across servers in
+                // different timezones. AssumeUniversal makes offset-less strings UTC.
+                if (System.DateTimeOffset.TryParse(s1, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto1) &&
+                    System.DateTimeOffset.TryParse(s2, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto2))
                 {
-                    // Compare as UTC to handle timezone differences like +00:00 vs Z
-                    return dt1.ToUniversalTime() == dt2.ToUniversalTime();
+                    if (dto1.UtcDateTime == dto2.UtcDateTime)
+                    {
+                        return true;
+                    }
+
+                    // Date-only relaxation: when both sides are midnight in their own
+                    // offset, treat as the same value if the calendar date matches.
+                    // Catches the birthday/PremiereDate/EndDate case where the same
+                    // calendar date is serialized as different instants by servers in
+                    // different timezones (e.g. "1990-05-15T00:00:00+12:00" vs
+                    // "1990-05-15T00:00:00Z").
+                    if (dto1.TimeOfDay == System.TimeSpan.Zero
+                        && dto2.TimeOfDay == System.TimeSpan.Zero
+                        && dto1.Date == dto2.Date)
+                    {
+                        return true;
+                    }
                 }
 
                 return false;

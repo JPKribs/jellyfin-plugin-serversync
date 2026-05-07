@@ -4,6 +4,7 @@ using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
+using Jellyfin.Plugin.ServerSync.Services;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -31,25 +32,28 @@ public partial class ConfigurationController
     [HttpGet("HistoryItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PaginatedResult<HistorySyncItemDto>> GetHistoryItems(
+        [FromServices] HistorySyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
         [FromQuery] string? sourceUserId = null,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
+        ArgumentNullException.ThrowIfNull(manager);
+
         // Clamp pagination values
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
 
         // Parse status filter
-        BaseSyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<BaseSyncStatus>(status, out var parsedStatus))
+        SyncStatus? statusFilter = null;
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
         {
             statusFilter = parsedStatus;
         }
 
         // Get paginated results
-        var (items, totalCount) = _databaseProvider.Database.SearchHistoryItemsPaginated(search, statusFilter, sourceUserId, skip, take);
+        var (items, totalCount) = manager.SearchHistoryItemsPaginated(search, statusFilter, sourceUserId, skip, take);
         var config = _configManager.Configuration;
 
         return Ok(new PaginatedResult<HistorySyncItemDto>
@@ -68,17 +72,18 @@ public partial class ConfigurationController
     /// <returns>History sync status response with counts.</returns>
     [HttpGet("HistoryStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<BaseSyncStatusResponse> GetHistoryStatus()
+    public ActionResult<BaseSyncStatusResponse> GetHistoryStatus([FromServices] HistorySyncTableManager manager)
     {
-        var counts = _databaseProvider.Database.GetHistoryStatusCounts();
+        ArgumentNullException.ThrowIfNull(manager);
+        var counts = manager.GetStatusCounts();
 
         return Ok(new BaseSyncStatusResponse
         {
-            Pending = counts.GetValueOrDefault(BaseSyncStatus.Pending, 0),
-            Queued = counts.GetValueOrDefault(BaseSyncStatus.Queued, 0),
-            Synced = counts.GetValueOrDefault(BaseSyncStatus.Synced, 0),
-            Errored = counts.GetValueOrDefault(BaseSyncStatus.Errored, 0),
-            Ignored = counts.GetValueOrDefault(BaseSyncStatus.Ignored, 0)
+            Pending = counts.GetValueOrDefault(SyncStatus.Pending, 0),
+            Queued = counts.GetValueOrDefault(SyncStatus.Queued, 0),
+            Synced = counts.GetValueOrDefault(SyncStatus.Synced, 0),
+            Errored = counts.GetValueOrDefault(SyncStatus.Errored, 0),
+            Ignored = counts.GetValueOrDefault(SyncStatus.Ignored, 0)
         });
     }
 
@@ -90,9 +95,13 @@ public partial class ConfigurationController
     /// <returns>Action result with success status.</returns>
     [HttpPost("HistoryItems/UpdateStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult UpdateHistoryItemStatus([FromBody] UpdateHistoryItemStatusRequest request)
+    public ActionResult UpdateHistoryItemStatus(
+        [FromServices] HistorySyncTableManager manager,
+        [FromBody] UpdateHistoryItemStatusRequest request)
     {
-        if (!Enum.TryParse<BaseSyncStatus>(request.Status, out var status))
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Enum.TryParse<SyncStatus>(request.Status, out var status))
         {
             return BadRequest("Invalid status value");
         }
@@ -100,11 +109,11 @@ public partial class ConfigurationController
         // Prefer database ID if provided
         if (request.Id.HasValue)
         {
-            _databaseProvider.Database.UpdateHistoryItemStatusById(request.Id.Value, status);
+            manager.UpdateStatus(request.Id.Value, status);
         }
         else if (!string.IsNullOrEmpty(request.SourceUserId) && !string.IsNullOrEmpty(request.SourceItemId))
         {
-            _databaseProvider.Database.UpdateHistoryItemStatus(request.SourceUserId, request.SourceItemId, status);
+            manager.UpdateStatusByKey((request.SourceUserId, request.SourceItemId), status);
         }
         else
         {
@@ -123,8 +132,11 @@ public partial class ConfigurationController
     [HttpPost("HistoryItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult QueueHistoryItems([FromBody] BulkHistoryItemsRequest request)
+    public ActionResult QueueHistoryItems(
+        [FromServices] HistorySyncTableManager manager,
+        [FromBody] BulkHistoryItemsRequest request)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         // Support both Ids (preferred) and Items (legacy)
         if ((request?.Ids == null || request.Ids.Count == 0) &&
             (request?.Items == null || request.Items.Count == 0))
@@ -139,7 +151,7 @@ public partial class ConfigurationController
         {
             try
             {
-                successCount = _databaseProvider.Database.BatchUpdateHistoryItemStatusByIds(request.Ids, BaseSyncStatus.Queued);
+                successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Queued);
             }
             catch (Exception ex)
             {
@@ -153,7 +165,7 @@ public partial class ConfigurationController
             {
                 try
                 {
-                    _databaseProvider.Database.UpdateHistoryItemStatus(item.SourceUserId, item.SourceItemId, BaseSyncStatus.Queued);
+                    manager.UpdateStatusByKey((item.SourceUserId, item.SourceItemId), SyncStatus.Queued);
                     successCount++;
                 }
                 catch (Exception ex)
@@ -178,8 +190,11 @@ public partial class ConfigurationController
     [HttpPost("HistoryItems/Ignore")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult IgnoreHistoryItems([FromBody] BulkHistoryItemsRequest request)
+    public ActionResult IgnoreHistoryItems(
+        [FromServices] HistorySyncTableManager manager,
+        [FromBody] BulkHistoryItemsRequest request)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         // Support both Ids (preferred) and Items (legacy)
         if ((request?.Ids == null || request.Ids.Count == 0) &&
             (request?.Items == null || request.Items.Count == 0))
@@ -194,7 +209,7 @@ public partial class ConfigurationController
         {
             try
             {
-                successCount = _databaseProvider.Database.BatchUpdateHistoryItemStatusByIds(request.Ids, BaseSyncStatus.Ignored);
+                successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Ignored);
             }
             catch (Exception ex)
             {
@@ -208,7 +223,7 @@ public partial class ConfigurationController
             {
                 try
                 {
-                    _databaseProvider.Database.UpdateHistoryItemStatus(item.SourceUserId, item.SourceItemId, BaseSyncStatus.Ignored);
+                    manager.UpdateStatusByKey((item.SourceUserId, item.SourceItemId), SyncStatus.Ignored);
                     successCount++;
                 }
                 catch (Exception ex)
@@ -233,19 +248,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerHistoryRefresh()
-    {
-        var refreshTask = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncRefreshHistoryTable");
-
-        if (refreshTask == null)
-        {
-            return NotFound("History refresh task not found");
-        }
-
-        _taskManager.Execute(refreshTask, new TaskOptions());
-
-        return Ok(new { Message = "History refresh task started" });
-    }
+        => ExecuteScheduledTaskByKey("ServerSyncRefreshHistoryTable", "History refresh task started", "History refresh task not found");
 
     /// <summary>
     /// TriggerHistorySync
@@ -256,19 +259,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerHistorySync()
-    {
-        var syncTask = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncMissingHistory");
-
-        if (syncTask == null)
-        {
-            return NotFound("History sync task not found");
-        }
-
-        _taskManager.Execute(syncTask, new TaskOptions());
-
-        return Ok(new { Message = "History sync task started" });
-    }
+        => ExecuteScheduledTaskByKey("ServerSyncMissingHistory", "History sync task started", "History sync task not found");
 
     /// <summary>
     /// Maps a HistorySyncItem to a DTO.
@@ -307,7 +298,7 @@ public partial class ConfigurationController
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,
-            ErrorMessage = item.ErrorMessage,
+            ErrorMessage = item.Reason,
             HasChanges = item.HasChanges
         };
     }

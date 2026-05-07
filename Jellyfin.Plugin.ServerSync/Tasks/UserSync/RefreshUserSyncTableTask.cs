@@ -2,108 +2,255 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
+using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Scheduled task to refresh the user sync table from source and local servers.
+/// One unit of refresh work for User Sync — a single (mapping, category)
+/// pairing carrying the source-fetched data needed to build that record.
+/// Pre-fetching at the mapping level (rather than per-category) keeps the
+/// network calls down to one per source user.
 /// </summary>
-public class RefreshUserSyncTableTask : IScheduledTask
+public sealed class UserCategoryWork
 {
-    private readonly ILogger<RefreshUserSyncTableTask> _logger;
-    private readonly IPluginConfigurationManager _configManager;
-    private readonly ISourceServerClientFactory _clientFactory;
-    private readonly UserSyncTableService _tableService;
+    public required UserMapping Mapping { get; init; }
+
+    public required string Category { get; init; }
+
+    public required Jellyfin.Sdk.Generated.Models.UserDto SourceUser { get; init; }
+
+    public required MediaBrowser.Model.Dto.UserDto LocalUserDto { get; init; }
+
+    public required Jellyfin.Database.Implementations.Entities.User LocalUser { get; init; }
+}
+
+/// <summary>
+/// Refresh phase for User Sync. Expands each enabled user mapping into one
+/// work item per enabled category (Policy / Configuration / ProfileImage),
+/// then builds one <see cref="UserSyncItem"/> per work item. The base handles
+/// upsert, status decision, and pruning.
+/// </summary>
+public class RefreshUserSyncTableTask
+    : RefreshSyncTaskBase<UserSyncItem, UserCategoryWork, (string SourceUserId, string LocalUserId, string PropertyCategory)>
+{
+    private readonly IUserManager _userManager;
+    private readonly UserSyncTableService _builder;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RefreshUserSyncTableTask"/> class.
+    /// Initializes a new instance.
     /// </summary>
     public RefreshUserSyncTableTask(
         ILogger<RefreshUserSyncTableTask> logger,
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
-        UserSyncTableService tableService)
+        IUserManager userManager,
+        UserSyncTableService builder,
+        UserSyncTableManager manager)
+        : base(logger, manager, clientFactory, configManager)
     {
-        _logger = logger;
-        _configManager = configManager;
-        _clientFactory = clientFactory;
-        _tableService = tableService;
+        _userManager = userManager;
+        _builder = builder;
     }
 
     /// <inheritdoc />
-    public string Name => "Refresh User Sync Table";
+    public override string Name => "Refresh User Sync Table";
 
     /// <inheritdoc />
-    public string Key => "ServerSyncRefreshUserTable";
+    public override string Key => "ServerSyncRefreshUserTable";
 
     /// <inheritdoc />
-    public string Description => "Scans source and local servers for user setting differences and updates the user sync table.";
+    public override string Description => "Scans source and local servers for user setting differences and updates the user sync table.";
 
     /// <inheritdoc />
-    public string Category => "User Sync";
+    public override string Category => "User Sync";
 
     /// <inheritdoc />
-    public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override string ModuleMutexKey => "User";
+
+    /// <inheritdoc />
+    protected override bool IsEnabled()
     {
-        var config = _configManager.Configuration;
-
-        // Check if user sync is enabled
-        if (!config.EnableUserSync)
-        {
-            _logger.LogDebug("User sync is disabled, skipping refresh");
-            return;
-        }
-
-        // Validate configuration
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) ||
-            string.IsNullOrWhiteSpace(config.SourceServerApiKey))
-        {
-            _logger.LogWarning("Source server not configured, skipping user sync refresh");
-            return;
-        }
-
-        var enabledMappings = config.UserMappings?.FindAll(m => m.IsEnabled) ?? [];
-        if (enabledMappings.Count == 0)
-        {
-            _logger.LogWarning("No enabled user mappings, skipping user sync refresh");
-            return;
-        }
-
-        _logger.LogInformation("Starting user sync table refresh");
-
-        using var sourceClient = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-
-        // Test connection
-        var connectionResult = await sourceClient.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-        if (!connectionResult.Success)
-        {
-            _logger.LogError("Failed to connect to source server: {Error}", connectionResult.ErrorMessage);
-            return;
-        }
-
-        var itemsProcessed = await _tableService.RefreshUserSyncTableAsync(
-            sourceClient,
-            config,
-            progress,
-            cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("User sync table refresh complete. {Count} properties compared", itemsProcessed);
-        progress.Report(100);
+        var config = ConfigManager.Configuration;
+        return config.EnableUserSync
+            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
+            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey)
+            && config.GetEnabledUserMappings().Count > 0;
     }
 
     /// <inheritdoc />
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
+    protected override async Task<IList<UserCategoryWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        return new[]
+        ArgumentNullException.ThrowIfNull(progress);
+        if (Client == null)
         {
-            new TaskTriggerInfo
+            return Array.Empty<UserCategoryWork>();
+        }
+
+        var config = ConfigManager.Configuration;
+        var enabledMappings = config.GetEnabledUserMappings();
+        var work = new List<UserCategoryWork>();
+        var processedMappings = 0;
+        var totalMappings = Math.Max(enabledMappings.Count, 1);
+        progress.Report(0);
+
+        foreach (var mapping in enabledMappings)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
             {
-                Type = TaskTriggerInfoType.IntervalTrigger,
-                IntervalTicks = TimeSpan.FromHours(22).Ticks
+                var sourceUserId = Guid.Parse(mapping.SourceUserId);
+                var localUserId = Guid.Parse(mapping.LocalUserId);
+
+                var sourceUser = await Client.GetUserAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
+                if (sourceUser == null)
+                {
+                    Logger.LogWarning("Source user {Id} not found; skipping mapping {Source} -> {Local}",
+                        mapping.SourceUserId, mapping.SourceUserName, mapping.LocalUserName);
+                    continue;
+                }
+
+                var localUser = _userManager.GetUserById(localUserId);
+                if (localUser == null)
+                {
+                    Logger.LogWarning("Local user {Id} not found; skipping mapping {Source} -> {Local}",
+                        mapping.LocalUserId, mapping.SourceUserName, mapping.LocalUserName);
+                    continue;
+                }
+
+                var localUserDto = _userManager.GetUserDto(localUser);
+
+                if (config.UserSyncPolicy)
+                {
+                    work.Add(new UserCategoryWork
+                    {
+                        Mapping = mapping,
+                        Category = UserPropertyCategory.Policy,
+                        SourceUser = sourceUser,
+                        LocalUserDto = localUserDto,
+                        LocalUser = localUser
+                    });
+                }
+
+                if (config.UserSyncConfiguration)
+                {
+                    work.Add(new UserCategoryWork
+                    {
+                        Mapping = mapping,
+                        Category = UserPropertyCategory.Configuration,
+                        SourceUser = sourceUser,
+                        LocalUserDto = localUserDto,
+                        LocalUser = localUser
+                    });
+                }
+
+                if (config.UserSyncProfileImage)
+                {
+                    work.Add(new UserCategoryWork
+                    {
+                        Mapping = mapping,
+                        Category = UserPropertyCategory.ProfileImage,
+                        SourceUser = sourceUser,
+                        LocalUserDto = localUserDto,
+                        LocalUser = localUser
+                    });
+                }
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error preparing work for mapping {Source} -> {Local}",
+                    mapping.SourceUserName, mapping.LocalUserName);
+            }
+
+            processedMappings++;
+            progress.Report(Math.Min(100, 100.0 * processedMappings / totalMappings));
+        }
+
+        progress.Report(100);
+        return work;
+    }
+
+    /// <inheritdoc />
+    protected override async Task<UserSyncItem?> BuildRecordAsync(
+        UserCategoryWork source,
+        IReadOnlyDictionary<(string SourceUserId, string LocalUserId, string PropertyCategory), UserSyncItem> existing,
+        CancellationToken cancellationToken)
+    {
+        if (Client == null)
+        {
+            return null;
+        }
+
+        var key = (source.Mapping.SourceUserId, source.Mapping.LocalUserId, source.Category);
+        existing.TryGetValue(key, out var existingItem);
+
+        var config = ConfigManager.Configuration;
+
+        return source.Category switch
+        {
+            UserPropertyCategory.Policy => await _builder.CreatePolicySyncItemAsync(
+                source.Mapping, source.SourceUser, source.LocalUserDto, config, existingItem).ConfigureAwait(false),
+            UserPropertyCategory.Configuration => await _builder.CreateConfigurationSyncItemAsync(
+                source.Mapping, source.SourceUser, source.LocalUserDto, existingItem).ConfigureAwait(false),
+            UserPropertyCategory.ProfileImage => await _builder.CreateProfileImageSyncItemAsync(
+                source.Mapping, source.SourceUser, source.LocalUser, Client, existingItem, cancellationToken).ConfigureAwait(false),
+            _ => null
         };
     }
+
+    /// <inheritdoc />
+    protected override (string SourceUserId, string LocalUserId, string PropertyCategory) ExtractKey(UserSyncItem record)
+        => (record.SourceUserId, record.LocalUserId, record.PropertyCategory);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// In scope when the row's user mapping is currently enabled. Disabling a
+    /// mapping preserves its rows (including Ignored overrides) instead of
+    /// pruning them.
+    /// </remarks>
+    protected override bool IsInScope(UserSyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        foreach (var mapping in ConfigManager.Configuration.GetEnabledUserMappings())
+        {
+            if (string.Equals(mapping.SourceUserId, record.SourceUserId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(mapping.LocalUserId, record.LocalUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc />
+    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    {
+        ConfigManager.Configuration.LastUserSyncTime = DateTime.UtcNow;
+        ConfigManager.SaveConfiguration();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
+    {
+        new TaskTriggerInfo
+        {
+            Type = MediaBrowser.Model.Tasks.TaskTriggerInfoType.IntervalTrigger,
+            IntervalTicks = TimeSpan.FromHours(22).Ticks
+        }
+    };
 }

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 
@@ -38,14 +39,15 @@ public static class FileValidationService
     /// <param name="localPath">The local path to validate.</param>
     /// <param name="sourceItemId">Source item ID for collision checking.</param>
     /// <param name="config">Plugin configuration for library boundaries.</param>
-    /// <param name="database">Sync database for collision checking.</param>
+    /// <param name="manager">Sync table manager for collision checking.</param>
     /// <returns>Validation result indicating if path is valid.</returns>
     public static PathValidationResult ValidatePath(
         string? localPath,
         string sourceItemId,
         PluginConfiguration config,
-        SyncDatabase database)
+        ContentSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (string.IsNullOrEmpty(localPath))
         {
             return new PathValidationResult(false, "No local path configured");
@@ -59,7 +61,7 @@ public static class FileValidationService
         }
 
         // Check for path collision
-        if (database.CheckPathCollision(localPath, sourceItemId))
+        if (manager.CheckPathCollision(localPath, sourceItemId))
         {
             return new PathValidationResult(false, "Path collision - another item is already using this path");
         }

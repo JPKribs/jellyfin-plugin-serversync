@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
@@ -19,19 +20,18 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Scheduled task to apply queued people sync changes to local person entities.
+/// Sync phase for People. Reads Queued rows and applies metadata + image
+/// changes to the local person entities. Apply logic preserved from the
+/// previous implementation — only the orchestration (status transitions,
+/// error handling, progress) moved into <see cref="SyncQueueTaskBase{TRecord, TKey}"/>.
 /// </summary>
-public class SyncMissingPeopleTask : IScheduledTask
+public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 {
-    private readonly ILogger<SyncMissingPeopleTask> _logger;
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
-    private readonly ISourceServerClientFactory _clientFactory;
-    private readonly IPluginConfigurationManager _configManager;
-    private readonly ISyncDatabaseProvider _databaseProvider;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SyncMissingPeopleTask"/> class.
+    /// Initializes a new instance.
     /// </summary>
     public SyncMissingPeopleTask(
         ILogger<SyncMissingPeopleTask> logger,
@@ -39,167 +39,72 @@ public class SyncMissingPeopleTask : IScheduledTask
         IProviderManager providerManager,
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
-        ISyncDatabaseProvider databaseProvider)
+        PeopleSyncTableManager manager)
+        : base(logger, manager, clientFactory, configManager)
     {
-        _logger = logger;
         _libraryManager = libraryManager;
         _providerManager = providerManager;
-        _clientFactory = clientFactory;
-        _configManager = configManager;
-        _databaseProvider = databaseProvider;
     }
 
     /// <inheritdoc />
-    public string Name => "Sync People Data";
+    public override string Name => "Sync People Data";
 
     /// <inheritdoc />
-    public string Key => "ServerSyncMissingPeople";
+    public override string Key => "ServerSyncMissingPeople";
 
     /// <inheritdoc />
-    public string Description => "Applies queued people sync changes (metadata, images) to local person entities.";
+    public override string Description => "Applies queued people sync changes (metadata, images) to local person entities.";
 
     /// <inheritdoc />
-    public string Category => "People Sync";
+    public override string Category => "People Sync";
 
     /// <inheritdoc />
-    public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override string ModuleMutexKey => "People";
+
+    /// <inheritdoc />
+    protected override bool IsEnabled()
     {
-        var config = _configManager.Configuration;
-
-        if (!config.EnablePeopleSync)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey))
-        {
-            _logger.LogWarning("People sync skipped: source server not configured");
-            return;
-        }
-
-        var syncImages = config.PeopleSyncImages;
-
-        _logger.LogInformation("Starting people sync");
-
-        var database = _databaseProvider.Database;
-
-        var queuedItems = database.GetPeopleSyncItemsByStatus(BaseSyncStatus.Queued);
-        var totalItems = queuedItems.Count;
-
-        if (totalItems == 0)
-        {
-            _logger.LogInformation("No queued people items to sync");
-            config.LastPeopleSyncTime = DateTime.UtcNow;
-            _configManager.SaveConfiguration();
-            progress.Report(100);
-            return;
-        }
-
-        _logger.LogInformation("Processing {Count} queued people items", totalItems);
-
-        using var imageClient = syncImages ? _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey) : null;
-
-        var processedCount = 0;
-        var successCount = 0;
-        var errorCount = 0;
-
-        foreach (var item in queuedItems)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            try
-            {
-                var success = await SyncPersonItemAsync(item, database, syncImages, imageClient, cancellationToken).ConfigureAwait(false);
-
-                if (success)
-                {
-                    successCount++;
-                }
-                else
-                {
-                    errorCount++;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to sync person {PersonName}", item.PersonName);
-                database.UpdatePeopleSyncItemStatusById(item.Id, BaseSyncStatus.Errored, ex.Message);
-                errorCount++;
-            }
-
-            processedCount++;
-            progress.Report((double)processedCount / totalItems * 100);
-        }
-
-        _logger.LogInformation(
-            "People sync completed: {Success} synced, {Errors} errors out of {Total} items",
-            successCount, errorCount, totalItems);
-
-        config.LastPeopleSyncTime = DateTime.UtcNow;
-        _configManager.SaveConfiguration();
-
-        progress.Report(100);
+        var config = ConfigManager.Configuration;
+        return config.EnablePeopleSync
+            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
+            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey);
     }
 
-    private async Task<bool> SyncPersonItemAsync(
-        PeopleSyncItem item,
-        SyncDatabase database,
-        bool syncImages,
-        SourceServerClient? imageClient,
-        CancellationToken cancellationToken)
+    /// <inheritdoc />
+    protected override async Task ApplyAsync(PeopleSyncItem record, CancellationToken cancellationToken)
     {
-        // Find local person by name, then get full entity via GetItemById
-        var personStub = _libraryManager.GetPerson(item.PersonName);
+        var personStub = _libraryManager.GetPerson(record.PersonName);
         if (personStub == null)
         {
-            _logger.LogDebug("Local person not found for {PersonName}, skipping", item.PersonName);
-            database.UpdatePeopleSyncItemStatusById(item.Id, BaseSyncStatus.Errored, "Local person not found");
-            return false;
+            throw new InvalidOperationException($"Local person not found: {record.PersonName}");
         }
 
         var localPerson = _libraryManager.GetItemById(personStub.Id);
         if (localPerson == null)
         {
-            _logger.LogDebug("Could not load full person entity for {PersonName}, skipping", item.PersonName);
-            database.UpdatePeopleSyncItemStatusById(item.Id, BaseSyncStatus.Errored, "Could not load person entity");
-            return false;
+            throw new InvalidOperationException($"Could not load person entity: {record.PersonName}");
         }
 
+        var config = ConfigManager.Configuration;
+        var syncImages = config.PeopleSyncImages;
         var hasChanges = false;
 
-        // Apply metadata from JSON blob
-        if (item.HasMetadataChanges)
+        if (record.HasMetadataChanges)
         {
-            var metadataApplied = await ApplyMetadataAsync(localPerson, item, cancellationToken).ConfigureAwait(false);
-            if (metadataApplied)
+            if (await ApplyMetadataAsync(localPerson, record, cancellationToken).ConfigureAwait(false))
             {
                 hasChanges = true;
             }
         }
 
-        // Apply images
-        if (syncImages && item.HasImagesChanges && imageClient != null && !string.IsNullOrEmpty(item.SourcePersonId))
+        if (syncImages && record.HasImagesChanges && !string.IsNullOrEmpty(record.SourcePersonId))
         {
-            if (!Guid.TryParse(item.SourcePersonId, out var sourcePersonGuid))
+            if (!Guid.TryParse(record.SourcePersonId, out var sourceGuid))
             {
-                _logger.LogWarning("Invalid source person ID format for {PersonName}: {SourcePersonId}", item.PersonName, item.SourcePersonId);
-                return false;
+                throw new InvalidOperationException($"Invalid source person ID for {record.PersonName}: {record.SourcePersonId}");
             }
 
-            var imageSuccess = await ApplyPersonImagesAsync(
-                localPerson,
-                sourcePersonGuid,
-                imageClient,
-                cancellationToken).ConfigureAwait(false);
-
-            if (imageSuccess)
+            if (Client != null && await ApplyPersonImagesAsync(localPerson, sourceGuid, Client, cancellationToken).ConfigureAwait(false))
             {
                 hasChanges = true;
             }
@@ -209,27 +114,45 @@ public class SyncMissingPeopleTask : IScheduledTask
         {
             await localPerson.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
         }
-
-        database.UpdatePeopleSyncItemStatusById(item.Id, BaseSyncStatus.Synced);
-        return true;
     }
 
-    /// <summary>
-    /// Applies metadata fields from SourceMetadataValue JSON blob to a local person entity.
-    /// </summary>
+    /// <inheritdoc />
+    protected override Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        ConfigManager.Configuration.LastPeopleSyncTime = DateTime.UtcNow;
+        ConfigManager.SaveConfiguration();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
+    {
+        new TaskTriggerInfo
+        {
+            Type = TaskTriggerInfoType.IntervalTrigger,
+            IntervalTicks = TimeSpan.FromHours(14).Ticks
+        }
+    };
+
+    // ===================================================================
+    // Apply logic — preserved from the prior SyncMissingPeopleTask.
+    // The TZ-safe DateOnlyEquals comparison for PremiereDate/EndDate is
+    // unchanged from the v10.11.42 fix; do not regress to direct `!=`.
+    // ===================================================================
+
     private Task<bool> ApplyMetadataAsync(
         BaseItem localPerson,
         PeopleSyncItem item,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(item.SourceMetadataValue))
+        if (string.IsNullOrEmpty(item.Metadata.Source))
         {
             return Task.FromResult(false);
         }
 
         try
         {
-            var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.SourceMetadataValue);
+            var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.Metadata.Source);
             if (metadata == null)
             {
                 return Task.FromResult(false);
@@ -237,7 +160,6 @@ public class SyncMissingPeopleTask : IScheduledTask
 
             var hasChanges = false;
 
-            // Name
             if (metadata.TryGetValue("Name", out var nameValue) && nameValue.ValueKind == JsonValueKind.String)
             {
                 var name = nameValue.GetString();
@@ -248,7 +170,6 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // OriginalTitle
             if (metadata.TryGetValue("OriginalTitle", out var origTitleValue) && origTitleValue.ValueKind == JsonValueKind.String)
             {
                 var origTitle = origTitleValue.GetString();
@@ -259,7 +180,6 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // SortName
             if (metadata.TryGetValue("SortName", out var sortNameValue) && sortNameValue.ValueKind == JsonValueKind.String)
             {
                 var sortName = sortNameValue.GetString();
@@ -270,7 +190,6 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // ForcedSortName
             if (metadata.TryGetValue("ForcedSortName", out var forcedSortNameValue) && forcedSortNameValue.ValueKind == JsonValueKind.String)
             {
                 var forcedSortName = forcedSortNameValue.GetString();
@@ -281,7 +200,6 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // Overview (biography)
             if (metadata.TryGetValue("Overview", out var overviewValue) && overviewValue.ValueKind == JsonValueKind.String)
             {
                 var overview = overviewValue.GetString();
@@ -292,7 +210,8 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // PremiereDate (birth date)
+            // PremiereDate (birth date — date-only semantic; compare by calendar
+            // date to avoid timezone-driven false diffs across servers).
             if (metadata.TryGetValue("PremiereDate", out var premiereDateValue))
             {
                 DateTime? premiereDate = null;
@@ -305,14 +224,14 @@ public class SyncMissingPeopleTask : IScheduledTask
                     }
                 }
 
-                if (localPerson.PremiereDate != premiereDate)
+                if (!JsonComparisonUtility.DateOnlyEquals(localPerson.PremiereDate, premiereDate))
                 {
                     localPerson.PremiereDate = premiereDate;
                     hasChanges = true;
                 }
             }
 
-            // EndDate (death date)
+            // EndDate (death date — date-only semantic).
             if (metadata.TryGetValue("EndDate", out var endDateValue))
             {
                 DateTime? endDate = null;
@@ -325,14 +244,13 @@ public class SyncMissingPeopleTask : IScheduledTask
                     }
                 }
 
-                if (localPerson.EndDate != endDate)
+                if (!JsonComparisonUtility.DateOnlyEquals(localPerson.EndDate, endDate))
                 {
                     localPerson.EndDate = endDate;
                     hasChanges = true;
                 }
             }
 
-            // ProductionYear
             if (metadata.TryGetValue("ProductionYear", out var yearValue))
             {
                 int? year = yearValue.ValueKind == JsonValueKind.Number
@@ -345,7 +263,30 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // Tags
+            // ProductionLocations (birth place — string array, typically one entry).
+            if (metadata.TryGetValue("ProductionLocations", out var locationsValue) && locationsValue.ValueKind == JsonValueKind.Array)
+            {
+                var locations = new List<string>();
+                foreach (var loc in locationsValue.EnumerateArray())
+                {
+                    if (loc.ValueKind == JsonValueKind.String)
+                    {
+                        var s = loc.GetString();
+                        if (!string.IsNullOrEmpty(s))
+                        {
+                            locations.Add(s);
+                        }
+                    }
+                }
+
+                var locationsArray = locations.ToArray();
+                if (!localPerson.ProductionLocations.SequenceEqual(locationsArray, StringComparer.Ordinal))
+                {
+                    localPerson.ProductionLocations = locationsArray;
+                    hasChanges = true;
+                }
+            }
+
             if (metadata.TryGetValue("Tags", out var tagsValue) && tagsValue.ValueKind == JsonValueKind.Array)
             {
                 var tags = new List<string>();
@@ -365,9 +306,33 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // ProviderIds
             if (metadata.TryGetValue("ProviderIds", out var providerIdsValue) && providerIdsValue.ValueKind == JsonValueKind.Object)
             {
+                // Reconcile providers — see same fix in SyncMissingMetadataTask.
+                // Without the cleanup pass, local-only entries persist and
+                // make the row report "still desynced" forever.
+                var sourceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in providerIdsValue.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrEmpty(prop.Value.GetString()))
+                    {
+                        sourceKeys.Add(prop.Name);
+                    }
+                }
+
+                if (localPerson.ProviderIds != null)
+                {
+                    var toRemove = localPerson.ProviderIds.Keys
+                        .Where(k => !sourceKeys.Contains(k))
+                        .ToList();
+                    foreach (var key in toRemove)
+                    {
+                        localPerson.ProviderIds.Remove(key);
+                        hasChanges = true;
+                    }
+                }
+
                 foreach (var prop in providerIdsValue.EnumerateObject())
                 {
                     if (prop.Value.ValueKind == JsonValueKind.String)
@@ -382,7 +347,6 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // LockedFields
             if (metadata.TryGetValue("LockedFields", out var lockedValue) && lockedValue.ValueKind == JsonValueKind.Array)
             {
                 var lockedFieldsList = new List<MetadataField>();
@@ -406,7 +370,6 @@ public class SyncMissingPeopleTask : IScheduledTask
                 }
             }
 
-            // LockData (IsLocked)
             if (metadata.TryGetValue("LockData", out var lockDataValue))
             {
                 bool? lockData = null;
@@ -428,9 +391,9 @@ public class SyncMissingPeopleTask : IScheduledTask
 
             return Task.FromResult(hasChanges);
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
-            _logger.LogError(ex, "Failed to apply metadata for person {PersonName}", item.PersonName);
+            Logger.LogError(ex, "Failed to parse metadata JSON for person {PersonName}", item.PersonName);
             return Task.FromResult(false);
         }
     }
@@ -443,7 +406,6 @@ public class SyncMissingPeopleTask : IScheduledTask
     {
         try
         {
-            // Get image info from source for this person
             var sourceImages = await imageClient.GetItemImageInfoAsync(sourcePersonId, cancellationToken).ConfigureAwait(false);
             if (sourceImages == null || sourceImages.Count == 0)
             {
@@ -460,7 +422,6 @@ public class SyncMissingPeopleTask : IScheduledTask
                     continue;
                 }
 
-                // Download the image
                 var (stream, contentType) = await imageClient.DownloadItemImageAsync(
                     sourcePersonId,
                     imageType,
@@ -472,19 +433,15 @@ public class SyncMissingPeopleTask : IScheduledTask
                     continue;
                 }
 
-                // Save to temp file then apply
                 var tempPath = Path.GetTempFileName();
                 try
                 {
                     await using (stream.ConfigureAwait(false))
                     {
-                        using (var fileStream = File.Create(tempPath))
-                        {
-                            await stream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
-                        }
+                        using var fileStream = File.Create(tempPath);
+                        await stream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
                     }
 
-                    // Parse the image type enum
                     if (Enum.TryParse<ImageType>(imageType, true, out var parsedImageType))
                     {
                         using var fileStream = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -497,7 +454,6 @@ public class SyncMissingPeopleTask : IScheduledTask
                             cancellationToken).ConfigureAwait(false);
 
                         appliedAny = true;
-                        _logger.LogDebug("Applied {ImageType} image for person {PersonName}", imageType, localPerson.Name);
                     }
                 }
                 finally
@@ -506,32 +462,23 @@ public class SyncMissingPeopleTask : IScheduledTask
                     {
                         File.Delete(tempPath);
                     }
-                    catch
+                    catch (IOException)
                     {
-                        // Best effort cleanup
+                        // Best-effort cleanup.
                     }
                 }
             }
 
             return appliedAny;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to apply images for person {PersonName}", localPerson.Name);
+            Logger.LogWarning(ex, "Failed to apply images for person {PersonName}", localPerson.Name);
             return false;
         }
-    }
-
-    /// <inheritdoc />
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
-    {
-        return new[]
-        {
-            new TaskTriggerInfo
-            {
-                Type = TaskTriggerInfoType.IntervalTrigger,
-                IntervalTicks = TimeSpan.FromHours(14).Ticks
-            }
-        };
     }
 }

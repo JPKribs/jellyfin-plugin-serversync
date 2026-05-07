@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Entities;
@@ -270,18 +271,21 @@ public static class FileDeletionService
     /// Processes all items marked for deletion in the sync database.
     /// Uses batch operations for database consistency.
     /// </summary>
-    /// <param name="database">Sync database.</param>
+    /// <param name="manager">Sync table manager.</param>
     /// <param name="config">Plugin configuration.</param>
     /// <param name="logger">Logger for operation output.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Tuple of (deleted count, failed count).</returns>
     public static (int Deleted, int Failed) ProcessPendingDeletions(
-        SyncDatabase database,
+        ContentSyncTableManager manager,
         PluginConfiguration config,
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        var itemsToDelete = database.GetByStatus(SyncStatus.Deleting).ToList();
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(logger);
+        var itemsToDelete = manager.GetByStatus(SyncStatus.Deleting).ToList();
 
         if (itemsToDelete.Count == 0)
         {
@@ -350,7 +354,7 @@ public static class FileDeletionService
         {
             try
             {
-                deleted = database.BatchDelete(successfulDeletes);
+                deleted = manager.BatchDelete(successfulDeletes);
             }
             catch (Exception ex)
             {
@@ -363,7 +367,7 @@ public static class FileDeletionService
             try
             {
                 var errorMessage = "Deletion failed";
-                failed = database.BatchUpdateStatus(
+                failed = manager.BatchUpdateStatus(
                     failedItems.Select(f => f.SourceItemId),
                     SyncStatus.Errored,
                     errorMessage);

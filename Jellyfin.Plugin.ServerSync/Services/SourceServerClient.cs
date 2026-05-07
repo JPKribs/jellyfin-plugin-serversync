@@ -7,6 +7,7 @@ using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk;
@@ -497,7 +498,10 @@ public class SourceServerClient : IDisposable
                     config.QueryParameters.ParentId = libraryId;
                     config.QueryParameters.Recursive = true;
                     config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
-                    config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources, ItemFields.Etag };
+                    config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                    // Sort by Id so pagination is stable across page boundaries —
+                    // without this, items added/removed mid-sync can dupe or skip.
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
@@ -573,6 +577,10 @@ public class SourceServerClient : IDisposable
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get top-level items from library {LibraryId}", libraryId);
@@ -593,6 +601,7 @@ public class SourceServerClient : IDisposable
         Guid libraryId,
         int startIndex = 0,
         int limit = 100,
+        ItemFields[]? fields = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -604,7 +613,11 @@ public class SourceServerClient : IDisposable
                     config.QueryParameters.ParentId = libraryId;
                     config.QueryParameters.Recursive = true;
                     config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
-                    config.QueryParameters.Fields = new[]
+                    // Caller decides which fields to request based on what
+                    // metadata categories are actually enabled. Sending
+                    // ItemFields.People for a library where the user has
+                    // MetadataSyncPeople=false bloats every page response.
+                    config.QueryParameters.Fields = fields ?? new[]
                     {
                         ItemFields.Path,
                         ItemFields.DateCreated,
@@ -619,13 +632,17 @@ public class SourceServerClient : IDisposable
                         ItemFields.ProductionLocations,
                         ItemFields.Taglines,
                         ItemFields.Settings,     // For LockedFields, PreferredMetadataLanguage, PreferredMetadataCountryCode
-                        ItemFields.CustomRating, // For CustomRating field
-                        ItemFields.Etag          // For change detection in SkipUnchanged refresh mode
+                        ItemFields.CustomRating  // For CustomRating field
                     };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -659,6 +676,10 @@ public class SourceServerClient : IDisposable
 
             return result?.TotalRecordCount ?? 0;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to get item count for library {LibraryId}", libraryId);
@@ -679,6 +700,7 @@ public class SourceServerClient : IDisposable
         Guid libraryId,
         int startIndex = 0,
         int limit = 100,
+        ItemFields[]? fields = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -697,7 +719,7 @@ public class SourceServerClient : IDisposable
                         BaseItemKind.MusicArtist,
                         BaseItemKind.BoxSet
                     };
-                    config.QueryParameters.Fields = new[]
+                    config.QueryParameters.Fields = fields ?? new[]
                     {
                         ItemFields.Path,
                         ItemFields.DateCreated,
@@ -712,13 +734,17 @@ public class SourceServerClient : IDisposable
                         ItemFields.ProductionLocations,
                         ItemFields.Taglines,
                         ItemFields.Settings,
-                        ItemFields.CustomRating,
-                        ItemFields.Etag
+                        ItemFields.CustomRating
                     };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -758,11 +784,110 @@ public class SourceServerClient : IDisposable
 
             return result?.TotalRecordCount ?? 0;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to get folder item count for library {LibraryId}", libraryId);
             return 0;
         }
+    }
+
+    /// <summary>
+    /// Lightweight discovery fetch — returns only Id and Path for items in a
+    /// library. Used by Metadata refresh to determine which source items have
+    /// a local correlate before paying for the full metadata payload. The
+    /// per-page response is dramatically smaller than the full
+    /// <c>GetLibraryItemsWithMetadataAsync</c> response (no Genres/Studios/
+    /// Tags/People/Overview/etc.), so the discovery scan is cheap even on
+    /// huge libraries.
+    /// </summary>
+    public async Task<BaseItemDtoQueryResult?> GetLibraryItemPathsAsync(
+        Guid libraryId,
+        BaseItemKind[] includeTypes,
+        int startIndex = 0,
+        int limit = 1000,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = GetApiClient();
+            return await client.Items.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.ParentId = libraryId;
+                    config.QueryParameters.Recursive = true;
+                    config.QueryParameters.IncludeItemTypes = includeTypes;
+                    config.QueryParameters.Fields = new[] { ItemFields.Path };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
+                    config.QueryParameters.StartIndex = startIndex;
+                    config.QueryParameters.Limit = limit;
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get item paths from library {LibraryId}", libraryId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Batch-fetches full metadata for a specific set of item IDs. Used by
+    /// Metadata refresh after the discovery pass: only items that exist
+    /// locally are fetched with their heavy <see cref="ItemFields"/>, so we
+    /// don't pay for source items the user doesn't have.
+    /// </summary>
+    public async Task<List<BaseItemDto>> GetItemsByIdsAsync(
+        IReadOnlyList<Guid> ids,
+        ItemFields[] fields,
+        int batchSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new List<BaseItemDto>();
+        if (ids.Count == 0)
+        {
+            return result;
+        }
+
+        for (var i = 0; i < ids.Count; i += batchSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
+
+            try
+            {
+                var client = GetApiClient();
+                var response = await client.Items.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.Ids = chunk;
+                        config.QueryParameters.Fields = fields;
+                    },
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                if (response?.Items != null)
+                {
+                    result.AddRange(response.Items);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch items batch starting at index {Index}", i);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -792,6 +917,10 @@ public class SourceServerClient : IDisposable
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
             return result?.Items?.FirstOrDefault();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -879,6 +1008,10 @@ public class SourceServerClient : IDisposable
                         StreamIndex = stream.Index ?? 0
                     }));
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get companion files for {ItemId}", itemId);
@@ -958,6 +1091,10 @@ public class SourceServerClient : IDisposable
             var client = GetApiClient();
             return await client.Users[userId].GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get user details for {UserId}", userId);
@@ -996,6 +1133,11 @@ public class SourceServerClient : IDisposable
 
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             return new ResponseDisposingStream(stream, response);
+        }
+        catch (OperationCanceledException)
+        {
+            response?.Dispose();
+            throw;
         }
         catch (Exception ex)
         {
@@ -1061,6 +1203,10 @@ public class SourceServerClient : IDisposable
         {
             var client = GetApiClient();
             return await client.Items[itemId].Images.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1217,6 +1363,7 @@ public class SourceServerClient : IDisposable
                     config =>
                     {
                         config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Person };
+                        config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
                         config.QueryParameters.StartIndex = startIndex;
                         config.QueryParameters.Limit = pageSize;
                         config.QueryParameters.Recursive = true;
@@ -1318,6 +1465,67 @@ public class SourceServerClient : IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="batchSize">Number of IDs per request.</param>
     /// <returns>List of fully-populated BaseItemDto results.</returns>
+    /// <summary>
+    /// Lists every Person item on the source server. Used by the People
+    /// refresh task to discover the full set of source persons; the refresh
+    /// then filters down to those with a local match.
+    /// <para>
+    /// Uses the dedicated <c>/Persons</c> endpoint, not
+    /// <c>/Items?IncludeItemTypes=Person</c>. Jellyfin treats those as two
+    /// different concepts — <c>/Items</c> with Person type returns
+    /// <c>BaseItemPerson</c>-shaped records (cast-list lightweight) where
+    /// <c>Overview</c> / <c>PremiereDate</c> / <c>ProductionLocations</c>
+    /// are stripped, while <c>/Persons</c> returns the full standalone
+    /// Person entity with every field populated. The endpoint does not
+    /// paginate via StartIndex — a single call returns all matching
+    /// persons.
+    /// </para>
+    /// </summary>
+    public async Task<List<BaseItemDto>> GetAllPersonsAsync(
+        CancellationToken cancellationToken,
+        int pageSize = 500)
+    {
+        _ = pageSize;
+        var client = GetApiClient();
+
+        try
+        {
+            var page = await client.Persons.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.Fields = new[]
+                    {
+                        ItemFields.Overview,
+                        ItemFields.ProviderIds,
+                        ItemFields.Tags,
+                        ItemFields.OriginalTitle,
+                        ItemFields.SortName,
+                        ItemFields.DateCreated,
+                        ItemFields.ProductionLocations,
+                        // Settings populates LockData + LockedFields; without it
+                        // those properties come back null, while local has them
+                        // populated, producing a perpetual false diff in the
+                        // Metadata blob ("LockData" yes/no vs "-").
+                        ItemFields.Settings
+                    };
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            var result = page?.Items?.ToList() ?? new List<BaseItemDto>();
+            _logger.LogInformation("Fetched {Total} persons from source", result.Count);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch persons from source");
+            return new List<BaseItemDto>();
+        }
+    }
+
     public async Task<List<BaseItemDto>> GetPersonsByIdsAsync(
         IReadOnlyList<Guid> ids,
         CancellationToken cancellationToken,
@@ -1405,10 +1613,15 @@ public class SourceServerClient : IDisposable
                         ItemFields.MediaSources
                     };
                     config.QueryParameters.EnableUserData = true;
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1418,13 +1631,20 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches the full set of item IDs played by a user within a library, paginating internally.
-    /// Returns an empty set on failure so callers can treat it as "no items played."
+    /// Fetches the full set of item IDs played by a user within a library,
+    /// paginating internally. Throws on transient failure so callers don't
+    /// confuse "transient error" with "user has played nothing" — a silent
+    /// empty return would cause downstream filters to skip items they
+    /// shouldn't.
     /// </summary>
     /// <param name="userId">User ID on the source server.</param>
     /// <param name="libraryId">Library ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Set of item IDs the user has played in the library.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the source server returns a null page (failure) rather
+    /// than an explicit empty page.
+    /// </exception>
     public async Task<HashSet<Guid>> GetUserPlayedItemIdsAsync(
         Guid userId,
         Guid libraryId,
@@ -1439,7 +1659,16 @@ public class SourceServerClient : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
 
             var page = await GetUserPlayedItemsAsync(userId, libraryId, startIndex, pageSize, cancellationToken).ConfigureAwait(false);
-            if (page?.Items == null || page.Items.Count == 0)
+            if (page == null)
+            {
+                // GetUserPlayedItemsAsync returns null on a logged transient
+                // failure. Treating that as end-of-list would silently classify
+                // every item as "user did not play this" — wrong answer.
+                throw new InvalidOperationException(
+                    $"Failed to fetch played items page for user {userId} in library {libraryId} at index {startIndex}");
+            }
+
+            if (page.Items == null || page.Items.Count == 0)
             {
                 break;
             }
@@ -1450,6 +1679,14 @@ public class SourceServerClient : IDisposable
                 {
                     ids.Add(item.Id.Value);
                 }
+            }
+
+            // Bound the loop with TotalRecordCount when the server provides it,
+            // so a stable-sort hiccup that returns a full page repeatedly cannot
+            // run startIndex past the actual total.
+            if (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value)
+            {
+                break;
             }
 
             if (page.Items.Count < pageSize)
@@ -1497,10 +1734,15 @@ public class SourceServerClient : IDisposable
                     };
                     config.QueryParameters.EnableUserData = true;
                     config.QueryParameters.IsPlayed = true;
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1543,10 +1785,15 @@ public class SourceServerClient : IDisposable
                     };
                     config.QueryParameters.EnableUserData = true;
                     config.QueryParameters.IsFavorite = true;
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1583,6 +1830,10 @@ public class SourceServerClient : IDisposable
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
             return result?.TotalRecordCount ?? 0;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1720,10 +1971,32 @@ public class SourceServerClient : IDisposable
 
         public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
 
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
-            _inner.ReadAsync(buffer, offset, count, cancellationToken);
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            // Wrap the inner read with a cancellation registration that
+            // forcibly disposes the response. Without this, a hung server can
+            // keep an inner HttpConnection read blocked past cancellation —
+            // HttpClient.Timeout doesn't apply once response headers are in.
+            using var registration = cancellationToken.Register(static state => DisposeQuiet((HttpResponseMessage)state!), _response);
+            return await _inner.ReadAsync(buffer.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
+        }
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
-            _inner.ReadAsync(buffer, cancellationToken);
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            using var registration = cancellationToken.Register(static state => DisposeQuiet((HttpResponseMessage)state!), _response);
+            return await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+
+        private static void DisposeQuiet(HttpResponseMessage response)
+        {
+            try
+            {
+                response.Dispose();
+            }
+            catch
+            {
+                // Already disposed or in shutdown — nothing useful to do here.
+            }
+        }
     }
 }

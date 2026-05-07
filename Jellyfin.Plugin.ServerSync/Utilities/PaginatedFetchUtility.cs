@@ -83,7 +83,7 @@ public static class PaginatedFetchUtility
             }
             catch (OperationCanceledException)
             {
-                break;
+                throw;
             }
             catch (Exception ex)
             {

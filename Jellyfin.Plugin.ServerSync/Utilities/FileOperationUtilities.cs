@@ -173,6 +173,12 @@ public static class FileOperationUtilities
 
     /// <summary>
     /// Gets companion files for a main file (subtitles, metadata, images).
+    /// Matches Jellyfin's external-file naming convention: companions live in
+    /// the same directory and have a name of the form
+    /// <c>{base}.{ext}</c> or <c>{base}.{language}.{ext}</c> (with optional
+    /// flags), where <c>{base}</c> is the main file's stem. The match is exact
+    /// on <c>{base}.</c> so a movie named <c>Foo.mkv</c> never picks up
+    /// companions of a sibling like <c>Foo 2.mkv</c>.
     /// </summary>
     /// <param name="mainFilePath">Path to the main file.</param>
     /// <returns>List of companion file paths.</returns>
@@ -187,14 +193,23 @@ public static class FileOperationUtilities
         }
 
         var fileNameWithoutExt = Path.GetFileNameWithoutExtension(mainFilePath);
+        var prefix = fileNameWithoutExt + ".";
 
         foreach (var ext in CompanionExtensions)
         {
-            var pattern = $"{fileNameWithoutExt}*{ext}";
             try
             {
-                var files = Directory.GetFiles(directory, pattern);
-                companions.AddRange(files);
+                // Use a coarse glob on the prefix, then filter strictly so we
+                // only accept "{base}.<...>{ext}" — not "{base} 2{ext}" etc.
+                foreach (var candidate in Directory.EnumerateFiles(directory, fileNameWithoutExt + "*" + ext))
+                {
+                    var name = Path.GetFileName(candidate);
+                    if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                        && name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                    {
+                        companions.Add(candidate);
+                    }
+                }
             }
             catch (IOException)
             {

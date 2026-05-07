@@ -1,18 +1,24 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Services;
 
 namespace Jellyfin.Plugin.ServerSync.Models.HistorySync;
 
 /// <summary>
-/// Represents a watch history item to be synced between servers.
+/// One row of synced watch-history state per (source user, source item). The
+/// row carries three parallel value triples (Source / Local / Merged) for
+/// each of the five primitives that make up watch state: <c>IsPlayed</c>,
+/// <c>PlayCount</c>, <c>PlaybackPositionTicks</c>, <c>LastPlayedDate</c>,
+/// <c>IsFavorite</c>. Refresh populates Source + Local and computes Merged
+/// via <see cref="HistorySyncMergeService.MergeHistoryData"/>; Sync applies
+/// Merged to the local server.
+/// <para>
+/// Primitives are stored directly (no <c>SyncableValue&lt;T&gt;</c> wrapper)
+/// because there's no JSON-blob hashing benefit at this scale.
+/// </para>
 /// </summary>
-public class HistorySyncItem
+public class HistorySyncItem : SyncRecord
 {
-    /// <summary>
-    /// Gets or sets the unique database identifier.
-    /// </summary>
-    public long Id { get; set; }
-
     // ===== Mapping Context =====
 
     /// <summary>
@@ -38,12 +44,13 @@ public class HistorySyncItem
     // ===== Item Identification =====
 
     /// <summary>
-    /// Gets or sets the source server item ID.
+    /// Gets or sets the source server item ID — second component of the
+    /// natural key.
     /// </summary>
     public string SourceItemId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the local server item ID (if matched).
+    /// Gets or sets the local server item ID (resolved by path lookup).
     /// </summary>
     public string? LocalItemId { get; set; }
 
@@ -143,35 +150,13 @@ public class HistorySyncItem
     /// </summary>
     public bool? MergedIsFavorite { get; set; }
 
-    // ===== Sync Tracking =====
+    /// <inheritdoc />
+    public override bool HasChanges => HistorySyncMergeService.HasChangesToSync(this);
 
-    /// <summary>
-    /// Gets or sets the sync status.
-    /// </summary>
-    public BaseSyncStatus Status { get; set; }
-
-    /// <summary>
-    /// Gets or sets when the status was last changed.
-    /// </summary>
-    public DateTime StatusDate { get; set; }
-
-    /// <summary>
-    /// Gets or sets when the item was last synced.
-    /// </summary>
-    public DateTime? LastSyncTime { get; set; }
-
-    /// <summary>
-    /// Gets or sets the error message if status is Errored.
-    /// </summary>
-    public string? ErrorMessage { get; set; }
-
-    /// <summary>
-    /// Gets a value indicating whether there are changes to sync.
-    /// </summary>
-    public bool HasChanges =>
-        (MergedIsPlayed != LocalIsPlayed && MergedIsPlayed.HasValue) ||
-        (MergedPlayCount != LocalPlayCount && MergedPlayCount.HasValue) ||
-        (MergedPlaybackPositionTicks != LocalPlaybackPositionTicks && MergedPlaybackPositionTicks.HasValue) ||
-        (MergedIsFavorite != LocalIsFavorite && MergedIsFavorite.HasValue) ||
-        (MergedLastPlayedDate != LocalLastPlayedDate && MergedLastPlayedDate.HasValue);
+    /// <inheritdoc />
+    public override void MarkSynced()
+    {
+        // No SyncableValue<T> fields on HistorySyncItem — primitives are
+        // compared directly. Nothing to mark.
+    }
 }

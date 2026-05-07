@@ -1,7 +1,11 @@
-namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
+namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
-/// DTO for image information including size and dimensions.
+/// DTO for image information including size and dimensions. Lives in
+/// <c>Models.Common</c> because the
+/// <see cref="Comparators.ImageManifestComparator"/> consumes it; keeping
+/// it under <c>Models.MetadataSync</c> created a wrong-direction
+/// dependency from <c>Common</c> into a sibling namespace.
 /// </summary>
 public class ImageInfoDto
 {

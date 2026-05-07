@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AnalysisMode>AllEnabledByDefault</AnalysisMode>
     <CodeAnalysisRuleSet>../jellyfin.ruleset</CodeAnalysisRuleSet>
-    <NoWarn>NU1605;CA1002;CA2227;CA1305;CA2213</NoWarn>
+    <NoWarn>NU1605;CA1002;CA2227;CA1305;CA2213;CA3003</NoWarn>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 

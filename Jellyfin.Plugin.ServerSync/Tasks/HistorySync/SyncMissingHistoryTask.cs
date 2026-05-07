@@ -1,260 +1,142 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
+using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Scheduled task to sync watch history from the source server.
-/// Applies queued changes from the history sync table.
+/// Apply phase for History sync. Reads queued <see cref="HistorySyncItem"/>
+/// rows and applies their merged play-state to the local server via
+/// <see cref="LocalServerClient.UpdateUserItemData"/>.
 /// </summary>
-public class SyncMissingHistoryTask : IScheduledTask
+public class SyncMissingHistoryTask
+    : SyncQueueTaskBase<HistorySyncItem, (string SourceUserId, string SourceItemId)>
 {
-    private readonly ILogger<SyncMissingHistoryTask> _logger;
-    private readonly IPluginConfigurationManager _configManager;
-    private readonly ISyncDatabaseProvider _databaseProvider;
     private readonly LocalServerClient _localClient;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SyncMissingHistoryTask"/> class.
+    /// Initializes a new instance.
     /// </summary>
     public SyncMissingHistoryTask(
         ILogger<SyncMissingHistoryTask> logger,
         IPluginConfigurationManager configManager,
-        ISyncDatabaseProvider databaseProvider,
-        LocalServerClient localClient)
+        ISourceServerClientFactory clientFactory,
+        LocalServerClient localClient,
+        HistorySyncTableManager manager)
+        : base(logger, manager, clientFactory, configManager)
     {
-        _logger = logger;
-        _configManager = configManager;
-        _databaseProvider = databaseProvider;
         _localClient = localClient;
     }
 
     /// <inheritdoc />
-    public string Name => "Sync History";
+    public override string Name => "Sync History";
 
     /// <inheritdoc />
-    public string Key => "ServerSyncMissingHistory";
+    public override string Key => "ServerSyncMissingHistory";
 
     /// <inheritdoc />
-    public string Description => "Applies queued watch history changes from the sync table to the local server.";
+    public override string Description => "Applies queued watch history changes from the sync table to the local server.";
 
     /// <inheritdoc />
-    public string Category => "History Sync";
+    public override string Category => "History Sync";
 
     /// <inheritdoc />
-    public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override string ModuleMutexKey => "History";
+
+    /// <inheritdoc />
+    protected override bool IsEnabled()
     {
-        var config = _configManager.Configuration;
+        var config = ConfigManager.Configuration;
+        return config.EnableHistorySync
+            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
+            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey);
+    }
 
-        // Check if history sync is enabled
-        if (!config.EnableHistorySync)
+    /// <inheritdoc />
+    protected override Task ApplyAsync(HistorySyncItem record, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        if (string.IsNullOrEmpty(record.LocalItemId))
         {
-            return Task.CompletedTask;
+            throw new InvalidOperationException("Local item not found");
         }
 
-        // Validate source server configuration
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) ||
-            string.IsNullOrWhiteSpace(config.SourceServerApiKey))
+        if (string.IsNullOrEmpty(record.LocalUserId))
         {
-            _logger.LogWarning("History sync skipped: source server not configured");
-            return Task.CompletedTask;
+            throw new InvalidOperationException("Local user not found");
         }
 
-        // Get enabled mappings
-        var enabledUserMappings = config.UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
-        var enabledLibraryMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
-
-        if (enabledUserMappings.Count == 0)
+        if (!Guid.TryParse(record.LocalUserId, out var localUserId)
+            || !Guid.TryParse(record.LocalItemId, out var localItemId))
         {
-            _logger.LogDebug("History sync skipped: no enabled user mappings");
-            return Task.CompletedTask;
+            throw new InvalidOperationException("Invalid user or item ID");
         }
 
-        if (enabledLibraryMappings.Count == 0)
+        var success = _localClient.UpdateUserItemData(
+            localUserId,
+            localItemId,
+            record.MergedIsPlayed,
+            record.MergedPlayCount,
+            record.MergedPlaybackPositionTicks,
+            record.MergedLastPlayedDate,
+            record.MergedIsFavorite);
+
+        if (!success)
         {
-            _logger.LogDebug("History sync skipped: no enabled library mappings");
-            return Task.CompletedTask;
+            throw new InvalidOperationException("Failed to update user data");
         }
 
-        _logger.LogInformation("Starting history sync");
+        Logger.LogDebug(
+            "Synced history for {ItemName}: {Changes}",
+            record.ItemName,
+            HistorySyncMergeService.GetChangeSummary(record));
 
-        var database = _databaseProvider.Database;
-
-        // Apply queued changes
-        _logger.LogInformation("Applying queued history changes");
-
-        // Get all queued history items
-        var queuedItems = database.GetHistoryItemsByStatus(BaseSyncStatus.Queued);
-        var totalItems = queuedItems.Count;
-
-        if (totalItems == 0)
-        {
-            _logger.LogInformation("No queued history items to sync");
-            progress.Report(100);
-            return Task.CompletedTask;
-        }
-
-        _logger.LogInformation("Processing {Count} queued history items", totalItems);
-
-        var processedCount = 0;
-        var successCount = 0;
-        var errorCount = 0;
-
-        foreach (var item in queuedItems)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            try
-            {
-                var success = SyncHistoryItem(item, _localClient, database);
-
-                if (success)
-                {
-                    successCount++;
-                }
-                else
-                {
-                    errorCount++;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to sync history item {ItemName}", item.ItemName);
-                item.Status = BaseSyncStatus.Errored;
-                item.ErrorMessage = ex.Message;
-                item.StatusDate = DateTime.UtcNow;
-                database.UpsertHistoryItem(item);
-                errorCount++;
-            }
-
-            processedCount++;
-            progress.Report((double)processedCount / totalItems * 100);
-        }
-
-        // Update last sync time
-        config.LastHistorySyncTime = DateTime.UtcNow;
-        _configManager.SaveConfiguration();
-
-        _logger.LogInformation(
-            "History sync completed: {Success} succeeded, {Error} failed out of {Total}",
-            successCount, errorCount, totalItems);
-
-        progress.Report(100);
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Syncs a single history item to the local server.
-    /// </summary>
-    private bool SyncHistoryItem(
-        HistorySyncItem item,
-        LocalServerClient localClient,
-        SyncDatabase database)
+    /// <inheritdoc />
+    /// <remarks>
+    /// HistorySyncItem has no SyncableValue fields (its base MarkSynced is
+    /// a no-op), so on success we copy the merged values into the local
+    /// snapshot. The next Refresh will re-pull the actual local state, but
+    /// in the meantime <see cref="HistorySyncMergeService.HasChangesToSync"/>
+    /// will see local == merged and not requeue.
+    /// </remarks>
+    protected override void OnApplySucceeded(HistorySyncItem record)
     {
-        // Validate we have a local item ID
-        if (string.IsNullOrEmpty(item.LocalItemId))
-        {
-            _logger.LogWarning("Cannot sync history for {ItemName}: local item not found", item.ItemName);
-            item.Status = BaseSyncStatus.Errored;
-            item.ErrorMessage = "Local item not found";
-            item.StatusDate = DateTime.UtcNow;
-            database.UpsertHistoryItem(item);
-            return false;
-        }
-
-        // Validate we have a local user ID
-        if (string.IsNullOrEmpty(item.LocalUserId))
-        {
-            _logger.LogWarning("Cannot sync history for {ItemName}: local user not found", item.ItemName);
-            item.Status = BaseSyncStatus.Errored;
-            item.ErrorMessage = "Local user not found";
-            item.StatusDate = DateTime.UtcNow;
-            database.UpsertHistoryItem(item);
-            return false;
-        }
-
-        // Parse IDs
-        if (!Guid.TryParse(item.LocalUserId, out var localUserId) ||
-            !Guid.TryParse(item.LocalItemId, out var localItemId))
-        {
-            _logger.LogWarning("Cannot sync history for {ItemName}: invalid user or item ID", item.ItemName);
-            item.Status = BaseSyncStatus.Errored;
-            item.ErrorMessage = "Invalid user or item ID";
-            item.StatusDate = DateTime.UtcNow;
-            database.UpsertHistoryItem(item);
-            return false;
-        }
-
-        // Apply the merged history data
-        var success = localClient.UpdateUserItemData(
-            localUserId,
-            localItemId,
-            item.MergedIsPlayed,
-            item.MergedPlayCount,
-            item.MergedPlaybackPositionTicks,
-            item.MergedLastPlayedDate,
-            item.MergedIsFavorite);
-
-        if (success)
-        {
-            _logger.LogDebug(
-                "Synced history for {ItemName}: {Changes}",
-                item.ItemName,
-                HistorySyncMergeService.GetChangeSummary(item));
-
-            // Update item status
-            item.Status = BaseSyncStatus.Synced;
-            item.LastSyncTime = DateTime.UtcNow;
-            item.StatusDate = DateTime.UtcNow;
-            item.ErrorMessage = null;
-
-            // Update local state to match merged state
-            item.LocalIsPlayed = item.MergedIsPlayed;
-            item.LocalPlayCount = item.MergedPlayCount;
-            item.LocalPlaybackPositionTicks = item.MergedPlaybackPositionTicks;
-            item.LocalLastPlayedDate = item.MergedLastPlayedDate;
-            item.LocalIsFavorite = item.MergedIsFavorite;
-
-            database.UpsertHistoryItem(item);
-            return true;
-        }
-        else
-        {
-            _logger.LogWarning("Failed to sync history for {ItemName}", item.ItemName);
-            item.Status = BaseSyncStatus.Errored;
-            item.ErrorMessage = "Failed to update user data";
-            item.StatusDate = DateTime.UtcNow;
-            database.UpsertHistoryItem(item);
-            return false;
-        }
+        ArgumentNullException.ThrowIfNull(record);
+        record.LocalIsPlayed = record.MergedIsPlayed;
+        record.LocalPlayCount = record.MergedPlayCount;
+        record.LocalPlaybackPositionTicks = record.MergedPlaybackPositionTicks;
+        record.LocalLastPlayedDate = record.MergedLastPlayedDate;
+        record.LocalIsFavorite = record.MergedIsFavorite;
+        record.MarkSynced();
     }
 
     /// <inheritdoc />
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
+    protected override Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        return new[]
-        {
-            new TaskTriggerInfo
-            {
-                Type = TaskTriggerInfoType.IntervalTrigger,
-                IntervalTicks = TimeSpan.FromHours(6).Ticks
-            }
-        };
+        var config = ConfigManager.Configuration;
+        config.LastHistorySyncTime = DateTime.UtcNow;
+        ConfigManager.SaveConfiguration();
+        return Task.CompletedTask;
     }
+
+    /// <inheritdoc />
+    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
+    {
+        new TaskTriggerInfo
+        {
+            Type = TaskTriggerInfoType.IntervalTrigger,
+            IntervalTicks = TimeSpan.FromHours(6).Ticks
+        }
+    };
 }

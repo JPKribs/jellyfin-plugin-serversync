@@ -103,33 +103,29 @@ public class CleanupTempFilesTask : IScheduledTask
                 {
                     var fileInfo = new FileInfo(file);
 
-                    // Skip files that are currently being downloaded (unless they're very old)
+                    // Never delete a file that an active worker is still
+                    // writing to, regardless of age. A slow throttled download
+                    // (e.g. 100 KB/s on a 50 GB file) can run for days, but
+                    // its on-disk LastWriteTimeUtc only advances when bytes
+                    // are flushed — long throttle sleeps make a healthy file
+                    // look stale. On Linux/macOS, deleting an open file
+                    // succeeds (unlink while open) and silently strands the
+                    // writer with a handle pointing to nothing visible.
                     var isActiveDownload = activeTempFiles.Contains(file.ToLowerInvariant());
-                    var isOldEnoughToDelete = fileInfo.LastWriteTimeUtc < cutoffTime;
-
-                    if (isActiveDownload && !isOldEnoughToDelete)
+                    if (isActiveDownload)
                     {
                         _logger.LogDebug("Skipping active download: {FileName}", fileInfo.Name);
                         skippedCount++;
                         continue;
                     }
 
-                    // Delete files older than the cutoff time
-                    if (isOldEnoughToDelete)
+                    if (fileInfo.LastWriteTimeUtc < cutoffTime)
                     {
                         var fileSize = fileInfo.Length;
                         fileInfo.Delete();
                         deletedCount++;
                         totalBytes += fileSize;
-
-                        if (isActiveDownload)
-                        {
-                            _logger.LogWarning("Deleted stale temp file that was marked as active: {FileName}", fileInfo.Name);
-                        }
-                        else
-                        {
-                            _logger.LogDebug("Deleted orphaned temp file: {FileName}", fileInfo.Name);
-                        }
+                        _logger.LogDebug("Deleted orphaned temp file: {FileName}", fileInfo.Name);
                     }
                 }
                 catch (Exception ex)

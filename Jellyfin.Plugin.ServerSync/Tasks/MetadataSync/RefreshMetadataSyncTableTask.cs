@@ -1,184 +1,459 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.MetadataSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using Jellyfin.Plugin.ServerSync.Utilities;
+using Jellyfin.Sdk.Generated.Models;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
+using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Scheduled task to refresh the metadata sync table from source and local servers.
+/// Source-side work item for the Metadata refresh task: a (library mapping,
+/// source item, isFolder) triple turned into a
+/// <see cref="MetadataSyncItem"/> by
+/// <see cref="MetadataSyncTableService.BuildRecordAsync"/>.
 /// </summary>
-public class RefreshMetadataSyncTableTask : IScheduledTask
+public sealed record MetadataWork(LibraryMapping LibraryMapping, BaseItemDto SourceItem, bool IsFolder);
+
+/// <summary>
+/// Refresh phase for Metadata sync. Walks every enabled library, fetches
+/// items (with optional folder-items pass) from each, and builds a
+/// <see cref="MetadataSyncItem"/> per (library, item) pair.
+/// </summary>
+public class RefreshMetadataSyncTableTask
+    : RefreshSyncTaskBase<MetadataSyncItem, MetadataWork, (string SourceLibraryId, string SourceItemId)>
 {
-    private readonly ILogger<RefreshMetadataSyncTableTask> _logger;
-    private readonly IPluginConfigurationManager _configManager;
-    private readonly ISyncDatabaseProvider _databaseProvider;
-    private readonly ISourceServerClientFactory _clientFactory;
     private readonly MetadataSyncTableService _metadataService;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RefreshMetadataSyncTableTask"/> class.
+    /// Initializes a new instance.
     /// </summary>
     public RefreshMetadataSyncTableTask(
         ILogger<RefreshMetadataSyncTableTask> logger,
         IPluginConfigurationManager configManager,
-        ISyncDatabaseProvider databaseProvider,
         ISourceServerClientFactory clientFactory,
-        MetadataSyncTableService metadataService)
+        MetadataSyncTableService metadataService,
+        MetadataSyncTableManager manager)
+        : base(logger, manager, clientFactory, configManager)
     {
-        _logger = logger;
-        _configManager = configManager;
-        _databaseProvider = databaseProvider;
-        _clientFactory = clientFactory;
         _metadataService = metadataService;
     }
 
     /// <inheritdoc />
-    public string Name => "Refresh Metadata Sync Table";
+    public override string Name => "Refresh Metadata Sync Table";
 
     /// <inheritdoc />
-    public string Key => "ServerSyncRefreshMetadataTable";
+    public override string Key => "ServerSyncRefreshMetadataTable";
 
     /// <inheritdoc />
-    public string Description => "Scans source and local servers for metadata differences and updates the metadata sync table.";
+    public override string Description => "Scans source and local servers for metadata differences and updates the metadata sync table.";
 
     /// <inheritdoc />
-    public string Category => "Metadata Sync";
+    public override string Category => "Metadata Sync";
 
     /// <inheritdoc />
-    public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override string ModuleMutexKey => "Metadata";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Metadata's <c>BuildRecordAsync</c> issues a per-item
+    /// <c>GetItemImageInfoAsync</c> HTTP call when image sync is enabled. With
+    /// libraries in the tens of thousands of items, serializing these round-
+    /// trips makes a refresh take hours. 8 parallel builds turn that into
+    /// minutes without overwhelming a typical home Jellyfin source.
+    /// </remarks>
+    protected override int BuildRecordParallelism => 8;
+
+    /// <inheritdoc />
+    protected override bool IsEnabled()
     {
-        var config = _configManager.Configuration;
+        var config = ConfigManager.Configuration;
+        if (!config.EnableMetadataSync) return false;
+        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey)) return false;
+        if (config.GetEnabledLibraryMappings().Count == 0) return false;
+        // At least one category enabled.
+        return config.MetadataSyncMetadata || config.MetadataSyncImages
+            || config.MetadataSyncPeople || config.MetadataSyncStudios;
+    }
 
-        // Check if metadata sync is enabled
-        if (!config.EnableMetadataSync)
+    /// <inheritdoc />
+    /// <remarks>
+    /// Two-phase fetch instead of "bulk-fetch everything heavy":
+    ///   <list type="number">
+    ///   <item>Enumerate local items per library and build a path lookup.</item>
+    ///   <item>Light source discovery — paginate every library asking for
+    ///   only <c>Path</c> + <c>Id</c>. Per-page payload is tiny.</item>
+    ///   <item>Filter source items to those whose translated path exists
+    ///   locally — that's the actual sync set.</item>
+    ///   <item>Heavy fetch by IDs — only request full metadata fields for
+    ///   matched items, batched.</item>
+    ///   </list>
+    /// On a typical install where local is a subset of source, this
+    /// dramatically reduces both bytes-over-wire and the build phase's
+    /// work — we no longer fetch full metadata for tens of thousands of
+    /// source items the user doesn't have.
+    /// </remarks>
+    protected override async Task<IList<MetadataWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(progress);
+        if (Client == null)
         {
-            return;
+            return Array.Empty<MetadataWork>();
         }
 
-        // Validate source server configuration
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl))
+        var config = ConfigManager.Configuration;
+        var enabledMappings = config.GetEnabledLibraryMappings();
+        var includeFolderItems = config.MetadataSyncFolderItems;
+        var fields = BuildRequestedFields(config);
+
+        var leafTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
+        var folderTypes = new[]
         {
-            _logger.LogWarning("Metadata sync skipped: source server URL not configured");
-            return;
+            BaseItemKind.Series,
+            BaseItemKind.Season,
+            BaseItemKind.MusicAlbum,
+            BaseItemKind.MusicArtist,
+            BaseItemKind.BoxSet
+        };
+
+        progress.Report(2);
+
+        // Phase 1: enumerate local items per library. This is in-process and
+        // fast — Jellyfin's library DB is already loaded.
+        var localByLibrary = new Dictionary<string, (Dictionary<string, BaseItem> Leaves, Dictionary<string, BaseItem> Folders)>();
+        foreach (var mapping in enabledMappings)
+        {
+            if (string.IsNullOrEmpty(mapping.LocalLibraryId)) continue;
+            if (!Guid.TryParse(mapping.LocalLibraryId, out var localLibraryGuid)) continue;
+            localByLibrary[mapping.SourceLibraryId] = _metadataService.GetLocalItemsByPath(localLibraryGuid);
         }
 
-        if (string.IsNullOrWhiteSpace(config.SourceServerApiKey))
-        {
-            _logger.LogWarning("Metadata sync skipped: API key not configured");
-            return;
-        }
+        progress.Report(8);
 
-        // Get enabled library mappings
-        var enabledLibraryMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
+        // Phase 2: lightweight discovery — find the source IDs of items whose
+        // translated paths exist locally. We collect (mapping, sourceId,
+        // isFolder) triples; the source-side metadata isn't materialized yet.
+        var matchedLeavesByMapping = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentBag<Guid>>();
+        var matchedFoldersByMapping = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentBag<Guid>>();
 
-        if (enabledLibraryMappings.Count == 0)
-        {
-            _logger.LogDebug("Metadata sync skipped: no enabled library mappings");
-            return;
-        }
-
-        // Get enabled category flags
-        var syncMetadata = config.MetadataSyncMetadata;
-        var syncImages = config.MetadataSyncImages;
-        var syncPeople = config.MetadataSyncPeople;
-        var syncStudios = config.MetadataSyncStudios;
-        var syncFolderItems = config.MetadataSyncFolderItems;
-        var refreshMode = config.MetadataRefreshMode;
-
-        if (!syncMetadata && !syncImages && !syncPeople && !syncStudios)
-        {
-            _logger.LogDebug("Metadata sync skipped: no categories enabled");
-            return;
-        }
-
-        _logger.LogInformation("Starting metadata sync table refresh from {SourceUrl}", config.SourceServerUrl);
-
-        using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-
-        // Test connection
-        var connectionResult = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-        if (!connectionResult.Success)
-        {
-            _logger.LogError("Failed to connect to source server at {SourceUrl}: {Error}",
-                config.SourceServerUrl, connectionResult.ErrorMessage ?? "Unknown error");
-            return;
-        }
-
-        var database = _databaseProvider.Database;
-
-        // Progress tracking: 1% for init, 98% for processing items, 1% for finalization
-        const double InitProgress = 1.0;
-        const double ProcessingProgress = 98.0;
-
-        progress.Report(0);
-
-        // Get total item count for progress tracking
-        var totalItems = await _metadataService.GetTotalItemCountAsync(
-            client,
-            enabledLibraryMappings,
-            cancellationToken,
-            includeFolderItems: syncFolderItems).ConfigureAwait(false);
-
-        progress.Report(InitProgress);
-
-        // Process each library mapping
-        var processedItems = 0;
-
-        foreach (var libraryMapping in enabledLibraryMappings)
-        {
-            if (cancellationToken.IsCancellationRequested)
+        await Parallel.ForEachAsync(
+            enabledMappings,
+            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
+            async (mapping, ct) =>
             {
-                break;
-            }
+                if (!Guid.TryParse(mapping.SourceLibraryId, out var sourceLibraryId)) return;
+                if (!localByLibrary.TryGetValue(mapping.SourceLibraryId, out var localPaths)) return;
 
-            await _metadataService.ProcessLibraryAsync(
-                client,
-                database,
-                libraryMapping,
-                syncMetadata,
-                syncImages,
-                syncPeople,
-                syncStudios,
-                refreshMode,
-                cancellationToken,
-                onItemProcessed: () =>
+                var leafBag = matchedLeavesByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new System.Collections.Concurrent.ConcurrentBag<Guid>());
+                var folderBag = matchedFoldersByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new System.Collections.Concurrent.ConcurrentBag<Guid>());
+
+                await DiscoverMatchingIdsAsync(mapping, sourceLibraryId, leafTypes, localPaths.Leaves, leafBag, ct).ConfigureAwait(false);
+                if (includeFolderItems)
                 {
-                    processedItems++;
-                    if (totalItems > 0)
-                    {
-                        var itemProgress = (double)processedItems / totalItems * ProcessingProgress;
-                        progress.Report(InitProgress + itemProgress);
-                    }
-                },
-                syncFolderItems: syncFolderItems).ConfigureAwait(false);
+                    await DiscoverMatchingIdsAsync(mapping, sourceLibraryId, folderTypes, localPaths.Folders, folderBag, ct).ConfigureAwait(false);
+                }
+            }).ConfigureAwait(false);
+
+        var totalMatched = matchedLeavesByMapping.Values.Sum(b => b.Count) + matchedFoldersByMapping.Values.Sum(b => b.Count);
+        Logger.LogInformation(
+            "{Task}: discovery matched {Total} items across {Libraries} libraries",
+            Name,
+            totalMatched,
+            enabledMappings.Count);
+
+        progress.Report(40);
+
+        if (totalMatched == 0)
+        {
+            return Array.Empty<MetadataWork>();
         }
+
+        // Phase 3: batch-fetch full metadata only for matched IDs. Each
+        // library's matched IDs are batched independently so we keep track
+        // of which mapping a batch belongs to.
+        var work = new System.Collections.Concurrent.ConcurrentBag<MetadataWork>();
+        var fetched = 0;
+        var heavyDenominator = Math.Max(totalMatched, 1);
+
+        async Task FetchHeavyAsync(LibraryMapping mapping, IReadOnlyList<Guid> ids, bool isFolder, CancellationToken ct)
+        {
+            if (ids.Count == 0) return;
+            var items = await Client.GetItemsByIdsAsync(ids, fields, cancellationToken: ct).ConfigureAwait(false);
+            foreach (var item in items)
+            {
+                work.Add(new MetadataWork(mapping, item, isFolder));
+                var done = Interlocked.Increment(ref fetched);
+                progress.Report(40 + (60.0 * done / heavyDenominator));
+            }
+        }
+
+        await Parallel.ForEachAsync(
+            enabledMappings,
+            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
+            async (mapping, ct) =>
+            {
+                if (matchedLeavesByMapping.TryGetValue(mapping.SourceLibraryId, out var leafBag) && !leafBag.IsEmpty)
+                {
+                    await FetchHeavyAsync(mapping, leafBag.ToArray(), false, ct).ConfigureAwait(false);
+                }
+
+                if (includeFolderItems
+                    && matchedFoldersByMapping.TryGetValue(mapping.SourceLibraryId, out var folderBag)
+                    && !folderBag.IsEmpty)
+                {
+                    await FetchHeavyAsync(mapping, folderBag.ToArray(), true, ct).ConfigureAwait(false);
+                }
+            }).ConfigureAwait(false);
 
         progress.Report(100);
+        return work.ToList();
+    }
 
-        // Update last sync time
-        config.LastMetadataSyncTime = DateTime.UtcNow;
-        _configManager.SaveConfiguration();
+    /// <summary>
+    /// Phase-2 discovery helper: paginate the source library asking only for
+    /// item paths, translate each to a local path, and add the source IDs
+    /// whose translated path exists in <paramref name="localPaths"/> to the
+    /// shared bag.
+    /// </summary>
+    private async Task DiscoverMatchingIdsAsync(
+        LibraryMapping mapping,
+        Guid sourceLibraryId,
+        BaseItemKind[] includeTypes,
+        Dictionary<string, BaseItem> localPaths,
+        System.Collections.Concurrent.ConcurrentBag<Guid> matchedIds,
+        CancellationToken cancellationToken)
+    {
+        if (Client == null || localPaths.Count == 0) return;
 
-        _logger.LogInformation("Metadata sync table refresh completed");
+        const int pageSize = 1000;
+        var startIndex = 0;
+        var consecutiveErrors = 0;
+        const int maxConsecutiveErrors = 3;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            BaseItemDtoQueryResult? page;
+            try
+            {
+                page = await Client.GetLibraryItemPathsAsync(sourceLibraryId, includeTypes, startIndex, pageSize, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Discovery page failed for library {Library} at index {Index}", mapping.SourceLibraryName, startIndex);
+                if (++consecutiveErrors >= maxConsecutiveErrors) return;
+                continue;
+            }
+
+            consecutiveErrors = 0;
+
+            if (page?.Items == null || page.Items.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var item in page.Items)
+            {
+                if (!item.Id.HasValue || string.IsNullOrEmpty(item.Path))
+                {
+                    continue;
+                }
+
+                if (mapping.FilterMode != Models.Configuration.LibraryFilterMode.AllowAll
+                    && mapping.FilteredItems?.Count > 0
+                    && PathUtilities.IsItemFiltered(item.Path, mapping.SourceRootPath, mapping.FilterMode, mapping.FilteredItems))
+                {
+                    continue;
+                }
+
+                var localPath = PathUtilities.TranslatePath(item.Path, mapping.SourceRootPath, mapping.LocalRootPath);
+                if (localPaths.ContainsKey(localPath))
+                {
+                    matchedIds.Add(item.Id.Value);
+                }
+            }
+
+            if (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value)
+            {
+                return;
+            }
+
+            if (page.Items.Count < pageSize)
+            {
+                return;
+            }
+
+            startIndex += page.Items.Count;
+        }
+    }
+
+    /// <summary>
+    /// Builds the minimum <see cref="ItemFields"/> set that satisfies the
+    /// user's enabled metadata categories. Skipping unused fields (notably
+    /// <see cref="ItemFields.People"/>, which can dominate the response on
+    /// movie/episode libraries) drops the per-page payload substantially.
+    /// </summary>
+    private static ItemFields[] BuildRequestedFields(PluginConfiguration config)
+    {
+        var fields = new List<ItemFields>
+        {
+            // Always required for path matching and identification.
+            ItemFields.Path,
+            ItemFields.DateCreated,
+            ItemFields.ProviderIds
+        };
+
+        if (config.MetadataSyncMetadata)
+        {
+            fields.Add(ItemFields.Overview);
+            fields.Add(ItemFields.OriginalTitle);
+            fields.Add(ItemFields.SortName);
+            fields.Add(ItemFields.ProductionLocations);
+            fields.Add(ItemFields.Taglines);
+            fields.Add(ItemFields.Settings);
+            fields.Add(ItemFields.CustomRating);
+        }
+
+        if (config.MetadataSyncGenres)
+        {
+            fields.Add(ItemFields.Genres);
+        }
+
+        if (config.MetadataSyncTags)
+        {
+            fields.Add(ItemFields.Tags);
+        }
+
+        if (config.MetadataSyncStudios)
+        {
+            fields.Add(ItemFields.Studios);
+        }
+
+        if (config.MetadataSyncPeople)
+        {
+            fields.Add(ItemFields.People);
+        }
+
+        return fields.ToArray();
     }
 
     /// <inheritdoc />
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
+    protected override async Task<MetadataSyncItem?> BuildRecordAsync(
+        MetadataWork source,
+        IReadOnlyDictionary<(string SourceLibraryId, string SourceItemId), MetadataSyncItem> existing,
+        CancellationToken cancellationToken)
     {
-        return new[]
+        ArgumentNullException.ThrowIfNull(source);
+        if (Client == null)
         {
-            new TaskTriggerInfo
-            {
-                Type = TaskTriggerInfoType.IntervalTrigger,
-                IntervalTicks = TimeSpan.FromHours(10).Ticks
-            }
-        };
+            return null;
+        }
+
+        var config = ConfigManager.Configuration;
+        var fresh = await _metadataService.BuildRecordAsync(
+            source.LibraryMapping,
+            source.SourceItem,
+            source.IsFolder,
+            syncMetadata: config.MetadataSyncMetadata,
+            syncImages: config.MetadataSyncImages,
+            syncPeople: config.MetadataSyncPeople,
+            syncStudios: config.MetadataSyncStudios,
+            syncGenres: config.MetadataSyncGenres,
+            syncTags: config.MetadataSyncTags,
+            Client,
+            cancellationToken).ConfigureAwait(false);
+
+        if (fresh == null)
+        {
+            return null;
+        }
+
+        // Carry forward Synced* fields from the existing row so the hash
+        // short-circuit (SourceHash == SyncedHash) can skip the deep JSON
+        // compare on later refreshes. The service builds a fresh record with
+        // null SyncedHash; the DB-side preserves SyncedHash via a CASE clause
+        // in Upsert SQL, but the in-memory record is what HasChanges and
+        // DecideStatus look at.
+        var key = (fresh.SourceLibraryId, fresh.SourceItemId);
+        if (existing.TryGetValue(key, out var prev))
+        {
+            fresh.Id = prev.Id;
+            fresh.Status = prev.Status;
+            fresh.LastSyncTime = prev.LastSyncTime;
+            fresh.Reason = prev.Reason;
+
+            fresh.Metadata.Synced = prev.Metadata.Synced;
+            fresh.Metadata.SyncedHash = prev.Metadata.SyncedHash;
+            fresh.Images.Synced = prev.Images.Synced;
+            fresh.Images.SyncedHash = prev.Images.SyncedHash;
+            fresh.People.Synced = prev.People.Synced;
+            fresh.People.SyncedHash = prev.People.SyncedHash;
+            fresh.Studios.Synced = prev.Studios.Synced;
+            fresh.Studios.SyncedHash = prev.Studios.SyncedHash;
+        }
+
+        return fresh;
     }
+
+    /// <inheritdoc />
+    protected override (string SourceLibraryId, string SourceItemId) ExtractKey(MetadataSyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return (record.SourceLibraryId, record.SourceItemId);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// In scope when the row's library mapping is currently enabled. Disabling
+    /// a mapping preserves its metadata rows so the user's Ignored overrides
+    /// survive a toggle.
+    /// </remarks>
+    protected override bool IsInScope(MetadataSyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        foreach (var mapping in ConfigManager.Configuration.GetEnabledLibraryMappings())
+        {
+            if (string.Equals(mapping.SourceLibraryId, record.SourceLibraryId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc />
+    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    {
+        ConfigManager.Configuration.LastMetadataSyncTime = DateTime.UtcNow;
+        ConfigManager.SaveConfiguration();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
+    {
+        new TaskTriggerInfo
+        {
+            Type = TaskTriggerInfoType.IntervalTrigger,
+            IntervalTicks = TimeSpan.FromHours(10).Ticks
+        }
+    };
 }

@@ -38,7 +38,7 @@ public static class RecyclingBinService
             if (!Directory.Exists(recyclingBinPath))
             {
                 Directory.CreateDirectory(recyclingBinPath);
-                logger.LogInformation("Created recycling bin directory: {Path}", recyclingBinPath);
+                logger.LogDebug("Created recycling bin directory: {Path}", recyclingBinPath);
             }
 
             // Generate recycled file name: path.with.periods_2026-01-29_17-30-45.ext
@@ -56,13 +56,73 @@ public static class RecyclingBinService
             }
 
             File.Move(filePath, destinationPath);
-            logger.LogInformation("Moved to recycling bin: {FileName} -> {RecycledName}", Path.GetFileName(filePath), recycledFileName);
+            logger.LogDebug("Moved to recycling bin: {FileName} -> {RecycledName}", Path.GetFileName(filePath), recycledFileName);
 
             return true;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to move file to recycling bin: {FilePath}", filePath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// ArchiveBackupToRecyclingBin
+    /// Moves a sidecar/backup file to the recycling bin, naming it as if it
+    /// were the original file. Used by the download pipeline after a successful
+    /// atomic rename: the previous version was first moved to a sidecar (so it
+    /// could be restored on rename failure), and is now archived under its
+    /// original path's recycled filename.
+    /// </summary>
+    /// <param name="backupPath">Current location of the sidecar to archive.</param>
+    /// <param name="originalDisplayPath">Original path of the file (used to derive the recycled filename).</param>
+    /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <returns>True if successful, false otherwise.</returns>
+    public static bool ArchiveBackupToRecyclingBin(string backupPath, string originalDisplayPath, string recyclingBinPath, ILogger logger)
+    {
+        if (string.IsNullOrEmpty(backupPath) || string.IsNullOrEmpty(originalDisplayPath) || string.IsNullOrEmpty(recyclingBinPath))
+        {
+            return false;
+        }
+
+        if (!File.Exists(backupPath))
+        {
+            logger.LogWarning("Cannot archive backup - file does not exist: {BackupPath}", backupPath);
+            return false;
+        }
+
+        try
+        {
+            if (!Directory.Exists(recyclingBinPath))
+            {
+                Directory.CreateDirectory(recyclingBinPath);
+            }
+
+            var recycledFileName = FileOperationUtilities.GenerateRecycledFileName(originalDisplayPath);
+            var destinationPath = Path.Combine(recyclingBinPath, recycledFileName);
+
+            if (File.Exists(destinationPath))
+            {
+                var uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
+                var ext = Path.GetExtension(recycledFileName);
+                var nameWithoutExt = Path.GetFileNameWithoutExtension(recycledFileName);
+                recycledFileName = $"{nameWithoutExt}_{uniqueSuffix}{ext}";
+                destinationPath = Path.Combine(recyclingBinPath, recycledFileName);
+            }
+
+            File.Move(backupPath, destinationPath);
+            logger.LogDebug(
+                "Archived previous version to recycling bin: {OriginalName} -> {RecycledName}",
+                Path.GetFileName(originalDisplayPath),
+                recycledFileName);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to archive backup to recycling bin: {BackupPath}", backupPath);
             return false;
         }
     }
@@ -85,32 +145,14 @@ public static class RecyclingBinService
         // Move the main file first
         var mainSuccess = MoveToRecyclingBin(filePath, recyclingBinPath, logger);
 
-        // Move companion files
+        // Move companion files (using the same strict matcher as
+        // FileOperationUtilities.GetCompanionFiles so we don't accidentally
+        // recycle siblings whose names share a prefix).
         try
         {
-            var directory = Path.GetDirectoryName(filePath);
-            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            foreach (var companionFile in FileOperationUtilities.GetCompanionFiles(filePath))
             {
-                return mainSuccess;
-            }
-
-            var fileNameWithoutExt = Path.GetFileNameWithoutExtension(filePath);
-
-            foreach (var ext in FileOperationUtilities.CompanionExtensions)
-            {
-                var pattern = $"{fileNameWithoutExt}*{ext}";
-                try
-                {
-                    var companionFiles = Directory.GetFiles(directory, pattern);
-                    foreach (var companionFile in companionFiles)
-                    {
-                        MoveToRecyclingBin(companionFile, recyclingBinPath, logger);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.LogDebug(ex, "Error searching for companion files with extension {Extension}", ext);
-                }
+                MoveToRecyclingBin(companionFile, recyclingBinPath, logger);
             }
         }
         catch (Exception ex)

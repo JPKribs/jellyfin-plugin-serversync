@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.42"
+version: "10.11.43"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -25,9 +25,19 @@ artifacts:
 - "Microsoft.Kiota.Serialization.Text.dll"
 - "Std.UriTemplate.dll"
 changelog:
+  important:
+  - You will need to reset your plugin database in troubleshooting as the schema has shifted dramatically and many previous values need to be re-pulled for accuracy!
+  technical:
+  - Long overdue rewrite to better share processes
+  - Standardize the Refresh > Compare > Sync pipeline between data types
+  - Settings cleanup for unused settings
+  - Web cleanup for settings that were removed as they are not needed
   fixes:
-  - Check content size instead of trusting metadata
-  - Update versioning and tracking
+  - Change the people endpoint to get the full person details instead of relying on BaseItemDTO
+  - Treat all dates in UTC instead of dealing with TZ comparisons
+  - Handle process percentages more accurately by stages instead of by guessing
+  - Handle race conditions for downloads/recycling where an item could be deleted too soon
+  - Reset the retry count when moving to the next item instead of setting overall retries
+  - Fix stale modals on syncs
   features:
-  - Filter out watched content from whitelisted syncing
-  - Treat watched content as `ignored` so it's visible in the listing but not synced
+  - Compare values by hashes instead of raw JSON

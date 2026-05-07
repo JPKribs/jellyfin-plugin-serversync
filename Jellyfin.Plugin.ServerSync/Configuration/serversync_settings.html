@@ -186,22 +186,9 @@
                                         <div class="fieldDescription checkboxFieldDescription">Re-queue files if the source file size differs or if the source was modified after last sync.</div>
                                     </div>
 
-                                    <div id="detectUpdatedFilesSettings" class="nested-settings hidden">
-                                        <div class="selectContainer">
-                                            <label class="selectLabel" for="selChangeDetectionPolicy">Change Detection Policy</label>
-                                            <select is="emby-select" id="selChangeDetectionPolicy" class="emby-select-withcolor emby-select">
-                                                <option value="SizeOnly">Size Only</option>
-                                                <option value="ETagOnly">ETag Only</option>
-                                                <option value="Both">Both Size and ETag</option>
-                                            </select>
-                                            <div class="fieldDescription">How to detect if a file has changed. Size Only is most stable.</div>
-                                            <div class="selectArrowContainer"><div style="display:none;">0</div><span class="selectArrow material-icons keyboard_arrow_down" aria-hidden="true"></span></div>
-                                        </div>
-                                    </div>
-
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
-                                            <input type="checkbox" is="emby-checkbox" id="chkIncludeExtras" />
+                                            <input type="checkbox" is="emby-checkbox" id="chkIncludeCompanionFiles" />
                                             <span class="checkboxLabel">Include Companion Files</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription">Also download external subtitles and other companion files when available.</div>
@@ -532,20 +519,6 @@
                                             <span class="checkboxLabel">Folder Items (Series, Seasons, Albums, Artists, BoxSets)</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription">Sync metadata for container/folder-type items in addition to leaf items. Matches by translated file path.</div>
-                                    </div>
-                                </div>
-
-                                <!-- Refresh Mode Subsection -->
-                                <h3 class="subsectionHeader">Refresh Mode</h3>
-                                <div class="settingsGroup">
-                                    <div class="selectContainer">
-                                        <label class="selectLabel" for="selMetadataRefreshMode">Metadata Refresh Mode</label>
-                                        <select is="emby-select" id="selMetadataRefreshMode" class="emby-select-withcolor emby-select">
-                                            <option value="FullRefresh">Full Refresh</option>
-                                            <option value="SkipUnchanged">Skip Unchanged</option>
-                                        </select>
-                                        <div class="fieldDescription">Full Refresh compares all metadata every run. Skip Unchanged uses ETags to skip items that haven't changed on the source server, which is faster for large libraries.</div>
-                                        <div class="selectArrowContainer"><div style="display:none;">0</div><span class="selectArrow material-icons keyboard_arrow_down" aria-hidden="true"></span></div>
                                     </div>
                                 </div>
                             </div>

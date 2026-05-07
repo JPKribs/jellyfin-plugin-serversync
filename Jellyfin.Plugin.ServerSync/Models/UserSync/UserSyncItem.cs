@@ -27,16 +27,11 @@ public static class UserPropertyCategory
 
 /// <summary>
 /// Represents a single property sync record for a user mapping.
-/// One record per property category (Policy, Configuration, ProfileImage) per user mapping.
-/// Similar to HistorySyncItem in structure.
+/// One record per property category (Policy, Configuration, ProfileImage)
+/// per user mapping. Three categories means up to three rows per user.
 /// </summary>
-public class UserSyncItem
+public class UserSyncItem : SyncRecord
 {
-    /// <summary>
-    /// Gets or sets the unique database identifier.
-    /// </summary>
-    public long Id { get; set; }
-
     // ===== User Mapping =====
 
     /// <summary>
@@ -66,10 +61,10 @@ public class UserSyncItem
     /// </summary>
     public string PropertyCategory { get; set; } = string.Empty;
 
-    // ===== Values =====
+    // ===== Values (Policy/Configuration use these; ProfileImage stores display strings here) =====
 
     /// <summary>
-    /// Gets or sets the source value (JSON for Policy/Config, size string for ProfileImage).
+    /// Gets or sets the source value (JSON for Policy/Config, display string for ProfileImage).
     /// </summary>
     public string? SourceValue { get; set; }
 
@@ -83,7 +78,20 @@ public class UserSyncItem
     /// </summary>
     public string? MergedValue { get; set; }
 
-    // ===== Profile Image Specific (for hash-based comparison) =====
+    /// <summary>
+    /// Gets or sets the SHA fingerprint of <see cref="SourceValue"/>. Reserved
+    /// for future fast-path comparisons; currently unused but maintained in the
+    /// schema so a later refactor can drop in <see cref="SyncableValue{T}"/>.
+    /// </summary>
+    public string? SourceValueHash { get; set; }
+
+    /// <summary>
+    /// Gets or sets the SHA fingerprint of the source value at the last
+    /// successful sync.
+    /// </summary>
+    public string? SyncedValueHash { get; set; }
+
+    // ===== Profile Image specific =====
 
     /// <summary>
     /// Gets or sets the source profile image hash (SHA256, truncated).
@@ -100,72 +108,70 @@ public class UserSyncItem
     /// </summary>
     public string? SyncedImageHash { get; set; }
 
-    // Legacy size fields - kept for backward compatibility during migration
     /// <summary>
-    /// Gets or sets the source profile image size in bytes (legacy, use hash instead).
+    /// Gets or sets the source profile image size in bytes.
     /// </summary>
     public long? SourceImageSize { get; set; }
 
     /// <summary>
-    /// Gets or sets the local profile image size in bytes (legacy, use hash instead).
+    /// Gets or sets the local profile image size in bytes.
     /// </summary>
     public long? LocalImageSize { get; set; }
 
     /// <summary>
-    /// Gets or sets the last synced image size (legacy, use hash instead).
+    /// Gets or sets the last synced image size.
     /// </summary>
     public long? SyncedImageSize { get; set; }
 
-    // ===== Sync Tracking =====
+    // ===== Computed change detection =====
 
-    /// <summary>
-    /// Gets or sets the sync status.
-    /// </summary>
-    public BaseSyncStatus Status { get; set; }
-
-    /// <summary>
-    /// Gets or sets when the status was last changed.
-    /// </summary>
-    public DateTime StatusDate { get; set; }
-
-    /// <summary>
-    /// Gets or sets when the item was last synced.
-    /// </summary>
-    public DateTime? LastSyncTime { get; set; }
-
-    /// <summary>
-    /// Gets or sets the error message if status is Errored.
-    /// </summary>
-    public string? ErrorMessage { get; set; }
-
-    // ===== Computed Properties =====
-
-    /// <summary>
-    /// Gets a value indicating whether there are changes to sync.
-    /// For ProfileImage: compares hashes. For others: compares merged vs local JSON values.
-    /// </summary>
-    public bool HasChanges
+    /// <inheritdoc />
+    public override bool HasChanges
     {
         get
         {
             if (PropertyCategory == UserPropertyCategory.ProfileImage)
             {
-                // Compare by hash for profile images (most accurate)
-                // Has changes if source has an image and hash differs from local
+                var sourceHasImage = !string.IsNullOrEmpty(SourceImageHash) || (SourceImageSize ?? 0) > 0;
+                var localHasImage = !string.IsNullOrEmpty(LocalImageHash) || (LocalImageSize ?? 0) > 0;
+
+                // Source removed its image but local still has one: queue the deletion.
+                if (!sourceHasImage)
+                {
+                    return localHasImage;
+                }
+
                 if (!string.IsNullOrEmpty(SourceImageHash))
                 {
                     return !string.Equals(SourceImageHash, LocalImageHash, StringComparison.OrdinalIgnoreCase);
                 }
 
-                // Fallback to size comparison if hash not available (legacy data)
-                return SourceImageSize.HasValue &&
-                       SourceImageSize > 0 &&
-                       SourceImageSize != LocalImageSize;
+                return SourceImageSize != LocalImageSize;
             }
 
-            // For Policy and Configuration, compare merged value (what we want) to local value (what exists)
-            // using semantic JSON comparison from shared utility
+            // For Policy and Configuration: short-circuit when the merged
+            // value's hash matches the last-synced hash — no apply needed.
+            if (!string.IsNullOrEmpty(SourceValueHash)
+                && string.Equals(SourceValueHash, SyncedValueHash, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             return !JsonComparisonUtility.JsonEquals(MergedValue, LocalValue);
+        }
+    }
+
+    /// <inheritdoc />
+    public override void MarkSynced()
+    {
+        if (PropertyCategory == UserPropertyCategory.ProfileImage)
+        {
+            SyncedImageHash = SourceImageHash;
+            SyncedImageSize = SourceImageSize;
+        }
+        else
+        {
+            SyncedValueHash = SourceValueHash;
         }
     }
 
@@ -183,18 +189,16 @@ public class UserSyncItem
 
             if (PropertyCategory == UserPropertyCategory.ProfileImage)
             {
-                var sourceSize = SourceImageSize.HasValue ? FormatUtilities.FormatBytes(SourceImageSize.Value) : "None";
-                return sourceSize;
+                return SourceImageSize.HasValue ? FormatUtilities.FormatBytes(SourceImageSize.Value) : "None";
             }
 
-            // Count the number of differing properties using shared utility
             var diffCount = JsonComparisonUtility.CountDifferences(MergedValue, LocalValue);
-            if (diffCount == 0)
+            return diffCount switch
             {
-                return "No changes";
-            }
-
-            return diffCount == 1 ? "1 difference" : $"{diffCount} differences";
+                0 => "No changes",
+                1 => "1 difference",
+                _ => $"{diffCount} differences"
+            };
         }
     }
 }

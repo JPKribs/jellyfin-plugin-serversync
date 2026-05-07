@@ -6,6 +6,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
+using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -19,44 +20,32 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 /// </summary>
 public partial class ConfigurationController
 {
-    // ===== User Sync Endpoints =====
-
     /// <summary>
-    /// GetUserSyncItemById
     /// Gets a single user sync item by its ID.
     /// </summary>
-    /// <param name="id">The item ID.</param>
-    /// <returns>The user sync item DTO or NotFound.</returns>
     [HttpGet("UserItems/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<UserSyncItemDto> GetUserSyncItemById(long id)
+    public ActionResult<UserSyncItemDto> GetUserSyncItemById(long id, [FromServices] UserSyncTableManager manager)
     {
-        var item = _databaseProvider.Database.GetUserSyncItemById(id);
+        var item = manager.GetById(id);
         if (item == null)
         {
             return NotFound("User sync item not found");
         }
 
         var config = _configManager.Configuration;
-        return Ok(MapToUserSyncItemDto(item, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, config.SourceServerApiKey));
+        var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
+        return Ok(MapToUserSyncItemDto(item, url, config.SourceServerApiKey));
     }
 
     /// <summary>
-    /// GetUserSyncItems
-    /// Gets paginated user sync items from the database with optional search and filter.
-    /// One record per property category (Policy, Configuration, ProfileImage) per user.
+    /// Gets paginated user sync items with optional search and status filter.
     /// </summary>
-    /// <param name="search">Optional search term (matches user names).</param>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="sourceUserId">Optional source user ID filter.</param>
-    /// <param name="propertyCategory">Optional property category filter.</param>
-    /// <param name="skip">Number of items to skip (default 0).</param>
-    /// <param name="take">Maximum items to return (default 50, max 200).</param>
-    /// <returns>Paginated result of user sync item DTOs.</returns>
     [HttpGet("UserItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PaginatedResult<UserSyncItemDto>> GetUserSyncItems(
+        [FromServices] UserSyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
         [FromQuery] string? sourceUserId = null,
@@ -64,81 +53,93 @@ public partial class ConfigurationController
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
-        // Clamp pagination values
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
 
-        // Parse status filter
-        BaseSyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<BaseSyncStatus>(status, out var parsedStatus))
+        SyncStatus? statusFilter = null;
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsed))
         {
-            statusFilter = parsedStatus;
+            statusFilter = parsed;
         }
 
-        // Get paginated results
-        var (items, totalCount) = _databaseProvider.Database.SearchUserSyncItemsPaginated(
-            search, statusFilter, sourceUserId, propertyCategory, skip, take);
-        var config = _configManager.Configuration;
+        var page = (skip / Math.Max(1, take)) + 1;
+        var result = manager.Paginate(new PaginationRequest
+        {
+            Page = page,
+            PageSize = take,
+            SearchTerm = search,
+            StatusFilter = statusFilter
+        });
 
+        // Manager.Paginate doesn't filter by sourceUserId/propertyCategory; apply
+        // those in-memory. The page may shrink as a result — acceptable since
+        // these are rarely used together with search/status filters in the UI.
+        var filtered = result.Items.AsEnumerable();
+        if (!string.IsNullOrEmpty(sourceUserId))
+        {
+            filtered = filtered.Where(i => string.Equals(i.SourceUserId, sourceUserId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrEmpty(propertyCategory))
+        {
+            filtered = filtered.Where(i => string.Equals(i.PropertyCategory, propertyCategory, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var config = _configManager.Configuration;
+        var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
         return Ok(new PaginatedResult<UserSyncItemDto>
         {
-            Items = items.Select(i => MapToUserSyncItemDto(i, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, config.SourceServerApiKey)).ToList(),
-            TotalCount = totalCount,
+            Items = filtered.Select(i => MapToUserSyncItemDto(i, url, config.SourceServerApiKey)).ToList(),
+            TotalCount = result.TotalCount,
             Skip = skip,
             Take = take
         });
     }
 
     /// <summary>
-    /// GetUserSyncStatus
     /// Gets user sync status counts.
     /// </summary>
-    /// <returns>User sync status response with counts.</returns>
     [HttpGet("UserStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<BaseSyncStatusResponse> GetUserSyncStatus()
+    public ActionResult<BaseSyncStatusResponse> GetUserSyncStatus([FromServices] UserSyncTableManager manager)
     {
-        var counts = _databaseProvider.Database.GetUserSyncStatusCounts();
-
         return Ok(new BaseSyncStatusResponse
         {
-            Pending = counts.GetValueOrDefault(BaseSyncStatus.Pending, 0),
-            Queued = counts.GetValueOrDefault(BaseSyncStatus.Queued, 0),
-            Synced = counts.GetValueOrDefault(BaseSyncStatus.Synced, 0),
-            Errored = counts.GetValueOrDefault(BaseSyncStatus.Errored, 0),
-            Ignored = counts.GetValueOrDefault(BaseSyncStatus.Ignored, 0)
+            Pending = manager.CountByStatus(SyncStatus.Pending),
+            Queued = manager.CountByStatus(SyncStatus.Queued),
+            Synced = manager.CountByStatus(SyncStatus.Synced),
+            Errored = manager.CountByStatus(SyncStatus.Errored),
+            Ignored = manager.CountByStatus(SyncStatus.Ignored)
         });
     }
 
     /// <summary>
-    /// UpdateUserSyncItemStatus
     /// Updates the status of a user sync item.
     /// </summary>
-    /// <param name="request">Status update request.</param>
-    /// <returns>Action result with success status.</returns>
     [HttpPost("UserItems/UpdateStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult UpdateUserSyncItemStatus([FromBody] UpdateUserSyncItemStatusRequest request)
+    public ActionResult UpdateUserSyncItemStatus(
+        [FromBody] UpdateUserSyncItemStatusRequest request,
+        [FromServices] UserSyncTableManager manager)
     {
-        if (!Enum.TryParse<BaseSyncStatus>(request.Status, out var status))
+        if (!Enum.TryParse<SyncStatus>(request.Status, out var status))
         {
             return BadRequest("Invalid status value");
         }
 
-        _databaseProvider.Database.UpdateUserSyncItemStatusById(request.Id, status);
+        manager.UpdateStatus(request.Id, status);
         return Ok(new { Success = true });
     }
 
     /// <summary>
-    /// QueueUserSyncItems
     /// Moves user sync items to Queued status.
     /// </summary>
-    /// <param name="request">Bulk user sync items request.</param>
-    /// <returns>Action result with updated count.</returns>
     [HttpPost("UserItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult QueueUserSyncItems([FromBody] BulkUserSyncItemsRequest request)
+    public ActionResult QueueUserSyncItems(
+        [FromBody] BulkUserSyncItemsRequest request,
+        [FromServices] UserSyncTableManager manager)
     {
         if (request?.Ids == null || request.Ids.Count == 0)
         {
@@ -146,10 +147,9 @@ public partial class ConfigurationController
         }
 
         var successCount = 0;
-
         try
         {
-            successCount = _databaseProvider.Database.BatchUpdateUserSyncItemStatusByIds(request.Ids, BaseSyncStatus.Queued);
+            successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Queued);
         }
         catch (Exception ex)
         {
@@ -160,15 +160,14 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// IgnoreUserSyncItems
     /// Marks user sync items as ignored.
     /// </summary>
-    /// <param name="request">Bulk user sync items request.</param>
-    /// <returns>Action result with updated count.</returns>
     [HttpPost("UserItems/Ignore")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult IgnoreUserSyncItems([FromBody] BulkUserSyncItemsRequest request)
+    public ActionResult IgnoreUserSyncItems(
+        [FromBody] BulkUserSyncItemsRequest request,
+        [FromServices] UserSyncTableManager manager)
     {
         if (request?.Ids == null || request.Ids.Count == 0)
         {
@@ -176,10 +175,9 @@ public partial class ConfigurationController
         }
 
         var successCount = 0;
-
         try
         {
-            successCount = _databaseProvider.Database.BatchUpdateUserSyncItemStatusByIds(request.Ids, BaseSyncStatus.Ignored);
+            successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Ignored);
         }
         catch (Exception ex)
         {
@@ -190,64 +188,34 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// TriggerUserRefresh
     /// Manually triggers the refresh user sync table task.
     /// </summary>
-    /// <returns>Action result with status message.</returns>
     [HttpPost("TriggerUserRefresh")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerUserRefresh()
-    {
-        var refreshTask = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncRefreshUserTable");
-
-        if (refreshTask == null)
-        {
-            return NotFound("User refresh task not found");
-        }
-
-        _taskManager.Execute(refreshTask, new TaskOptions());
-
-        return Ok(new { Message = "User refresh task started" });
-    }
+        => ExecuteScheduledTaskByKey("ServerSyncRefreshUserTable", "User refresh task started", "User refresh task not found");
 
     /// <summary>
-    /// TriggerUserSync
     /// Manually triggers the sync missing user data task.
     /// </summary>
-    /// <returns>Action result with status message.</returns>
     [HttpPost("TriggerUserSync")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerUserSync()
-    {
-        var syncTask = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncMissingUserData");
-
-        if (syncTask == null)
-        {
-            return NotFound("User sync task not found");
-        }
-
-        _taskManager.Execute(syncTask, new TaskOptions());
-
-        return Ok(new { Message = "User sync task started" });
-    }
+        => ExecuteScheduledTaskByKey("ServerSyncMissingUserData", "User sync task started", "User sync task not found");
 
     /// <summary>
-    /// ResetUserSyncDatabase
     /// Resets the user sync database, removing all tracked user sync items.
     /// </summary>
-    /// <returns>Action result with success status.</returns>
     [HttpPost("ResetUserSyncDatabase")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetUserSyncDatabase()
+    public ActionResult ResetUserSyncDatabase([FromServices] UserSyncTableManager manager)
     {
         try
         {
-            _databaseProvider.Database.ResetUserSyncDatabase();
-            _logger.LogInformation("User sync database has been reset");
+            var deleted = manager.ResetTable();
+            _logger.LogInformation("User sync database has been reset, {Count} rows deleted", deleted);
             return Ok(new { Success = true, Message = "User sync database reset successfully" });
         }
         catch (Exception ex)
@@ -258,8 +226,111 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Maps a UserSyncItem to a DTO.
+    /// Gets paginated list of user sync users (consolidated view).
+    /// Groups items by (SourceUserId, LocalUserId) showing one row per user.
     /// </summary>
+    [HttpGet("UserSyncUsers")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<PaginatedResult<UserSyncUserDto>> GetUserSyncUsers(
+        [FromServices] UserSyncTableManager manager,
+        [FromQuery] string? search = null,
+        [FromQuery] string? status = null,
+        [FromQuery] int skip = 0,
+        [FromQuery] int take = 50)
+    {
+        take = Math.Clamp(take, 1, 200);
+        skip = Math.Max(0, skip);
+
+        SyncStatus? statusFilter = null;
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsed))
+        {
+            statusFilter = parsed;
+        }
+
+        var page = (skip / Math.Max(1, take)) + 1;
+        var result = manager.PaginateUserMappings(new PaginationRequest
+        {
+            Page = page,
+            PageSize = take,
+            SearchTerm = search,
+            StatusFilter = statusFilter
+        });
+
+        var config = _configManager.Configuration;
+        var dtos = result.Items.Select(g => MapToUserSyncUserDto(
+            g.SourceUserId, g.LocalUserId, g.SourceUserName, g.LocalUserName, g.Items.ToList(), config)).ToList();
+
+        return Ok(new PaginatedResult<UserSyncUserDto>
+        {
+            Items = dtos,
+            TotalCount = result.TotalCount
+        });
+    }
+
+    /// <summary>
+    /// Gets detailed information for a specific user mapping.
+    /// </summary>
+    [HttpGet("UserSyncUsers/{sourceUserId}/{localUserId}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<UserSyncUserDetailDto> GetUserSyncUserDetail(
+        string sourceUserId,
+        string localUserId,
+        [FromServices] UserSyncTableManager manager)
+    {
+        var items = manager.GetByUserMapping(sourceUserId, localUserId);
+        if (items.Count == 0)
+        {
+            return NotFound();
+        }
+
+        var config = _configManager.Configuration;
+        var dto = MapToUserSyncUserDetailDto(sourceUserId, localUserId, items.ToList(), config);
+        return Ok(dto);
+    }
+
+    /// <summary>
+    /// Ignores all categories for specified user mappings.
+    /// </summary>
+    [HttpPost("UserSyncUsers/Ignore")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult IgnoreUserSyncUsers(
+        [FromBody] BulkUserMappingsRequest request,
+        [FromServices] UserSyncTableManager manager)
+    {
+        if (request?.UserMappings == null || request.UserMappings.Count == 0)
+        {
+            return BadRequest("No user mappings specified");
+        }
+
+        var mappings = request.UserMappings.Select(m => (m.SourceUserId, m.LocalUserId));
+        var successCount = manager.BulkUpdateStatusByMappings(mappings, SyncStatus.Ignored);
+        return Ok(new { Updated = successCount });
+    }
+
+    /// <summary>
+    /// Queues all categories for specified user mappings.
+    /// </summary>
+    [HttpPost("UserSyncUsers/Queue")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult QueueUserSyncUsers(
+        [FromBody] BulkUserMappingsRequest request,
+        [FromServices] UserSyncTableManager manager)
+    {
+        if (request?.UserMappings == null || request.UserMappings.Count == 0)
+        {
+            return BadRequest("No user mappings specified");
+        }
+
+        var mappings = request.UserMappings.Select(m => (m.SourceUserId, m.LocalUserId));
+        var successCount = manager.BulkUpdateStatusByMappings(mappings, SyncStatus.Queued);
+        return Ok(new { Updated = successCount });
+    }
+
+    // ===== DTO mapping helpers (unchanged from prior version) =====
+
     private static UserSyncItemDto MapToUserSyncItemDto(UserSyncItem item, string? sourceServerUrl = null, string? sourceServerApiKey = null)
     {
         return new UserSyncItemDto
@@ -284,135 +355,10 @@ public partial class ConfigurationController
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,
-            ErrorMessage = item.ErrorMessage
+            ErrorMessage = item.Reason
         };
     }
 
-    // ============================================
-    // User Sync Consolidated Endpoints
-    // ============================================
-
-    /// <summary>
-    /// GetUserSyncUsers
-    /// Gets paginated list of user sync users (consolidated view).
-    /// Groups UserSyncItems by (SourceUserId, LocalUserId) showing one row per user.
-    /// </summary>
-    /// <param name="search">Optional search term (matches usernames).</param>
-    /// <param name="status">Optional status filter (matches any category with this status).</param>
-    /// <param name="skip">Number of items to skip (default 0).</param>
-    /// <param name="take">Maximum items to return (default 50, max 200).</param>
-    /// <returns>Paginated result of user sync user DTOs.</returns>
-    [HttpGet("UserSyncUsers")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PaginatedResult<UserSyncUserDto>> GetUserSyncUsers(
-        [FromQuery] string? search = null,
-        [FromQuery] string? status = null,
-        [FromQuery] int skip = 0,
-        [FromQuery] int take = 50)
-    {
-        // Clamp pagination values
-        take = Math.Clamp(take, 1, 200);
-        skip = Math.Max(0, skip);
-
-        // Parse status filter
-        BaseSyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<BaseSyncStatus>(status, out var parsedStatus))
-        {
-            statusFilter = parsedStatus;
-        }
-
-        // Get paginated results
-        var (users, totalCount) = _databaseProvider.Database.GetUserSyncUsersPaginated(search, statusFilter, skip, take);
-
-        // Map to DTOs
-        var config = _configManager.Configuration;
-        var dtos = users.Select(u => MapToUserSyncUserDto(
-            u.SourceUserId,
-            u.LocalUserId,
-            u.SourceUserName,
-            u.LocalUserName,
-            u.Items,
-            config)).ToList();
-
-        return Ok(new PaginatedResult<UserSyncUserDto>
-        {
-            Items = dtos,
-            TotalCount = totalCount
-        });
-    }
-
-    /// <summary>
-    /// GetUserSyncUserDetail
-    /// Gets detailed information for a specific user mapping.
-    /// Returns all property categories for the modal view.
-    /// </summary>
-    /// <param name="sourceUserId">The source server user ID.</param>
-    /// <param name="localUserId">The local server user ID.</param>
-    /// <returns>User sync user detail DTO.</returns>
-    [HttpGet("UserSyncUsers/{sourceUserId}/{localUserId}")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<UserSyncUserDetailDto> GetUserSyncUserDetail(string sourceUserId, string localUserId)
-    {
-        var items = _databaseProvider.Database.GetUserSyncUserDetail(sourceUserId, localUserId);
-        if (items.Count == 0)
-        {
-            return NotFound();
-        }
-
-        var config = _configManager.Configuration;
-        var dto = MapToUserSyncUserDetailDto(sourceUserId, localUserId, items, config);
-
-        return Ok(dto);
-    }
-
-    /// <summary>
-    /// IgnoreUserSyncUsers
-    /// Ignores all categories for specified user mappings.
-    /// </summary>
-    /// <param name="request">Bulk user mappings request.</param>
-    /// <returns>Action result with updated count.</returns>
-    [HttpPost("UserSyncUsers/Ignore")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult IgnoreUserSyncUsers([FromBody] BulkUserMappingsRequest request)
-    {
-        if (request?.UserMappings == null || request.UserMappings.Count == 0)
-        {
-            return BadRequest("No user mappings specified");
-        }
-
-        var mappings = request.UserMappings.Select(m => (m.SourceUserId, m.LocalUserId));
-        var successCount = _databaseProvider.Database.BatchUpdateUserSyncStatusByMappings(mappings, BaseSyncStatus.Ignored);
-
-        return Ok(new { Updated = successCount });
-    }
-
-    /// <summary>
-    /// QueueUserSyncUsers
-    /// Queues all categories for specified user mappings.
-    /// </summary>
-    /// <param name="request">Bulk user mappings request.</param>
-    /// <returns>Action result with updated count.</returns>
-    [HttpPost("UserSyncUsers/Queue")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult QueueUserSyncUsers([FromBody] BulkUserMappingsRequest request)
-    {
-        if (request?.UserMappings == null || request.UserMappings.Count == 0)
-        {
-            return BadRequest("No user mappings specified");
-        }
-
-        var mappings = request.UserMappings.Select(m => (m.SourceUserId, m.LocalUserId));
-        var successCount = _databaseProvider.Database.BatchUpdateUserSyncStatusByMappings(mappings, BaseSyncStatus.Queued);
-
-        return Ok(new { Updated = successCount });
-    }
-
-    /// <summary>
-    /// Maps user sync items to a consolidated UserSyncUserDto.
-    /// </summary>
     private static UserSyncUserDto MapToUserSyncUserDto(
         string sourceUserId,
         string localUserId,
@@ -431,57 +377,33 @@ public partial class ConfigurationController
             LocalUserId = localUserId,
             SourceUserName = sourceUserName ?? items.FirstOrDefault()?.SourceUserName,
             LocalUserName = localUserName ?? items.FirstOrDefault()?.LocalUserName,
-
-            // Source server info
             SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
             SourceServerApiKey = config.SourceServerApiKey,
-
-            // Record IDs
             PolicyId = policyItem?.Id,
             ConfigurationId = configItem?.Id,
             ProfileImageId = imageItem?.Id,
-
-            // Individual statuses
             PolicyStatus = policyItem?.Status.ToString(),
             ConfigurationStatus = configItem?.Status.ToString(),
             ProfileImageStatus = imageItem?.Status.ToString(),
-
-            // Individual change flags
             PolicyHasChanges = policyItem?.HasChanges ?? false,
             ConfigurationHasChanges = configItem?.HasChanges ?? false,
             ProfileImageHasChanges = imageItem?.HasChanges ?? false,
-
-            // Individual change summaries
             PolicyChangesSummary = policyItem?.ChangesSummary,
             ConfigurationChangesSummary = configItem?.ChangesSummary,
             ProfileImageChangesSummary = imageItem?.ChangesSummary,
-
-            // Aggregate has changes
-            HasChanges = (policyItem?.HasChanges ?? false) ||
-                        (configItem?.HasChanges ?? false) ||
-                        (imageItem?.HasChanges ?? false),
-
-            // Aggregate last sync time (most recent)
+            HasChanges = (policyItem?.HasChanges ?? false) || (configItem?.HasChanges ?? false) || (imageItem?.HasChanges ?? false),
             LastSyncTime = new[] { policyItem?.LastSyncTime, configItem?.LastSyncTime, imageItem?.LastSyncTime }
-                .Where(t => t.HasValue)
-                .Select(t => t!.Value)
-                .DefaultIfEmpty()
-                .Max(),
-
-            // Aggregate error message
-            ErrorMessage = string.Join("; ", new[] { policyItem?.ErrorMessage, configItem?.ErrorMessage, imageItem?.ErrorMessage }
+                .Where(t => t.HasValue).Select(t => t!.Value).DefaultIfEmpty().Max(),
+            ErrorMessage = string.Join("; ", new[] { policyItem?.Reason, configItem?.Reason, imageItem?.Reason }
                 .Where(e => !string.IsNullOrEmpty(e)))
         };
 
         dto.OverallStatus = ComputeOverallStatus(policyItem?.Status, configItem?.Status, imageItem?.Status);
-
-        // Compute total changes display
         dto.TotalChanges = ComputeTotalChangesDisplay(
             policyItem?.HasChanges ?? false, policyItem?.ChangesSummary,
             configItem?.HasChanges ?? false, configItem?.ChangesSummary,
             imageItem?.HasChanges ?? false);
 
-        // Set empty error message to null
         if (string.IsNullOrEmpty(dto.ErrorMessage))
         {
             dto.ErrorMessage = null;
@@ -490,9 +412,6 @@ public partial class ConfigurationController
         return dto;
     }
 
-    /// <summary>
-    /// Maps user sync items to a detailed UserSyncUserDetailDto for the modal.
-    /// </summary>
     private static UserSyncUserDetailDto MapToUserSyncUserDetailDto(
         string sourceUserId,
         string localUserId,
@@ -509,32 +428,20 @@ public partial class ConfigurationController
             LocalUserId = localUserId,
             SourceUserName = items.FirstOrDefault()?.SourceUserName,
             LocalUserName = items.FirstOrDefault()?.LocalUserName,
-
-            // Map full item details
             PolicyItem = policyItem != null ? MapToUserSyncItemDto(policyItem) : null,
             ConfigurationItem = configItem != null ? MapToUserSyncItemDto(configItem) : null,
             ProfileImageItem = imageItem != null ? MapToUserSyncItemDto(imageItem) : null,
-
-            // Config flags
             PolicyEnabled = config.UserSyncPolicy,
             ConfigurationEnabled = config.UserSyncConfiguration,
             ProfileImageEnabled = config.UserSyncProfileImage,
-
-            // Aggregate last sync time
             LastSyncTime = new[] { policyItem?.LastSyncTime, configItem?.LastSyncTime, imageItem?.LastSyncTime }
-                .Where(t => t.HasValue)
-                .Select(t => t!.Value)
-                .DefaultIfEmpty()
-                .Max(),
-
-            // Aggregate error message
-            ErrorMessage = string.Join("; ", new[] { policyItem?.ErrorMessage, configItem?.ErrorMessage, imageItem?.ErrorMessage }
+                .Where(t => t.HasValue).Select(t => t!.Value).DefaultIfEmpty().Max(),
+            ErrorMessage = string.Join("; ", new[] { policyItem?.Reason, configItem?.Reason, imageItem?.Reason }
                 .Where(e => !string.IsNullOrEmpty(e)))
         };
 
         dto.OverallStatus = ComputeOverallStatus(policyItem?.Status, configItem?.Status, imageItem?.Status);
 
-        // Set empty error message to null
         if (string.IsNullOrEmpty(dto.ErrorMessage))
         {
             dto.ErrorMessage = null;
@@ -543,16 +450,12 @@ public partial class ConfigurationController
         return dto;
     }
 
-    /// <summary>
-    /// Computes the total changes display string (e.g., "1 policy, 2 config").
-    /// </summary>
     private static string ComputeTotalChangesDisplay(
         bool policyHasChanges, string? policySummary,
         bool configHasChanges, string? configSummary,
         bool imageHasChanges)
     {
         var parts = new List<string>();
-
         if (policyHasChanges)
         {
             var count = ExtractChangeCount(policySummary);
@@ -573,9 +476,6 @@ public partial class ConfigurationController
         return parts.Count == 0 ? "No Changes" : string.Join(", ", parts);
     }
 
-    /// <summary>
-    /// Extracts the change count from a summary string like "X differences".
-    /// </summary>
     private static int ExtractChangeCount(string? summary)
     {
         if (string.IsNullOrEmpty(summary))

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 
 namespace Jellyfin.Plugin.ServerSync.Models.ContentSync;
 

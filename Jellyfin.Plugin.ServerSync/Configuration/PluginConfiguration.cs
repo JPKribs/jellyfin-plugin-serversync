@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.MetadataSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.ServerSync.Configuration;
@@ -17,6 +16,16 @@ public class PluginConfiguration : BasePluginConfiguration
     // ===== Source Server Configuration =====
 
     public string SourceServerUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When true (default), the source-server URL is allowed to point at
+    /// loopback, RFC1918, or IPv6 ULA addresses — typical for home Jellyfin
+    /// installs where the source server runs on the same LAN. When false, the
+    /// URL must resolve to a public address; loopback/private ranges are
+    /// rejected. Cloud-metadata endpoints (169.254.0.0/16, IPv6 link-local,
+    /// IPv6 site-local, 0.0.0.0) are always blocked regardless of this flag.
+    /// </summary>
+    public bool AllowSourceServerOnPrivateNetwork { get; set; } = true;
 
     /// <summary>
     /// Optional external URL for the source server, used only for image display in the UI.
@@ -156,11 +165,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Re-queue files with size or date mismatches when enabled.
     /// </summary>
     public bool DetectUpdatedFiles { get; set; } = true;
-
-    /// <summary>
-    /// Controls how file changes are detected. Path is always checked.
-    /// </summary>
-    public ChangeDetectionPolicy ChangeDetectionPolicy { get; set; } = ChangeDetectionPolicy.SizeOnly;
 
     /// <summary>
     /// Enable time-based bandwidth scheduling with alternate speed.
@@ -387,12 +391,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Timestamp when the last people sync completed.
     /// </summary>
     public DateTime? LastPeopleSyncTime { get; set; }
-
-    /// <summary>
-    /// Controls how metadata items are refreshed during sync.
-    /// FullRefresh always compares all categories; SkipUnchanged skips items with matching ETags.
-    /// </summary>
-    public MetadataRefreshMode MetadataRefreshMode { get; set; } = MetadataRefreshMode.FullRefresh;
 
     /// <summary>
     /// ValidateConfiguration
@@ -699,5 +697,32 @@ public class PluginConfiguration : BasePluginConfiguration
             "GB" => "GB",
             _ => "MB"
         };
+    }
+}
+
+/// <summary>
+/// Convenience helpers over <see cref="PluginConfiguration"/>'s mapping
+/// collections. Centralizes the
+/// <c>(config.LibraryMappings ?? new()).Where(m =&gt; m.IsEnabled).ToList()</c>
+/// pattern that used to be repeated across every refresh task.
+/// </summary>
+public static class PluginConfigurationExtensions
+{
+    /// <summary>
+    /// Returns enabled library mappings as a fresh list. Never returns null.
+    /// </summary>
+    public static List<LibraryMapping> GetEnabledLibraryMappings(this PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
+    }
+
+    /// <summary>
+    /// Returns enabled user mappings as a fresh list. Never returns null.
+    /// </summary>
+    public static List<UserMapping> GetEnabledUserMappings(this PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
     }
 }

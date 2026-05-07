@@ -4,6 +4,7 @@ using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
+using Jellyfin.Plugin.ServerSync.Services;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -16,21 +17,15 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 /// </summary>
 public partial class ConfigurationController
 {
-    // ============================================
-    // People Sync Endpoints
-    // ============================================
-
     /// <summary>
     /// Gets a specific people sync item by its database ID.
     /// </summary>
-    /// <param name="id">The database ID of the people sync item.</param>
-    /// <returns>The people sync item DTO.</returns>
     [HttpGet("PeopleItems/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<PeopleSyncItemDto> GetPeopleSyncItem(long id)
+    public ActionResult<PeopleSyncItemDto> GetPeopleSyncItem(long id, [FromServices] PeopleSyncTableManager manager)
     {
-        var item = _databaseProvider.Database.GetPeopleSyncItemById(id);
+        var item = manager.GetById(id);
         if (item == null)
         {
             return NotFound();
@@ -42,38 +37,37 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets paginated people sync items with optional search and status filtering.
     /// </summary>
-    /// <param name="search">Optional search term to filter by person name.</param>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="skip">Number of items to skip.</param>
-    /// <param name="take">Number of items to return.</param>
-    /// <returns>Paginated people sync items.</returns>
     [HttpGet("PeopleItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PaginatedResult<PeopleSyncItemDto>> GetPeopleSyncItems(
+        [FromServices] PeopleSyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
-        // Clamp pagination values
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
 
-        // Parse status filter
-        BaseSyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<BaseSyncStatus>(status, out var parsedStatus))
+        SyncStatus? statusFilter = null;
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
         {
             statusFilter = parsedStatus;
         }
 
-        // Get paginated results
-        var (items, totalCount) = _databaseProvider.Database.SearchPeopleSyncItemsPaginated(
-            search, statusFilter, skip, take);
+        var page = (skip / Math.Max(1, take)) + 1;
+        var result = manager.Paginate(new PaginationRequest
+        {
+            Page = page,
+            PageSize = take,
+            SearchTerm = search,
+            StatusFilter = statusFilter
+        });
 
         return Ok(new PaginatedResult<PeopleSyncItemDto>
         {
-            Items = items.Select(MapToPeopleSyncItemDto).ToList(),
-            TotalCount = totalCount,
+            Items = result.Items.Select(MapToPeopleSyncItemDto).ToList(),
+            TotalCount = result.TotalCount,
             Skip = skip,
             Take = take
         });
@@ -82,53 +76,50 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets people sync status counts.
     /// </summary>
-    /// <returns>People sync status response with counts.</returns>
     [HttpGet("PeopleStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PeopleSyncStatusResponse> GetPeopleSyncStatus()
+    public ActionResult<PeopleSyncStatusResponse> GetPeopleSyncStatus([FromServices] PeopleSyncTableManager manager)
     {
-        var counts = _databaseProvider.Database.GetPeopleSyncStatusCounts();
-
         return Ok(new PeopleSyncStatusResponse
         {
-            Pending = counts.GetValueOrDefault(BaseSyncStatus.Pending, 0),
-            Queued = counts.GetValueOrDefault(BaseSyncStatus.Queued, 0),
-            Synced = counts.GetValueOrDefault(BaseSyncStatus.Synced, 0),
-            Errored = counts.GetValueOrDefault(BaseSyncStatus.Errored, 0),
-            Ignored = counts.GetValueOrDefault(BaseSyncStatus.Ignored, 0),
+            Pending = manager.CountByStatus(SyncStatus.Pending),
+            Queued = manager.CountByStatus(SyncStatus.Queued),
+            Synced = manager.CountByStatus(SyncStatus.Synced),
+            Errored = manager.CountByStatus(SyncStatus.Errored),
+            Ignored = manager.CountByStatus(SyncStatus.Ignored),
             LastSyncTime = _configManager.Configuration.LastPeopleSyncTime,
-            PersonCount = counts.Values.Sum()
+            PersonCount = manager.Count()
         });
     }
 
     /// <summary>
     /// Updates the status of a people sync item.
     /// </summary>
-    /// <param name="request">Status update request.</param>
-    /// <returns>Action result with success status.</returns>
     [HttpPost("PeopleItems/UpdateStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult UpdatePeopleSyncItemStatus([FromBody] UpdatePeopleSyncItemStatusRequest request)
+    public ActionResult UpdatePeopleSyncItemStatus(
+        [FromBody] UpdatePeopleSyncItemStatusRequest request,
+        [FromServices] PeopleSyncTableManager manager)
     {
-        if (!Enum.TryParse<BaseSyncStatus>(request.Status, out var parsedStatus))
+        if (!Enum.TryParse<SyncStatus>(request.Status, out var parsedStatus))
         {
             return BadRequest("Invalid status value");
         }
 
-        _databaseProvider.Database.UpdatePeopleSyncItemStatusById(request.Id, parsedStatus);
+        manager.UpdateStatus(request.Id, parsedStatus);
         return Ok(new { Success = true });
     }
 
     /// <summary>
     /// Moves people sync items to Queued status.
     /// </summary>
-    /// <param name="request">Bulk people sync items request.</param>
-    /// <returns>Action result with updated count.</returns>
     [HttpPost("PeopleItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult QueuePeopleSyncItems([FromBody] BulkPeopleSyncItemsRequest request)
+    public ActionResult QueuePeopleSyncItems(
+        [FromBody] BulkPeopleSyncItemsRequest request,
+        [FromServices] PeopleSyncTableManager manager)
     {
         if (request?.Ids == null || request.Ids.Count == 0)
         {
@@ -136,10 +127,9 @@ public partial class ConfigurationController
         }
 
         var successCount = 0;
-
         try
         {
-            successCount = _databaseProvider.Database.BatchUpdatePeopleSyncItemStatusByIds(request.Ids, BaseSyncStatus.Queued);
+            successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Queued);
         }
         catch (Exception ex)
         {
@@ -152,12 +142,12 @@ public partial class ConfigurationController
     /// <summary>
     /// Marks people sync items as ignored.
     /// </summary>
-    /// <param name="request">Bulk people sync items request.</param>
-    /// <returns>Action result with updated count.</returns>
     [HttpPost("PeopleItems/Ignore")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult IgnorePeopleSyncItems([FromBody] BulkPeopleSyncItemsRequest request)
+    public ActionResult IgnorePeopleSyncItems(
+        [FromBody] BulkPeopleSyncItemsRequest request,
+        [FromServices] PeopleSyncTableManager manager)
     {
         if (request?.Ids == null || request.Ids.Count == 0)
         {
@@ -165,10 +155,9 @@ public partial class ConfigurationController
         }
 
         var successCount = 0;
-
         try
         {
-            successCount = _databaseProvider.Database.BatchUpdatePeopleSyncItemStatusByIds(request.Ids, BaseSyncStatus.Ignored);
+            successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Ignored);
         }
         catch (Exception ex)
         {
@@ -181,59 +170,32 @@ public partial class ConfigurationController
     /// <summary>
     /// Manually triggers the refresh people sync table task.
     /// </summary>
-    /// <returns>Action result with status message.</returns>
     [HttpPost("TriggerPeopleRefresh")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerPeopleRefresh()
-    {
-        var refreshTask = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncRefreshPeopleTable");
-
-        if (refreshTask == null)
-        {
-            return NotFound("People refresh task not found");
-        }
-
-        _taskManager.Execute(refreshTask, new TaskOptions());
-
-        return Ok(new { Message = "People refresh task started" });
-    }
+        => ExecuteScheduledTaskByKey("ServerSyncRefreshPeopleTable", "People refresh task started", "People refresh task not found");
 
     /// <summary>
     /// Manually triggers the sync missing people task.
     /// </summary>
-    /// <returns>Action result with status message.</returns>
     [HttpPost("TriggerPeopleSync")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerPeopleSync()
-    {
-        var syncTask = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncMissingPeople");
-
-        if (syncTask == null)
-        {
-            return NotFound("People sync task not found");
-        }
-
-        _taskManager.Execute(syncTask, new TaskOptions());
-
-        return Ok(new { Message = "People sync task started" });
-    }
+        => ExecuteScheduledTaskByKey("ServerSyncMissingPeople", "People sync task started", "People sync task not found");
 
     /// <summary>
     /// Resets the people sync database, removing all tracked people sync items.
     /// </summary>
-    /// <returns>Action result with success status.</returns>
     [HttpPost("ResetPeopleSyncDatabase")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetPeopleSyncDatabase()
+    public ActionResult ResetPeopleSyncDatabase([FromServices] PeopleSyncTableManager manager)
     {
         try
         {
-            _databaseProvider.Database.ResetPeopleSyncDatabase();
-            _logger.LogInformation("People sync database has been reset");
+            var deleted = manager.ResetTable();
+            _logger.LogInformation("People sync database has been reset, {Count} rows deleted", deleted);
             return Ok(new { Success = true, Message = "People sync database reset successfully" });
         }
         catch (Exception ex)
@@ -255,17 +217,17 @@ public partial class ConfigurationController
             PersonName = item.PersonName,
             SourcePersonId = item.SourcePersonId,
             LocalPersonId = item.LocalPersonId,
-            SourceMetadataValue = item.SourceMetadataValue,
-            LocalMetadataValue = item.LocalMetadataValue,
-            SourceImagesValue = item.SourceImagesValue,
-            LocalImagesValue = item.LocalImagesValue,
+            SourceMetadataValue = item.Metadata.Source,
+            LocalMetadataValue = item.Metadata.Local,
+            SourceImagesValue = item.Images.Source,
+            LocalImagesValue = item.Images.Local,
             HasMetadataChanges = item.HasMetadataChanges,
             HasImagesChanges = item.HasImagesChanges,
             HasChanges = item.HasChanges,
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,
-            ErrorMessage = item.ErrorMessage,
+            ErrorMessage = item.Reason,
             SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl)
                 ? config.SourceServerExternalUrl
                 : config.SourceServerUrl,

@@ -2969,9 +2969,9 @@ export default function (view) {
             var config = this.currentConfig || {};
             var html = '';
 
-            var policyEnabled = config.SyncUserPolicy !== false;
-            var configurationEnabled = config.SyncUserConfiguration !== false;
-            var profileImageEnabled = config.SyncUserProfileImage !== false;
+            var policyEnabled = config.UserSyncPolicy !== false;
+            var configurationEnabled = config.UserSyncConfiguration !== false;
+            var profileImageEnabled = config.UserSyncProfileImage !== false;
 
             if (configurationEnabled) {
                 var hasConfigChanges = detail.ConfigurationItem && detail.ConfigurationItem.HasChanges === true;

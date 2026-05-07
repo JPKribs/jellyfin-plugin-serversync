@@ -1,179 +1,258 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using Jellyfin.Plugin.ServerSync.Utilities;
+using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
+using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Scheduled task to refresh the history sync table from source and local servers.
+/// Source-side work item for the History refresh task: a (user mapping,
+/// library mapping, source item) triple that
+/// <see cref="RefreshHistorySyncTableTask.BuildRecordAsync"/> turns into a
+/// <see cref="HistorySyncItem"/>.
 /// </summary>
-public class RefreshHistorySyncTableTask : IScheduledTask
+public sealed record HistoryWork(UserMapping UserMapping, LibraryMapping LibraryMapping, BaseItemDto SourceItem);
+
+/// <summary>
+/// Refresh phase for History sync. Walks every (enabled user × enabled
+/// library) combination, fetches each user's library items with their
+/// per-user UserData (Played/PlayCount/Position/LastPlayedDate/IsFavorite),
+/// looks up the local item by translated path, and builds a
+/// <see cref="HistorySyncItem"/> with the merged target state computed by
+/// <see cref="HistorySyncMergeService"/>.
+/// </summary>
+public class RefreshHistorySyncTableTask
+    : RefreshSyncTaskBase<HistorySyncItem, HistoryWork, (string SourceUserId, string SourceItemId)>
 {
-    private readonly ILogger<RefreshHistorySyncTableTask> _logger;
-    private readonly IPluginConfigurationManager _configManager;
-    private readonly ISyncDatabaseProvider _databaseProvider;
-    private readonly ISourceServerClientFactory _clientFactory;
     private readonly HistorySyncTableService _historyService;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RefreshHistorySyncTableTask"/> class.
+    /// Initializes a new instance.
     /// </summary>
     public RefreshHistorySyncTableTask(
         ILogger<RefreshHistorySyncTableTask> logger,
         IPluginConfigurationManager configManager,
-        ISyncDatabaseProvider databaseProvider,
         ISourceServerClientFactory clientFactory,
-        HistorySyncTableService historyService)
+        HistorySyncTableService historyService,
+        HistorySyncTableManager manager)
+        : base(logger, manager, clientFactory, configManager)
     {
-        _logger = logger;
-        _configManager = configManager;
-        _databaseProvider = databaseProvider;
-        _clientFactory = clientFactory;
         _historyService = historyService;
     }
 
     /// <inheritdoc />
-    public string Name => "Refresh History Sync Table";
+    public override string Name => "Refresh History Sync Table";
 
     /// <inheritdoc />
-    public string Key => "ServerSyncRefreshHistoryTable";
+    public override string Key => "ServerSyncRefreshHistoryTable";
 
     /// <inheritdoc />
-    public string Description => "Scans source and local servers for watch history differences and updates the history sync table.";
+    public override string Description => "Scans source and local servers for watch history differences and updates the history sync table.";
 
     /// <inheritdoc />
-    public string Category => "History Sync";
+    public override string Category => "History Sync";
 
     /// <inheritdoc />
-    public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override string ModuleMutexKey => "History";
+
+    /// <inheritdoc />
+    protected override bool IsEnabled()
     {
-        var config = _configManager.Configuration;
+        var config = ConfigManager.Configuration;
+        if (!config.EnableHistorySync) return false;
+        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey)) return false;
+        return config.GetEnabledUserMappings().Count > 0 && config.GetEnabledLibraryMappings().Count > 0;
+    }
 
-        // Check if history sync is enabled
-        if (!config.EnableHistorySync)
+    /// <inheritdoc />
+    protected override async Task<IList<HistoryWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(progress);
+        if (Client == null)
         {
-            return;
+            return Array.Empty<HistoryWork>();
         }
 
-        // Validate source server configuration
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl))
+        var config = ConfigManager.Configuration;
+        var userMappings = config.UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
+        var libraryMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
+
+        // Pre-fetch counts per (user × library) pair for progress denominator.
+        var totalExpected = 0;
+        foreach (var userMapping in userMappings)
         {
-            _logger.LogWarning("History sync skipped: source server URL not configured");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(config.SourceServerApiKey))
-        {
-            _logger.LogWarning("History sync skipped: API key not configured");
-            return;
-        }
-
-        // Get enabled mappings
-        var enabledUserMappings = config.UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
-        var enabledLibraryMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
-
-        if (enabledUserMappings.Count == 0)
-        {
-            _logger.LogDebug("History sync skipped: no enabled user mappings");
-            return;
-        }
-
-        if (enabledLibraryMappings.Count == 0)
-        {
-            _logger.LogDebug("History sync skipped: no enabled library mappings");
-            return;
-        }
-
-        _logger.LogInformation("Starting history sync table refresh from {SourceUrl}", config.SourceServerUrl);
-
-        using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-
-        // Test connection
-        var connectionResult = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-        if (!connectionResult.Success)
-        {
-            _logger.LogError("Failed to connect to source server at {SourceUrl}: {Error}",
-                config.SourceServerUrl, connectionResult.ErrorMessage ?? "Unknown error");
-            return;
-        }
-
-        var database = _databaseProvider.Database;
-
-        // Progress tracking: 1% for init, 98% for processing items, 1% for finalization
-        const double InitProgress = 1.0;
-        const double ProcessingProgress = 98.0;
-
-        progress.Report(0);
-
-        // Get total item count for progress tracking
-        var totalItems = await _historyService.GetTotalItemCountAsync(
-            client,
-            enabledUserMappings,
-            enabledLibraryMappings,
-            cancellationToken).ConfigureAwait(false);
-
-        progress.Report(InitProgress);
-
-        // Process each user mapping and library mapping combination
-        var processedItems = 0;
-
-        foreach (var userMapping in enabledUserMappings)
-        {
-            if (cancellationToken.IsCancellationRequested)
+            if (!Guid.TryParse(userMapping.SourceUserId, out var sourceUserId)) continue;
+            foreach (var libraryMapping in libraryMappings)
             {
-                break;
+                if (!Guid.TryParse(libraryMapping.SourceLibraryId, out var sourceLibraryId)) continue;
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var count = await Client.GetUserLibraryItemCountAsync(sourceUserId, sourceLibraryId, cancellationToken).ConfigureAwait(false);
+                    totalExpected += count;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogDebug(ex, "Failed to fetch count for user {User} library {Library}", userMapping.SourceUserName, libraryMapping.SourceLibraryName);
+                }
+            }
+        }
+
+        progress.Report(totalExpected > 0 ? 1 : 50);
+
+        var work = new List<HistoryWork>();
+        var fetched = 0;
+
+        foreach (var userMapping in userMappings)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!Guid.TryParse(userMapping.SourceUserId, out var sourceUserId))
+            {
+                Logger.LogWarning("Skipping user mapping with invalid source ID: {Id}", userMapping.SourceUserId);
+                continue;
             }
 
-            foreach (var libraryMapping in enabledLibraryMappings)
+            foreach (var libraryMapping in libraryMappings)
             {
-                if (cancellationToken.IsCancellationRequested)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!Guid.TryParse(libraryMapping.SourceLibraryId, out var sourceLibraryId))
                 {
-                    break;
+                    Logger.LogWarning("Skipping library mapping with invalid source ID: {Id}", libraryMapping.SourceLibraryId);
+                    continue;
                 }
 
-                await _historyService.ProcessUserLibraryAsync(
-                    client,
-                    database,
-                    userMapping,
-                    libraryMapping,
-                    cancellationToken,
+                await PaginatedFetchUtility.FetchAllPagesAsync(
+                    fetchPage: (startIndex, batchSize, ct) => Client.GetUserLibraryItemsAsync(sourceUserId, sourceLibraryId, startIndex, batchSize, ct),
+                    processItem: (item, _) =>
+                    {
+                        work.Add(new HistoryWork(userMapping, libraryMapping, item));
+                        return Task.FromResult(true);
+                    },
+                    libraryName: libraryMapping.SourceLibraryName,
+                    sourceRootPath: libraryMapping.SourceRootPath,
+                    filterMode: libraryMapping.FilterMode,
+                    filteredItems: libraryMapping.FilteredItems,
+                    logger: Logger,
+                    cancellationToken: cancellationToken,
                     onItemProcessed: () =>
                     {
-                        processedItems++;
-                        if (totalItems > 0)
+                        fetched++;
+                        if (totalExpected > 0)
                         {
-                            var itemProgress = (double)processedItems / totalItems * ProcessingProgress;
-                            progress.Report(InitProgress + itemProgress);
+                            progress.Report(Math.Min(100, 100.0 * fetched / totalExpected));
                         }
                     }).ConfigureAwait(false);
             }
         }
 
         progress.Report(100);
-
-        // Update last sync time
-        config.LastHistorySyncTime = DateTime.UtcNow;
-        _configManager.SaveConfiguration();
-
-        _logger.LogInformation("History sync table refresh completed");
+        return work;
     }
 
     /// <inheritdoc />
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
+    protected override Task<HistorySyncItem?> BuildRecordAsync(
+        HistoryWork source,
+        IReadOnlyDictionary<(string SourceUserId, string SourceItemId), HistorySyncItem> existing,
+        CancellationToken cancellationToken)
     {
-        return new[]
-        {
-            new TaskTriggerInfo
-            {
-                Type = TaskTriggerInfoType.IntervalTrigger,
-                IntervalTicks = TimeSpan.FromHours(4).Ticks
-            }
-        };
+        var sourceItemId = source.SourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
+        var record = _historyService.BuildRecord(source.UserMapping, source.LibraryMapping, source.SourceItem, sourceItemId);
+        return Task.FromResult(record);
     }
+
+    /// <inheritdoc />
+    protected override (string SourceUserId, string SourceItemId) ExtractKey(HistorySyncItem record)
+        => (record.SourceUserId, record.SourceItemId);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// In scope when both the row's library mapping AND its user mapping are
+    /// currently enabled. Disabling either preserves history rows instead of
+    /// pruning them, so the user's Ignored overrides survive a toggle.
+    /// </remarks>
+    protected override bool IsInScope(HistorySyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        var config = ConfigManager.Configuration;
+
+        var libraryEnabled = false;
+        foreach (var mapping in config.GetEnabledLibraryMappings())
+        {
+            if (string.Equals(mapping.SourceLibraryId, record.SourceLibraryId, StringComparison.OrdinalIgnoreCase))
+            {
+                libraryEnabled = true;
+                break;
+            }
+        }
+
+        if (!libraryEnabled)
+        {
+            return false;
+        }
+
+        foreach (var mapping in config.GetEnabledUserMappings())
+        {
+            if (string.Equals(mapping.SourceUserId, record.SourceUserId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(mapping.LocalUserId, record.LocalUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc />
+    protected override void DecideStatus(HistorySyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.Status == SyncStatus.Ignored)
+        {
+            return;
+        }
+
+        if (record.HasChanges)
+        {
+            record.Status = SyncStatus.Queued;
+        }
+        else
+        {
+            record.Status = SyncStatus.Synced;
+            record.LastSyncTime = DateTime.UtcNow;
+        }
+
+        record.StatusDate = DateTime.UtcNow;
+        record.Reason = null;
+    }
+
+    /// <inheritdoc />
+    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    {
+        ConfigManager.Configuration.LastHistorySyncTime = DateTime.UtcNow;
+        ConfigManager.SaveConfiguration();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
+    {
+        new TaskTriggerInfo
+        {
+            Type = TaskTriggerInfoType.IntervalTrigger,
+            IntervalTicks = TimeSpan.FromHours(4).Ticks
+        }
+    };
 }

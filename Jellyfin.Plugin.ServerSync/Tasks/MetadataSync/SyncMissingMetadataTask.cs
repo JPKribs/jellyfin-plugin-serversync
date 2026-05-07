@@ -5,33 +5,38 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
+using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Scheduled task to sync metadata from the source server.
-/// Applies queued changes from the metadata sync table.
+/// Apply phase for Metadata sync. Reads queued
+/// <see cref="MetadataSyncItem"/> rows in parent-first order and applies
+/// each enabled category (Metadata, Images, People, Studios) to the local
+/// item via the four <c>ApplyXxxAsync</c> private helpers. A category that
+/// succeeds is per-category <c>MarkSynced</c>'d so its hash short-circuit
+/// is honored on the next Refresh; a category that fails causes
+/// <see cref="ApplyAsync"/> to throw, which the base class translates into
+/// <see cref="SyncStatus.Errored"/>.
 /// </summary>
-public class SyncMissingMetadataTask : IScheduledTask
+public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (string SourceLibraryId, string SourceItemId)>
 {
-    private readonly ILogger<SyncMissingMetadataTask> _logger;
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
-    private readonly ISourceServerClientFactory _clientFactory;
-    private readonly IPluginConfigurationManager _configManager;
-    private readonly ISyncDatabaseProvider _databaseProvider;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SyncMissingMetadataTask"/> class.
+    /// Initializes a new instance.
     /// </summary>
     public SyncMissingMetadataTask(
         ILogger<SyncMissingMetadataTask> logger,
@@ -39,82 +44,49 @@ public class SyncMissingMetadataTask : IScheduledTask
         IProviderManager providerManager,
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
-        ISyncDatabaseProvider databaseProvider)
+        MetadataSyncTableManager manager)
+        : base(logger, manager, clientFactory, configManager)
     {
-        _logger = logger;
         _libraryManager = libraryManager;
         _providerManager = providerManager;
-        _clientFactory = clientFactory;
-        _configManager = configManager;
-        _databaseProvider = databaseProvider;
     }
 
     /// <inheritdoc />
-    public string Name => "Sync Metadata";
+    public override string Name => "Sync Metadata";
 
     /// <inheritdoc />
-    public string Key => "ServerSyncMissingMetadata";
+    public override string Key => "ServerSyncMissingMetadata";
 
     /// <inheritdoc />
-    public string Description => "Applies queued metadata changes from the sync table to the local server.";
+    public override string Description => "Applies queued metadata changes from the sync table to the local server.";
 
     /// <inheritdoc />
-    public string Category => "Metadata Sync";
+    public override string Category => "Metadata Sync";
 
     /// <inheritdoc />
-    public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override string ModuleMutexKey => "Metadata";
+
+    /// <inheritdoc />
+    protected override bool IsEnabled()
     {
-        var config = _configManager.Configuration;
+        var config = ConfigManager.Configuration;
+        if (!config.EnableMetadataSync) return false;
+        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey)) return false;
+        if (config.GetEnabledLibraryMappings().Count == 0) return false;
+        return config.MetadataSyncMetadata || config.MetadataSyncImages
+            || config.MetadataSyncPeople || config.MetadataSyncStudios;
+    }
 
-        // Check if metadata sync is enabled
-        if (!config.EnableMetadataSync)
-        {
-            return;
-        }
-
-        // Validate source server configuration
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) ||
-            string.IsNullOrWhiteSpace(config.SourceServerApiKey))
-        {
-            _logger.LogWarning("Metadata sync skipped: source server not configured");
-            return;
-        }
-
-        // Get enabled library mappings
-        var enabledLibraryMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
-
-        if (enabledLibraryMappings.Count == 0)
-        {
-            _logger.LogDebug("Metadata sync skipped: no enabled library mappings");
-            return;
-        }
-
-        // Get enabled category flags
-        var syncMetadata = config.MetadataSyncMetadata;
-        var syncGenres = config.MetadataSyncGenres;
-        var syncTags = config.MetadataSyncTags;
-        var syncImages = config.MetadataSyncImages;
-        var syncPeople = config.MetadataSyncPeople;
-        var syncStudios = config.MetadataSyncStudios;
-
-        if (!syncMetadata && !syncImages && !syncPeople && !syncStudios)
-        {
-            _logger.LogDebug("Metadata sync skipped: no categories enabled");
-            return;
-        }
-
-        _logger.LogInformation("Starting metadata sync");
-
-        var database = _databaseProvider.Database;
-
-        // Apply queued changes
-        _logger.LogInformation("Applying queued metadata changes");
-
-        // Get all queued metadata items, ordered so parents sync before children
-        var queuedItems = database.GetMetadataSyncItemsByStatus(BaseSyncStatus.Queued);
-
-        // Sort: folder items first (by hierarchy depth), then leaf items
-        queuedItems.Sort((a, b) =>
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sort: folder-type items first (Series → Season → MusicArtist →
+    /// MusicAlbum → BoxSet) then leaf items, so parent metadata is in
+    /// place before children would inherit anything from it.
+    /// </remarks>
+    protected override IList<MetadataSyncItem> GetItemsToApply()
+    {
+        var items = Manager.GetByStatus(SyncStatus.Queued).ToList();
+        items.Sort((a, b) =>
         {
             var orderA = GetItemTypeOrder(a.ItemType);
             var orderB = GetItemTypeOrder(b.ItemType);
@@ -126,230 +98,140 @@ public class SyncMissingMetadataTask : IScheduledTask
             return string.Compare(a.ItemName, b.ItemName, StringComparison.OrdinalIgnoreCase);
         });
 
-        var totalItems = queuedItems.Count;
-
-        if (totalItems == 0)
-        {
-            _logger.LogInformation("No queued metadata items to sync");
-
-            // Update last sync time
-            config.LastMetadataSyncTime = DateTime.UtcNow;
-            _configManager.SaveConfiguration();
-
-            progress.Report(100);
-            return;
-        }
-
-        _logger.LogInformation("Processing {Count} queued metadata items", totalItems);
-
-        // Create a shared SourceServerClient for image downloads (reused across all items)
-        using var imageClient = syncImages ? _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey) : null;
-
-        var processedCount = 0;
-        var successCount = 0;
-        var errorCount = 0;
-
-        foreach (var item in queuedItems)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            try
-            {
-                var success = await SyncMetadataItemAsync(item, database, syncMetadata, syncGenres, syncTags, syncImages, syncPeople, syncStudios, imageClient, cancellationToken).ConfigureAwait(false);
-
-                if (success)
-                {
-                    successCount++;
-                }
-                else
-                {
-                    errorCount++;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to sync metadata item {ItemName}", item.ItemName);
-                item.Status = BaseSyncStatus.Errored;
-                item.ErrorMessage = ex.Message;
-                item.StatusDate = DateTime.UtcNow;
-                database.UpsertMetadataSyncItem(item);
-                errorCount++;
-            }
-
-            processedCount++;
-            progress.Report((double)processedCount / totalItems * 100);
-        }
-
-        // Update last sync time
-        config.LastMetadataSyncTime = DateTime.UtcNow;
-        _configManager.SaveConfiguration();
-
-        _logger.LogInformation(
-            "Metadata sync completed: {Success} succeeded, {Error} failed out of {Total}",
-            successCount, errorCount, totalItems);
-
-        progress.Report(100);
+        return items;
     }
 
-    /// <summary>
-    /// Syncs a single metadata item to the local server (all enabled categories).
-    /// </summary>
-    private async Task<bool> SyncMetadataItemAsync(
-        MetadataSyncItem item,
-        SyncDatabase database,
-        bool syncMetadata,
-        bool syncGenres,
-        bool syncTags,
-        bool syncImages,
-        bool syncPeople,
-        bool syncStudios,
-        SourceServerClient? sourceClient,
-        CancellationToken cancellationToken)
+    /// <inheritdoc />
+    protected override async Task ApplyAsync(MetadataSyncItem record, CancellationToken cancellationToken)
     {
-        // Validate we have a local item ID
-        if (string.IsNullOrEmpty(item.LocalItemId))
+        ArgumentNullException.ThrowIfNull(record);
+
+        if (string.IsNullOrEmpty(record.LocalItemId))
         {
-            _logger.LogWarning("Cannot sync metadata for {ItemName}: local item not found", item.ItemName);
-            item.Status = BaseSyncStatus.Errored;
-            item.ErrorMessage = "Local item not found";
-            item.StatusDate = DateTime.UtcNow;
-            database.UpsertMetadataSyncItem(item);
-            return false;
+            throw new InvalidOperationException("Local item not found");
         }
 
-        // Parse local item ID
-        if (!Guid.TryParse(item.LocalItemId, out var localItemId))
+        if (!Guid.TryParse(record.LocalItemId, out var localItemId))
         {
-            _logger.LogWarning("Cannot sync metadata for {ItemName}: invalid item ID", item.ItemName);
-            item.Status = BaseSyncStatus.Errored;
-            item.ErrorMessage = "Invalid item ID";
-            item.StatusDate = DateTime.UtcNow;
-            database.UpsertMetadataSyncItem(item);
-            return false;
+            throw new InvalidOperationException("Invalid item ID");
         }
 
-        // Get the local item
         var localItem = _libraryManager.GetItemById(localItemId);
         if (localItem == null)
         {
-            _logger.LogWarning("Cannot sync metadata for {ItemName}: local item not found in library", item.ItemName);
-            item.Status = BaseSyncStatus.Errored;
-            item.ErrorMessage = "Local item not found in library";
-            item.StatusDate = DateTime.UtcNow;
-            database.UpsertMetadataSyncItem(item);
-            return false;
+            throw new InvalidOperationException("Local item not found in library");
         }
 
-        var allSucceeded = true;
-        var syncedCategories = new List<string>();
+        var config = ConfigManager.Configuration;
+        var failures = new List<string>();
+        var synced = new List<string>();
 
-        // Sync metadata if enabled and has changes
-        if (syncMetadata && item.HasMetadataChanges)
+        if (config.MetadataSyncMetadata && record.HasMetadataChanges)
         {
-            var success = await ApplyMetadataAsync(localItem, item, syncGenres, syncTags, cancellationToken).ConfigureAwait(false);
-            if (success)
+            if (await ApplyMetadataAsync(localItem, record, config.MetadataSyncGenres, config.MetadataSyncTags, cancellationToken).ConfigureAwait(false))
             {
-                // Update local value to match source after sync
-                item.LocalMetadataValue = item.SourceMetadataValue;
-                syncedCategories.Add("Metadata");
+                record.Metadata.MarkSynced();
+                synced.Add("Metadata");
             }
             else
             {
-                allSucceeded = false;
-                _logger.LogWarning("Failed to sync metadata for {ItemName}", item.ItemName);
+                failures.Add("Metadata");
             }
         }
 
-        // Sync images if enabled and has changes
-        if (syncImages && item.HasImagesChanges)
+        if (config.MetadataSyncImages && record.HasImagesChanges)
         {
-            var success = await ApplyImagesAsync(localItem, item, sourceClient, cancellationToken).ConfigureAwait(false);
-            if (success)
+            if (await ApplyImagesAsync(localItem, record, Client, cancellationToken).ConfigureAwait(false))
             {
-                // Track what source hash we synced - used for comparison on refresh
-                item.SyncedImagesHash = item.SourceImagesHash;
-                syncedCategories.Add("Images");
+                record.Images.MarkSynced();
+                synced.Add("Images");
             }
             else
             {
-                allSucceeded = false;
-                _logger.LogWarning("Failed to sync images for {ItemName}", item.ItemName);
+                failures.Add("Images");
             }
         }
 
-        // Sync people if enabled and has changes
-        if (syncPeople && item.HasPeopleChanges)
+        if (config.MetadataSyncPeople && record.HasPeopleChanges)
         {
-            var success = await ApplyPeopleAsync(localItem, item, cancellationToken).ConfigureAwait(false);
-            if (success)
+            if (await ApplyPeopleAsync(localItem, record, cancellationToken).ConfigureAwait(false))
             {
-                // Update local value to match source after sync
-                item.LocalPeopleValue = item.SourcePeopleValue;
-                syncedCategories.Add("People");
+                record.People.MarkSynced();
+                synced.Add("People");
             }
             else
             {
-                allSucceeded = false;
-                _logger.LogWarning("Failed to sync people for {ItemName}", item.ItemName);
+                failures.Add("People");
             }
         }
 
-        // Sync studios if enabled and has changes
-        if (syncStudios && item.HasStudiosChanges)
+        if (config.MetadataSyncStudios && record.HasStudiosChanges)
         {
-            var success = await ApplyStudiosAsync(localItem, item, cancellationToken).ConfigureAwait(false);
-            if (success)
+            if (await ApplyStudiosAsync(localItem, record, cancellationToken).ConfigureAwait(false))
             {
-                // Update local value to match source after sync
-                item.LocalStudiosValue = item.SourceStudiosValue;
-                syncedCategories.Add("Studios");
+                record.Studios.MarkSynced();
+                synced.Add("Studios");
             }
             else
             {
-                allSucceeded = false;
-                _logger.LogWarning("Failed to sync studios for {ItemName}", item.ItemName);
+                failures.Add("Studios");
             }
         }
 
-        if (allSucceeded && syncedCategories.Count > 0)
+        if (failures.Count > 0)
         {
-            _logger.LogDebug("Synced {Categories} for {ItemName}", string.Join(", ", syncedCategories), item.ItemName);
-
-            // Update item status
-            item.Status = BaseSyncStatus.Synced;
-            item.LastSyncTime = DateTime.UtcNow;
-            item.StatusDate = DateTime.UtcNow;
-            item.ErrorMessage = null;
-
-            database.UpsertMetadataSyncItem(item);
-            return true;
+            // Categories that succeeded keep their per-category MarkSynced
+            // state on the record — the base class will Upsert the record
+            // as Errored, persisting the partial progress so the next run
+            // doesn't redo the categories that already succeeded.
+            throw new InvalidOperationException($"Failed to apply: {string.Join(", ", failures)}");
         }
-        else if (!allSucceeded)
+
+        if (synced.Count > 0)
         {
-            item.Status = BaseSyncStatus.Errored;
-            item.ErrorMessage = "Failed to apply some metadata categories";
-            item.StatusDate = DateTime.UtcNow;
-            database.UpsertMetadataSyncItem(item);
-            return false;
-        }
-        else
-        {
-            // No changes to sync - mark as synced
-            item.Status = BaseSyncStatus.Synced;
-            item.LastSyncTime = DateTime.UtcNow;
-            item.StatusDate = DateTime.UtcNow;
-            item.ErrorMessage = null;
-            database.UpsertMetadataSyncItem(item);
-            return true;
+            Logger.LogDebug("Synced {Categories} for {ItemName}", string.Join(", ", synced), record.ItemName);
         }
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// No-op — per-category <see cref="SyncableValue{T}.MarkSynced"/> calls
+    /// already happened inside <see cref="ApplyAsync"/>. Calling
+    /// <see cref="MetadataSyncItem.MarkSynced"/> here would re-mark
+    /// categories that <see cref="ApplyAsync"/> intentionally skipped (e.g.
+    /// because the user disabled them in config), which would break the
+    /// short-circuit on the next Refresh once they're re-enabled.
+    /// </remarks>
+    protected override void OnApplySucceeded(MetadataSyncItem record)
+    {
+        // Intentionally empty.
+    }
+
+    /// <inheritdoc />
+    protected override Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        ConfigManager.Configuration.LastMetadataSyncTime = DateTime.UtcNow;
+        try
+        {
+            ConfigManager.SaveConfiguration();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to save metadata sync end time");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
+    {
+        new TaskTriggerInfo
+        {
+            Type = TaskTriggerInfoType.IntervalTrigger,
+            IntervalTicks = TimeSpan.FromHours(12).Ticks
+        }
+    };
 
     /// <summary>
     /// Applies metadata fields to a local item.
@@ -361,14 +243,14 @@ public class SyncMissingMetadataTask : IScheduledTask
         bool syncTags,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(item.SourceMetadataValue))
+        if (string.IsNullOrEmpty(item.Metadata.Source))
         {
             return true; // Nothing to apply
         }
 
         try
         {
-            var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.SourceMetadataValue);
+            var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.Metadata.Source);
             if (metadata == null)
             {
                 return false;
@@ -529,7 +411,8 @@ public class SyncMissingMetadataTask : IScheduledTask
                 }
             }
 
-            // PremiereDate
+            // PremiereDate (date-only semantic — compare by calendar date to avoid
+            // timezone-driven false diffs when servers are in different TZs)
             if (metadata.TryGetValue("PremiereDate", out var premiereDateValue))
             {
                 DateTime? premiereDate = null;
@@ -542,14 +425,14 @@ public class SyncMissingMetadataTask : IScheduledTask
                     }
                 }
 
-                if (localItem.PremiereDate != premiereDate)
+                if (!JsonComparisonUtility.DateOnlyEquals(localItem.PremiereDate, premiereDate))
                 {
                     localItem.PremiereDate = premiereDate;
                     hasChanges = true;
                 }
             }
 
-            // EndDate
+            // EndDate (date-only semantic)
             if (metadata.TryGetValue("EndDate", out var endDateValue))
             {
                 DateTime? endDate = null;
@@ -562,7 +445,7 @@ public class SyncMissingMetadataTask : IScheduledTask
                     }
                 }
 
-                if (localItem.EndDate != endDate)
+                if (!JsonComparisonUtility.DateOnlyEquals(localItem.EndDate, endDate))
                 {
                     localItem.EndDate = endDate;
                     hasChanges = true;
@@ -619,12 +502,39 @@ public class SyncMissingMetadataTask : IScheduledTask
 
             if (metadata.TryGetValue("ProviderIds", out var providerIdsValue) && providerIdsValue.ValueKind == JsonValueKind.Object)
             {
+                // Reconcile providers so local matches source exactly. Without
+                // the cleanup pass, local-only entries (e.g. a Tmdb id that
+                // was scraped locally but isn't on source) persist forever
+                // and report as "still desynced" on every refresh.
+                var sourceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in providerIdsValue.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrEmpty(prop.Value.GetString()))
+                    {
+                        sourceKeys.Add(prop.Name);
+                    }
+                }
+
+                if (localItem.ProviderIds != null)
+                {
+                    var toRemove = localItem.ProviderIds.Keys
+                        .Where(k => !sourceKeys.Contains(k))
+                        .ToList();
+                    foreach (var key in toRemove)
+                    {
+                        localItem.ProviderIds.Remove(key);
+                        hasChanges = true;
+                    }
+                }
+
                 foreach (var prop in providerIdsValue.EnumerateObject())
                 {
                     if (prop.Value.ValueKind == JsonValueKind.String)
                     {
                         var providerValue = prop.Value.GetString();
-                        if (!string.IsNullOrEmpty(providerValue))
+                        if (!string.IsNullOrEmpty(providerValue)
+                            && localItem.GetProviderId(prop.Name) != providerValue)
                         {
                             localItem.SetProviderId(prop.Name, providerValue);
                             hasChanges = true;
@@ -718,7 +628,7 @@ public class SyncMissingMetadataTask : IScheduledTask
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to apply metadata for {ItemName}", item.ItemName);
+            Logger.LogError(ex, "Failed to apply metadata for {ItemName}", item.ItemName);
             return false;
         }
     }
@@ -735,19 +645,19 @@ public class SyncMissingMetadataTask : IScheduledTask
     {
         if (sourceClient == null)
         {
-            _logger.LogWarning("No source server client available for image sync");
+            Logger.LogWarning("No source server client available for image sync");
             return false;
         }
 
         try
         {
             // Parse source image info - new format is Dictionary<imageType, List<ImageInfoDto>>
-            if (string.IsNullOrEmpty(item.SourceImagesValue))
+            if (string.IsNullOrEmpty(item.Images.Source))
             {
                 return true; // No images on source
             }
 
-            var sourceImagesByType = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(item.SourceImagesValue);
+            var sourceImagesByType = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(item.Images.Source);
             if (sourceImagesByType == null || sourceImagesByType.Count == 0)
             {
                 return true;
@@ -755,7 +665,7 @@ public class SyncMissingMetadataTask : IScheduledTask
 
             if (!Guid.TryParse(item.SourceItemId, out var sourceItemGuid))
             {
-                _logger.LogWarning("Invalid source item ID for image sync: {SourceItemId}", item.SourceItemId);
+                Logger.LogWarning("Invalid source item ID for image sync: {SourceItemId}", item.SourceItemId);
                 return false;
             }
 
@@ -770,7 +680,7 @@ public class SyncMissingMetadataTask : IScheduledTask
 
                 if (!Enum.TryParse<ImageType>(imageTypeName, out var imageType))
                 {
-                    _logger.LogWarning("Unknown image type: {ImageType}", imageTypeName);
+                    Logger.LogWarning("Unknown image type: {ImageType}", imageTypeName);
                     continue;
                 }
 
@@ -791,7 +701,7 @@ public class SyncMissingMetadataTask : IScheduledTask
 
                             if (imageStream == null)
                             {
-                                _logger.LogWarning("Failed to download image {ImageType}/{Index} for {ItemName}",
+                                Logger.LogWarning("Failed to download image {ImageType}/{Index} for {ItemName}",
                                     imageTypeName, i, localItem.Name);
                                 allDownloadsSucceeded = false;
                                 continue;
@@ -820,7 +730,7 @@ public class SyncMissingMetadataTask : IScheduledTask
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "Error downloading {ImageType}/{Index} image for {ItemName}",
+                            Logger.LogWarning(ex, "Error downloading {ImageType}/{Index} image for {ItemName}",
                                 imageTypeName, i, localItem.Name);
                             allDownloadsSucceeded = false;
                         }
@@ -830,7 +740,7 @@ public class SyncMissingMetadataTask : IScheduledTask
                     // Partial success would delete existing images and replace with fewer — data loss.
                     if (!allDownloadsSucceeded)
                     {
-                        _logger.LogWarning(
+                        Logger.LogWarning(
                             "Not all {ImageType} downloads succeeded for {ItemName} ({Downloaded}/{Total}), keeping existing images",
                             imageTypeName, localItem.Name, tempFiles.Count, sourceImages.Count);
                         continue;
@@ -849,11 +759,11 @@ public class SyncMissingMetadataTask : IScheduledTask
                         try
                         {
                             localItem.RemoveImage(existingImage);
-                            _logger.LogDebug("Removed existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
+                            Logger.LogDebug("Removed existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "Failed to remove existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
+                            Logger.LogWarning(ex, "Failed to remove existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
                         }
                     }
 
@@ -870,11 +780,11 @@ public class SyncMissingMetadataTask : IScheduledTask
                                 imageType,
                                 index,
                                 cancellationToken).ConfigureAwait(false);
-                            _logger.LogDebug("Saved {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
+                            Logger.LogDebug("Saved {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "Error saving {ImageType}/{Index} image for {ItemName}",
+                            Logger.LogWarning(ex, "Error saving {ImageType}/{Index} image for {ItemName}",
                                 imageTypeName, index, localItem.Name);
                         }
                     }
@@ -896,7 +806,7 @@ public class SyncMissingMetadataTask : IScheduledTask
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to apply images for {ItemName}", item.ItemName);
+            Logger.LogError(ex, "Failed to apply images for {ItemName}", item.ItemName);
             return false;
         }
     }
@@ -909,14 +819,14 @@ public class SyncMissingMetadataTask : IScheduledTask
         MetadataSyncItem item,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(item.SourcePeopleValue))
+        if (string.IsNullOrEmpty(item.People.Source))
         {
             return true; // Nothing to apply
         }
 
         try
         {
-            var peopleList = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(item.SourcePeopleValue);
+            var peopleList = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(item.People.Source);
             if (peopleList == null)
             {
                 return false;
@@ -948,14 +858,52 @@ public class SyncMissingMetadataTask : IScheduledTask
                 }
             }
 
-            _libraryManager.UpdatePeople(localItem, people);
+            // Some BaseItem subclasses silently no-op UpdatePeople when
+            // SupportsPeople == false (e.g. certain folder types). If we
+            // hit that, return false so the row is recorded as Errored
+            // rather than falsely marked Synced.
+            if (!localItem.SupportsPeople)
+            {
+                Logger.LogWarning(
+                    "Cannot sync people for {ItemName} ({ItemType}): SupportsPeople is false on this item type. Local item id {LocalItemId}",
+                    item.ItemName,
+                    localItem.GetType().Name,
+                    localItem.Id);
+                return false;
+            }
+
+            // Persist the item first so its row is in a clean MetadataEdit
+            // state, then write people, then save the item again. Calling
+            // UpdatePeople before the item save can leave the people-link
+            // table referencing a stale base-item state on some Jellyfin
+            // builds. Using the async variant avoids the .GetAwaiter().GetResult()
+            // wrapper of the sync version, which can stall under contention.
+            await _libraryManager.UpdatePeopleAsync(localItem, people, cancellationToken).ConfigureAwait(false);
             await localItem.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+
+            // Verify the write actually persisted. If the item type doesn't
+            // accept manual people writes (e.g. they get re-aggregated from
+            // children on Series), GetPeople will still return the previous
+            // empty/different set after the call. Catch that explicitly so
+            // we don't mark a row Synced when local state didn't change.
+            var persisted = _libraryManager.GetPeople(localItem);
+            if (persisted == null || persisted.Count != people.Count)
+            {
+                Logger.LogWarning(
+                    "Apply people for {ItemName} ({ItemType}, local id {LocalItemId}) wrote {Wrote} entries but {Found} are now linked. The item type may not accept direct people writes (e.g. Series-level people are aggregated from episodes).",
+                    item.ItemName,
+                    localItem.GetType().Name,
+                    localItem.Id,
+                    people.Count,
+                    persisted?.Count ?? 0);
+                return false;
+            }
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to apply people for {ItemName}", item.ItemName);
+            Logger.LogError(ex, "Failed to apply people for {ItemName}", item.ItemName);
             return false;
         }
     }
@@ -968,14 +916,14 @@ public class SyncMissingMetadataTask : IScheduledTask
         MetadataSyncItem item,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(item.SourceStudiosValue))
+        if (string.IsNullOrEmpty(item.Studios.Source))
         {
             return true; // Nothing to apply
         }
 
         try
         {
-            var studiosList = JsonSerializer.Deserialize<List<string>>(item.SourceStudiosValue);
+            var studiosList = JsonSerializer.Deserialize<List<string>>(item.Studios.Source);
             if (studiosList == null)
             {
                 return false;
@@ -989,7 +937,7 @@ public class SyncMissingMetadataTask : IScheduledTask
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to apply studios for {ItemName}", item.ItemName);
+            Logger.LogError(ex, "Failed to apply studios for {ItemName}", item.ItemName);
             return false;
         }
     }
@@ -1008,16 +956,4 @@ public class SyncMissingMetadataTask : IScheduledTask
         };
     }
 
-    /// <inheritdoc />
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
-    {
-        return new[]
-        {
-            new TaskTriggerInfo
-            {
-                Type = TaskTriggerInfoType.IntervalTrigger,
-                IntervalTicks = TimeSpan.FromHours(12).Ticks
-            }
-        };
-    }
 }

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -33,12 +34,14 @@ public partial class ConfigurationController
     [HttpGet("Items")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PaginatedResult<SyncItemDto>> GetSyncItems(
+        [FromServices] ContentSyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
         [FromQuery] string? pendingType = null,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         var config = _configManager.Configuration;
 
         // Clamp pagination values to reasonable limits
@@ -60,7 +63,7 @@ public partial class ConfigurationController
         }
 
         // Get paginated results
-        var (items, totalCount) = _databaseProvider.Database.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take);
+        var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take);
 
         // Build lookup for library names from mappings
         var libraryMappings = config.LibraryMappings ?? new List<LibraryMapping>();
@@ -94,7 +97,7 @@ public partial class ConfigurationController
                     PendingType = i.PendingType?.ToString(),
                     StatusDate = i.StatusDate,
                     LastSyncTime = i.LastSyncTime,
-                    ErrorMessage = i.ErrorMessage,
+                    ErrorMessage = i.Reason,
                     RetryCount = i.RetryCount,
                     SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
                     SourceServerApiKey = config.SourceServerApiKey,
@@ -115,10 +118,11 @@ public partial class ConfigurationController
     /// <returns>Sync status response with counts.</returns>
     [HttpGet("Status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<SyncStatusResponse> GetSyncStatus()
+    public ActionResult<SyncStatusResponse> GetSyncStatus([FromServices] ContentSyncTableManager manager)
     {
-        var counts = _databaseProvider.Database.GetStatusCounts();
-        var pendingCounts = _databaseProvider.Database.GetPendingCounts();
+        ArgumentNullException.ThrowIfNull(manager);
+        var counts = manager.GetStatusCounts();
+        var pendingCounts = manager.GetPendingCounts();
 
         return Ok(new SyncStatusResponse
         {
@@ -142,13 +146,14 @@ public partial class ConfigurationController
     [HttpGet("Stats")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public ActionResult<SyncStatsResponse> GetSyncStats()
+    public ActionResult<SyncStatsResponse> GetSyncStats([FromServices] ContentSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         try
         {
             var config = _configManager.Configuration;
-            var stats = _databaseProvider.Database.GetSyncStats();
-            var pendingCounts = _databaseProvider.Database.GetPendingCounts();
+            var stats = manager.GetSyncStats();
+            var pendingCounts = manager.GetPendingCounts();
             var diskInfo = DiskSpaceService.GetMinimumDiskSpaceInfo(config);
 
             return Ok(new SyncStatsResponse
@@ -186,9 +191,10 @@ public partial class ConfigurationController
     /// <returns>Pending size response with breakdown.</returns>
     [HttpGet("PendingSize")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PendingSizeResponse> GetPendingSize()
+    public ActionResult<PendingSizeResponse> GetPendingSize([FromServices] ContentSyncTableManager manager)
     {
-        var sizes = _databaseProvider.Database.GetPendingSizes();
+        ArgumentNullException.ThrowIfNull(manager);
+        var sizes = manager.GetPendingSizes();
 
         return Ok(new PendingSizeResponse
         {
@@ -221,19 +227,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerSync()
-    {
-        var downloadTask = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncDownloadContent");
-
-        if (downloadTask == null)
-        {
-            return NotFound("Download task not found");
-        }
-
-        _taskManager.Execute(downloadTask, new TaskOptions());
-
-        return Ok(new { Message = "Sync task started" });
-    }
+        => ExecuteScheduledTaskByKey("ServerSyncDownloadContent", "Sync task started", "Download task not found");
 
     /// <summary>
     /// TriggerRefresh
@@ -244,19 +238,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerRefresh()
-    {
-        var refreshTask = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncUpdateTables");
-
-        if (refreshTask == null)
-        {
-            return NotFound("Refresh task not found");
-        }
-
-        _taskManager.Execute(refreshTask, new TaskOptions());
-
-        return Ok(new { Message = "Refresh task started" });
-    }
+        => ExecuteScheduledTaskByKey("ServerSyncUpdateTables", "Refresh task started", "Refresh task not found");
 
     /// <summary>
     /// RetryErroredItems
@@ -266,21 +248,24 @@ public partial class ConfigurationController
     /// <returns>Action result with success status.</returns>
     [HttpPost("RetryErroredItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult RetryErroredItems([FromBody] BulkItemsRequest? request = null)
+    public ActionResult RetryErroredItems(
+        [FromServices] ContentSyncTableManager manager,
+        [FromBody] BulkItemsRequest? request = null)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds?.Count > 0)
         {
             foreach (var itemId in request.SourceItemIds)
             {
-                _databaseProvider.Database.UpdateStatus(itemId, SyncStatus.Queued);
+                manager.UpdateStatus(itemId, SyncStatus.Queued);
             }
         }
         else
         {
-            var erroredItems = _databaseProvider.Database.GetByStatus(SyncStatus.Errored);
+            var erroredItems = manager.GetByStatus(SyncStatus.Errored);
             foreach (var item in erroredItems)
             {
-                _databaseProvider.Database.UpdateStatus(item.SourceItemId, SyncStatus.Queued);
+                manager.UpdateStatus(item.SourceItemId, SyncStatus.Queued);
             }
         }
 
@@ -295,14 +280,18 @@ public partial class ConfigurationController
     /// <returns>Action result with success status.</returns>
     [HttpPost("UpdateItemStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult UpdateItemStatus([FromBody] UpdateItemStatusRequest request)
+    public ActionResult UpdateItemStatus(
+        [FromServices] ContentSyncTableManager manager,
+        [FromBody] UpdateItemStatusRequest request)
     {
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(request);
         if (!Enum.TryParse<SyncStatus>(request.Status, out var status))
         {
             return BadRequest("Invalid status value");
         }
 
-        _databaseProvider.Database.UpdateStatus(request.SourceItemId, status);
+        manager.UpdateStatus(request.SourceItemId, status);
         return Ok(new { Success = true });
     }
 
@@ -315,8 +304,11 @@ public partial class ConfigurationController
     [HttpPost("IgnoreItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult IgnoreItems([FromBody] BulkItemsRequest request)
+    public ActionResult IgnoreItems(
+        [FromServices] ContentSyncTableManager manager,
+        [FromBody] BulkItemsRequest request)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
             return BadRequest("No items specified");
@@ -327,7 +319,7 @@ public partial class ConfigurationController
         {
             try
             {
-                _databaseProvider.Database.UpdateStatus(itemId, SyncStatus.Ignored);
+                manager.UpdateStatus(itemId, SyncStatus.Ignored);
                 successCount++;
             }
             catch (Exception ex)
@@ -349,8 +341,11 @@ public partial class ConfigurationController
     [HttpPost("QueueItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult QueueItems([FromBody] BulkItemsRequest request)
+    public ActionResult QueueItems(
+        [FromServices] ContentSyncTableManager manager,
+        [FromBody] BulkItemsRequest request)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
             return BadRequest("No items specified");
@@ -361,7 +356,7 @@ public partial class ConfigurationController
         {
             try
             {
-                _databaseProvider.Database.UpdateStatus(itemId, SyncStatus.Queued);
+                manager.UpdateStatus(itemId, SyncStatus.Queued);
                 successCount++;
             }
             catch (Exception ex)
@@ -385,8 +380,11 @@ public partial class ConfigurationController
     [HttpPost("MarkSynced")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult MarkSynced([FromBody] BulkItemsRequest request)
+    public ActionResult MarkSynced(
+        [FromServices] ContentSyncTableManager manager,
+        [FromBody] BulkItemsRequest request)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
             return BadRequest("No items specified");
@@ -399,7 +397,7 @@ public partial class ConfigurationController
         {
             try
             {
-                var item = _databaseProvider.Database.GetBySourceItemId(itemId);
+                var item = manager.GetBySourceItemId(itemId);
                 if (item == null)
                 {
                     notFoundCount++;
@@ -408,7 +406,7 @@ public partial class ConfigurationController
 
                 if (!string.IsNullOrEmpty(item.LocalPath) && System.IO.File.Exists(item.LocalPath))
                 {
-                    _databaseProvider.Database.UpdateStatus(itemId, SyncStatus.Synced);
+                    manager.UpdateStatus(itemId, SyncStatus.Synced);
                     syncedCount++;
                     _logger.LogInformation(
                         "Manually marked {FileName} as synced (local file verified at {LocalPath})",
@@ -444,8 +442,11 @@ public partial class ConfigurationController
     [HttpPost("DeleteLocalItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult DeleteLocalItems([FromBody] BulkItemsRequest request)
+    public ActionResult DeleteLocalItems(
+        [FromServices] ContentSyncTableManager manager,
+        [FromBody] BulkItemsRequest request)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
             return BadRequest("No items specified");
@@ -460,7 +461,7 @@ public partial class ConfigurationController
 
         foreach (var sourceItemId in request.SourceItemIds)
         {
-            var item = _databaseProvider.Database.GetBySourceItemId(sourceItemId);
+            var item = manager.GetBySourceItemId(sourceItemId);
             if (item == null)
             {
                 var sanitizedSourceId = SanitizeForLog(sourceItemId);
@@ -509,7 +510,7 @@ public partial class ConfigurationController
                     "SKIPPED DELETE: {FileName} - File not found in Jellyfin library or on disk, removing from tracking. Source path: {SourcePath}",
                     sanitizedFileName,
                     sanitizedSourcePath);
-                _databaseProvider.Database.Delete(sourceItemId);
+                manager.Delete(sourceItemId);
                 skippedCount++;
                 continue;
             }
@@ -523,7 +524,7 @@ public partial class ConfigurationController
                 var action = useRecyclingBin ? "RECYCLED" : "DELETED";
                 var suffix = localItem == null ? " (direct)" : string.Empty;
                 _logger.LogInformation("{Action}{Suffix}: {FileName} - Local path: {LocalPath}", action, suffix, sanitizedFileName, sanitizedLocalPath);
-                _databaseProvider.Database.Delete(sourceItemId);
+                manager.Delete(sourceItemId);
                 deletedCount++;
             }
             else
@@ -538,7 +539,7 @@ public partial class ConfigurationController
                         "DELETE (external): {FileName} - File no longer exists after deletion attempt, removing from tracking. Local path: {LocalPath}",
                         sanitizedFileName,
                         sanitizedLocalPath);
-                    _databaseProvider.Database.Delete(sourceItemId);
+                    manager.Delete(sourceItemId);
                     deletedCount++;
                 }
                 else
@@ -569,8 +570,11 @@ public partial class ConfigurationController
     [HttpPost("RemoveFromTracking")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult RemoveFromTracking([FromBody] BulkItemsRequest request)
+    public ActionResult RemoveFromTracking(
+        [FromServices] ContentSyncTableManager manager,
+        [FromBody] BulkItemsRequest request)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
             return BadRequest("No items specified");
@@ -581,7 +585,7 @@ public partial class ConfigurationController
         {
             try
             {
-                _databaseProvider.Database.Delete(sourceItemId);
+                manager.Delete(sourceItemId);
                 successCount++;
             }
             catch (Exception ex)
