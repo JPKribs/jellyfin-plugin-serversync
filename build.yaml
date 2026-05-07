@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.44"
+version: "10.11.45"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -25,15 +25,7 @@ artifacts:
 - "Microsoft.Kiota.Serialization.Text.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  technical:
-  - File reorganization since things have gotten hectic
-  - Ran this against an AI to ask for potential issues and cleanup so there are some cleanup steps inspired by AI
-  - Reduce duplicate calls to catches / writes
-  - Remove code that was found to be dead or uncalled
-  - Break out some code into helpers instead of recreating it each time
   fixes:
   - Better metadata batching to only required syncs
   - Better people batching to only required syncs
   - Better handling for failed image uploads (mostly for folders)
-  features:
-  - More descriptive error messages and statuses

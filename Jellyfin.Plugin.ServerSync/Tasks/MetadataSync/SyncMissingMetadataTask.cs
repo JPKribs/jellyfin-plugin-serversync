@@ -72,6 +72,18 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     protected override string ModuleMutexKey => "Metadata";
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Image downloads dominate per-item wall time (HTTP round-trip per
+    /// image type, then a file write); without parallelism a few thousand
+    /// items take 8+ minutes serially. Local writes (UpdatePeopleAsync,
+    /// UpdateToRepositoryAsync, IProviderManager.SaveImage) go through
+    /// Jellyfin's repository which has its own internal locking, so
+    /// concurrent applies serialize cleanly at persist time while still
+    /// overlapping the HTTP-bound download phase.
+    /// </remarks>
+    protected override int MaxDegreeOfParallelism => 4;
+
+    /// <inheritdoc />
     protected override bool IsEnabled()
     {
         var config = ConfigManager.Configuration;

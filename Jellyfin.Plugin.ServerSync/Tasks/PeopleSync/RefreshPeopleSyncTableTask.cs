@@ -1,8 +1,6 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
@@ -70,13 +68,13 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
 
     /// <inheritdoc />
     /// <remarks>
-    /// People's <c>BuildRecordAsync</c> issues a per-person
-    /// <c>GetItemImageInfoAsync</c> HTTP call for every locally-matched
-    /// person when image sync is enabled. Most persons get filtered earlier
-    /// (no local match), but on a library with many matched persons this
-    /// adds up; parallelism keeps the build phase from being HTTP-bound.
+    /// <c>BuildRecordAsync</c> is HTTP-free now (source data comes from the
+    /// bulk <c>/Persons</c> fetch, image data from <c>BaseItemDto.ImageTags</c>);
+    /// the only blocking work per item is the local file-size stat for each
+    /// matched person's images. A modest parallelism here lets that stat I/O
+    /// overlap without contending on Jellyfin's library SQLite.
     /// </remarks>
-    protected override int BuildRecordParallelism => 8;
+    protected override int BuildRecordParallelism => 4;
 
     /// <inheritdoc />
     protected override bool IsEnabled()
@@ -89,13 +87,13 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
 
     /// <inheritdoc />
     /// <remarks>
-    /// Local-first fetch: enumerate the local Person items, then for each
-    /// distinct name make a per-name <c>/Persons/{name}</c> call against the
-    /// source server (parallel, bounded). The previous "fetch all source
-    /// persons then filter by local match" approach pulled tens of thousands
-    /// of person records over the wire just to find a small subset that has
-    /// a local correlate; this is dramatically cheaper when the local
-    /// library has fewer persons than the source.
+    /// Bulk fetch + in-memory join: enumerate local Person items, then pull
+    /// the full source Person catalog via paginated <c>/Persons?fields=…</c>
+    /// calls (no <c>searchTerm</c>) and intersect by name in memory. The
+    /// previous per-name fan-out cost one HTTP round-trip per local person
+    /// (130k+ requests on a real library, 2.5 hours wall-clock); this
+    /// version trades that for ~N/1000 paginated requests and a hashtable
+    /// lookup per local name.
     /// </remarks>
     protected override async Task<IList<SdkBaseItemDto>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
@@ -125,65 +123,48 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
             }
         }
 
-        var localNames = _localPersonsByName.Keys.ToList();
-
         Logger.LogInformation(
-            "{Task}: enumerated {Count} local persons; fetching matching source persons",
+            "{Task}: enumerated {Count} local persons; bulk-fetching source persons",
             Name,
-            localNames.Count);
+            _localPersonsByName.Count);
 
         progress.Report(10);
 
-        if (localNames.Count == 0)
+        if (_localPersonsByName.Count == 0)
         {
             return Array.Empty<SdkBaseItemDto>();
         }
 
-        // Step 2: per-name fetch against source. /Persons/{name} returns the
-        // full person entity; combined with the follow-up /Items?Ids= that
-        // GetPersonByNameAsync issues, every match yields a fully-populated
-        // BaseItemDto. Bounded parallelism so we don't melt the source.
-        var matched = new ConcurrentBag<SdkBaseItemDto>();
-        var processed = 0;
-        var total = Math.Max(localNames.Count, 1);
+        // Step 2: bulk-fetch the entire source Person catalog in pages.
+        // Returns BaseItemDto with the same field set GetPersonByNameAsync
+        // used, so downstream metadata blobs are byte-identical to the
+        // previous per-name path.
+        var sourcePersons = await Client.GetAllPersonsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        await Parallel.ForEachAsync(
-            localNames,
-            new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = cancellationToken },
-            async (name, ct) =>
-            {
-                try
-                {
-                    var person = await Client.GetPersonByNameAsync(name, ct).ConfigureAwait(false);
-                    if (person != null)
-                    {
-                        matched.Add(person);
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogDebug(ex, "Failed to fetch source person {Name}", name);
-                }
-                finally
-                {
-                    var done = Interlocked.Increment(ref processed);
-                    progress.Report(Math.Min(100, 10 + (90.0 * done / total)));
-                }
-            }).ConfigureAwait(false);
+        progress.Report(80);
 
-        var result = matched.ToList();
+        // Step 3: intersect by name in memory. Source duplicates (same name
+        // appearing twice on source) keep the first occurrence — the local
+        // dictionary uses the same first-wins rule above.
+        var matched = new List<SdkBaseItemDto>(_localPersonsByName.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var person in sourcePersons)
+        {
+            if (string.IsNullOrEmpty(person.Name)) continue;
+            if (!_localPersonsByName.ContainsKey(person.Name)) continue;
+            if (!seen.Add(person.Name)) continue;
+            matched.Add(person);
+        }
+
         Logger.LogInformation(
-            "{Task}: matched {Matched}/{Local} local persons against source",
+            "{Task}: matched {Matched}/{Local} local persons against {SourceTotal} source persons",
             Name,
-            result.Count,
-            localNames.Count);
+            matched.Count,
+            _localPersonsByName.Count,
+            sourcePersons.Count);
 
         progress.Report(100);
-        return result;
+        return matched;
     }
 
     /// <inheritdoc />

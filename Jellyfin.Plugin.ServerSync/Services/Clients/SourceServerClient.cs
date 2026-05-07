@@ -1538,6 +1538,67 @@ public class SourceServerClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Bulk-fetches every Person from the source server in a single
+    /// <c>/Persons?fields=…</c> call. Returns one <see cref="BaseItemDto"/>
+    /// per source Person with the same field set as
+    /// <see cref="GetPersonByNameAsync"/>, so callers can do a local
+    /// name-keyed join instead of issuing one HTTP call per person.
+    /// <para>
+    /// Jellyfin's <c>/Persons</c> endpoint exposes neither <c>StartIndex</c>
+    /// nor a server-imposed cap, so we omit <c>Limit</c> to receive the
+    /// whole catalog in one response. The response can be large (tens of
+    /// MB on libraries with 100k+ persons), but it's still dramatically
+    /// faster than per-name fan-out — one round-trip vs. 100k.
+    /// </para>
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>All persons returned by the source server.</returns>
+    public async Task<IReadOnlyList<BaseItemDto>> GetAllPersonsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = GetApiClient();
+            var result = await client.Persons.GetAsync(
+                config =>
+                {
+                    // No searchTerm and no Limit — request the entire catalog.
+                    config.QueryParameters.Fields = new[]
+                    {
+                        ItemFields.Overview,
+                        ItemFields.ProviderIds,
+                        ItemFields.Tags,
+                        ItemFields.OriginalTitle,
+                        ItemFields.SortName,
+                        ItemFields.DateCreated,
+                        ItemFields.ProductionLocations,
+                        // Settings populates LockData + LockedFields; matches
+                        // GetPersonByNameAsync so blob hashes are identical
+                        // regardless of fetch path.
+                        ItemFields.Settings
+                    };
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            if (result?.Items == null)
+            {
+                return Array.Empty<BaseItemDto>();
+            }
+
+            return result.Items;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to bulk-fetch Persons from source server");
+            return Array.Empty<BaseItemDto>();
+        }
+    }
+
 
     // ===== History Sync Methods =====
 
