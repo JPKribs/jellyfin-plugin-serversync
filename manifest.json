@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.46",
+        "changelog": "## Fixes\r\n- Report metadata batches after eah batch instead of only at the end\r\n\r\n## Features\r\n- Better logging for image syncing issues on both metadata & people",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.46/jellyfin-plugin-serversync-10.11.46.zip",
+        "checksum": "64dc64faf9cf3a35158fa0ef68d19dab",
+        "timestamp": "2026-05-07T22:27:13Z"
+      },
+      {
         "version": "10.11.45",
         "changelog": "## Fixes\r\n- Better metadata batching to only required syncs\r\n- Better people batching to only required syncs\r\n- Better handling for failed image uploads (mostly for folders)",
         "targetAbi": "10.11.0.0",
