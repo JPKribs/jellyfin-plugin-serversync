@@ -34,14 +34,15 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
     /// <returns>Human-readable diff, or null when manifests match.</returns>
     public string? DescribeDifference(string? source, string? local)
     {
-        if (string.IsNullOrEmpty(source) && string.IsNullOrEmpty(local))
-        {
-            return null;
-        }
-
         if (string.IsNullOrEmpty(source))
         {
-            return "source manifest empty, local non-empty";
+            // Asymmetric: source is the source-of-truth. When source has no
+            // images (empty manifest), there is nothing to sync — local
+            // should keep whatever it has. Reporting this as "different"
+            // forces an apply that can't do anything (nothing to download)
+            // and a guaranteed verify failure. Treat as no-diff so the
+            // record is left alone.
+            return null;
         }
 
         if (string.IsNullOrEmpty(local))

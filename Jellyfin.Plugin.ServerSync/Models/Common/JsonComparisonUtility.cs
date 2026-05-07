@@ -439,6 +439,24 @@ public static class JsonComparisonUtility
                     {
                         return true;
                     }
+
+                    // Whole-hour relaxation: covers the common case where one
+                    // server stored "midnight in <local TZ>" and serialized it
+                    // as a UTC-shifted whole-hour value (e.g. source in MDT
+                    // saves PremiereDate as "2019-03-25T06:00:00+00:00" while
+                    // local has "2019-03-25T00:00:00Z"). Both sides have
+                    // minute=0 and second=0 (whole-hour boundaries — real
+                    // timestamps almost never line up that precisely), and
+                    // both UTC instants land on the same calendar date in the
+                    // same 24-hour window. Treat as equal so verification
+                    // doesn't fail on a pure timezone artifact.
+                    if (dto1.Minute == 0 && dto1.Second == 0
+                        && dto2.Minute == 0 && dto2.Second == 0
+                        && dto1.UtcDateTime.Date == dto2.UtcDateTime.Date
+                        && System.Math.Abs((dto1.UtcDateTime - dto2.UtcDateTime).TotalHours) <= 24)
+                    {
+                        return true;
+                    }
                 }
 
                 return false;

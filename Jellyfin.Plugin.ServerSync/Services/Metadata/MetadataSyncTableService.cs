@@ -665,6 +665,21 @@ public class MetadataSyncTableService
         {
             foreach (var kvp in sourceItem.ImageTags.AdditionalData)
             {
+                // Skip image types that this sync path can't apply to its
+                // targets. Metadata sync only operates on Movie/Series/Season/
+                // Episode/Album/Artist/BoxSet — never Person — so a Profile
+                // tag in the source DTO (sometimes present on TMDB-imported
+                // metadata for actors associated with a Movie record) cannot
+                // be saved on the local item; Jellyfin's repository drops
+                // such writes silently. Including them here would put the
+                // Profile entry in the source manifest, fail the post-apply
+                // verification ("Profile present on source but missing on
+                // local"), and pin the row in Errored forever.
+                if (string.Equals(kvp.Key, "Profile", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 var tag = MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value);
                 if (!string.IsNullOrEmpty(tag))
                 {
