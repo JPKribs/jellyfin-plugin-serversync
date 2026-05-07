@@ -234,4 +234,6 @@ Using the user configurations found in the Sync Table, all Queued records update
 
 Claude Code was utilized for this project to resolve issues with GitHub Actions & Build Scripts. For project code, it was used to locally to cleanup inline comments and create first drafts of documentation.
 
+In recent releases, AI has been used as a secondary review for potential code issues as there are many examples I cannot test without a large diversity of systems available. 
+
 **All code was written and tested by humans.**
