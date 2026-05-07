@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.45",
+        "changelog": "## Fixes\r\n- Better metadata batching to only required syncs\r\n- Better people batching to only required syncs\r\n- Better handling for failed image uploads (mostly for folders)",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.45/jellyfin-plugin-serversync-10.11.45.zip",
+        "checksum": "72291d922fa0b637a7731d33c5df2242",
+        "timestamp": "2026-05-07T22:11:42Z"
+      },
+      {
         "version": "10.11.44",
         "changelog": "## Technical\r\n- File reorganization since things have gotten hectic\r\n- Ran this against an AI to ask for potential issues and cleanup so there are some cleanup steps inspired by AI\r\n- Reduce duplicate calls to catches / writes\r\n- Remove code that was found to be dead or uncalled\r\n- Break out some code into helpers instead of recreating it each time\r\n\r\n## Fixes\r\n- Better metadata batching to only required syncs\r\n- Better people batching to only required syncs\r\n- Better handling for failed image uploads (mostly for folders)\r\n\r\n## Features\r\n- More descriptive error messages and statuses",
         "targetAbi": "10.11.0.0",
