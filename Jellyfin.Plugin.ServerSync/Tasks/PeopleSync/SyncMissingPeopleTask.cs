@@ -461,14 +461,27 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             return (true, null);
         }
 
-        var diff = JsonComparisonUtility.CountDifferences(record.Metadata.Source, freshBlob);
-        return (false, $"verification found {diff} divergent field(s); source={FormatUtilities.TruncateForLog(record.Metadata.Source)}; local={FormatUtilities.TruncateForLog(freshBlob)}");
+        var differingFields = JsonComparisonUtility.GetDifferingFields(record.Metadata.Source, freshBlob);
+        var fieldList = differingFields.Count == 0 ? "(none)" : string.Join(",", differingFields);
+        var detail = JsonComparisonUtility.DescribeDifferingFields(record.Metadata.Source, freshBlob);
+        return (false, $"verification found {differingFields.Count} divergent field(s) [{fieldList}]; {detail}");
     }
 
     private (bool Succeeded, string? FailureReason) VerifyImagesApplied(BaseItem freshPerson, PeopleSyncItem record)
     {
         var (_, freshLocal) = _peopleService.PopulateImageData(null, freshPerson);
         record.Images.Local = freshLocal;
+
+        if (record.Images.Comparator is Models.Common.Comparators.ImageManifestComparator imagesComparator)
+        {
+            var diff = imagesComparator.DescribeDifference(record.Images.Source, freshLocal);
+            if (diff == null)
+            {
+                return (true, null);
+            }
+
+            return (false, $"image manifest after apply does not match source manifest: {diff}");
+        }
 
         if (record.Images.Comparator.Equals(record.Images.Source, freshLocal))
         {

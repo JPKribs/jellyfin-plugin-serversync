@@ -121,6 +121,148 @@ public static class JsonComparisonUtility
     }
 
     /// <summary>
+    /// Returns the names of top-level properties that differ between two
+    /// JSON objects, using the same equality semantics as
+    /// <see cref="JsonElementEquals"/> (null/empty/missing equivalence,
+    /// timezone-aware date parsing, etc). Used by the metadata-verify
+    /// failure path to point at the specific divergent field instead of
+    /// reporting just a count — without this, "1 divergent field" with a
+    /// truncated blob is unactionable.
+    /// </summary>
+    /// <param name="json1">First JSON string.</param>
+    /// <param name="json2">Second JSON string.</param>
+    /// <returns>Property names whose values differ; empty if equal or unparseable.</returns>
+    public static IReadOnlyList<string> GetDifferingFields(string? json1, string? json2)
+    {
+        if (string.IsNullOrEmpty(json1) || string.IsNullOrEmpty(json2))
+        {
+            // Mismatched presence — not a property-level diff, but report it
+            // distinctly so callers can still surface a useful message.
+            return !string.IsNullOrEmpty(json1) || !string.IsNullOrEmpty(json2)
+                ? new[] { "(blob)" }
+                : Array.Empty<string>();
+        }
+
+        try
+        {
+            using var doc1 = JsonDocument.Parse(json1);
+            using var doc2 = JsonDocument.Parse(json2);
+
+            var obj1 = doc1.RootElement;
+            var obj2 = doc2.RootElement;
+
+            if (obj1.ValueKind != JsonValueKind.Object || obj2.ValueKind != JsonValueKind.Object)
+            {
+                return JsonElementEquals(obj1, obj2) ? Array.Empty<string>() : new[] { "(root)" };
+            }
+
+            var props1 = obj1.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
+            var props2 = obj2.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
+
+            var allKeys = new HashSet<string>(props1.Keys);
+            allKeys.UnionWith(props2.Keys);
+
+            var diffs = new List<string>();
+            foreach (var key in allKeys)
+            {
+                var has1 = props1.TryGetValue(key, out var val1);
+                var has2 = props2.TryGetValue(key, out var val2);
+
+                if (has1 && has2)
+                {
+                    if (!JsonElementEquals(val1, val2))
+                    {
+                        diffs.Add(key);
+                    }
+                }
+                else if (has1)
+                {
+                    if (!IsEmptyValue(val1))
+                    {
+                        diffs.Add(key);
+                    }
+                }
+                else if (has2)
+                {
+                    if (!IsEmptyValue(val2))
+                    {
+                        diffs.Add(key);
+                    }
+                }
+            }
+
+            diffs.Sort(StringComparer.Ordinal);
+            return diffs;
+        }
+        catch (JsonException)
+        {
+            return new[] { "(parse-error)" };
+        }
+    }
+
+    /// <summary>
+    /// Returns a compact "field=source-vs-local" diagnostic for the first
+    /// few divergent properties. Values are JSON-serialized and truncated
+    /// so the result fits in a log line. Used to point at the actual
+    /// divergence when the truncated full-blob view shows only matching
+    /// prefix fields.
+    /// </summary>
+    /// <param name="json1">Source JSON string.</param>
+    /// <param name="json2">Local JSON string.</param>
+    /// <param name="maxFields">Cap on number of fields included.</param>
+    /// <param name="maxValueLength">Cap on each rendered value.</param>
+    /// <returns>Human-readable diff, or empty string if no diffs / unparseable.</returns>
+    public static string DescribeDifferingFields(
+        string? json1,
+        string? json2,
+        int maxFields = 3,
+        int maxValueLength = 120)
+    {
+        var fields = GetDifferingFields(json1, json2);
+        if (fields.Count == 0 || string.IsNullOrEmpty(json1) || string.IsNullOrEmpty(json2))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var doc1 = JsonDocument.Parse(json1);
+            using var doc2 = JsonDocument.Parse(json2);
+            if (doc1.RootElement.ValueKind != JsonValueKind.Object
+                || doc2.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return string.Join(",", fields);
+            }
+
+            var props1 = doc1.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+            var props2 = doc2.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+
+            var pieces = new List<string>();
+            foreach (var name in fields)
+            {
+                if (pieces.Count >= maxFields)
+                {
+                    pieces.Add($"+{fields.Count - pieces.Count} more");
+                    break;
+                }
+
+                var s = props1.TryGetValue(name, out var v1) ? v1.GetRawText() : "<missing>";
+                var l = props2.TryGetValue(name, out var v2) ? v2.GetRawText() : "<missing>";
+                pieces.Add($"{name}: source={Truncate(s, maxValueLength)} local={Truncate(l, maxValueLength)}");
+            }
+
+            return string.Join("; ", pieces);
+        }
+        catch (JsonException)
+        {
+            return string.Join(",", fields);
+        }
+    }
+
+    private static string Truncate(string s, int max)
+        => s.Length <= max ? s : string.Concat(s.AsSpan(0, max), "…");
+
+    /// <summary>
     /// Checks if a JsonElement represents an "empty" value (null, empty string, empty array, empty object).
     /// </summary>
     private static bool IsEmptyValue(JsonElement e)

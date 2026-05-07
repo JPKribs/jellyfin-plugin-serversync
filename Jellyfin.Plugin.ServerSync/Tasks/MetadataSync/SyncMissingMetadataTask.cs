@@ -874,10 +874,10 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             return (true, null);
         }
 
-        var diff = JsonComparisonUtility.CountDifferences(source, fresh);
-        var truncSource = FormatUtilities.TruncateForLog(source);
-        var truncLocal = FormatUtilities.TruncateForLog(fresh);
-        return (false, $"verification found {diff} divergent field(s) (item type {freshLocal.GetType().Name}); source={truncSource}; local={truncLocal}");
+        var differingFields = JsonComparisonUtility.GetDifferingFields(source, fresh);
+        var fieldList = differingFields.Count == 0 ? "(none)" : string.Join(",", differingFields);
+        var detail = JsonComparisonUtility.DescribeDifferingFields(source, fresh);
+        return (false, $"verification found {differingFields.Count} divergent field(s) [{fieldList}] (item type {freshLocal.GetType().Name}); {detail}");
     }
 
     private (bool Succeeded, string? FailureReason) VerifyImagesApplied(
@@ -888,6 +888,21 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         _metadataService.RefreshLocalSnapshot(record, syncMetadata: false, syncImages: true, syncPeople: false, syncStudios: false, syncGenres: false, syncTags: false);
         // Use the same comparator the refresh uses for source==local image
         // diffs (tag-aware). If the comparator says they match, we're synced.
+        // When they don't match, ask the comparator for a specific diff so
+        // the failure reason names the offending type/index instead of a
+        // generic "count or per-type tag/size mismatch".
+        var imagesComparator = record.Images.Comparator as Models.Common.Comparators.ImageManifestComparator;
+        if (imagesComparator != null)
+        {
+            var diff = imagesComparator.DescribeDifference(record.Images.Source, record.Images.Local);
+            if (diff == null)
+            {
+                return (true, null);
+            }
+
+            return (false, $"image manifest after apply does not match source manifest: {diff}");
+        }
+
         if (record.Images.Comparator.Equals(record.Images.Source, record.Images.Local))
         {
             return (true, null);

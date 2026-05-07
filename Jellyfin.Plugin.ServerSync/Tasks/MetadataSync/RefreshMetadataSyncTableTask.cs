@@ -187,15 +187,31 @@ public class RefreshMetadataSyncTableTask
         var fetched = 0;
         var heavyDenominator = Math.Max(totalMatched, 1);
 
+        // Drive batching from here (rather than inside GetItemsByIdsAsync) so
+        // progress ticks after every page lands instead of only after the
+        // whole mapping finishes — the original implementation appeared
+        // frozen at ~24% on libraries with tens of thousands of matched
+        // items because no callback fired during the multi-minute serial
+        // chunk loop.
+        const int heavyBatchSize = 50;
         async Task FetchHeavyAsync(LibraryMapping mapping, IReadOnlyList<Guid> ids, bool isFolder, CancellationToken ct)
         {
             if (ids.Count == 0) return;
-            var items = await Client.GetItemsByIdsAsync(ids, fields, cancellationToken: ct).ConfigureAwait(false);
-            foreach (var item in items)
+            for (var i = 0; i < ids.Count; i += heavyBatchSize)
             {
-                work.Add(new MetadataWork(mapping, item, isFolder));
-                var done = Interlocked.Increment(ref fetched);
-                progress.Report(40 + (60.0 * done / heavyDenominator));
+                var chunk = new List<Guid>(Math.Min(heavyBatchSize, ids.Count - i));
+                for (var j = i; j < Math.Min(i + heavyBatchSize, ids.Count); j++)
+                {
+                    chunk.Add(ids[j]);
+                }
+
+                var items = await Client.GetItemsByIdsAsync(chunk, fields, batchSize: heavyBatchSize, cancellationToken: ct).ConfigureAwait(false);
+                foreach (var item in items)
+                {
+                    work.Add(new MetadataWork(mapping, item, isFolder));
+                    var done = Interlocked.Increment(ref fetched);
+                    progress.Report(40 + (60.0 * done / heavyDenominator));
+                }
             }
         }
 
