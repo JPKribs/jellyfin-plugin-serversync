@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
 /// One page of results from <see cref="ISyncTableManager{TRecord, TKey}.Paginate"/>.

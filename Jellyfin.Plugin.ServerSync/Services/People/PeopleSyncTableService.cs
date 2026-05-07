@@ -42,6 +42,122 @@ public class PeopleSyncTableService
     }
 
     /// <summary>
+    /// Re-reads the local side of a person record so the modal shows live
+    /// data rather than the snapshot captured at the last people refresh.
+    /// Call this from per-item endpoints — without it, a successful Sync
+    /// apply updates local state in Jellyfin but the modal keeps showing
+    /// the pre-sync local blob until the user re-runs the full Refresh.
+    /// Source-side fields (and all hashes) are left untouched.
+    /// </summary>
+    public void RefreshLocalSnapshot(PeopleSyncItem record, bool syncImages)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (string.IsNullOrEmpty(record.PersonName)) return;
+
+        var personStub = _libraryManager.GetPerson(record.PersonName);
+        if (personStub == null) return;
+
+        var localPerson = _libraryManager.GetItemById(personStub.Id);
+        if (localPerson == null) return;
+
+        record.Metadata.Local = BuildLocalMetadata(localPerson);
+
+        if (syncImages)
+        {
+            var (_, localImg) = PopulateImageData(null, localPerson);
+            record.Images.Local = localImg;
+        }
+    }
+
+    /// <summary>
+    /// Enriches the source-side image manifest with real Size / Width /
+    /// Height fetched from the source server. The refresh task builds the
+    /// source manifest from <c>BaseItemDto.ImageTags</c> for performance
+    /// (tag-only — no byte size or pixel dimensions), so the People modal
+    /// without enrichment renders Source as <c>"1 (0 B)"</c> while Local
+    /// has a real KB value, which looks like a sync failure even when
+    /// nothing's wrong.
+    /// <para>
+    /// Per-modal-open: one HTTP call to <c>/Items/{id}/Images</c> on source.
+    /// Best-effort — failure leaves the original tag-only blob in place and
+    /// logs at Debug. Mutates <paramref name="record"/>.<see cref="PeopleSyncItem.Images"/>.<see cref="SyncableValue{T}.Source"/>
+    /// in-memory only; not persisted, so the comparator hashes used by the
+    /// next Refresh remain consistent with the tag-based source manifest.
+    /// </para>
+    /// </summary>
+    public async System.Threading.Tasks.Task EnrichSourceImageSizesAsync(
+        PeopleSyncItem record,
+        SourceServerClient client,
+        System.Threading.CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(client);
+
+        if (string.IsNullOrEmpty(record.Images.Source)) return;
+        if (string.IsNullOrEmpty(record.SourcePersonId)) return;
+        if (!Guid.TryParse(record.SourcePersonId, out var sourcePersonId)) return;
+
+        Dictionary<string, List<ImageInfoDto>>? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(record.Images.Source);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex, "Could not deserialize source image manifest for person {Name}", record.PersonName);
+            return;
+        }
+
+        if (manifest == null || manifest.Count == 0) return;
+
+        List<Jellyfin.Sdk.Generated.Models.ImageInfo>? sourceInfo;
+        try
+        {
+            sourceInfo = await client.GetItemImageInfoAsync(sourcePersonId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (System.OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Source image-info enrichment failed for person {Name}", record.PersonName);
+            return;
+        }
+
+        if (sourceInfo == null || sourceInfo.Count == 0) return;
+
+        var byKey = new Dictionary<(string Type, int Index), Jellyfin.Sdk.Generated.Models.ImageInfo>();
+        foreach (var info in sourceInfo)
+        {
+            var typeName = info.ImageType?.ToString();
+            if (string.IsNullOrEmpty(typeName)) continue;
+            byKey[(typeName, info.ImageIndex ?? 0)] = info;
+        }
+
+        var anyChanged = false;
+        foreach (var kvp in manifest)
+        {
+            for (var i = 0; i < kvp.Value.Count; i++)
+            {
+                var entry = kvp.Value[i];
+                if (byKey.TryGetValue((kvp.Key, entry.ImageIndex), out var info))
+                {
+                    if (info.Size.HasValue) entry.Size = info.Size.Value;
+                    if (info.Width.HasValue) entry.Width = info.Width.Value;
+                    if (info.Height.HasValue) entry.Height = info.Height.Value;
+                    anyChanged = true;
+                }
+            }
+        }
+
+        if (anyChanged)
+        {
+            record.Images.Source = JsonSerializer.Serialize(manifest);
+        }
+    }
+
+    /// <summary>
     /// Builds a metadata JSON blob from a source BaseItemDto (person).
     /// Matches the same pattern as MetadataSyncTableService.SetMetadataFieldValues.
     /// </summary>
@@ -65,18 +181,16 @@ public class PeopleSyncTableService
         {
             ["Name"] = sourcePerson.Name,
             ["OriginalTitle"] = sourcePerson.OriginalTitle,
-            ["SortName"] = sourcePerson.SortName,
+            // SortName excluded — server-derived from Name, never matches
+            // across servers. ForcedSortName is the user override and IS
+            // synced.
             ["ForcedSortName"] = sourcePerson.ForcedSortName,
             ["Overview"] = sourcePerson.Overview,
             ["PremiereDate"] = sourcePerson.PremiereDate,
             ["EndDate"] = sourcePerson.EndDate,
             ["ProductionYear"] = sourcePerson.ProductionYear,
-            ["ProductionLocations"] = sourcePerson.ProductionLocations?
-                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            ["Tags"] = sourcePerson.Tags?
-                .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
+            ["ProductionLocations"] = NormalizeStringArray(sourcePerson.ProductionLocations),
+            ["Tags"] = NormalizeStringArray(sourcePerson.Tags),
             ["ProviderIds"] = sourceProviderIds,
             ["LockedFields"] = sourcePerson.LockedFields?.Select(f => f.ToString())
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
@@ -102,18 +216,14 @@ public class PeopleSyncTableService
         {
             ["Name"] = localPerson.Name,
             ["OriginalTitle"] = localPerson.OriginalTitle,
-            ["SortName"] = localPerson.SortName,
+            // SortName excluded — see source-side comment.
             ["ForcedSortName"] = localPerson.ForcedSortName,
             ["Overview"] = localPerson.Overview,
             ["PremiereDate"] = localPerson.PremiereDate,
             ["EndDate"] = localPerson.EndDate,
             ["ProductionYear"] = localPerson.ProductionYear,
-            ["ProductionLocations"] = localPerson.ProductionLocations?
-                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            ["Tags"] = localPerson.Tags?
-                .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
+            ["ProductionLocations"] = NormalizeStringArray(localPerson.ProductionLocations),
+            ["Tags"] = NormalizeStringArray(localPerson.Tags),
             ["ProviderIds"] = localProviderIds,
             ["LockedFields"] = localPerson.LockedFields?.Select(f => f.ToString())
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
@@ -122,6 +232,31 @@ public class PeopleSyncTableService
         };
 
         return JsonSerializer.Serialize(metadata);
+    }
+
+    /// <summary>
+    /// Collapses the three storage shapes Jellyfin returns for "no value"
+    /// string arrays — <c>null</c>, <c>[]</c>, and <c>[""]</c> — into a single
+    /// canonical <c>null</c>. Without this, an item whose source has
+    /// <c>ProductionLocations: null</c> but whose local persists as
+    /// <c>[""]</c> (empty-string-in-array, observed on Person rows after
+    /// UpdateToRepositoryAsync) compares unequal forever and verification
+    /// keeps Erroring the row. Filtering whitespace and emitting null when
+    /// empty makes both sides round-trip identically.
+    /// </summary>
+    private static string[]? NormalizeStringArray(IReadOnlyList<string>? source)
+    {
+        if (source == null)
+        {
+            return null;
+        }
+
+        var filtered = source
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return filtered.Length == 0 ? null : filtered;
     }
 
     /// <summary>

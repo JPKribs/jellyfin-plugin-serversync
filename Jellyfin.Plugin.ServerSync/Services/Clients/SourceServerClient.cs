@@ -475,6 +475,163 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
+    /// <summary>
+    /// Fetches Content-sync-style leaf item rows (Path / DateCreated /
+    /// MediaSources) for a specific set of IDs, batched. Restricts to leaf
+    /// types (Movie / Episode / Audio / Video) so a whitelisted Series ID
+    /// returns nothing here — children of whitelisted folders come back via
+    /// <see cref="GetContentItemsByAncestorsAsync"/>; this method only
+    /// catches whitelisted items that are themselves syncable leaves.
+    /// </summary>
+    public async Task<List<BaseItemDto>> GetContentItemsByIdsAsync(
+        IReadOnlyList<Guid> ids,
+        int batchSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new List<BaseItemDto>();
+        if (ids.Count == 0)
+        {
+            return result;
+        }
+
+        for (var i = 0; i < ids.Count; i += batchSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
+            try
+            {
+                var client = GetApiClient();
+                var page = await client.Items.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.Ids = chunk;
+                        config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
+                        config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                    },
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                if (page?.Items != null)
+                {
+                    result.AddRange(page.Items);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch content items batch starting at index {Index}", i);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Fetches Content-sync leaf items (Movie / Episode / Audio / Video) that
+    /// are descendants of any of <paramref name="ancestorIds"/>. Used by the
+    /// Whitelist routing path so a whitelisted Series ID expands to all of
+    /// its episodes (same for Seasons / BoxSets / any folder-type whitelist),
+    /// matching the implicit path-prefix expansion the previous bulk-fetch +
+    /// IsItemFiltered approach gave for free.
+    /// <para>
+    /// Implemented as one <c>ParentId=&lt;id&gt;&amp;Recursive=true</c> query
+    /// per whitelist entry (concurrent up to 4 in flight). The Kiota client
+    /// in use does not expose <c>AncestorIds</c> as a query parameter, so
+    /// we use ParentId-recursive instead — same end result. Whitelist entries
+    /// that are leaves themselves return nothing here (they have no syncable
+    /// descendants); those are picked up by
+    /// <see cref="GetContentItemsByIdsAsync"/>. Results from all queries are
+    /// de-duped by item ID.
+    /// </para>
+    /// </summary>
+    public async Task<List<BaseItemDto>> GetContentItemsByAncestorsAsync(
+        IReadOnlyList<Guid> ancestorIds,
+        int pageSize = 1000,
+        int maxParallelism = 4,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new List<BaseItemDto>();
+        if (ancestorIds.Count == 0)
+        {
+            return result;
+        }
+
+        var seen = new HashSet<Guid>();
+        var lockObj = new object();
+
+        await Parallel.ForEachAsync(
+            ancestorIds,
+            new ParallelOptions { MaxDegreeOfParallelism = maxParallelism, CancellationToken = cancellationToken },
+            async (ancestorId, ct) =>
+            {
+                var startIndex = 0;
+                while (true)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    BaseItemDtoQueryResult? page;
+                    try
+                    {
+                        var client = GetApiClient();
+                        page = await client.Items.GetAsync(
+                            config =>
+                            {
+                                config.QueryParameters.ParentId = ancestorId;
+                                config.QueryParameters.Recursive = true;
+                                config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
+                                config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                                config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
+                                config.QueryParameters.StartIndex = startIndex;
+                                config.QueryParameters.Limit = pageSize;
+                            },
+                            cancellationToken: ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to fetch descendants of {AncestorId} at offset {Index}", ancestorId, startIndex);
+                        break;
+                    }
+
+                    if (page?.Items == null || page.Items.Count == 0)
+                    {
+                        break;
+                    }
+
+                    lock (lockObj)
+                    {
+                        foreach (var item in page.Items)
+                        {
+                            if (item.Id.HasValue && seen.Add(item.Id.Value))
+                            {
+                                result.Add(item);
+                            }
+                        }
+                    }
+
+                    if (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value)
+                    {
+                        break;
+                    }
+
+                    if (page.Items.Count < pageSize)
+                    {
+                        break;
+                    }
+
+                    startIndex += page.Items.Count;
+                }
+            }).ConfigureAwait(false);
+
+        return result;
+    }
+
+    /// <summary>
     /// GetLibraryItemsAsync
     /// Gets items from a library with pagination support.
     /// </summary>
@@ -1275,9 +1432,21 @@ public class SourceServerClient : IDisposable
     // ===== People Sync Methods =====
 
     /// <summary>
-    /// Gets a single Person by name from the source server as a full BaseItemDto.
-    /// First resolves the person ID via the Persons endpoint, then fetches the full
-    /// item with all metadata fields via the Items endpoint.
+    /// Gets a single Person by name from the source server as a full
+    /// <see cref="BaseItemDto"/>.
+    /// <para>
+    /// Uses <c>/Persons?searchTerm=…&amp;fields=…</c> directly. The previous
+    /// implementation hit <c>/Persons/{name}</c> for an ID then refetched
+    /// via <c>/Items?Ids=</c>, but the Items endpoint with Person IDs returns
+    /// the cast-list <c>BaseItemPerson</c> shape — Overview, PremiereDate,
+    /// EndDate, ProductionLocations, Tags, LockedFields are stripped, which
+    /// caused permanent metadata diffs in the People modal.
+    /// </para>
+    /// <para>
+    /// <c>searchTerm</c> is fuzzy/substring on Jellyfin, so we filter for
+    /// the first result whose Name matches <paramref name="name"/>
+    /// case-insensitively; partial-prefix matches are discarded.
+    /// </para>
     /// </summary>
     /// <param name="name">Person name to look up.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -1286,20 +1455,20 @@ public class SourceServerClient : IDisposable
         string name,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrEmpty(name))
+        {
+            return null;
+        }
+
         try
         {
             var client = GetApiClient();
 
-            var personStub = await client.Persons[name].GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (personStub?.Id == null)
-            {
-                return null;
-            }
-
-            var result = await client.Items.GetAsync(
+            var page = await client.Persons.GetAsync(
                 config =>
                 {
-                    config.QueryParameters.Ids = new Guid?[] { personStub.Id };
+                    config.QueryParameters.SearchTerm = name;
+                    config.QueryParameters.Limit = 25;
                     config.QueryParameters.Fields = new[]
                     {
                         ItemFields.Overview,
@@ -1307,13 +1476,36 @@ public class SourceServerClient : IDisposable
                         ItemFields.Tags,
                         ItemFields.OriginalTitle,
                         ItemFields.SortName,
-                        ItemFields.Settings,
-                        ItemFields.DateCreated
+                        ItemFields.DateCreated,
+                        ItemFields.ProductionLocations,
+                        // Settings populates LockData + LockedFields; without
+                        // it those properties come back null, while local has
+                        // them populated, producing a perpetual false diff in
+                        // the Metadata blob.
+                        ItemFields.Settings
                     };
                 },
                 cancellationToken).ConfigureAwait(false);
 
-            return result?.Items?.FirstOrDefault();
+            if (page?.Items == null || page.Items.Count == 0)
+            {
+                return null;
+            }
+
+            // Exact-match (case-insensitive) only. searchTerm returns substring
+            // hits on Jellyfin, so a person "Tom Hanks" search hits "Tom Hanks"
+            // and "Tom Hanky" — discard non-exact matches to avoid syncing the
+            // wrong Person.
+            foreach (var candidate in page.Items)
+            {
+                if (!string.IsNullOrEmpty(candidate.Name)
+                    && string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
         }
         catch (OperationCanceledException)
         {
@@ -1578,6 +1770,52 @@ public class SourceServerClient : IDisposable
     }
 
     // ===== History Sync Methods =====
+
+    /// <summary>
+    /// Batch-fetches items by ID with the specified user's UserData populated.
+    /// Used by the History refresh task after the local-first discovery pass —
+    /// only items whose translated path exists locally get user-data fetched,
+    /// rather than the prior approach of pulling every user-played item per
+    /// (user × library) and discarding most on path mismatch.
+    /// </summary>
+    public async Task<BaseItemDtoQueryResult?> GetItemsWithUserDataByIdsAsync(
+        Guid userId,
+        Guid?[] ids,
+        CancellationToken cancellationToken = default)
+    {
+        if (ids.Length == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var client = GetApiClient();
+            return await client.Items.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.UserId = userId;
+                    config.QueryParameters.Ids = ids;
+                    config.QueryParameters.EnableUserData = true;
+                    config.QueryParameters.Fields = new[]
+                    {
+                        ItemFields.Path,
+                        ItemFields.DateCreated,
+                        ItemFields.MediaSources
+                    };
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch user-data items for user {UserId}", userId);
+            return null;
+        }
+    }
 
     /// <summary>
     /// Gets items with user playback data for a specific user in a library.

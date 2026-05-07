@@ -81,6 +81,20 @@ public class UpdateSyncTablesTask
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Routing depends on <see cref="LibraryMapping.FilterMode"/>:
+    ///   <list type="bullet">
+    ///   <item><b>Whitelist</b> — fetch the items in
+    ///   <see cref="LibraryMapping.FilteredItems"/> by ID in batches of 50.
+    ///   No bulk library scan. The whitelist is the authority; if a user
+    ///   wants every episode of a Series, they whitelist the episodes (or
+    ///   we can layer AncestorIds expansion in later, but the spec is "fetch
+    ///   only the items in FilteredItems").</item>
+    ///   <item><b>Blacklist / AllowAll</b> — bulk-fetch the library, drop
+    ///   blacklisted items via <see cref="PathUtilities.IsItemFiltered"/>.
+    ///   This is the existing behavior.</item>
+    ///   </list>
+    /// </remarks>
     protected override async Task<IList<ContentRefreshWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
@@ -93,8 +107,9 @@ public class UpdateSyncTablesTask
         var enabledMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
 
         // Pre-fetch per-library counts so per-item progress reporting has a
-        // denominator. Each count call is a tiny query with Limit=0; total
-        // round-trip is one per enabled library.
+        // denominator. For whitelist mappings we know the count up front
+        // from FilteredItems.Count; otherwise we ask the server (Limit=0
+        // count query). Total round-trip is at most one per enabled library.
         var libraryCounts = new Dictionary<string, int>(enabledMappings.Count);
         var totalExpected = 0;
         foreach (var mapping in enabledMappings)
@@ -102,6 +117,19 @@ public class UpdateSyncTablesTask
             cancellationToken.ThrowIfCancellationRequested();
             if (!Guid.TryParse(mapping.SourceLibraryId, out var sourceLibraryId))
             {
+                continue;
+            }
+
+            if (mapping.FilterMode == LibraryFilterMode.Whitelist)
+            {
+                // Whitelist count isn't known up-front: a single whitelisted
+                // Series expands to all of its episodes. We could query
+                // TotalRecordCount on the AncestorIds endpoint, but that's
+                // an extra round-trip per library. Cheaper to leave the
+                // denominator unset and let progress be coarse for whitelist
+                // mappings — the bulk-fetch libraries (if any) dominate the
+                // bar; the Math.Min(100, ...) clamp keeps it visually sane.
+                libraryCounts[mapping.SourceLibraryId] = 0;
                 continue;
             }
 
@@ -138,6 +166,65 @@ public class UpdateSyncTablesTask
                 config.WatchedFilterUserIds,
                 cancellationToken).ConfigureAwait(false);
 
+            if (mapping.FilterMode == LibraryFilterMode.Whitelist)
+            {
+                // Whitelist: fetch only what the user picked, but expand
+                // folder-type whitelists (Series, Season, BoxSet) to their
+                // syncable leaf children. This is the implicit behavior the
+                // previous bulk-scan + path-prefix-filter gave for free.
+                //
+                // Two queries:
+                //   1. AncestorIds = whitelist  → leaves under whitelisted folders.
+                //   2. Ids = whitelist (leaf-types only)  → leaves whitelisted directly.
+                // Union by item ID so a leaf under a whitelisted folder that's
+                // ALSO whitelisted itself is returned once.
+                var ids = (mapping.FilteredItems ?? new List<Models.Configuration.FilteredItem>())
+                    .Select(fi => Guid.TryParse(fi.ItemId, out var g) ? g : Guid.Empty)
+                    .Where(g => g != Guid.Empty)
+                    .ToList();
+
+                if (ids.Count == 0)
+                {
+                    Logger.LogInformation(
+                        "{Library} is in whitelist mode but FilteredItems is empty — nothing to fetch.",
+                        mapping.SourceLibraryName);
+                    continue;
+                }
+
+                var ancestorChildren = await Client.GetContentItemsByAncestorsAsync(ids, pageSize: 1000, maxParallelism: 4, cancellationToken: cancellationToken).ConfigureAwait(false);
+                var directLeaves = await Client.GetContentItemsByIdsAsync(ids, batchSize: 50, cancellationToken).ConfigureAwait(false);
+
+                Logger.LogInformation(
+                    "{Library} whitelist expanded to {AncestorCount} children + {DirectCount} direct leaves from {WhitelistCount} whitelisted item(s).",
+                    mapping.SourceLibraryName,
+                    ancestorChildren.Count,
+                    directLeaves.Count,
+                    ids.Count);
+
+                var seen = new HashSet<Guid>();
+                foreach (var item in ancestorChildren.Concat(directLeaves))
+                {
+                    if (!item.Id.HasValue || !seen.Add(item.Id.Value))
+                    {
+                        continue;
+                    }
+
+                    var hitWatched = watchedByAll != null && watchedByAll.Contains(item.Id.Value);
+                    work.Add(new ContentRefreshWork(mapping, item, hitWatched));
+
+                    fetched++;
+                    if (totalExpected > 0)
+                    {
+                        progress.Report(Math.Min(100, 100.0 * fetched / totalExpected));
+                    }
+                }
+
+                continue;
+            }
+
+            // Blacklist / AllowAll: bulk-fetch and post-filter via the
+            // FetchAllPagesAsync utility, which honors the same FilterMode
+            // semantics that BuildRecordAsync uses.
             await PaginatedFetchUtility.FetchAllPagesAsync(
                 fetchPage: (startIndex, batchSize, ct) => Client.GetLibraryItemsAsync(sourceLibraryId, startIndex, batchSize, ct),
                 processItem: (item, _) =>

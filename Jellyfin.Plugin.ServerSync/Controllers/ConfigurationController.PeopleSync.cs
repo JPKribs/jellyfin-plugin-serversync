@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
@@ -23,12 +25,51 @@ public partial class ConfigurationController
     [HttpGet("PeopleItems/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<PeopleSyncItemDto> GetPeopleSyncItem(long id, [FromServices] PeopleSyncTableManager manager)
+    public async Task<ActionResult<PeopleSyncItemDto>> GetPeopleSyncItem(
+        long id,
+        [FromServices] PeopleSyncTableManager manager,
+        [FromServices] PeopleSyncTableService peopleService,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(peopleService);
         var item = manager.GetById(id);
         if (item == null)
         {
             return NotFound();
+        }
+
+        var config = _configManager.Configuration;
+
+        // Re-read live local state so the modal shows what's actually in
+        // Jellyfin right now, not the snapshot from the last People Refresh.
+        // Without this, a successful Sync apply doesn't show up here until
+        // the user re-runs the Refresh task.
+        peopleService.RefreshLocalSnapshot(item, syncImages: config.PeopleSyncImages);
+
+        // Enrich source-side image manifest with real sizes/dimensions so
+        // the modal renders Source as e.g. "623.4 KB" instead of "1 (0 B)".
+        // The refresh builds source manifests from ImageTags only (no per-
+        // person HTTP call) for performance; this is the per-modal-open
+        // compensation.
+        if (config.PeopleSyncImages
+            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
+            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey)
+            && !string.IsNullOrEmpty(item.Images.Source))
+        {
+            try
+            {
+                using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
+                await peopleService.EnrichSourceImageSizesAsync(item, client, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Source image enrichment failed for person {Name}; modal will show tag-only sizes", item.PersonName);
+            }
         }
 
         return Ok(MapToPeopleSyncItemDto(item));

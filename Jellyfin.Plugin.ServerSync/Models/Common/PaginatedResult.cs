@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.ServerSync.Models;
+namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
 /// Generic paginated result wrapper for API responses.

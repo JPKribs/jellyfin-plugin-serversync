@@ -84,10 +84,14 @@ public class SyncMissingUserDataTask
         {
             case UserPropertyCategory.Policy:
                 await ApplyPolicyChangesAsync(localUser, record).ConfigureAwait(false);
+                VerifyPolicyApplied(localUserId, record);
+                Logger.LogInformation("Apply Policy verified for {User}", localUser.Username);
                 break;
 
             case UserPropertyCategory.Configuration:
                 await ApplyConfigurationChangesAsync(localUser, record).ConfigureAwait(false);
+                VerifyConfigurationApplied(localUserId, record);
+                Logger.LogInformation("Apply Configuration verified for {User}", localUser.Username);
                 break;
 
             case UserPropertyCategory.ProfileImage:
@@ -97,11 +101,163 @@ public class SyncMissingUserDataTask
                 }
 
                 await ApplyProfileImageAsync(localUser, record, Client, cancellationToken).ConfigureAwait(false);
+                // ApplyProfileImageAsync already updates Local* fields with the
+                // hash of the bytes it just wrote; verifying is checking they
+                // now match Source*.
+                VerifyProfileImageApplied(record);
+                Logger.LogInformation("Apply ProfileImage verified for {User}", localUser.Username);
                 break;
 
             default:
                 throw new InvalidOperationException($"Unknown property category: {record.PropertyCategory}");
         }
+    }
+
+    private void VerifyPolicyApplied(Guid localUserId, UserSyncItem record)
+    {
+        var freshUser = _userManager.GetUserById(localUserId)
+            ?? throw new InvalidOperationException("user disappeared after policy apply");
+        var freshPolicy = _userManager.GetUserDto(freshUser).Policy;
+        if (freshPolicy == null)
+        {
+            throw new InvalidOperationException("policy unavailable after apply (cannot verify)");
+        }
+
+        if (string.IsNullOrEmpty(record.MergedValue))
+        {
+            return;
+        }
+
+        var mergedProps = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(record.MergedValue);
+        if (mergedProps == null) return;
+
+        var policyType = freshPolicy.GetType();
+        var diffs = new List<string>();
+        foreach (var kvp in mergedProps)
+        {
+            var prop = policyType.GetProperty(kvp.Key);
+            if (prop == null || !prop.CanRead) continue;
+
+            object? actual = prop.GetValue(freshPolicy);
+            object? wanted;
+            try
+            {
+                wanted = JsonSerializer.Deserialize(kvp.Value.GetRawText(), prop.PropertyType);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (!ScalarEquals(actual, wanted))
+            {
+                diffs.Add(kvp.Key);
+                if (diffs.Count >= 5) break;
+            }
+        }
+
+        if (diffs.Count > 0)
+        {
+            throw new InvalidOperationException($"Policy verification mismatch on: {string.Join(", ", diffs)}");
+        }
+    }
+
+    private void VerifyConfigurationApplied(Guid localUserId, UserSyncItem record)
+    {
+        var freshUser = _userManager.GetUserById(localUserId)
+            ?? throw new InvalidOperationException("user disappeared after configuration apply");
+        var freshConfig = _userManager.GetUserDto(freshUser).Configuration;
+        if (freshConfig == null)
+        {
+            throw new InvalidOperationException("configuration unavailable after apply (cannot verify)");
+        }
+
+        if (string.IsNullOrEmpty(record.MergedValue))
+        {
+            return;
+        }
+
+        var mergedProps = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(record.MergedValue);
+        if (mergedProps == null) return;
+
+        var configType = freshConfig.GetType();
+        var diffs = new List<string>();
+        foreach (var kvp in mergedProps)
+        {
+            var prop = configType.GetProperty(kvp.Key);
+            if (prop == null || !prop.CanRead) continue;
+
+            object? actual = prop.GetValue(freshConfig);
+            object? wanted;
+            try
+            {
+                wanted = JsonSerializer.Deserialize(kvp.Value.GetRawText(), prop.PropertyType);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (!ScalarEquals(actual, wanted))
+            {
+                diffs.Add(kvp.Key);
+                if (diffs.Count >= 5) break;
+            }
+        }
+
+        if (diffs.Count > 0)
+        {
+            throw new InvalidOperationException($"Configuration verification mismatch on: {string.Join(", ", diffs)}");
+        }
+    }
+
+    private static void VerifyProfileImageApplied(UserSyncItem record)
+    {
+        // ApplyProfileImageAsync already wrote the downloaded hash into
+        // LocalImageHash. Verifying = confirming Local matches Source.
+        var sourceHasNoImage = string.IsNullOrEmpty(record.SourceImageHash)
+            && (!record.SourceImageSize.HasValue || record.SourceImageSize <= 0);
+        if (sourceHasNoImage)
+        {
+            // Apply is "remove local image" — verify local has no image.
+            var localHasImage = !string.IsNullOrEmpty(record.LocalImageHash)
+                || (record.LocalImageSize.HasValue && record.LocalImageSize > 0);
+            if (localHasImage)
+            {
+                throw new InvalidOperationException("ProfileImage: local still has an image after apply intended to clear it");
+            }
+
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(record.SourceImageHash)
+            && !string.Equals(record.SourceImageHash, record.LocalImageHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"ProfileImage: hash mismatch after apply (source {record.SourceImageHash}, local {record.LocalImageHash})");
+        }
+
+        if (string.IsNullOrEmpty(record.SourceImageHash)
+            && record.SourceImageSize.HasValue
+            && record.LocalImageSize != record.SourceImageSize)
+        {
+            throw new InvalidOperationException(
+                $"ProfileImage: size mismatch after apply (source {record.SourceImageSize}, local {record.LocalImageSize})");
+        }
+    }
+
+    private static bool ScalarEquals(object? a, object? b)
+    {
+        if (a == null && b == null) return true;
+        if (a == null || b == null) return false;
+        // Reflection comparison — for collections, fall back to JSON.
+        if (a is System.Collections.IEnumerable ea && b is System.Collections.IEnumerable eb
+            && a is not string && b is not string)
+        {
+            return JsonSerializer.Serialize(ea) == JsonSerializer.Serialize(eb);
+        }
+
+        return a.Equals(b);
     }
 
     /// <inheritdoc />

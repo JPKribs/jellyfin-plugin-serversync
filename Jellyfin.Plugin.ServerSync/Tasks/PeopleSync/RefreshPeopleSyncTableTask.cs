@@ -1,15 +1,19 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Sdk.Generated.Models;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
+using SdkBaseItemDto = Jellyfin.Sdk.Generated.Models.BaseItemDto;
 using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
@@ -23,6 +27,15 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
 {
     private readonly ILibraryManager _libraryManager;
     private readonly PeopleSyncTableService _peopleService;
+
+    /// <summary>
+    /// Per-run cache of local Person items keyed by Name. Built by
+    /// <see cref="GetListAsync"/>, consumed by <see cref="BuildRecordAsync"/>
+    /// so the build phase doesn't re-hit Jellyfin's library SQLite for every
+    /// item — that contention was producing
+    /// <c>SQLite Error 5: 'database is locked'</c> under parallelism.
+    /// </summary>
+    private Dictionary<string, BaseItem>? _localPersonsByName;
 
     /// <summary>
     /// Initializes a new instance.
@@ -75,19 +88,100 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     }
 
     /// <inheritdoc />
-    protected override async Task<IList<BaseItemDto>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    /// <remarks>
+    /// Local-first fetch: enumerate the local Person items, then for each
+    /// distinct name make a per-name <c>/Persons/{name}</c> call against the
+    /// source server (parallel, bounded). The previous "fetch all source
+    /// persons then filter by local match" approach pulled tens of thousands
+    /// of person records over the wire just to find a small subset that has
+    /// a local correlate; this is dramatically cheaper when the local
+    /// library has fewer persons than the source.
+    /// </remarks>
+    protected override async Task<IList<SdkBaseItemDto>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
         if (Client == null)
         {
-            return Array.Empty<BaseItemDto>();
+            return Array.Empty<SdkBaseItemDto>();
         }
 
-        // /Persons is a single non-paginated call — report midway during
-        // the fetch and 100 when complete so the UI moves rather than
-        // sitting still.
-        progress.Report(20);
-        var result = await Client.GetAllPersonsAsync(cancellationToken).ConfigureAwait(false);
+        progress.Report(2);
+
+        // Step 1: enumerate local Person items once and cache them for
+        // BuildRecordAsync. Doing this once up front (rather than per-item)
+        // avoids hammering Jellyfin's library SQLite during the parallel
+        // build phase — that was producing "database is locked" errors.
+        var localPersons = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            IncludeItemTypes = new[] { Jellyfin.Data.Enums.BaseItemKind.Person }
+        }) ?? new List<BaseItem>();
+
+        _localPersonsByName = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in localPersons)
+        {
+            if (!string.IsNullOrEmpty(p.Name) && !_localPersonsByName.ContainsKey(p.Name))
+            {
+                _localPersonsByName[p.Name] = p;
+            }
+        }
+
+        var localNames = _localPersonsByName.Keys.ToList();
+
+        Logger.LogInformation(
+            "{Task}: enumerated {Count} local persons; fetching matching source persons",
+            Name,
+            localNames.Count);
+
+        progress.Report(10);
+
+        if (localNames.Count == 0)
+        {
+            return Array.Empty<SdkBaseItemDto>();
+        }
+
+        // Step 2: per-name fetch against source. /Persons/{name} returns the
+        // full person entity; combined with the follow-up /Items?Ids= that
+        // GetPersonByNameAsync issues, every match yields a fully-populated
+        // BaseItemDto. Bounded parallelism so we don't melt the source.
+        var matched = new ConcurrentBag<SdkBaseItemDto>();
+        var processed = 0;
+        var total = Math.Max(localNames.Count, 1);
+
+        await Parallel.ForEachAsync(
+            localNames,
+            new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = cancellationToken },
+            async (name, ct) =>
+            {
+                try
+                {
+                    var person = await Client.GetPersonByNameAsync(name, ct).ConfigureAwait(false);
+                    if (person != null)
+                    {
+                        matched.Add(person);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Failed to fetch source person {Name}", name);
+                }
+                finally
+                {
+                    var done = Interlocked.Increment(ref processed);
+                    progress.Report(Math.Min(100, 10 + (90.0 * done / total)));
+                }
+            }).ConfigureAwait(false);
+
+        var result = matched.ToList();
+        Logger.LogInformation(
+            "{Task}: matched {Matched}/{Local} local persons against source",
+            Name,
+            result.Count,
+            localNames.Count);
+
         progress.Report(100);
         return result;
     }
@@ -104,15 +198,11 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
             return Task.FromResult<PeopleSyncItem?>(null);
         }
 
-        // Look up local person — skip entirely if no local match.
-        var personStub = _libraryManager.GetPerson(source.Name);
-        if (personStub == null)
-        {
-            return Task.FromResult<PeopleSyncItem?>(null);
-        }
-
-        var localPerson = _libraryManager.GetItemById(personStub.Id);
-        if (localPerson == null)
+        // Look up local person from the cache built in GetListAsync. Going
+        // back to ILibraryManager here under parallel load was producing
+        // SQLite "database is locked" errors against Jellyfin's main DB.
+        if (_localPersonsByName == null
+            || !_localPersonsByName.TryGetValue(source.Name, out var localPerson))
         {
             return Task.FromResult<PeopleSyncItem?>(null);
         }

@@ -25,15 +25,17 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// <see cref="MetadataSyncItem"/> rows in parent-first order and applies
 /// each enabled category (Metadata, Images, People, Studios) to the local
 /// item via the four <c>ApplyXxxAsync</c> private helpers. A category that
-/// succeeds is per-category <c>MarkSynced</c>'d so its hash short-circuit
-/// is honored on the next Refresh; a category that fails causes
-/// <see cref="ApplyAsync"/> to throw, which the base class translates into
-/// <see cref="SyncStatus.Errored"/>.
+/// passes a post-write verification read is per-category <c>MarkSynced</c>'d
+/// so its hash short-circuit is honored on the next Refresh; a category
+/// that fails (apply error or verification mismatch) causes the row to
+/// transition to <see cref="SyncStatus.Errored"/> with a <see cref="SyncRecord.Reason"/>
+/// naming the diverging category and cause.
 /// </summary>
 public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (string SourceLibraryId, string SourceItemId)>
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
+    private readonly MetadataSyncTableService _metadataService;
 
     /// <summary>
     /// Initializes a new instance.
@@ -44,11 +46,13 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         IProviderManager providerManager,
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
+        MetadataSyncTableService metadataService,
         MetadataSyncTableManager manager)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
         _providerManager = providerManager;
+        _metadataService = metadataService;
     }
 
     /// <inheritdoc />
@@ -126,57 +130,198 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         var failures = new List<string>();
         var synced = new List<string>();
 
+        // Phase 1: write per-category. Each apply mutates localItem in-memory
+        // and reports whether anything changed. The composite UpdateToRepository
+        // call combines flags so we save once per item, not once per category.
+        var metadataChanged = false;
+        var imagesChanged = false;
+        var peopleChanged = false;
+        var studiosChanged = false;
+        var anyApplyAttempted = false;
+
         if (config.MetadataSyncMetadata && record.HasMetadataChanges)
         {
-            if (await ApplyMetadataAsync(localItem, record, config.MetadataSyncGenres, config.MetadataSyncTags, cancellationToken).ConfigureAwait(false))
+            anyApplyAttempted = true;
+            try
             {
-                record.Metadata.MarkSynced();
-                synced.Add("Metadata");
+                metadataChanged = ApplyMetadata(localItem, record, config.MetadataSyncGenres, config.MetadataSyncTags);
             }
-            else
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                failures.Add("Metadata");
+                Logger.LogError(ex, "Metadata apply threw for {ItemName}", record.ItemName);
+                failures.Add($"Metadata: apply threw — {ex.Message}");
             }
         }
 
         if (config.MetadataSyncImages && record.HasImagesChanges)
         {
-            if (await ApplyImagesAsync(localItem, record, Client, cancellationToken).ConfigureAwait(false))
+            anyApplyAttempted = true;
+            try
             {
-                record.Images.MarkSynced();
-                synced.Add("Images");
+                imagesChanged = await ApplyImagesAsync(localItem, record, Client, cancellationToken).ConfigureAwait(false);
             }
-            else
+            catch (OperationCanceledException)
             {
-                failures.Add("Images");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Images apply threw for {ItemName}", record.ItemName);
+                failures.Add($"Images: apply threw — {ex.Message}");
             }
         }
 
         if (config.MetadataSyncPeople && record.HasPeopleChanges)
         {
-            if (await ApplyPeopleAsync(localItem, record, cancellationToken).ConfigureAwait(false))
+            anyApplyAttempted = true;
+            if (!localItem.SupportsPeople)
             {
-                record.People.MarkSynced();
-                synced.Add("People");
+                failures.Add($"People: item type {localItem.GetType().Name} does not accept manual people writes");
+                Logger.LogWarning(
+                    "Cannot sync people for {ItemName} ({ItemType}): SupportsPeople is false. Local id {LocalItemId}",
+                    record.ItemName,
+                    localItem.GetType().Name,
+                    localItem.Id);
             }
             else
             {
-                failures.Add("People");
+                try
+                {
+                    peopleChanged = await ApplyPeopleAsync(localItem, record, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "People apply threw for {ItemName}", record.ItemName);
+                    failures.Add($"People: apply threw — {ex.Message}");
+                }
             }
         }
 
         if (config.MetadataSyncStudios && record.HasStudiosChanges)
         {
-            if (await ApplyStudiosAsync(localItem, record, cancellationToken).ConfigureAwait(false))
+            anyApplyAttempted = true;
+            try
             {
-                record.Studios.MarkSynced();
-                synced.Add("Studios");
+                studiosChanged = ApplyStudios(localItem, record);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.LogError(ex, "Studios apply threw for {ItemName}", record.ItemName);
+                failures.Add($"Studios: apply threw — {ex.Message}");
+            }
+        }
+
+        // Phase 2: persist. One UpdateToRepositoryAsync with combined flags.
+        // ApplyImagesAsync already called UpdateToRepositoryAsync(ImageUpdate)
+        // because SaveImage internally requires the item to have a row, so we
+        // only need to combine the field-mutation flag here.
+        if (anyApplyAttempted && (metadataChanged || peopleChanged || studiosChanged))
+        {
+            try
+            {
+                await localItem.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "UpdateToRepositoryAsync(MetadataEdit) threw for {ItemName}", record.ItemName);
+                failures.Add($"Persist: UpdateToRepositoryAsync threw — {ex.Message}");
+            }
+        }
+
+        // Phase 3: verify. Re-read the local item and confirm the write took.
+        // Verification failures don't throw — they just prevent MarkSynced and
+        // are recorded as Errored with a precise Reason.
+        if (failures.Count == 0 && anyApplyAttempted)
+        {
+            // Re-read so we get whatever Jellyfin actually persisted, including
+            // any provider/aggregation logic that may have rewritten our blob.
+            var freshLocal = _libraryManager.GetItemById(localItemId);
+            if (freshLocal == null)
+            {
+                failures.Add("Verify: local item disappeared after apply");
             }
             else
             {
-                failures.Add("Studios");
+                if (config.MetadataSyncMetadata && record.HasMetadataChanges)
+                {
+                    var (ok, reason) = VerifyMetadataApplied(freshLocal, record, config.MetadataSyncGenres, config.MetadataSyncTags);
+                    if (ok)
+                    {
+                        record.Metadata.MarkSynced();
+                        synced.Add("Metadata");
+                        Logger.LogInformation("Apply Metadata verified for {ItemName}", record.ItemName);
+                    }
+                    else
+                    {
+                        failures.Add($"Metadata: {reason}");
+                        Logger.LogWarning("Apply Metadata failed verification for {ItemName}: {Reason}", record.ItemName, reason);
+                    }
+                }
+
+                if (config.MetadataSyncImages && record.HasImagesChanges)
+                {
+                    var (ok, reason) = VerifyImagesApplied(freshLocal, record);
+                    if (ok)
+                    {
+                        record.Images.MarkSynced();
+                        synced.Add("Images");
+                        Logger.LogInformation("Apply Images verified for {ItemName}", record.ItemName);
+                    }
+                    else
+                    {
+                        failures.Add($"Images: {reason}");
+                        Logger.LogWarning("Apply Images failed verification for {ItemName}: {Reason}", record.ItemName, reason);
+                    }
+                }
+
+                if (config.MetadataSyncPeople && record.HasPeopleChanges && localItem.SupportsPeople)
+                {
+                    var (ok, reason) = VerifyPeopleApplied(freshLocal, record);
+                    if (ok)
+                    {
+                        record.People.MarkSynced();
+                        synced.Add("People");
+                        Logger.LogInformation("Apply People verified for {ItemName}", record.ItemName);
+                    }
+                    else
+                    {
+                        failures.Add($"People: {reason}");
+                        Logger.LogWarning("Apply People failed verification for {ItemName}: {Reason}", record.ItemName, reason);
+                    }
+                }
+
+                if (config.MetadataSyncStudios && record.HasStudiosChanges)
+                {
+                    var (ok, reason) = VerifyStudiosApplied(freshLocal, record);
+                    if (ok)
+                    {
+                        record.Studios.MarkSynced();
+                        synced.Add("Studios");
+                        Logger.LogInformation("Apply Studios verified for {ItemName}", record.ItemName);
+                    }
+                    else
+                    {
+                        failures.Add($"Studios: {reason}");
+                        Logger.LogWarning("Apply Studios failed verification for {ItemName}: {Reason}", record.ItemName, reason);
+                    }
+                }
             }
         }
+
+        // Suppress unused-variable warnings — we tracked the changed flags so
+        // the verification log line below has consistent context.
+        _ = metadataChanged;
+        _ = imagesChanged;
+        _ = peopleChanged;
+        _ = studiosChanged;
 
         if (failures.Count > 0)
         {
@@ -184,7 +329,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             // state on the record — the base class will Upsert the record
             // as Errored, persisting the partial progress so the next run
             // doesn't redo the categories that already succeeded.
-            throw new InvalidOperationException($"Failed to apply: {string.Join(", ", failures)}");
+            throw new InvalidOperationException(string.Join("; ", failures));
         }
 
         if (synced.Count > 0)
@@ -234,339 +379,141 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     };
 
     /// <summary>
-    /// Applies metadata fields to a local item.
+    /// Applies metadata fields to the local item, writing nulls and empty
+    /// arrays through to local so "remove a tag" / "clear an overview" on
+    /// source actually clears local. Does NOT call
+    /// <see cref="MediaBrowser.Controller.Entities.BaseItem.UpdateToRepositoryAsync"/> —
+    /// the caller batches all category writes into a single repository save.
     /// </summary>
-    private async Task<bool> ApplyMetadataAsync(
+    /// <returns>True if anything was changed, false if no-op.</returns>
+    private bool ApplyMetadata(
         MediaBrowser.Controller.Entities.BaseItem localItem,
         MetadataSyncItem item,
         bool syncGenres,
-        bool syncTags,
-        CancellationToken cancellationToken)
+        bool syncTags)
     {
         if (string.IsNullOrEmpty(item.Metadata.Source))
         {
-            return true; // Nothing to apply
+            return false;
         }
 
-        try
+        var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.Metadata.Source);
+        if (metadata == null)
         {
-            var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.Metadata.Source);
-            if (metadata == null)
+            throw new InvalidOperationException("Metadata source blob deserialized to null");
+        }
+
+        var hasChanges = false;
+        var localVideo = localItem as MediaBrowser.Controller.Entities.Video;
+
+        // Strings — assign through nulls and empty strings so source clearing
+        // a field actually clears local.
+        hasChanges |= AssignStringField(metadata, "Name", v => { if (!string.IsNullOrEmpty(v) && localItem.Name != v) { localItem.Name = v; return true; } return false; });
+        hasChanges |= AssignStringField(metadata, "OriginalTitle", v => { if (localItem.OriginalTitle != v) { localItem.OriginalTitle = v; return true; } return false; });
+        hasChanges |= AssignStringField(metadata, "Overview", v => { if (localItem.Overview != v) { localItem.Overview = v; return true; } return false; });
+        hasChanges |= AssignStringField(metadata, "OfficialRating", v => { if (localItem.OfficialRating != v) { localItem.OfficialRating = v; return true; } return false; });
+        hasChanges |= AssignStringField(metadata, "Tagline", v => { if (localItem.Tagline != v) { localItem.Tagline = v; return true; } return false; });
+        // SortName intentionally not synced: Jellyfin derives SortName
+        // from Name independently on each server, so writing it from
+        // source produces a value that local will overwrite on next
+        // metadata refresh anyway. ForcedSortName (user override) IS synced.
+        hasChanges |= AssignStringField(metadata, "ForcedSortName", v => { if (localItem.ForcedSortName != v) { localItem.ForcedSortName = v; return true; } return false; });
+        hasChanges |= AssignStringField(metadata, "CustomRating", v => { if (localItem.CustomRating != v) { localItem.CustomRating = v; return true; } return false; });
+        hasChanges |= AssignStringField(metadata, "PreferredMetadataCountryCode", v => { if (localItem.PreferredMetadataCountryCode != v) { localItem.PreferredMetadataCountryCode = v; return true; } return false; });
+        hasChanges |= AssignStringField(metadata, "PreferredMetadataLanguage", v => { if (localItem.PreferredMetadataLanguage != v) { localItem.PreferredMetadataLanguage = v; return true; } return false; });
+
+        // Floats — number or null; treat absent as no-op, present-and-null as
+        // clear-local.
+        hasChanges |= AssignFloat(metadata, "CommunityRating", v => { if (localItem.CommunityRating != v) { localItem.CommunityRating = v; return true; } return false; });
+        hasChanges |= AssignFloat(metadata, "CriticRating", v => { if (localItem.CriticRating != v) { localItem.CriticRating = v; return true; } return false; });
+
+        // Ints — same semantic.
+        hasChanges |= AssignInt(metadata, "ProductionYear", v => { if (localItem.ProductionYear != v) { localItem.ProductionYear = v; return true; } return false; });
+        hasChanges |= AssignInt(metadata, "IndexNumber", v => { if (localItem.IndexNumber != v) { localItem.IndexNumber = v; return true; } return false; });
+        hasChanges |= AssignInt(metadata, "ParentIndexNumber", v => { if (localItem.ParentIndexNumber != v) { localItem.ParentIndexNumber = v; return true; } return false; });
+
+        // Dates — date-only compare.
+        if (metadata.TryGetValue("PremiereDate", out var premiereValue))
+        {
+            var d = ParseNullableDate(premiereValue);
+            if (!JsonComparisonUtility.DateOnlyEquals(localItem.PremiereDate, d))
             {
-                return false;
-            }
-
-            var hasChanges = false;
-
-            // Apply each metadata field
-            if (metadata.TryGetValue("Name", out var nameValue) && nameValue.ValueKind == JsonValueKind.String)
-            {
-                var name = nameValue.GetString();
-                if (!string.IsNullOrEmpty(name) && localItem.Name != name)
-                {
-                    localItem.Name = name;
-                    hasChanges = true;
-                }
-            }
-
-            if (metadata.TryGetValue("OriginalTitle", out var origTitleValue) && origTitleValue.ValueKind == JsonValueKind.String)
-            {
-                var origTitle = origTitleValue.GetString();
-                if (localItem.OriginalTitle != origTitle)
-                {
-                    localItem.OriginalTitle = origTitle;
-                    hasChanges = true;
-                }
-            }
-
-            if (metadata.TryGetValue("Overview", out var overviewValue) && overviewValue.ValueKind == JsonValueKind.String)
-            {
-                var overview = overviewValue.GetString();
-                if (localItem.Overview != overview)
-                {
-                    localItem.Overview = overview;
-                    hasChanges = true;
-                }
-            }
-
-            if (metadata.TryGetValue("OfficialRating", out var ratingValue) && ratingValue.ValueKind == JsonValueKind.String)
-            {
-                var rating = ratingValue.GetString();
-                if (localItem.OfficialRating != rating)
-                {
-                    localItem.OfficialRating = rating;
-                    hasChanges = true;
-                }
-            }
-
-            if (metadata.TryGetValue("CommunityRating", out var commRatingValue))
-            {
-                float? commRating = commRatingValue.ValueKind == JsonValueKind.Number
-                    ? commRatingValue.GetSingle()
-                    : null;
-                if (localItem.CommunityRating != commRating)
-                {
-                    localItem.CommunityRating = commRating;
-                    hasChanges = true;
-                }
-            }
-
-            if (metadata.TryGetValue("CriticRating", out var criticRatingValue))
-            {
-                float? criticRating = criticRatingValue.ValueKind == JsonValueKind.Number
-                    ? criticRatingValue.GetSingle()
-                    : null;
-                if (localItem.CriticRating != criticRating)
-                {
-                    localItem.CriticRating = criticRating;
-                    hasChanges = true;
-                }
-            }
-
-            if (metadata.TryGetValue("ProductionYear", out var yearValue))
-            {
-                int? year = yearValue.ValueKind == JsonValueKind.Number
-                    ? yearValue.GetInt32()
-                    : null;
-                if (localItem.ProductionYear != year)
-                {
-                    localItem.ProductionYear = year;
-                    hasChanges = true;
-                }
-            }
-
-            // Only sync Genres if enabled in config
-            if (syncGenres && metadata.TryGetValue("Genres", out var genresValue) && genresValue.ValueKind == JsonValueKind.Array)
-            {
-                var genres = new List<string>();
-                foreach (var genre in genresValue.EnumerateArray())
-                {
-                    if (genre.ValueKind == JsonValueKind.String)
-                    {
-                        genres.Add(genre.GetString()!);
-                    }
-                }
-
-                localItem.Genres = genres.ToArray();
+                localItem.PremiereDate = d;
                 hasChanges = true;
             }
+        }
 
-            // Only sync Tags if enabled in config
-            if (syncTags && metadata.TryGetValue("Tags", out var tagsValue) && tagsValue.ValueKind == JsonValueKind.Array)
+        if (metadata.TryGetValue("EndDate", out var endValue))
+        {
+            var d = ParseNullableDate(endValue);
+            if (!JsonComparisonUtility.DateOnlyEquals(localItem.EndDate, d))
             {
-                var tags = new List<string>();
-                foreach (var tag in tagsValue.EnumerateArray())
-                {
-                    if (tag.ValueKind == JsonValueKind.String)
-                    {
-                        tags.Add(tag.GetString()!);
-                    }
-                }
-
-                localItem.Tags = tags.ToArray();
+                localItem.EndDate = d;
                 hasChanges = true;
             }
+        }
 
-            // Tagline (singular string on BaseItem)
-            if (metadata.TryGetValue("Tagline", out var taglineValue) && taglineValue.ValueKind == JsonValueKind.String)
+        // Arrays — empty/null source clears local.
+        if (syncGenres && metadata.TryGetValue("Genres", out var genresValue))
+        {
+            var newGenres = ReadStringArray(genresValue);
+            if (!ArraysEqualOrdinal(localItem.Genres, newGenres))
             {
-                var tagline = taglineValue.GetString();
-                if (localItem.Tagline != tagline)
+                localItem.Genres = newGenres;
+                hasChanges = true;
+            }
+        }
+
+        if (syncTags && metadata.TryGetValue("Tags", out var tagsValue))
+        {
+            var newTags = ReadStringArray(tagsValue);
+            if (!ArraysEqualOrdinal(localItem.Tags, newTags))
+            {
+                localItem.Tags = newTags;
+                hasChanges = true;
+            }
+        }
+
+        // ProviderIds: reconcile so local matches source exactly. Includes
+        // removing local-only keys.
+        if (metadata.TryGetValue("ProviderIds", out var providerIdsValue))
+        {
+            var sourceIds = ReadProviderIds(providerIdsValue);
+            // Remove local-only entries first.
+            if (localItem.ProviderIds != null)
+            {
+                var toRemove = localItem.ProviderIds.Keys
+                    .Where(k => !sourceIds.ContainsKey(k))
+                    .ToList();
+                foreach (var key in toRemove)
                 {
-                    localItem.Tagline = tagline;
+                    localItem.ProviderIds.Remove(key);
                     hasChanges = true;
                 }
             }
 
-            // SortName
-            if (metadata.TryGetValue("SortName", out var sortNameValue) && sortNameValue.ValueKind == JsonValueKind.String)
+            foreach (var kvp in sourceIds)
             {
-                var sortName = sortNameValue.GetString();
-                if (localItem.SortName != sortName)
+                if (localItem.GetProviderId(kvp.Key) != kvp.Value)
                 {
-                    localItem.SortName = sortName ?? string.Empty;
+                    localItem.SetProviderId(kvp.Key, kvp.Value);
                     hasChanges = true;
                 }
             }
+        }
 
-            // ForcedSortName
-            if (metadata.TryGetValue("ForcedSortName", out var forcedSortNameValue) && forcedSortNameValue.ValueKind == JsonValueKind.String)
+        // Video-specific fields. Settable only when local is a Video.
+        if (localVideo != null)
+        {
+            hasChanges |= AssignStringField(metadata, "AspectRatio", v => { if (localVideo.AspectRatio != v) { localVideo.AspectRatio = v; return true; } return false; });
+
+            if (metadata.TryGetValue("Video3DFormat", out var video3DValue))
             {
-                var forcedSortName = forcedSortNameValue.GetString();
-                if (localItem.ForcedSortName != forcedSortName)
-                {
-                    localItem.ForcedSortName = forcedSortName;
-                    hasChanges = true;
-                }
-            }
-
-            // CustomRating
-            if (metadata.TryGetValue("CustomRating", out var customRatingValue) && customRatingValue.ValueKind == JsonValueKind.String)
-            {
-                var customRating = customRatingValue.GetString();
-                if (localItem.CustomRating != customRating)
-                {
-                    localItem.CustomRating = customRating;
-                    hasChanges = true;
-                }
-            }
-
-            // PremiereDate (date-only semantic — compare by calendar date to avoid
-            // timezone-driven false diffs when servers are in different TZs)
-            if (metadata.TryGetValue("PremiereDate", out var premiereDateValue))
-            {
-                DateTime? premiereDate = null;
-                if (premiereDateValue.ValueKind == JsonValueKind.String)
-                {
-                    var dateStr = premiereDateValue.GetString();
-                    if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
-                    {
-                        premiereDate = parsed;
-                    }
-                }
-
-                if (!JsonComparisonUtility.DateOnlyEquals(localItem.PremiereDate, premiereDate))
-                {
-                    localItem.PremiereDate = premiereDate;
-                    hasChanges = true;
-                }
-            }
-
-            // EndDate (date-only semantic)
-            if (metadata.TryGetValue("EndDate", out var endDateValue))
-            {
-                DateTime? endDate = null;
-                if (endDateValue.ValueKind == JsonValueKind.String)
-                {
-                    var dateStr = endDateValue.GetString();
-                    if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
-                    {
-                        endDate = parsed;
-                    }
-                }
-
-                if (!JsonComparisonUtility.DateOnlyEquals(localItem.EndDate, endDate))
-                {
-                    localItem.EndDate = endDate;
-                    hasChanges = true;
-                }
-            }
-
-            // IndexNumber (episode number)
-            if (metadata.TryGetValue("IndexNumber", out var indexNumValue))
-            {
-                int? indexNum = indexNumValue.ValueKind == JsonValueKind.Number
-                    ? indexNumValue.GetInt32()
-                    : null;
-                if (localItem.IndexNumber != indexNum)
-                {
-                    localItem.IndexNumber = indexNum;
-                    hasChanges = true;
-                }
-            }
-
-            // ParentIndexNumber (season number)
-            if (metadata.TryGetValue("ParentIndexNumber", out var parentIndexNumValue))
-            {
-                int? parentIndexNum = parentIndexNumValue.ValueKind == JsonValueKind.Number
-                    ? parentIndexNumValue.GetInt32()
-                    : null;
-                if (localItem.ParentIndexNumber != parentIndexNum)
-                {
-                    localItem.ParentIndexNumber = parentIndexNum;
-                    hasChanges = true;
-                }
-            }
-
-            // PreferredMetadataCountryCode
-            if (metadata.TryGetValue("PreferredMetadataCountryCode", out var countryCodeValue) && countryCodeValue.ValueKind == JsonValueKind.String)
-            {
-                var countryCode = countryCodeValue.GetString();
-                if (localItem.PreferredMetadataCountryCode != countryCode)
-                {
-                    localItem.PreferredMetadataCountryCode = countryCode;
-                    hasChanges = true;
-                }
-            }
-
-            // PreferredMetadataLanguage
-            if (metadata.TryGetValue("PreferredMetadataLanguage", out var langValue) && langValue.ValueKind == JsonValueKind.String)
-            {
-                var lang = langValue.GetString();
-                if (localItem.PreferredMetadataLanguage != lang)
-                {
-                    localItem.PreferredMetadataLanguage = lang;
-                    hasChanges = true;
-                }
-            }
-
-            if (metadata.TryGetValue("ProviderIds", out var providerIdsValue) && providerIdsValue.ValueKind == JsonValueKind.Object)
-            {
-                // Reconcile providers so local matches source exactly. Without
-                // the cleanup pass, local-only entries (e.g. a Tmdb id that
-                // was scraped locally but isn't on source) persist forever
-                // and report as "still desynced" on every refresh.
-                var sourceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var prop in providerIdsValue.EnumerateObject())
-                {
-                    if (prop.Value.ValueKind == JsonValueKind.String
-                        && !string.IsNullOrEmpty(prop.Value.GetString()))
-                    {
-                        sourceKeys.Add(prop.Name);
-                    }
-                }
-
-                if (localItem.ProviderIds != null)
-                {
-                    var toRemove = localItem.ProviderIds.Keys
-                        .Where(k => !sourceKeys.Contains(k))
-                        .ToList();
-                    foreach (var key in toRemove)
-                    {
-                        localItem.ProviderIds.Remove(key);
-                        hasChanges = true;
-                    }
-                }
-
-                foreach (var prop in providerIdsValue.EnumerateObject())
-                {
-                    if (prop.Value.ValueKind == JsonValueKind.String)
-                    {
-                        var providerValue = prop.Value.GetString();
-                        if (!string.IsNullOrEmpty(providerValue)
-                            && localItem.GetProviderId(prop.Name) != providerValue)
-                        {
-                            localItem.SetProviderId(prop.Name, providerValue);
-                            hasChanges = true;
-                        }
-                    }
-                }
-            }
-
-            // Video-specific properties - only apply if item is a Video
-            var localVideo = localItem as MediaBrowser.Controller.Entities.Video;
-
-            // Note: Taglines is not directly settable on local BaseItem/Video - will be synced as display-only
-
-            // AspectRatio (Video-specific)
-            if (localVideo != null && metadata.TryGetValue("AspectRatio", out var aspectValue))
-            {
-                var aspectRatio = aspectValue.ValueKind == JsonValueKind.String ? aspectValue.GetString() : null;
-                if (localVideo.AspectRatio != aspectRatio)
-                {
-                    localVideo.AspectRatio = aspectRatio;
-                    hasChanges = true;
-                }
-            }
-
-            // Video3DFormat (Video-specific)
-            if (localVideo != null && metadata.TryGetValue("Video3DFormat", out var video3DValue))
-            {
-                MediaBrowser.Model.Entities.Video3DFormat? format = null;
+                Video3DFormat? format = null;
                 if (video3DValue.ValueKind == JsonValueKind.String)
                 {
-                    var formatStr = video3DValue.GetString();
-                    if (!string.IsNullOrEmpty(formatStr) && Enum.TryParse<MediaBrowser.Model.Entities.Video3DFormat>(formatStr, out var parsed))
+                    var s = video3DValue.GetString();
+                    if (!string.IsNullOrEmpty(s) && Enum.TryParse<Video3DFormat>(s, out var parsed))
                     {
                         format = parsed;
                     }
@@ -578,64 +525,41 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                     hasChanges = true;
                 }
             }
+        }
 
-            // LockedFields (BaseItem property)
-            if (metadata.TryGetValue("LockedFields", out var lockedValue) && lockedValue.ValueKind == JsonValueKind.Array)
+        // LockedFields — empty source clears local.
+        if (metadata.TryGetValue("LockedFields", out var lockedValue))
+        {
+            var newLocked = ReadEnumArray<MetadataField>(lockedValue);
+            if (!ArraysEqual(localItem.LockedFields, newLocked))
             {
-                var lockedFieldsList = new List<MediaBrowser.Model.Entities.MetadataField>();
-                foreach (var f in lockedValue.EnumerateArray())
-                {
-                    if (f.ValueKind == JsonValueKind.String)
-                    {
-                        var fieldStr = f.GetString();
-                        if (!string.IsNullOrEmpty(fieldStr) && Enum.TryParse<MediaBrowser.Model.Entities.MetadataField>(fieldStr, out var field))
-                        {
-                            lockedFieldsList.Add(field);
-                        }
-                    }
-                }
-
-                localItem.LockedFields = lockedFieldsList.ToArray();
+                localItem.LockedFields = newLocked;
                 hasChanges = true;
             }
-
-            // LockData (IsLocked - lock item to prevent future metadata changes)
-            if (metadata.TryGetValue("LockData", out var lockDataValue))
-            {
-                bool? lockData = null;
-                if (lockDataValue.ValueKind == JsonValueKind.True)
-                {
-                    lockData = true;
-                }
-                else if (lockDataValue.ValueKind == JsonValueKind.False)
-                {
-                    lockData = false;
-                }
-
-                if (lockData.HasValue && localItem.IsLocked != lockData.Value)
-                {
-                    localItem.IsLocked = lockData.Value;
-                    hasChanges = true;
-                }
-            }
-
-            if (hasChanges)
-            {
-                await localItem.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-            }
-
-            return true;
         }
-        catch (Exception ex)
+
+        // LockData — bool? coalesced to false when null, matching source-side
+        // serialization (which writes `LockData ?? false`).
+        if (metadata.TryGetValue("LockData", out var lockDataValue))
         {
-            Logger.LogError(ex, "Failed to apply metadata for {ItemName}", item.ItemName);
-            return false;
+            bool target = lockDataValue.ValueKind == JsonValueKind.True;
+            if (localItem.IsLocked != target)
+            {
+                localItem.IsLocked = target;
+                hasChanges = true;
+            }
         }
+
+        return hasChanges;
     }
 
     /// <summary>
     /// Applies images from the source server to a local item.
-    /// Deletes existing local images and replaces them with images from the source.
+    /// Two-pass approach: first download to temp files (so a partial
+    /// failure leaves existing local images intact), then delete + replace
+    /// per type. Calls <see cref="MediaBrowser.Controller.Entities.BaseItem.UpdateToRepositoryAsync"/>
+    /// at the end because <see cref="IProviderManager.SaveImage"/> needs the
+    /// item present in the repository.
     /// </summary>
     private async Task<bool> ApplyImagesAsync(
         MediaBrowser.Controller.Entities.BaseItem localItem,
@@ -645,174 +569,158 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     {
         if (sourceClient == null)
         {
-            Logger.LogWarning("No source server client available for image sync");
+            throw new InvalidOperationException("No source server client available for image sync");
+        }
+
+        if (string.IsNullOrEmpty(item.Images.Source))
+        {
             return false;
         }
 
-        try
+        var sourceImagesByType = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(item.Images.Source);
+        if (sourceImagesByType == null || sourceImagesByType.Count == 0)
         {
-            // Parse source image info - new format is Dictionary<imageType, List<ImageInfoDto>>
-            if (string.IsNullOrEmpty(item.Images.Source))
+            return false;
+        }
+
+        if (!Guid.TryParse(item.SourceItemId, out var sourceItemGuid))
+        {
+            throw new InvalidOperationException($"Invalid source item ID for image sync: {item.SourceItemId}");
+        }
+
+        var anyChanged = false;
+
+        foreach (var kvp in sourceImagesByType)
+        {
+            var imageTypeName = kvp.Key;
+            var sourceImages = kvp.Value;
+
+            if (!Enum.TryParse<ImageType>(imageTypeName, out var imageType))
             {
-                return true; // No images on source
+                Logger.LogWarning("Unknown image type: {ImageType}", imageTypeName);
+                continue;
             }
 
-            var sourceImagesByType = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(item.Images.Source);
-            if (sourceImagesByType == null || sourceImagesByType.Count == 0)
+            // Pass 1: download to temp files
+            var tempFiles = new List<(int Index, string TempPath, string ContentType)>();
+            try
             {
-                return true;
-            }
+                var allDownloadsSucceeded = true;
 
-            if (!Guid.TryParse(item.SourceItemId, out var sourceItemGuid))
-            {
-                Logger.LogWarning("Invalid source item ID for image sync: {SourceItemId}", item.SourceItemId);
-                return false;
-            }
-
-            // Process each image type from source.
-            // Two-pass approach: first download all images to temp files to verify success,
-            // then apply them. This prevents data loss (deleting existing images before
-            // confirming all downloads succeed) while avoiding holding all image data in memory.
-            foreach (var kvp in sourceImagesByType)
-            {
-                var imageTypeName = kvp.Key;
-                var sourceImages = kvp.Value;
-
-                if (!Enum.TryParse<ImageType>(imageTypeName, out var imageType))
+                for (int i = 0; i < sourceImages.Count; i++)
                 {
-                    Logger.LogWarning("Unknown image type: {ImageType}", imageTypeName);
+                    int? imageIndex = (imageType == ImageType.Backdrop || sourceImages.Count > 1) ? i : null;
+
+                    try
+                    {
+                        var (imageStream, contentType) = await sourceClient.DownloadItemImageAsync(
+                            sourceItemGuid, imageTypeName, imageIndex, cancellationToken).ConfigureAwait(false);
+
+                        if (imageStream == null)
+                        {
+                            Logger.LogWarning("Failed to download image {ImageType}/{Index} for {ItemName}",
+                                imageTypeName, i, localItem.Name);
+                            allDownloadsSucceeded = false;
+                            continue;
+                        }
+
+                        var tempPath = Path.GetTempFileName();
+                        try
+                        {
+                            using (imageStream)
+                            {
+                                using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 81920);
+                                await imageStream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
+                            }
+
+                            tempFiles.Add((i, tempPath, contentType ?? "image/jpeg"));
+                        }
+                        catch
+                        {
+                            try { File.Delete(tempPath); } catch (IOException) { }
+                            throw;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "Error downloading {ImageType}/{Index} image for {ItemName}",
+                            imageTypeName, i, localItem.Name);
+                        allDownloadsSucceeded = false;
+                    }
+                }
+
+                if (!allDownloadsSucceeded)
+                {
+                    Logger.LogWarning(
+                        "Not all {ImageType} downloads succeeded for {ItemName} ({Downloaded}/{Total}), keeping existing images",
+                        imageTypeName, localItem.Name, tempFiles.Count, sourceImages.Count);
                     continue;
                 }
 
-                // Pass 1: Download all images for this type to temp files
-                var tempFiles = new List<(int Index, string TempPath, string ContentType)>();
-                try
+                if (tempFiles.Count == 0)
                 {
-                    var allDownloadsSucceeded = true;
+                    continue;
+                }
 
-                    for (int i = 0; i < sourceImages.Count; i++)
+                // Pass 2: delete existing + apply
+                var existingImages = localItem.GetImages(imageType).ToList();
+                foreach (var existingImage in existingImages)
+                {
+                    try
                     {
-                        int? imageIndex = (imageType == ImageType.Backdrop || sourceImages.Count > 1) ? i : null;
-
-                        try
-                        {
-                            var (imageStream, contentType) = await sourceClient.DownloadItemImageAsync(
-                                sourceItemGuid, imageTypeName, imageIndex, cancellationToken).ConfigureAwait(false);
-
-                            if (imageStream == null)
-                            {
-                                Logger.LogWarning("Failed to download image {ImageType}/{Index} for {ItemName}",
-                                    imageTypeName, i, localItem.Name);
-                                allDownloadsSucceeded = false;
-                                continue;
-                            }
-
-                            var tempPath = Path.GetTempFileName();
-                            try
-                            {
-                                using (imageStream)
-                                {
-                                    using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 81920);
-                                    await imageStream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
-                                }
-
-                                tempFiles.Add((i, tempPath, contentType ?? "image/jpeg"));
-                            }
-                            catch
-                            {
-                                try { File.Delete(tempPath); } catch (IOException) { }
-                                throw;
-                            }
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogWarning(ex, "Error downloading {ImageType}/{Index} image for {ItemName}",
-                                imageTypeName, i, localItem.Name);
-                            allDownloadsSucceeded = false;
-                        }
+                        localItem.RemoveImage(existingImage);
+                        anyChanged = true;
                     }
-
-                    // Only replace existing images if ALL downloads succeeded for this type.
-                    // Partial success would delete existing images and replace with fewer — data loss.
-                    if (!allDownloadsSucceeded)
+                    catch (Exception ex)
                     {
-                        Logger.LogWarning(
-                            "Not all {ImageType} downloads succeeded for {ItemName} ({Downloaded}/{Total}), keeping existing images",
-                            imageTypeName, localItem.Name, tempFiles.Count, sourceImages.Count);
-                        continue;
-                    }
-
-                    if (tempFiles.Count == 0)
-                    {
-                        // No source images and all "downloads" succeeded (vacuously) — nothing to do
-                        continue;
-                    }
-
-                    // Pass 2: All downloads succeeded — safe to delete existing images and apply
-                    var existingImages = localItem.GetImages(imageType).ToList();
-                    foreach (var existingImage in existingImages)
-                    {
-                        try
-                        {
-                            localItem.RemoveImage(existingImage);
-                            Logger.LogDebug("Removed existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogWarning(ex, "Failed to remove existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
-                        }
-                    }
-
-                    // Stream each temp file into the provider manager one at a time
-                    foreach (var (index, tempPath, contentType) in tempFiles)
-                    {
-                        try
-                        {
-                            using var fileStream = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                            await _providerManager.SaveImage(
-                                localItem,
-                                fileStream,
-                                contentType,
-                                imageType,
-                                index,
-                                cancellationToken).ConfigureAwait(false);
-                            Logger.LogDebug("Saved {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogWarning(ex, "Error saving {ImageType}/{Index} image for {ItemName}",
-                                imageTypeName, index, localItem.Name);
-                        }
+                        Logger.LogWarning(ex, "Failed to remove existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
                     }
                 }
-                finally
+
+                foreach (var (index, tempPath, contentType) in tempFiles)
                 {
-                    // Clean up all temp files even on exception
-                    foreach (var (_, tempPath, _) in tempFiles)
+                    try
                     {
-                        try { File.Delete(tempPath); } catch (IOException) { }
+                        using var fileStream = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                        await _providerManager.SaveImage(
+                            localItem,
+                            fileStream,
+                            contentType,
+                            imageType,
+                            index,
+                            cancellationToken).ConfigureAwait(false);
+                        anyChanged = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "Error saving {ImageType}/{Index} image for {ItemName}",
+                            imageTypeName, index, localItem.Name);
                     }
                 }
             }
-
-            // Save the item to persist image changes
-            await localItem.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, cancellationToken).ConfigureAwait(false);
-
-            return true;
+            finally
+            {
+                foreach (var (_, tempPath, _) in tempFiles)
+                {
+                    try { File.Delete(tempPath); } catch (IOException) { }
+                }
+            }
         }
-        catch (Exception ex)
+
+        if (anyChanged)
         {
-            Logger.LogError(ex, "Failed to apply images for {ItemName}", item.ItemName);
-            return false;
+            await localItem.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, cancellationToken).ConfigureAwait(false);
         }
+
+        return anyChanged;
     }
 
     /// <summary>
-    /// Applies people to a local item.
+    /// Applies people. Does NOT call UpdateToRepositoryAsync — caller batches.
     /// </summary>
     private async Task<bool> ApplyPeopleAsync(
         MediaBrowser.Controller.Entities.BaseItem localItem,
@@ -821,125 +729,184 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     {
         if (string.IsNullOrEmpty(item.People.Source))
         {
-            return true; // Nothing to apply
-        }
-
-        try
-        {
-            var peopleList = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(item.People.Source);
-            if (peopleList == null)
-            {
-                return false;
-            }
-
-            var people = new List<MediaBrowser.Controller.Entities.PersonInfo>();
-            foreach (var person in peopleList)
-            {
-                var personInfo = new MediaBrowser.Controller.Entities.PersonInfo();
-
-                if (person.TryGetValue("Name", out var name))
-                {
-                    personInfo.Name = name;
-                }
-
-                if (person.TryGetValue("Role", out var role))
-                {
-                    personInfo.Role = role;
-                }
-
-                if (person.TryGetValue("Type", out var type) && Enum.TryParse<Jellyfin.Data.Enums.PersonKind>(type, out var personKind))
-                {
-                    personInfo.Type = personKind;
-                }
-
-                if (!string.IsNullOrEmpty(personInfo.Name))
-                {
-                    people.Add(personInfo);
-                }
-            }
-
-            // Some BaseItem subclasses silently no-op UpdatePeople when
-            // SupportsPeople == false (e.g. certain folder types). If we
-            // hit that, return false so the row is recorded as Errored
-            // rather than falsely marked Synced.
-            if (!localItem.SupportsPeople)
-            {
-                Logger.LogWarning(
-                    "Cannot sync people for {ItemName} ({ItemType}): SupportsPeople is false on this item type. Local item id {LocalItemId}",
-                    item.ItemName,
-                    localItem.GetType().Name,
-                    localItem.Id);
-                return false;
-            }
-
-            // Persist the item first so its row is in a clean MetadataEdit
-            // state, then write people, then save the item again. Calling
-            // UpdatePeople before the item save can leave the people-link
-            // table referencing a stale base-item state on some Jellyfin
-            // builds. Using the async variant avoids the .GetAwaiter().GetResult()
-            // wrapper of the sync version, which can stall under contention.
-            await _libraryManager.UpdatePeopleAsync(localItem, people, cancellationToken).ConfigureAwait(false);
-            await localItem.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-
-            // Verify the write actually persisted. If the item type doesn't
-            // accept manual people writes (e.g. they get re-aggregated from
-            // children on Series), GetPeople will still return the previous
-            // empty/different set after the call. Catch that explicitly so
-            // we don't mark a row Synced when local state didn't change.
-            var persisted = _libraryManager.GetPeople(localItem);
-            if (persisted == null || persisted.Count != people.Count)
-            {
-                Logger.LogWarning(
-                    "Apply people for {ItemName} ({ItemType}, local id {LocalItemId}) wrote {Wrote} entries but {Found} are now linked. The item type may not accept direct people writes (e.g. Series-level people are aggregated from episodes).",
-                    item.ItemName,
-                    localItem.GetType().Name,
-                    localItem.Id,
-                    people.Count,
-                    persisted?.Count ?? 0);
-                return false;
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to apply people for {ItemName}", item.ItemName);
             return false;
         }
+
+        var peopleList = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(item.People.Source);
+        if (peopleList == null)
+        {
+            throw new InvalidOperationException("People source blob deserialized to null");
+        }
+
+        var people = new List<MediaBrowser.Controller.Entities.PersonInfo>();
+        foreach (var person in peopleList)
+        {
+            var personInfo = new MediaBrowser.Controller.Entities.PersonInfo();
+
+            if (person.TryGetValue("Name", out var name))
+            {
+                personInfo.Name = name;
+            }
+
+            if (person.TryGetValue("Role", out var role))
+            {
+                personInfo.Role = role;
+            }
+
+            if (person.TryGetValue("Type", out var type) && Enum.TryParse<Jellyfin.Data.Enums.PersonKind>(type, out var personKind))
+            {
+                personInfo.Type = personKind;
+            }
+
+            if (!string.IsNullOrEmpty(personInfo.Name))
+            {
+                people.Add(personInfo);
+            }
+        }
+
+        await _libraryManager.UpdatePeopleAsync(localItem, people, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     /// <summary>
-    /// Applies studios to a local item.
+    /// Applies studios. Does NOT call UpdateToRepositoryAsync — caller batches.
     /// </summary>
-    private async Task<bool> ApplyStudiosAsync(
+    private bool ApplyStudios(
         MediaBrowser.Controller.Entities.BaseItem localItem,
-        MetadataSyncItem item,
-        CancellationToken cancellationToken)
+        MetadataSyncItem item)
     {
         if (string.IsNullOrEmpty(item.Studios.Source))
         {
-            return true; // Nothing to apply
-        }
-
-        try
-        {
-            var studiosList = JsonSerializer.Deserialize<List<string>>(item.Studios.Source);
-            if (studiosList == null)
-            {
-                return false;
-            }
-
-            // Apply studios directly - Jellyfin will create/find the studio entities by name
-            localItem.Studios = studiosList.ToArray();
-            await localItem.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to apply studios for {ItemName}", item.ItemName);
             return false;
         }
+
+        var studiosList = JsonSerializer.Deserialize<List<string>>(item.Studios.Source);
+        if (studiosList == null)
+        {
+            throw new InvalidOperationException("Studios source blob deserialized to null");
+        }
+
+        var newStudios = studiosList.ToArray();
+        if (ArraysEqualOrdinal(localItem.Studios, newStudios))
+        {
+            return false;
+        }
+
+        localItem.Studios = newStudios;
+        return true;
+    }
+
+    // ===================================================================
+    // Verification — re-read local state and compare against source blob.
+    // Each helper is a pure function for testability: takes the freshly-
+    // read local item + source record, returns (succeeded, failureReason).
+    // ===================================================================
+
+    private (bool Succeeded, string? FailureReason) VerifyMetadataApplied(
+        MediaBrowser.Controller.Entities.BaseItem freshLocal,
+        MetadataSyncItem record,
+        bool syncGenres,
+        bool syncTags)
+    {
+        // Rebuild the freshly-extracted local blob using the same path the
+        // refresh would use, then compare to the source blob. JsonEquals is
+        // tolerant of property ordering and date-format jitter.
+        _metadataService.RefreshLocalSnapshot(record, syncMetadata: true, syncImages: false, syncPeople: false, syncStudios: false, syncGenres: syncGenres, syncTags: syncTags);
+        var fresh = record.Metadata.Local;
+        var source = record.Metadata.Source;
+        if (JsonComparisonUtility.JsonEquals(fresh, source))
+        {
+            return (true, null);
+        }
+
+        var diff = JsonComparisonUtility.CountDifferences(source, fresh);
+        var truncSource = TruncateForLog(source);
+        var truncLocal = TruncateForLog(fresh);
+        return (false, $"verification found {diff} divergent field(s) (item type {freshLocal.GetType().Name}); source={truncSource}; local={truncLocal}");
+    }
+
+    private (bool Succeeded, string? FailureReason) VerifyImagesApplied(
+        MediaBrowser.Controller.Entities.BaseItem freshLocal,
+        MetadataSyncItem record)
+    {
+        _ = freshLocal;
+        _metadataService.RefreshLocalSnapshot(record, syncMetadata: false, syncImages: true, syncPeople: false, syncStudios: false, syncGenres: false, syncTags: false);
+        // Use the same comparator the refresh uses for source==local image
+        // diffs (tag-aware). If the comparator says they match, we're synced.
+        if (record.Images.Comparator.Equals(record.Images.Source, record.Images.Local))
+        {
+            return (true, null);
+        }
+
+        return (false, "image manifest after apply does not match source manifest (count or per-type tag/size mismatch)");
+    }
+
+    private (bool Succeeded, string? FailureReason) VerifyPeopleApplied(
+        MediaBrowser.Controller.Entities.BaseItem freshLocal,
+        MetadataSyncItem record)
+    {
+        // Direct count check first — Jellyfin sometimes silently no-ops the
+        // people write on item types that aggregate from children (Series).
+        var sourceList = ParsePeopleList(record.People.Source);
+        var localPeople = _libraryManager.GetPeople(freshLocal);
+        if (sourceList == null)
+        {
+            return (false, "source people blob deserialized to null");
+        }
+
+        var localCount = localPeople?.Count ?? 0;
+        if (localCount != sourceList.Count)
+        {
+            return (false, $"wrote {sourceList.Count} entries but {localCount} are now linked on local — Jellyfin overwrote the manual write (item type: {freshLocal.GetType().Name})");
+        }
+
+        // Names must match (case-insensitive). Roles vary harmlessly across
+        // Jellyfin builds; matching names is enough to confirm persistence.
+        var sourceNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in sourceList)
+        {
+            if (p.TryGetValue("Name", out var n) && !string.IsNullOrEmpty(n))
+            {
+                sourceNames.Add(n);
+            }
+        }
+
+        var localNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (localPeople != null)
+        {
+            foreach (var p in localPeople)
+            {
+                if (!string.IsNullOrEmpty(p.Name))
+                {
+                    localNames.Add(p.Name);
+                }
+            }
+        }
+
+        if (!sourceNames.SetEquals(localNames))
+        {
+            return (false, $"name set mismatch: source has {sourceNames.Count}, local has {localNames.Count} after write (item type: {freshLocal.GetType().Name})");
+        }
+
+        return (true, null);
+    }
+
+    private (bool Succeeded, string? FailureReason) VerifyStudiosApplied(
+        MediaBrowser.Controller.Entities.BaseItem freshLocal,
+        MetadataSyncItem record)
+    {
+        var sourceList = JsonSerializer.Deserialize<List<string>>(record.Studios.Source ?? "[]") ?? new List<string>();
+        var localStudios = freshLocal.Studios ?? Array.Empty<string>();
+
+        var sourceSet = new HashSet<string>(sourceList, StringComparer.OrdinalIgnoreCase);
+        var localSet = new HashSet<string>(localStudios.Where(s => !string.IsNullOrWhiteSpace(s)), StringComparer.OrdinalIgnoreCase);
+
+        if (sourceSet.SetEquals(localSet))
+        {
+            return (true, null);
+        }
+
+        return (false, $"studios mismatch: source has {sourceSet.Count} ({string.Join("|", sourceSet.OrderBy(s => s))}), local has {localSet.Count} ({string.Join("|", localSet.OrderBy(s => s))})");
     }
 
     /// <summary>
@@ -952,8 +919,170 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         {
             "Series" or "MusicArtist" => 0,
             "Season" or "MusicAlbum" or "BoxSet" => 1,
-            _ => 2 // Episodes, Movies, Audio, Video, and unknown types
+            _ => 2
         };
     }
 
+    // ===================================================================
+    // Apply helpers — local extraction utilities.
+    // ===================================================================
+
+    /// <summary>
+    /// Reads a string value from the dict and passes it to the assigner.
+    /// Returns the assigner's result. The value is null when the JSON is
+    /// null, the empty string when the JSON is an empty string, or the
+    /// content otherwise. If the key is absent, returns false and does not
+    /// invoke the assigner.
+    /// </summary>
+    private static bool AssignStringField(Dictionary<string, JsonElement> metadata, string key, Func<string?, bool> assign)
+    {
+        if (!metadata.TryGetValue(key, out var v)) return false;
+
+        string? read = v.ValueKind switch
+        {
+            JsonValueKind.String => v.GetString(),
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            _ => null
+        };
+
+        return assign(read);
+    }
+
+    private static bool AssignFloat(Dictionary<string, JsonElement> metadata, string key, Func<float?, bool> assign)
+    {
+        if (!metadata.TryGetValue(key, out var v)) return false;
+
+        float? read = v.ValueKind == JsonValueKind.Number ? v.GetSingle() : (float?)null;
+        return assign(read);
+    }
+
+    private static bool AssignInt(Dictionary<string, JsonElement> metadata, string key, Func<int?, bool> assign)
+    {
+        if (!metadata.TryGetValue(key, out var v)) return false;
+
+        int? read = v.ValueKind == JsonValueKind.Number ? v.GetInt32() : (int?)null;
+        return assign(read);
+    }
+
+    private static DateTime? ParseNullableDate(JsonElement v)
+    {
+        if (v.ValueKind != JsonValueKind.String) return null;
+        var s = v.GetString();
+        if (string.IsNullOrEmpty(s)) return null;
+        return DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed) ? parsed : null;
+    }
+
+    private static string[] ReadStringArray(JsonElement v)
+    {
+        if (v.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<string>();
+        }
+
+        var list = new List<string>();
+        foreach (var entry in v.EnumerateArray())
+        {
+            if (entry.ValueKind == JsonValueKind.String)
+            {
+                var s = entry.GetString();
+                if (s != null)
+                {
+                    list.Add(s);
+                }
+            }
+        }
+
+        return list.ToArray();
+    }
+
+    private static T[] ReadEnumArray<T>(JsonElement v) where T : struct, Enum
+    {
+        if (v.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<T>();
+        }
+
+        var list = new List<T>();
+        foreach (var entry in v.EnumerateArray())
+        {
+            if (entry.ValueKind == JsonValueKind.String)
+            {
+                var s = entry.GetString();
+                if (!string.IsNullOrEmpty(s) && Enum.TryParse<T>(s, out var parsed))
+                {
+                    list.Add(parsed);
+                }
+            }
+        }
+
+        return list.ToArray();
+    }
+
+    private static Dictionary<string, string> ReadProviderIds(JsonElement v)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (v.ValueKind != JsonValueKind.Object)
+        {
+            return result;
+        }
+
+        foreach (var prop in v.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.String)
+            {
+                var pv = prop.Value.GetString();
+                if (!string.IsNullOrEmpty(pv))
+                {
+                    result[prop.Name] = pv;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static bool ArraysEqualOrdinal(string[]? a, string[]? b)
+    {
+        var aArr = a ?? Array.Empty<string>();
+        var bArr = b ?? Array.Empty<string>();
+        if (aArr.Length != bArr.Length) return false;
+        for (var i = 0; i < aArr.Length; i++)
+        {
+            if (!string.Equals(aArr[i], bArr[i], StringComparison.Ordinal)) return false;
+        }
+
+        return true;
+    }
+
+    private static bool ArraysEqual<T>(T[]? a, T[]? b) where T : struct
+    {
+        var aArr = a ?? Array.Empty<T>();
+        var bArr = b ?? Array.Empty<T>();
+        if (aArr.Length != bArr.Length) return false;
+        for (var i = 0; i < aArr.Length; i++)
+        {
+            if (!aArr[i].Equals(bArr[i])) return false;
+        }
+
+        return true;
+    }
+
+    private static List<Dictionary<string, string>>? ParsePeopleList(string? blob)
+    {
+        if (string.IsNullOrEmpty(blob)) return new List<Dictionary<string, string>>();
+        try
+        {
+            return JsonSerializer.Deserialize<List<Dictionary<string, string>>>(blob);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string TruncateForLog(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "(empty)";
+        return s.Length <= 200 ? s : string.Concat(s.AsSpan(0, 200), "…");
+    }
 }

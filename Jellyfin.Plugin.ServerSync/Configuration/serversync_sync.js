@@ -2036,7 +2036,6 @@ export default function (view) {
             var metadataFields = [
                 { key: 'Name', label: 'Name' },
                 { key: 'OriginalTitle', label: 'Original Title' },
-                { key: 'SortName', label: 'Sort Name' },
                 { key: 'ForcedSortName', label: 'Forced Sort Name' },
                 { key: 'Overview', label: 'Overview', truncate: true },
                 { key: 'Tagline', label: 'Tagline' },
@@ -3427,7 +3426,6 @@ export default function (view) {
                 var metadataFields = [
                     { key: 'Name', label: 'Name' },
                     { key: 'OriginalTitle', label: 'Original Title' },
-                    { key: 'SortName', label: 'Sort Name' },
                     { key: 'ForcedSortName', label: 'Forced Sort Name' },
                     { key: 'Overview', label: 'Overview', truncate: true },
                     { key: 'PremiereDate', label: 'Birth Date', isDate: true },
@@ -3485,9 +3483,13 @@ export default function (view) {
                         var sourceSize = sourceList.reduce(function(sum, img) { return sum + (img.Size || 0); }, 0);
                         var localSize = localList.reduce(function(sum, img) { return sum + (img.Size || 0); }, 0);
                         var sizeChanged = sourceList.length !== localList.length || (sourceSize > 0 && localSize > 0 && sourceSize !== localSize);
+                        // Render identically to the Metadata modal: when size is
+                        // unknown (server didn't ship Size in the manifest) show
+                        // "1 image" rather than "1 (0 B)" — the latter reads as
+                        // "image is empty" even when the image is fine.
                         self._addComparisonRow(tbody, imageType,
-                            sourceList.length + ' (' + self._formatBytes(sourceSize) + ')',
-                            localList.length + ' (' + self._formatBytes(localSize) + ')',
+                            self._formatImageCell(sourceList.length, sourceSize),
+                            self._formatImageCell(localList.length, localSize),
                             sizeChanged);
                     });
                 } else {
@@ -3537,6 +3539,19 @@ export default function (view) {
             var size = bytes;
             while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
             return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+        },
+
+        // Renders an image-cell value identically to the Metadata modal's
+        // formatImageDisplay: count alone when size is unknown (avoids the
+        // "1 (0 B)" misread on tag-only source manifests), size-with-count
+        // when both are known.
+        _formatImageCell: function(count, size) {
+            if (count === 0) return '-';
+            if (!size || size === 0) {
+                return count === 1 ? '1 image' : count + ' images';
+            }
+            var sizeStr = this._formatBytes(size);
+            return count > 1 ? sizeStr + ' (' + count + ')' : sizeStr;
         },
 
         _addComparisonRow: function(tbody, property, sourceVal, localVal, isChanged) {

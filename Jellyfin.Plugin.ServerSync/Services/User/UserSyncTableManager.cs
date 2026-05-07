@@ -126,6 +126,34 @@ public sealed class UserSyncTableManager
     });
 
     /// <summary>
+    /// Counts distinct user mappings (SourceUserId, LocalUserId pairs) that
+    /// have at least one category row in <paramref name="status"/>. Use this
+    /// for the User-sync header counters so they match the visible row count
+    /// (one row per user mapping) instead of the underlying category-row
+    /// count (three per user when all categories are enabled).
+    /// <para>
+    /// Note: a user mapping with one category Queued and another Errored
+    /// counts as 1 in BOTH Queued and Errored — same as how the visible row
+    /// would show "Errored" or "Queued" based on the worst-case status.
+    /// </para>
+    /// </summary>
+    public int CountUserMappingsByStatus(SyncStatus status) => ExecuteRead(
+        conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT SourceUserId, LocalUserId
+                    FROM UserSyncItems
+                    WHERE Status = @Status
+                )";
+            cmd.Parameters.AddWithValue("@Status", (int)status);
+            var result = cmd.ExecuteScalar();
+            return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+        },
+        fallback: 0);
+
+    /// <summary>
     /// Returns all rows (all categories) for a given user mapping. Used by
     /// the user-grouping UI which displays all three categories per user as
     /// one logical row.

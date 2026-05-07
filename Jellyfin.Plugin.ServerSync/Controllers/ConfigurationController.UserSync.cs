@@ -97,19 +97,23 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets user sync status counts.
+    /// Gets user sync status counts. Counts distinct user mappings (one per
+    /// visible row) rather than raw category-row count, so the header
+    /// counter matches the list below. See
+    /// <see cref="UserSyncTableManager.CountUserMappingsByStatus"/>.
     /// </summary>
     [HttpGet("UserStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<BaseSyncStatusResponse> GetUserSyncStatus([FromServices] UserSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         return Ok(new BaseSyncStatusResponse
         {
-            Pending = manager.CountByStatus(SyncStatus.Pending),
-            Queued = manager.CountByStatus(SyncStatus.Queued),
-            Synced = manager.CountByStatus(SyncStatus.Synced),
-            Errored = manager.CountByStatus(SyncStatus.Errored),
-            Ignored = manager.CountByStatus(SyncStatus.Ignored)
+            Pending = manager.CountUserMappingsByStatus(SyncStatus.Pending),
+            Queued = manager.CountUserMappingsByStatus(SyncStatus.Queued),
+            Synced = manager.CountUserMappingsByStatus(SyncStatus.Synced),
+            Errored = manager.CountUserMappingsByStatus(SyncStatus.Errored),
+            Ignored = manager.CountUserMappingsByStatus(SyncStatus.Ignored)
         });
     }
 

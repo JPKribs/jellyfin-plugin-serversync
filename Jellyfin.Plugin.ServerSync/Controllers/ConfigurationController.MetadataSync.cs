@@ -33,10 +33,11 @@ public partial class ConfigurationController
     [HttpGet("MetadataItems/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<MetadataSyncItemDto> GetMetadataSyncItem(
+    public async Task<ActionResult<MetadataSyncItemDto>> GetMetadataSyncItem(
         long id,
         [FromServices] MetadataSyncTableManager manager,
-        [FromServices] MetadataSyncTableService metadataService)
+        [FromServices] MetadataSyncTableService metadataService,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(metadataService);
@@ -61,6 +62,30 @@ public partial class ConfigurationController
             syncStudios: config.MetadataSyncStudios,
             syncGenres: config.MetadataSyncGenres,
             syncTags: config.MetadataSyncTags);
+
+        // Enrich source-side image manifest with real sizes/dimensions so
+        // the modal renders Source as e.g. "623.4 KB" instead of "1 (0 B)".
+        // The refresh task uses tag-only manifests for performance; this is
+        // the per-modal-open compensation that gives the user honest numbers.
+        if (config.MetadataSyncImages
+            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
+            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey)
+            && !string.IsNullOrEmpty(item.Images.Source))
+        {
+            try
+            {
+                using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
+                await metadataService.EnrichSourceImageSizesAsync(item, client, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Source image enrichment failed for metadata item {Id} ({Name}); modal will show tag-only sizes", id, item.ItemName);
+            }
+        }
 
         return Ok(MapToMetadataSyncItemDto(item, config.LibraryMappings, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, config.SourceServerApiKey));
     }

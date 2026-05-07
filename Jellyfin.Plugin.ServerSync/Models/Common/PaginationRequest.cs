@@ -1,6 +1,6 @@
 using Jellyfin.Plugin.ServerSync.Models.Common;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
 /// Parameters for a paginated query against an <see cref="ISyncTableManager{TRecord, TKey}"/>.
