@@ -124,7 +124,7 @@ public partial class ConfigurationController
         var counts = manager.GetStatusCounts();
         var pendingCounts = manager.GetPendingCounts();
 
-        return Ok(new SyncStatusResponse
+        var response = new SyncStatusResponse
         {
             Pending = counts.GetValueOrDefault(SyncStatus.Pending, 0),
             PendingDownload = pendingCounts.GetValueOrDefault(PendingType.Download, 0),
@@ -135,7 +135,9 @@ public partial class ConfigurationController
             Errored = counts.GetValueOrDefault(SyncStatus.Errored, 0),
             Ignored = counts.GetValueOrDefault(SyncStatus.Ignored, 0),
             Deleting = counts.GetValueOrDefault(SyncStatus.Deleting, 0)
-        });
+        };
+        PopulateLastFailure(response, "Content");
+        return Ok(response);
     }
 
     /// <summary>

@@ -698,6 +698,41 @@ public class PluginConfiguration : BasePluginConfiguration
             _ => "MB"
         };
     }
+
+    /// <summary>
+    /// Most-recent run failure per module. Each task base appends/replaces
+    /// an entry on pre-flight or run-level failures and removes it on
+    /// successful completion. The dashboard surfaces these so a silent
+    /// abort (connection failure, disk space, circuit breaker) is visible
+    /// to the user without log-diving.
+    /// <para>
+    /// Stored as a list (not a dictionary) because Jellyfin's
+    /// <see cref="BasePluginConfiguration"/> uses XML serialization, which
+    /// doesn't round-trip <see cref="Dictionary{TKey, TValue}"/> reliably —
+    /// using one breaks plugin-config loading on startup.
+    /// </para>
+    /// </summary>
+    public List<SyncRunFailure> LastRunFailures { get; set; } = new();
+}
+
+/// <summary>
+/// Failure record for a sync run that aborted before normal completion.
+/// </summary>
+public sealed class SyncRunFailure
+{
+    /// <summary>
+    /// Module mutex key — "Content", "History", "Metadata", "People", or "User".
+    /// </summary>
+    public string ModuleKey { get; set; } = string.Empty;
+
+    /// <summary>"Refresh" or "Sync".</summary>
+    public string Phase { get; set; } = string.Empty;
+
+    /// <summary>One-line human-readable reason; surfaced in the UI.</summary>
+    public string Reason { get; set; } = string.Empty;
+
+    /// <summary>UTC timestamp when the failure was recorded.</summary>
+    public DateTime Timestamp { get; set; }
 }
 
 /// <summary>

@@ -443,8 +443,20 @@ public class SyncMissingUserDataTask
         // Avoid Path.GetTempFileName: it creates a 0-byte file we'd then have
         // to rename to *.jpg, leaking the original.
         var tempPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".jpg");
+        var userDataPath = Path.Combine(
+            _serverConfigurationManager.ApplicationPaths.UserConfigurationDirectoryPath,
+            localUser.Username);
+        var profilePath = Path.Combine(userDataPath, "profile.jpg");
+        // Staging path lives next to the final target so File.Move stays
+        // intra-filesystem (atomic). A separate name during the write-and-
+        // verify phase means the user's existing profile.jpg keeps working
+        // even if the download stalls or fails.
+        var stagingPath = Path.Combine(userDataPath, "profile.jpg.serversync.staging");
+
         try
         {
+            // Phase 1: download and hash. tempPath is a fresh temp file —
+            // failures here don't touch local state.
             using (var fileStream = File.Create(tempPath))
             {
                 await imageStream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
@@ -456,7 +468,23 @@ public class SyncMissingUserDataTask
                 downloadedHash = HashUtilities.ComputeSha256Hash(verifyStream);
             }
 
-            // Clear-and-set is how Jellyfin's API operates internally.
+            var downloadedSize = new FileInfo(tempPath).Length;
+            if (downloadedSize <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Downloaded profile image for {item.SourceUserName ?? item.SourceUserId} was empty (0 bytes)");
+            }
+
+            // Phase 2: durably stage the new image inside the user's profile
+            // directory under a sentinel name. If anything below fails after
+            // the stage, the staging file is still present for the next sync
+            // run (or manual recovery) and the user's existing profile.jpg
+            // remains untouched.
+            Directory.CreateDirectory(userDataPath);
+            File.Copy(tempPath, stagingPath, overwrite: true);
+
+            // Phase 3: clear the existing image (DB row + file). Safe now
+            // because the new image is already staged on disk.
             if (localUser.ProfileImage != null)
             {
                 await _userManager.ClearProfileImageAsync(localUser).ConfigureAwait(false);
@@ -464,21 +492,17 @@ public class SyncMissingUserDataTask
                     ?? throw new InvalidOperationException("User disappeared after clearing profile image");
             }
 
-            var userDataPath = Path.Combine(
-                _serverConfigurationManager.ApplicationPaths.UserConfigurationDirectoryPath,
-                localUser.Username);
-            Directory.CreateDirectory(userDataPath);
-            var profilePath = Path.Combine(userDataPath, "profile.jpg");
+            // Phase 4: atomically promote staging → profile.jpg. Single FS
+            // operation — overwrite is safe because Phase 3 just removed
+            // the old profile.jpg.
+            File.Move(stagingPath, profilePath, overwrite: true);
 
-            using (var profileStream = File.OpenRead(tempPath))
-            {
-                await _providerManager.SaveImage(profileStream, "image/jpeg", profilePath).ConfigureAwait(false);
-            }
-
+            // Phase 5: update the DB pointer. Even if this throws, the file
+            // is in place; the next refresh will see source == local on the
+            // file and reconcile the DB row.
             localUser.ProfileImage = new ImageInfo(profilePath);
             await _userManager.UpdateUserAsync(localUser).ConfigureAwait(false);
 
-            var downloadedSize = new FileInfo(tempPath).Length;
             item.LocalImageHash = downloadedHash;
             item.LocalImageSize = downloadedSize;
             item.SyncedImageHash = downloadedHash;
@@ -500,6 +524,21 @@ public class SyncMissingUserDataTask
             catch (IOException)
             {
                 // Best-effort cleanup; OS will clean temp eventually.
+            }
+
+            // Clean up staging only if it survived past the move (i.e. the
+            // move never happened). If the move succeeded, staging no
+            // longer exists at that path.
+            try
+            {
+                if (File.Exists(stagingPath))
+                {
+                    File.Delete(stagingPath);
+                }
+            }
+            catch (IOException)
+            {
+                // Same — best-effort cleanup.
             }
         }
     }

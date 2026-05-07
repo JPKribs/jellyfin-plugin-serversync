@@ -1,3 +1,5 @@
+using System;
+
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
@@ -23,5 +25,20 @@ public static class FormatUtilities
         }
 
         return $"{size:F2} {units[unitIndex]}";
+    }
+
+    /// <summary>
+    /// Truncates a string for inclusion in a log line. Long JSON blobs in
+    /// log messages bloat the log without adding useful information beyond
+    /// the first ~200 chars; this caps and adds a horizontal-ellipsis.
+    /// Empty/null inputs render as "(empty)" so the log line stays readable.
+    /// </summary>
+    /// <param name="s">The string to truncate.</param>
+    /// <param name="maxLength">Maximum length before truncation; default 200.</param>
+    /// <returns>Original string, "(empty)", or truncated form with ellipsis.</returns>
+    public static string TruncateForLog(string? s, int maxLength = 200)
+    {
+        if (string.IsNullOrEmpty(s)) return "(empty)";
+        return s.Length <= maxLength ? s : string.Concat(s.AsSpan(0, maxLength), "…");
     }
 }

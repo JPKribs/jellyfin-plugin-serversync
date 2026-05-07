@@ -300,10 +300,19 @@ public static class FileDeletionService
             .GroupBy(m => m.SourceLibraryId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().LocalRootPath, StringComparer.OrdinalIgnoreCase);
 
-        var successfulDeletes = new List<string>();
+        var deleted = 0;
+        var failed = 0;
+        var dbCleanupErrors = new List<string>();
         var failedItems = new List<(string SourceItemId, string Error)>();
 
-        // Process file deletions first
+        // Per-item atomicity: file delete → immediate DB row delete. The
+        // previous design ran all file deletes first, then a single
+        // BatchDelete at the end — if BatchDelete threw (SQLite locked,
+        // disk full), the files were gone but the DB still referenced them.
+        // A subsequent refresh would see "file missing" + Deleting status
+        // and confuse the user with a fake error. Per-item ordering means
+        // a transient DB failure leaves the row in place; the next refresh
+        // re-marks Deleting and we retry the whole pair on the next sync.
         foreach (var item in itemsToDelete)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -313,6 +322,7 @@ public static class FileDeletionService
 
             var localPath = item.LocalPath;
             var fileName = Path.GetFileName(localPath ?? item.SourcePath);
+            var fileGone = false;
 
             if (!string.IsNullOrEmpty(localPath) && File.Exists(localPath))
             {
@@ -320,7 +330,6 @@ public static class FileDeletionService
                 if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
                 {
                     result = DeleteWithRecyclingBin(localPath, config.RecyclingBinPath, logger);
-                    // Note: Empty folder cleanup not done for recycling bin (files are moved, not deleted)
                 }
                 else
                 {
@@ -330,7 +339,7 @@ public static class FileDeletionService
 
                 if (result.Success)
                 {
-                    successfulDeletes.Add(item.SourceItemId);
+                    fileGone = true;
                     logger.LogInformation("DELETED: {FileName}", fileName);
                 }
                 else
@@ -341,24 +350,31 @@ public static class FileDeletionService
             }
             else
             {
-                // File doesn't exist, mark for removal from database
-                successfulDeletes.Add(item.SourceItemId);
+                // File doesn't exist on disk — DB row should still be cleaned up.
+                fileGone = true;
             }
-        }
 
-        // Batch update database records
-        var deleted = 0;
-        var failed = 0;
-
-        if (successfulDeletes.Count > 0)
-        {
-            try
+            if (fileGone)
             {
-                deleted = manager.BatchDelete(successfulDeletes);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to batch delete {Count} database records", successfulDeletes.Count);
+                try
+                {
+                    manager.Delete(item.SourceItemId);
+                    deleted++;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // File is gone but DB delete failed. Log loudly so the
+                    // user can see it; the next sync run will pick up the
+                    // stale row and re-attempt cleanup. We don't add to
+                    // failedItems because the file IS deleted — re-marking
+                    // Errored would be wrong.
+                    logger.LogError(ex, "DB cleanup failed for {FileName} ({SourceItemId}) — file already deleted; will retry on next sync", fileName, item.SourceItemId);
+                    dbCleanupErrors.Add(item.SourceItemId);
+                }
             }
         }
 

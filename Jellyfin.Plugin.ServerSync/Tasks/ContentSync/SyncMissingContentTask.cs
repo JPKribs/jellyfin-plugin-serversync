@@ -179,7 +179,8 @@ public class DownloadMissingContentTask
 
         if (string.IsNullOrEmpty(record.LocalPath))
         {
-            throw new InvalidOperationException("Item has no local path configured");
+            throw new InvalidOperationException(
+                $"Item has no local path configured (source: {record.SourcePath ?? record.SourceItemId})");
         }
 
         var config = ConfigManager.Configuration;
@@ -194,7 +195,10 @@ public class DownloadMissingContentTask
         var (isValid, validationError) = DownloadService.ValidateForDownload(record, config, TypedManager);
         if (!isValid)
         {
-            throw new InvalidOperationException(validationError ?? "Validation failed");
+            // Include filename + source path so the Reason field surfaces
+            // which item failed validation, not just "Validation failed".
+            throw new InvalidOperationException(
+                $"Validation failed for {fileName}: {validationError ?? "unknown reason"} (source: {record.SourcePath ?? record.SourceItemId})");
         }
 
         if (DownloadService.ShouldSkipDownload(record, config.SizeMatchToleranceBytes, out var skipReason))
@@ -234,7 +238,12 @@ public class DownloadMissingContentTask
                 _circuitBreaker.RecordFailure(result.ErrorMessage);
                 Logger.LogError("FAILED: {FileName} ({Size}) - {Error}. Source: {SourcePath}",
                     fileName, fileSize, result.ErrorMessage, record.SourcePath);
-                throw new InvalidOperationException(result.ErrorMessage ?? "Download failed");
+                // Include filename + size + source path in the message so the
+                // Reason field surfaces actionable context. Bare "Connection
+                // timeout" is useless when 50 items errored — user can't tell
+                // which file or whether the issue is network or filesystem.
+                throw new InvalidOperationException(
+                    $"Download failed for {fileName} ({fileSize}): {result.ErrorMessage ?? "unknown error"} (source: {record.SourcePath ?? record.SourceItemId})");
             }
         }
         finally
@@ -288,6 +297,10 @@ public class DownloadMissingContentTask
 
         progress.Report(10);
 
+        // Library refresh is conditional on actual filesystem changes
+        // (downloads or deletions). A no-op run skips the refresh because
+        // ValidateMediaLibrary is expensive on large libraries and there's
+        // nothing for Jellyfin to discover when we wrote/removed nothing.
         if (_successCount > 0 || _deletedCount > 0)
         {
             try
@@ -296,6 +309,10 @@ public class DownloadMissingContentTask
                 var refreshProgress = new Progress<double>(p =>
                     progress.Report(10 + (85.0 * Math.Clamp(p, 0, 100) / 100.0)));
                 await _libraryManager.ValidateMediaLibrary(refreshProgress, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

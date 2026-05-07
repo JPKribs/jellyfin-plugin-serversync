@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Services;
 using MediaBrowser.Model.Tasks;
@@ -296,7 +297,12 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         if (!await TestConnectionAsync(cancellationToken).ConfigureAwait(false))
         {
-            Logger.LogWarning("{Task}: connection check failed; aborting refresh", Name);
+            // Bumped to LogError + recorded to config so the dashboard can
+            // surface "last refresh failed: connection check" instead of the
+            // user assuming everything's fine because the row count didn't
+            // change.
+            Logger.LogError("{Task}: connection check failed; aborting refresh", Name);
+            RecordRunFailure("Refresh", "Connection check failed — source server unreachable or credentials invalid");
             return;
         }
 
@@ -340,11 +346,38 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         var total = Math.Max(sourceItems.Count, 1);
         var parallelism = Math.Max(1, BuildRecordParallelism);
 
+        // Per-item failures during build/upsert get counted so the run
+        // summary tells the user how many records didn't make it. A single
+        // bad item must not abort the whole refresh — that's the audit fix.
+        var buildFailures = 0;
+        var persistFailures = 0;
+
         async ValueTask BuildOneAsync(TSource src, CancellationToken ct)
         {
             try
             {
-                var record = await BuildRecordAsync(src, existing, ct).ConfigureAwait(false);
+                TRecord? record;
+                try
+                {
+                    record = await BuildRecordAsync(src, existing, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Bad source item (path translate fault, source HTTP
+                    // hiccup, etc.). Log loudly with item context where
+                    // possible, count the failure, and let other items
+                    // continue. Without this catch, one bad record aborts
+                    // the entire refresh and the row vanishes silently from
+                    // the user's table.
+                    Interlocked.Increment(ref buildFailures);
+                    Logger.LogError(ex, "{Task}: BuildRecordAsync threw for source {Source}; record skipped", Name, src);
+                    return;
+                }
+
                 if (record == null)
                 {
                     return;
@@ -363,8 +396,13 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 {
                     Manager.Upsert(record);
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
+                    Interlocked.Increment(ref persistFailures);
                     Logger.LogError(ex, "{Task}: failed to upsert record for key {Key}", Name, key);
                 }
             }
@@ -418,6 +456,65 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         progress.Report(100);
 
-        Logger.LogInformation("{Task} complete: {Processed} processed, {Pruned} pruned", Name, processed, pruned);
+        // Surface per-item failure counts so the user / log-reader can
+        // tell the difference between "no rows changed" (normal) and "lots
+        // of rows silently failed to build or persist" (problem). Logs at
+        // Warning when any failure occurred and records a config-side
+        // failure entry so the dashboard can surface it.
+        if (buildFailures > 0 || persistFailures > 0)
+        {
+            Logger.LogWarning(
+                "{Task} complete: {Processed} processed, {Pruned} pruned, {BuildFailed} build-failed, {PersistFailed} persist-failed (see prior errors for details)",
+                Name, processed, pruned, buildFailures, persistFailures);
+            RecordRunFailure("Refresh", $"{buildFailures} build failures, {persistFailures} persist failures (check log)");
+        }
+        else
+        {
+            Logger.LogInformation("{Task} complete: {Processed} processed, {Pruned} pruned", Name, processed, pruned);
+            ClearRunFailure();
+        }
+    }
+
+    /// <summary>
+    /// Records the most-recent run failure for this module on the plugin
+    /// configuration. Surfaced in the dashboard via the Status endpoint.
+    /// Best-effort — config save failure is logged but doesn't propagate.
+    /// </summary>
+    private void RecordRunFailure(string phase, string reason)
+    {
+        try
+        {
+            var failures = _configManager.Configuration.LastRunFailures;
+            failures.RemoveAll(f => string.Equals(f.ModuleKey, ModuleMutexKey, StringComparison.OrdinalIgnoreCase));
+            failures.Add(new SyncRunFailure
+            {
+                ModuleKey = ModuleMutexKey,
+                Phase = phase,
+                Reason = reason,
+                Timestamp = DateTime.UtcNow
+            });
+            _configManager.SaveConfiguration();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Task}: failed to record run-failure outcome", Name);
+        }
+    }
+
+    private void ClearRunFailure()
+    {
+        try
+        {
+            var failures = _configManager.Configuration.LastRunFailures;
+            var removed = failures.RemoveAll(f => string.Equals(f.ModuleKey, ModuleMutexKey, StringComparison.OrdinalIgnoreCase));
+            if (removed > 0)
+            {
+                _configManager.SaveConfiguration();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Task}: failed to clear run-failure outcome", Name);
+        }
     }
 }

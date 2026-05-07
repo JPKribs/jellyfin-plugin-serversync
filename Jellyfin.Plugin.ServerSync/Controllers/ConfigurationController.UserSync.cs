@@ -107,14 +107,16 @@ public partial class ConfigurationController
     public ActionResult<BaseSyncStatusResponse> GetUserSyncStatus([FromServices] UserSyncTableManager manager)
     {
         ArgumentNullException.ThrowIfNull(manager);
-        return Ok(new BaseSyncStatusResponse
+        var response = new BaseSyncStatusResponse
         {
             Pending = manager.CountUserMappingsByStatus(SyncStatus.Pending),
             Queued = manager.CountUserMappingsByStatus(SyncStatus.Queued),
             Synced = manager.CountUserMappingsByStatus(SyncStatus.Synced),
             Errored = manager.CountUserMappingsByStatus(SyncStatus.Errored),
             Ignored = manager.CountUserMappingsByStatus(SyncStatus.Ignored)
-        });
+        };
+        PopulateLastFailure(response, "User");
+        return Ok(response);
     }
 
     /// <summary>
@@ -145,22 +147,22 @@ public partial class ConfigurationController
         [FromBody] BulkUserSyncItemsRequest request,
         [FromServices] UserSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids == null || request.Ids.Count == 0)
         {
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
         try
         {
-            successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Queued);
+            var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Queued);
+            return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "QueueUserSyncItems"));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to queue user sync items by IDs");
+            _logger.LogError(ex, "Failed to queue user sync items by IDs");
+            return StatusCode(500, new { Error = "Bulk queue failed; see server log" });
         }
-
-        return Ok(new { Updated = successCount });
     }
 
     /// <summary>
@@ -173,22 +175,22 @@ public partial class ConfigurationController
         [FromBody] BulkUserSyncItemsRequest request,
         [FromServices] UserSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids == null || request.Ids.Count == 0)
         {
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
         try
         {
-            successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Ignored);
+            var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Ignored);
+            return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "IgnoreUserSyncItems"));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to ignore user sync items by IDs");
+            _logger.LogError(ex, "Failed to ignore user sync items by IDs");
+            return StatusCode(500, new { Error = "Bulk ignore failed; see server log" });
         }
-
-        return Ok(new { Updated = successCount });
     }
 
     /// <summary>

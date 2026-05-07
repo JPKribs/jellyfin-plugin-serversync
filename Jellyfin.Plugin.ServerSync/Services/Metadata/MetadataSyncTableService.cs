@@ -86,89 +86,25 @@ public class MetadataSyncTableService
     /// Enriches the source-side image manifest in <paramref name="item"/>
     /// with Size / Width / Height fetched from the source server. The refresh
     /// task builds the source manifest from <c>BaseItemDto.ImageTags</c> for
-    /// performance — that gives us a per-image content fingerprint but no
-    /// byte size or pixel dimensions, so the modal would render source-side
-    /// as "0 B" while local renders as a real KB value, which looks broken
-    /// even when nothing's wrong.
-    /// <para>
-    /// Per-modal-open: one HTTP call to <c>/Items/{id}/Images</c> on source.
-    /// Best-effort — on failure we log and leave the original tag-only blob
-    /// in place. Mutates <paramref name="item"/>.<see cref="MetadataSyncItem.Images"/>.<see cref="SyncableValue{T}.Source"/>
-    /// in-memory only; the caller does not persist this enriched copy back
-    /// to SQLite (no Upsert), so the comparator hashes used by the next
-    /// Refresh remain consistent with the tag-based source manifest.
-    /// </para>
+    /// performance — tag-only with Size=0 — so the modal would otherwise
+    /// render source-side as "0 B" while local has a real KB value. This
+    /// per-modal-open helper compensates with one HTTP call.
     /// </summary>
     public async Task EnrichSourceImageSizesAsync(
         MetadataSyncItem item,
         SourceServerClient client,
-        System.Threading.CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
-        ArgumentNullException.ThrowIfNull(client);
-
-        if (string.IsNullOrEmpty(item.Images.Source)) return;
         if (!Guid.TryParse(item.SourceItemId, out var sourceItemGuid)) return;
 
-        Dictionary<string, List<ImageInfoDto>>? manifest;
-        try
-        {
-            manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(item.Images.Source);
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(ex, "Could not deserialize source image manifest for enrichment ({Item})", item.ItemName);
-            return;
-        }
-
-        if (manifest == null || manifest.Count == 0) return;
-
-        List<Jellyfin.Sdk.Generated.Models.ImageInfo>? sourceInfo;
-        try
-        {
-            sourceInfo = await client.GetItemImageInfoAsync(sourceItemGuid, cancellationToken).ConfigureAwait(false);
-        }
-        catch (System.OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Source image-info enrichment failed for {Item}", item.ItemName);
-            return;
-        }
-
-        if (sourceInfo == null || sourceInfo.Count == 0) return;
-
-        // Index source info by (type, index) so we can merge per-entry.
-        var byKey = new Dictionary<(string Type, int Index), Jellyfin.Sdk.Generated.Models.ImageInfo>();
-        foreach (var info in sourceInfo)
-        {
-            var typeName = info.ImageType?.ToString();
-            if (string.IsNullOrEmpty(typeName)) continue;
-            byKey[(typeName, info.ImageIndex ?? 0)] = info;
-        }
-
-        var anyChanged = false;
-        foreach (var kvp in manifest)
-        {
-            for (var i = 0; i < kvp.Value.Count; i++)
-            {
-                var entry = kvp.Value[i];
-                if (byKey.TryGetValue((kvp.Key, entry.ImageIndex), out var info))
-                {
-                    if (info.Size.HasValue) entry.Size = info.Size.Value;
-                    if (info.Width.HasValue) entry.Width = info.Width.Value;
-                    if (info.Height.HasValue) entry.Height = info.Height.Value;
-                    anyChanged = true;
-                }
-            }
-        }
-
-        if (anyChanged)
-        {
-            item.Images.Source = JsonSerializer.Serialize(manifest);
-        }
+        item.Images.Source = await ImageManifestEnricher.EnrichAsync(
+            item.Images.Source,
+            sourceItemGuid,
+            client,
+            _logger,
+            item.ItemName ?? item.SourceItemId,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static void RebuildLocalMetadataBlob(MetadataSyncItem item, BaseItem localItem, bool syncGenres, bool syncTags)
@@ -215,12 +151,12 @@ public class MetadataSyncTableService
 
         if (syncGenres)
         {
-            localMetadata["Genres"] = NormalizeStringArray(localItem.Genres);
+            localMetadata["Genres"] = StringNormalizationUtility.NormalizeStringArray(localItem.Genres);
         }
 
         if (syncTags)
         {
-            localMetadata["Tags"] = NormalizeStringArray(localItem.Tags);
+            localMetadata["Tags"] = StringNormalizationUtility.NormalizeStringArray(localItem.Tags);
         }
 
         item.Metadata.Local = JsonSerializer.Serialize(localMetadata);
@@ -539,12 +475,12 @@ public class MetadataSyncTableService
             // null on both sides so Jellyfin's storage normalization (which
             // can return [""] for what we wrote as []) doesn't produce a
             // permanent verification mismatch.
-            sourceMetadata["Genres"] = NormalizeStringArray(sourceItem.Genres);
+            sourceMetadata["Genres"] = StringNormalizationUtility.NormalizeStringArray(sourceItem.Genres);
         }
 
         if (syncTags)
         {
-            sourceMetadata["Tags"] = NormalizeStringArray(sourceItem.Tags);
+            sourceMetadata["Tags"] = StringNormalizationUtility.NormalizeStringArray(sourceItem.Tags);
         }
 
         item.Metadata.UpdateSource(JsonSerializer.Serialize(sourceMetadata));
@@ -603,41 +539,16 @@ public class MetadataSyncTableService
 
             if (syncGenres)
             {
-                localMetadata["Genres"] = NormalizeStringArray(localItem.Genres);
+                localMetadata["Genres"] = StringNormalizationUtility.NormalizeStringArray(localItem.Genres);
             }
 
             if (syncTags)
             {
-                localMetadata["Tags"] = NormalizeStringArray(localItem.Tags);
+                localMetadata["Tags"] = StringNormalizationUtility.NormalizeStringArray(localItem.Tags);
             }
 
             item.Metadata.Local = JsonSerializer.Serialize(localMetadata);
         }
-    }
-
-    /// <summary>
-    /// Collapses the three storage shapes Jellyfin returns for "no value"
-    /// string arrays — <c>null</c>, <c>[]</c>, and <c>[""]</c> — into a single
-    /// canonical <c>null</c>. Without this, an item whose source has
-    /// <c>Tags: null</c> but whose local persists as <c>[""]</c>
-    /// (empty-string-in-array, observed after UpdateToRepositoryAsync rounds
-    /// our <c>[]</c> writes) compares unequal forever and verification keeps
-    /// Erroring the row. Filtering whitespace and emitting null when empty
-    /// makes both sides round-trip identically.
-    /// </summary>
-    private static string[]? NormalizeStringArray(IReadOnlyList<string>? source)
-    {
-        if (source == null)
-        {
-            return null;
-        }
-
-        var filtered = source
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        return filtered.Length == 0 ? null : filtered;
     }
 
     /// <summary>

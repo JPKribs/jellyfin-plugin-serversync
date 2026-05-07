@@ -222,7 +222,7 @@ public partial class ConfigurationController
         var counts = manager.GetStatusCounts();
         var libraryMappings = _configManager.Configuration.LibraryMappings ?? new List<LibraryMapping>();
 
-        return Ok(new MetadataSyncStatusResponse
+        var response = new MetadataSyncStatusResponse
         {
             Pending = counts.GetValueOrDefault(SyncStatus.Pending, 0),
             Queued = counts.GetValueOrDefault(SyncStatus.Queued, 0),
@@ -231,7 +231,9 @@ public partial class ConfigurationController
             Ignored = counts.GetValueOrDefault(SyncStatus.Ignored, 0),
             LastSyncTime = _configManager.Configuration.LastMetadataSyncTime,
             LibraryCount = libraryMappings.Count
-        });
+        };
+        PopulateLastFailure(response, "Metadata");
+        return Ok(response);
     }
 
     /// <summary>
@@ -276,18 +278,16 @@ public partial class ConfigurationController
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
-
         try
         {
-            successCount = manager.BatchUpdateStatusByIds(request.Ids, SyncStatus.Queued);
+            var (updated, notFound) = manager.BatchUpdateStatusByIdsWithDetails(request.Ids, SyncStatus.Queued);
+            return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "QueueMetadataSyncItems"));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to queue metadata sync items by IDs");
+            _logger.LogError(ex, "Failed to queue metadata sync items by IDs");
+            return StatusCode(500, new { Error = "Bulk queue failed; see server log" });
         }
-
-        return Ok(new { Updated = successCount });
     }
 
     /// <summary>
@@ -309,18 +309,16 @@ public partial class ConfigurationController
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
-
         try
         {
-            successCount = manager.BatchUpdateStatusByIds(request.Ids, SyncStatus.Ignored);
+            var (updated, notFound) = manager.BatchUpdateStatusByIdsWithDetails(request.Ids, SyncStatus.Ignored);
+            return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "IgnoreMetadataSyncItems"));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to ignore metadata sync items by IDs");
+            _logger.LogError(ex, "Failed to ignore metadata sync items by IDs");
+            return StatusCode(500, new { Error = "Bulk ignore failed; see server log" });
         }
-
-        return Ok(new { Updated = successCount });
     }
 
     /// <summary>

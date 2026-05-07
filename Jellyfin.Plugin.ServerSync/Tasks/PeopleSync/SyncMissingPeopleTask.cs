@@ -10,6 +10,7 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
@@ -266,18 +267,18 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         var hasChanges = false;
 
         // Strings — assign through nulls.
-        hasChanges |= AssignString(metadata, "Name", v => { if (!string.IsNullOrEmpty(v) && localPerson.Name != v) { localPerson.Name = v; return true; } return false; });
-        hasChanges |= AssignString(metadata, "OriginalTitle", v => { if (localPerson.OriginalTitle != v) { localPerson.OriginalTitle = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "Name", v => { if (!string.IsNullOrEmpty(v) && localPerson.Name != v) { localPerson.Name = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "OriginalTitle", v => { if (localPerson.OriginalTitle != v) { localPerson.OriginalTitle = v; return true; } return false; });
         // SortName intentionally not synced — Jellyfin derives it from
         // Name independently per server, so cross-server writes never
         // stick. ForcedSortName (user override) IS synced.
-        hasChanges |= AssignString(metadata, "ForcedSortName", v => { if (localPerson.ForcedSortName != v) { localPerson.ForcedSortName = v; return true; } return false; });
-        hasChanges |= AssignString(metadata, "Overview", v => { if (localPerson.Overview != v) { localPerson.Overview = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "ForcedSortName", v => { if (localPerson.ForcedSortName != v) { localPerson.ForcedSortName = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "Overview", v => { if (localPerson.Overview != v) { localPerson.Overview = v; return true; } return false; });
 
         // Dates — date-only compare.
         if (metadata.TryGetValue("PremiereDate", out var premiereValue))
         {
-            var d = ParseNullableDate(premiereValue);
+            var d = JsonFieldHelpers.ParseNullableDate(premiereValue);
             if (!JsonComparisonUtility.DateOnlyEquals(localPerson.PremiereDate, d))
             {
                 localPerson.PremiereDate = d;
@@ -287,7 +288,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
         if (metadata.TryGetValue("EndDate", out var endValue))
         {
-            var d = ParseNullableDate(endValue);
+            var d = JsonFieldHelpers.ParseNullableDate(endValue);
             if (!JsonComparisonUtility.DateOnlyEquals(localPerson.EndDate, d))
             {
                 localPerson.EndDate = d;
@@ -309,7 +310,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         // Arrays — empty/null source clears local.
         if (metadata.TryGetValue("ProductionLocations", out var locationsValue))
         {
-            var newLocations = ReadStringArray(locationsValue);
+            var newLocations = JsonFieldHelpers.ReadStringArray(locationsValue);
             var current = localPerson.ProductionLocations ?? Array.Empty<string>();
             if (!current.SequenceEqual(newLocations, StringComparer.Ordinal))
             {
@@ -320,7 +321,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
         if (metadata.TryGetValue("Tags", out var tagsValue))
         {
-            var newTags = ReadStringArray(tagsValue);
+            var newTags = JsonFieldHelpers.ReadStringArray(tagsValue);
             var current = localPerson.Tags ?? Array.Empty<string>();
             if (!current.SequenceEqual(newTags, StringComparer.Ordinal))
             {
@@ -332,7 +333,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         // ProviderIds reconcile.
         if (metadata.TryGetValue("ProviderIds", out var providerIdsValue))
         {
-            var sourceIds = ReadProviderIds(providerIdsValue);
+            var sourceIds = JsonFieldHelpers.ReadProviderIds(providerIdsValue);
             if (localPerson.ProviderIds != null)
             {
                 var toRemove = localPerson.ProviderIds.Keys.Where(k => !sourceIds.ContainsKey(k)).ToList();
@@ -356,7 +357,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         // LockedFields — empty source clears local.
         if (metadata.TryGetValue("LockedFields", out var lockedValue))
         {
-            var newLocked = ReadEnumArray<MetadataField>(lockedValue);
+            var newLocked = JsonFieldHelpers.ReadEnumArray<MetadataField>(lockedValue);
             var current = localPerson.LockedFields ?? Array.Empty<MetadataField>();
             if (!current.SequenceEqual(newLocked))
             {
@@ -461,7 +462,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         }
 
         var diff = JsonComparisonUtility.CountDifferences(record.Metadata.Source, freshBlob);
-        return (false, $"verification found {diff} divergent field(s); source={TruncateForLog(record.Metadata.Source)}; local={TruncateForLog(freshBlob)}");
+        return (false, $"verification found {diff} divergent field(s); source={FormatUtilities.TruncateForLog(record.Metadata.Source)}; local={FormatUtilities.TruncateForLog(freshBlob)}");
     }
 
     private (bool Succeeded, string? FailureReason) VerifyImagesApplied(BaseItem freshPerson, PeopleSyncItem record)
@@ -481,97 +482,4 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
     // Local helpers
     // ===================================================================
 
-    private static bool AssignString(Dictionary<string, JsonElement> metadata, string key, Func<string?, bool> assign)
-    {
-        if (!metadata.TryGetValue(key, out var v)) return false;
-        string? read = v.ValueKind switch
-        {
-            JsonValueKind.String => v.GetString(),
-            _ => null
-        };
-        return assign(read);
-    }
-
-    private static DateTime? ParseNullableDate(JsonElement v)
-    {
-        if (v.ValueKind != JsonValueKind.String) return null;
-        var s = v.GetString();
-        if (string.IsNullOrEmpty(s)) return null;
-        return DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed) ? parsed : null;
-    }
-
-    private static string[] ReadStringArray(JsonElement v)
-    {
-        if (v.ValueKind != JsonValueKind.Array)
-        {
-            return Array.Empty<string>();
-        }
-
-        var list = new List<string>();
-        foreach (var entry in v.EnumerateArray())
-        {
-            if (entry.ValueKind == JsonValueKind.String)
-            {
-                var s = entry.GetString();
-                if (s != null)
-                {
-                    list.Add(s);
-                }
-            }
-        }
-
-        return list.ToArray();
-    }
-
-    private static T[] ReadEnumArray<T>(JsonElement v) where T : struct, Enum
-    {
-        if (v.ValueKind != JsonValueKind.Array)
-        {
-            return Array.Empty<T>();
-        }
-
-        var list = new List<T>();
-        foreach (var entry in v.EnumerateArray())
-        {
-            if (entry.ValueKind == JsonValueKind.String)
-            {
-                var s = entry.GetString();
-                if (!string.IsNullOrEmpty(s) && Enum.TryParse<T>(s, out var parsed))
-                {
-                    list.Add(parsed);
-                }
-            }
-        }
-
-        return list.ToArray();
-    }
-
-    private static Dictionary<string, string> ReadProviderIds(JsonElement v)
-    {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (v.ValueKind != JsonValueKind.Object)
-        {
-            return result;
-        }
-
-        foreach (var prop in v.EnumerateObject())
-        {
-            if (prop.Value.ValueKind == JsonValueKind.String)
-            {
-                var pv = prop.Value.GetString();
-                if (!string.IsNullOrEmpty(pv))
-                {
-                    result[prop.Name] = pv;
-                }
-            }
-        }
-
-        return result;
-    }
-
-    private static string TruncateForLog(string? s)
-    {
-        if (string.IsNullOrEmpty(s)) return "(empty)";
-        return s.Length <= 200 ? s : string.Concat(s.AsSpan(0, 200), "…");
-    }
 }

@@ -251,13 +251,31 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <inheritdoc />
     public int BulkUpdateStatus(IReadOnlyList<long> ids, SyncStatus status, string? reason = null)
     {
+        var result = BulkUpdateStatusWithDetails(ids, status, reason);
+        return result.Updated;
+    }
+
+    /// <summary>
+    /// Same as <see cref="BulkUpdateStatus"/> but returns the per-call
+    /// breakdown: how many rows were actually updated, and which input IDs
+    /// were NOT present in the table (typically: row was deleted between
+    /// the user clicking Queue and the request reaching the server). Used
+    /// by the bulk endpoints to surface "5 of 10 items updated; 5 not
+    /// found" in the UI — silent partial failures were the audit gap.
+    /// </summary>
+    public (int Updated, IReadOnlyList<long> NotFoundIds) BulkUpdateStatusWithDetails(
+        IReadOnlyList<long> ids,
+        SyncStatus status,
+        string? reason = null)
+    {
         ArgumentNullException.ThrowIfNull(ids);
         if (ids.Count == 0)
         {
-            return 0;
+            return (0, Array.Empty<long>());
         }
 
         var updated = 0;
+        var notFound = new List<long>();
         ExecuteWrite(conn =>
         {
             using var transaction = conn.BeginTransaction();
@@ -271,12 +289,20 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
             foreach (var id in ids)
             {
                 idParam.Value = id;
-                updated += cmd.ExecuteNonQuery();
+                var rows = cmd.ExecuteNonQuery();
+                if (rows > 0)
+                {
+                    updated += rows;
+                }
+                else
+                {
+                    notFound.Add(id);
+                }
             }
 
             transaction.Commit();
         });
-        return updated;
+        return (updated, notFound);
     }
 
     /// <inheritdoc />

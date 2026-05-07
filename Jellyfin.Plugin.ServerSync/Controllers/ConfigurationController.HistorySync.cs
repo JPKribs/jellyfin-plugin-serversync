@@ -77,14 +77,16 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         var counts = manager.GetStatusCounts();
 
-        return Ok(new BaseSyncStatusResponse
+        var response = new BaseSyncStatusResponse
         {
             Pending = counts.GetValueOrDefault(SyncStatus.Pending, 0),
             Queued = counts.GetValueOrDefault(SyncStatus.Queued, 0),
             Synced = counts.GetValueOrDefault(SyncStatus.Synced, 0),
             Errored = counts.GetValueOrDefault(SyncStatus.Errored, 0),
             Ignored = counts.GetValueOrDefault(SyncStatus.Ignored, 0)
-        });
+        };
+        PopulateLastFailure(response, "History");
+        return Ok(response);
     }
 
     /// <summary>
@@ -144,22 +146,24 @@ public partial class ConfigurationController
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
-
-        // Process by database ID if provided
+        // Process by database ID if provided (preferred path)
         if (request?.Ids != null && request.Ids.Count > 0)
         {
             try
             {
-                successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Queued);
+                var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Queued);
+                return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "QueueHistoryItems"));
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to queue history items by IDs");
+                _logger.LogError(ex, "Failed to queue history items by IDs");
+                return StatusCode(500, new { Error = "Bulk queue failed; see server log" });
             }
         }
-        // Fallback to legacy Items property
-        else if (request?.Items != null)
+
+        // Legacy fallback by composite key — preserved for older clients.
+        var successCount = 0;
+        if (request?.Items != null)
         {
             foreach (var item in request.Items)
             {
@@ -178,7 +182,7 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(new { Updated = successCount });
+        return Ok(new BulkOperationResult { Updated = successCount, Requested = request?.Items?.Count ?? 0 });
     }
 
     /// <summary>
@@ -202,22 +206,22 @@ public partial class ConfigurationController
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
-
-        // Process by database ID if provided
         if (request?.Ids != null && request.Ids.Count > 0)
         {
             try
             {
-                successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Ignored);
+                var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Ignored);
+                return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "IgnoreHistoryItems"));
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to ignore history items by IDs");
+                _logger.LogError(ex, "Failed to ignore history items by IDs");
+                return StatusCode(500, new { Error = "Bulk ignore failed; see server log" });
             }
         }
-        // Fallback to legacy Items property
-        else if (request?.Items != null)
+
+        var successCount = 0;
+        if (request?.Items != null)
         {
             foreach (var item in request.Items)
             {
@@ -236,7 +240,7 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(new { Updated = successCount });
+        return Ok(new BulkOperationResult { Updated = successCount, Requested = request?.Items?.Count ?? 0 });
     }
 
     /// <summary>

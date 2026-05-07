@@ -204,16 +204,23 @@ public class SourceServerClient : IDisposable
         var json = System.Text.Json.JsonSerializer.Serialize(authRequest);
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-        // Add the required MediaBrowser authorization header (without token for auth request)
-        var authHeader = $"MediaBrowser Client=\"{DefaultClientName}\", Device=\"{localServerName}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{pluginVersion}\"";
-        content.Headers.Add("X-Emby-Authorization", authHeader);
+        // Per Jellyfin auth spec, AuthenticateByName requires client
+        // identification via the Authorization header (no Token yet — we're
+        // about to obtain it). Format must be the canonical
+        // `MediaBrowser key="value", ...` scheme. The previous code used
+        // `X-Emby-Authorization` which is deprecated and rejected when
+        // `EnableLegacyAuthorization=false`. Header lives on the request,
+        // not on Content (Authorization is not a content-level header).
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{serverUrl}/Users/AuthenticateByName")
+        {
+            Content = content
+        };
+        var authHeader = $"Client=\"{DefaultClientName}\", Device=\"{localServerName}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{pluginVersion}\"";
+        request.Headers.Authorization = new AuthenticationHeaderValue("MediaBrowser", authHeader);
 
         try
         {
-            using var response = await httpClient.PostAsync(
-                $"{serverUrl}/Users/AuthenticateByName",
-                content,
-                cancellationToken).ConfigureAwait(false);
+            using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -1099,6 +1106,12 @@ public class SourceServerClient : IDisposable
         HttpRequestMessage? request = null;
         try
         {
+            // /Items/{id}/Download — direct-download URL. Authentication is
+            // via the Authorization header only; do NOT mix in api_key /
+            // ApiKey query parameters or X-Emby-Token headers. Per the
+            // Jellyfin auth spec (10.11+), sending multiple tokens in one
+            // request has undefined precedence and may be rejected outright
+            // when EnableLegacyAuthorization=false on the source.
             var url = $"{_serverUrl}/Items/{itemId}/Download";
             request = new HttpRequestMessage(HttpMethod.Get, url);
             AddAuthorizationHeader(request);
@@ -1123,7 +1136,14 @@ public class SourceServerClient : IDisposable
             response?.Dispose();
             request?.Dispose();
             _logger.LogError(ex, "Failed to download item {ItemId}", itemId);
-            return null;
+            // Re-throw with a context-rich message so the per-row Reason
+            // field surfaces what actually went wrong (timeout, 5xx,
+            // connection refused, SSL handshake, etc.) instead of the
+            // generic "No response from server". Original exception is
+            // preserved as InnerException for stack-trace logging.
+            throw new InvalidOperationException(
+                $"Source download failed for item {itemId}: {ex.GetType().Name}: {ex.Message}",
+                ex);
         }
     }
 
@@ -1518,256 +1538,6 @@ public class SourceServerClient : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets multiple persons by name from the source server as full BaseItemDtos.
-    /// Uses the /Items endpoint with IncludeItemTypes=Person and paginated StartIndex/Limit
-    /// to fetch all persons with full metadata, then filters to the requested names.
-    /// </summary>
-    /// <param name="names">Person names to look up.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <param name="pageSize">Number of persons to fetch per page.</param>
-    /// <returns>Dictionary of person name to BaseItemDto.</returns>
-    public async Task<Dictionary<string, BaseItemDto>> GetPersonsByNamesAsync(
-        IReadOnlyList<string> names,
-        CancellationToken cancellationToken,
-        int pageSize = 500)
-    {
-        var result = new Dictionary<string, BaseItemDto>(StringComparer.OrdinalIgnoreCase);
-
-        if (names.Count == 0)
-        {
-            return result;
-        }
-
-        var neededNames = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
-        var client = GetApiClient();
-        int startIndex = 0;
-        int totalFetched = 0;
-
-        // Paginate through all Person items on the source server
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                var page = await client.Items.GetAsync(
-                    config =>
-                    {
-                        config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Person };
-                        config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
-                        config.QueryParameters.StartIndex = startIndex;
-                        config.QueryParameters.Limit = pageSize;
-                        config.QueryParameters.Recursive = true;
-                        config.QueryParameters.Fields = new[]
-                        {
-                            ItemFields.Overview,
-                            ItemFields.ProviderIds,
-                            ItemFields.Tags,
-                            ItemFields.OriginalTitle,
-                            ItemFields.SortName,
-                            ItemFields.Settings,
-                            ItemFields.DateCreated
-                        };
-                    },
-                    cancellationToken).ConfigureAwait(false);
-
-                if (page?.Items == null || page.Items.Count == 0)
-                {
-                    break;
-                }
-
-                foreach (var person in page.Items)
-                {
-                    if (!string.IsNullOrEmpty(person.Name) && neededNames.Contains(person.Name))
-                    {
-                        result[person.Name] = person;
-                    }
-                }
-
-                totalFetched += page.Items.Count;
-                startIndex += page.Items.Count;
-
-                _logger.LogDebug(
-                    "Fetched person page: {PageCount} items (total {Total}), matched {Matched}/{Needed} so far",
-                    page.Items.Count, totalFetched, result.Count, neededNames.Count);
-
-                // Stop if we've received fewer items than requested (last page)
-                // or we've found all the names we need
-                if (page.Items.Count < pageSize || result.Count >= neededNames.Count)
-                {
-                    break;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to fetch persons page at offset {StartIndex}", startIndex);
-                break;
-            }
-        }
-
-        _logger.LogInformation(
-            "Fetched {Total} persons from source in {Pages} page(s), matched {Matched}/{Needed} requested names",
-            totalFetched,
-            (totalFetched + pageSize - 1) / pageSize,
-            result.Count,
-            neededNames.Count);
-
-        // Fallback: individual lookups for names not found in the paginated fetch
-        if (result.Count < neededNames.Count)
-        {
-            var missingNames = neededNames.Where(n => !result.ContainsKey(n)).ToList();
-            _logger.LogDebug("Falling back to individual lookups for {Count} unresolved person(s)", missingNames.Count);
-
-            await Parallel.ForEachAsync(
-                missingNames,
-                new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = 4,
-                    CancellationToken = cancellationToken
-                },
-                async (name, ct) =>
-                {
-                    var person = await GetPersonByNameAsync(name, ct).ConfigureAwait(false);
-                    if (person != null && !string.IsNullOrEmpty(person.Name))
-                    {
-                        lock (result)
-                        {
-                            result[name] = person;
-                        }
-                    }
-                }).ConfigureAwait(false);
-
-            _logger.LogInformation("After fallback: matched {Matched}/{Needed} requested names", result.Count, neededNames.Count);
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Re-fetches persons by their IDs via /Items?Ids=... in batches.
-    /// Used to get complete metadata for persons where the bulk IncludeItemTypes=Person
-    /// fetch returned incomplete data (e.g., missing Overview).
-    /// </summary>
-    /// <param name="ids">Person IDs to fetch.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <param name="batchSize">Number of IDs per request.</param>
-    /// <returns>List of fully-populated BaseItemDto results.</returns>
-    /// <summary>
-    /// Lists every Person item on the source server. Used by the People
-    /// refresh task to discover the full set of source persons; the refresh
-    /// then filters down to those with a local match.
-    /// <para>
-    /// Uses the dedicated <c>/Persons</c> endpoint, not
-    /// <c>/Items?IncludeItemTypes=Person</c>. Jellyfin treats those as two
-    /// different concepts — <c>/Items</c> with Person type returns
-    /// <c>BaseItemPerson</c>-shaped records (cast-list lightweight) where
-    /// <c>Overview</c> / <c>PremiereDate</c> / <c>ProductionLocations</c>
-    /// are stripped, while <c>/Persons</c> returns the full standalone
-    /// Person entity with every field populated. The endpoint does not
-    /// paginate via StartIndex — a single call returns all matching
-    /// persons.
-    /// </para>
-    /// </summary>
-    public async Task<List<BaseItemDto>> GetAllPersonsAsync(
-        CancellationToken cancellationToken,
-        int pageSize = 500)
-    {
-        _ = pageSize;
-        var client = GetApiClient();
-
-        try
-        {
-            var page = await client.Persons.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.Fields = new[]
-                    {
-                        ItemFields.Overview,
-                        ItemFields.ProviderIds,
-                        ItemFields.Tags,
-                        ItemFields.OriginalTitle,
-                        ItemFields.SortName,
-                        ItemFields.DateCreated,
-                        ItemFields.ProductionLocations,
-                        // Settings populates LockData + LockedFields; without it
-                        // those properties come back null, while local has them
-                        // populated, producing a perpetual false diff in the
-                        // Metadata blob ("LockData" yes/no vs "-").
-                        ItemFields.Settings
-                    };
-                },
-                cancellationToken).ConfigureAwait(false);
-
-            var result = page?.Items?.ToList() ?? new List<BaseItemDto>();
-            _logger.LogInformation("Fetched {Total} persons from source", result.Count);
-            return result;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch persons from source");
-            return new List<BaseItemDto>();
-        }
-    }
-
-    public async Task<List<BaseItemDto>> GetPersonsByIdsAsync(
-        IReadOnlyList<Guid> ids,
-        CancellationToken cancellationToken,
-        int batchSize = 50)
-    {
-        var result = new List<BaseItemDto>();
-
-        for (int i = 0; i < ids.Count; i += batchSize)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
-
-            try
-            {
-                var client = GetApiClient();
-                var itemsResult = await client.Items.GetAsync(
-                    config =>
-                    {
-                        config.QueryParameters.Ids = chunk;
-                        config.QueryParameters.Fields = new[]
-                        {
-                            ItemFields.Overview,
-                            ItemFields.ProviderIds,
-                            ItemFields.Tags,
-                            ItemFields.OriginalTitle,
-                            ItemFields.SortName,
-                            ItemFields.Settings,
-                            ItemFields.DateCreated
-                        };
-                    },
-                    cancellationToken).ConfigureAwait(false);
-
-                if (itemsResult?.Items != null)
-                {
-                    result.AddRange(itemsResult.Items);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to fetch persons by IDs at batch offset {Index}", i);
-            }
-        }
-
-        return result;
-    }
 
     // ===== History Sync Methods =====
 
@@ -1990,57 +1760,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets the user's favorite items in a library.
-    /// </summary>
-    /// <param name="userId">User ID on the source server.</param>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with favorite items.</returns>
-    public async Task<BaseItemDtoQueryResult?> GetUserFavoritesAsync(
-        Guid userId,
-        Guid libraryId,
-        int startIndex = 0,
-        int limit = 100,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var client = GetApiClient();
-            return await client.Items.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.UserId = userId;
-                    config.QueryParameters.ParentId = libraryId;
-                    config.QueryParameters.Recursive = true;
-                    config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
-                    config.QueryParameters.Fields = new[]
-                    {
-                        ItemFields.Path,
-                        ItemFields.DateCreated,
-                        ItemFields.MediaSources
-                    };
-                    config.QueryParameters.EnableUserData = true;
-                    config.QueryParameters.IsFavorite = true;
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
-                    config.QueryParameters.StartIndex = startIndex;
-                    config.QueryParameters.Limit = limit;
-                },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get favorites for user {UserId} in library {LibraryId}", userId, libraryId);
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Gets count of items with history data for a user in a library.
     /// </summary>
     /// <param name="userId">User ID on the source server.</param>
@@ -2081,13 +1800,26 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// AddAuthorizationHeader
-    /// Adds the MediaBrowser authorization header to HTTP requests.
+    /// <summary>
+    /// Adds the canonical Jellyfin <c>Authorization: MediaBrowser ...</c>
+    /// header to a request. Format per Jellyfin's auth spec:
+    /// <c>MediaBrowser key="value", key2="value2"</c>. Per Jellyfin docs,
+    /// the Authorization header is the only non-deprecated method for
+    /// transmitting credentials; <c>X-Emby-Token</c>, <c>X-MediaBrowser-Token</c>,
+    /// <c>X-Emby-Authorization</c>, and the <c>api_key</c> query parameter
+    /// are all deprecated and may be rejected by Jellyfin servers with
+    /// <c>EnableLegacyAuthorization=false</c>.
     /// </summary>
     /// <param name="request">HTTP request message.</param>
     private void AddAuthorizationHeader(HttpRequestMessage request)
     {
-        var authValue = $"MediaBrowser Client=\"{DefaultClientName}\", Device=\"{_localServerName}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{_pluginVersion}\", Token=\"{_apiKey}\"";
+        // The parameter passed to AuthenticationHeaderValue must NOT start
+        // with the scheme name. `AuthenticationHeaderValue("MediaBrowser", x)`
+        // emits `Authorization: MediaBrowser <x>`. Earlier code prefixed
+        // "MediaBrowser " into the parameter too, yielding a double-scheme
+        // header that some Jellyfin endpoints (notably Download) reject
+        // with 400 Bad Request.
+        var authValue = $"Client=\"{DefaultClientName}\", Device=\"{_localServerName}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{_pluginVersion}\", Token=\"{_apiKey}\"";
         request.Headers.Authorization = new AuthenticationHeaderValue("MediaBrowser", authValue);
     }
 

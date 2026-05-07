@@ -66,6 +66,55 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
+    /// Builds a <see cref="BulkOperationResult"/> from a manager's
+    /// <c>BulkUpdateStatusWithDetails</c> tuple. Logs at Warning if any
+    /// items were not found so log readers can correlate UI alerts to
+    /// server-side details.
+    /// </summary>
+    private BulkOperationResult BuildBulkResult(
+        int updated,
+        int requested,
+        IReadOnlyList<long> notFoundIds,
+        string operation)
+    {
+        if (notFoundIds.Count > 0)
+        {
+            _logger.LogWarning(
+                "{Operation}: {Updated}/{Requested} rows updated; {NotFound} ID(s) not found in table",
+                operation, updated, requested, notFoundIds.Count);
+        }
+
+        return new BulkOperationResult
+        {
+            Updated = updated,
+            Requested = requested,
+            Failed = notFoundIds
+                .Select(id => new BulkOperationFailure { Id = id, Reason = "Item not found in sync table (already removed?)" })
+                .ToList()
+        };
+    }
+
+    /// <summary>
+    /// Populates the LastFailure* fields on a status response from the
+    /// per-module run-failure list on the plugin config. No-op when the
+    /// module's last run completed cleanly (no entry for this module).
+    /// </summary>
+    private void PopulateLastFailure(BaseSyncStatusResponse response, string moduleKey)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        var failures = _configManager.Configuration.LastRunFailures;
+        if (failures == null) return;
+
+        var failure = failures.FirstOrDefault(f => string.Equals(f.ModuleKey, moduleKey, StringComparison.OrdinalIgnoreCase));
+        if (failure != null)
+        {
+            response.LastFailurePhase = failure.Phase;
+            response.LastFailureReason = failure.Reason;
+            response.LastFailureTime = failure.Timestamp;
+        }
+    }
+
+    /// <summary>
     /// Looks up a scheduled task by its <see cref="IScheduledTask.Key"/>
     /// and triggers it. Returns 200 OK with the supplied success message
     /// or 404 with <paramref name="notFoundMessage"/> if the key isn't

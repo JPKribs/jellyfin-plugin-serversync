@@ -121,7 +121,8 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PeopleSyncStatusResponse> GetPeopleSyncStatus([FromServices] PeopleSyncTableManager manager)
     {
-        return Ok(new PeopleSyncStatusResponse
+        ArgumentNullException.ThrowIfNull(manager);
+        var response = new PeopleSyncStatusResponse
         {
             Pending = manager.CountByStatus(SyncStatus.Pending),
             Queued = manager.CountByStatus(SyncStatus.Queued),
@@ -130,7 +131,9 @@ public partial class ConfigurationController
             Ignored = manager.CountByStatus(SyncStatus.Ignored),
             LastSyncTime = _configManager.Configuration.LastPeopleSyncTime,
             PersonCount = manager.Count()
-        });
+        };
+        PopulateLastFailure(response, "People");
+        return Ok(response);
     }
 
     /// <summary>
@@ -162,22 +165,22 @@ public partial class ConfigurationController
         [FromBody] BulkPeopleSyncItemsRequest request,
         [FromServices] PeopleSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids == null || request.Ids.Count == 0)
         {
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
         try
         {
-            successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Queued);
+            var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Queued);
+            return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "QueuePeopleSyncItems"));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to queue people sync items by IDs");
+            _logger.LogError(ex, "Failed to queue people sync items by IDs");
+            return StatusCode(500, new { Error = "Bulk queue failed; see server log" });
         }
-
-        return Ok(new { Updated = successCount });
     }
 
     /// <summary>
@@ -190,22 +193,22 @@ public partial class ConfigurationController
         [FromBody] BulkPeopleSyncItemsRequest request,
         [FromServices] PeopleSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids == null || request.Ids.Count == 0)
         {
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
         try
         {
-            successCount = manager.BulkUpdateStatus(request.Ids, SyncStatus.Ignored);
+            var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Ignored);
+            return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "IgnorePeopleSyncItems"));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to ignore people sync items by IDs");
+            _logger.LogError(ex, "Failed to ignore people sync items by IDs");
+            return StatusCode(500, new { Error = "Bulk ignore failed; see server log" });
         }
-
-        return Ok(new { Updated = successCount });
     }
 
     /// <summary>

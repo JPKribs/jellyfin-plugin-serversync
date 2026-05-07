@@ -206,7 +206,14 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
 
         if (!await BeforeRunAsync(cancellationToken).ConfigureAwait(false))
         {
-            Logger.LogInformation("{Task}: pre-flight aborted run", Name);
+            // Bumped to LogError + recorded to config so the dashboard can
+            // surface "last sync aborted: pre-flight failure" instead of
+            // the user wondering why queued rows aren't draining. Subclass
+            // BeforeRunAsync overrides log specific reasons (disk space,
+            // circuit breaker, connection); this captures the high-level
+            // fact of the abort.
+            Logger.LogError("{Task}: pre-flight aborted run — see prior log entries for the specific check that failed", Name);
+            RecordRunFailure("Sync", "Pre-flight aborted (see log for cause: connection / disk space / circuit breaker)");
             return;
         }
 
@@ -294,6 +301,61 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         progress.Report(100);
 
         Logger.LogInformation("{Task} complete: {Success} synced, {Failure} errored out of {Total}", Name, successes, failures, queued.Count);
+
+        // Mirror the refresh base: record/clear the run outcome so the
+        // dashboard can surface "last sync had errors" without log-diving.
+        // We treat any errored item as a non-clean run.
+        if (failures > 0)
+        {
+            RecordRunFailure("Sync", $"{failures} of {queued.Count} item(s) errored — open the table to see per-row reasons");
+        }
+        else
+        {
+            ClearRunFailure();
+        }
+    }
+
+    /// <summary>
+    /// Records the most-recent run failure for this module on the plugin
+    /// configuration. Surfaced in the dashboard via the Status endpoint.
+    /// Best-effort — config save failure is logged but doesn't propagate.
+    /// </summary>
+    private void RecordRunFailure(string phase, string reason)
+    {
+        try
+        {
+            var failures = _configManager.Configuration.LastRunFailures;
+            failures.RemoveAll(f => string.Equals(f.ModuleKey, ModuleMutexKey, StringComparison.OrdinalIgnoreCase));
+            failures.Add(new Configuration.SyncRunFailure
+            {
+                ModuleKey = ModuleMutexKey,
+                Phase = phase,
+                Reason = reason,
+                Timestamp = DateTime.UtcNow
+            });
+            _configManager.SaveConfiguration();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Task}: failed to record run-failure outcome", Name);
+        }
+    }
+
+    private void ClearRunFailure()
+    {
+        try
+        {
+            var failures = _configManager.Configuration.LastRunFailures;
+            var removed = failures.RemoveAll(f => string.Equals(f.ModuleKey, ModuleMutexKey, StringComparison.OrdinalIgnoreCase));
+            if (removed > 0)
+            {
+                _configManager.SaveConfiguration();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Task}: failed to clear run-failure outcome", Name);
+        }
     }
 
     private async Task<bool> ApplyOneAsync(TRecord record, CancellationToken cancellationToken)

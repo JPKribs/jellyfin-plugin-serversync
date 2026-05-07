@@ -11,6 +11,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
@@ -408,34 +409,34 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
         // Strings — assign through nulls and empty strings so source clearing
         // a field actually clears local.
-        hasChanges |= AssignStringField(metadata, "Name", v => { if (!string.IsNullOrEmpty(v) && localItem.Name != v) { localItem.Name = v; return true; } return false; });
-        hasChanges |= AssignStringField(metadata, "OriginalTitle", v => { if (localItem.OriginalTitle != v) { localItem.OriginalTitle = v; return true; } return false; });
-        hasChanges |= AssignStringField(metadata, "Overview", v => { if (localItem.Overview != v) { localItem.Overview = v; return true; } return false; });
-        hasChanges |= AssignStringField(metadata, "OfficialRating", v => { if (localItem.OfficialRating != v) { localItem.OfficialRating = v; return true; } return false; });
-        hasChanges |= AssignStringField(metadata, "Tagline", v => { if (localItem.Tagline != v) { localItem.Tagline = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "Name", v => { if (!string.IsNullOrEmpty(v) && localItem.Name != v) { localItem.Name = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "OriginalTitle", v => { if (localItem.OriginalTitle != v) { localItem.OriginalTitle = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "Overview", v => { if (localItem.Overview != v) { localItem.Overview = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "OfficialRating", v => { if (localItem.OfficialRating != v) { localItem.OfficialRating = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "Tagline", v => { if (localItem.Tagline != v) { localItem.Tagline = v; return true; } return false; });
         // SortName intentionally not synced: Jellyfin derives SortName
         // from Name independently on each server, so writing it from
         // source produces a value that local will overwrite on next
         // metadata refresh anyway. ForcedSortName (user override) IS synced.
-        hasChanges |= AssignStringField(metadata, "ForcedSortName", v => { if (localItem.ForcedSortName != v) { localItem.ForcedSortName = v; return true; } return false; });
-        hasChanges |= AssignStringField(metadata, "CustomRating", v => { if (localItem.CustomRating != v) { localItem.CustomRating = v; return true; } return false; });
-        hasChanges |= AssignStringField(metadata, "PreferredMetadataCountryCode", v => { if (localItem.PreferredMetadataCountryCode != v) { localItem.PreferredMetadataCountryCode = v; return true; } return false; });
-        hasChanges |= AssignStringField(metadata, "PreferredMetadataLanguage", v => { if (localItem.PreferredMetadataLanguage != v) { localItem.PreferredMetadataLanguage = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "ForcedSortName", v => { if (localItem.ForcedSortName != v) { localItem.ForcedSortName = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "CustomRating", v => { if (localItem.CustomRating != v) { localItem.CustomRating = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "PreferredMetadataCountryCode", v => { if (localItem.PreferredMetadataCountryCode != v) { localItem.PreferredMetadataCountryCode = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignString(metadata, "PreferredMetadataLanguage", v => { if (localItem.PreferredMetadataLanguage != v) { localItem.PreferredMetadataLanguage = v; return true; } return false; });
 
         // Floats — number or null; treat absent as no-op, present-and-null as
         // clear-local.
-        hasChanges |= AssignFloat(metadata, "CommunityRating", v => { if (localItem.CommunityRating != v) { localItem.CommunityRating = v; return true; } return false; });
-        hasChanges |= AssignFloat(metadata, "CriticRating", v => { if (localItem.CriticRating != v) { localItem.CriticRating = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignFloat(metadata, "CommunityRating", v => { if (localItem.CommunityRating != v) { localItem.CommunityRating = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignFloat(metadata, "CriticRating", v => { if (localItem.CriticRating != v) { localItem.CriticRating = v; return true; } return false; });
 
         // Ints — same semantic.
-        hasChanges |= AssignInt(metadata, "ProductionYear", v => { if (localItem.ProductionYear != v) { localItem.ProductionYear = v; return true; } return false; });
-        hasChanges |= AssignInt(metadata, "IndexNumber", v => { if (localItem.IndexNumber != v) { localItem.IndexNumber = v; return true; } return false; });
-        hasChanges |= AssignInt(metadata, "ParentIndexNumber", v => { if (localItem.ParentIndexNumber != v) { localItem.ParentIndexNumber = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignInt(metadata, "ProductionYear", v => { if (localItem.ProductionYear != v) { localItem.ProductionYear = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignInt(metadata, "IndexNumber", v => { if (localItem.IndexNumber != v) { localItem.IndexNumber = v; return true; } return false; });
+        hasChanges |= JsonFieldHelpers.AssignInt(metadata, "ParentIndexNumber", v => { if (localItem.ParentIndexNumber != v) { localItem.ParentIndexNumber = v; return true; } return false; });
 
         // Dates — date-only compare.
         if (metadata.TryGetValue("PremiereDate", out var premiereValue))
         {
-            var d = ParseNullableDate(premiereValue);
+            var d = JsonFieldHelpers.ParseNullableDate(premiereValue);
             if (!JsonComparisonUtility.DateOnlyEquals(localItem.PremiereDate, d))
             {
                 localItem.PremiereDate = d;
@@ -445,7 +446,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
         if (metadata.TryGetValue("EndDate", out var endValue))
         {
-            var d = ParseNullableDate(endValue);
+            var d = JsonFieldHelpers.ParseNullableDate(endValue);
             if (!JsonComparisonUtility.DateOnlyEquals(localItem.EndDate, d))
             {
                 localItem.EndDate = d;
@@ -456,7 +457,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         // Arrays — empty/null source clears local.
         if (syncGenres && metadata.TryGetValue("Genres", out var genresValue))
         {
-            var newGenres = ReadStringArray(genresValue);
+            var newGenres = JsonFieldHelpers.ReadStringArray(genresValue);
             if (!ArraysEqualOrdinal(localItem.Genres, newGenres))
             {
                 localItem.Genres = newGenres;
@@ -466,7 +467,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
         if (syncTags && metadata.TryGetValue("Tags", out var tagsValue))
         {
-            var newTags = ReadStringArray(tagsValue);
+            var newTags = JsonFieldHelpers.ReadStringArray(tagsValue);
             if (!ArraysEqualOrdinal(localItem.Tags, newTags))
             {
                 localItem.Tags = newTags;
@@ -478,7 +479,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         // removing local-only keys.
         if (metadata.TryGetValue("ProviderIds", out var providerIdsValue))
         {
-            var sourceIds = ReadProviderIds(providerIdsValue);
+            var sourceIds = JsonFieldHelpers.ReadProviderIds(providerIdsValue);
             // Remove local-only entries first.
             if (localItem.ProviderIds != null)
             {
@@ -505,7 +506,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         // Video-specific fields. Settable only when local is a Video.
         if (localVideo != null)
         {
-            hasChanges |= AssignStringField(metadata, "AspectRatio", v => { if (localVideo.AspectRatio != v) { localVideo.AspectRatio = v; return true; } return false; });
+            hasChanges |= JsonFieldHelpers.AssignString(metadata, "AspectRatio", v => { if (localVideo.AspectRatio != v) { localVideo.AspectRatio = v; return true; } return false; });
 
             if (metadata.TryGetValue("Video3DFormat", out var video3DValue))
             {
@@ -530,7 +531,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         // LockedFields — empty source clears local.
         if (metadata.TryGetValue("LockedFields", out var lockedValue))
         {
-            var newLocked = ReadEnumArray<MetadataField>(lockedValue);
+            var newLocked = JsonFieldHelpers.ReadEnumArray<MetadataField>(lockedValue);
             if (!ArraysEqual(localItem.LockedFields, newLocked))
             {
                 localItem.LockedFields = newLocked;
@@ -589,6 +590,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
 
         var anyChanged = false;
+        // Per-type failure log. If non-empty after the loop, we throw at the
+        // end so the orchestrator records this category as Errored with the
+        // diagnostic. Errors ARE logged inline (LogWarning) for live tailing,
+        // but the throw ensures verification doesn't silently mark Synced
+        // when only some types/indexes landed.
+        var perTypeErrors = new List<string>();
 
         foreach (var kvp in sourceImagesByType)
         {
@@ -598,15 +605,17 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             if (!Enum.TryParse<ImageType>(imageTypeName, out var imageType))
             {
                 Logger.LogWarning("Unknown image type: {ImageType}", imageTypeName);
+                perTypeErrors.Add($"{imageTypeName}: unknown image type");
                 continue;
             }
 
-            // Pass 1: download to temp files
+            // Pass 1: download to temp files. Per-image failures mark the
+            // type as failed without aborting other types — the user might
+            // still want backdrops even if a thumb failed.
             var tempFiles = new List<(int Index, string TempPath, string ContentType)>();
+            var typeErrors = new List<string>();
             try
             {
-                var allDownloadsSucceeded = true;
-
                 for (int i = 0; i < sourceImages.Count; i++)
                 {
                     int? imageIndex = (imageType == ImageType.Backdrop || sourceImages.Count > 1) ? i : null;
@@ -620,7 +629,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                         {
                             Logger.LogWarning("Failed to download image {ImageType}/{Index} for {ItemName}",
                                 imageTypeName, i, localItem.Name);
-                            allDownloadsSucceeded = false;
+                            typeErrors.Add($"download index {i}: returned null");
                             continue;
                         }
 
@@ -635,7 +644,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
                             tempFiles.Add((i, tempPath, contentType ?? "image/jpeg"));
                         }
-                        catch
+                        catch (Exception)
                         {
                             try { File.Delete(tempPath); } catch (IOException) { }
                             throw;
@@ -649,24 +658,34 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                     {
                         Logger.LogWarning(ex, "Error downloading {ImageType}/{Index} image for {ItemName}",
                             imageTypeName, i, localItem.Name);
-                        allDownloadsSucceeded = false;
+                        typeErrors.Add($"download index {i}: {ex.Message}");
                     }
                 }
 
-                if (!allDownloadsSucceeded)
+                // Per-type atomicity: if ANY download for this type failed,
+                // skip Pass 2 entirely. Don't half-replace the local images
+                // — user keeps their existing set instead of being left in
+                // a half-deleted state. The row will go Errored at the end.
+                if (typeErrors.Count > 0)
                 {
                     Logger.LogWarning(
-                        "Not all {ImageType} downloads succeeded for {ItemName} ({Downloaded}/{Total}), keeping existing images",
+                        "Not all {ImageType} downloads succeeded for {ItemName} ({Downloaded}/{Total}), keeping existing local images",
                         imageTypeName, localItem.Name, tempFiles.Count, sourceImages.Count);
+                    perTypeErrors.Add($"{imageTypeName}: {string.Join("; ", typeErrors)} (kept existing local images)");
                     continue;
                 }
 
                 if (tempFiles.Count == 0)
                 {
+                    // Source had this type but every download was empty —
+                    // nothing to do, nothing failed.
                     continue;
                 }
 
-                // Pass 2: delete existing + apply
+                // Pass 2: delete existing + apply, all-or-nothing per type.
+                // If a remove or save fails, any partial mutation already
+                // made stays (we can't unwind a RemoveImage), but we log the
+                // type as failed so verification + user reason are honest.
                 var existingImages = localItem.GetImages(imageType).ToList();
                 foreach (var existingImage in existingImages)
                 {
@@ -675,9 +694,14 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                         localItem.RemoveImage(existingImage);
                         anyChanged = true;
                     }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         Logger.LogWarning(ex, "Failed to remove existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
+                        typeErrors.Add($"remove existing: {ex.Message}");
                     }
                 }
 
@@ -695,11 +719,21 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                             cancellationToken).ConfigureAwait(false);
                         anyChanged = true;
                     }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         Logger.LogWarning(ex, "Error saving {ImageType}/{Index} image for {ItemName}",
                             imageTypeName, index, localItem.Name);
+                        typeErrors.Add($"save index {index}: {ex.Message}");
                     }
+                }
+
+                if (typeErrors.Count > 0)
+                {
+                    perTypeErrors.Add($"{imageTypeName}: {string.Join("; ", typeErrors)}");
                 }
             }
             finally
@@ -714,6 +748,15 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         if (anyChanged)
         {
             await localItem.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Surface any per-type failures so the row goes Errored with a
+        // precise reason. Without this, half-applied image state would
+        // pass MarkSynced and lie about success.
+        if (perTypeErrors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Image apply incomplete for {item.ItemName}: {string.Join(" | ", perTypeErrors)}");
         }
 
         return anyChanged;
@@ -820,8 +863,8 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
 
         var diff = JsonComparisonUtility.CountDifferences(source, fresh);
-        var truncSource = TruncateForLog(source);
-        var truncLocal = TruncateForLog(fresh);
+        var truncSource = FormatUtilities.TruncateForLog(source);
+        var truncLocal = FormatUtilities.TruncateForLog(fresh);
         return (false, $"verification found {diff} divergent field(s) (item type {freshLocal.GetType().Name}); source={truncSource}; local={truncLocal}");
     }
 
@@ -934,113 +977,6 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// content otherwise. If the key is absent, returns false and does not
     /// invoke the assigner.
     /// </summary>
-    private static bool AssignStringField(Dictionary<string, JsonElement> metadata, string key, Func<string?, bool> assign)
-    {
-        if (!metadata.TryGetValue(key, out var v)) return false;
-
-        string? read = v.ValueKind switch
-        {
-            JsonValueKind.String => v.GetString(),
-            JsonValueKind.Null or JsonValueKind.Undefined => null,
-            _ => null
-        };
-
-        return assign(read);
-    }
-
-    private static bool AssignFloat(Dictionary<string, JsonElement> metadata, string key, Func<float?, bool> assign)
-    {
-        if (!metadata.TryGetValue(key, out var v)) return false;
-
-        float? read = v.ValueKind == JsonValueKind.Number ? v.GetSingle() : (float?)null;
-        return assign(read);
-    }
-
-    private static bool AssignInt(Dictionary<string, JsonElement> metadata, string key, Func<int?, bool> assign)
-    {
-        if (!metadata.TryGetValue(key, out var v)) return false;
-
-        int? read = v.ValueKind == JsonValueKind.Number ? v.GetInt32() : (int?)null;
-        return assign(read);
-    }
-
-    private static DateTime? ParseNullableDate(JsonElement v)
-    {
-        if (v.ValueKind != JsonValueKind.String) return null;
-        var s = v.GetString();
-        if (string.IsNullOrEmpty(s)) return null;
-        return DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed) ? parsed : null;
-    }
-
-    private static string[] ReadStringArray(JsonElement v)
-    {
-        if (v.ValueKind != JsonValueKind.Array)
-        {
-            return Array.Empty<string>();
-        }
-
-        var list = new List<string>();
-        foreach (var entry in v.EnumerateArray())
-        {
-            if (entry.ValueKind == JsonValueKind.String)
-            {
-                var s = entry.GetString();
-                if (s != null)
-                {
-                    list.Add(s);
-                }
-            }
-        }
-
-        return list.ToArray();
-    }
-
-    private static T[] ReadEnumArray<T>(JsonElement v) where T : struct, Enum
-    {
-        if (v.ValueKind != JsonValueKind.Array)
-        {
-            return Array.Empty<T>();
-        }
-
-        var list = new List<T>();
-        foreach (var entry in v.EnumerateArray())
-        {
-            if (entry.ValueKind == JsonValueKind.String)
-            {
-                var s = entry.GetString();
-                if (!string.IsNullOrEmpty(s) && Enum.TryParse<T>(s, out var parsed))
-                {
-                    list.Add(parsed);
-                }
-            }
-        }
-
-        return list.ToArray();
-    }
-
-    private static Dictionary<string, string> ReadProviderIds(JsonElement v)
-    {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (v.ValueKind != JsonValueKind.Object)
-        {
-            return result;
-        }
-
-        foreach (var prop in v.EnumerateObject())
-        {
-            if (prop.Value.ValueKind == JsonValueKind.String)
-            {
-                var pv = prop.Value.GetString();
-                if (!string.IsNullOrEmpty(pv))
-                {
-                    result[prop.Name] = pv;
-                }
-            }
-        }
-
-        return result;
-    }
-
     private static bool ArraysEqualOrdinal(string[]? a, string[]? b)
     {
         var aArr = a ?? Array.Empty<string>();
@@ -1080,9 +1016,4 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
     }
 
-    private static string TruncateForLog(string? s)
-    {
-        if (string.IsNullOrEmpty(s)) return "(empty)";
-        return s.Length <= 200 ? s : string.Concat(s.AsSpan(0, 200), "…");
-    }
 }

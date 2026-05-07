@@ -27,7 +27,13 @@ artifacts:
 changelog:
   technical:
   - File reorganization since things have gotten hectic
-  - Process 
+  - Ran this against an AI to ask for potential issues and cleanup so there are some cleanup steps inspired by AI
+  - Reduce duplicate calls to catches / writes
+  - Remove code that was found to be dead or uncalled
+  - Break out some code into helpers instead of recreating it each time
   fixes:
   - Better metadata batching to only required syncs
   - Better people batching to only required syncs
+  - Better handling for failed image uploads (mostly for folders)
+  features:
+  - More descriptive error messages and statuses

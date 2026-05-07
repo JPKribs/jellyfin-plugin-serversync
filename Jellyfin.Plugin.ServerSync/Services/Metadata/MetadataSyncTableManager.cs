@@ -428,8 +428,26 @@ public sealed class MetadataSyncTableManager
     /// </summary>
     public int BatchUpdateStatusByIds(IEnumerable<long> ids, SyncStatus status, string? reason = null)
     {
+        var result = BatchUpdateStatusByIdsWithDetails(ids, status, reason);
+        return result.Updated;
+    }
+
+    /// <summary>
+    /// Same as <see cref="BatchUpdateStatusByIds"/> but reports the
+    /// per-call breakdown: rows updated, plus the input IDs that didn't
+    /// match (typically: row was deleted between the user's click and the
+    /// request landing). Bulk endpoints call this so the UI can surface
+    /// "5 of 10 items updated; 5 not found" instead of silently swallowing
+    /// the partial failure.
+    /// </summary>
+    public (int Updated, IReadOnlyList<long> NotFoundIds) BatchUpdateStatusByIdsWithDetails(
+        IEnumerable<long> ids,
+        SyncStatus status,
+        string? reason = null)
+    {
         ArgumentNullException.ThrowIfNull(ids);
         var count = 0;
+        var notFound = new List<long>();
         ExecuteWrite(conn =>
         {
             using var transaction = conn.BeginTransaction();
@@ -450,12 +468,20 @@ public sealed class MetadataSyncTableManager
             foreach (var id in ids)
             {
                 idParam.Value = id;
-                count += cmd.ExecuteNonQuery();
+                var rows = cmd.ExecuteNonQuery();
+                if (rows > 0)
+                {
+                    count += rows;
+                }
+                else
+                {
+                    notFound.Add(id);
+                }
             }
 
             transaction.Commit();
         });
-        return count;
+        return (count, notFound);
     }
 
 
