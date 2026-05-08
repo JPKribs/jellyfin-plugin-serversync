@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.54",
+        "changelog": "## Fixes\r\n- Prevent looping metadata syncing for items that have no issues",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.54/jellyfin-plugin-serversync-10.11.54.zip",
+        "checksum": "8173f96a4463f39e9a6500e9a7e6de19",
+        "timestamp": "2026-05-08T01:09:28Z"
+      },
+      {
         "version": "10.11.53",
         "changelog": "## Fixes\r\n- Metadata chunk errors where only one loads when threads are exhausted",
         "targetAbi": "10.11.0.0",
