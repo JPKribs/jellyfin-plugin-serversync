@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.52",
+        "changelog": "## Fixes\r\n- Metadata refresh Phase 3 (heavy fetch by IDs) is now ~10× faster — increased batch size from 50 to 200 IDs per request (4× fewer round-trips) and added 4-way parallelism for chunk fetches within each mapping (was serial). Combined with the existing 4-way mapping parallelism this allows up to 16 concurrent requests against the source.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.52/jellyfin-plugin-serversync-10.11.52.zip",
+        "checksum": "83c10a0882dfc5785b6b8138d8a7313a",
+        "timestamp": "2026-05-08T00:21:25Z"
+      },
+      {
         "version": "10.11.51",
         "changelog": "## Fixes\r\n- Critical fix for people image sync — call UpdateToRepositoryAsync(ImageUpdate) after the SaveImage loop. SaveImage updates the BaseItem's in-memory ImageInfos but the DB write does NOT happen reliably for Person items, so verify's reload-from-DB found zero images and every record that actually needed an image sync failed with local manifest empty, source non-empty.",
         "targetAbi": "10.11.0.0",
