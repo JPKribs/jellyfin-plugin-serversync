@@ -82,11 +82,37 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
             {
                 var s = sourceImages[i];
                 var l = localImages[i];
-                // Sizes of zero are treated as "unknown" — skip the size check
-                // for those entries rather than reporting a spurious diff.
-                if (s.Size > 0 && l.Size > 0 && s.Size != l.Size)
+                if (s.Size > 0 && l.Size > 0)
                 {
-                    return $"type {type}[{i}]: source size {s.Size}, local size {l.Size}";
+                    if (s.Size != l.Size)
+                    {
+                        return $"type {type}[{i}]: source size {s.Size}, local size {l.Size}";
+                    }
+                }
+                else if (s.Size == 0 && l.Size > 0)
+                {
+                    // Source manifest is tag-only (Size=0). Refresh builds
+                    // source manifests from BaseItemDto.ImageTags for
+                    // performance — no per-item HTTP — and that path only
+                    // populates Tag, leaving Size/Width/Height at 0. The
+                    // local side is built from the filesystem with real
+                    // sizes. We can't confirm parity by comparing sizes,
+                    // and treating the row as "equal" silently hides every
+                    // image divergence (the canonical 10.11.x bug — modal
+                    // shows different KB but row is marked Synced).
+                    //
+                    // Returning a diff here forces the row to Queued. The
+                    // Apply path actually downloads and writes, then
+                    // VerifyImagesApplied enriches source with real sizes
+                    // before re-running this comparator, so verify passes
+                    // when the apply genuinely landed. After
+                    // <see cref="SyncableValue{T}.MarkSynced"/> records the
+                    // current SourceHash, future refreshes short-circuit
+                    // via SourceHash == SyncedHash without ever calling
+                    // back into this method (the hash incorporates Tag, so
+                    // any source-side image change reliably invalidates
+                    // the short-circuit).
+                    return $"type {type}[{i}]: source manifest is tag-only (size unknown), local size {l.Size}; cannot confirm match without enrichment";
                 }
             }
         }

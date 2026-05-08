@@ -281,7 +281,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
                 if (config.MetadataSyncImages && record.HasImagesChanges)
                 {
-                    var (ok, reason) = VerifyImagesApplied(freshLocal, record);
+                    var (ok, reason) = await VerifyImagesAppliedAsync(freshLocal, record, cancellationToken).ConfigureAwait(false);
                     if (ok)
                     {
                         record.Images.MarkSynced();
@@ -893,28 +893,60 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         return (false, $"verification found {differingFields.Count} divergent field(s) [{fieldList}] (item type {freshLocal.GetType().Name}); {detail}");
     }
 
-    private (bool Succeeded, string? FailureReason) VerifyImagesApplied(
+    private async Task<(bool Succeeded, string? FailureReason)> VerifyImagesAppliedAsync(
         MediaBrowser.Controller.Entities.BaseItem freshLocal,
-        MetadataSyncItem record)
+        MetadataSyncItem record,
+        CancellationToken cancellationToken)
     {
         _ = freshLocal;
         _metadataService.RefreshLocalSnapshot(record, syncMetadata: false, syncImages: true, syncPeople: false, syncStudios: false, syncGenres: false, syncTags: false);
-        // Use the same comparator the refresh uses for source==local image
-        // diffs (tag-aware). If the comparator says they match, we're synced.
-        // When they don't match, ask the comparator for a specific diff so
-        // the failure reason names the offending type/index instead of a
-        // generic "count or per-type tag/size mismatch".
+
+        // The comparator can only check sizes when both sides have non-zero
+        // sizes. Refresh builds source manifests tag-only (Size=0) for
+        // performance, so without enrichment here the comparator either
+        // says "tag-only manifest, can't confirm" (post-fix behavior, which
+        // would fail every verify) or "equal because size check skipped"
+        // (pre-fix behavior, which silently passes broken applies). Enrich
+        // the source side once with real sizes from /Items/{id}/Images so
+        // the verify is honest. The enriched manifest is local to this
+        // method — record.Images.Source stays tag-only on disk so future
+        // refreshes' SourceHash short-circuit (which is computed over the
+        // tag-only manifest) keeps working.
+        string? enrichedSource = record.Images.Source;
+        if (Client != null && Guid.TryParse(record.SourceItemId, out var sourceItemGuid))
+        {
+            try
+            {
+                enrichedSource = await Utilities.ImageManifestEnricher.EnrichAsync(
+                    record.Images.Source,
+                    sourceItemGuid,
+                    Client,
+                    Logger,
+                    record.ItemName ?? record.SourceItemId,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Source image enrichment for verify failed for {ItemName}; falling back to tag-only comparison", record.ItemName);
+            }
+        }
+
+        // Strip Profile entries from the source side before comparing.
+        // Metadata sync only writes to non-Person items, where Jellyfin
+        // silently rejects Profile saves; if a record was built before
+        // PopulateSourceImagesFromTags learned to filter Profile (or ever
+        // drifts back), we'd be stuck reporting an unsyncable diff forever.
+        // Strip here so the verify reflects what's actually syncable
+        // instead of what's on the wire from source.
+        var sanitizedSource = StripUnsyncableImageTypes(enrichedSource);
+
         var imagesComparator = record.Images.Comparator as Models.Common.Comparators.ImageManifestComparator;
         if (imagesComparator != null)
         {
-            // Strip Profile entries from the source side before comparing.
-            // Metadata sync only writes to non-Person items, where Jellyfin
-            // silently rejects Profile saves; if a record was built before
-            // PopulateSourceImagesFromTags learned to filter Profile (or
-            // ever drifts back), we'd be stuck reporting an unsyncable diff
-            // forever. Strip here so the verify reflects what's actually
-            // syncable instead of what's on the wire from source.
-            var sanitizedSource = StripUnsyncableImageTypes(record.Images.Source);
             var diff = imagesComparator.DescribeDifference(sanitizedSource, record.Images.Local);
             if (diff == null)
             {
@@ -924,7 +956,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             return (false, $"image manifest after apply does not match source manifest: {diff}");
         }
 
-        if (record.Images.Comparator.Equals(record.Images.Source, record.Images.Local))
+        if (record.Images.Comparator.Equals(sanitizedSource, record.Images.Local))
         {
             return (true, null);
         }

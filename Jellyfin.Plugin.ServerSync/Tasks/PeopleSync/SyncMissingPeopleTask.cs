@@ -190,7 +190,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
                 if (syncImages && record.HasImagesChanges)
                 {
-                    var (ok, reason) = VerifyImagesApplied(freshPerson, record);
+                    var (ok, reason) = await VerifyImagesAppliedAsync(freshPerson, record, cancellationToken).ConfigureAwait(false);
                     if (ok)
                     {
                         record.Images.MarkSynced();
@@ -682,7 +682,10 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         return (false, $"verification found {differingFields.Count} divergent field(s) [{fieldList}]; {detail}");
     }
 
-    private (bool Succeeded, string? FailureReason) VerifyImagesApplied(BaseItem freshPerson, PeopleSyncItem record)
+    private async Task<(bool Succeeded, string? FailureReason)> VerifyImagesAppliedAsync(
+        BaseItem freshPerson,
+        PeopleSyncItem record,
+        CancellationToken cancellationToken)
     {
         // Diagnostic: log what GetImages actually returns at verify time so
         // we can see the gap between "SaveImage returned without throwing"
@@ -702,9 +705,44 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         var (_, freshLocal) = _peopleService.PopulateImageData(null, freshPerson);
         record.Images.Local = freshLocal;
 
+        // Refresh stores source manifests tag-only (Size=0) for performance
+        // — no per-person HTTP. Local manifests have real sizes from the
+        // filesystem. The comparator can only compare sizes when both sides
+        // have non-zero values; otherwise it has no honest signal. Enrich
+        // the source side here (one HTTP call) so the verify is meaningful.
+        // The enriched manifest is local to this method — record.Images.Source
+        // stays tag-only on disk so the SourceHash short-circuit on the next
+        // refresh keeps working (the hash is computed over the tag-only
+        // manifest both before and after apply, so SyncedHash stays
+        // comparable to future SourceHash recomputations).
+        string? enrichedSource = record.Images.Source;
+        if (Client != null
+            && !string.IsNullOrEmpty(record.SourcePersonId)
+            && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
+        {
+            try
+            {
+                enrichedSource = await Utilities.ImageManifestEnricher.EnrichAsync(
+                    record.Images.Source,
+                    sourcePersonGuid,
+                    Client,
+                    Logger,
+                    record.PersonName ?? record.SourcePersonId,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Source image enrichment for verify failed for person {PersonName}; falling back to tag-only comparison", record.PersonName);
+            }
+        }
+
         if (record.Images.Comparator is Models.Common.Comparators.ImageManifestComparator imagesComparator)
         {
-            var diff = imagesComparator.DescribeDifference(record.Images.Source, freshLocal);
+            var diff = imagesComparator.DescribeDifference(enrichedSource, freshLocal);
             if (diff == null)
             {
                 return (true, null);
@@ -713,7 +751,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             return (false, $"image manifest after apply does not match source manifest: {diff}");
         }
 
-        if (record.Images.Comparator.Equals(record.Images.Source, freshLocal))
+        if (record.Images.Comparator.Equals(enrichedSource, freshLocal))
         {
             return (true, null);
         }
