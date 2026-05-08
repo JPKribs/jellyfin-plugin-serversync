@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.56",
+        "changelog": "## Fixes\r\n- Fix images not syncing for no reason",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.56/jellyfin-plugin-serversync-10.11.56.zip",
+        "checksum": "e747ffa2c28ffb4461e0299c5964dcf4",
+        "timestamp": "2026-05-08T02:30:55Z"
+      },
+      {
         "version": "10.11.55",
         "changelog": "## Fixes\r\n- Fix images not syncing for no reason",
         "targetAbi": "10.11.0.0",
