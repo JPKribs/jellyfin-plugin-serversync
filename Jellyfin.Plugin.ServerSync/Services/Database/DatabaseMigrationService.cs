@@ -22,7 +22,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 19;
+    public const int CurrentSchemaVersion = 20;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -296,6 +296,65 @@ public static class DatabaseMigrationService
                 }
 
                 CreateInitialSchema(connection);
+            }
+
+            // v20: Clear poisoned SyncedHash columns from 10.11.54.
+            // That release's OnApplySucceeded set SyncedHash = SourceHash on
+            // every category after a successful apply, including categories
+            // the run never actually applied (skipped because per-category
+            // HasChanges was already false, or skipped because user config
+            // disabled the category, or skipped because the row was force-
+            // queued without a real source change). The next Refresh saw
+            // SourceHash == SyncedHash, the hash short-circuit in
+            // SyncableValue.HasChanges returned false before the comparator
+            // ran, DecideStatus marked the row Synced, and the apply phase
+            // never touched the row again — even though local genuinely
+            // diverged from source. Most visibly, images stopped flowing.
+            //
+            // Null out all SyncedHash columns on the metadata + people
+            // tables so the next Refresh is forced to use the comparator
+            // for every row. Rows that genuinely match Source==Local will
+            // be MarkSynced'd by DecideStatus on that pass; rows that
+            // diverge will be Queued and the next Sync will apply them.
+            // Status is left alone — DecideStatus will overwrite it (except
+            // for Ignored, which it preserves on purpose, so user
+            // overrides survive).
+            //
+            // Skipped on a fresh-create path because CreateInitialSchema
+            // produces NULL SyncedHashes by default; only the in-place
+            // upgrade path needs this UPDATE.
+            if (fromVersion >= 19 && fromVersion < 20)
+            {
+                logger.LogWarning(
+                    "Schema upgrade to v20: clearing poisoned SyncedHash columns left over from 10.11.54. The next Refresh will re-evaluate every row against the source via comparator (no data loss; Ignored overrides preserved).");
+
+                using var clearTransaction = connection.BeginTransaction();
+
+                using (var clearMetadata = connection.CreateCommand())
+                {
+                    clearMetadata.Transaction = clearTransaction;
+                    clearMetadata.CommandText = @"
+                        UPDATE MetadataSyncItems
+                        SET SyncedMetadataHash = NULL,
+                            SyncedImagesHash = NULL,
+                            SyncedPeopleHash = NULL,
+                            SyncedStudiosHash = NULL";
+                    var rows = clearMetadata.ExecuteNonQuery();
+                    logger.LogInformation("v20: cleared SyncedHash on {Rows} MetadataSyncItems rows", rows);
+                }
+
+                using (var clearPeople = connection.CreateCommand())
+                {
+                    clearPeople.Transaction = clearTransaction;
+                    clearPeople.CommandText = @"
+                        UPDATE PeopleSyncItems
+                        SET SyncedMetadataHash = NULL,
+                            SyncedImagesHash = NULL";
+                    var rows = clearPeople.ExecuteNonQuery();
+                    logger.LogInformation("v20: cleared SyncedHash on {Rows} PeopleSyncItems rows", rows);
+                }
+
+                clearTransaction.Commit();
             }
 
             SetSchemaVersion(connection, CurrentSchemaVersion);

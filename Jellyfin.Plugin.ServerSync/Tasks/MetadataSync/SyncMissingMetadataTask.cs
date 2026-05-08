@@ -353,25 +353,29 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
     /// <inheritdoc />
     /// <remarks>
-    /// Normalize <i>all</i> per-category SyncedHashes to current SourceHashes
-    /// after a successful apply (no failures). Per-category
-    /// <see cref="SyncableValue{T}.MarkSynced"/> already ran inside
-    /// <see cref="ApplyAsync"/> for categories whose verify passed; this
-    /// covers the categories that were SKIPPED because they had no apply
-    /// work at runtime (per-category <c>HasChanges</c> was already false at
-    /// apply time, even though Refresh's <c>DecideStatus</c> may have
-    /// queued the row earlier when one category transiently looked diverged).
-    /// Without this, those skipped categories keep a stale SyncedHash and
-    /// the very next Refresh re-queues the row again — producing the
-    /// "same 2k items get re-processed every refresh" loop. The semantic
-    /// is honest: a successful apply (no failures) means the row's source
-    /// IS in sync with local per the comparator at that moment, so all
-    /// SyncedHashes should reflect that.
+    /// No-op — per-category <see cref="SyncableValue{T}.MarkSynced"/> calls
+    /// already happened inside <see cref="ApplyAsync"/> for the categories
+    /// whose verify passed.
+    /// <para>
+    /// Calling <see cref="MetadataSyncItem.MarkSynced"/> here would set
+    /// <c>SyncedHash = SourceHash</c> on categories that this run did NOT
+    /// actually apply (skipped because per-category <c>HasChanges</c> was
+    /// false at apply time, or skipped because the user's config disabled
+    /// that category, or skipped because the row was force-queued from the
+    /// UI without a matching source change). The next Refresh would then
+    /// see <c>SourceHash == SyncedHash</c>, short-circuit
+    /// <see cref="SyncableValue{T}.HasChanges"/> to false, and
+    /// <c>DecideStatus</c> would mark the row Synced — even when local
+    /// genuinely diverges from source. The UI keeps showing a diff (it
+    /// compares Source vs Local directly), but the apply phase only ever
+    /// processes Queued rows, so pressing Sync does nothing. That broke
+    /// images, people, and metadata across the board in 10.11.54.
+    /// </para>
     /// </remarks>
     protected override void OnApplySucceeded(MetadataSyncItem record)
     {
-        ArgumentNullException.ThrowIfNull(record);
-        record.MarkSynced();
+        // Intentionally empty — see remarks.
+        _ = record;
     }
 
     /// <inheritdoc />

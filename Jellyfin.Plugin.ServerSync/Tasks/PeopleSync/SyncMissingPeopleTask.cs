@@ -222,19 +222,28 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
     /// <inheritdoc />
     /// <remarks>
-    /// Normalize all per-category SyncedHashes to current SourceHashes on
-    /// successful apply. Per-category MarkSynced runs inside ApplyAsync
-    /// for categories that actually applied; this covers the categories
-    /// that were skipped because no work was needed at apply time. Without
-    /// this, a row Refresh queued (because one category transiently looked
-    /// diverged) but Sync left untouched (because all categories agreed at
-    /// apply time) keeps stale SyncedHashes — the next Refresh re-queues
-    /// it, looping forever.
+    /// No-op — per-category MarkSynced calls already happen inside
+    /// <see cref="ApplyAsync"/> for categories that this run actually
+    /// applied + verified.
+    /// <para>
+    /// Calling <see cref="PeopleSyncItem.MarkSynced"/> here sets
+    /// <c>SyncedHash = SourceHash</c> on categories this run did NOT
+    /// apply (skipped because per-category <c>HasChanges</c> was false at
+    /// apply time, or skipped because user config disabled that category,
+    /// or skipped because the row was force-queued without a source
+    /// change). The next Refresh then sees <c>SourceHash == SyncedHash</c>
+    /// and the hash short-circuit makes <c>HasChanges</c> return false
+    /// even when local genuinely diverges, so <c>DecideStatus</c> marks
+    /// the row Synced and the apply phase never touches it again. The UI
+    /// (which compares Source vs Local directly) still shows the diff,
+    /// but pressing Sync does nothing. That broke metadata + people sync
+    /// across the board in 10.11.54.
+    /// </para>
     /// </remarks>
     protected override void OnApplySucceeded(PeopleSyncItem record)
     {
-        ArgumentNullException.ThrowIfNull(record);
-        record.MarkSynced();
+        // Intentionally empty — see remarks.
+        _ = record;
     }
 
     /// <inheritdoc />
