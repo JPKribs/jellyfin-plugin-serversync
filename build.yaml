@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.50"
+version: "10.11.51"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -26,4 +26,4 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   fixes:
-  - Expanding logging has unlocked a whole host of image download issues that I am now working through
+  - Critical fix for people image sync — call UpdateToRepositoryAsync(ImageUpdate) after the SaveImage loop. SaveImage updates the BaseItem's in-memory ImageInfos but the DB write does NOT happen reliably for Person items, so verify's reload-from-DB found zero images and every record that actually needed an image sync failed with "local manifest empty, source non-empty". Metadata sync's image apply has had this call all along; people sync was missing it. This is why only ~19 records were failing — those were the ones that genuinely needed an image sync (everyone else had HasImagesChanges=false and never hit the broken code path).

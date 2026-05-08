@@ -620,6 +620,27 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             Logger.LogWarning(
                 "Image apply for {PersonName} produced no successful saves: {Total} attempted, {DownloadFails} download failures, {SaveFails} save failures, fellBack={FellBack}",
                 record.PersonName, work.Count, downloadFailures, saveFailures, fellBack);
+            return false;
+        }
+
+        // Persist the image mutations to the repository. SaveImage updates
+        // localPerson._imageInfos in memory, but the DB write does NOT
+        // happen reliably for Person items — the verify path's
+        // GetItemById call reloads from the DB and reports 0 images
+        // unless we force a persist here. The metadata sync's
+        // ApplyImagesAsync has had this call all along; people sync was
+        // missing it, which is why every record that genuinely needed an
+        // image sync was failing verification with "local manifest empty,
+        // source non-empty" while the in-memory localPerson count went
+        // 0 → 1 successfully.
+        try
+        {
+            await localPerson.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Image apply for {PersonName}: UpdateToRepositoryAsync(ImageUpdate) threw after SaveImage; image mutations may not have persisted", record.PersonName);
         }
 
         return appliedAny;
