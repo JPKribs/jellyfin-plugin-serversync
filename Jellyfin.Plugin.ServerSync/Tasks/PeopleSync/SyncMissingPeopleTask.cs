@@ -517,6 +517,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
 
             var tempPath = Path.GetTempFileName();
+            long tempBytes = 0;
             try
             {
                 await using (stream.ConfigureAwait(false))
@@ -525,8 +526,42 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                     await stream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
                 }
 
+                try { tempBytes = new FileInfo(tempPath).Length; } catch (IOException) { }
+
+                if (tempBytes == 0)
+                {
+                    // 200 OK with empty body — source served the request but
+                    // had no actual image data. SaveImage will silently no-op
+                    // on a zero-byte file, which produces a "verify says local
+                    // is empty" failure with no other clue. Skip the save and
+                    // log loudly so the cause is visible.
+                    Logger.LogWarning(
+                        "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned 0 bytes (Content-Type: {Ct}). Source server delivered the response but had no image data — likely stale ImageTags pointing at deleted file.",
+                        record.PersonName, imageType, imageIndex, sourcePersonId, contentType ?? "(none)");
+                    downloadFailures++;
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(contentType)
+                    && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Non-image Content-Type means we got an error page (HTML
+                    // 404, JSON error, etc.) wrapped in a 200 response. Don't
+                    // save garbage as a Primary image.
+                    Logger.LogWarning(
+                        "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned non-image Content-Type '{Ct}' ({Bytes} bytes). Refusing to save.",
+                        record.PersonName, imageType, imageIndex, sourcePersonId, contentType, tempBytes);
+                    downloadFailures++;
+                    continue;
+                }
+
                 if (Enum.TryParse<ImageType>(imageType, true, out var parsedImageType))
                 {
+                    int beforeCount = 0;
+                    try { beforeCount = localPerson.GetImages(parsedImageType).Count(); }
+                    catch (InvalidOperationException) { }
+                    catch (IOException) { }
+
                     using var fileStream = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
                     try
                     {
@@ -539,12 +574,34 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                             cancellationToken).ConfigureAwait(false);
 
                         appliedAny = true;
+
+                        int afterCount = 0;
+                        try { afterCount = localPerson.GetImages(parsedImageType).Count(); }
+                        catch (InvalidOperationException) { }
+                        catch (IOException) { }
+
+                        // If SaveImage returned without throwing but the in-
+                        // memory ImageInfos list didn't gain an entry, we
+                        // silently no-op'd. Surface that explicitly so the
+                        // verify failure is traceable.
+                        if (afterCount <= beforeCount)
+                        {
+                            Logger.LogWarning(
+                                "Image apply for {PersonName}: SaveImage returned for {Type}/{Index} ({Bytes} bytes) but local count did not increase ({Before} → {After}). SaveImage silently no-op'd — likely an unsupported image type for Person items, a path issue, or a Jellyfin internal rejection.",
+                                record.PersonName, imageType, imageIndex, tempBytes, beforeCount, afterCount);
+                        }
+                        else
+                        {
+                            Logger.LogInformation(
+                                "Image apply for {PersonName}: SaveImage applied {Type}/{Index} ({Bytes} bytes); local count {Before} → {After}",
+                                record.PersonName, imageType, imageIndex, tempBytes, beforeCount, afterCount);
+                        }
                     }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex)
                     {
                         saveFailures++;
-                        Logger.LogWarning(ex, "Image apply for {PersonName}: SaveImage threw for {Type}/{Index}", record.PersonName, imageType, imageIndex);
+                        Logger.LogWarning(ex, "Image apply for {PersonName}: SaveImage threw for {Type}/{Index} ({Bytes} bytes)", record.PersonName, imageType, imageIndex, tempBytes);
                     }
                 }
                 else
@@ -592,6 +649,21 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
     private (bool Succeeded, string? FailureReason) VerifyImagesApplied(BaseItem freshPerson, PeopleSyncItem record)
     {
+        // Diagnostic: log what GetImages actually returns at verify time so
+        // we can see the gap between "SaveImage returned without throwing"
+        // and "freshPerson reports zero images of that type". If these
+        // numbers disagree with the post-SaveImage count from the apply
+        // path, we have a stale-cache or different-instance problem.
+        try
+        {
+            var primaryCount = freshPerson.GetImages(MediaBrowser.Model.Entities.ImageType.Primary).Count();
+            Logger.LogInformation(
+                "Verify Images for {PersonName}: freshPerson (id={Id}) reports {Count} Primary image(s)",
+                record.PersonName, freshPerson.Id, primaryCount);
+        }
+        catch (InvalidOperationException) { }
+        catch (IOException) { }
+
         var (_, freshLocal) = _peopleService.PopulateImageData(null, freshPerson);
         record.Images.Local = freshLocal;
 
