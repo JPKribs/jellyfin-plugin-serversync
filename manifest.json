@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.50",
+        "changelog": "## Fixes\r\n- Expanding logging has unlocked a whole host of image download issues that I am now working through",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.50/jellyfin-plugin-serversync-10.11.50.zip",
+        "checksum": "52f8a7a6ccbee0e46f3b67c5e4ea6263",
+        "timestamp": "2026-05-08T00:02:04Z"
+      },
+      {
         "version": "10.11.49",
         "changelog": "## Fixes\r\n- Expanding logging has unlocked a whole host of image download issues that I am now working through",
         "targetAbi": "10.11.0.0",
