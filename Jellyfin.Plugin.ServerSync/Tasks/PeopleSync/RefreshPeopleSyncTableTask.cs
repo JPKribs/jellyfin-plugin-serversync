@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -168,15 +169,14 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     }
 
     /// <inheritdoc />
-    protected override Task<PeopleSyncItem?> BuildRecordAsync(
+    protected override async Task<PeopleSyncItem?> BuildRecordAsync(
         BaseItemDto source,
         IReadOnlyDictionary<string, PeopleSyncItem> existing,
         CancellationToken cancellationToken)
     {
-        _ = cancellationToken;
         if (string.IsNullOrEmpty(source.Name))
         {
-            return Task.FromResult<PeopleSyncItem?>(null);
+            return null;
         }
 
         // Look up local person from the cache built in GetListAsync. Going
@@ -185,7 +185,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         if (_localPersonsByName == null
             || !_localPersonsByName.TryGetValue(source.Name, out var localPerson))
         {
-            return Task.FromResult<PeopleSyncItem?>(null);
+            return null;
         }
 
         // Reuse existing record (preserves Status if Ignored) or create new.
@@ -202,14 +202,47 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         record.Metadata.Local = PeopleSyncTableService.BuildLocalMetadata(localPerson);
         record.Metadata.RecomputeSourceHash();
 
-        // Image manifests — image data comes from the bulk /Persons response
-        // (no per-person HTTP call). UpdateSource produces a comparator-built
-        // hash so the SourceHash short-circuit works correctly across
-        // refreshes.
         var config = ConfigManager.Configuration;
         if (config.PeopleSyncImages)
         {
             var (sourceImg, localImg) = _peopleService.PopulateImageData(source, localPerson);
+
+            // Enrich source-side image manifest with real Size/Width/Height
+            // via /Items/{id}/Images. PopulateImageData builds the source side
+            // tag-only (Size=0) from BaseItemDto.ImageTags — that path is
+            // cheap but leaves the comparator with no honest signal to
+            // compare against the sized local manifest. Without enrichment
+            // here, the comparator's tag-only-vs-sized fallback fires on
+            // every row, every refresh — every row queues, every row
+            // re-applies, every refresh wastes the bandwidth of redownloading
+            // images that already match. One per-person HTTP at refresh time
+            // gives the comparator real numbers, so rows that genuinely
+            // match Source==Local stay Synced and only true divergences
+            // queue.
+            if (Client != null
+                && !string.IsNullOrEmpty(record.SourcePersonId)
+                && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
+            {
+                try
+                {
+                    sourceImg = await ImageManifestEnricher.EnrichAsync(
+                        sourceImg,
+                        sourcePersonGuid,
+                        Client,
+                        Logger,
+                        source.Name,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Source image enrichment failed for {PersonName}; comparator will fall back to tag-only", source.Name);
+                }
+            }
+
             record.Images.UpdateSource(sourceImg);
             record.Images.Local = localImg;
         }
@@ -222,7 +255,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
             record.Images.SourceHash = null;
         }
 
-        return Task.FromResult<PeopleSyncItem?>(record);
+        return record;
     }
 
     /// <inheritdoc />

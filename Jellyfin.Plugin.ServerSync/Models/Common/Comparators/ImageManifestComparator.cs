@@ -82,38 +82,57 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
             {
                 var s = sourceImages[i];
                 var l = localImages[i];
+
+                // Both sides have real sizes — the canonical case after
+                // refresh enrichment runs. Strict size compare.
                 if (s.Size > 0 && l.Size > 0)
                 {
                     if (s.Size != l.Size)
                     {
                         return $"type {type}[{i}]: source size {s.Size}, local size {l.Size}";
                     }
+
+                    continue;
                 }
-                else if (s.Size == 0 && l.Size > 0)
+
+                // Source size unknown (manifest is tag-only — refresh's
+                // per-item enrichment failed or hasn't run, so we never got
+                // real Size/Width/Height from /Items/{id}/Images). Local
+                // has a real size from the filesystem. We can't confirm
+                // parity by comparing sizes; treating the row as "equal"
+                // silently hides every image divergence (the 10.11.x bug
+                // pattern: modal shows different KB but row marked Synced).
+                // Return diff so the row queues; the Apply path will
+                // download, and VerifyImagesAppliedAsync re-runs enrichment
+                // before comparing so post-apply verification passes when
+                // the apply genuinely landed. Once MarkSynced records the
+                // SourceHash, future refreshes short-circuit on
+                // SourceHash == SyncedHash and never call back here.
+                if (s.Size == 0 && l.Size > 0)
                 {
-                    // Source manifest is tag-only (Size=0). Refresh builds
-                    // source manifests from BaseItemDto.ImageTags for
-                    // performance — no per-item HTTP — and that path only
-                    // populates Tag, leaving Size/Width/Height at 0. The
-                    // local side is built from the filesystem with real
-                    // sizes. We can't confirm parity by comparing sizes,
-                    // and treating the row as "equal" silently hides every
-                    // image divergence (the canonical 10.11.x bug — modal
-                    // shows different KB but row is marked Synced).
-                    //
-                    // Returning a diff here forces the row to Queued. The
-                    // Apply path actually downloads and writes, then
-                    // VerifyImagesApplied enriches source with real sizes
-                    // before re-running this comparator, so verify passes
-                    // when the apply genuinely landed. After
-                    // <see cref="SyncableValue{T}.MarkSynced"/> records the
-                    // current SourceHash, future refreshes short-circuit
-                    // via SourceHash == SyncedHash without ever calling
-                    // back into this method (the hash incorporates Tag, so
-                    // any source-side image change reliably invalidates
-                    // the short-circuit).
                     return $"type {type}[{i}]: source manifest is tag-only (size unknown), local size {l.Size}; cannot confirm match without enrichment";
                 }
+
+                // Source has a real size, local has size 0 — local file is
+                // missing or unreadable (filesystem builder leaves Size=0
+                // when File.Exists is false or FileInfo.Length throws). The
+                // image needs to be (re-)pulled from source. Without this
+                // branch the loop falls through and the comparator returns
+                // equal, leaving a hollow local image silently desynced.
+                if (s.Size > 0 && l.Size == 0)
+                {
+                    return $"type {type}[{i}]: source size {s.Size}, local size 0 (file missing or unreadable)";
+                }
+
+                // Both sides Size=0: genuinely indeterminate (refresh
+                // enrichment failed AND local file is missing). The Apply
+                // path will retry enrichment and the download; if both
+                // sides are still 0 next time, the row stays in this
+                // limbo. Don't return diff here because there's nothing
+                // actionable — apply can't write what source can't deliver.
+                // Fall through (continue). The Tag is still part of the
+                // SourceHash so a Tag change invalidates the short-circuit
+                // and we re-attempt enrichment on the next refresh.
             }
         }
 

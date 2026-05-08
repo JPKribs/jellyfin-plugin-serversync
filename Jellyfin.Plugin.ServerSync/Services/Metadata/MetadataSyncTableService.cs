@@ -564,30 +564,59 @@ public class MetadataSyncTableService
     /// <see cref="ImageManifestComparator"/> hash incorporates tags so the
     /// <c>SourceHash == SyncedHash</c> short-circuit still works.
     /// </summary>
-    private static Task SetImagesValuesAsync(
+    private async Task SetImagesValuesAsync(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
         BaseItem? localItem,
         SourceServerClient client,
         CancellationToken cancellationToken)
     {
-        _ = client;
-        _ = cancellationToken;
-
         var sourceImagesByType = new Dictionary<string, List<ImageInfoDto>>();
         PopulateSourceImagesFromTags(sourceItem, sourceImagesByType);
 
-        // Only store if there are actual images. UpdateSource recomputes
-        // the hash via ImageManifestComparator — the manual truncated-SHA256
-        // used previously is no longer needed.
-        if (sourceImagesByType.Count > 0)
+        string? sourceManifestJson = sourceImagesByType.Count > 0
+            ? JsonSerializer.Serialize(sourceImagesByType)
+            : null;
+
+        // Enrich source-side image manifest with real Size/Width/Height via
+        // /Items/{id}/Images. PopulateSourceImagesFromTags builds the source
+        // side tag-only (Size=0) from BaseItemDto.ImageTags — fast but leaves
+        // the comparator with no honest signal to compare against the sized
+        // local manifest. Without enrichment here, the comparator's
+        // tag-only-vs-sized fallback fires on every row, every refresh —
+        // every row queues, every row re-applies, every refresh wastes the
+        // bandwidth of redownloading images that already match. One per-item
+        // HTTP at refresh time gives the comparator real numbers, so rows
+        // that genuinely match Source==Local stay Synced and only true
+        // divergences queue.
+        if (sourceManifestJson != null
+            && client != null
+            && Guid.TryParse(item.SourceItemId, out var sourceItemGuid))
         {
-            item.Images.UpdateSource(JsonSerializer.Serialize(sourceImagesByType));
+            try
+            {
+                sourceManifestJson = await Utilities.ImageManifestEnricher.EnrichAsync(
+                    sourceManifestJson,
+                    sourceItemGuid,
+                    client,
+                    _logger,
+                    item.ItemName ?? item.SourceItemId,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Source image enrichment failed for {ItemName}; comparator will fall back to tag-only", item.ItemName);
+            }
         }
-        else
-        {
-            item.Images.UpdateSource(null);
-        }
+
+        // UpdateSource recomputes the hash via ImageManifestComparator over
+        // the (now enriched) manifest, so the SourceHash short-circuit
+        // remains stable across refreshes.
+        item.Images.UpdateSource(sourceManifestJson);
 
         // Local images with size/dimensions per type
         if (localItem != null)
@@ -647,8 +676,6 @@ public class MetadataSyncTableService
                 ? JsonSerializer.Serialize(localImagesByType)
                 : null;
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
