@@ -353,16 +353,25 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
     /// <inheritdoc />
     /// <remarks>
-    /// No-op — per-category <see cref="SyncableValue{T}.MarkSynced"/> calls
-    /// already happened inside <see cref="ApplyAsync"/>. Calling
-    /// <see cref="MetadataSyncItem.MarkSynced"/> here would re-mark
-    /// categories that <see cref="ApplyAsync"/> intentionally skipped (e.g.
-    /// because the user disabled them in config), which would break the
-    /// short-circuit on the next Refresh once they're re-enabled.
+    /// Normalize <i>all</i> per-category SyncedHashes to current SourceHashes
+    /// after a successful apply (no failures). Per-category
+    /// <see cref="SyncableValue{T}.MarkSynced"/> already ran inside
+    /// <see cref="ApplyAsync"/> for categories whose verify passed; this
+    /// covers the categories that were SKIPPED because they had no apply
+    /// work at runtime (per-category <c>HasChanges</c> was already false at
+    /// apply time, even though Refresh's <c>DecideStatus</c> may have
+    /// queued the row earlier when one category transiently looked diverged).
+    /// Without this, those skipped categories keep a stale SyncedHash and
+    /// the very next Refresh re-queues the row again — producing the
+    /// "same 2k items get re-processed every refresh" loop. The semantic
+    /// is honest: a successful apply (no failures) means the row's source
+    /// IS in sync with local per the comparator at that moment, so all
+    /// SyncedHashes should reflect that.
     /// </remarks>
     protected override void OnApplySucceeded(MetadataSyncItem record)
     {
-        // Intentionally empty.
+        ArgumentNullException.ThrowIfNull(record);
+        record.MarkSynced();
     }
 
     /// <inheritdoc />

@@ -222,14 +222,19 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
     /// <inheritdoc />
     /// <remarks>
-    /// No-op — per-category MarkSynced calls already happen in
-    /// <see cref="ApplyAsync"/>. The default base behavior of
-    /// <see cref="PeopleSyncItem.MarkSynced"/> would re-mark categories
-    /// that this run intentionally skipped.
+    /// Normalize all per-category SyncedHashes to current SourceHashes on
+    /// successful apply. Per-category MarkSynced runs inside ApplyAsync
+    /// for categories that actually applied; this covers the categories
+    /// that were skipped because no work was needed at apply time. Without
+    /// this, a row Refresh queued (because one category transiently looked
+    /// diverged) but Sync left untouched (because all categories agreed at
+    /// apply time) keeps stale SyncedHashes — the next Refresh re-queues
+    /// it, looping forever.
     /// </remarks>
     protected override void OnApplySucceeded(PeopleSyncItem record)
     {
-        // Intentionally empty.
+        ArgumentNullException.ThrowIfNull(record);
+        record.MarkSynced();
     }
 
     /// <inheritdoc />
