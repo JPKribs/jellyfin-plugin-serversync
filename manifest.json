@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.51",
+        "changelog": "## Fixes\r\n- Critical fix for people image sync — call UpdateToRepositoryAsync(ImageUpdate) after the SaveImage loop. SaveImage updates the BaseItem's in-memory ImageInfos but the DB write does NOT happen reliably for Person items, so verify's reload-from-DB found zero images and every record that actually needed an image sync failed with local manifest empty, source non-empty.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.51/jellyfin-plugin-serversync-10.11.51.zip",
+        "checksum": "c2261be4e506adda1a880953fc2ea468",
+        "timestamp": "2026-05-08T00:07:40Z"
+      },
+      {
         "version": "10.11.50",
         "changelog": "## Fixes\r\n- Expanding logging has unlocked a whole host of image download issues that I am now working through",
         "targetAbi": "10.11.0.0",
