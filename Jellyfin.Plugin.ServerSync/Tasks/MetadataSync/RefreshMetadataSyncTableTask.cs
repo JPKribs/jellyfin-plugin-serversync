@@ -193,26 +193,51 @@ public class RefreshMetadataSyncTableTask
         // frozen at ~24% on libraries with tens of thousands of matched
         // items because no callback fired during the multi-minute serial
         // chunk loop.
-        const int heavyBatchSize = 50;
+        //
+        // Batch size 200 (vs the SDK default of 50) cuts request count 4×;
+        // a typical Jellyfin item ID is 32 hex chars, so 200 IDs in the
+        // /Items?Ids= query string is ~6.5KB — well under any reasonable
+        // URL length cap.
+        //
+        // Within a single mapping, run the chunk fetches in parallel
+        // (bounded). Combined with the outer 4-way mapping parallelism this
+        // gives up to 16 concurrent requests against the source. Most
+        // self-hosted Jellyfin servers handle that fine; if it ever turns
+        // out to overwhelm a weak source, the per-mapping cap is the easy
+        // knob to lower.
+        const int heavyBatchSize = 200;
+        const int chunksPerMappingParallelism = 4;
         async Task FetchHeavyAsync(LibraryMapping mapping, IReadOnlyList<Guid> ids, bool isFolder, CancellationToken ct)
         {
             if (ids.Count == 0) return;
+
+            // Pre-slice into chunks so Parallel.ForEachAsync can drive them.
+            var chunks = new List<IReadOnlyList<Guid>>((ids.Count + heavyBatchSize - 1) / heavyBatchSize);
             for (var i = 0; i < ids.Count; i += heavyBatchSize)
             {
-                var chunk = new List<Guid>(Math.Min(heavyBatchSize, ids.Count - i));
-                for (var j = i; j < Math.Min(i + heavyBatchSize, ids.Count); j++)
+                var size = Math.Min(heavyBatchSize, ids.Count - i);
+                var chunk = new List<Guid>(size);
+                for (var j = i; j < i + size; j++)
                 {
                     chunk.Add(ids[j]);
                 }
 
-                var items = await Client.GetItemsByIdsAsync(chunk, fields, batchSize: heavyBatchSize, cancellationToken: ct).ConfigureAwait(false);
-                foreach (var item in items)
-                {
-                    work.Add(new MetadataWork(mapping, item, isFolder));
-                    var done = Interlocked.Increment(ref fetched);
-                    progress.Report(40 + (60.0 * done / heavyDenominator));
-                }
+                chunks.Add(chunk);
             }
+
+            await Parallel.ForEachAsync(
+                chunks,
+                new ParallelOptions { MaxDegreeOfParallelism = chunksPerMappingParallelism, CancellationToken = ct },
+                async (chunk, innerCt) =>
+                {
+                    var items = await Client.GetItemsByIdsAsync(chunk, fields, batchSize: heavyBatchSize, cancellationToken: innerCt).ConfigureAwait(false);
+                    foreach (var item in items)
+                    {
+                        work.Add(new MetadataWork(mapping, item, isFolder));
+                        var done = Interlocked.Increment(ref fetched);
+                        progress.Report(40 + (60.0 * done / heavyDenominator));
+                    }
+                }).ConfigureAwait(false);
         }
 
         await Parallel.ForEachAsync(
