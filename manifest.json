@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.53",
+        "changelog": "## Fixes\r\n- Metadata chunk errors where only one loads when threads are exhausted",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.53/jellyfin-plugin-serversync-10.11.53.zip",
+        "checksum": "88651be4db8a761e4783ef724d21b687",
+        "timestamp": "2026-05-08T00:32:48Z"
+      },
+      {
         "version": "10.11.52",
         "changelog": "## Fixes\r\n- Metadata refresh Phase 3 (heavy fetch by IDs) is now ~10× faster — increased batch size from 50 to 200 IDs per request (4× fewer round-trips) and added 4-way parallelism for chunk fetches within each mapping (was serial). Combined with the existing 4-way mapping parallelism this allows up to 16 concurrent requests against the source.",
         "targetAbi": "10.11.0.0",
