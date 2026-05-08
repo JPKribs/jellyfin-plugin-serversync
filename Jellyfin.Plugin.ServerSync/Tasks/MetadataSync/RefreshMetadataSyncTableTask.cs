@@ -194,10 +194,14 @@ public class RefreshMetadataSyncTableTask
         // items because no callback fired during the multi-minute serial
         // chunk loop.
         //
-        // Batch size 200 (vs the SDK default of 50) cuts request count 4×;
-        // a typical Jellyfin item ID is 32 hex chars, so 200 IDs in the
-        // /Items?Ids= query string is ~6.5KB — well under any reasonable
-        // URL length cap.
+        // Batch size capped at 50 (matches the SDK default). I tried bumping
+        // it to 200 to cut round-trip count, but that produced HTTP 414
+        // (URI Too Long) on real-world setups — many reverse proxies (nginx
+        // default large_client_header_buffers, IIS request filtering, etc.)
+        // cap header size at 4–8KB, and 200 IDs × 32 hex chars + Fields=
+        // and other query overhead pushes past that. 50 IDs ≈ 1.6KB of
+        // ?Ids= content plus ~500 bytes of other query string, comfortably
+        // under any reasonable proxy limit.
         //
         // Within a single mapping, run the chunk fetches in parallel
         // (bounded). Combined with the outer 4-way mapping parallelism this
@@ -205,7 +209,7 @@ public class RefreshMetadataSyncTableTask
         // self-hosted Jellyfin servers handle that fine; if it ever turns
         // out to overwhelm a weak source, the per-mapping cap is the easy
         // knob to lower.
-        const int heavyBatchSize = 200;
+        const int heavyBatchSize = 50;
         const int chunksPerMappingParallelism = 4;
         async Task FetchHeavyAsync(LibraryMapping mapping, IReadOnlyList<Guid> ids, bool isFolder, CancellationToken ct)
         {
