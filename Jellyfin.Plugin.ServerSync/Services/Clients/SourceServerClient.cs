@@ -536,6 +536,154 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
+    /// Fetches the Content-sync leaf items belonging to a single whitelisted
+    /// item. Looks up the whitelisted item by ID with no type restriction,
+    /// then:
+    ///   - If it's a leaf (Movie / Episode / Audio / Video): returns just it.
+    ///   - If it's a folder type (Series / Season / BoxSet / MusicAlbum /
+    ///     MusicArtist): walks its descendants and returns the leaves under
+    ///     it.
+    /// One whitelisted ID at a time. The descendants walk uses a folder-by-
+    /// folder traversal rather than <c>ParentId=&lt;id&gt;&amp;Recursive=true</c>
+    /// because Jellyfin keeps both the literal <c>ParentId</c> filter and the
+    /// derived <c>AncestorIds</c> filter on recursive queries — episodes have
+    /// <c>ParentId=&lt;seasonId&gt;</c>, not <c>&lt;seriesId&gt;</c>, so a
+    /// recursive query against a Series returned nothing and the whitelist
+    /// branch produced no work for any Series. Walking children one folder
+    /// level at a time avoids that filter entirely.
+    /// </summary>
+    public async Task<List<BaseItemDto>> GetWhitelistedItemLeavesAsync(
+        Guid whitelistedId,
+        CancellationToken cancellationToken = default)
+    {
+        var leafTypes = new HashSet<BaseItemDto_Type?>
+        {
+            BaseItemDto_Type.Movie,
+            BaseItemDto_Type.Episode,
+            BaseItemDto_Type.Audio,
+            BaseItemDto_Type.Video
+        };
+
+        var result = new List<BaseItemDto>();
+        var seen = new HashSet<Guid>();
+
+        BaseItemDto? rootItem;
+        try
+        {
+            var client = GetApiClient();
+            var rootPage = await client.Items.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.Ids = new Guid?[] { whitelistedId };
+                    config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            rootItem = rootPage?.Items?.FirstOrDefault();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Whitelist: failed to fetch item {Id}", whitelistedId);
+            return result;
+        }
+
+        if (rootItem == null || !rootItem.Id.HasValue)
+        {
+            _logger.LogWarning("Whitelist: source server returned no item for id {Id}", whitelistedId);
+            return result;
+        }
+
+        if (leafTypes.Contains(rootItem.Type))
+        {
+            result.Add(rootItem);
+            seen.Add(rootItem.Id.Value);
+            return result;
+        }
+
+        // Folder-like (Series / Season / BoxSet / Album / Artist): walk
+        // children breadth-first one folder at a time, collecting leaves.
+        var queue = new Queue<Guid>();
+        queue.Enqueue(rootItem.Id.Value);
+
+        while (queue.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var parentId = queue.Dequeue();
+
+            var startIndex = 0;
+            const int pageSize = 1000;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                BaseItemDtoQueryResult? page;
+                try
+                {
+                    var client = GetApiClient();
+                    page = await client.Items.GetAsync(
+                        config =>
+                        {
+                            config.QueryParameters.ParentId = parentId;
+                            config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                            config.QueryParameters.SortBy = new[] { ItemSortBy.SortName };
+                            config.QueryParameters.StartIndex = startIndex;
+                            config.QueryParameters.Limit = pageSize;
+                        },
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Whitelist: failed to fetch children of {ParentId}", parentId);
+                    break;
+                }
+
+                if (page?.Items == null || page.Items.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (var child in page.Items)
+                {
+                    if (!child.Id.HasValue || !seen.Add(child.Id.Value))
+                    {
+                        continue;
+                    }
+
+                    if (leafTypes.Contains(child.Type))
+                    {
+                        result.Add(child);
+                    }
+                    else
+                    {
+                        // Folder — descend.
+                        queue.Enqueue(child.Id.Value);
+                    }
+                }
+
+                if (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value)
+                {
+                    break;
+                }
+
+                if (page.Items.Count < pageSize)
+                {
+                    break;
+                }
+
+                startIndex += page.Items.Count;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Fetches Content-sync leaf items (Movie / Episode / Audio / Video) that
     /// are descendants of any of <paramref name="ancestorIds"/>. Used by the
     /// Whitelist routing path so a whitelisted Series ID expands to all of

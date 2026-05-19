@@ -168,16 +168,14 @@ public class UpdateSyncTablesTask
 
             if (mapping.FilterMode == LibraryFilterMode.Whitelist)
             {
-                // Whitelist: fetch only what the user picked, but expand
-                // folder-type whitelists (Series, Season, BoxSet) to their
-                // syncable leaf children. This is the implicit behavior the
-                // previous bulk-scan + path-prefix-filter gave for free.
-                //
-                // Two queries:
-                //   1. AncestorIds = whitelist  → leaves under whitelisted folders.
-                //   2. Ids = whitelist (leaf-types only)  → leaves whitelisted directly.
-                // Union by item ID so a leaf under a whitelisted folder that's
-                // ALSO whitelisted itself is returned once.
+                // Whitelist: fetch only what the user picked. Each whitelisted
+                // ID is resolved on its own — leaves are returned as-is,
+                // folder-type whitelists (Series / Season / BoxSet / Album /
+                // Artist) expand to their leaf descendants. Per-ID query
+                // avoids the prior approach's reliance on
+                // ParentId+Recursive=true, which dropped items whose direct
+                // ParentId did not equal the whitelisted ID (e.g. all
+                // episodes under a whitelisted Series).
                 var ids = (mapping.FilteredItems ?? new List<Models.Configuration.FilteredItem>())
                     .Select(fi => Guid.TryParse(fi.ItemId, out var g) ? g : Guid.Empty)
                     .Where(g => g != Guid.Empty)
@@ -191,33 +189,35 @@ public class UpdateSyncTablesTask
                     continue;
                 }
 
-                var ancestorChildren = await Client.GetContentItemsByAncestorsAsync(ids, pageSize: 1000, maxParallelism: 4, cancellationToken: cancellationToken).ConfigureAwait(false);
-                var directLeaves = await Client.GetContentItemsByIdsAsync(ids, batchSize: 50, cancellationToken).ConfigureAwait(false);
-
-                Logger.LogInformation(
-                    "{Library} whitelist expanded to {AncestorCount} children + {DirectCount} direct leaves from {WhitelistCount} whitelisted item(s).",
-                    mapping.SourceLibraryName,
-                    ancestorChildren.Count,
-                    directLeaves.Count,
-                    ids.Count);
-
                 var seen = new HashSet<Guid>();
-                foreach (var item in ancestorChildren.Concat(directLeaves))
+                var collected = 0;
+                foreach (var whitelistedId in ids)
                 {
-                    if (!item.Id.HasValue || !seen.Add(item.Id.Value))
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var leaves = await Client.GetWhitelistedItemLeavesAsync(whitelistedId, cancellationToken).ConfigureAwait(false);
+                    foreach (var item in leaves)
                     {
-                        continue;
-                    }
+                        if (!item.Id.HasValue || !seen.Add(item.Id.Value))
+                        {
+                            continue;
+                        }
 
-                    var hitWatched = watchedByAll != null && watchedByAll.Contains(item.Id.Value);
-                    work.Add(new ContentRefreshWork(mapping, item, hitWatched));
-
-                    fetched++;
-                    if (totalExpected > 0)
-                    {
-                        progress.Report(Math.Min(100, 100.0 * fetched / totalExpected));
+                        var hitWatched = watchedByAll != null && watchedByAll.Contains(item.Id.Value);
+                        work.Add(new ContentRefreshWork(mapping, item, hitWatched));
+                        collected++;
+                        fetched++;
+                        if (totalExpected > 0)
+                        {
+                            progress.Report(Math.Min(100, 100.0 * fetched / totalExpected));
+                        }
                     }
                 }
+
+                Logger.LogInformation(
+                    "{Library} whitelist resolved to {Count} leaf item(s) from {WhitelistCount} whitelisted entry/entries.",
+                    mapping.SourceLibraryName,
+                    collected,
+                    ids.Count);
 
                 continue;
             }

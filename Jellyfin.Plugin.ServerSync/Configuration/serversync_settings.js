@@ -617,12 +617,8 @@ export default function (view) {
             var sourceSelect = row.querySelector('.sourceLibrarySelect');
             var localSelect = row.querySelector('.localLibrarySelect');
 
-            // Collect filter data. Send the numeric enum value: Jellyfin's
-            // plugin-config JSON deserializer does not accept enum-name strings
-            // for this field, so "Whitelist" would silently fall back to 0
-            // (AllowAll) and the whitelist code path would never be taken.
-            var filterModeName = row._filterModeSelect ? row._filterModeSelect.value : 'AllowAll';
-            var filterMode = filterModeName === 'Whitelist' ? 1 : (filterModeName === 'Blacklist' ? 2 : 0);
+            // Collect filter data
+            var filterMode = row._filterModeSelect ? row._filterModeSelect.value : 'AllowAll';
             var filteredItems = [];
             var selectedItems = row._selectedFilterItems || {};
             Object.keys(selectedItems).forEach(function(id) {
