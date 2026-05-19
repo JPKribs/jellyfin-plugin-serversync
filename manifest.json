@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.58",
+        "changelog": "## Fixes\r\n- Content whitelisting was broken by pagination changes",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.58/jellyfin-plugin-serversync-10.11.58.zip",
+        "checksum": "3a6acd2e3df610c5614b13cddf3c8d9e",
+        "timestamp": "2026-05-19T02:22:40Z"
+      },
+      {
         "version": "10.11.57",
         "changelog": "## Fixes\r\n- Various fixes and attempts to resolve syncing issues",
         "targetAbi": "10.11.0.0",
