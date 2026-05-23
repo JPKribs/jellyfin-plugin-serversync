@@ -340,6 +340,15 @@ public class UpdateSyncTablesTask
 
         var config = ConfigManager.Configuration;
 
+        if (existingItem != null
+            && existingItem.Status == SyncStatus.Synced
+            && config.DeleteMissingContentMode != ApprovalMode.Disabled
+            && !string.IsNullOrEmpty(existingItem.LocalPath)
+            && !System.IO.File.Exists(existingItem.LocalPath))
+        {
+            return Task.FromResult<SyncItem?>(null);
+        }
+
         if (existingItem != null)
         {
             var updated = SyncStateService.ProcessExistingItem(

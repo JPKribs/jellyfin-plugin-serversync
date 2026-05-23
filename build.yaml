@@ -25,6 +25,8 @@ artifacts:
 - "Microsoft.Kiota.Serialization.Text.dll"
 - "Std.UriTemplate.dll"
 changelog:
+  fixes:
+  - Deletion on source server deletion
   technical:
   - Safer pruning when source refresh fails partway
   - People metadata persists even if image sync errors
