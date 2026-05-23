@@ -10,27 +10,13 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Enriches a source-side image manifest (built from <c>BaseItemDto.ImageTags</c>
-/// during refresh, which is tag-only with Size=0) with real Size / Width /
-/// Height fetched from the source server. The refresh skips this enrichment
-/// for performance; the per-modal-open path uses this helper so the modal
-/// renders honest values instead of "1 (0 B)".
+/// Adds Size / Width / Height to a tag-only source image manifest via one HTTP call.
 /// </summary>
 public static class ImageManifestEnricher
 {
     /// <summary>
-    /// Returns the enriched manifest JSON, or the original on failure.
-    /// One HTTP call to <c>/Items/{sourceItemId}/Images</c>; failure logs
-    /// at Debug and returns the input unchanged so the caller can fall back
-    /// to the tag-only manifest.
+    /// Returns the enriched manifest JSON, or the input unchanged on any failure.
     /// </summary>
-    /// <param name="sourceManifestJson">Existing tag-only manifest JSON.</param>
-    /// <param name="sourceItemId">Source server item ID.</param>
-    /// <param name="client">Source server client.</param>
-    /// <param name="logger">Logger for diagnostics.</param>
-    /// <param name="logContext">Item identifier (name or person) for diagnostic log lines.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The enriched JSON, or the input unchanged.</returns>
     public static async Task<string?> EnrichAsync(
         string? sourceManifestJson,
         Guid sourceItemId,

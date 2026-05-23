@@ -66,14 +66,12 @@ public class RefreshMetadataSyncTableTask
     /// <inheritdoc />
     protected override string ModuleMutexKey => "Metadata";
 
+    // Metadata's <c>BuildRecordAsync</c> issues a per-item
+    // <c>GetItemImageInfoAsync</c> HTTP call when image sync is enabled. With
+    // libraries in the tens of thousands of items, serializing these round-
+    // trips makes a refresh take hours. 8 parallel builds turn that into
+    // minutes without overwhelming a typical home Jellyfin source.
     /// <inheritdoc />
-    /// <remarks>
-    /// Metadata's <c>BuildRecordAsync</c> issues a per-item
-    /// <c>GetItemImageInfoAsync</c> HTTP call when image sync is enabled. With
-    /// libraries in the tens of thousands of items, serializing these round-
-    /// trips makes a refresh take hours. 8 parallel builds turn that into
-    /// minutes without overwhelming a typical home Jellyfin source.
-    /// </remarks>
     protected override int BuildRecordParallelism => 8;
 
     /// <inheritdoc />
@@ -88,23 +86,21 @@ public class RefreshMetadataSyncTableTask
             || config.MetadataSyncPeople || config.MetadataSyncStudios;
     }
 
+    // Two-phase fetch instead of "bulk-fetch everything heavy":
+    //   <list type="number">
+    //   <item>Enumerate local items per library and build a path lookup.</item>
+    //   <item>Light source discovery — paginate every library asking for
+    //   only <c>Path</c> + <c>Id</c>. Per-page payload is tiny.</item>
+    //   <item>Filter source items to those whose translated path exists
+    //   locally — that's the actual sync set.</item>
+    //   <item>Heavy fetch by IDs — only request full metadata fields for
+    //   matched items, batched.</item>
+    //   </list>
+    // On a typical install where local is a subset of source, this
+    // dramatically reduces both bytes-over-wire and the build phase's
+    // work — we no longer fetch full metadata for tens of thousands of
+    // source items the user doesn't have.
     /// <inheritdoc />
-    /// <remarks>
-    /// Two-phase fetch instead of "bulk-fetch everything heavy":
-    ///   <list type="number">
-    ///   <item>Enumerate local items per library and build a path lookup.</item>
-    ///   <item>Light source discovery — paginate every library asking for
-    ///   only <c>Path</c> + <c>Id</c>. Per-page payload is tiny.</item>
-    ///   <item>Filter source items to those whose translated path exists
-    ///   locally — that's the actual sync set.</item>
-    ///   <item>Heavy fetch by IDs — only request full metadata fields for
-    ///   matched items, batched.</item>
-    ///   </list>
-    /// On a typical install where local is a subset of source, this
-    /// dramatically reduces both bytes-over-wire and the build phase's
-    /// work — we no longer fetch full metadata for tens of thousands of
-    /// source items the user doesn't have.
-    /// </remarks>
     protected override async Task<IList<MetadataWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
@@ -464,12 +460,10 @@ public class RefreshMetadataSyncTableTask
         return (record.SourceLibraryId, record.SourceItemId);
     }
 
+    // In scope when the row's library mapping is currently enabled. Disabling
+    // a mapping preserves its metadata rows so the user's Ignored overrides
+    // survive a toggle.
     /// <inheritdoc />
-    /// <remarks>
-    /// In scope when the row's library mapping is currently enabled. Disabling
-    /// a mapping preserves its metadata rows so the user's Ignored overrides
-    /// survive a toggle.
-    /// </remarks>
     protected override bool IsInScope(MetadataSyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -485,11 +479,10 @@ public class RefreshMetadataSyncTableTask
     }
 
     /// <inheritdoc />
-    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
     {
-        ConfigManager.Configuration.LastMetadataSyncTime = DateTime.UtcNow;
-        ConfigManager.SaveConfiguration();
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastMetadataSyncTime = utcNow;
     }
 
     /// <inheritdoc />

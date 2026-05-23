@@ -27,3 +27,7 @@ artifacts:
 changelog:
   fixes:
   - Content whitelisting was broken by pagination changes
+  technical:
+  - Add tests for validating changes
+  - Some comment restrucuting to be better and cleaner
+  - Renaming values to keep things more consistent

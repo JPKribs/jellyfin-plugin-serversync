@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Jellyfin.Plugin.ServerSync.Tests</RootNamespace>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!--
+      Tests are deliberately less strict than the production project:
+        - Tests use Assert/throw patterns the analyzer flags as smells
+          (CA1707 underscores in test names; CA2007 ConfigureAwait;
+          CA1305 culture-specific formatting in test data; etc.).
+        - We don't want test noise to bury real production issues, so we
+          drop TreatWarningsAsErrors and disable analysis here.
+    -->
+    <AnalysisMode>Default</AnalysisMode>
+    <NoWarn>CA1707;CA2007;CA1305;CA1062;CA1822;CA1861;xUnit1004</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+
+    <!--
+      Tests touch types from the plugin's Jellyfin dependencies (BaseItemDto
+      from the SDK, etc.). We mirror the main project's package set without
+      PrivateAssets so the types are visible at compile time here.
+    -->
+    <PackageReference Include="Jellyfin.Controller" Version="10.11.0" />
+    <PackageReference Include="Jellyfin.Model" Version="10.11.0" />
+    <PackageReference Include="Jellyfin.Sdk" Version="2025.10.21" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Jellyfin.Plugin.ServerSync\Jellyfin.Plugin.ServerSync.csproj" />
+  </ItemGroup>
+
+</Project>

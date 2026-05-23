@@ -6,6 +6,7 @@ using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -16,6 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// composite (SourceUserId, LocalUserId, PropertyCategory) — three rows per
 /// user mapping (one each for Policy, Configuration, ProfileImage).
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public sealed class UserSyncTableManager
     : SyncTableManagerBase<UserSyncItem, (string SourceUserId, string LocalUserId, string PropertyCategory)>
 {
@@ -36,12 +38,9 @@ public sealed class UserSyncTableManager
     /// <inheritdoc />
     protected override string TableName => "UserSyncItems";
 
+    // Sentinel — UpdateStatusByKey is overridden directly to handle the
+    // composite (SourceUserId, LocalUserId, PropertyCategory) key.
     /// <inheritdoc />
-    /// <remarks>
-    /// Sentinel — never used because we override
-    /// <see cref="UpdateStatusByKey"/> directly to handle the composite key
-    /// (SourceUserId, LocalUserId, PropertyCategory).
-    /// </remarks>
     protected override string KeyColumn => "SourceUserId";
 
     /// <inheritdoc />
@@ -127,15 +126,9 @@ public sealed class UserSyncTableManager
 
     /// <summary>
     /// Counts distinct user mappings (SourceUserId, LocalUserId pairs) that
-    /// have at least one category row in <paramref name="status"/>. Use this
-    /// for the User-sync header counters so they match the visible row count
-    /// (one row per user mapping) instead of the underlying category-row
-    /// count (three per user when all categories are enabled).
-    /// <para>
-    /// Note: a user mapping with one category Queued and another Errored
-    /// counts as 1 in BOTH Queued and Errored — same as how the visible row
-    /// would show "Errored" or "Queued" based on the worst-case status.
-    /// </para>
+    /// have at least one category row in <paramref name="status"/>. A mapping
+    /// with one category Queued and another Errored counts in both buckets,
+    /// matching how the row is rendered by worst-case status.
     /// </summary>
     public int CountUserMappingsByStatus(SyncStatus status) => ExecuteRead(
         conn =>

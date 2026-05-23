@@ -33,9 +33,7 @@ public abstract class SyncRecord
     /// <summary>
     /// Gets or sets a human-readable explanation associated with the current
     /// status. Populated for <see cref="SyncStatus.Errored"/> (error message)
-    /// and <see cref="SyncStatus.Ignored"/> (why-ignored). Null otherwise.
-    /// Replaces the legacy <c>ErrorMessage</c> field used by the per-module
-    /// records.
+    /// and <see cref="SyncStatus.Ignored"/> (why-ignored); null otherwise.
     /// </summary>
     public string? Reason { get; set; }
 
@@ -47,12 +45,9 @@ public abstract class SyncRecord
     public abstract bool HasChanges { get; }
 
     /// <summary>
-    /// Marks this record as having been successfully synced. Implementations
-    /// should call <see cref="SyncableValue{T}.MarkSynced"/> on each of their
-    /// constituent fields so future Refresh runs can short-circuit via
-    /// <see cref="SyncableValue{T}.SyncedHash"/>. Called by
-    /// <c>SyncQueueTaskBase</c> after a successful apply, and by
-    /// <c>RefreshSyncTaskBase</c> when no changes are detected.
+    /// Marks this record as successfully synced. Implementations call
+    /// <see cref="SyncableValue{T}.MarkSynced"/> on each constituent field so
+    /// future Refresh runs can short-circuit via <see cref="SyncableValue{T}.SyncedHash"/>.
     /// </summary>
     public abstract void MarkSynced();
 }

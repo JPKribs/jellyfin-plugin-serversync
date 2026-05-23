@@ -5,6 +5,7 @@ using Jellyfin.Database.Implementations.Entities;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -13,6 +14,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// Client for accessing local Jellyfin server APIs.
 /// Used by History Sync to read and update user data on the local server.
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public class LocalServerClient
 {
     private readonly ILogger<LocalServerClient> _logger;

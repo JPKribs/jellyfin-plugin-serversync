@@ -6,6 +6,7 @@ using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller.Library;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -17,6 +18,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// task; the Sync task calls the record's <see cref="HistorySyncMergeService"/>
 /// directly and applies the merged values via <see cref="LocalServerClient"/>.
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public class HistorySyncTableService
 {
     private readonly ILogger<HistorySyncTableService> _logger;
@@ -120,6 +122,7 @@ public class HistorySyncTableService
         };
 
         HistorySyncMergeService.MergeHistoryData(item);
+        item.UpdateSourceStateBundle();
         return item;
     }
 }

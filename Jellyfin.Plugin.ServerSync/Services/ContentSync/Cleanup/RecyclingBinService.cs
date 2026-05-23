@@ -6,13 +6,11 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// RecyclingBinService
 /// Handles moving files to the recycling bin and cleaning up old files.
 /// </summary>
 public static class RecyclingBinService
 {
     /// <summary>
-    /// MoveToRecyclingBin
     /// Moves a file to the recycling bin with a timestamped name.
     /// </summary>
     /// <param name="filePath">Path to the file to move.</param>
@@ -68,7 +66,6 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// ArchiveBackupToRecyclingBin
     /// Moves a sidecar/backup file to the recycling bin, naming it as if it
     /// were the original file. Used by the download pipeline after a successful
     /// atomic rename: the previous version was first moved to a sidecar (so it
@@ -128,7 +125,6 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// MoveWithCompanionsToRecyclingBin
     /// Moves a file and its companion files (subtitles, etc.) to the recycling bin.
     /// </summary>
     /// <param name="filePath">Path to the main file to move.</param>
@@ -164,7 +160,6 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// CleanupExpiredFiles
     /// Deletes files in the recycling bin older than the retention period.
     /// </summary>
     /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>

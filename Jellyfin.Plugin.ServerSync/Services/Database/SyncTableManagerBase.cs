@@ -13,18 +13,11 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// <summary>
 /// Universal operations on a sync table — the parts that depend only on the
 /// standard columns (<c>Id</c>, <c>Status</c>, <c>StatusDate</c>,
-/// <c>LastSyncTime</c>, <c>Reason</c>) are implemented here. Schema-specific
-/// methods (key lookup, upsert SQL, search) remain abstract for subclasses.
-/// <para>
-/// Subclasses with single-column natural keys get <see cref="UpdateStatusByKey"/>
-/// for free by overriding <see cref="KeyColumn"/>. Composite-key tables (e.g.
-/// User) override <see cref="UpdateStatusByKey"/> directly to handle their
-/// multi-column WHERE clause; they should still use
-/// <see cref="BuildStatusTransitionClauses"/> +
-/// <see cref="AddStatusTransitionParameters"/> so universal transition logic
-/// (LastSyncTime on Synced, retry-count tracking, Reason auto-clear) stays
-/// consistent.
-/// </para>
+/// <c>LastSyncTime</c>, <c>Reason</c>). Schema-specific methods (key lookup,
+/// upsert SQL, search) remain abstract for subclasses. Composite-key tables
+/// override <see cref="UpdateStatusByKey"/> directly but should still use
+/// <see cref="BuildStatusTransitionClauses"/> + <see cref="AddStatusTransitionParameters"/>
+/// for consistent transition logic.
 /// </summary>
 /// <typeparam name="TRecord">Record type.</typeparam>
 /// <typeparam name="TKey">Natural-key type.</typeparam>

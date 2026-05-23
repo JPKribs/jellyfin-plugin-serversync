@@ -1,12 +1,11 @@
 using System;
-using System.Threading;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Circuit breaker to prevent hammering a failing server.
-/// Tracks consecutive failures and stops operations after threshold is reached.
+/// Counts consecutive failures and trips into an open state after a threshold,
+/// suppressing operations until a cooldown elapses.
 /// </summary>
 public class CircuitBreaker
 {
@@ -20,7 +19,7 @@ public class CircuitBreaker
     private readonly object _lock = new();
 
     /// <summary>
-    /// Gets whether the circuit is currently open (failing).
+    /// True when the breaker is open and operations should be suppressed.
     /// </summary>
     public bool IsOpen
     {
@@ -33,10 +32,8 @@ public class CircuitBreaker
                     return false;
                 }
 
-                // Check if cooldown period has elapsed
                 if (DateTime.UtcNow - _circuitOpenedAt.Value >= _cooldownPeriod)
                 {
-                    // Half-open state: allow one retry attempt
                     return false;
                 }
 
@@ -46,7 +43,7 @@ public class CircuitBreaker
     }
 
     /// <summary>
-    /// Gets the number of consecutive failures.
+    /// Current consecutive-failure count.
     /// </summary>
     public int ConsecutiveFailures
     {
@@ -60,7 +57,7 @@ public class CircuitBreaker
     }
 
     /// <summary>
-    /// Gets the time remaining in cooldown, or null if circuit is closed.
+    /// Time remaining in the cooldown window, or null when the breaker is closed.
     /// </summary>
     public TimeSpan? CooldownRemaining
     {
@@ -85,12 +82,8 @@ public class CircuitBreaker
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="CircuitBreaker"/> class.
+    /// Initializes a new instance.
     /// </summary>
-    /// <param name="logger">Logger for circuit breaker events.</param>
-    /// <param name="serviceName">Name of the service being protected.</param>
-    /// <param name="failureThreshold">Number of consecutive failures before opening circuit.</param>
-    /// <param name="cooldownPeriod">Time to wait before allowing retry after circuit opens.</param>
     public CircuitBreaker(
         ILogger logger,
         string serviceName,
@@ -104,7 +97,7 @@ public class CircuitBreaker
     }
 
     /// <summary>
-    /// Records a successful operation, resetting the failure count.
+    /// Resets the failure count after a successful operation.
     /// </summary>
     public void RecordSuccess()
     {
@@ -123,9 +116,8 @@ public class CircuitBreaker
     }
 
     /// <summary>
-    /// Records a failed operation. Opens circuit if threshold is reached.
+    /// Increments the failure count and opens the circuit if the threshold is reached.
     /// </summary>
-    /// <param name="errorMessage">Optional error message for logging.</param>
     public void RecordFailure(string? errorMessage = null)
     {
         lock (_lock)
@@ -156,15 +148,13 @@ public class CircuitBreaker
     }
 
     /// <summary>
-    /// Checks if the circuit allows an operation. Returns false if circuit is open.
+    /// Returns true if the operation should proceed; otherwise sets <paramref name="reason"/>.
     /// </summary>
-    /// <param name="reason">Output parameter with reason if operation is blocked.</param>
-    /// <returns>True if operation should proceed, false if circuit is open.</returns>
     public bool AllowOperation(out string? reason)
     {
         lock (_lock)
         {
-            // Use direct field access (not public properties) to avoid re-acquiring _lock
+            // Direct field access avoids re-acquiring _lock via the properties.
             if (_circuitOpenedAt == null || DateTime.UtcNow - _circuitOpenedAt.Value >= _cooldownPeriod)
             {
                 reason = null;
@@ -180,7 +170,7 @@ public class CircuitBreaker
     }
 
     /// <summary>
-    /// Resets the circuit breaker to closed state.
+    /// Forces the breaker back to a closed state.
     /// </summary>
     public void Reset()
     {

@@ -24,7 +24,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// short-circuit fires next refresh; on failure, throws so the base records
 /// the reason and transitions to <see cref="Models.Common.SyncStatus.Errored"/>.
 /// </summary>
-public class SyncMissingUserDataTask
+public class SyncMissingUserTask
     : SyncQueueTaskBase<UserSyncItem, (string SourceUserId, string LocalUserId, string PropertyCategory)>
 {
     private readonly IUserManager _userManager;
@@ -34,8 +34,8 @@ public class SyncMissingUserDataTask
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
-    public SyncMissingUserDataTask(
-        ILogger<SyncMissingUserDataTask> logger,
+    public SyncMissingUserTask(
+        ILogger<SyncMissingUserTask> logger,
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
         IUserManager userManager,
@@ -50,7 +50,7 @@ public class SyncMissingUserDataTask
     }
 
     /// <inheritdoc />
-    public override string Name => "Sync User Data";
+    public override string Name => "Sync User";
 
     /// <inheritdoc />
     public override string Key => "ServerSyncMissingUserData";
@@ -76,22 +76,16 @@ public class SyncMissingUserDataTask
     /// <inheritdoc />
     protected override async Task ApplyAsync(UserSyncItem record, CancellationToken cancellationToken)
     {
-        var localUserId = Guid.Parse(record.LocalUserId);
-        var localUser = _userManager.GetUserById(localUserId)
-            ?? throw new InvalidOperationException($"Local user not found: {record.LocalUserName ?? record.LocalUserId}");
+        var (_, localUser) = ResolveLocalUser(record);
 
         switch (record.PropertyCategory)
         {
             case UserPropertyCategory.Policy:
                 await ApplyPolicyChangesAsync(localUser, record).ConfigureAwait(false);
-                VerifyPolicyApplied(localUserId, record);
-                Logger.LogInformation("Apply Policy verified for {User}", localUser.Username);
                 break;
 
             case UserPropertyCategory.Configuration:
                 await ApplyConfigurationChangesAsync(localUser, record).ConfigureAwait(false);
-                VerifyConfigurationApplied(localUserId, record);
-                Logger.LogInformation("Apply Configuration verified for {User}", localUser.Username);
                 break;
 
             case UserPropertyCategory.ProfileImage:
@@ -100,10 +94,35 @@ public class SyncMissingUserDataTask
                     throw new InvalidOperationException("Source client unavailable for profile-image sync");
                 }
 
-                await ApplyProfileImageAsync(localUser, record, Client, cancellationToken).ConfigureAwait(false);
                 // ApplyProfileImageAsync already updates Local* fields with the
-                // hash of the bytes it just wrote; verifying is checking they
-                // now match Source*.
+                // hash of the bytes it just wrote so VerifyAfterApplyAsync can
+                // compare Local* against Source* in the standard way.
+                await ApplyProfileImageAsync(localUser, record, Client, cancellationToken).ConfigureAwait(false);
+                break;
+
+            default:
+                throw new InvalidOperationException($"Unknown property category: {record.PropertyCategory}");
+        }
+    }
+
+    /// <inheritdoc />
+    protected override Task VerifyAfterApplyAsync(UserSyncItem record, CancellationToken cancellationToken)
+    {
+        var (localUserId, localUser) = ResolveLocalUser(record);
+
+        switch (record.PropertyCategory)
+        {
+            case UserPropertyCategory.Policy:
+                VerifyPolicyApplied(localUserId, record);
+                Logger.LogInformation("Apply Policy verified for {User}", localUser.Username);
+                break;
+
+            case UserPropertyCategory.Configuration:
+                VerifyConfigurationApplied(localUserId, record);
+                Logger.LogInformation("Apply Configuration verified for {User}", localUser.Username);
+                break;
+
+            case UserPropertyCategory.ProfileImage:
                 VerifyProfileImageApplied(record);
                 Logger.LogInformation("Apply ProfileImage verified for {User}", localUser.Username);
                 break;
@@ -111,6 +130,16 @@ public class SyncMissingUserDataTask
             default:
                 throw new InvalidOperationException($"Unknown property category: {record.PropertyCategory}");
         }
+
+        return Task.CompletedTask;
+    }
+
+    private (Guid LocalUserId, Jellyfin.Database.Implementations.Entities.User LocalUser) ResolveLocalUser(UserSyncItem record)
+    {
+        var localUserId = Guid.Parse(record.LocalUserId);
+        var localUser = _userManager.GetUserById(localUserId)
+            ?? throw new InvalidOperationException($"Local user not found: {record.LocalUserName ?? record.LocalUserId}");
+        return (localUserId, localUser);
     }
 
     private void VerifyPolicyApplied(Guid localUserId, UserSyncItem record)
@@ -261,11 +290,10 @@ public class SyncMissingUserDataTask
     }
 
     /// <inheritdoc />
-    protected override Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
     {
-        ConfigManager.Configuration.LastUserSyncTime = DateTime.UtcNow;
-        ConfigManager.SaveConfiguration();
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastUserSyncTime = utcNow;
     }
 
     /// <inheritdoc />

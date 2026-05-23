@@ -25,7 +25,6 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, BaseItemDto, string>
 {
     private readonly ILibraryManager _libraryManager;
-    private readonly PeopleSyncTableService _peopleService;
 
     /// <summary>
     /// Per-run cache of local Person items keyed by Name. Built by
@@ -44,12 +43,10 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         ILibraryManager libraryManager,
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
-        PeopleSyncTableService peopleService,
         PeopleSyncTableManager manager)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
-        _peopleService = peopleService;
     }
 
     /// <inheritdoc />
@@ -67,14 +64,12 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     /// <inheritdoc />
     protected override string ModuleMutexKey => "People";
 
+    // <c>BuildRecordAsync</c> is HTTP-free now (source data comes from the
+    // bulk <c>/Persons</c> fetch, image data from <c>BaseItemDto.ImageTags</c>);
+    // the only blocking work per item is the local file-size stat for each
+    // matched person's images. A modest parallelism here lets that stat I/O
+    // overlap without contending on Jellyfin's library SQLite.
     /// <inheritdoc />
-    /// <remarks>
-    /// <c>BuildRecordAsync</c> is HTTP-free now (source data comes from the
-    /// bulk <c>/Persons</c> fetch, image data from <c>BaseItemDto.ImageTags</c>);
-    /// the only blocking work per item is the local file-size stat for each
-    /// matched person's images. A modest parallelism here lets that stat I/O
-    /// overlap without contending on Jellyfin's library SQLite.
-    /// </remarks>
     protected override int BuildRecordParallelism => 4;
 
     /// <inheritdoc />
@@ -86,16 +81,14 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
             && !string.IsNullOrWhiteSpace(config.SourceServerApiKey);
     }
 
+    // Bulk fetch + in-memory join: enumerate local Person items, then pull
+    // the full source Person catalog via paginated <c>/Persons?fields=…</c>
+    // calls (no <c>searchTerm</c>) and intersect by name in memory. The
+    // previous per-name fan-out cost one HTTP round-trip per local person
+    // (130k+ requests on a real library, 2.5 hours wall-clock); this
+    // version trades that for ~N/1000 paginated requests and a hashtable
+    // lookup per local name.
     /// <inheritdoc />
-    /// <remarks>
-    /// Bulk fetch + in-memory join: enumerate local Person items, then pull
-    /// the full source Person catalog via paginated <c>/Persons?fields=…</c>
-    /// calls (no <c>searchTerm</c>) and intersect by name in memory. The
-    /// previous per-name fan-out cost one HTTP round-trip per local person
-    /// (130k+ requests on a real library, 2.5 hours wall-clock); this
-    /// version trades that for ~N/1000 paginated requests and a hashtable
-    /// lookup per local name.
-    /// </remarks>
     protected override async Task<IList<SdkBaseItemDto>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
@@ -198,14 +191,14 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
 
         // Build metadata blobs for both sides; SyncableValue.RecomputeSourceHash
         // ensures the SourceHash field is populated for the Compare fast-path.
-        record.Metadata.Source = PeopleSyncTableService.BuildSourceMetadata(source);
-        record.Metadata.Local = PeopleSyncTableService.BuildLocalMetadata(localPerson);
+        record.Metadata.Source = PeopleSyncMergeService.BuildSourceMetadata(source);
+        record.Metadata.Local = PeopleSyncMergeService.BuildLocalMetadata(localPerson);
         record.Metadata.RecomputeSourceHash();
 
         var config = ConfigManager.Configuration;
         if (config.PeopleSyncImages)
         {
-            var (sourceImg, localImg) = _peopleService.PopulateImageData(source, localPerson);
+            var (sourceImg, localImg) = PeopleSyncMergeService.PopulateImageData(source, localPerson);
 
             // Enrich source-side image manifest with real Size/Width/Height
             // via /Items/{id}/Images. PopulateImageData builds the source side
@@ -262,11 +255,10 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     protected override string ExtractKey(PeopleSyncItem record) => record.PersonName;
 
     /// <inheritdoc />
-    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
     {
-        ConfigManager.Configuration.LastPeopleSyncTime = DateTime.UtcNow;
-        ConfigManager.SaveConfiguration();
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastPeopleSyncTime = utcNow;
     }
 
     /// <inheritdoc />

@@ -22,7 +22,6 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 public partial class ConfigurationController
 {
     /// <summary>
-    /// GetSyncItems
     /// Gets paginated sync items from the database with optional search and filter.
     /// </summary>
     /// <param name="search">Optional search term.</param>
@@ -44,28 +43,23 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         var config = _configManager.Configuration;
 
-        // Clamp pagination values to reasonable limits
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
 
-        // Parse status filter
         SyncStatus? statusFilter = null;
         if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
         {
             statusFilter = parsedStatus;
         }
 
-        // Parse pending type filter
         PendingType? pendingTypeFilter = null;
         if (!string.IsNullOrEmpty(pendingType) && Enum.TryParse<PendingType>(pendingType, out var parsedPendingType))
         {
             pendingTypeFilter = parsedPendingType;
         }
 
-        // Get paginated results
         var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take);
 
-        // Build lookup for library names from mappings
         var libraryMappings = config.LibraryMappings ?? new List<LibraryMapping>();
         var libraryNameLookup = libraryMappings
             .GroupBy(m => m.SourceLibraryId, StringComparer.OrdinalIgnoreCase)
@@ -112,7 +106,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetSyncStatus
     /// Gets sync status counts.
     /// </summary>
     /// <returns>Sync status response with counts.</returns>
@@ -141,7 +134,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetSyncStats
     /// Gets detailed sync statistics for health dashboard.
     /// </summary>
     /// <returns>Sync stats response.</returns>
@@ -186,7 +178,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetPendingSize
     /// Gets the total size of pending items to be synced.
     /// Calculates: PendingDownload + PendingReplacement + Queued - PendingDeletion
     /// </summary>
@@ -209,7 +200,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetDiskSpace
     /// Gets disk space information for configured library paths.
     /// </summary>
     /// <returns>List of disk space info.</returns>
@@ -221,7 +211,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// TriggerSync
     /// Manually triggers the sync task.
     /// </summary>
     /// <returns>Action result with status message.</returns>
@@ -232,7 +221,6 @@ public partial class ConfigurationController
         => ExecuteScheduledTaskByKey("ServerSyncDownloadContent", "Sync task started", "Download task not found");
 
     /// <summary>
-    /// TriggerRefresh
     /// Manually triggers the refresh sync table task.
     /// </summary>
     /// <returns>Action result with status message.</returns>
@@ -243,7 +231,6 @@ public partial class ConfigurationController
         => ExecuteScheduledTaskByKey("ServerSyncUpdateTables", "Refresh task started", "Refresh task not found");
 
     /// <summary>
-    /// RetryErroredItems
     /// Resets errored items for retry.
     /// </summary>
     /// <param name="request">Optional request with specific item IDs.</param>
@@ -275,7 +262,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// UpdateItemStatus
     /// Updates the status of a sync item.
     /// </summary>
     /// <param name="request">Status update request.</param>
@@ -298,7 +284,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// IgnoreItems
     /// Marks multiple items as ignored.
     /// </summary>
     /// <param name="request">Bulk items request.</param>
@@ -335,7 +320,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// QueueItems
     /// Moves items to Queued status (works for Pending, Ignored, Errored, and Synced items).
     /// </summary>
     /// <param name="request">Bulk items request.</param>
@@ -372,7 +356,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// MarkSynced
     /// Marks items as synced after verifying the local file exists.
     /// Use this to resolve items that are stuck in Queued/Errored status
     /// when the local file is already present.
@@ -436,7 +419,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// DeleteLocalItems
     /// Deletes items from the LOCAL server only using the Jellyfin API.
     /// </summary>
     /// <param name="request">Bulk items request.</param>
@@ -476,7 +458,6 @@ public partial class ConfigurationController
             var sanitizedFileName = SanitizeForLog(fileName);
             var sanitizedLocalPath = SanitizeForLog(item.LocalPath);
 
-            // Validate path is within configured library directories (safety check)
             if (!string.IsNullOrEmpty(item.LocalPath) && !FileValidationService.IsPathWithinLibrary(item.LocalPath, config))
             {
                 _logger.LogWarning(
@@ -487,7 +468,6 @@ public partial class ConfigurationController
                 continue;
             }
 
-            // Try to find the local item - first by stored ID, then by path
             MediaBrowser.Controller.Entities.BaseItem? localItem = null;
 
             if (!string.IsNullOrEmpty(item.LocalItemId) && Guid.TryParse(item.LocalItemId, out var localItemGuid))
@@ -495,13 +475,11 @@ public partial class ConfigurationController
                 localItem = _libraryManager.GetItemById(localItemGuid);
             }
 
-            // If not found by ID, try to find by path (handles case where LocalItemId was never set)
             if (localItem == null && !string.IsNullOrEmpty(item.LocalPath))
             {
                 localItem = _libraryManager.FindByPath(item.LocalPath, isFolder: false);
             }
 
-            // Check if file exists anywhere
             var fileExists = localItem != null || (!string.IsNullOrEmpty(item.LocalPath) && System.IO.File.Exists(item.LocalPath));
 
             if (!fileExists)
@@ -517,7 +495,6 @@ public partial class ConfigurationController
                 continue;
             }
 
-            // Use FileDeletionService to handle the deletion
             var result = FileDeletionService.DeleteLocalFile(item.LocalPath, localItem, _libraryManager, config, _logger);
 
             if (result.Success)
@@ -564,7 +541,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// RemoveFromTracking
     /// Removes items from the sync tracking database without deleting the actual files.
     /// </summary>
     /// <param name="request">Bulk items request.</param>

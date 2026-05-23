@@ -84,20 +84,18 @@ public class RefreshHistorySyncTableTask
         return config.GetEnabledUserMappings().Count > 0 && config.GetEnabledLibraryMappings().Count > 0;
     }
 
+    // Three-phase fetch:
+    //   <list type="number">
+    //   <item>Enumerate local items per mapped library, building a path
+    //   lookup. In-process, no HTTP.</item>
+    //   <item>For each enabled library, do a lightweight source discovery
+    //   pass (paths only) and collect the IDs whose translated path exists
+    //   locally. One library-level call, not one per user.</item>
+    //   <item>For each (enabled user × library), batch-fetch user-data for
+    //   the matched IDs only. Per-batch ~50 IDs, all with EnableUserData=true
+    //   and the source user's UserId.</item>
+    //   </list>
     /// <inheritdoc />
-    /// <remarks>
-    /// Three-phase fetch:
-    ///   <list type="number">
-    ///   <item>Enumerate local items per mapped library, building a path
-    ///   lookup. In-process, no HTTP.</item>
-    ///   <item>For each enabled library, do a lightweight source discovery
-    ///   pass (paths only) and collect the IDs whose translated path exists
-    ///   locally. One library-level call, not one per user.</item>
-    ///   <item>For each (enabled user × library), batch-fetch user-data for
-    ///   the matched IDs only. Per-batch ~50 IDs, all with EnableUserData=true
-    ///   and the source user's UserId.</item>
-    ///   </list>
-    /// </remarks>
     protected override async Task<IList<HistoryWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
@@ -287,12 +285,10 @@ public class RefreshHistorySyncTableTask
     protected override (string SourceUserId, string SourceItemId) ExtractKey(HistorySyncItem record)
         => (record.SourceUserId, record.SourceItemId);
 
+    // In scope when both the row's library mapping AND its user mapping are
+    // currently enabled. Disabling either preserves history rows instead of
+    // pruning them, so the user's Ignored overrides survive a toggle.
     /// <inheritdoc />
-    /// <remarks>
-    /// In scope when both the row's library mapping AND its user mapping are
-    /// currently enabled. Disabling either preserves history rows instead of
-    /// pruning them, so the user's Ignored overrides survive a toggle.
-    /// </remarks>
     protected override bool IsInScope(HistorySyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -349,11 +345,10 @@ public class RefreshHistorySyncTableTask
     }
 
     /// <inheritdoc />
-    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
     {
-        ConfigManager.Configuration.LastHistorySyncTime = DateTime.UtcNow;
-        ConfigManager.SaveConfiguration();
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastHistorySyncTime = utcNow;
     }
 
     /// <inheritdoc />

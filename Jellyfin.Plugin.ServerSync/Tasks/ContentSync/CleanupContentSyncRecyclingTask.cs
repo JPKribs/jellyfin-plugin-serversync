@@ -9,7 +9,6 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// EmptyRecyclingBinTask
 /// Scheduled task to permanently delete expired files from the recycling bin.
 /// </summary>
 public class EmptyRecyclingBinTask : IScheduledTask

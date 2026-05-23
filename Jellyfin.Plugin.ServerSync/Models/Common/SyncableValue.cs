@@ -4,21 +4,11 @@ using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
-/// One comparable field on a <see cref="SyncRecord"/>. Holds the snapshot
-/// values for source, local, and last-synced sides of a single value, plus
-/// content fingerprints used to short-circuit semantic comparison.
-/// <para>
-/// The fast path is <c>SourceHash == SyncedHash</c>: when the source has not
-/// moved since we last successfully synced it, we can skip the more expensive
-/// <see cref="ISyncComparator{T}.Equals"/> call entirely. Hashes are produced
-/// by the same code on both sides over time, so they compare reliably to
-/// themselves; we never compare a source-side hash against a local-side hash,
-/// since their serialization paths can differ at the byte level even when
-/// semantically equal.
-/// </para>
+/// One comparable field on a <see cref="SyncRecord"/>: source / local /
+/// synced snapshots plus content fingerprints used to short-circuit
+/// semantic comparison when <c>SourceHash == SyncedHash</c>.
 /// </summary>
-/// <typeparam name="T">Value type, typically <see cref="string"/> for JSON blobs
-/// or a primitive for field-level comparison.</typeparam>
+/// <typeparam name="T">Value type, typically <see cref="string"/> for JSON blobs.</typeparam>
 public sealed class SyncableValue<T>
 {
     /// <summary>

@@ -12,7 +12,6 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// CleanupTempFilesTask
 /// Scheduled task to clean up orphaned temporary files from failed downloads.
 /// </summary>
 public class CleanupTempFilesTask : IScheduledTask

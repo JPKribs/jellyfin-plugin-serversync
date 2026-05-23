@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,29 +7,62 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// Per-record build helpers for User Sync. Each method builds one
-/// <see cref="UserSyncItem"/> for one (mapping, category) tuple. Callers
-/// pass the existing record (if any) to preserve LastSyncTime and Ignored
-/// status. No DB writes — the caller (the Refresh task base) upserts.
+/// Per-record build helpers for User Sync. Builds one
+/// <see cref="UserSyncItem"/> for one (mapping, category) tuple, preserving
+/// LastSyncTime and Ignored status from any existing record. No DB writes —
+/// the caller (the Refresh task base) upserts.
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public class UserSyncTableService
 {
     private readonly ILogger<UserSyncTableService> _logger;
 
+    /// <summary>
+    /// Initializes a new instance.
+    /// </summary>
     public UserSyncTableService(ILogger<UserSyncTableService> logger)
     {
         _logger = logger;
     }
 
     /// <summary>
-    /// Builds a Policy sync item.
+    /// Builds a <see cref="UserSyncItem"/> for one (mapping, category) tuple.
+    /// Returns null for an unknown category. The category-specific helpers
+    /// are private — callers go through this single entry point so adding a
+    /// category is a switch-arm addition rather than a new public method.
     /// </summary>
-    public Task<UserSyncItem?> CreatePolicySyncItemAsync(
+    public async Task<UserSyncItem?> BuildRecordAsync(
+        UserMapping mapping,
+        string category,
+        Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
+        MediaBrowser.Model.Dto.UserDto localUserDto,
+        Jellyfin.Database.Implementations.Entities.User localUser,
+        SourceServerClient sourceClient,
+        PluginConfiguration config,
+        UserSyncItem? existingItem,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+        ArgumentNullException.ThrowIfNull(sourceUser);
+        ArgumentNullException.ThrowIfNull(sourceClient);
+        ArgumentNullException.ThrowIfNull(config);
+
+        return category switch
+        {
+            UserPropertyCategory.Policy => BuildPolicyItem(mapping, sourceUser, localUserDto, config, existingItem),
+            UserPropertyCategory.Configuration => BuildConfigurationItem(mapping, sourceUser, localUserDto, existingItem),
+            UserPropertyCategory.ProfileImage => await BuildProfileImageItemAsync(mapping, sourceUser, localUser, sourceClient, existingItem, cancellationToken).ConfigureAwait(false),
+            _ => null
+        };
+    }
+
+    private static UserSyncItem BuildPolicyItem(
         UserMapping mapping,
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
         MediaBrowser.Model.Dto.UserDto localUserDto,
@@ -52,20 +84,16 @@ public class UserSyncTableService
         item.LocalUserName = localUserDto.Name;
         item.SourceValue = sourcePolicy;
         item.LocalValue = localPolicy;
-        item.MergedValue = mergedPolicy;
-        // Hash MergedValue (the value we'd actually apply), not SourceValue —
-        // that way SyncedValueHash == hash(MergedValue) on the next refresh
-        // means "the value we'd apply hasn't moved since last successful sync"
-        // and we can short-circuit the deep JSON compare in HasChanges.
-        item.SourceValueHash = HashUtilities.ComputeSha256Hash(mergedPolicy ?? string.Empty);
+        // UpdateMergedValue stores MergedValue (the value we'd apply) on the
+        // backing SyncableValue and recomputes the source-hash via the
+        // comparator. SyncedHash matches that format after a successful sync,
+        // so the fast-path skip on the next Refresh stays consistent.
+        item.UpdateMergedValue(mergedPolicy);
         item.StatusDate = DateTime.UtcNow;
-        return Task.FromResult<UserSyncItem?>(item);
+        return item;
     }
 
-    /// <summary>
-    /// Builds a Configuration sync item. Source-wins (no merge).
-    /// </summary>
-    public Task<UserSyncItem?> CreateConfigurationSyncItemAsync(
+    private static UserSyncItem BuildConfigurationItem(
         UserMapping mapping,
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
         MediaBrowser.Model.Dto.UserDto localUserDto,
@@ -85,17 +113,13 @@ public class UserSyncTableService
         item.LocalUserName = localUserDto.Name;
         item.SourceValue = sourceConfig;
         item.LocalValue = localConfig;
-        item.MergedValue = sourceConfig;
-        item.SourceValueHash = HashUtilities.ComputeSha256Hash(sourceConfig ?? string.Empty);
+        // Configuration is pure source-wins, so MergedValue == sourceConfig.
+        item.UpdateMergedValue(sourceConfig);
         item.StatusDate = DateTime.UtcNow;
-        return Task.FromResult<UserSyncItem?>(item);
+        return item;
     }
 
-    /// <summary>
-    /// Builds a ProfileImage sync item. Fetches source image hash via the
-    /// source client; computes local hash from the on-disk file when present.
-    /// </summary>
-    public async Task<UserSyncItem?> CreateProfileImageSyncItemAsync(
+    private async Task<UserSyncItem> BuildProfileImageItemAsync(
         UserMapping mapping,
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
         Jellyfin.Database.Implementations.Entities.User localUser,

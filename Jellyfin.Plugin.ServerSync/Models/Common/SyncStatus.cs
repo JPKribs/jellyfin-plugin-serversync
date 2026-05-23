@@ -2,10 +2,6 @@ namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
 /// Sync status values shared across all sync modules. Stored as INTEGER in SQLite.
-/// Integer values match the legacy <see cref="SyncStatus"/> for backward
-/// compatibility during the per-module port; existing rows are not migrated.
-/// Replaces <see cref="SyncStatus"/> and will obsolete it once all modules
-/// have been ported.
 /// </summary>
 public enum SyncStatus
 {

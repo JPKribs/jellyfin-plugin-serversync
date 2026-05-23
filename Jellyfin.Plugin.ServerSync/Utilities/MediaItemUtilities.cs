@@ -4,15 +4,13 @@ using Microsoft.Kiota.Abstractions.Serialization;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Utilities for working with Jellyfin media items.
+/// Helpers for working with Jellyfin SDK media-item DTOs.
 /// </summary>
 public static class MediaItemUtilities
 {
     /// <summary>
-    /// Extracts the file size from an item's media sources.
+    /// Returns the size of the first media source, or 0 when unavailable.
     /// </summary>
-    /// <param name="item">The media item DTO.</param>
-    /// <returns>The file size in bytes, or 0 if not available.</returns>
     public static long GetItemSize(BaseItemDto item)
     {
         if (item.MediaSources != null && item.MediaSources.Count > 0)
@@ -28,17 +26,9 @@ public static class MediaItemUtilities
     }
 
     /// <summary>
-    /// Unwraps a Kiota <c>AdditionalData</c> value to its underlying primitive
-    /// representation. Kiota stores deserialized JSON values as
-    /// <see cref="UntypedNode"/> subclasses (UntypedString, UntypedBoolean,
-    /// etc.) whose default <see cref="object.ToString"/> returns the type name,
-    /// not the wrapped value. Calling <c>.ToString()</c> directly on a
-    /// <c>BaseItemDto.ProviderIds.AdditionalData</c> entry therefore produces
-    /// gibberish like "Microsoft.Kiota.Abstractions.Serialization.UntypedString"
-    /// instead of "tt12345" — the cause of perpetual ProviderIds desyncs.
+    /// Unwraps a Kiota <c>AdditionalData</c> value to its underlying primitive string,
+    /// using <see cref="System.Globalization.CultureInfo.InvariantCulture"/> for numeric forms.
     /// </summary>
-    /// <param name="value">An entry value from a Kiota AdditionalData dictionary.</param>
-    /// <returns>The string representation of the underlying value, or null.</returns>
     public static string? UnwrapKiotaPrimitive(object? value)
     {
         if (value == null)
@@ -53,8 +43,6 @@ public static class MediaItemUtilities
 
         if (value is UntypedNode node)
         {
-            // GetValue() on each subclass returns the wrapped CLR primitive.
-            // UntypedNull yields null.
             return node switch
             {
                 UntypedString us => us.GetValue(),

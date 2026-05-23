@@ -6,6 +6,7 @@ using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -16,6 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// (PendingType-aware queries, retry-count tracking, path collision checks,
 /// sync stats) on top of the universal <see cref="SyncTableManagerBase{TRecord, TKey}"/>.
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, string>
 {
     /// <summary>
@@ -38,11 +40,9 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// <inheritdoc />
     protected override string KeyColumn => "SourceItemId";
 
+    // Pending sorts first so the approval-workflow UX surfaces new items
+    // awaiting user decision before everything else.
     /// <inheritdoc />
-    /// <remarks>
-    /// Content surfaces Pending first because the approval-workflow UX
-    /// prioritizes new items awaiting user decision.
-    /// </remarks>
     protected override string StatusPriorityOrderBy => @"
         CASE Status
             WHEN 0 THEN 0

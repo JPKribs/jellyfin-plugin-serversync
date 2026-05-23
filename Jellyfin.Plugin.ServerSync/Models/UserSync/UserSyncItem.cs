@@ -1,5 +1,6 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 using Jellyfin.Plugin.ServerSync.Utilities;
 
 namespace Jellyfin.Plugin.ServerSync.Models.UserSync;
@@ -26,9 +27,10 @@ public static class UserPropertyCategory
 }
 
 /// <summary>
-/// Represents a single property sync record for a user mapping.
-/// One record per property category (Policy, Configuration, ProfileImage)
-/// per user mapping. Three categories means up to three rows per user.
+/// One property sync record per (user mapping, category). Policy and
+/// Configuration use an internal <see cref="SyncableValue{T}"/> for change
+/// detection; ProfileImage uses its own hash-pair since its "value" is the
+/// image bytes' fingerprint.
 /// </summary>
 public class UserSyncItem : SyncRecord
 {
@@ -61,35 +63,77 @@ public class UserSyncItem : SyncRecord
     /// </summary>
     public string PropertyCategory { get; set; } = string.Empty;
 
-    // ===== Values (Policy/Configuration use these; ProfileImage stores display strings here) =====
+    // ===== Values =====
 
     /// <summary>
-    /// Gets or sets the source value (JSON for Policy/Config, display string for ProfileImage).
+    /// Raw source value (JSON for Policy/Config, display string for ProfileImage).
+    /// Display-only — change detection uses <see cref="Value"/> for
+    /// Policy/Config and the image-hash fields for ProfileImage.
     /// </summary>
     public string? SourceValue { get; set; }
 
     /// <summary>
-    /// Gets or sets the local value.
+    /// Local value extracted at refresh time. Delegated to
+    /// <see cref="Value"/>'s <see cref="SyncableValue{T}.Local"/> so the
+    /// comparator path on <see cref="SyncableValue{T}.HasChanges"/> works
+    /// uniformly with the other modules.
     /// </summary>
-    public string? LocalValue { get; set; }
+    public string? LocalValue
+    {
+        get => Value.Local;
+        set => Value.Local = value;
+    }
 
     /// <summary>
-    /// Gets or sets the merged value (what will be applied).
+    /// Computed apply target (source-wins with library-ID translation for
+    /// Policy; identical to source for Configuration). Delegated to
+    /// <see cref="Value"/>'s <see cref="SyncableValue{T}.Source"/>. Use
+    /// <see cref="UpdateMergedValue"/> in the refresh build path so the
+    /// source-hash gets recomputed via the comparator.
     /// </summary>
-    public string? MergedValue { get; set; }
+    public string? MergedValue
+    {
+        get => Value.Source;
+        set => Value.Source = value;
+    }
 
     /// <summary>
-    /// Gets or sets the SHA fingerprint of <see cref="SourceValue"/>. Reserved
-    /// for future fast-path comparisons; currently unused but maintained in the
-    /// schema so a later refactor can drop in <see cref="SyncableValue{T}"/>.
+    /// SHA fingerprint of <see cref="MergedValue"/>. Delegated to
+    /// <see cref="Value"/>'s <see cref="SyncableValue{T}.SourceHash"/>.
     /// </summary>
-    public string? SourceValueHash { get; set; }
+    public string? SourceValueHash
+    {
+        get => Value.SourceHash;
+        set => Value.SourceHash = value;
+    }
 
     /// <summary>
-    /// Gets or sets the SHA fingerprint of the source value at the last
-    /// successful sync.
+    /// Source-value hash captured at the last successful sync. Delegated to
+    /// <see cref="Value"/>'s <see cref="SyncableValue{T}.SyncedHash"/>.
     /// </summary>
-    public string? SyncedValueHash { get; set; }
+    public string? SyncedValueHash
+    {
+        get => Value.SyncedHash;
+        set => Value.SyncedHash = value;
+    }
+
+    /// <summary>
+    /// Internal <see cref="SyncableValue{T}"/> that drives change detection
+    /// for Policy / Configuration categories. ProfileImage has its own
+    /// hash-pair below.
+    /// </summary>
+    public SyncableValue<string> Value { get; } = new SyncableValue<string>
+    {
+        Comparator = new JsonBlobComparator()
+    };
+
+    /// <summary>
+    /// Sets <see cref="MergedValue"/> and recomputes its hash via the
+    /// comparator. Call from the refresh build path so
+    /// <see cref="SyncableValue{T}.SourceHash"/> stays consistent with
+    /// the format the rest of the SyncableValue plumbing produces.
+    /// </summary>
+    public void UpdateMergedValue(string? mergedValue) => Value.UpdateSource(mergedValue);
 
     // ===== Profile Image specific =====
 
@@ -149,15 +193,9 @@ public class UserSyncItem : SyncRecord
                 return SourceImageSize != LocalImageSize;
             }
 
-            // For Policy and Configuration: short-circuit when the merged
-            // value's hash matches the last-synced hash — no apply needed.
-            if (!string.IsNullOrEmpty(SourceValueHash)
-                && string.Equals(SourceValueHash, SyncedValueHash, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            return !JsonComparisonUtility.JsonEquals(MergedValue, LocalValue);
+            // Policy / Configuration: the SyncableValue handles both the
+            // hash short-circuit and the comparator fallback.
+            return Value.HasChanges;
         }
     }
 
@@ -168,11 +206,10 @@ public class UserSyncItem : SyncRecord
         {
             SyncedImageHash = SourceImageHash;
             SyncedImageSize = SourceImageSize;
+            return;
         }
-        else
-        {
-            SyncedValueHash = SourceValueHash;
-        }
+
+        Value.MarkSynced();
     }
 
     /// <summary>

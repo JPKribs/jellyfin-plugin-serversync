@@ -8,7 +8,6 @@ using MediaBrowser.Model.Plugins;
 namespace Jellyfin.Plugin.ServerSync.Configuration;
 
 /// <summary>
-/// PluginConfiguration
 /// Configuration settings for the Server Sync plugin.
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
@@ -91,7 +90,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public string DownloadSpeedUnit { get; set; } = "MB";
 
     /// <summary>
-    /// GetMaxDownloadSpeedBytes
     /// Calculates the max download speed in bytes per second.
     /// </summary>
     /// <returns>Speed in bytes per second.</returns>
@@ -109,7 +107,6 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// GetScheduledDownloadSpeedBytes
     /// Calculates the scheduled download speed in bytes per second.
     /// </summary>
     /// <returns>Speed in bytes per second.</returns>
@@ -127,7 +124,6 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// GetEffectiveDownloadSpeedBytes
     /// Returns the appropriate download speed based on current time and scheduling settings.
     /// </summary>
     /// <returns>Effective speed in bytes per second.</returns>
@@ -393,7 +389,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public DateTime? LastPeopleSyncTime { get; set; }
 
     /// <summary>
-    /// ValidateConfiguration
     /// Validates configuration values and returns a list of validation errors.
     /// </summary>
     /// <returns>List of validation error messages.</returns>
@@ -623,7 +618,6 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// IsValid
     /// Returns true if the configuration passes validation.
     /// </summary>
     /// <returns>True if valid.</returns>
@@ -633,7 +627,6 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// SanitizeValues
     /// Clamps configuration values to valid ranges.
     /// </summary>
     public void SanitizeValues()
@@ -700,17 +693,9 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// Most-recent run failure per module. Each task base appends/replaces
-    /// an entry on pre-flight or run-level failures and removes it on
-    /// successful completion. The dashboard surfaces these so a silent
-    /// abort (connection failure, disk space, circuit breaker) is visible
-    /// to the user without log-diving.
-    /// <para>
-    /// Stored as a list (not a dictionary) because Jellyfin's
-    /// <see cref="BasePluginConfiguration"/> uses XML serialization, which
-    /// doesn't round-trip <see cref="Dictionary{TKey, TValue}"/> reliably —
-    /// using one breaks plugin-config loading on startup.
-    /// </para>
+    /// Most-recent run failure per module, surfaced in the dashboard.
+    /// Stored as a list (not a dictionary) because Jellyfin's XML serialization
+    /// doesn't round-trip <see cref="Dictionary{TKey, TValue}"/> reliably.
     /// </summary>
     public List<SyncRunFailure> LastRunFailures { get; set; } = new();
 }

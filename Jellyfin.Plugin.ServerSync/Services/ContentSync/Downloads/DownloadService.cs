@@ -8,6 +8,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -15,6 +16,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// <summary>
 /// Service for downloading files from the source server.
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public class DownloadService
 {
     private readonly ILogger<DownloadService> _logger;

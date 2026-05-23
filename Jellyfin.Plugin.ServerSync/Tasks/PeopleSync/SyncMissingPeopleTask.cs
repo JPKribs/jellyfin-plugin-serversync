@@ -31,7 +31,6 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
-    private readonly PeopleSyncTableService _peopleService;
 
     /// <summary>
     /// Initializes a new instance.
@@ -42,13 +41,11 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         IProviderManager providerManager,
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
-        PeopleSyncTableService peopleService,
         PeopleSyncTableManager manager)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
         _providerManager = providerManager;
-        _peopleService = peopleService;
     }
 
     /// <inheritdoc />
@@ -80,22 +77,10 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
     {
         ArgumentNullException.ThrowIfNull(record);
 
-        var personStub = _libraryManager.GetPerson(record.PersonName);
-        if (personStub == null)
-        {
-            throw new InvalidOperationException($"Local person not found: {record.PersonName}");
-        }
-
-        var localPerson = _libraryManager.GetItemById(personStub.Id);
-        if (localPerson == null)
-        {
-            throw new InvalidOperationException($"Could not load person entity: {record.PersonName}");
-        }
-
+        var (_, localPerson) = ResolveLocalPerson(record);
         var config = ConfigManager.Configuration;
         var syncImages = config.PeopleSyncImages;
         var failures = new List<string>();
-        var synced = new List<string>();
 
         var metadataChanged = false;
         var imagesChanged = false;
@@ -162,52 +147,71 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
         }
 
-        // Verify what actually persisted.
-        if (failures.Count == 0 && anyApplyAttempted)
+        _ = imagesChanged;
+
+        if (failures.Count > 0)
         {
-            var freshPerson = _libraryManager.GetItemById(personStub.Id);
-            if (freshPerson == null)
+            throw new InvalidOperationException(string.Join("; ", failures));
+        }
+    }
+
+    // Re-reads the local person and confirms each applied category landed.
+    // Categories whose verify passes are per-category <c>MarkSynced</c>'d
+    // inline so partial progress sticks even if a later category fails.
+    /// <inheritdoc />
+    protected override async Task VerifyAfterApplyAsync(PeopleSyncItem record, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        var config = ConfigManager.Configuration;
+        var syncImages = config.PeopleSyncImages;
+
+        var anyCandidate = record.HasMetadataChanges
+            || (syncImages && record.HasImagesChanges && !string.IsNullOrEmpty(record.SourcePersonId));
+        if (!anyCandidate)
+        {
+            return;
+        }
+
+        var (localPersonId, _) = ResolveLocalPerson(record);
+
+        var freshPerson = _libraryManager.GetItemById(localPersonId)
+            ?? throw new InvalidOperationException("Verify: person entity disappeared after apply");
+
+        var failures = new List<string>();
+        var synced = new List<string>();
+
+        if (record.HasMetadataChanges)
+        {
+            var (ok, reason) = VerifyMetadataApplied(freshPerson, record);
+            if (ok)
             {
-                failures.Add("Verify: person entity disappeared after apply");
+                record.Metadata.MarkSynced();
+                synced.Add("Metadata");
+                Logger.LogInformation("Apply Metadata verified for person {PersonName}", record.PersonName);
             }
             else
             {
-                if (record.HasMetadataChanges)
-                {
-                    var (ok, reason) = VerifyMetadataApplied(freshPerson, record);
-                    if (ok)
-                    {
-                        record.Metadata.MarkSynced();
-                        synced.Add("Metadata");
-                        Logger.LogInformation("Apply Metadata verified for person {PersonName}", record.PersonName);
-                    }
-                    else
-                    {
-                        failures.Add($"Metadata: {reason}");
-                        Logger.LogWarning("Apply Metadata failed verification for person {PersonName}: {Reason}", record.PersonName, reason);
-                    }
-                }
-
-                if (syncImages && record.HasImagesChanges)
-                {
-                    var (ok, reason) = await VerifyImagesAppliedAsync(freshPerson, record, cancellationToken).ConfigureAwait(false);
-                    if (ok)
-                    {
-                        record.Images.MarkSynced();
-                        synced.Add("Images");
-                        Logger.LogInformation("Apply Images verified for person {PersonName}", record.PersonName);
-                    }
-                    else
-                    {
-                        failures.Add($"Images: {reason}");
-                        Logger.LogWarning("Apply Images failed verification for person {PersonName}: {Reason}", record.PersonName, reason);
-                    }
-                }
+                failures.Add($"Metadata: {reason}");
+                Logger.LogWarning("Apply Metadata failed verification for person {PersonName}: {Reason}", record.PersonName, reason);
             }
         }
 
-        _ = metadataChanged;
-        _ = imagesChanged;
+        if (syncImages && record.HasImagesChanges)
+        {
+            var (ok, reason) = await VerifyImagesAppliedAsync(freshPerson, record, cancellationToken).ConfigureAwait(false);
+            if (ok)
+            {
+                record.Images.MarkSynced();
+                synced.Add("Images");
+                Logger.LogInformation("Apply Images verified for person {PersonName}", record.PersonName);
+            }
+            else
+            {
+                failures.Add($"Images: {reason}");
+                Logger.LogWarning("Apply Images failed verification for person {PersonName}: {Reason}", record.PersonName, reason);
+            }
+        }
 
         if (failures.Count > 0)
         {
@@ -220,38 +224,32 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         }
     }
 
+    private (Guid LocalPersonId, BaseItem LocalPerson) ResolveLocalPerson(PeopleSyncItem record)
+    {
+        var personStub = _libraryManager.GetPerson(record.PersonName)
+            ?? throw new InvalidOperationException($"Local person not found: {record.PersonName}");
+
+        var localPerson = _libraryManager.GetItemById(personStub.Id)
+            ?? throw new InvalidOperationException($"Could not load person entity: {record.PersonName}");
+
+        return (personStub.Id, localPerson);
+    }
+
+    // No-op: per-category MarkSynced already happens inside ApplyAsync for
+    // the categories this run actually applied + verified. Marking the
+    // whole record here would advance SyncedHash on un-applied categories
+    // too, falsely short-circuiting the next Refresh.
     /// <inheritdoc />
-    /// <remarks>
-    /// No-op — per-category MarkSynced calls already happen inside
-    /// <see cref="ApplyAsync"/> for categories that this run actually
-    /// applied + verified.
-    /// <para>
-    /// Calling <see cref="PeopleSyncItem.MarkSynced"/> here sets
-    /// <c>SyncedHash = SourceHash</c> on categories this run did NOT
-    /// apply (skipped because per-category <c>HasChanges</c> was false at
-    /// apply time, or skipped because user config disabled that category,
-    /// or skipped because the row was force-queued without a source
-    /// change). The next Refresh then sees <c>SourceHash == SyncedHash</c>
-    /// and the hash short-circuit makes <c>HasChanges</c> return false
-    /// even when local genuinely diverges, so <c>DecideStatus</c> marks
-    /// the row Synced and the apply phase never touches it again. The UI
-    /// (which compares Source vs Local directly) still shows the diff,
-    /// but pressing Sync does nothing. That broke metadata + people sync
-    /// across the board in 10.11.54.
-    /// </para>
-    /// </remarks>
     protected override void OnApplySucceeded(PeopleSyncItem record)
     {
-        // Intentionally empty — see remarks.
         _ = record;
     }
 
     /// <inheritdoc />
-    protected override Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
     {
-        ConfigManager.Configuration.LastPeopleSyncTime = DateTime.UtcNow;
-        ConfigManager.SaveConfiguration();
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastPeopleSyncTime = utcNow;
     }
 
     /// <inheritdoc />
@@ -669,7 +667,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         // Rebuild the local blob via the canonical builder, then JSON-equals
         // it against source. The service's Build* helpers normalize ordering
         // and apply the same Kiota-unwrap so the comparison is apples-to-apples.
-        var freshBlob = PeopleSyncTableService.BuildLocalMetadata(freshPerson);
+        var freshBlob = PeopleSyncMergeService.BuildLocalMetadata(freshPerson);
         record.Metadata.Local = freshBlob;
         if (JsonComparisonUtility.JsonEquals(freshBlob, record.Metadata.Source))
         {
@@ -702,7 +700,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         catch (InvalidOperationException) { }
         catch (IOException) { }
 
-        var (_, freshLocal) = _peopleService.PopulateImageData(null, freshPerson);
+        var (_, freshLocal) = PeopleSyncMergeService.PopulateImageData(null, freshPerson);
         record.Images.Local = freshLocal;
 
         // Refresh stores source manifests tag-only (Size=0) for performance

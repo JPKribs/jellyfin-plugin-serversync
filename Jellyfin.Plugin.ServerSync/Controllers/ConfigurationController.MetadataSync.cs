@@ -25,7 +25,6 @@ public partial class ConfigurationController
     // ============================================
 
     /// <summary>
-    /// GetMetadataSyncItem
     /// Gets a specific metadata sync item by its ID.
     /// </summary>
     /// <param name="id">The database ID of the metadata sync item.</param>
@@ -49,11 +48,8 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
 
-        // Re-read the live local item before returning. Without this, the
-        // modal shows the local snapshot from the last metadata Refresh —
-        // so a successful Sync apply that just wrote new data to the local
-        // server doesn't show up here until the user re-runs Refresh,
-        // making it look like sync silently failed.
+        // Re-read live local state so the modal reflects what's actually on
+        // the server, not the snapshot from the last metadata Refresh.
         metadataService.RefreshLocalSnapshot(
             item,
             syncMetadata: config.MetadataSyncMetadata,
@@ -63,10 +59,8 @@ public partial class ConfigurationController
             syncGenres: config.MetadataSyncGenres,
             syncTags: config.MetadataSyncTags);
 
-        // Enrich source-side image manifest with real sizes/dimensions so
-        // the modal renders Source as e.g. "623.4 KB" instead of "1 (0 B)".
-        // The refresh task uses tag-only manifests for performance; this is
-        // the per-modal-open compensation that gives the user honest numbers.
+        // Refresh builds tag-only manifests for speed; the modal needs real
+        // sizes/dimensions to render "623.4 KB" instead of "1 (0 B)".
         if (config.MetadataSyncImages
             && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
             && !string.IsNullOrWhiteSpace(config.SourceServerApiKey)
@@ -91,7 +85,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetMetadataItemImageInfo
     /// Gets image info (including sizes) for a metadata sync item from the source server.
     /// </summary>
     /// <param name="id">The database ID of the metadata sync item.</param>
@@ -156,7 +149,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetMetadataSyncItems
     /// Gets paginated metadata sync items from the database with optional search and filter.
     /// One record per item containing all categories (Metadata, Images, People).
     /// </summary>
@@ -178,18 +170,15 @@ public partial class ConfigurationController
     {
         ArgumentNullException.ThrowIfNull(manager);
 
-        // Clamp pagination values
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
 
-        // Parse status filter
         SyncStatus? statusFilter = null;
         if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
         {
             statusFilter = parsedStatus;
         }
 
-        // Get paginated results
         var (items, totalCount) = manager.SearchMetadataSyncItemsPaginated(
             search, statusFilter, sourceLibraryId, skip, take);
 
@@ -210,7 +199,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetMetadataSyncStatus
     /// Gets metadata sync status counts.
     /// </summary>
     /// <returns>Metadata sync status response with counts.</returns>
@@ -237,7 +225,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// UpdateMetadataSyncItemStatus
     /// Updates the status of a metadata sync item.
     /// </summary>
     /// <param name="request">Status update request.</param>
@@ -260,7 +247,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// QueueMetadataSyncItems
     /// Moves metadata sync items to Queued status.
     /// </summary>
     /// <param name="request">Bulk metadata sync items request.</param>
@@ -291,7 +277,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// IgnoreMetadataSyncItems
     /// Marks metadata sync items as ignored.
     /// </summary>
     /// <param name="request">Bulk metadata sync items request.</param>
@@ -322,7 +307,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// TriggerMetadataRefresh
     /// Manually triggers the refresh metadata sync table task.
     /// </summary>
     /// <returns>Action result with status message.</returns>
@@ -333,7 +317,6 @@ public partial class ConfigurationController
         => ExecuteScheduledTaskByKey("ServerSyncRefreshMetadataTable", "Metadata refresh task started", "Metadata refresh task not found");
 
     /// <summary>
-    /// TriggerMetadataSync
     /// Manually triggers the sync missing metadata task.
     /// </summary>
     /// <returns>Action result with status message.</returns>
@@ -344,7 +327,6 @@ public partial class ConfigurationController
         => ExecuteScheduledTaskByKey("ServerSyncMissingMetadata", "Metadata sync task started", "Metadata sync task not found");
 
     /// <summary>
-    /// ResetMetadataSyncDatabase
     /// Resets the metadata sync database, removing all tracked metadata sync items.
     /// </summary>
     /// <returns>Action result with success status.</returns>
@@ -387,7 +369,6 @@ public partial class ConfigurationController
         string? sourceServerApiKey,
         bool includeBlobs)
     {
-        // Look up library names
         string? sourceLibraryName = null;
         string? localLibraryName = null;
 

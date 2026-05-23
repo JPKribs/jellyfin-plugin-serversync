@@ -6,19 +6,17 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Utilities for path manipulation and translation.
+/// Path translation and library-filter matching.
 /// </summary>
 public static class PathUtilities
 {
     private static readonly char[] PathSeparators = { '/', '\\' };
 
     /// <summary>
-    /// Translates a source server path to the corresponding local path.
+    /// Maps a source-server path to the corresponding local path, stripping any
+    /// path-traversal segments and falling back to <paramref name="localRoot"/> + filename
+    /// when the source path doesn't lie under <paramref name="sourceRoot"/>.
     /// </summary>
-    /// <param name="sourcePath">The source server file path.</param>
-    /// <param name="sourceRoot">The root path on the source server.</param>
-    /// <param name="localRoot">The corresponding local root path.</param>
-    /// <returns>The translated local path.</returns>
     public static string TranslatePath(string sourcePath, string sourceRoot, string localRoot)
     {
         if (string.IsNullOrEmpty(sourcePath))
@@ -39,7 +37,7 @@ public static class PathUtilities
                 var result = localRoot;
                 foreach (var part in pathParts)
                 {
-                    // Block path traversal from untrusted source paths
+                    // Defends against directory traversal from untrusted source paths.
                     if (part == ".." || part == ".")
                     {
                         continue;
@@ -48,13 +46,13 @@ public static class PathUtilities
                     result = Path.Combine(result, part);
                 }
 
-                // Final safety check: ensure the result is still under localRoot
+                // Belt-and-suspenders: even after stripping .. segments, confirm the
+                // result is still under localRoot before returning it.
                 var normalizedResult = Path.GetFullPath(result);
                 var normalizedRoot = Path.GetFullPath(localRoot + Path.DirectorySeparatorChar);
                 if (!normalizedResult.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(normalizedResult, Path.GetFullPath(localRoot), StringComparison.OrdinalIgnoreCase))
                 {
-                    // Path escaped the local root — return safe fallback
                     return Path.Combine(localRoot, Path.GetFileName(sourcePath));
                 }
 
@@ -64,20 +62,14 @@ public static class PathUtilities
             return localRoot;
         }
 
-        // Fallback: just use the filename
         var fileName = Path.GetFileName(sourcePath);
         return Path.Combine(localRoot, fileName);
     }
 
     /// <summary>
-    /// Determines whether an item should be filtered (skipped) based on the library's filter mode
-    /// and filtered items list.
+    /// Returns true if the item should be SKIPPED for the given filter mode + list.
+    /// Whitelist skips non-matches, Blacklist skips matches, AllowAll skips nothing.
     /// </summary>
-    /// <param name="sourcePath">The full source server path of the item.</param>
-    /// <param name="sourceRootPath">The root path of the library on the source server.</param>
-    /// <param name="filterMode">The filter mode (AllowAll, Whitelist, Blacklist).</param>
-    /// <param name="filteredItems">List of filtered items with paths.</param>
-    /// <returns>True if the item should be SKIPPED (filtered out).</returns>
     public static bool IsItemFiltered(
         string sourcePath,
         string sourceRootPath,
@@ -91,7 +83,7 @@ public static class PathUtilities
 
         if (string.IsNullOrEmpty(sourcePath))
         {
-            // No path to match — in whitelist mode this means skip (not in list), in blacklist mode allow
+            // Pathless item: Whitelist can't match (skip), Blacklist can't match (allow).
             return filterMode == LibraryFilterMode.Whitelist;
         }
 
@@ -108,20 +100,17 @@ public static class PathUtilities
 
             var normalizedFilterPath = fi.Path.Replace('\\', '/').TrimEnd('/');
 
-            // Build the full path to compare against
             string fullFilterPrefix;
             if (normalizedFilterPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
             {
-                // Path is already absolute — use as-is
                 fullFilterPrefix = normalizedFilterPath;
             }
             else
             {
-                // Path is relative to root
                 fullFilterPrefix = normalizedRoot + "/" + normalizedFilterPath.TrimStart('/');
             }
 
-            // Check if the source path is this item or a child of this item
+            // StartsWith + segment-boundary check: "Foo" must not match "Foobar".
             if (normalizedSourcePath.StartsWith(fullFilterPrefix, StringComparison.OrdinalIgnoreCase)
                 && (normalizedSourcePath.Length == fullFilterPrefix.Length
                     || normalizedSourcePath[fullFilterPrefix.Length] == '/'))
@@ -133,8 +122,8 @@ public static class PathUtilities
 
         return filterMode switch
         {
-            LibraryFilterMode.Whitelist => !matchesAny, // Skip if NOT in whitelist
-            LibraryFilterMode.Blacklist => matchesAny,  // Skip if IN blacklist
+            LibraryFilterMode.Whitelist => !matchesAny,
+            LibraryFilterMode.Blacklist => matchesAny,
             _ => false
         };
     }

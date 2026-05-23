@@ -20,7 +20,6 @@ public static class JsonComparisonUtility
     /// <returns>True if semantically equal, false otherwise.</returns>
     public static bool JsonEquals(string? json1, string? json2)
     {
-        // Handle null/empty cases
         if (string.IsNullOrEmpty(json1) && string.IsNullOrEmpty(json2))
         {
             return true;
@@ -40,7 +39,6 @@ public static class JsonComparisonUtility
         }
         catch (JsonException)
         {
-            // If parsing fails, fall back to string comparison
             return string.Equals(json1, json2, StringComparison.Ordinal);
         }
     }
@@ -77,7 +75,6 @@ public static class JsonComparisonUtility
             var props1 = obj1.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
             var props2 = obj2.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
 
-            // Get all unique property names
             var allKeys = new HashSet<string>(props1.Keys);
             allKeys.UnionWith(props2.Keys);
 
@@ -88,7 +85,6 @@ public static class JsonComparisonUtility
 
                 if (has1 && has2)
                 {
-                    // Both have the property - compare values
                     if (!JsonElementEquals(val1, val2))
                     {
                         diffCount++;
@@ -96,7 +92,7 @@ public static class JsonComparisonUtility
                 }
                 else if (has1)
                 {
-                    // Only obj1 has property - count as diff only if non-empty
+                    // One-sided property counts only when its value is non-empty.
                     if (!IsEmptyValue(val1))
                     {
                         diffCount++;
@@ -104,7 +100,6 @@ public static class JsonComparisonUtility
                 }
                 else if (has2)
                 {
-                    // Only obj2 has property - count as diff only if non-empty
                     if (!IsEmptyValue(val2))
                     {
                         diffCount++;
@@ -122,16 +117,9 @@ public static class JsonComparisonUtility
 
     /// <summary>
     /// Returns the names of top-level properties that differ between two
-    /// JSON objects, using the same equality semantics as
-    /// <see cref="JsonElementEquals"/> (null/empty/missing equivalence,
-    /// timezone-aware date parsing, etc). Used by the metadata-verify
-    /// failure path to point at the specific divergent field instead of
-    /// reporting just a count — without this, "1 divergent field" with a
-    /// truncated blob is unactionable.
+    /// JSON objects, with the same null/empty/missing equivalence as
+    /// <see cref="JsonElementEquals"/>.
     /// </summary>
-    /// <param name="json1">First JSON string.</param>
-    /// <param name="json2">Second JSON string.</param>
-    /// <returns>Property names whose values differ; empty if equal or unparseable.</returns>
     public static IReadOnlyList<string> GetDifferingFields(string? json1, string? json2)
     {
         if (string.IsNullOrEmpty(json1) || string.IsNullOrEmpty(json2))
@@ -202,16 +190,9 @@ public static class JsonComparisonUtility
 
     /// <summary>
     /// Returns a compact "field=source-vs-local" diagnostic for the first
-    /// few divergent properties. Values are JSON-serialized and truncated
-    /// so the result fits in a log line. Used to point at the actual
-    /// divergence when the truncated full-blob view shows only matching
-    /// prefix fields.
+    /// few divergent properties, with values JSON-serialised and truncated
+    /// to fit in a log line.
     /// </summary>
-    /// <param name="json1">Source JSON string.</param>
-    /// <param name="json2">Local JSON string.</param>
-    /// <param name="maxFields">Cap on number of fields included.</param>
-    /// <param name="maxValueLength">Cap on each rendered value.</param>
-    /// <returns>Human-readable diff, or empty string if no diffs / unparseable.</returns>
     public static string DescribeDifferingFields(
         string? json1,
         string? json2,
@@ -318,19 +299,16 @@ public static class JsonComparisonUtility
     /// <returns>True if equal, false otherwise.</returns>
     public static bool JsonElementEquals(JsonElement e1, JsonElement e2)
     {
-        // If both are "empty" values, consider them equal
         if (IsEmptyValue(e1) && IsEmptyValue(e2))
         {
             return true;
         }
 
-        // If only one is empty, they're different
         if (IsEmptyValue(e1) || IsEmptyValue(e2))
         {
             return false;
         }
 
-        // At this point, neither is empty - check type match
         if (e1.ValueKind != e2.ValueKind)
         {
             return false;
@@ -342,7 +320,6 @@ public static class JsonComparisonUtility
                 var props1 = e1.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
                 var props2 = e2.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
 
-                // Get all unique property names
                 var allKeys = new HashSet<string>(props1.Keys);
                 allKeys.UnionWith(props2.Keys);
 
@@ -353,7 +330,6 @@ public static class JsonComparisonUtility
 
                     if (has1 && has2)
                     {
-                        // Both have the property - compare values
                         if (!JsonElementEquals(val1, val2))
                         {
                             return false;
@@ -361,7 +337,7 @@ public static class JsonComparisonUtility
                     }
                     else if (has1)
                     {
-                        // Only obj1 has property - treat as equal if value is empty
+                        // One-sided property is a diff only when non-empty.
                         if (!IsEmptyValue(val1))
                         {
                             return false;
@@ -369,7 +345,6 @@ public static class JsonComparisonUtility
                     }
                     else if (has2)
                     {
-                        // Only obj2 has property - treat as equal if value is empty
                         if (!IsEmptyValue(val2))
                         {
                             return false;
@@ -402,23 +377,19 @@ public static class JsonComparisonUtility
                 var s1 = e1.GetString();
                 var s2 = e2.GetString();
 
-                // Both null or empty are considered equal (already handled above, but double-check)
                 if (string.IsNullOrEmpty(s1) && string.IsNullOrEmpty(s2))
                 {
                     return true;
                 }
 
-                // Direct string match
                 if (s1 == s2)
                 {
                     return true;
                 }
 
-                // Try to parse as dates and compare. Uses DateTimeOffset to avoid the
-                // DateTimeKind.Unspecified pitfall: DateTime.ToUniversalTime() on an
-                // Unspecified value silently treats it as local time and shifts by the
-                // server's TZ offset, producing spurious diffs across servers in
-                // different timezones. AssumeUniversal makes offset-less strings UTC.
+                // Compare as dates via DateTimeOffset to avoid the DateTime
+                // Unspecified-kind TZ shift. AssumeUniversal makes offset-less
+                // strings UTC.
                 if (System.DateTimeOffset.TryParse(s1, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto1) &&
                     System.DateTimeOffset.TryParse(s2, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto2))
                 {
@@ -427,12 +398,8 @@ public static class JsonComparisonUtility
                         return true;
                     }
 
-                    // Date-only relaxation: when both sides are midnight in their own
-                    // offset, treat as the same value if the calendar date matches.
-                    // Catches the birthday/PremiereDate/EndDate case where the same
-                    // calendar date is serialized as different instants by servers in
-                    // different timezones (e.g. "1990-05-15T00:00:00+12:00" vs
-                    // "1990-05-15T00:00:00Z").
+                    // Date-only relaxation: both midnight in their own offset
+                    // with the same calendar date (PremiereDate / birthdays).
                     if (dto1.TimeOfDay == System.TimeSpan.Zero
                         && dto2.TimeOfDay == System.TimeSpan.Zero
                         && dto1.Date == dto2.Date)
@@ -440,16 +407,9 @@ public static class JsonComparisonUtility
                         return true;
                     }
 
-                    // Whole-hour relaxation: covers the common case where one
-                    // server stored "midnight in <local TZ>" and serialized it
-                    // as a UTC-shifted whole-hour value (e.g. source in MDT
-                    // saves PremiereDate as "2019-03-25T06:00:00+00:00" while
-                    // local has "2019-03-25T00:00:00Z"). Both sides have
-                    // minute=0 and second=0 (whole-hour boundaries — real
-                    // timestamps almost never line up that precisely), and
-                    // both UTC instants land on the same calendar date in the
-                    // same 24-hour window. Treat as equal so verification
-                    // doesn't fail on a pure timezone artifact.
+                    // Whole-hour relaxation: TZ-shifted "midnight in local TZ"
+                    // values land on whole-hour boundaries with the same UTC
+                    // calendar date within a 24-hour window. Treat as equal.
                     if (dto1.Minute == 0 && dto1.Second == 0
                         && dto2.Minute == 0 && dto2.Second == 0
                         && dto1.UtcDateTime.Date == dto2.UtcDateTime.Date

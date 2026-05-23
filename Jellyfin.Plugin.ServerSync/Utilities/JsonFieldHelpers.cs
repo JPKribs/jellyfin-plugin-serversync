@@ -6,20 +6,14 @@ using System.Text.Json;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Read/assign helpers for the apply paths in <c>SyncMissing*Task.cs</c>
-/// files. The pattern across modules is: deserialize a metadata blob into
-/// <c>Dictionary&lt;string, JsonElement&gt;</c> and conditionally assign
-/// each field. These helpers handle the "field absent → skip" vs
-/// "field present and null → assign null/empty" distinction uniformly.
+/// Read helpers that distinguish "field absent" from "field present and null"
+/// so apply-path callers can skip vs write a clearing value.
 /// </summary>
 public static class JsonFieldHelpers
 {
     /// <summary>
-    /// Reads a string-typed field and passes it to <paramref name="assign"/>.
-    /// Returns whatever the assigner returns; returns false (and does not
-    /// invoke the assigner) when the key is absent. JSON <c>null</c> /
-    /// <c>undefined</c> / non-string kinds all read as <c>null</c> — the
-    /// assigner decides whether to write null or skip.
+    /// Reads a string field. Skips when the key is absent; otherwise passes the value
+    /// (which may be null) to <paramref name="assign"/>.
     /// </summary>
     public static bool AssignString(Dictionary<string, JsonElement> metadata, string key, Func<string?, bool> assign)
     {
@@ -36,7 +30,9 @@ public static class JsonFieldHelpers
         return assign(read);
     }
 
-    /// <summary>Same shape as <see cref="AssignString"/> for nullable float values.</summary>
+    /// <summary>
+    /// Reads a nullable float field. Same skip-when-absent semantics as <see cref="AssignString"/>.
+    /// </summary>
     public static bool AssignFloat(Dictionary<string, JsonElement> metadata, string key, Func<float?, bool> assign)
     {
         ArgumentNullException.ThrowIfNull(metadata);
@@ -47,7 +43,9 @@ public static class JsonFieldHelpers
         return assign(read);
     }
 
-    /// <summary>Same shape as <see cref="AssignString"/> for nullable int values.</summary>
+    /// <summary>
+    /// Reads a nullable int field. Same skip-when-absent semantics as <see cref="AssignString"/>.
+    /// </summary>
     public static bool AssignInt(Dictionary<string, JsonElement> metadata, string key, Func<int?, bool> assign)
     {
         ArgumentNullException.ThrowIfNull(metadata);
@@ -59,9 +57,8 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Parses a date string from a JsonElement. Returns null on missing or
-    /// invalid input. Uses <see cref="DateTimeStyles.RoundtripKind"/> so
-    /// timezone information in the source string is preserved.
+    /// Parses an ISO 8601 date string with <see cref="DateTimeStyles.RoundtripKind"/>.
+    /// Returns null on missing, non-string, or unparseable input.
     /// </summary>
     public static DateTime? ParseNullableDate(JsonElement v)
     {
@@ -72,8 +69,8 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads a string array from a JsonElement, dropping nulls. Returns an
-    /// empty array (not null) when the input is missing or non-array.
+    /// Reads a string array. Returns an empty array for missing or non-array input;
+    /// drops non-string entries.
     /// </summary>
     public static string[] ReadStringArray(JsonElement v)
     {
@@ -99,8 +96,8 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads an enum array from a JsonElement, dropping unparseable entries.
-    /// Returns an empty array (not null) when the input is missing or non-array.
+    /// Reads an enum array. Returns an empty array for missing or non-array input;
+    /// drops unparseable entries.
     /// </summary>
     public static T[] ReadEnumArray<T>(JsonElement v) where T : struct, Enum
     {
@@ -126,8 +123,8 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads a Jellyfin-style ProviderIds object: keys are case-insensitive,
-    /// values are stripped of empty strings.
+    /// Reads a Jellyfin-style ProviderIds object as a case-insensitive string dictionary.
+    /// Empty-string values are dropped.
     /// </summary>
     public static Dictionary<string, string> ReadProviderIds(JsonElement v)
     {

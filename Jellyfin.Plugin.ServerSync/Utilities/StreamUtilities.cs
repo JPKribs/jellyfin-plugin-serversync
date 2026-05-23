@@ -7,19 +7,17 @@ using System.Threading.Tasks;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Utility methods for stream operations.
+/// Stream copy with optional rate limiting.
 /// </summary>
 public static class StreamUtilities
 {
     private const int DefaultBufferSize = 81920;
 
     /// <summary>
-    /// Copies stream with optional speed limiting.
+    /// Copies <paramref name="source"/> to <paramref name="destination"/>, sleeping
+    /// between reads to enforce <paramref name="bytesPerSecond"/>.
+    /// Zero or negative <paramref name="bytesPerSecond"/> disables the limit.
     /// </summary>
-    /// <param name="source">Source stream to copy from.</param>
-    /// <param name="destination">Destination stream to copy to.</param>
-    /// <param name="bytesPerSecond">Maximum bytes per second (0 or negative for unlimited).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task CopyWithSpeedLimitAsync(
         Stream source,
         Stream destination,

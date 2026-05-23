@@ -3,12 +3,14 @@ using System.IO;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
 /// Provides access to plugin configuration by delegating to the Plugin singleton.
 /// </summary>
+[PluginService(ServiceLifetime.Singleton, ServiceType = typeof(IPluginConfigurationManager))]
 public class PluginConfigurationManager : IPluginConfigurationManager
 {
     private readonly IApplicationPaths _applicationPaths;

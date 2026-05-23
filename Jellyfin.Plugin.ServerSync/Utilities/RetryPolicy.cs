@@ -8,30 +8,17 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Provides retry logic with exponential backoff for network operations.
+/// Exponential-backoff retry wrapper for transient network failures.
 /// </summary>
 public static class RetryPolicy
 {
-    /// <summary>
-    /// Default base delay for exponential backoff (1 second).
-    /// </summary>
     private const int BaseDelayMs = 1000;
-
-    /// <summary>
-    /// Maximum delay cap to prevent excessive wait times (30 seconds).
-    /// </summary>
     private const int MaxDelayMs = 30000;
 
     /// <summary>
-    /// Executes an async operation with retry logic and exponential backoff.
+    /// Runs <paramref name="operation"/>, retrying transient failures up to
+    /// <paramref name="maxRetries"/> times with exponential backoff and jitter.
     /// </summary>
-    /// <typeparam name="T">Return type of the operation.</typeparam>
-    /// <param name="operation">The async operation to execute.</param>
-    /// <param name="maxRetries">Maximum number of retry attempts.</param>
-    /// <param name="logger">Logger for retry information.</param>
-    /// <param name="operationName">Name of the operation for logging.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Result of the operation.</returns>
     public static async Task<T> ExecuteWithRetryAsync<T>(
         Func<CancellationToken, Task<T>> operation,
         int maxRetries,
@@ -79,23 +66,16 @@ public static class RetryPolicy
             }
             catch (Exception)
             {
-                // Non-transient exception, don't retry
                 throw;
             }
         }
 
-        // Should not reach here, but just in case
         throw lastException ?? new InvalidOperationException("Retry failed without exception");
     }
 
     /// <summary>
-    /// Executes an async operation with retry logic and exponential backoff (void return).
+    /// Void-returning overload of <see cref="ExecuteWithRetryAsync{T}"/>.
     /// </summary>
-    /// <param name="operation">The async operation to execute.</param>
-    /// <param name="maxRetries">Maximum number of retry attempts.</param>
-    /// <param name="logger">Logger for retry information.</param>
-    /// <param name="operationName">Name of the operation for logging.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task ExecuteWithRetryAsync(
         Func<CancellationToken, Task> operation,
         int maxRetries,
@@ -115,50 +95,36 @@ public static class RetryPolicy
             cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Calculates the delay for exponential backoff with jitter.
-    /// </summary>
-    /// <param name="attempt">Current attempt number (1-based).</param>
-    /// <returns>Delay in milliseconds.</returns>
     private static int CalculateDelay(int attempt)
     {
-        // Exponential backoff: 1s, 2s, 4s, 8s, ... capped at MaxDelayMs
-        var clampedExponent = Math.Min(attempt - 1, 20); // Cap exponent to prevent int overflow
+        // Exponential backoff capped at MaxDelayMs; exponent clamped to avoid int overflow.
+        var clampedExponent = Math.Min(attempt - 1, 20);
         var exponentialDelay = (int)(BaseDelayMs * Math.Pow(2, clampedExponent));
         var cappedDelay = Math.Min(exponentialDelay, MaxDelayMs);
 
-        // Add jitter (±25%) to prevent thundering herd
+        // ±25% jitter to prevent thundering herd.
         var jitter = Random.Shared.Next(-(cappedDelay / 4), cappedDelay / 4);
         return cappedDelay + jitter;
     }
 
-    /// <summary>
-    /// Determines if an exception is transient and should trigger a retry.
-    /// </summary>
-    /// <param name="ex">Exception to check.</param>
-    /// <returns>True if the exception is transient.</returns>
     private static bool IsTransientException(Exception ex)
     {
-        // HttpRequestException with transient status codes
         if (ex is HttpRequestException httpEx)
         {
-            // Check for transient HTTP status codes
             if (httpEx.StatusCode.HasValue)
             {
                 return IsTransientStatusCode(httpEx.StatusCode.Value);
             }
 
-            // Network-level failures are generally transient
             return true;
         }
 
-        // TaskCanceledException due to timeout (not user cancellation)
         if (ex is TaskCanceledException taskCanceledEx && taskCanceledEx.InnerException is TimeoutException)
         {
             return true;
         }
 
-        // IO exceptions are often transient, but exclude non-transient subtypes
+        // Generic IO is transient, but specific subtypes (not found, path-too-long) are not.
         if (ex is System.IO.IOException
             and not System.IO.FileNotFoundException
             and not System.IO.DirectoryNotFoundException
@@ -168,13 +134,11 @@ public static class RetryPolicy
             return true;
         }
 
-        // Socket exceptions are transient
         if (ex is System.Net.Sockets.SocketException)
         {
             return true;
         }
 
-        // Check inner exception
         if (ex.InnerException != null)
         {
             return IsTransientException(ex.InnerException);
@@ -183,21 +147,16 @@ public static class RetryPolicy
         return false;
     }
 
-    /// <summary>
-    /// Determines if an HTTP status code indicates a transient error.
-    /// </summary>
-    /// <param name="statusCode">HTTP status code to check.</param>
-    /// <returns>True if the status code indicates a transient error.</returns>
     private static bool IsTransientStatusCode(HttpStatusCode statusCode)
     {
         return statusCode switch
         {
-            HttpStatusCode.RequestTimeout => true,         // 408
-            HttpStatusCode.TooManyRequests => true,        // 429
-            HttpStatusCode.InternalServerError => true,    // 500
-            HttpStatusCode.BadGateway => true,             // 502
-            HttpStatusCode.ServiceUnavailable => true,     // 503
-            HttpStatusCode.GatewayTimeout => true,         // 504
+            HttpStatusCode.RequestTimeout => true,
+            HttpStatusCode.TooManyRequests => true,
+            HttpStatusCode.InternalServerError => true,
+            HttpStatusCode.BadGateway => true,
+            HttpStatusCode.ServiceUnavailable => true,
+            HttpStatusCode.GatewayTimeout => true,
             _ => false
         };
     }

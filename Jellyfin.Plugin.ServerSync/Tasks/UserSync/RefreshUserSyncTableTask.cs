@@ -197,30 +197,26 @@ public class RefreshUserSyncTableTask
         var key = (source.Mapping.SourceUserId, source.Mapping.LocalUserId, source.Category);
         existing.TryGetValue(key, out var existingItem);
 
-        var config = ConfigManager.Configuration;
-
-        return source.Category switch
-        {
-            UserPropertyCategory.Policy => await _builder.CreatePolicySyncItemAsync(
-                source.Mapping, source.SourceUser, source.LocalUserDto, config, existingItem).ConfigureAwait(false),
-            UserPropertyCategory.Configuration => await _builder.CreateConfigurationSyncItemAsync(
-                source.Mapping, source.SourceUser, source.LocalUserDto, existingItem).ConfigureAwait(false),
-            UserPropertyCategory.ProfileImage => await _builder.CreateProfileImageSyncItemAsync(
-                source.Mapping, source.SourceUser, source.LocalUser, Client, existingItem, cancellationToken).ConfigureAwait(false),
-            _ => null
-        };
+        return await _builder.BuildRecordAsync(
+            source.Mapping,
+            source.Category,
+            source.SourceUser,
+            source.LocalUserDto,
+            source.LocalUser,
+            Client,
+            ConfigManager.Configuration,
+            existingItem,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     protected override (string SourceUserId, string LocalUserId, string PropertyCategory) ExtractKey(UserSyncItem record)
         => (record.SourceUserId, record.LocalUserId, record.PropertyCategory);
 
+    // In scope when the row's user mapping is currently enabled. Disabling a
+    // mapping preserves its rows (including Ignored overrides) instead of
+    // pruning them.
     /// <inheritdoc />
-    /// <remarks>
-    /// In scope when the row's user mapping is currently enabled. Disabling a
-    /// mapping preserves its rows (including Ignored overrides) instead of
-    /// pruning them.
-    /// </remarks>
     protected override bool IsInScope(UserSyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -237,11 +233,10 @@ public class RefreshUserSyncTableTask
     }
 
     /// <inheritdoc />
-    protected override Task FinalizeAsync(CancellationToken cancellationToken)
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
     {
-        ConfigManager.Configuration.LastUserSyncTime = DateTime.UtcNow;
-        ConfigManager.SaveConfiguration();
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastUserSyncTime = utcNow;
     }
 
     /// <inheritdoc />

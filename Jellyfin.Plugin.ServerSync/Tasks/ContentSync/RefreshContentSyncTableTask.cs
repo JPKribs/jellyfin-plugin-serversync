@@ -80,21 +80,19 @@ public class UpdateSyncTablesTask
         return config.GetEnabledLibraryMappings().Count > 0;
     }
 
+    // Routing depends on <see cref="LibraryMapping.FilterMode"/>:
+    //   <list type="bullet">
+    //   <item><b>Whitelist</b> — fetch the items in
+    //   <see cref="LibraryMapping.FilteredItems"/> by ID in batches of 50.
+    //   No bulk library scan. The whitelist is the authority; if a user
+    //   wants every episode of a Series, they whitelist the episodes (or
+    //   we can layer AncestorIds expansion in later, but the spec is "fetch
+    //   only the items in FilteredItems").</item>
+    //   <item><b>Blacklist / AllowAll</b> — bulk-fetch the library, drop
+    //   blacklisted items via <see cref="PathUtilities.IsItemFiltered"/>.
+    //   This is the existing behavior.</item>
+    //   </list>
     /// <inheritdoc />
-    /// <remarks>
-    /// Routing depends on <see cref="LibraryMapping.FilterMode"/>:
-    ///   <list type="bullet">
-    ///   <item><b>Whitelist</b> — fetch the items in
-    ///   <see cref="LibraryMapping.FilteredItems"/> by ID in batches of 50.
-    ///   No bulk library scan. The whitelist is the authority; if a user
-    ///   wants every episode of a Series, they whitelist the episodes (or
-    ///   we can layer AncestorIds expansion in later, but the spec is "fetch
-    ///   only the items in FilteredItems").</item>
-    ///   <item><b>Blacklist / AllowAll</b> — bulk-fetch the library, drop
-    ///   blacklisted items via <see cref="PathUtilities.IsItemFiltered"/>.
-    ///   This is the existing behavior.</item>
-    ///   </list>
-    /// </remarks>
     protected override async Task<IList<ContentRefreshWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
@@ -315,12 +313,10 @@ public class UpdateSyncTablesTask
         return record.SourceItemId;
     }
 
+    // A row is in scope when its <see cref="SyncItem.SourceLibraryId"/> is
+    // still mapped via an enabled <see cref="LibraryMapping"/>. Rows under a
+    // disabled mapping are inert — neither pruned nor scheduled for deletion.
     /// <inheritdoc />
-    /// <remarks>
-    /// A row is in scope when its <see cref="SyncItem.SourceLibraryId"/> is
-    /// still mapped via an enabled <see cref="LibraryMapping"/>. Rows under a
-    /// disabled mapping are inert — neither pruned nor scheduled for deletion.
-    /// </remarks>
     protected override bool IsInScope(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -336,13 +332,11 @@ public class UpdateSyncTablesTask
         return false;
     }
 
+    // No-op — <see cref="BuildRecordAsync"/> sets the status itself based
+    // on the configured approval modes (DownloadNewContentMode,
+    // ReplaceExistingContentMode), so the default Queued/Synced decision
+    // would override Content's intent.
     /// <inheritdoc />
-    /// <remarks>
-    /// No-op — <see cref="BuildRecordAsync"/> sets the status itself based
-    /// on the configured approval modes (DownloadNewContentMode,
-    /// ReplaceExistingContentMode), so the default Queued/Synced decision
-    /// would override Content's intent.
-    /// </remarks>
     protected override void DecideStatus(SyncItem record)
     {
         // Intentionally empty.

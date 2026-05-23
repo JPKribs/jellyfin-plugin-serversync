@@ -71,16 +71,14 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// <inheritdoc />
     protected override string ModuleMutexKey => "Metadata";
 
+    // Image downloads dominate per-item wall time (HTTP round-trip per
+    // image type, then a file write); without parallelism a few thousand
+    // items take 8+ minutes serially. Local writes (UpdatePeopleAsync,
+    // UpdateToRepositoryAsync, IProviderManager.SaveImage) go through
+    // Jellyfin's repository which has its own internal locking, so
+    // concurrent applies serialize cleanly at persist time while still
+    // overlapping the HTTP-bound download phase.
     /// <inheritdoc />
-    /// <remarks>
-    /// Image downloads dominate per-item wall time (HTTP round-trip per
-    /// image type, then a file write); without parallelism a few thousand
-    /// items take 8+ minutes serially. Local writes (UpdatePeopleAsync,
-    /// UpdateToRepositoryAsync, IProviderManager.SaveImage) go through
-    /// Jellyfin's repository which has its own internal locking, so
-    /// concurrent applies serialize cleanly at persist time while still
-    /// overlapping the HTTP-bound download phase.
-    /// </remarks>
     protected override int MaxDegreeOfParallelism => 4;
 
     /// <inheritdoc />
@@ -94,12 +92,10 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             || config.MetadataSyncPeople || config.MetadataSyncStudios;
     }
 
+    // Sort: folder-type items first (Series → Season → MusicArtist →
+    // MusicAlbum → BoxSet) then leaf items, so parent metadata is in
+    // place before children would inherit anything from it.
     /// <inheritdoc />
-    /// <remarks>
-    /// Sort: folder-type items first (Series → Season → MusicArtist →
-    /// MusicAlbum → BoxSet) then leaf items, so parent metadata is in
-    /// place before children would inherit anything from it.
-    /// </remarks>
     protected override IList<MetadataSyncItem> GetItemsToApply()
     {
         var items = Manager.GetByStatus(SyncStatus.Queued).ToList();
@@ -123,25 +119,9 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     {
         ArgumentNullException.ThrowIfNull(record);
 
-        if (string.IsNullOrEmpty(record.LocalItemId))
-        {
-            throw new InvalidOperationException("Local item not found");
-        }
-
-        if (!Guid.TryParse(record.LocalItemId, out var localItemId))
-        {
-            throw new InvalidOperationException("Invalid item ID");
-        }
-
-        var localItem = _libraryManager.GetItemById(localItemId);
-        if (localItem == null)
-        {
-            throw new InvalidOperationException("Local item not found in library");
-        }
-
+        var localItem = ResolveLocalItem(record);
         var config = ConfigManager.Configuration;
         var failures = new List<string>();
-        var synced = new List<string>();
 
         // Phase 1: write per-category. Each apply mutates localItem in-memory
         // and reports whether anything changed. The composite UpdateToRepository
@@ -249,99 +229,124 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             }
         }
 
-        // Phase 3: verify. Re-read the local item and confirm the write took.
-        // Verification failures don't throw — they just prevent MarkSynced and
-        // are recorded as Errored with a precise Reason.
-        if (failures.Count == 0 && anyApplyAttempted)
+        // imagesChanged is tracked for symmetry with the other categories
+        // even though Phase 2 doesn't depend on it (Images persist via
+        // IProviderManager.SaveImage inside ApplyImagesAsync).
+        _ = imagesChanged;
+
+        if (failures.Count > 0)
         {
-            // Re-read so we get whatever Jellyfin actually persisted, including
-            // any provider/aggregation logic that may have rewritten our blob.
-            var freshLocal = _libraryManager.GetItemById(localItemId);
-            if (freshLocal == null)
+            throw new InvalidOperationException(string.Join("; ", failures));
+        }
+    }
+
+    // Re-reads the local item and confirms each applied category landed in
+    // Jellyfin's repository — provider/aggregation logic can rewrite our
+    // blob between apply and persist, so a write-then-trust loop produces
+    // silent green badges on rows that are actually still divergent.
+    // Categories whose verify passes are per-category <c>MarkSynced</c>'d
+    // inline so partial progress sticks even if a later category fails;
+    // the base then upserts the record as Errored with the cumulative
+    // reason.
+    /// <inheritdoc />
+    protected override async Task VerifyAfterApplyAsync(MetadataSyncItem record, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        var config = ConfigManager.Configuration;
+
+        // No categories candidate for verify (nothing was applied) — skip the
+        // re-read and let the base mark the record Synced.
+        var anyCandidate = (config.MetadataSyncMetadata && record.HasMetadataChanges)
+            || (config.MetadataSyncImages && record.HasImagesChanges)
+            || (config.MetadataSyncPeople && record.HasPeopleChanges)
+            || (config.MetadataSyncStudios && record.HasStudiosChanges);
+        if (!anyCandidate)
+        {
+            return;
+        }
+
+        if (!Guid.TryParse(record.LocalItemId!, out var localItemId))
+        {
+            throw new InvalidOperationException("Invalid item ID");
+        }
+
+        var freshLocal = _libraryManager.GetItemById(localItemId)
+            ?? throw new InvalidOperationException("Verify: local item disappeared after apply");
+
+        var failures = new List<string>();
+        var synced = new List<string>();
+
+        if (config.MetadataSyncMetadata && record.HasMetadataChanges)
+        {
+            var (ok, reason) = VerifyMetadataApplied(freshLocal, record, config.MetadataSyncGenres, config.MetadataSyncTags);
+            if (ok)
             {
-                failures.Add("Verify: local item disappeared after apply");
+                record.Metadata.MarkSynced();
+                synced.Add("Metadata");
+                Logger.LogInformation("Apply Metadata verified for {ItemName}", record.ItemName);
             }
             else
             {
-                if (config.MetadataSyncMetadata && record.HasMetadataChanges)
-                {
-                    var (ok, reason) = VerifyMetadataApplied(freshLocal, record, config.MetadataSyncGenres, config.MetadataSyncTags);
-                    if (ok)
-                    {
-                        record.Metadata.MarkSynced();
-                        synced.Add("Metadata");
-                        Logger.LogInformation("Apply Metadata verified for {ItemName}", record.ItemName);
-                    }
-                    else
-                    {
-                        failures.Add($"Metadata: {reason}");
-                        Logger.LogWarning("Apply Metadata failed verification for {ItemName}: {Reason}", record.ItemName, reason);
-                    }
-                }
-
-                if (config.MetadataSyncImages && record.HasImagesChanges)
-                {
-                    var (ok, reason) = await VerifyImagesAppliedAsync(freshLocal, record, cancellationToken).ConfigureAwait(false);
-                    if (ok)
-                    {
-                        record.Images.MarkSynced();
-                        synced.Add("Images");
-                        Logger.LogInformation("Apply Images verified for {ItemName}", record.ItemName);
-                    }
-                    else
-                    {
-                        failures.Add($"Images: {reason}");
-                        Logger.LogWarning("Apply Images failed verification for {ItemName}: {Reason}", record.ItemName, reason);
-                    }
-                }
-
-                if (config.MetadataSyncPeople && record.HasPeopleChanges && localItem.SupportsPeople)
-                {
-                    var (ok, reason) = VerifyPeopleApplied(freshLocal, record);
-                    if (ok)
-                    {
-                        record.People.MarkSynced();
-                        synced.Add("People");
-                        Logger.LogInformation("Apply People verified for {ItemName}", record.ItemName);
-                    }
-                    else
-                    {
-                        failures.Add($"People: {reason}");
-                        Logger.LogWarning("Apply People failed verification for {ItemName}: {Reason}", record.ItemName, reason);
-                    }
-                }
-
-                if (config.MetadataSyncStudios && record.HasStudiosChanges)
-                {
-                    var (ok, reason) = VerifyStudiosApplied(freshLocal, record);
-                    if (ok)
-                    {
-                        record.Studios.MarkSynced();
-                        synced.Add("Studios");
-                        Logger.LogInformation("Apply Studios verified for {ItemName}", record.ItemName);
-                    }
-                    else
-                    {
-                        failures.Add($"Studios: {reason}");
-                        Logger.LogWarning("Apply Studios failed verification for {ItemName}: {Reason}", record.ItemName, reason);
-                    }
-                }
+                failures.Add($"Metadata: {reason}");
+                Logger.LogWarning("Apply Metadata failed verification for {ItemName}: {Reason}", record.ItemName, reason);
             }
         }
 
-        // Suppress unused-variable warnings — we tracked the changed flags so
-        // the verification log line below has consistent context.
-        _ = metadataChanged;
-        _ = imagesChanged;
-        _ = peopleChanged;
-        _ = studiosChanged;
+        if (config.MetadataSyncImages && record.HasImagesChanges)
+        {
+            var (ok, reason) = await VerifyImagesAppliedAsync(freshLocal, record, cancellationToken).ConfigureAwait(false);
+            if (ok)
+            {
+                record.Images.MarkSynced();
+                synced.Add("Images");
+                Logger.LogInformation("Apply Images verified for {ItemName}", record.ItemName);
+            }
+            else
+            {
+                failures.Add($"Images: {reason}");
+                Logger.LogWarning("Apply Images failed verification for {ItemName}: {Reason}", record.ItemName, reason);
+            }
+        }
+
+        if (config.MetadataSyncPeople && record.HasPeopleChanges && freshLocal.SupportsPeople)
+        {
+            var (ok, reason) = VerifyPeopleApplied(freshLocal, record);
+            if (ok)
+            {
+                record.People.MarkSynced();
+                synced.Add("People");
+                Logger.LogInformation("Apply People verified for {ItemName}", record.ItemName);
+            }
+            else
+            {
+                failures.Add($"People: {reason}");
+                Logger.LogWarning("Apply People failed verification for {ItemName}: {Reason}", record.ItemName, reason);
+            }
+        }
+
+        if (config.MetadataSyncStudios && record.HasStudiosChanges)
+        {
+            var (ok, reason) = VerifyStudiosApplied(freshLocal, record);
+            if (ok)
+            {
+                record.Studios.MarkSynced();
+                synced.Add("Studios");
+                Logger.LogInformation("Apply Studios verified for {ItemName}", record.ItemName);
+            }
+            else
+            {
+                failures.Add($"Studios: {reason}");
+                Logger.LogWarning("Apply Studios failed verification for {ItemName}: {Reason}", record.ItemName, reason);
+            }
+        }
 
         if (failures.Count > 0)
         {
             // Categories that succeeded keep their per-category MarkSynced
-            // state on the record — the base class will Upsert the record
-            // as Errored, persisting the partial progress so the next run
-            // doesn't redo the categories that already succeeded.
+            // state — the base will Upsert the record as Errored, persisting
+            // the partial progress so the next run doesn't redo the
+            // categories that already succeeded.
             throw new InvalidOperationException(string.Join("; ", failures));
         }
 
@@ -351,47 +356,37 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
     }
 
+    private MediaBrowser.Controller.Entities.BaseItem ResolveLocalItem(MetadataSyncItem record)
+    {
+        if (string.IsNullOrEmpty(record.LocalItemId))
+        {
+            throw new InvalidOperationException("Local item not found");
+        }
+
+        if (!Guid.TryParse(record.LocalItemId, out var localItemId))
+        {
+            throw new InvalidOperationException("Invalid item ID");
+        }
+
+        return _libraryManager.GetItemById(localItemId)
+            ?? throw new InvalidOperationException("Local item not found in library");
+    }
+
+    // No-op: per-category MarkSynced already happens inside ApplyAsync for
+    // the categories whose verify passed. Marking the whole record here
+    // would advance SyncedHash on un-applied categories too, falsely
+    // short-circuiting the next Refresh.
     /// <inheritdoc />
-    /// <remarks>
-    /// No-op — per-category <see cref="SyncableValue{T}.MarkSynced"/> calls
-    /// already happened inside <see cref="ApplyAsync"/> for the categories
-    /// whose verify passed.
-    /// <para>
-    /// Calling <see cref="MetadataSyncItem.MarkSynced"/> here would set
-    /// <c>SyncedHash = SourceHash</c> on categories that this run did NOT
-    /// actually apply (skipped because per-category <c>HasChanges</c> was
-    /// false at apply time, or skipped because the user's config disabled
-    /// that category, or skipped because the row was force-queued from the
-    /// UI without a matching source change). The next Refresh would then
-    /// see <c>SourceHash == SyncedHash</c>, short-circuit
-    /// <see cref="SyncableValue{T}.HasChanges"/> to false, and
-    /// <c>DecideStatus</c> would mark the row Synced — even when local
-    /// genuinely diverges from source. The UI keeps showing a diff (it
-    /// compares Source vs Local directly), but the apply phase only ever
-    /// processes Queued rows, so pressing Sync does nothing. That broke
-    /// images, people, and metadata across the board in 10.11.54.
-    /// </para>
-    /// </remarks>
     protected override void OnApplySucceeded(MetadataSyncItem record)
     {
-        // Intentionally empty — see remarks.
         _ = record;
     }
 
     /// <inheritdoc />
-    protected override Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
     {
-        ConfigManager.Configuration.LastMetadataSyncTime = DateTime.UtcNow;
-        try
-        {
-            ConfigManager.SaveConfiguration();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Failed to save metadata sync end time");
-        }
-
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastMetadataSyncTime = utcNow;
     }
 
     /// <inheritdoc />

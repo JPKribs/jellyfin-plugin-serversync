@@ -20,7 +20,6 @@ public partial class ConfigurationController
     // ===== History Sync Endpoints =====
 
     /// <summary>
-    /// GetHistoryItems
     /// Gets paginated history sync items from the database with optional search and filter.
     /// </summary>
     /// <param name="search">Optional search term.</param>
@@ -41,18 +40,15 @@ public partial class ConfigurationController
     {
         ArgumentNullException.ThrowIfNull(manager);
 
-        // Clamp pagination values
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
 
-        // Parse status filter
         SyncStatus? statusFilter = null;
         if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
         {
             statusFilter = parsedStatus;
         }
 
-        // Get paginated results
         var (items, totalCount) = manager.SearchHistoryItemsPaginated(search, statusFilter, sourceUserId, skip, take);
         var config = _configManager.Configuration;
 
@@ -66,7 +62,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetHistoryStatus
     /// Gets history sync status counts.
     /// </summary>
     /// <returns>History sync status response with counts.</returns>
@@ -90,7 +85,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// UpdateHistoryItemStatus
     /// Updates the status of a history sync item.
     /// </summary>
     /// <param name="request">Status update request.</param>
@@ -126,7 +120,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// QueueHistoryItems
     /// Moves history items to Queued status.
     /// </summary>
     /// <param name="request">Bulk history items request.</param>
@@ -186,7 +179,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// IgnoreHistoryItems
     /// Marks history items as ignored.
     /// </summary>
     /// <param name="request">Bulk history items request.</param>
@@ -244,7 +236,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// TriggerHistoryRefresh
     /// Manually triggers the refresh history sync table task.
     /// </summary>
     /// <returns>Action result with status message.</returns>
@@ -255,7 +246,6 @@ public partial class ConfigurationController
         => ExecuteScheduledTaskByKey("ServerSyncRefreshHistoryTable", "History refresh task started", "History refresh task not found");
 
     /// <summary>
-    /// TriggerHistorySync
     /// Manually triggers the sync missing history task.
     /// </summary>
     /// <returns>Action result with status message.</returns>

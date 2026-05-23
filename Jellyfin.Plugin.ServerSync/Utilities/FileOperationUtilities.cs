@@ -8,24 +8,19 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Utility methods for file operations.
+/// File-system operations: atomic moves, companion-file discovery, recycled-name
+/// generation, and directory write-permission probes.
 /// </summary>
 public static class FileOperationUtilities
 {
     /// <summary>
-    /// Common companion file extensions (subtitles, metadata, images).
+    /// Subtitle / metadata / image extensions discovered as companion files for a media file.
     /// </summary>
     public static readonly string[] CompanionExtensions = { ".srt", ".sub", ".ass", ".ssa", ".vtt", ".nfo", ".jpg", ".png" };
 
     /// <summary>
-    /// Moves a file with atomic overwrite semantics where possible.
-    /// Includes retry logic for transient failures.
+    /// Moves a file with overwrite semantics, retrying on transient IO failures.
     /// </summary>
-    /// <param name="sourcePath">Source file path.</param>
-    /// <param name="destinationPath">Destination file path.</param>
-    /// <param name="logger">Optional logger for retry warnings.</param>
-    /// <param name="maxRetries">Maximum number of retry attempts.</param>
-    /// <param name="retryDelayMs">Base delay between retries in milliseconds.</param>
     public static void MoveFileWithOverwrite(
         string sourcePath,
         string destinationPath,
@@ -52,20 +47,14 @@ public static class FileOperationUtilities
             }
         }
 
-        // Final attempt - let exception propagate
+        // Last attempt — let the exception propagate.
         File.Move(sourcePath, destinationPath, overwrite: true);
     }
 
     /// <summary>
-    /// Async version of MoveFileWithOverwrite that uses Task.Delay instead of Thread.Sleep.
-    /// Preferred for callers in async contexts (download pipeline, etc.) to avoid blocking thread pool threads.
+    /// Async version of <see cref="MoveFileWithOverwrite"/> using <see cref="Task.Delay"/>
+    /// so retry waits don't block thread-pool threads.
     /// </summary>
-    /// <param name="sourcePath">Source file path.</param>
-    /// <param name="destinationPath">Destination file path.</param>
-    /// <param name="logger">Optional logger for retry warnings.</param>
-    /// <param name="maxRetries">Maximum number of retry attempts.</param>
-    /// <param name="retryDelayMs">Base delay between retries in milliseconds.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task MoveFileWithOverwriteAsync(
         string sourcePath,
         string destinationPath,
@@ -93,22 +82,17 @@ public static class FileOperationUtilities
             }
         }
 
-        // Final attempt - let exception propagate
         File.Move(sourcePath, destinationPath, overwrite: true);
     }
 
     /// <summary>
-    /// Generates a recycled file name with path encoded and timestamp.
-    /// Format: path.to.file_2026-01-29_17-30-45.ext
+    /// Builds a recycled file name in the form <c>path.to.file_2026-01-29_17-30-45.ext</c>.
     /// </summary>
-    /// <param name="originalPath">Original file path.</param>
-    /// <returns>Recycled file name.</returns>
     public static string GenerateRecycledFileName(string originalPath)
     {
         var fileName = Path.GetFileName(originalPath);
         var directory = Path.GetDirectoryName(originalPath) ?? string.Empty;
 
-        // Encode the directory path: replace path separators with periods
         var encodedPath = directory
             .Replace(Path.DirectorySeparatorChar, '.')
             .Replace(Path.AltDirectorySeparatorChar, '.')
@@ -128,17 +112,15 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// Attempts to extract the UTC timestamp from a recycled file name.
+    /// Extracts the UTC timestamp from a recycled file name, or null if the pattern doesn't match.
     /// </summary>
-    /// <param name="filePath">Path to recycled file.</param>
-    /// <returns>Extracted timestamp or null if not parseable.</returns>
     public static DateTime? ExtractTimestampFromFileName(string filePath)
     {
         try
         {
             var fileName = Path.GetFileNameWithoutExtension(filePath);
 
-            // Look for timestamp pattern: _YYYY-MM-DD_HH-mm-ss at the end
+            // Pattern: _YYYY-MM-DD_HH-mm-ss at the end.
             var lastUnderscore = fileName.LastIndexOf('_');
             if (lastUnderscore < 0)
             {
@@ -165,23 +147,16 @@ public static class FileOperationUtilities
         }
         catch (ArgumentOutOfRangeException)
         {
-            // Filename doesn't contain the expected timestamp pattern
+            // Filename doesn't match the expected timestamp pattern.
         }
 
         return null;
     }
 
     /// <summary>
-    /// Gets companion files for a main file (subtitles, metadata, images).
-    /// Matches Jellyfin's external-file naming convention: companions live in
-    /// the same directory and have a name of the form
-    /// <c>{base}.{ext}</c> or <c>{base}.{language}.{ext}</c> (with optional
-    /// flags), where <c>{base}</c> is the main file's stem. The match is exact
-    /// on <c>{base}.</c> so a movie named <c>Foo.mkv</c> never picks up
-    /// companions of a sibling like <c>Foo 2.mkv</c>.
+    /// Returns companion files (subtitles, NFOs, images) that share the main file's stem.
+    /// Match is exact on <c>{base}.</c> so siblings like <c>Foo 2.mkv</c> don't bleed into <c>Foo.mkv</c>'s companions.
     /// </summary>
-    /// <param name="mainFilePath">Path to the main file.</param>
-    /// <returns>List of companion file paths.</returns>
     public static List<string> GetCompanionFiles(string mainFilePath)
     {
         var companions = new List<string>();
@@ -199,8 +174,6 @@ public static class FileOperationUtilities
         {
             try
             {
-                // Use a coarse glob on the prefix, then filter strictly so we
-                // only accept "{base}.<...>{ext}" — not "{base} 2{ext}" etc.
                 foreach (var candidate in Directory.EnumerateFiles(directory, fileNameWithoutExt + "*" + ext))
                 {
                     var name = Path.GetFileName(candidate);
@@ -213,7 +186,7 @@ public static class FileOperationUtilities
             }
             catch (IOException)
             {
-                // Directory access error during companion file search
+                // Skip this extension on directory-access failure.
             }
         }
 
@@ -221,10 +194,9 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// Tests if a directory has write permissions by creating a temporary file.
+    /// Probes a directory for write permission by creating and deleting a sentinel file.
+    /// Creates the directory if it doesn't exist.
     /// </summary>
-    /// <param name="directoryPath">Directory path to test.</param>
-    /// <returns>True if write permission exists.</returns>
     public static bool HasWritePermission(string directoryPath)
     {
         if (string.IsNullOrEmpty(directoryPath))
@@ -258,7 +230,7 @@ public static class FileOperationUtilities
                     }
                     catch (IOException)
                     {
-                        // Test file cleanup failed; DeleteOnClose should handle it
+                        // DeleteOnClose handles cleanup; explicit delete is best-effort.
                     }
                 }
             }

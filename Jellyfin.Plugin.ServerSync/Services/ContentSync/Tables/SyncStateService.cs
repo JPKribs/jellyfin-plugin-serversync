@@ -9,18 +9,11 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// State transitions for content sync items. Change detection is size-only —
-/// the prior ETag-based detection was unstable because Jellyfin's ETag
-/// includes UserData, so it changed on every play/pause/favorite even when
-/// the underlying file didn't.
-/// <para>
-/// The Process* methods are pure: they mutate or build the
-/// <see cref="SyncItem"/> and return it. Persistence is the caller's
-/// responsibility (the base task class's Upsert path).
-/// <see cref="ProcessMissingItem"/> is the exception — it can either delete
-/// or upsert depending on the deletion mode and prior status, so it owns
-/// its own writes.
-/// </para>
+/// State transitions for content sync items. Change detection is size-only;
+/// the ETag-based detection it replaced was unstable because Jellyfin's ETag
+/// changes whenever UserData changes. <see cref="ProcessMissingItem"/> owns
+/// its own writes (delete vs upsert); other Process* methods are pure and
+/// leave persistence to the caller.
 /// </summary>
 public static class SyncStateService
 {

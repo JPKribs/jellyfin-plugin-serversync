@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using MediaBrowser.Common.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -8,6 +9,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// <summary>
 /// Provides lazy-initialized access to the shared <see cref="SyncDatabase"/> singleton.
 /// </summary>
+[PluginService(ServiceLifetime.Singleton, ServiceType = typeof(ISyncDatabaseProvider))]
 public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
 {
     private readonly ILoggerFactory _loggerFactory;

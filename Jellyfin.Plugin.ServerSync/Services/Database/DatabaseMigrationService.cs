@@ -7,22 +7,16 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// Handles database schema migrations for the sync database.
-/// <para>
-/// v18 is a hard reset: the schema was reorganized around a unified
-/// <c>SyncRecord</c> base (with <c>Reason</c> replacing <c>ErrorMessage</c>),
-/// new content fingerprint columns, and the removal of the unstable
-/// <c>SourceETag</c> change-detection signal. Upgrades from any prior
-/// version drop all tables and recreate them fresh — tracking data is lost,
-/// but the next refresh re-populates everything.
-/// </para>
+/// Handles database schema migrations for the sync database. Upgrades from
+/// pre-v19 versions drop all tracking tables and recreate them; the next
+/// refresh re-populates everything from source/local state.
 /// </summary>
 public static class DatabaseMigrationService
 {
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 20;
+    public const int CurrentSchemaVersion = 21;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -69,7 +63,9 @@ public static class DatabaseMigrationService
         // ===== History Sync (HistorySyncItems) =====
         // One row per (user, library, item). Source/Local/Merged are five
         // primitive fields (IsPlayed/PlayCount/PositionTicks/LastPlayedDate/
-        // IsFavorite). No hashes — primitive compares are already cheap.
+        // IsFavorite). SourceStateHash/SyncedStateHash bundle the five
+        // source-side fields into a single fingerprint so Refresh can
+        // skip rows whose source state hasn't moved since the last sync.
         using var historyCmd = connection.CreateCommand();
         historyCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS HistorySyncItems (
@@ -102,6 +98,8 @@ public static class DatabaseMigrationService
                 StatusDate TEXT NOT NULL,
                 LastSyncTime TEXT,
                 Reason TEXT,
+                SourceStateHash TEXT,
+                SyncedStateHash TEXT,
                 UNIQUE(SourceUserId, SourceItemId)
             );
             CREATE INDEX IF NOT EXISTS idx_history_user ON HistorySyncItems(SourceUserId, LocalUserId);
@@ -298,31 +296,11 @@ public static class DatabaseMigrationService
                 CreateInitialSchema(connection);
             }
 
-            // v20: Clear poisoned SyncedHash columns from 10.11.54.
-            // That release's OnApplySucceeded set SyncedHash = SourceHash on
-            // every category after a successful apply, including categories
-            // the run never actually applied (skipped because per-category
-            // HasChanges was already false, or skipped because user config
-            // disabled the category, or skipped because the row was force-
-            // queued without a real source change). The next Refresh saw
-            // SourceHash == SyncedHash, the hash short-circuit in
-            // SyncableValue.HasChanges returned false before the comparator
-            // ran, DecideStatus marked the row Synced, and the apply phase
-            // never touched the row again — even though local genuinely
-            // diverged from source. Most visibly, images stopped flowing.
-            //
-            // Null out all SyncedHash columns on the metadata + people
-            // tables so the next Refresh is forced to use the comparator
-            // for every row. Rows that genuinely match Source==Local will
-            // be MarkSynced'd by DecideStatus on that pass; rows that
-            // diverge will be Queued and the next Sync will apply them.
-            // Status is left alone — DecideStatus will overwrite it (except
-            // for Ignored, which it preserves on purpose, so user
-            // overrides survive).
-            //
-            // Skipped on a fresh-create path because CreateInitialSchema
-            // produces NULL SyncedHashes by default; only the in-place
-            // upgrade path needs this UPDATE.
+            // v20: Clear poisoned SyncedHash columns left over from a 10.11.54
+            // bug that set SyncedHash = SourceHash on un-applied categories.
+            // Nulls force the next Refresh through the comparator for every
+            // row; matching rows get re-MarkSynced, diverging rows requeue.
+            // Status is left alone so Ignored overrides survive.
             if (fromVersion >= 19 && fromVersion < 20)
             {
                 logger.LogWarning(
@@ -355,6 +333,48 @@ public static class DatabaseMigrationService
                 }
 
                 clearTransaction.Commit();
+            }
+
+            // v21: History migrates to SyncableValue<string> for change
+            // detection. New columns SourceStateHash + SyncedStateHash on
+            // HistorySyncItems carry the source-state bundle's fingerprint.
+            // Also clear any UserSyncItems SyncedValueHash values because the
+            // hash format changed from truncated-SHA256 (32 hex) to full
+            // JsonBlobComparator SHA256 (64 hex) — the next Refresh re-seeds
+            // them via the comparator path.
+            if (fromVersion >= 19 && fromVersion < 21)
+            {
+                logger.LogWarning(
+                    "Schema upgrade to v21: adding SourceStateHash/SyncedStateHash columns to HistorySyncItems and clearing stale SyncedValueHash on UserSyncItems for the SyncableValue migration.");
+
+                using var v21Transaction = connection.BeginTransaction();
+
+                foreach (var col in new[] { "SourceStateHash", "SyncedStateHash" })
+                {
+                    using var addCol = connection.CreateCommand();
+                    addCol.Transaction = v21Transaction;
+                    addCol.CommandText = $"ALTER TABLE HistorySyncItems ADD COLUMN {col} TEXT";
+                    try
+                    {
+                        addCol.ExecuteNonQuery();
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Idempotent — running against a partially-migrated
+                        // schema (rare but possible from a crashed upgrade)
+                        // shouldn't fail.
+                    }
+                }
+
+                using (var clearUser = connection.CreateCommand())
+                {
+                    clearUser.Transaction = v21Transaction;
+                    clearUser.CommandText = "UPDATE UserSyncItems SET SyncedValueHash = NULL";
+                    var rows = clearUser.ExecuteNonQuery();
+                    logger.LogInformation("v21: cleared SyncedValueHash on {Rows} UserSyncItems rows", rows);
+                }
+
+                v21Transaction.Commit();
             }
 
             SetSchemaVersion(connection, CurrentSchemaVersion);

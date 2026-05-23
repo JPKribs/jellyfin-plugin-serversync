@@ -68,6 +68,50 @@ public class SyncMissingHistoryTask
     {
         ArgumentNullException.ThrowIfNull(record);
 
+        var (localUserId, localItemId) = ParseLocalIds(record);
+
+        var success = _localClient.UpdateUserItemData(
+            localUserId,
+            localItemId,
+            record.MergedIsPlayed,
+            record.MergedPlayCount,
+            record.MergedPlaybackPositionTicks,
+            record.MergedLastPlayedDate,
+            record.MergedIsFavorite);
+
+        if (!success)
+        {
+            throw new InvalidOperationException("Failed to update user data");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task VerifyAfterApplyAsync(HistorySyncItem record, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        var (localUserId, localItemId) = ParseLocalIds(record);
+
+        // Re-read the user-data and compare against what we just merged.
+        // Mismatches surface as a precise Errored reason rather than a
+        // silent green badge.
+        var (ok, reason) = VerifyApplied(record, localUserId, localItemId);
+        if (!ok)
+        {
+            throw new InvalidOperationException(reason ?? "verification failed");
+        }
+
+        Logger.LogInformation("Apply History verified for {ItemName}: {Changes}",
+            record.ItemName,
+            HistorySyncMergeService.GetChangeSummary(record));
+
+        return Task.CompletedTask;
+    }
+
+    private static (Guid LocalUserId, Guid LocalItemId) ParseLocalIds(HistorySyncItem record)
+    {
         if (string.IsNullOrEmpty(record.LocalItemId))
         {
             throw new InvalidOperationException("Local item not found");
@@ -84,34 +128,7 @@ public class SyncMissingHistoryTask
             throw new InvalidOperationException("Invalid user or item ID");
         }
 
-        var success = _localClient.UpdateUserItemData(
-            localUserId,
-            localItemId,
-            record.MergedIsPlayed,
-            record.MergedPlayCount,
-            record.MergedPlaybackPositionTicks,
-            record.MergedLastPlayedDate,
-            record.MergedIsFavorite);
-
-        if (!success)
-        {
-            throw new InvalidOperationException("Failed to update user data");
-        }
-
-        // Verify the write took. Re-read the user-data and compare against
-        // what we just merged. Mismatches surface as a precise Errored
-        // reason rather than a silent green badge.
-        var (ok, reason) = VerifyApplied(record, localUserId, localItemId);
-        if (!ok)
-        {
-            throw new InvalidOperationException(reason ?? "verification failed");
-        }
-
-        Logger.LogInformation("Apply History verified for {ItemName}: {Changes}",
-            record.ItemName,
-            HistorySyncMergeService.GetChangeSummary(record));
-
-        return Task.CompletedTask;
+        return (localUserId, localItemId);
     }
 
     private (bool Succeeded, string? FailureReason) VerifyApplied(HistorySyncItem record, Guid localUserId, Guid localItemId)
@@ -170,14 +187,12 @@ public class SyncMissingHistoryTask
         return new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, dt.Second, dt.Kind);
     }
 
+    // HistorySyncItem has no SyncableValue fields (its base MarkSynced is
+    // a no-op), so on success we copy the merged values into the local
+    // snapshot. The next Refresh will re-pull the actual local state, but
+    // in the meantime <see cref="HistorySyncMergeService.HasChangesToSync"/>
+    // will see local == merged and not requeue.
     /// <inheritdoc />
-    /// <remarks>
-    /// HistorySyncItem has no SyncableValue fields (its base MarkSynced is
-    /// a no-op), so on success we copy the merged values into the local
-    /// snapshot. The next Refresh will re-pull the actual local state, but
-    /// in the meantime <see cref="HistorySyncMergeService.HasChangesToSync"/>
-    /// will see local == merged and not requeue.
-    /// </remarks>
     protected override void OnApplySucceeded(HistorySyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -190,12 +205,10 @@ public class SyncMissingHistoryTask
     }
 
     /// <inheritdoc />
-    protected override Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
     {
-        var config = ConfigManager.Configuration;
-        config.LastHistorySyncTime = DateTime.UtcNow;
-        ConfigManager.SaveConfiguration();
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastHistorySyncTime = utcNow;
     }
 
     /// <inheritdoc />

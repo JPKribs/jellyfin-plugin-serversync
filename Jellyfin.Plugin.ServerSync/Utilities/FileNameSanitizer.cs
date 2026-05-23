@@ -8,44 +8,26 @@ using System.Text.RegularExpressions;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Utility for sanitizing file names to remove illegal characters.
+/// Replaces characters and patterns that are illegal in cross-platform file names.
 /// </summary>
 public static partial class FileNameSanitizer
 {
-    /// <summary>
-    /// Characters that are invalid in file names across Windows, macOS, and Linux.
-    /// </summary>
     private static readonly char[] InvalidChars = Path.GetInvalidFileNameChars();
 
-    /// <summary>
-    /// Additional characters that may cause issues.
-    /// </summary>
     private static readonly char[] AdditionalInvalidChars = { ':', '*', '?', '"', '<', '>', '|', '\0' };
 
-    /// <summary>
-    /// Pre-computed set of all invalid characters (union of OS-invalid + additional).
-    /// </summary>
     private static readonly HashSet<char> AllInvalidChars = InvalidChars
         .Concat(AdditionalInvalidChars)
         .Distinct()
         .ToHashSet();
 
-    /// <summary>
-    /// Pre-compiled regex for collapsing consecutive underscores.
-    /// </summary>
     private static readonly Regex UnderscoreCollapseRegex = new(@"_+", RegexOptions.Compiled);
 
-    /// <summary>
-    /// Maximum file name length (conservative limit for cross-platform compatibility).
-    /// </summary>
     private const int MaxFileNameLength = 200;
 
     /// <summary>
-    /// Sanitizes a file name by removing or replacing illegal characters.
+    /// Returns a cross-platform-safe file name. Empty or null input becomes "unnamed_{guid}".
     /// </summary>
-    /// <param name="fileName">The file name to sanitize.</param>
-    /// <param name="replacement">Character to replace illegal characters with (default: underscore).</param>
-    /// <returns>Sanitized file name.</returns>
     public static string Sanitize(string? fileName, char replacement = '_')
     {
         if (string.IsNullOrWhiteSpace(fileName))
@@ -68,23 +50,15 @@ public static partial class FileNameSanitizer
         }
 
         var sanitized = sb.ToString();
-
-        // Remove consecutive replacement characters
         sanitized = CollapseReplacements(sanitized, replacement);
-
-        // Trim leading/trailing spaces and dots (problematic on Windows)
         sanitized = sanitized.Trim(' ', '.');
-
-        // Handle reserved Windows file names
         sanitized = HandleReservedNames(sanitized);
 
-        // Truncate if too long (preserve extension)
         if (sanitized.Length > MaxFileNameLength)
         {
             sanitized = TruncateWithExtension(sanitized, MaxFileNameLength);
         }
 
-        // Final fallback if empty
         if (string.IsNullOrWhiteSpace(sanitized))
         {
             return $"unnamed_{Guid.NewGuid():N}";
@@ -94,12 +68,8 @@ public static partial class FileNameSanitizer
     }
 
     /// <summary>
-    /// Sanitizes a file name for use as a temporary file.
-    /// Combines an ID prefix with the sanitized original name.
+    /// Sanitizes a temp file name as "{sanitized-id}_{sanitized-original-name}".
     /// </summary>
-    /// <param name="sourceItemId">Source item ID to use as prefix.</param>
-    /// <param name="originalPath">Original file path to extract name from.</param>
-    /// <returns>Sanitized temp file name.</returns>
     public static string SanitizeTempFileName(string sourceItemId, string? originalPath)
     {
         var originalName = !string.IsNullOrEmpty(originalPath)
@@ -112,9 +82,6 @@ public static partial class FileNameSanitizer
         return $"{sanitizedId}_{sanitizedName}";
     }
 
-    /// <summary>
-    /// Collapses consecutive replacement characters into a single one.
-    /// </summary>
     private static string CollapseReplacements(string input, char replacement)
     {
         if (replacement == '_')
@@ -126,15 +93,11 @@ public static partial class FileNameSanitizer
         return Regex.Replace(input, pattern, replacement.ToString());
     }
 
-    /// <summary>
-    /// Handles reserved Windows file names by appending an underscore.
-    /// </summary>
     private static string HandleReservedNames(string fileName)
     {
         var nameWithoutExtension = Path.GetFileNameWithoutExtension(fileName).ToUpperInvariant();
         var extension = Path.GetExtension(fileName);
 
-        // Reserved names in Windows
         string[] reservedNames =
         {
             "CON", "PRN", "AUX", "NUL",
@@ -150,9 +113,6 @@ public static partial class FileNameSanitizer
         return fileName;
     }
 
-    /// <summary>
-    /// Truncates a file name while preserving the extension.
-    /// </summary>
     private static string TruncateWithExtension(string fileName, int maxLength)
     {
         var extension = Path.GetExtension(fileName);
@@ -161,7 +121,6 @@ public static partial class FileNameSanitizer
         var maxNameLength = maxLength - extension.Length;
         if (maxNameLength < 1)
         {
-            // Extension too long, just truncate everything
             return fileName[..maxLength];
         }
 

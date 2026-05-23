@@ -1,6 +1,7 @@
 using System;
 using System.Net.Http;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -9,6 +10,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// Factory for creating <see cref="SourceServerClient"/> instances using DI-provided dependencies.
 /// Validates the server URL for SSRF protection before creating the client.
 /// </summary>
+[PluginService(ServiceLifetime.Singleton, ServiceType = typeof(ISourceServerClientFactory))]
 public class SourceServerClientFactory : ISourceServerClientFactory
 {
     private readonly IHttpClientFactory _httpClientFactory;

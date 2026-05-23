@@ -13,7 +13,6 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// SyncDatabase
 /// SQLite database for tracking sync items between servers.
 /// </summary>
 public class SyncDatabase : IDisposable
@@ -222,7 +221,6 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// RecreateDatabase
     /// Closes and deletes the current database, then creates a fresh one.
     /// </summary>
     private void RecreateDatabase()
@@ -267,7 +265,6 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// EnsureConnection
     /// Ensures the database connection is open, reopening if necessary.
     /// </summary>
     private void EnsureConnection()
@@ -325,7 +322,6 @@ public class SyncDatabase : IDisposable
     // ============================================
 
     /// <summary>
-    /// ResetDatabase
     /// Drops all data and recreates the database with the latest schema.
     /// </summary>
     public void ResetDatabase()

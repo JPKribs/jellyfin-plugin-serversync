@@ -23,25 +23,16 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
         => DescribeDifference(source, local) == null;
 
     /// <summary>
-    /// Returns a one-line description of the first detected mismatch
-    /// between two serialized image manifests, or <c>null</c> if they
-    /// match. Pinpoints the type/index involved so the verification
-    /// failure log can name the specific divergence instead of just
-    /// "count or per-type tag/size mismatch".
+    /// Returns the first detected mismatch between two manifests, or null
+    /// when they match. Names the diverging type/index so verify failures
+    /// pinpoint the cause instead of a generic message.
     /// </summary>
-    /// <param name="source">Source-side manifest.</param>
-    /// <param name="local">Local-side manifest.</param>
-    /// <returns>Human-readable diff, or null when manifests match.</returns>
     public string? DescribeDifference(string? source, string? local)
     {
         if (string.IsNullOrEmpty(source))
         {
-            // Asymmetric: source is the source-of-truth. When source has no
-            // images (empty manifest), there is nothing to sync — local
-            // should keep whatever it has. Reporting this as "different"
-            // forces an apply that can't do anything (nothing to download)
-            // and a guaranteed verify failure. Treat as no-diff so the
-            // record is left alone.
+            // Empty source = nothing to sync; leave local alone rather than
+            // queue an apply that can't deliver and would fail verify.
             return null;
         }
 
@@ -83,8 +74,7 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
                 var s = sourceImages[i];
                 var l = localImages[i];
 
-                // Both sides have real sizes — the canonical case after
-                // refresh enrichment runs. Strict size compare.
+                // Both sides have real sizes — canonical case, strict compare.
                 if (s.Size > 0 && l.Size > 0)
                 {
                     if (s.Size != l.Size)
@@ -95,50 +85,27 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
                     continue;
                 }
 
-                // Source size unknown (manifest is tag-only — refresh's
-                // per-item enrichment failed or hasn't run, so we never got
-                // real Size/Width/Height from /Items/{id}/Images). Local
-                // has a real size from the filesystem. We can't confirm
-                // parity by comparing sizes; treating the row as "equal"
-                // silently hides every image divergence (the 10.11.x bug
-                // pattern: modal shows different KB but row marked Synced).
-                // Return diff so the row queues; the Apply path will
-                // download, and VerifyImagesAppliedAsync re-runs enrichment
-                // before comparing so post-apply verification passes when
-                // the apply genuinely landed. Once MarkSynced records the
-                // SourceHash, future refreshes short-circuit on
-                // SourceHash == SyncedHash and never call back here.
+                // Tag-only source vs sized local: queue. Treating it as equal
+                // would silently desync. MarkSynced after a successful apply
+                // makes the next refresh short-circuit on SourceHash.
                 if (s.Size == 0 && l.Size > 0)
                 {
                     return $"type {type}[{i}]: source manifest is tag-only (size unknown), local size {l.Size}; cannot confirm match without enrichment";
                 }
 
-                // Source has a real size, local has size 0 — local file is
-                // missing or unreadable (filesystem builder leaves Size=0
-                // when File.Exists is false or FileInfo.Length throws). The
-                // image needs to be (re-)pulled from source. Without this
-                // branch the loop falls through and the comparator returns
-                // equal, leaving a hollow local image silently desynced.
+                // Local file missing or unreadable (Size=0). Queue for re-pull.
                 if (s.Size > 0 && l.Size == 0)
                 {
                     return $"type {type}[{i}]: source size {s.Size}, local size 0 (file missing or unreadable)";
                 }
 
-                // Both sides Size=0: genuinely indeterminate (refresh
-                // enrichment failed AND local file is missing). The Apply
-                // path will retry enrichment and the download; if both
-                // sides are still 0 next time, the row stays in this
-                // limbo. Don't return diff here because there's nothing
-                // actionable — apply can't write what source can't deliver.
-                // Fall through (continue). The Tag is still part of the
-                // SourceHash so a Tag change invalidates the short-circuit
-                // and we re-attempt enrichment on the next refresh.
+                // Both sides Size=0: indeterminate, fall through — nothing
+                // actionable. Tag change invalidates the SourceHash so we'll
+                // re-enrich on the next refresh anyway.
             }
         }
 
-        // Local-only types are tolerated in equality (only source→local
-        // direction matters), but surface them in the description so users
-        // can see when local has extra image types beyond what source has.
+        // Local-only types are tolerated (source→local direction only).
         foreach (var (type, localImages) in localMap)
         {
             if (!sourceMap.ContainsKey(type))

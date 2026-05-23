@@ -6,6 +6,7 @@ using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -16,6 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// (user, item) pair, regardless of which local user it maps to (the local
 /// side is informational, not part of the key).
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public sealed class HistorySyncTableManager
     : SyncTableManagerBase<HistorySyncItem, (string SourceUserId, string SourceItemId)>
 {
@@ -36,19 +38,14 @@ public sealed class HistorySyncTableManager
     /// <inheritdoc />
     protected override string TableName => "HistorySyncItems";
 
+    // Sentinel — unused, since UpdateStatusByKey is overridden directly to
+    // handle the composite (SourceUserId, SourceItemId) key.
     /// <inheritdoc />
-    /// <remarks>
-    /// Sentinel — never used because we override
-    /// <see cref="UpdateStatusByKey"/> directly to handle the composite key
-    /// (SourceUserId, SourceItemId).
-    /// </remarks>
     protected override string KeyColumn => "SourceItemId";
 
+    // History has no Pending status: rows are either Queued or Synced.
+    // Order: Errored, Queued, Ignored, Synced.
     /// <inheritdoc />
-    /// <remarks>
-    /// History has no Pending status (items either have changes → Queued, or
-    /// don't → Synced). Order: Errored, Queued, Ignored, Synced.
-    /// </remarks>
     protected override string StatusPriorityOrderBy => @"
         CASE Status
             WHEN 3 THEN 0
@@ -99,6 +96,8 @@ public sealed class HistorySyncTableManager
 
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
+        item.SourceState.SourceHash = ReadNullableString(reader, "SourceStateHash");
+        item.SourceState.SyncedHash = ReadNullableString(reader, "SyncedStateHash");
         return item;
     }
 
@@ -156,14 +155,16 @@ public sealed class HistorySyncTableManager
                     SourceIsPlayed, SourcePlayCount, SourcePlaybackPositionTicks, SourceLastPlayedDate, SourceIsFavorite,
                     LocalIsPlayed, LocalPlayCount, LocalPlaybackPositionTicks, LocalLastPlayedDate, LocalIsFavorite,
                     MergedIsPlayed, MergedPlayCount, MergedPlaybackPositionTicks, MergedLastPlayedDate, MergedIsFavorite,
-                    Status, StatusDate, LastSyncTime, Reason
+                    Status, StatusDate, LastSyncTime, Reason,
+                    SourceStateHash, SyncedStateHash
                 ) VALUES (
                     @sourceUserId, @localUserId, @sourceLibraryId, @localLibraryId,
                     @sourceItemId, @localItemId, @itemName, @sourcePath, @localPath,
                     @srcPlayed, @srcCount, @srcPos, @srcLast, @srcFav,
                     @locPlayed, @locCount, @locPos, @locLast, @locFav,
                     @mrgPlayed, @mrgCount, @mrgPos, @mrgLast, @mrgFav,
-                    @status, @statusDate, @lastSync, @reason
+                    @status, @statusDate, @lastSync, @reason,
+                    @srcStateHash, @syncedStateHash
                 )
                 ON CONFLICT(SourceUserId, SourceItemId) DO UPDATE SET
                     LocalUserId = @localUserId,
@@ -191,7 +192,9 @@ public sealed class HistorySyncTableManager
                     Status = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
                     StatusDate = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.StatusDate ELSE @statusDate END,
                     LastSyncTime = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.LastSyncTime ELSE @lastSync END,
-                    Reason = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.Reason ELSE @reason END";
+                    Reason = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.Reason ELSE @reason END,
+                    SourceStateHash = @srcStateHash,
+                    SyncedStateHash = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.SyncedStateHash ELSE @syncedStateHash END";
 
             cmd.Parameters.AddWithValue("@sourceUserId", record.SourceUserId);
             cmd.Parameters.AddWithValue("@localUserId", record.LocalUserId);
@@ -221,6 +224,8 @@ public sealed class HistorySyncTableManager
             AddTimestamp(cmd, "@statusDate", record.StatusDate);
             AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
             AddNullable(cmd, "@reason", record.Reason);
+            AddNullable(cmd, "@srcStateHash", record.SourceState.SourceHash);
+            AddNullable(cmd, "@syncedStateHash", record.SourceState.SyncedHash);
             cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
             cmd.ExecuteNonQuery();
         });

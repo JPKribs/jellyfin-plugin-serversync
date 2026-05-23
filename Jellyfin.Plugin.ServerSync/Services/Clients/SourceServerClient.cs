@@ -17,7 +17,6 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// SourceServerClient
 /// Client for communicating with the source Jellyfin server using the official SDK.
 /// The HttpClient is externally owned (via IHttpClientFactory) and must NOT be disposed by this class.
 /// </summary>
@@ -78,7 +77,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// TestConnectionAsync
     /// Tests connection to the source server and returns server info.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -297,7 +295,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// GetLibrariesAsync
     /// Gets all libraries from the source server.
     /// Tries the admin /Library/VirtualFolders endpoint first.
     /// If that fails (e.g. non-admin user token), falls back to /Users/{userId}/Views.
@@ -398,7 +395,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// GetUsersAsync
     /// Gets all users from the source server.
     /// Falls back to fetching only the authenticated user if the admin endpoint is forbidden.
     /// </summary>
@@ -536,21 +532,13 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches the Content-sync leaf items belonging to a single whitelisted
-    /// item. Looks up the whitelisted item by ID with no type restriction,
-    /// then:
-    ///   - If it's a leaf (Movie / Episode / Audio / Video): returns just it.
-    ///   - If it's a folder type (Series / Season / BoxSet / MusicAlbum /
-    ///     MusicArtist): walks its descendants and returns the leaves under
-    ///     it.
-    /// One whitelisted ID at a time. The descendants walk uses a folder-by-
-    /// folder traversal rather than <c>ParentId=&lt;id&gt;&amp;Recursive=true</c>
-    /// because Jellyfin keeps both the literal <c>ParentId</c> filter and the
-    /// derived <c>AncestorIds</c> filter on recursive queries — episodes have
-    /// <c>ParentId=&lt;seasonId&gt;</c>, not <c>&lt;seriesId&gt;</c>, so a
-    /// recursive query against a Series returned nothing and the whitelist
-    /// branch produced no work for any Series. Walking children one folder
-    /// level at a time avoids that filter entirely.
+    /// Fetches the Content-sync leaves for a single whitelisted item: returns
+    /// the item itself if it's a leaf, or walks its descendants folder-by-
+    /// folder if it's a folder type. The folder walk avoids the
+    /// <c>ParentId</c>+<c>Recursive=true</c> path because Jellyfin keeps the
+    /// literal <c>ParentId</c> filter on recursive queries, which returns
+    /// nothing for a Series since episodes carry the Season's ID, not the
+    /// Series'.
     /// </summary>
     public async Task<List<BaseItemDto>> GetWhitelistedItemLeavesAsync(
         Guid whitelistedId,
@@ -685,21 +673,10 @@ public class SourceServerClient : IDisposable
 
     /// <summary>
     /// Fetches Content-sync leaf items (Movie / Episode / Audio / Video) that
-    /// are descendants of any of <paramref name="ancestorIds"/>. Used by the
-    /// Whitelist routing path so a whitelisted Series ID expands to all of
-    /// its episodes (same for Seasons / BoxSets / any folder-type whitelist),
-    /// matching the implicit path-prefix expansion the previous bulk-fetch +
-    /// IsItemFiltered approach gave for free.
-    /// <para>
-    /// Implemented as one <c>ParentId=&lt;id&gt;&amp;Recursive=true</c> query
-    /// per whitelist entry (concurrent up to 4 in flight). The Kiota client
-    /// in use does not expose <c>AncestorIds</c> as a query parameter, so
-    /// we use ParentId-recursive instead — same end result. Whitelist entries
-    /// that are leaves themselves return nothing here (they have no syncable
-    /// descendants); those are picked up by
-    /// <see cref="GetContentItemsByIdsAsync"/>. Results from all queries are
-    /// de-duped by item ID.
-    /// </para>
+    /// are descendants of any of <paramref name="ancestorIds"/>. One
+    /// <c>ParentId=&lt;id&gt;&amp;Recursive=true</c> query per entry (up to 4
+    /// concurrent), de-duped by item ID. Leaf-only entries return nothing here
+    /// and are picked up by <see cref="GetContentItemsByIdsAsync"/> instead.
     /// </summary>
     public async Task<List<BaseItemDto>> GetContentItemsByAncestorsAsync(
         IReadOnlyList<Guid> ancestorIds,
@@ -787,7 +764,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// GetLibraryItemsAsync
     /// Gets items from a library with pagination support.
     /// </summary>
     /// <param name="libraryId">Library ID.</param>
@@ -901,7 +877,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// GetLibraryItemsWithMetadataAsync
     /// Gets items from a library with extended metadata fields for metadata sync.
     /// </summary>
     /// <param name="libraryId">Library ID.</param>
@@ -964,7 +939,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// GetLibraryItemCountAsync
     /// Gets the total count of items in a library without fetching item details.
     /// </summary>
     /// <param name="libraryId">Library ID.</param>
@@ -1203,7 +1177,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// GetItemDetailsAsync
     /// Gets detailed item info including media sources and streams.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
@@ -1242,7 +1215,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// DownloadFileAsync
     /// Downloads a file from the source server.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
@@ -1296,7 +1268,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// GetCompanionFilesAsync
     /// Gets external companion files (subtitles, etc.) for an item.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
@@ -1346,7 +1317,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// DownloadCompanionFileAsync
     /// Downloads an external subtitle or companion file by its path.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
@@ -1604,25 +1574,10 @@ public class SourceServerClient : IDisposable
     // ===== People Sync Methods =====
 
     /// <summary>
-    /// Gets a single Person by name from the source server as a full
-    /// <see cref="BaseItemDto"/>.
-    /// <para>
-    /// Uses <c>/Persons?searchTerm=…&amp;fields=…</c> directly. The previous
-    /// implementation hit <c>/Persons/{name}</c> for an ID then refetched
-    /// via <c>/Items?Ids=</c>, but the Items endpoint with Person IDs returns
-    /// the cast-list <c>BaseItemPerson</c> shape — Overview, PremiereDate,
-    /// EndDate, ProductionLocations, Tags, LockedFields are stripped, which
-    /// caused permanent metadata diffs in the People modal.
-    /// </para>
-    /// <para>
-    /// <c>searchTerm</c> is fuzzy/substring on Jellyfin, so we filter for
-    /// the first result whose Name matches <paramref name="name"/>
-    /// case-insensitively; partial-prefix matches are discarded.
-    /// </para>
+    /// Gets a single Person by name as a full <see cref="BaseItemDto"/> via
+    /// <c>/Persons?searchTerm=…</c>. Jellyfin's searchTerm is fuzzy, so we
+    /// filter for an exact case-insensitive Name match and discard partials.
     /// </summary>
-    /// <param name="name">Person name to look up.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>BaseItemDto for the person, or null on failure.</returns>
     public async Task<BaseItemDto?> GetPersonByNameAsync(
         string name,
         CancellationToken cancellationToken = default)
@@ -1692,19 +1647,10 @@ public class SourceServerClient : IDisposable
 
     /// <summary>
     /// Bulk-fetches every Person from the source server in a single
-    /// <c>/Persons?fields=…</c> call. Returns one <see cref="BaseItemDto"/>
-    /// per source Person with the same field set as
-    /// <see cref="GetPersonByNameAsync"/>, so callers can do a local
-    /// name-keyed join instead of issuing one HTTP call per person.
-    /// <para>
-    /// Jellyfin's <c>/Persons</c> endpoint exposes neither <c>StartIndex</c>
-    /// nor a server-imposed cap, so we omit <c>Limit</c> to receive the
-    /// whole catalog in one response. The response can be large (tens of
-    /// MB on libraries with 100k+ persons), but it's still dramatically
-    /// faster than per-name fan-out — one round-trip vs. 100k.
-    /// </para>
+    /// <c>/Persons?fields=…</c> call so callers can do a local name-keyed join
+    /// instead of one HTTP call per person. Response can be tens of MB on
+    /// libraries with 100k+ persons, but still beats per-name fan-out.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>All persons returned by the source server.</returns>
     public async Task<IReadOnlyList<BaseItemDto>> GetAllPersonsAsync(
         CancellationToken cancellationToken = default)
@@ -1852,16 +1798,11 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches the full set of item IDs played by a user within a library,
-    /// paginating internally. Throws on transient failure so callers don't
-    /// confuse "transient error" with "user has played nothing" — a silent
-    /// empty return would cause downstream filters to skip items they
-    /// shouldn't.
+    /// Fetches every item ID a user has played within a library, paginated.
+    /// Throws on transient failure so callers don't conflate "error" with
+    /// "user played nothing" — a silent empty return would let downstream
+    /// filters skip items they shouldn't.
     /// </summary>
-    /// <param name="userId">User ID on the source server.</param>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Set of item IDs the user has played in the library.</returns>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the source server returns a null page (failure) rather
     /// than an explicit empty page.
@@ -2037,7 +1978,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// GetApiClient
     /// Returns the API client, creating it lazily if needed.
     /// </summary>
     /// <returns>Jellyfin API client instance.</returns>

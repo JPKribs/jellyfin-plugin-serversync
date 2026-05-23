@@ -6,6 +6,7 @@ using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -18,6 +19,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// Source/SyncedHash columns to drive the per-category short-circuit on
 /// Refresh.
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public sealed class MetadataSyncTableManager
     : SyncTableManagerBase<MetadataSyncItem, (string SourceLibraryId, string SourceItemId)>
 {
@@ -38,17 +40,13 @@ public sealed class MetadataSyncTableManager
     /// <inheritdoc />
     protected override string TableName => "MetadataSyncItems";
 
+    // Sentinel — UpdateStatusByKey is overridden directly to handle the
+    // composite key.
     /// <inheritdoc />
-    /// <remarks>
-    /// Sentinel — we override <see cref="UpdateStatusByKey"/> directly to
-    /// handle the composite key.
-    /// </remarks>
     protected override string KeyColumn => "SourceItemId";
 
+    // Order: Errored, Queued, Ignored, Synced. No Pending in this table.
     /// <inheritdoc />
-    /// <remarks>
-    /// Order: Errored, Queued, Ignored, Synced. No Pending in this table.
-    /// </remarks>
     protected override string StatusPriorityOrderBy => @"
         CASE Status
             WHEN 3 THEN 0
@@ -259,16 +257,11 @@ public sealed class MetadataSyncTableManager
         fallback: (IList<MetadataSyncItem>)Array.Empty<MetadataSyncItem>());
 
     /// <summary>
-    /// Searches metadata items with optional filters. Adds a SourceLibraryId
-    /// filter beyond what <see cref="Paginate"/> exposes.
-    /// <para>
-    /// Returns a lightweight projection — the four <c>Source*Value</c> /
-    /// <c>Local*Value</c> JSON blob columns are NOT loaded (they can run
-    /// several KB each, multiplied by 8 columns × pageSize rows). Hashes
-    /// are loaded so callers can compute per-category change flags via
-    /// hash mismatch. Use <see cref="GetByKey"/> when blobs are needed
-    /// (e.g. the per-item detail endpoint).
-    /// </para>
+    /// Searches metadata items with optional filters. Returns a lightweight
+    /// projection that omits the four <c>Source*Value</c> / <c>Local*Value</c>
+    /// JSON blob columns (several KB each); hashes are loaded so callers can
+    /// compute per-category change flags via hash mismatch. Use
+    /// <see cref="GetByKey"/> when blobs are needed.
     /// </summary>
     public (IList<MetadataSyncItem> Items, int TotalCount) SearchMetadataSyncItemsPaginated(
         string? searchTerm = null,

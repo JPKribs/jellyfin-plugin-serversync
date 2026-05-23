@@ -20,7 +20,6 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 public partial class ConfigurationController
 {
     /// <summary>
-    /// TestConnection
     /// Tests connection to the source server using API key authentication.
     /// </summary>
     /// <param name="request">Connection test request.</param>
@@ -30,7 +29,6 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<ConnectionTestResult>> TestConnection([FromBody] TestConnectionRequest request, CancellationToken cancellationToken)
     {
-        // Validate URL first
         var urlValidation = ValidateServerUrl(request.ServerUrl);
         if (!urlValidation.IsValid)
         {
@@ -58,7 +56,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// ValidateUrl
     /// Validates a server URL format and accessibility.
     /// </summary>
     /// <param name="request">URL validation request.</param>
@@ -71,7 +68,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Authenticate
     /// Authenticates with a source server using username and password to generate an access token.
     /// </summary>
     /// <param name="request">Authentication request with credentials.</param>
@@ -81,7 +77,6 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<AuthenticateResponse>> Authenticate([FromBody] AuthenticateRequest request, CancellationToken cancellationToken)
     {
-        // Validate URL first
         var urlValidation = ValidateServerUrl(request.ServerUrl);
         if (!urlValidation.IsValid)
         {
@@ -125,7 +120,6 @@ public partial class ConfigurationController
             return Ok(result);
         }
 
-        // Test the token by getting server info
         using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, result.AccessToken!);
 
         var connectionTest = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -138,7 +132,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetSourceLibraries
     /// Gets libraries from the source server.
     /// </summary>
     /// <param name="request">Connection request with credentials.</param>
@@ -191,7 +184,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetSourceUsers
     /// Gets users from the source server.
     /// </summary>
     /// <param name="request">Connection request with credentials.</param>
@@ -243,7 +235,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// GetSourceLibraryItems
     /// Gets top-level items from a source server library for browsing/filtering.
     /// </summary>
     /// <param name="libraryId">Source library ID.</param>
@@ -321,7 +312,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// ValidateServerUrl
     /// Validates and normalizes a server URL.
     /// </summary>
     /// <param name="url">URL to validate.</param>
@@ -337,7 +327,6 @@ public partial class ConfigurationController
             };
         }
 
-        // Check for path traversal attempts
         if (url.Contains("..", StringComparison.Ordinal) || url.Contains("./", StringComparison.Ordinal))
         {
             return new ValidateUrlResponse
@@ -347,7 +336,6 @@ public partial class ConfigurationController
             };
         }
 
-        // Try to parse as URI
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
             return new ValidateUrlResponse
@@ -357,7 +345,6 @@ public partial class ConfigurationController
             };
         }
 
-        // Only allow HTTP and HTTPS
         if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
         {
             return new ValidateUrlResponse
@@ -367,7 +354,6 @@ public partial class ConfigurationController
             };
         }
 
-        // Check for localhost variants that might be intentional
         var isLocalhost = uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
                           uri.Host.Equals("127.0.0.1", StringComparison.Ordinal) ||
                           uri.Host.Equals("::1", StringComparison.Ordinal);
@@ -388,7 +374,6 @@ public partial class ConfigurationController
             }
         }
 
-        // Normalize the URL
         var normalizedUrl = $"{uri.Scheme}://{uri.Host}";
         if (!uri.IsDefaultPort)
         {

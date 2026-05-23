@@ -17,10 +17,8 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 /// <see cref="SyncStatus.Synced"/> otherwise). Refresh + Compare run in
 /// one pass; <see cref="SyncStatus.Pending"/> only appears for rows that
 /// existed before this run and never got revisited (e.g. interrupted run).
-/// <para>
-/// <see cref="SyncStatus.Ignored"/> rows are preserved as the user's
-/// explicit override and never auto-transitioned.
-/// </para>
+/// <see cref="SyncStatus.Ignored"/> rows are preserved as user overrides
+/// and never auto-transitioned.
 /// </summary>
 /// <typeparam name="TRecord">Record type.</typeparam>
 /// <typeparam name="TSource">Type of items returned by the source list.</typeparam>
@@ -104,10 +102,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
     /// <summary>
     /// Maximum concurrent <see cref="BuildRecordAsync"/> calls per refresh.
-    /// Default <c>1</c> (serial). Override when <c>BuildRecordAsync</c> spends
-    /// most of its time waiting on per-item HTTP calls — Metadata is the
-    /// canonical case (it fetches image info per item) and uses a higher
-    /// value to avoid serializing thousands of round-trips.
+    /// Default <c>1</c> (serial). Raise only when build is HTTP-bound —
+    /// Metadata fetches per-item image info and uses <c>8</c>. Parallelism
+    /// doesn't help in-process Jellyfin reads or SQLite-write-bound work
+    /// (the table manager's single write lock serializes the upsert).
     /// </summary>
     protected virtual int BuildRecordParallelism => 1;
 
@@ -132,13 +130,9 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     }
 
     /// <summary>
-    /// Fetches the list of source items to consider this run. Use
-    /// <see cref="Utilities.PaginatedFetchUtility"/>.
-    /// <para>
+    /// Fetches the list of source items to consider this run.
     /// <paramref name="progress"/> reports 0–100 for the fetch phase only;
-    /// the base class scales it into the run's overall progress allocation.
-    /// Implementations that don't paginate (single API call) can ignore it.
-    /// </para>
+    /// the base class scales it into the run's overall allocation.
     /// </summary>
     protected abstract Task<IList<TSource>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken);
 
@@ -217,12 +211,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
     /// <summary>
     /// Removes rows that no longer exist on the source. Default deletes them
-    /// outright. Subclasses can override to implement soft-delete (e.g.
-    /// Content marks them <see cref="SyncStatus.Pending"/> for deletion
-    /// awaiting user approval). Returns the number of rows pruned.
-    /// <para>
-    /// Out-of-scope rows (per <see cref="IsInScope"/>) are never pruned.
-    /// </para>
+    /// outright; subclasses can override for soft-delete (Content marks them
+    /// <see cref="SyncStatus.Pending"/> awaiting user approval). Out-of-scope
+    /// rows (per <see cref="IsInScope"/>) are never pruned. Returns the
+    /// number of rows pruned.
     /// </summary>
     protected virtual Task<int> PruneStaleAsync(
         IReadOnlyDictionary<TKey, TRecord> existing,
@@ -258,10 +250,25 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     }
 
     /// <summary>
-    /// Hook to update configuration timestamps and other bookkeeping after a
-    /// successful run. Default is a no-op.
+    /// Hook for post-run bookkeeping beyond timestamp updates (e.g. resolving
+    /// LocalItemIds after the upsert pass). Default is a no-op. For the
+    /// per-module "last refresh time" bump, override
+    /// <see cref="RecordRunCompleted"/> instead — the base saves the config
+    /// uniformly for all modules.
     /// </summary>
     protected virtual Task FinalizeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Per-module timestamp bump. Default is a no-op; each module overrides
+    /// to set its <c>LastXSyncTime</c> field on the configuration. The base
+    /// calls this after <see cref="FinalizeAsync"/> and then persists the
+    /// configuration with a single try/catch — modules don't repeat that
+    /// save plumbing.
+    /// </summary>
+    protected virtual void RecordRunCompleted(Configuration.PluginConfiguration config, DateTime utcNow)
+    {
+        // Default: nothing to record.
+    }
 
     /// <inheritdoc />
     public abstract IEnumerable<TaskTriggerInfo> GetDefaultTriggers();
@@ -447,6 +454,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         try
         {
             await FinalizeAsync(cancellationToken).ConfigureAwait(false);
+            RecordRunCompletedAndSave();
         }
         finally
         {
@@ -472,6 +480,24 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         {
             Logger.LogInformation("{Task} complete: {Processed} processed, {Pruned} pruned", Name, processed, pruned);
             ClearRunFailure();
+        }
+    }
+
+    /// <summary>
+    /// Lets the subclass stamp its module's last-run timestamp, then saves
+    /// the configuration. Failures here are logged but never propagate — a
+    /// failed save mustn't mask the actual run result.
+    /// </summary>
+    private void RecordRunCompletedAndSave()
+    {
+        try
+        {
+            RecordRunCompleted(_configManager.Configuration, DateTime.UtcNow);
+            _configManager.SaveConfiguration();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Task}: failed to save run-completion timestamp", Name);
         }
     }
 

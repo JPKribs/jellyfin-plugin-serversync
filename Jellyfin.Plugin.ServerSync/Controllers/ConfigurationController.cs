@@ -19,9 +19,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// API controller for Server Sync plugin operations.
-/// NOTE: This controller ONLY operates on the LOCAL server. It NEVER modifies the source server.
-/// All delete operations use the local Jellyfin API to delete items from this server only.
+/// API controller for Server Sync plugin operations. Operates only on the
+/// local server — never modifies the source server.
 /// </summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
@@ -136,7 +135,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// SanitizeForLog
     /// Sanitizes user input to prevent log injection attacks.
     /// </summary>
     /// <param name="input">User input to sanitize.</param>
@@ -198,7 +196,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// GetCapabilities
     /// Returns the plugin capabilities including whether deletion is supported.
     /// </summary>
     /// <returns>Capabilities response.</returns>
@@ -208,8 +205,6 @@ public partial class ConfigurationController : ControllerBase
     {
         try
         {
-            // Deletion is supported if we have access to the library manager
-            // which is injected via DI - if we got here, we have it
             var canDelete = _libraryManager != null;
 
             return Ok(new CapabilitiesResponse
@@ -232,7 +227,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// GetStatusMetadata
     /// Returns metadata for all status types including display names and colors.
     /// Used by the frontend to render status badges consistently.
     /// </summary>
@@ -245,7 +239,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// ResolveLocalItemIds
     /// Attempts to find and store the local Jellyfin item IDs for synced items.
     /// </summary>
     /// <returns>Action result with resolved count.</returns>
@@ -307,7 +300,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// ResetSyncDatabase
     /// Deletes all items from the sync database and recreates it with the latest schema.
     /// </summary>
     /// <returns>Action result with success status.</returns>
@@ -329,7 +321,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// ResetContentSyncDatabase
     /// Resets the content sync table only, removing all tracked content items.
     /// Other tables (History, Metadata, User) are not affected.
     /// </summary>
@@ -353,7 +344,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// ResetHistorySyncDatabase
     /// Resets the history sync database, removing all tracked history items.
     /// </summary>
     /// <returns>Action result with success status.</returns>
@@ -376,7 +366,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// ValidateConfiguration
     /// Validates the current plugin configuration.
     /// </summary>
     /// <returns>Validation response with errors.</returns>
@@ -394,7 +383,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// SanitizeConfiguration
     /// Sanitizes configuration values to valid ranges.
     /// </summary>
     /// <returns>Action result with status message.</returns>

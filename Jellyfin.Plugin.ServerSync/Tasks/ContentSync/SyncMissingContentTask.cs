@@ -21,17 +21,10 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// Apply phase for Content sync. Downloads queued items in parallel
 /// (bounded by <see cref="PluginConfiguration.MaxConcurrentDownloads"/>),
 /// processes pending deletions, and triggers a library refresh on
-/// completion.
-/// <para>
-/// The base class handles the per-item Synced/Errored persistence; this
-/// task only mutates record fields (LocalPath, CompanionFiles) before
-/// returning, and throws on failure to signal Errored. Pre-flight
-/// (disk space, connection test, circuit breaker) lives in
-/// <see cref="BeforeRunAsync"/>; post-flight (deletions, library refresh)
-/// in <see cref="FinalizeAsync"/>.
-/// </para>
+/// completion. Pre-flight (disk space, connection, circuit breaker) lives
+/// in <see cref="BeforeRunAsync"/>; post-flight in <see cref="FinalizeAsync"/>.
 /// </summary>
-public class DownloadMissingContentTask
+public class SyncMissingContentTask
     : SyncQueueTaskBase<SyncItem, string>
 {
     private const int DefaultMaxRetries = 3;
@@ -55,8 +48,8 @@ public class DownloadMissingContentTask
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
-    public DownloadMissingContentTask(
-        ILogger<DownloadMissingContentTask> logger,
+    public SyncMissingContentTask(
+        ILogger<SyncMissingContentTask> logger,
         ILibraryManager libraryManager,
         IPluginConfigurationManager configManager,
         ContentSyncTableManager manager,
@@ -100,12 +93,10 @@ public class DownloadMissingContentTask
         return true;
     }
 
+    // Errored-for-retry rows are pulled in alongside Queued so a previously
+    // failed download gets another shot, capped by
+    // <see cref="PluginConfiguration.MaxRetryCount"/>.
     /// <inheritdoc />
-    /// <remarks>
-    /// Errored-for-retry rows are pulled in alongside Queued so a previously
-    /// failed download gets another shot, capped by
-    /// <see cref="PluginConfiguration.MaxRetryCount"/>.
-    /// </remarks>
     protected override IList<SyncItem> GetItemsToApply()
     {
         var typedManager = TypedManager;
@@ -252,24 +243,20 @@ public class DownloadMissingContentTask
         }
     }
 
+    // No-op — Content has no SyncableValue fields and the base's
+    // post-apply Status/LastSyncTime/Reason write covers everything we
+    // need. <see cref="ApplyAsync"/> already populated CompanionFiles on
+    // the record.
     /// <inheritdoc />
-    /// <remarks>
-    /// No-op — Content has no SyncableValue fields and the base's
-    /// post-apply Status/LastSyncTime/Reason write covers everything we
-    /// need. <see cref="ApplyAsync"/> already populated CompanionFiles on
-    /// the record.
-    /// </remarks>
     protected override void OnApplySucceeded(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
         record.RetryCount = 0;
     }
 
+    // Increments <see cref="SyncItem.RetryCount"/> so the
+    // <c>MaxRetryCount</c> cap in <see cref="GetItemsToApply"/> is honored.
     /// <inheritdoc />
-    /// <remarks>
-    /// Increments <see cref="SyncItem.RetryCount"/> so the
-    /// <c>MaxRetryCount</c> cap in <see cref="GetItemsToApply"/> is honored.
-    /// </remarks>
     protected override void OnApplyFailed(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -322,18 +309,15 @@ public class DownloadMissingContentTask
 
         progress.Report(95);
 
-        config.LastSyncEndTime = DateTime.UtcNow;
-        try
-        {
-            ConfigManager.SaveConfiguration();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Failed to save sync end time");
-        }
-
         _circuitBreaker = null;
         _tempPath = null;
+    }
+
+    /// <inheritdoc />
+    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        config.LastSyncEndTime = utcNow;
     }
 
     /// <inheritdoc />

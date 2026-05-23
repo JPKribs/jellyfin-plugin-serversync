@@ -133,6 +133,17 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     protected abstract Task ApplyAsync(TRecord record, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Called after a successful <see cref="ApplyAsync"/> to confirm the write
+    /// landed. Default is a no-op; modules that mutate live Jellyfin state
+    /// override to re-read and compare. Throwing transitions the record to
+    /// <see cref="SyncStatus.Errored"/> exactly like a failed
+    /// <see cref="ApplyAsync"/>. Records with per-category state may call
+    /// <c>record.Foo.MarkSynced()</c> on individual categories before throwing
+    /// so partial success persists alongside the Errored row.
+    /// </summary>
+    protected virtual Task VerifyAfterApplyAsync(TRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
     /// Called after a successful apply, before the record is marked Synced.
     /// Default implementation calls <see cref="SyncRecord.MarkSynced"/>, which
     /// copies <c>SourceHash → SyncedHash</c> on each constituent
@@ -143,8 +154,13 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
 
     /// <summary>
     /// Called after an apply throws, before the record is persisted as Errored.
-    /// Subclasses override to update retry-related fields on the in-memory
-    /// record (Content increments <c>RetryCount</c>). Default is a no-op.
+    /// Retry-extension point — Content overrides to increment
+    /// <c>RetryCount</c>, which feeds its <c>GetErroredItemsForRetry</c>
+    /// query so failed downloads get another attempt on the next run.
+    /// History / Metadata / User / People inherit the no-op because their
+    /// apply failures are deterministic (mismatched IDs, refused writes,
+    /// verification mismatches) and a retry without operator intervention
+    /// would just rerun the same failure.
     /// </summary>
     protected virtual void OnApplyFailed(TRecord record)
     {
@@ -152,17 +168,26 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     }
 
     /// <summary>
-    /// Hook for post-run bookkeeping. Runs even when no items were queued —
-    /// Content uses this to process pending deletions and trigger a library
-    /// refresh on every Sync run, regardless of how many downloads happened.
-    /// Default is a no-op.
-    /// <para>
+    /// Hook for post-run bookkeeping beyond timestamp updates — Content uses
+    /// this to process pending deletions and trigger a library refresh on
+    /// every Sync run. Default is a no-op. For the per-module "last sync
+    /// time" bump, override <see cref="RecordRunCompleted"/> instead.
     /// <paramref name="progress"/> reports 0–100 for the finalize phase only;
-    /// the base scales it into the run's overall 90–100% band so a long-
-    /// running library refresh doesn't sit at 100% while still working.
-    /// </para>
+    /// the base scales it into the run's overall 90–100% band.
     /// </summary>
     protected virtual Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Per-module timestamp bump. Default is a no-op; each module overrides
+    /// to set its <c>LastXSyncTime</c> field on the configuration. The base
+    /// calls this after <see cref="FinalizeAsync"/> and then persists the
+    /// configuration with a single try/catch — modules don't repeat that
+    /// save plumbing.
+    /// </summary>
+    protected virtual void RecordRunCompleted(Configuration.PluginConfiguration config, DateTime utcNow)
+    {
+        // Default: nothing to record.
+    }
 
     /// <inheritdoc />
     public abstract IEnumerable<TaskTriggerInfo> GetDefaultTriggers();
@@ -291,6 +316,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         try
         {
             await FinalizeAsync(finalizeProgress, cancellationToken).ConfigureAwait(false);
+            RecordRunCompletedAndSave();
         }
         finally
         {
@@ -312,6 +338,24 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         else
         {
             ClearRunFailure();
+        }
+    }
+
+    /// <summary>
+    /// Lets the subclass stamp its module's last-run timestamp, then saves
+    /// the configuration. Failures here are logged but never propagate — a
+    /// failed save mustn't mask the actual run result.
+    /// </summary>
+    private void RecordRunCompletedAndSave()
+    {
+        try
+        {
+            RecordRunCompleted(_configManager.Configuration, DateTime.UtcNow);
+            _configManager.SaveConfiguration();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Task}: failed to save run-completion timestamp", Name);
         }
     }
 
@@ -363,6 +407,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         try
         {
             await ApplyAsync(record, cancellationToken).ConfigureAwait(false);
+            await VerifyAfterApplyAsync(record, cancellationToken).ConfigureAwait(false);
 
             OnApplySucceeded(record);
             record.Status = SyncStatus.Synced;

@@ -6,6 +6,7 @@ using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -14,6 +15,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// Per-table manager for <see cref="PeopleSyncItem"/>. Replaces the old
 /// <c>SyncDatabase.PeopleSync.cs</c> partial-class methods.
 /// </summary>
+[PluginService(ServiceLifetime.Transient)]
 public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem, string>
 {
     /// <summary>
