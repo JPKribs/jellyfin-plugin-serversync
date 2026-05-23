@@ -210,11 +210,24 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected virtual bool IsInScope(TRecord record) => true;
 
     /// <summary>
+    /// True if the record should be excluded from pruning even though it
+    /// wasn't seen this run. Override when discovery for the record's scope
+    /// may have completed only partially — e.g. a library whose source-side
+    /// enumeration broke on consecutive errors, or a user mapping whose
+    /// source user fetch failed. Default returns false (no exclusion).
+    /// Without this guard, a transient source-side hiccup mid-discovery
+    /// would silently delete the rows for items the loop just didn't get
+    /// to enumerate.
+    /// </summary>
+    protected virtual bool ShouldSkipPruning(TRecord record) => false;
+
+    /// <summary>
     /// Removes rows that no longer exist on the source. Default deletes them
     /// outright; subclasses can override for soft-delete (Content marks them
     /// <see cref="SyncStatus.Pending"/> awaiting user approval). Out-of-scope
-    /// rows (per <see cref="IsInScope"/>) are never pruned. Returns the
-    /// number of rows pruned.
+    /// rows (per <see cref="IsInScope"/>) and rows in scopes with incomplete
+    /// discovery (per <see cref="ShouldSkipPruning"/>) are never pruned.
+    /// Returns the number of rows pruned.
     /// </summary>
     protected virtual Task<int> PruneStaleAsync(
         IReadOnlyDictionary<TKey, TRecord> existing,
@@ -222,6 +235,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         CancellationToken cancellationToken)
     {
         var pruned = 0;
+        var skippedDueToIncompleteDiscovery = 0;
         foreach (var kvp in existing)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -235,6 +249,12 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 continue;
             }
 
+            if (ShouldSkipPruning(kvp.Value))
+            {
+                skippedDueToIncompleteDiscovery++;
+                continue;
+            }
+
             try
             {
                 Manager.DeleteById(kvp.Value.Id);
@@ -244,6 +264,13 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             {
                 Logger.LogWarning(ex, "{Task}: failed to prune stale record id {Id}", Name, kvp.Value.Id);
             }
+        }
+
+        if (skippedDueToIncompleteDiscovery > 0)
+        {
+            Logger.LogWarning(
+                "{Task}: skipped pruning {Count} row(s) in scopes with incomplete discovery this run — re-run after source server stabilizes",
+                Name, skippedDueToIncompleteDiscovery);
         }
 
         return Task.FromResult(pruned);

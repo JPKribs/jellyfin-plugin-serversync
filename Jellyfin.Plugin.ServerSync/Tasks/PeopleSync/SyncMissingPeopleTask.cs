@@ -49,7 +49,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
     }
 
     /// <inheritdoc />
-    public override string Name => "Sync People Data";
+    public override string Name => "Sync People";
 
     /// <inheritdoc />
     public override string Key => "ServerSyncMissingPeople";
@@ -83,12 +83,9 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         var failures = new List<string>();
 
         var metadataChanged = false;
-        var imagesChanged = false;
-        var anyApplyAttempted = false;
 
         if (record.HasMetadataChanges)
         {
-            anyApplyAttempted = true;
             try
             {
                 metadataChanged = ApplyMetadata(localPerson, record);
@@ -100,37 +97,11 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
         }
 
-        if (syncImages && record.HasImagesChanges && !string.IsNullOrEmpty(record.SourcePersonId))
-        {
-            if (!Guid.TryParse(record.SourcePersonId, out var sourceGuid))
-            {
-                failures.Add($"Images: invalid source person ID {record.SourcePersonId}");
-            }
-            else if (Client == null)
-            {
-                failures.Add("Images: source server client unavailable");
-            }
-            else
-            {
-                anyApplyAttempted = true;
-                try
-                {
-                    imagesChanged = await ApplyPersonImagesAsync(localPerson, sourceGuid, record, Client, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "Images apply threw for {PersonName}", record.PersonName);
-                    failures.Add($"Images: apply threw — {ex.Message}");
-                }
-            }
-        }
-
-        // Single combined repository save for any field-level mutations.
-        if (failures.Count == 0 && anyApplyAttempted && metadataChanged)
+        // Persist metadata immediately, independent of any image outcome.
+        // Previously this was gated on failures.Count == 0, which meant a
+        // later image apply failure would skip the metadata DB write — the
+        // mutation lived only in Jellyfin's in-memory cache until eviction.
+        if (metadataChanged)
         {
             try
             {
@@ -147,7 +118,33 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
         }
 
-        _ = imagesChanged;
+        if (syncImages && record.HasImagesChanges && !string.IsNullOrEmpty(record.SourcePersonId))
+        {
+            if (!Guid.TryParse(record.SourcePersonId, out var sourceGuid))
+            {
+                failures.Add($"Images: invalid source person ID {record.SourcePersonId}");
+            }
+            else if (Client == null)
+            {
+                failures.Add("Images: source server client unavailable");
+            }
+            else
+            {
+                try
+                {
+                    await ApplyPersonImagesAsync(localPerson, sourceGuid, record, Client, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Images apply threw for {PersonName}", record.PersonName);
+                    failures.Add($"Images: apply threw — {ex.Message}");
+                }
+            }
+        }
 
         if (failures.Count > 0)
         {

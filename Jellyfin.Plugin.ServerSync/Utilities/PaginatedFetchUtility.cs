@@ -9,6 +9,16 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
+/// Outcome of a paginated fetch loop.
+/// <see cref="CompletedFully"/> is false when the loop broke early on
+/// errors/null results/cancellation — callers that drive pruning from
+/// "items I didn't see this run" must treat partial discovery as
+/// unsafe-to-prune, since the unseen items may just be ones we never
+/// got to enumerate.
+/// </summary>
+public readonly record struct PaginatedFetchOutcome(int ProcessedItems, bool CompletedFully);
+
+/// <summary>
 /// Reusable paginated fetch loop with retry and library-filter handling.
 /// </summary>
 public static class PaginatedFetchUtility
@@ -37,7 +47,7 @@ public static class PaginatedFetchUtility
     /// Drives a paginated fetch loop, applying library filters per item and stopping
     /// after <see cref="MaxConsecutiveErrors"/> consecutive failures.
     /// </summary>
-    public static async Task<int> FetchAllPagesAsync(
+    public static async Task<PaginatedFetchOutcome> FetchAllPagesAsync(
         FetchPageAsync fetchPage,
         ProcessItemAsync processItem,
         string libraryName,
@@ -51,6 +61,7 @@ public static class PaginatedFetchUtility
         var startIndex = 0;
         var processedItems = 0;
         var consecutiveErrors = 0;
+        var completedFully = false;
 
         while (true)
         {
@@ -125,6 +136,7 @@ public static class PaginatedFetchUtility
 
             if (result.Items == null || result.Items.Count == 0)
             {
+                completedFully = true;
                 break;
             }
 
@@ -171,10 +183,11 @@ public static class PaginatedFetchUtility
 
             if (result.Items.Count < DefaultBatchSize)
             {
+                completedFully = true;
                 break;
             }
         }
 
-        return processedItems;
+        return new PaginatedFetchOutcome(processedItems, completedFully);
     }
 }

@@ -68,7 +68,6 @@ export default function (view) {
         initialized: {},       // Tracks which views have been lazy-initialized
         _listenerBound: false, // Prevents duplicate dropdown change listeners
 
-        // Initialize the view manager: bind dropdown listener and apply config-based filtering
         init: function() {
             var self = this;
             if (!this._listenerBound) {
@@ -92,8 +91,6 @@ export default function (view) {
             });
         },
 
-        // Filter dropdown options based on enabled sync types in config.
-        // Hides/disables options whose config key (e.g. EnableContentSync) is false.
         _applyEnabledTypes: function(config) {
             var dropdown = view.querySelector('#syncTypeDropdown');
             if (!dropdown) return;
@@ -126,7 +123,6 @@ export default function (view) {
                 if (noSyncMessage) noSyncMessage.classList.remove('hidden');
                 if (titleEl) titleEl.textContent = 'Sync';
 
-                // Hide all sync views
                 var views = view.querySelectorAll('.syncView');
                 for (var j = 0; j < views.length; j++) {
                     views[j].classList.add('hidden');
@@ -138,13 +134,11 @@ export default function (view) {
             }
         },
 
-        // Select the first visible/enabled option and switch to it.
         // Preserves the current view if it's still enabled.
         _selectFirstEnabled: function() {
             var dropdown = view.querySelector('#syncTypeDropdown');
             if (!dropdown) return;
 
-            // Check if current view is still enabled
             if (this.currentView) {
                 var currentOpt = dropdown.querySelector('option[value="' + this.currentView + '"]');
                 if (currentOpt && !currentOpt.disabled) {
@@ -177,7 +171,6 @@ export default function (view) {
             }
         },
 
-        // Map view names to their table module for observer management
         _getTableModule: function(name) {
             switch (name) {
                 case 'content': return SyncTableModule;
@@ -189,8 +182,6 @@ export default function (view) {
             }
         },
 
-        // Switch to a different sync view: hide all views, show the target,
-        // update page title, and lazy-initialize the view's controller
         switchView: function(viewName) {
             if (this.currentView === viewName) return;
 
@@ -201,19 +192,16 @@ export default function (view) {
                 outgoingModule.table.disconnectObserver();
             }
 
-            // Hide all views
             var views = view.querySelectorAll('.syncView');
             for (var i = 0; i < views.length; i++) {
                 views[i].classList.add('hidden');
             }
 
-            // Show selected view
             var targetView = view.querySelector('#syncView-' + viewName);
             if (targetView) {
                 targetView.classList.remove('hidden');
             }
 
-            // Update page title
             var dropdown = view.querySelector('#syncTypeDropdown');
             var displayName = viewName.charAt(0).toUpperCase() + viewName.slice(1);
             if (dropdown) {
@@ -273,7 +261,6 @@ export default function (view) {
         currentConfig: null,    // Cached plugin configuration
         _initialized: false,    // Prevents duplicate initialization
 
-        // Create the PaginatedTable, bind action buttons, and inject bulk-action buttons
         init: function() {
             if (this._initialized) {
                 return;
@@ -395,17 +382,14 @@ export default function (view) {
             this._injectBulkActions();
         },
 
-        // Bind click handlers for action buttons and modal buttons
         _bindModuleEvents: function() {
             var self = this;
             var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'SyncTableModule'); };
 
-            // Action bar buttons
             bind('btnRefreshItems', function() { self.refreshSyncTable(); });
             bind('btnTriggerSync', function() { self.triggerSync(); });
             bind('btnRetryErrors', function() { self.retryErrors(); });
 
-            // Modal action buttons
             bind('btnModalIgnore', function() { self.modalIgnore(); });
             bind('btnModalQueue', function() { self.modalQueue(); });
             bind('btnModalMarkSynced', function() { self.modalMarkSynced(); });
@@ -413,7 +397,6 @@ export default function (view) {
             bind('btnModalClose', function() { self.closeModal(); });
         },
 
-        // Inject bulk-action buttons (Ignore, Queue, Delete) into the PaginatedTable header
         _injectBulkActions: function() {
             var self = this;
             var bulkContainer = this.table.getBulkActionsContainer();
@@ -431,7 +414,6 @@ export default function (view) {
             bulkContainer.querySelector('#btnBulkDelete').addEventListener('click', function() { self.bulkDelete(); });
         },
 
-        // Fetch server capabilities (e.g. whether item deletion is supported)
         loadCapabilities: function() {
             var self = this;
             return ServerSyncShared.apiRequest('Capabilities', 'GET').then(function(capabilities) {
@@ -443,7 +425,6 @@ export default function (view) {
             });
         },
 
-        // Show or hide delete buttons based on server capability
         updateDeleteCapabilityVisibility: function(canDelete) {
             var bulkDeleteBtn = view.querySelector('#btnBulkDelete');
             var modalDeleteBtn = view.querySelector('#btnModalDelete');
@@ -456,7 +437,6 @@ export default function (view) {
             }
         },
 
-        // Load health dashboard data: last sync time, library count, and pending download size
         loadHealthStats: function() {
             return Promise.all([
                 ServerSyncShared.apiRequest('Stats', 'GET'),
@@ -495,7 +475,6 @@ export default function (view) {
             });
         },
 
-        // Fetch status counts from the API and update all status cards and tooltips
         loadSyncStatus: function() {
             return ServerSyncShared.apiRequest('Status', 'GET').then(function(status) {
                 var syncedCount = status.Synced || 0;
@@ -547,12 +526,10 @@ export default function (view) {
             });
         },
 
-        // Reload the PaginatedTable data from the API
         loadSyncItems: function() {
             return this.table.reload();
         },
 
-        // Start the content download task, then poll for progress
         triggerSync: function() {
             var self = this;
             var btn = view.querySelector('#btnTriggerSync');
@@ -572,7 +549,6 @@ export default function (view) {
             });
         },
 
-        // Start the table refresh task (re-scans source server), then poll for progress
         refreshSyncTable: function() {
             var self = this;
             var btn = view.querySelector('#btnRefreshItems');
@@ -592,7 +568,6 @@ export default function (view) {
             });
         },
 
-        // Re-queue all errored items for retry
         retryErrors: function() {
             var self = this;
 
@@ -605,7 +580,6 @@ export default function (view) {
             });
         },
 
-        // Enable/disable bulk action buttons based on selection count
         updateBulkActionsVisibility: function(count) {
             var hasSelection = count > 0;
             var ignoreBtn = view.querySelector('#btnBulkIgnore');
@@ -619,12 +593,11 @@ export default function (view) {
             if (deleteBtn) deleteBtn.disabled = !hasSelection;
         },
 
-        // Bulk ignore all selected items
         bulkIgnore: function() {
             this.bulkAction('IgnoreItems');
         },
 
-        // Bulk queue selected items (excludes pending-deletion items which cannot be queued)
+        // Pending-deletion items cannot be queued — filter them out.
         bulkQueue: function() {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -655,7 +628,7 @@ export default function (view) {
             });
         },
 
-        // Bulk mark selected items as synced (verifies local files exist on server)
+        // Verifies local files exist on server before marking.
         bulkMarkSynced: function() {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -676,7 +649,6 @@ export default function (view) {
             });
         },
 
-        // Bulk delete selected items from the local server (requires confirmation)
         bulkDelete: function() {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -698,7 +670,6 @@ export default function (view) {
             });
         },
 
-        // Generic bulk action: send selected IDs to the given API endpoint
         bulkAction: function(endpoint) {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -715,7 +686,6 @@ export default function (view) {
             });
         },
 
-        // Return human-readable status text (e.g. "Pending Download" for pending subtypes)
         getDisplayStatus: function(item) {
             if (item.Status === 'Pending' && item.PendingType) {
                 return 'Pending ' + item.PendingType;
@@ -723,7 +693,6 @@ export default function (view) {
             return item.Status;
         },
 
-        // Return CSS class for status badge (e.g. "Pending-Download" for pending subtypes)
         getStatusClass: function(item) {
             if (item.Status === 'Pending' && item.PendingType) {
                 return 'Pending-' + item.PendingType;
@@ -731,7 +700,6 @@ export default function (view) {
             return item.Status;
         },
 
-        // Open the detail modal for a content item — populates all fields from the item data
         showItemDetail: function(sourceItemId) {
             var self = this;
             var items = this.table.getItems();
@@ -865,7 +833,6 @@ export default function (view) {
             view.querySelector('#itemDetailModal').classList.remove('hidden');
         },
 
-        // Close the content detail modal and refresh the table
         closeModal: function() {
             view.querySelector('#itemDetailModal').classList.add('hidden');
             this.currentModalItem = null;
@@ -873,14 +840,12 @@ export default function (view) {
             this.loadHealthStats();
         },
 
-        // Set the current modal item to Ignored status
         modalIgnore: function() {
             if (this.currentModalItem) {
                 this.updateItemStatus(this.currentModalItem.SourceItemId, 'Ignored');
             }
         },
 
-        // Queue the current modal item for sync (blocks pending-deletion items)
         modalQueue: function() {
             if (this.currentModalItem) {
                 if (this.currentModalItem.Status === 'Pending' && this.currentModalItem.PendingType === 'Deletion') {
@@ -890,7 +855,6 @@ export default function (view) {
             }
         },
 
-        // Mark the current modal item as synced (verifies local file exists on server)
         modalMarkSynced: function() {
             var self = this;
             if (!this.currentModalItem) return;
@@ -909,7 +873,6 @@ export default function (view) {
             });
         },
 
-        // Delete the current modal item from the local server (requires confirmation)
         modalDelete: function() {
             var self = this;
             if (!this.currentModalItem) return;
@@ -929,7 +892,6 @@ export default function (view) {
             });
         },
 
-        // Send a status update for a single item, then close modal and refresh
         updateItemStatus: function(sourceItemId, status) {
             var self = this;
 
@@ -944,7 +906,6 @@ export default function (view) {
             });
         },
 
-        // Show/hide pending subtype filters and status cards based on approval mode settings
         updatePendingFilterVisibility: function(config) {
             var downloadMode = config.DownloadNewContentMode || 'Enabled';
             var replaceMode = config.ReplaceExistingContentMode || 'Enabled';
@@ -979,7 +940,6 @@ export default function (view) {
     // ============================================
 
     var ContentPageController = {
-        // Initialize the content view: load capabilities, config, status, items, and health
         init: function() {
             SyncTableModule.init();
             SyncTableModule.loadCapabilities();
@@ -1009,7 +969,6 @@ export default function (view) {
         currentConfig: null,    // Cached plugin configuration (includes UserMappings)
         _initialized: false,    // Prevents duplicate initialization
 
-        // Create the PaginatedTable, bind action buttons, and inject bulk-action buttons
         init: function(config) {
             if (this._initialized) {
                 return;
@@ -1127,23 +1086,19 @@ export default function (view) {
             this._injectBulkActions();
         },
 
-        // Bind click handlers for action buttons and modal buttons
         _bindModuleEvents: function() {
             var self = this;
             var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'HistorySyncTableModule'); };
 
-            // Action bar buttons
             bind('btnRefreshHistoryItems', function() { self.refreshHistoryTable(); });
             bind('btnTriggerHistorySync', function() { self.triggerHistorySync(); });
             bind('btnRetryHistoryErrors', function() { self.retryErrors(); });
 
-            // Modal action buttons
             bind('btnHistoryModalIgnore', function() { self.modalIgnore(); });
             bind('btnHistoryModalQueue', function() { self.modalQueue(); });
             bind('btnHistoryModalClose', function() { self.closeModal(); });
         },
 
-        // Inject bulk-action buttons (Ignore, Queue) into the PaginatedTable header
         _injectBulkActions: function() {
             var self = this;
             var bulkContainer = this.table.getBulkActionsContainer();
@@ -1157,7 +1112,6 @@ export default function (view) {
             view.querySelector('#btnHistoryBulkQueue').addEventListener('click', function() { self.bulkQueue(); });
         },
 
-        // Fetch status counts and update status cards and tooltips
         loadHistoryStatus: function() {
             return ServerSyncShared.apiRequest('HistoryStatus', 'GET').then(function(status) {
                 view.querySelector('#historySyncedCount').textContent = status.Synced || 0;
@@ -1181,7 +1135,6 @@ export default function (view) {
             });
         },
 
-        // Load health dashboard: last sync time, user count, and library count
         loadHealthStats: function() {
             return ServerSyncShared.getConfig().then(function(config) {
                 var lastSyncEl = view.querySelector('#historyHealthLastSync');
@@ -1208,12 +1161,10 @@ export default function (view) {
             });
         },
 
-        // Reload the PaginatedTable data from the API
         loadHistoryItems: function() {
             return this.table.reload();
         },
 
-        // Start the history table refresh task, then poll for progress
         refreshHistoryTable: function() {
             var self = this;
             var btn = view.querySelector('#btnRefreshHistoryItems');
@@ -1233,7 +1184,6 @@ export default function (view) {
             });
         },
 
-        // Start the history sync task, then poll for progress
         triggerHistorySync: function() {
             var self = this;
             var btn = view.querySelector('#btnTriggerHistorySync');
@@ -1253,7 +1203,7 @@ export default function (view) {
             });
         },
 
-        // Re-queue all errored history items for retry (empty Ids + Status filter = retry all)
+        // Empty Ids + Status filter = retry all.
         retryErrors: function() {
             var self = this;
 
@@ -1266,7 +1216,6 @@ export default function (view) {
             });
         },
 
-        // Enable/disable bulk action buttons based on selection count
         updateBulkActionsVisibility: function(count) {
             var hasSelection = count > 0;
             var ignoreBtn = view.querySelector('#btnHistoryBulkIgnore');
@@ -1276,7 +1225,6 @@ export default function (view) {
             if (queueBtn) queueBtn.disabled = !hasSelection;
         },
 
-        // Bulk ignore all selected history items
         bulkIgnore: function() {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -1292,7 +1240,6 @@ export default function (view) {
             });
         },
 
-        // Bulk queue all selected history items
         bulkQueue: function() {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -1308,7 +1255,6 @@ export default function (view) {
             });
         },
 
-        // Open the detail modal for a history item — populates user info, comparison table, etc.
         showItemDetail: function(itemId) {
             var self = this;
             var items = this.table.getItems();
@@ -1382,7 +1328,6 @@ export default function (view) {
             view.querySelector('#historyItemDetailModal').classList.remove('hidden');
         },
 
-        // Set a comparison table cell value with type-specific formatting
         setTableValue: function(elementId, value, type) {
             var el = view.querySelector('#' + elementId);
             if (!el) return;
@@ -1412,7 +1357,6 @@ export default function (view) {
             el.textContent = text;
         },
 
-        // Convert Jellyfin ticks to human-readable timestamp (H:MM:SS or M:SS)
         formatPosition: function(ticks) {
             if (!ticks || ticks === 0) return '-';
             var seconds = Math.floor(ticks / 10000000);
@@ -1427,7 +1371,6 @@ export default function (view) {
             return minutes + ':' + String(seconds).padStart(2, '0');
         },
 
-        // Format a date string as relative time (e.g. "5 minutes ago")
         formatDate: function(dateStr) {
             if (!dateStr) return '-';
             try {
@@ -1437,7 +1380,6 @@ export default function (view) {
             }
         },
 
-        // Highlight a comparison table row if the merged value differs from the local value
         highlightChangedRow: function(rowId, mergedValue, localValue) {
             var row = view.querySelector('#' + rowId);
             if (!row) return;
@@ -1454,7 +1396,6 @@ export default function (view) {
             }
         },
 
-        // Look up a user mapping from config by source or local user ID
         findUserMapping: function(sourceUserId, localUserId) {
             if (!this.currentConfig || !this.currentConfig.UserMappings) return null;
             return this.currentConfig.UserMappings.find(function(m) {
@@ -1462,7 +1403,6 @@ export default function (view) {
             });
         },
 
-        // Close the history detail modal and refresh the table
         closeModal: function() {
             view.querySelector('#historyItemDetailModal').classList.add('hidden');
             this.currentModalItem = null;
@@ -1470,21 +1410,18 @@ export default function (view) {
             this.loadHistoryStatus();
         },
 
-        // Set the current modal item to Ignored status
         modalIgnore: function() {
             if (this.currentModalItem) {
                 this.updateItemStatus(this.currentModalItem.Id, 'Ignored');
             }
         },
 
-        // Queue the current modal item for sync
         modalQueue: function() {
             if (this.currentModalItem) {
                 this.updateItemStatus(this.currentModalItem.Id, 'Queued');
             }
         },
 
-        // Send a status update for a single item, then close modal and refresh
         updateItemStatus: function(itemId, status) {
             var self = this;
 
@@ -1507,12 +1444,10 @@ export default function (view) {
     var HistoryPageController = {
         currentConfig: null,
 
-        // Initialize the history view: fetch server name, then load config and data
         init: function() {
             this.loadConfig();
         },
 
-        // Load config, pass to table module, then load status/items/health
         loadConfig: function() {
             var self = this;
 
@@ -1547,7 +1482,6 @@ export default function (view) {
         currentConfig: null,    // Cached plugin configuration (includes sync category toggles)
         _initialized: false,    // Prevents duplicate initialization
 
-        // Create the PaginatedTable, bind action buttons, and inject bulk-action buttons
         init: function(config) {
             if (this._initialized) {
                 return;
@@ -1655,7 +1589,6 @@ export default function (view) {
             this._injectBulkActions();
         },
 
-        // Bind click handlers for action buttons and modal buttons
         _bindModuleEvents: function() {
             var self = this;
             var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'MetadataSyncTableModule'); };
@@ -1669,7 +1602,6 @@ export default function (view) {
             bind('btnMetadataSyncModalClose', function() { self.closeModal(); });
         },
 
-        // Inject bulk-action buttons (Ignore, Queue) into the PaginatedTable header
         _injectBulkActions: function() {
             var self = this;
             var bulkContainer = this.table.getBulkActionsContainer();
@@ -1683,7 +1615,6 @@ export default function (view) {
             view.querySelector('#btnMetadataBulkQueue').addEventListener('click', function() { self.bulkQueue(); });
         },
 
-        // Fetch status counts and update status cards and tooltips
         loadMetadataStatus: function() {
             return ServerSyncShared.apiRequest('MetadataStatus', 'GET').then(function(status) {
                 view.querySelector('#metadataSyncedCount').textContent = status.Synced || 0;
@@ -1707,7 +1638,6 @@ export default function (view) {
             });
         },
 
-        // Load health dashboard: last sync time and library count
         loadHealthStats: function() {
             return Promise.all([
                 ServerSyncShared.getConfig(),
@@ -1734,12 +1664,10 @@ export default function (view) {
             });
         },
 
-        // Reload the PaginatedTable data from the API
         loadMetadataItems: function() {
             return this.table.reload();
         },
 
-        // Start the metadata table refresh task, then poll for progress
         refreshMetadataTable: function() {
             var self = this;
             var btn = view.querySelector('#btnRefreshMetadataItems');
@@ -1759,7 +1687,6 @@ export default function (view) {
             });
         },
 
-        // Start the metadata sync task, then poll for progress
         triggerMetadataSync: function() {
             var self = this;
             var btn = view.querySelector('#btnTriggerMetadataSync');
@@ -1779,7 +1706,7 @@ export default function (view) {
             });
         },
 
-        // Re-queue all errored metadata items for retry (empty Ids + Status filter = retry all)
+        // Empty Ids + Status filter = retry all.
         retryErrors: function() {
             var self = this;
 
@@ -1792,7 +1719,6 @@ export default function (view) {
             });
         },
 
-        // Enable/disable bulk action buttons based on selection count
         updateBulkActionsVisibility: function(count) {
             var hasSelection = count > 0;
             var ignoreBtn = view.querySelector('#btnMetadataBulkIgnore');
@@ -1802,7 +1728,6 @@ export default function (view) {
             if (queueBtn) queueBtn.disabled = !hasSelection;
         },
 
-        // Bulk ignore all selected metadata items
         bulkIgnore: function() {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -1818,7 +1743,6 @@ export default function (view) {
             });
         },
 
-        // Bulk queue all selected metadata items
         bulkQueue: function() {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -1834,7 +1758,6 @@ export default function (view) {
             });
         },
 
-        // Fetch full item detail from API and open the metadata detail modal
         showItemDetail: function(itemId) {
             var self = this;
 
@@ -1892,7 +1815,6 @@ export default function (view) {
             });
         },
 
-        // Build change summary badges (Metadata, Genres, Tags, Images, People, Studios)
         buildChangesSummary: function(item) {
             var container = view.querySelector('#metadataSyncModalChangesSummary');
             var config = this.currentConfig || {};
@@ -1957,7 +1879,6 @@ export default function (view) {
             container.innerHTML = html;
         },
 
-        // Build the full comparison property table with section headers for each category
         buildPropertyTable: function(item) {
             var self = this;
             var tbody = view.querySelector('#metadataSyncModalTableBody');
@@ -2017,7 +1938,6 @@ export default function (view) {
             tbody.innerHTML = html;
         },
 
-        // Safely parse a JSON string, returning null on failure
         parseJsonSafe: function(jsonString) {
             if (!jsonString) return null;
             try {
@@ -2028,7 +1948,6 @@ export default function (view) {
             }
         },
 
-        // Build comparison rows for core metadata fields (Name, Overview, ratings, etc.) and provider IDs
         buildCoreMetadataRows: function(source, local) {
             var self = this;
             var html = '';
@@ -2113,7 +2032,6 @@ export default function (view) {
             return html;
         },
 
-        // Build count + items comparison rows for simple string arrays (Genres, Tags)
         buildArrayComparisonRow: function(label, sourceArray, localArray) {
             var html = '';
             var sourceItems = Array.isArray(sourceArray) ? sourceArray : [];
@@ -2149,7 +2067,6 @@ export default function (view) {
             return html;
         },
 
-        // Build count + items comparison rows for people objects (extracts Name from each)
         buildPeopleComparisonRow: function(sourcePeople, localPeople) {
             var html = '';
 
@@ -2202,7 +2119,6 @@ export default function (view) {
             return html;
         },
 
-        // Format a metadata value for display based on field type (boolean, date, array, etc.)
         formatMetadataValue: function(value, field) {
             if (field.isBoolean) {
                 if (value === true) return 'Yes';
@@ -2228,7 +2144,6 @@ export default function (view) {
             return ServerSyncShared.escapeHtml(String(value));
         },
 
-        // Format a date string to ISO date only (YYYY-MM-DD)
         formatDateOnly: function(dateStr) {
             if (!dateStr) return '-';
             try {
@@ -2239,7 +2154,6 @@ export default function (view) {
             }
         },
 
-        // Normalize a value to a canonical string for change detection comparison
         normalizeForComparison: function(value, field) {
             if (field.isBoolean) {
                 if (value === true) return 'true';
@@ -2265,7 +2179,6 @@ export default function (view) {
             return String(value);
         },
 
-        // Check if a value is null, undefined, empty string, or empty array
         isEmpty: function(value) {
             if (value === null || value === undefined) return true;
             if (value === '') return true;
@@ -2273,7 +2186,6 @@ export default function (view) {
             return false;
         },
 
-        // Build comparison rows for image types (Primary, Backdrop, etc.) with size/count info
         buildImagesRows: function(sourceImages, localImages, item) {
             var self = this;
             var html = '';
@@ -2329,7 +2241,6 @@ export default function (view) {
             return html;
         },
 
-        // Format image info for display: size with optional count (e.g. "1.5 MB (3)")
         formatImageDisplay: function(size, count) {
             if (count === 0) return '-';
             if (!size || size === 0) {
@@ -2342,7 +2253,6 @@ export default function (view) {
             return sizeStr;
         },
 
-        // Close the metadata detail modal and refresh the table
         closeModal: function() {
             view.querySelector('#metadataSyncItemDetailModal').classList.add('hidden');
             this.currentModalItem = null;
@@ -2351,21 +2261,18 @@ export default function (view) {
             this.loadHealthStats();
         },
 
-        // Set the current modal item to Ignored status
         modalIgnore: function() {
             if (this.currentModalItem) {
                 this.updateItemStatus(this.currentModalItem.Id, 'Ignored');
             }
         },
 
-        // Queue the current modal item for sync
         modalQueue: function() {
             if (this.currentModalItem) {
                 this.updateItemStatus(this.currentModalItem.Id, 'Queued');
             }
         },
 
-        // Send a status update for a single item, then close modal and refresh
         updateItemStatus: function(itemId, status) {
             var self = this;
 
@@ -2388,13 +2295,11 @@ export default function (view) {
     var MetadataPageController = {
         currentConfig: null,
 
-        // Initialize the metadata view: fetch server name, then load config and data
         init: function() {
             var self = this;
             self.loadConfig();
         },
 
-        // Load config, pass to table module, then load status/items/health
         loadConfig: function() {
             var self = this;
 
@@ -2429,7 +2334,6 @@ export default function (view) {
         currentConfig: null,     // Cached plugin configuration (includes sync category toggles)
         _initialized: false,     // Prevents duplicate initialization
 
-        // Create the PaginatedTable, bind action buttons, and inject bulk-action buttons
         init: function(config) {
             if (this._initialized) {
                 return;
@@ -2538,7 +2442,6 @@ export default function (view) {
             this._injectBulkActions();
         },
 
-        // Bind click handlers for action buttons and modal buttons
         _bindModuleEvents: function() {
             var self = this;
             var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'UserSyncTableModule'); };
@@ -2552,7 +2455,6 @@ export default function (view) {
             bind('btnUserSyncModalClose', function() { self.closeModal(); });
         },
 
-        // Inject bulk-action buttons (Ignore, Queue) into the PaginatedTable header
         _injectBulkActions: function() {
             var self = this;
             var bulkContainer = this.table.getBulkActionsContainer();
@@ -2566,7 +2468,6 @@ export default function (view) {
             view.querySelector('#btnUserBulkQueue').addEventListener('click', function() { self.bulkQueue(); });
         },
 
-        // Fetch status counts and update status cards and tooltips
         loadUserStatus: function() {
             return ServerSyncShared.apiRequest('UserStatus', 'GET').then(function(status) {
                 view.querySelector('#userSyncedCount').textContent = status.Synced || 0;
@@ -2590,7 +2491,6 @@ export default function (view) {
             });
         },
 
-        // Load health dashboard: last sync time and total user count
         loadHealthStats: function() {
             return ServerSyncShared.apiRequest('UserStatus', 'GET').then(function(status) {
                 if (status) {
@@ -2613,12 +2513,10 @@ export default function (view) {
             });
         },
 
-        // Reload the PaginatedTable data from the API
         loadUserItems: function() {
             return this.table.reload();
         },
 
-        // Start the user table refresh task, then poll for progress
         triggerRefresh: function() {
             var self = this;
             var btn = view.querySelector('#btnRefreshUserItems');
@@ -2638,7 +2536,6 @@ export default function (view) {
             });
         },
 
-        // Start the user sync task, then poll for progress
         triggerSync: function() {
             var self = this;
             var btn = view.querySelector('#btnTriggerUserSync');
@@ -2658,7 +2555,7 @@ export default function (view) {
             });
         },
 
-        // Re-queue all errored user items for retry (empty Ids + Status filter = retry all)
+        // Empty Ids + Status filter = retry all.
         retryErrors: function() {
             var self = this;
 
@@ -2671,7 +2568,6 @@ export default function (view) {
             });
         },
 
-        // Enable/disable bulk action buttons based on selection count
         updateBulkActionsVisibility: function(count) {
             var hasSelection = count > 0;
             var ignoreBtn = view.querySelector('#btnUserBulkIgnore');
@@ -2681,7 +2577,6 @@ export default function (view) {
             if (queueBtn) queueBtn.disabled = !hasSelection;
         },
 
-        // Bulk ignore selected users (composite key: "sourceId|localId")
         bulkIgnore: function() {
             var self = this;
             var selectedKeys = this.table.getSelectedIds();
@@ -2702,7 +2597,6 @@ export default function (view) {
             });
         },
 
-        // Bulk queue selected users (composite key: "sourceId|localId")
         bulkQueue: function() {
             var self = this;
             var selectedKeys = this.table.getSelectedIds();
@@ -2723,7 +2617,6 @@ export default function (view) {
             });
         },
 
-        // Fetch full user detail from API and open the user detail modal
         showUserDetail: function(item) {
             var self = this;
             var sourceUserId = item.SourceUserId;
@@ -2813,7 +2706,6 @@ export default function (view) {
             });
         },
 
-        // Create a section header row for the comparison table (e.g. "Policy", "Configuration")
         _createSectionHeader: function(title) {
             var row = document.createElement('tr');
             row.className = 'userSyncModal-sectionHeader';
@@ -2824,7 +2716,6 @@ export default function (view) {
             return row;
         },
 
-        // Create a disabled/unavailable row for a sync category
         _createDisabledRow: function(category, message) {
             var row = document.createElement('tr');
             row.className = 'userSyncModal-disabledRow';
@@ -2835,7 +2726,6 @@ export default function (view) {
             return row;
         },
 
-        // Parse JSON values and add comparison rows for each property key
         _addPropertyRows: function(tbody, item) {
             var self = this;
 
@@ -2915,7 +2805,6 @@ export default function (view) {
             });
         },
 
-        // Safely parse a JSON string, returning null on failure
         _parseJson: function(str) {
             if (!str || typeof str !== 'string') return null;
             try {
@@ -2925,7 +2814,6 @@ export default function (view) {
             }
         },
 
-        // Add a comparison row for profile image (shows size info for source vs local)
         _addProfileImageRow: function(tbody, item) {
             var row = document.createElement('tr');
             var isChanged = item.HasChanges;
@@ -2962,7 +2850,6 @@ export default function (view) {
             tbody.appendChild(row);
         },
 
-        // Build change summary badges (Configuration, Policy, Image)
         buildChangesSummary: function(detail) {
             var container = view.querySelector('#userSyncModalChangesSummary');
             var config = this.currentConfig || {};
@@ -2996,7 +2883,6 @@ export default function (view) {
             container.innerHTML = html;
         },
 
-        // Format a value for display in the comparison table (handles booleans, arrays, etc.)
         _formatValue: function(value) {
             if (value === null || value === undefined) {
                 return '-';
@@ -3010,7 +2896,6 @@ export default function (view) {
             return String(value);
         },
 
-        // Close the user detail modal and refresh the table
         closeModal: function() {
             view.querySelector('#userSyncItemDetailModal').classList.add('hidden');
             this.currentModalDetail = null;
@@ -3018,7 +2903,6 @@ export default function (view) {
             this.loadUserStatus();
         },
 
-        // Set the current modal user to Ignored status
         modalIgnore: function() {
             var self = this;
             var detail = self.currentModalDetail;
@@ -3037,7 +2921,6 @@ export default function (view) {
             });
         },
 
-        // Queue the current modal user for sync
         modalQueue: function() {
             var self = this;
             var detail = self.currentModalDetail;
@@ -3064,13 +2947,11 @@ export default function (view) {
     var UsersPageController = {
         currentConfig: null,
 
-        // Initialize the users view: fetch server name, then load config and data
         init: function() {
             var self = this;
             self.loadConfig();
         },
 
-        // Load config, pass to table module, then load status/items/health
         loadConfig: function() {
             var self = this;
 
@@ -3310,7 +3191,6 @@ export default function (view) {
 
         retryErrors: function() {
             var self = this;
-            // Get all errored items and queue them
             ServerSyncShared.apiRequest('PeopleItems?status=Errored&take=200', 'GET').then(function(result) {
                 if (result && result.Items && result.Items.length > 0) {
                     var ids = result.Items.map(function(item) { return item.Id; });
@@ -3399,30 +3279,25 @@ export default function (view) {
                     errorSection.classList.add('hidden');
                 }
 
-                // Set server names in headers and mapping
                 var sourceServerName = (self.currentConfig && self.currentConfig.SourceServerName) || 'Source';
                 var localServerName = ServerSyncShared.localServerName || 'Local';
                 view.querySelector('#peopleSyncModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
                 view.querySelector('#peopleSyncModalSourceHeader').textContent = sourceServerName;
                 view.querySelector('#peopleSyncModalLocalHeader').textContent = localServerName;
 
-                // Build changes summary badges
                 var summaryHtml = '';
                 summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasMetadataChanges ? 'has-changes' : 'no-changes') + '">Metadata: ' + (detail.HasMetadataChanges ? 'Changes' : 'Synced') + '</span> ';
                 summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasImagesChanges ? 'has-changes' : 'no-changes') + '">Images: ' + (detail.HasImagesChanges ? 'Changes' : 'Synced') + '</span>';
                 view.querySelector('#peopleSyncModalChangesSummary').innerHTML = summaryHtml;
 
-                // Build comparison table
                 var tbody = view.querySelector('#peopleSyncModalTableBody');
                 tbody.innerHTML = '';
 
                 var sourceMetadata = self._parseJson(detail.SourceMetadataValue) || {};
                 var localMetadata = self._parseJson(detail.LocalMetadataValue) || {};
 
-                // Metadata section header
                 self._addSectionHeader(tbody, 'Metadata');
 
-                // Metadata fields
                 var metadataFields = [
                     { key: 'Name', label: 'Name' },
                     { key: 'OriginalTitle', label: 'Original Title' },
@@ -3444,7 +3319,6 @@ export default function (view) {
                     self._addComparisonRow(tbody, field.label, sourceDisplay, localDisplay, isChanged);
                 });
 
-                // Tags row
                 var sourceTags = Array.isArray(sourceMetadata.Tags) ? sourceMetadata.Tags : [];
                 var localTags = Array.isArray(localMetadata.Tags) ? localMetadata.Tags : [];
                 var tagsChanged = JSON.stringify(sourceTags.slice().sort()) !== JSON.stringify(localTags.slice().sort());
@@ -3453,7 +3327,6 @@ export default function (view) {
                     localTags.length > 0 ? ServerSyncShared.escapeHtml(localTags.join(', ')) : '-',
                     tagsChanged);
 
-                // Provider IDs rows
                 var sourceProviders = sourceMetadata.ProviderIds || {};
                 var localProviders = localMetadata.ProviderIds || {};
                 var allKeys = Object.keys(sourceProviders).concat(Object.keys(localProviders));
@@ -3471,7 +3344,6 @@ export default function (view) {
                     self._addComparisonRow(tbody, 'Provider IDs', '-', '-', false);
                 }
 
-                // Images section
                 self._addSectionHeader(tbody, 'Images');
 
                 var sourceImages = self._parseJson(detail.SourceImagesValue);

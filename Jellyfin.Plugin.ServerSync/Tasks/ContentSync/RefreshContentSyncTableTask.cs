@@ -42,6 +42,15 @@ public class UpdateSyncTablesTask
 {
     private readonly ILibraryManager _libraryManager;
 
+    // Per-run record of source libraries whose discovery broke early
+    // (paginated fetch hit the consecutive-error threshold, or a whitelist
+    // ID lookup threw). Rows belonging to these libraries must be excluded
+    // from <see cref="PruneStaleAsync"/> — otherwise a transient source
+    // hiccup mid-enumeration would mark every unseen item for deletion,
+    // which is destructive (the FileDeletionService then removes the local
+    // file). Reset at the top of <see cref="GetListAsync"/>.
+    private readonly HashSet<string> _librariesWithIncompleteDiscovery = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
@@ -100,6 +109,8 @@ public class UpdateSyncTablesTask
         {
             return Array.Empty<ContentRefreshWork>();
         }
+
+        _librariesWithIncompleteDiscovery.Clear();
 
         var config = ConfigManager.Configuration;
         var enabledMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
@@ -174,10 +185,27 @@ public class UpdateSyncTablesTask
                 // ParentId+Recursive=true, which dropped items whose direct
                 // ParentId did not equal the whitelisted ID (e.g. all
                 // episodes under a whitelisted Series).
-                var ids = (mapping.FilteredItems ?? new List<Models.Configuration.FilteredItem>())
-                    .Select(fi => Guid.TryParse(fi.ItemId, out var g) ? g : Guid.Empty)
-                    .Where(g => g != Guid.Empty)
-                    .ToList();
+                var rawItems = mapping.FilteredItems ?? new List<Models.Configuration.FilteredItem>();
+                var ids = new List<Guid>(rawItems.Count);
+                var droppedIds = 0;
+                foreach (var fi in rawItems)
+                {
+                    if (Guid.TryParse(fi.ItemId, out var g))
+                    {
+                        ids.Add(g);
+                    }
+                    else
+                    {
+                        droppedIds++;
+                    }
+                }
+
+                if (droppedIds > 0)
+                {
+                    Logger.LogWarning(
+                        "{Library} whitelist has {Count} unparseable ID(s) — those entries will not sync until corrected.",
+                        mapping.SourceLibraryName, droppedIds);
+                }
 
                 if (ids.Count == 0)
                 {
@@ -189,10 +217,33 @@ public class UpdateSyncTablesTask
 
                 var seen = new HashSet<Guid>();
                 var collected = 0;
+                var whitelistDiscoveryComplete = true;
                 foreach (var whitelistedId in ids)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var leaves = await Client.GetWhitelistedItemLeavesAsync(whitelistedId, cancellationToken).ConfigureAwait(false);
+                    List<BaseItemDto> leaves;
+                    try
+                    {
+                        leaves = await Client.GetWhitelistedItemLeavesAsync(whitelistedId, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // One whitelist entry failed — mark the library as
+                        // incomplete so PruneStaleAsync won't schedule
+                        // deletion of items whose source state we couldn't
+                        // verify. We keep processing the remaining whitelist
+                        // entries so partial progress is still recorded.
+                        whitelistDiscoveryComplete = false;
+                        Logger.LogWarning(ex,
+                            "Whitelist lookup failed for ID {Id} in {Library}; continuing with remaining entries",
+                            whitelistedId, mapping.SourceLibraryName);
+                        continue;
+                    }
+
                     foreach (var item in leaves)
                     {
                         if (!item.Id.HasValue || !seen.Add(item.Id.Value))
@@ -211,6 +262,11 @@ public class UpdateSyncTablesTask
                     }
                 }
 
+                if (!whitelistDiscoveryComplete)
+                {
+                    _librariesWithIncompleteDiscovery.Add(mapping.SourceLibraryId);
+                }
+
                 Logger.LogInformation(
                     "{Library} whitelist resolved to {Count} leaf item(s) from {WhitelistCount} whitelisted entry/entries.",
                     mapping.SourceLibraryName,
@@ -223,7 +279,7 @@ public class UpdateSyncTablesTask
             // Blacklist / AllowAll: bulk-fetch and post-filter via the
             // FetchAllPagesAsync utility, which honors the same FilterMode
             // semantics that BuildRecordAsync uses.
-            await PaginatedFetchUtility.FetchAllPagesAsync(
+            var outcome = await PaginatedFetchUtility.FetchAllPagesAsync(
                 fetchPage: (startIndex, batchSize, ct) => Client.GetLibraryItemsAsync(sourceLibraryId, startIndex, batchSize, ct),
                 processItem: (item, _) =>
                 {
@@ -245,6 +301,11 @@ public class UpdateSyncTablesTask
                         progress.Report(Math.Min(100, 100.0 * fetched / totalExpected));
                     }
                 }).ConfigureAwait(false);
+
+            if (!outcome.CompletedFully)
+            {
+                _librariesWithIncompleteDiscovery.Add(mapping.SourceLibraryId);
+            }
         }
 
         progress.Report(100);
@@ -356,6 +417,7 @@ public class UpdateSyncTablesTask
 
         var typedManager = (ContentSyncTableManager)Manager;
         var pruned = 0;
+        var skippedDueToIncompleteDiscovery = 0;
         foreach (var kvp in existing)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -372,6 +434,18 @@ public class UpdateSyncTablesTask
                 continue;
             }
 
+            // Discovery for this library didn't complete (paginated fetch
+            // hit the error threshold, or a whitelist ID lookup threw). The
+            // "unseen" set therefore mixes truly-deleted items with items
+            // we simply didn't enumerate — pruning would schedule the
+            // latter for deletion alongside the former. Skip the whole
+            // library this run; next refresh re-attempts discovery.
+            if (_librariesWithIncompleteDiscovery.Contains(kvp.Value.SourceLibraryId))
+            {
+                skippedDueToIncompleteDiscovery++;
+                continue;
+            }
+
             try
             {
                 var result = SyncStateService.ProcessMissingItem(typedManager, kvp.Value, deleteMode, Logger);
@@ -384,6 +458,13 @@ public class UpdateSyncTablesTask
             {
                 Logger.LogWarning(ex, "Failed to process missing item {SourceItemId}", kvp.Value.SourceItemId);
             }
+        }
+
+        if (skippedDueToIncompleteDiscovery > 0)
+        {
+            Logger.LogWarning(
+                "{Task}: skipped pruning {Count} row(s) across {LibraryCount} library/libraries with incomplete discovery this run — re-run after source server stabilizes",
+                Name, skippedDueToIncompleteDiscovery, _librariesWithIncompleteDiscovery.Count);
         }
 
         return Task.FromResult(pruned);

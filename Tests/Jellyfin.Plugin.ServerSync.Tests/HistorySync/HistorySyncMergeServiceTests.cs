@@ -34,12 +34,14 @@ public class HistorySyncMergeServiceTests
     }
 
     /// <summary>
-    /// Null SourceIsFavorite defaults the merged value to false.
-    /// True: a source row with no opinion on Favorite is treated as "not favourite."
-    /// False: null Source would inadvertently keep local favourites alive forever.
+    /// Null SourceIsFavorite preserves the local value rather than wiping it.
+    /// True: a transient response where source UserData is missing doesn't
+    /// silently destroy local favorites.
+    /// False: treating "no data received" as "not favorited" would zero out
+    /// local favorites on any API hiccup.
     /// </summary>
     [Fact]
-    public void MergeHistoryData_IsFavorite_FalseWhenSourceNull()
+    public void MergeHistoryData_IsFavorite_PreservesLocalWhenSourceNull()
     {
         var item = MakeItem();
         item.SourceIsFavorite = null;
@@ -47,7 +49,7 @@ public class HistorySyncMergeServiceTests
 
         HistorySyncMergeService.MergeHistoryData(item);
 
-        Assert.False(item.MergedIsFavorite);
+        Assert.True(item.MergedIsFavorite);
     }
 
     /// <summary>
@@ -313,12 +315,14 @@ public class HistorySyncMergeServiceTests
     }
 
     /// <summary>
-    /// No LocalItemId with a merge diff still returns true (flagged dead code).
-    /// True: pins the current — surprising — behaviour where the LocalItemId guard never reaches.
-    /// False: behaviour silently changes when someone reorders the checks in HasChangesToSync.
+    /// LocalItemId being absent does not suppress a real merge diff.
+    /// True: BuildRecord never persists a row without a LocalItemId, so this is
+    /// belt-and-suspenders — but if a future code path ever does, a real diff
+    /// is still surfaced.
+    /// False: silent suppression would mask actual divergences for orphan rows.
     /// </summary>
     [Fact]
-    public void HasChangesToSync_NoLocalItemId_WithMergeDiff_StillReturnsTrue_FlaggedDeadCode()
+    public void HasChangesToSync_NoLocalItemId_WithMergeDiff_StillReturnsTrue()
     {
         var item = MakeItem();
         item.LocalItemId = null;
@@ -329,9 +333,10 @@ public class HistorySyncMergeServiceTests
     }
 
     /// <summary>
-    /// No LocalItemId with no merge diff returns false.
-    /// True: the intended LocalItemId guard fires when there's nothing else to detect first.
-    /// False: rows with no local correlate would erroneously claim they have changes.
+    /// LocalItemId being absent + no merge diff returns false.
+    /// True: a row with no divergence and no local correlate is correctly
+    /// reported as unchanged.
+    /// False: idempotent rows would falsely claim they need syncing.
     /// </summary>
     [Fact]
     public void HasChangesToSync_NoLocalItemId_NoMergeDiff_ReturnsFalse()

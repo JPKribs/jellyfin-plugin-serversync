@@ -20,7 +20,6 @@ export function createServerSyncShared(view) {
         // Local server name (fetched once)
         localServerName: null,
 
-        // Format bytes to human readable size
         formatSize: function(bytes) {
             if (!bytes) return '0 B';
             var units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -32,7 +31,6 @@ export function createServerSyncShared(view) {
             return bytes.toFixed(i > 0 ? 2 : 0) + ' ' + units[i];
         },
 
-        // Format relative time (e.g., "5 minutes ago")
         formatRelativeTime: function(date) {
             var now = new Date();
             var diff = now - date;
@@ -46,19 +44,16 @@ export function createServerSyncShared(view) {
             return 'Just now';
         },
 
-        // Get filename from path
         getFileName: function(path) {
             if (!path) return '';
             return path.split('/').pop().split('\\').pop();
         },
 
-        // Escape HTML special characters
         escapeHtml: function(str) {
             if (!str) return '';
             return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         },
 
-        // Build an authenticated image URL for an item on the source server
         buildSourceImageUrl: function(serverUrl, apiKey, itemId, imageType, maxHeight) {
             if (!serverUrl || !apiKey || !itemId) return null;
             imageType = imageType || 'Primary';
@@ -67,7 +62,6 @@ export function createServerSyncShared(view) {
                 '?maxHeight=' + maxHeight + '&api_key=' + encodeURIComponent(apiKey);
         },
 
-        // Build an authenticated image URL for a user on the source server
         buildSourceUserImageUrl: function(serverUrl, apiKey, userId, maxHeight) {
             if (!serverUrl || !apiKey || !userId) return null;
             maxHeight = maxHeight || 80;
@@ -75,7 +69,6 @@ export function createServerSyncShared(view) {
                 '?maxHeight=' + maxHeight + '&api_key=' + encodeURIComponent(apiKey);
         },
 
-        // Render a thumbnail image with fallback placeholder for item images.
         // Starts as portrait (40×60); on load, if the image is landscape
         // (width > height), it swaps to the landscape class (106×60).
         renderItemThumb: function(serverUrl, apiKey, itemId) {
@@ -90,7 +83,6 @@ export function createServerSyncShared(view) {
                 '<div class="pt-row-thumb-placeholder" style="display:none"><span class="material-icons">movie</span></div>';
         },
 
-        // Render a circular user avatar with fallback placeholder
         renderUserThumb: function(serverUrl, apiKey, userId) {
             var imgUrl = this.buildSourceUserImageUrl(serverUrl, apiKey, userId, 80);
             if (!imgUrl) {
@@ -101,7 +93,6 @@ export function createServerSyncShared(view) {
                 '<div class="pt-row-thumb-user-placeholder" style="display:none"><span class="material-icons">person</span></div>';
         },
 
-        // Render a portrait thumbnail for a person with fallback placeholder.
         // Always portrait (no landscape auto-detection) since person images are headshots.
         renderPersonThumb: function(serverUrl, apiKey, personId) {
             var imgUrl = this.buildSourceImageUrl(serverUrl, apiKey, personId, 'Primary', 80);
@@ -114,22 +105,18 @@ export function createServerSyncShared(view) {
                 '<div class="pt-row-thumb-placeholder" style="display:none"><span class="material-icons">person</span></div>';
         },
 
-        // Show alert using Dashboard
         showAlert: function(message) {
             Dashboard.alert(message);
         },
 
-        // Get plugin configuration
         getConfig: function() {
             return ApiClient.getPluginConfiguration(this.pluginId);
         },
 
-        // Save plugin configuration
         saveConfig: function(config) {
             return ApiClient.updatePluginConfiguration(this.pluginId, config);
         },
 
-        // Fetch local server name from system info
         fetchLocalServerName: function() {
             var self = this;
             return ApiClient.getPublicSystemInfo().then(function(info) {
@@ -141,7 +128,6 @@ export function createServerSyncShared(view) {
             });
         },
 
-        // Make API request to plugin endpoint
         apiRequest: function(endpoint, method, data) {
             var options = {
                 url: ApiClient.getUrl('ServerSync/' + endpoint),
@@ -162,7 +148,6 @@ export function createServerSyncShared(view) {
             });
         },
 
-        // Set element visibility
         setVisible: function(elementOrId, visible) {
             var el = typeof elementOrId === 'string' ? view.querySelector('#' + elementOrId) : elementOrId;
             if (el) {
@@ -174,7 +159,6 @@ export function createServerSyncShared(view) {
             }
         },
 
-        // Safe event binding
         bindEvent: function(id, event, handler, moduleName) {
             var el = view.querySelector('#' + id);
             if (el) {
@@ -185,14 +169,10 @@ export function createServerSyncShared(view) {
             return el;
         },
 
-        // Safe click binding shorthand
         bindClick: function(id, handler, moduleName) {
             return this.bindEvent(id, 'click', handler, moduleName);
         },
 
-        // Poll a scheduled task for progress and update button UI
-        // btn: the button element, taskKey: Jellyfin task key,
-        // label: original button text, onComplete: callback when task finishes
         pollTaskProgress: function(btn, taskKey, label, onComplete) {
             var progressBar = btn.querySelector('.btn-progress');
             if (!progressBar) {
@@ -277,7 +257,6 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
         searchTimeout: null
     };
 
-    // Merge options
     Object.keys(options).forEach(function(key) {
         if (typeof options[key] === 'object' && options[key] !== null && !Array.isArray(options[key])) {
             table.options[key] = Object.assign({}, table.options[key], options[key]);
@@ -340,7 +319,6 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
         var opts = table.options;
         var html = '<div class="pt-wrapper">';
 
-        // Top row: Search + Filter
         html += '<div class="pt-controls">';
         if (opts.search && opts.search.enabled !== false) {
             html += '<input type="text" class="pt-search" placeholder="' +
@@ -362,7 +340,6 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
         }
         html += '</div>';
 
-        // Bottom row: Selection controls + Bulk actions + Reload button
         if (opts.selection && opts.selection.enabled) {
             html += '<div class="pt-selection-header">';
             html += '<label class="pt-select-all-label">';
@@ -379,16 +356,13 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
             html += '</div>';
         }
 
-        // Table body
         html += '<div class="pt-body"></div>';
 
-        // Loading indicator
         html += '<div class="pt-loading-more" style="display:none;">Loading more...</div>';
 
-        // Scroll sentinel (always in DOM, observed by IntersectionObserver for infinite scroll)
+        // Always in the DOM — observed by IntersectionObserver for infinite scroll.
         html += '<div class="pt-scroll-sentinel" style="height:1px;"></div>';
 
-        // Footer
         html += '<div class="pt-footer">';
         html += '<span class="pt-item-count"></span>';
         html += '</div>';
@@ -532,7 +506,6 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
 
         var html = '<div class="pt-row" data-id="' + ServerSyncShared.escapeHtml(String(itemId)) + '">';
 
-        // Checkbox cell
         if (opts.selection && opts.selection.enabled) {
             var checked = table.state.selectedIds.has(String(itemId)) ? ' checked' : '';
             html += '<div class="pt-cell pt-cell-checkbox">';
@@ -541,7 +514,6 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
             html += '</div>';
         }
 
-        // Data cells
         visibleColumns.forEach(function(col) {
             var value = item[col.key];
             var cellClass = 'pt-cell';
@@ -605,7 +577,6 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
             row.addEventListener('click', handleRowAction);
         });
 
-        // Status badge buttons
         body.querySelectorAll('.pt-status-btn').forEach(function(btn) {
             btn.addEventListener('click', function(e) {
                 e.preventDefault();
@@ -845,7 +816,7 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
             }
         },
 
-        // Disconnect the IntersectionObserver (call on viewhide or tab switch to prevent stale state)
+        // Call on viewhide or tab switch to prevent stale state.
         disconnectObserver: function() {
             if (table._scrollObserver) {
                 table._scrollObserver.disconnect();
@@ -853,7 +824,7 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
             }
         },
 
-        // Reconnect the IntersectionObserver (call when the table's container becomes visible again)
+        // Call when the table's container becomes visible again.
         reconnectObserver: function() {
             if (table._scrollObserver || !table.elements.scrollSentinel) {
                 return; // Already connected or no sentinel element
@@ -867,7 +838,6 @@ export function createPaginatedTable(view, ServerSyncShared, options) {
         }
     };
 
-    // Initialize
     _createStructure();
     _bindEvents();
 

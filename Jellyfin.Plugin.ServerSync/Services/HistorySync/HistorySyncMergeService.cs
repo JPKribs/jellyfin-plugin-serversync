@@ -22,8 +22,19 @@ public static class HistorySyncMergeService
     /// <param name="item">History sync item to update with merged values.</param>
     public static void MergeHistoryData(HistorySyncItem item)
     {
-        // IsFavorite: Always taken from Source Server
-        item.MergedIsFavorite = item.SourceIsFavorite ?? false;
+        // IsFavorite: take source when it has an opinion, otherwise keep
+        // local. The previous unconditional `?? false` conflated two cases
+        // for a null source value — "explicitly unfavorited" and "UserData
+        // not available in the response" — silently wiping local favorites
+        // on the latter.
+        if (item.SourceIsFavorite.HasValue)
+        {
+            item.MergedIsFavorite = item.SourceIsFavorite.Value;
+        }
+        else
+        {
+            item.MergedIsFavorite = item.LocalIsFavorite;
+        }
 
         // PlayCount: Take the maximum of Source and Local
         item.MergedPlayCount = Math.Max(item.SourcePlayCount ?? 0, item.LocalPlayCount ?? 0);
@@ -109,13 +120,6 @@ public static class HistorySyncMergeService
         if (item.MergedLastPlayedDate != item.LocalLastPlayedDate && item.MergedLastPlayedDate.HasValue)
         {
             return true;
-        }
-
-        // Also check if we have source data but no local data was matched yet
-        if (string.IsNullOrEmpty(item.LocalItemId) && !string.IsNullOrEmpty(item.SourceItemId))
-        {
-            // Item exists on source but hasn't been matched locally
-            return false; // Can't sync without local item
         }
 
         return false;

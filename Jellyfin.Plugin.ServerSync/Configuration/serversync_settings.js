@@ -56,7 +56,6 @@ export default function (view) {
         return ServerSyncShared.bindClick(id, handler);
     }
 
-    // Safe DOM accessors for load/save settings
     function getEl(id) {
         return view.querySelector('#' + id);
     }
@@ -107,7 +106,6 @@ export default function (view) {
             setVisible('serverInfoContainer', true);
         }
 
-        // Load authenticated user if present
         if (config.SourceServerAuthenticatedUser) {
             var authUserEl = view.querySelector('#txtAuthenticatedUser');
             if (authUserEl) authUserEl.textContent = config.SourceServerAuthenticatedUser;
@@ -169,10 +167,6 @@ export default function (view) {
         config.SourceServerApiKey = apiKeyEl ? apiKeyEl.value : '';
         config.SourceServerExternalUrl = externalUrlEl ? externalUrlEl.value : '';
 
-        // Note: SourceServerAuthenticatedUser is set by generateToken, not here
-        // If the API key was manually changed, clear the authenticated user
-        // (This is handled by generateToken setting it, and manual edits won't update it)
-
         ServerSyncShared.saveConfig(config).then(function() {
             Dashboard.alert('Server settings saved');
         }).catch(function() {
@@ -213,23 +207,19 @@ export default function (view) {
                 // Clear the password field for security
                 if (passwordEl) passwordEl.value = '';
 
-                // Update the API key field with the new token
                 var apiKeyEl = view.querySelector('#txtSourceServerApiKey');
                 if (apiKeyEl) apiKeyEl.value = response.AccessToken;
 
-                // Update the authenticated user display
                 var authUserEl = view.querySelector('#txtAuthenticatedUser');
                 if (authUserEl) authUserEl.textContent = response.Username || username;
                 setVisible('authenticatedUserRow', true);
 
-                // Update server info display
                 var nameEl = view.querySelector('#txtSourceServerName');
                 var idEl = view.querySelector('#txtSourceServerId');
                 if (nameEl) nameEl.textContent = response.ServerName || 'Unknown';
                 if (idEl) idEl.textContent = response.ServerId || 'Unknown';
                 setVisible('serverInfoContainer', true);
 
-                // Update currentConfig
                 if (currentConfig) {
                     currentConfig.SourceServerApiKey = response.AccessToken;
                     currentConfig.SourceServerAuthenticatedUser = response.Username || username;
@@ -238,7 +228,6 @@ export default function (view) {
                     currentConfig.SourceServerId = response.ServerId;
                 }
 
-                // Save the configuration automatically
                 var config = currentConfig || {};
                 config.SourceServerUrl = serverUrl;
                 config.SourceServerApiKey = response.AccessToken;
@@ -381,23 +370,15 @@ export default function (view) {
         var filterSearchInput = div.querySelector('.filterSearchInput');
         var filterSearchSpinner = div.querySelector('.filterSearchSpinner');
 
-        // State for this mapping's filter
         var selectedFilterItems = {};
         var filterSearchTimeout = null;
         var filterStartIndex = 0;
         var filterCurrentLibraryId = mapping.SourceLibraryId || '';
         var filterRequestId = 0;
 
-        // Initialize filter mode (config returns enum name string)
-        var savedFilterMode = mapping.FilterMode || 'AllowAll';
-        // Handle both numeric (legacy) and string enum values
-        if (savedFilterMode === 0 || savedFilterMode === '0') savedFilterMode = 'AllowAll';
-        else if (savedFilterMode === 1 || savedFilterMode === '1') savedFilterMode = 'Whitelist';
-        else if (savedFilterMode === 2 || savedFilterMode === '2') savedFilterMode = 'Blacklist';
-        filterModeSelect.value = String(savedFilterMode);
+        filterModeSelect.value = mapping.FilterMode || 'AllowAll';
         updateFilterVisibility();
 
-        // Load existing filtered items as selected
         (mapping.FilteredItems || []).forEach(function(fi) {
             if (fi.ItemId) {
                 selectedFilterItems[fi.ItemId] = { ItemId: fi.ItemId, Name: fi.Name || '', Year: fi.Year, Path: fi.Path || '' };
@@ -549,7 +530,6 @@ export default function (view) {
             }
         }
 
-        // Search with debounce
         filterSearchInput.addEventListener('input', function() {
             clearTimeout(filterSearchTimeout);
             filterSearchTimeout = setTimeout(function() {
@@ -557,11 +537,10 @@ export default function (view) {
             }, 300);
         });
 
-        // Store references for collectLibraryMappings
+        // Stored on the div so collectLibraryMappings can read them back.
         div._filterModeSelect = filterModeSelect;
         div._selectedFilterItems = selectedFilterItems;
 
-        // Populate source library select
         var sourceSelect = div.querySelector('.sourceLibrarySelect');
         if (mapping.SourceLibraryId) sourceSelect.dataset.savedValue = mapping.SourceLibraryId;
         sourceSelect.innerHTML = '<option value="">Select source library...</option>';
@@ -579,7 +558,6 @@ export default function (view) {
                 var locations = JSON.parse(option.dataset.locations);
                 if (locations.length > 0) div.querySelector('.sourceRootPath').value = locations[0];
             }
-            // Update filter browser for new library
             filterCurrentLibraryId = this.value;
             selectedFilterItems = {};
             div._selectedFilterItems = selectedFilterItems;
@@ -588,7 +566,6 @@ export default function (view) {
             }
         });
 
-        // Populate local library select
         var localSelect = div.querySelector('.localLibrarySelect');
         if (mapping.LocalLibraryId) localSelect.dataset.savedValue = mapping.LocalLibraryId;
         localSelect.innerHTML = '<option value="">Select local library...</option>';
@@ -617,7 +594,6 @@ export default function (view) {
             var sourceSelect = row.querySelector('.sourceLibrarySelect');
             var localSelect = row.querySelector('.localLibrarySelect');
 
-            // Collect filter data
             var filterMode = row._filterModeSelect ? row._filterModeSelect.value : 'AllowAll';
             var filteredItems = [];
             var selectedItems = row._selectedFilterItems || {};
@@ -1156,27 +1132,22 @@ export default function (view) {
                 initCollapsibles();
                 initNestedVisibilityHandlers();
 
-                // Server actions
                 bindClick('btnTestConnection', testConnection);
                 bindClick('btnSaveServer', saveServerConfig);
                 bindClick('btnGenerateToken', generateToken);
 
-                // Library mapping actions
                 bindClick('btnAddMapping', function() { addLibraryMappingRow(); });
                 bindClick('btnSaveLibraries', saveLibraries);
 
-                // User mapping actions
                 bindClick('btnAddUserMapping', function() { addUserMappingRow(); });
                 bindClick('btnSaveUsers', saveUsers);
 
-                // Sync settings actions
                 bindClick('btnSaveContentSettings', saveContentSettings);
                 bindClick('btnSaveHistorySettings', saveHistorySettings);
                 bindClick('btnSaveMetadataSettings', saveMetadataSettings);
                 bindClick('btnSavePeopleSettings', savePeopleSettings);
                 bindClick('btnSaveUserSyncSettings', saveUserSyncSettings);
 
-                // Troubleshooting: Database reset actions
                 bindClick('btnResetContentTable', function() { resetTable('ResetContentSyncDatabase', 'content sync'); });
                 bindClick('btnResetHistoryTable', function() { resetTable('ResetHistorySyncDatabase', 'history sync'); });
                 bindClick('btnResetMetadataTable', function() { resetTable('ResetMetadataSyncDatabase', 'metadata sync'); });

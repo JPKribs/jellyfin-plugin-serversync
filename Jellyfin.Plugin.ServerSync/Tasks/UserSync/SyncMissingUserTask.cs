@@ -312,7 +312,36 @@ public class SyncMissingUserTask
     // captures the new state and the next Refresh sees no diff.
     // ===================================================================
 
-    private async Task ApplyPolicyChangesAsync(User localUser, UserSyncItem item)
+    private Task ApplyPolicyChangesAsync(User localUser, UserSyncItem item)
+        => ApplyJsonPropertyChangesAsync(
+            localUser,
+            item,
+            categoryLabel: "Policy",
+            getTarget: dto => dto.Policy,
+            persistAsync: (id, policy) => _userManager.UpdatePolicyAsync(id, policy));
+
+    private Task ApplyConfigurationChangesAsync(User localUser, UserSyncItem item)
+        => ApplyJsonPropertyChangesAsync(
+            localUser,
+            item,
+            categoryLabel: "Configuration",
+            getTarget: dto => dto.Configuration,
+            persistAsync: (id, config) => _userManager.UpdateConfigurationAsync(id, config));
+
+    /// <summary>
+    /// Shared apply path for Policy and Configuration: deserialize the merged
+    /// JSON blob, reflect each key onto the typed target object, log unknown
+    /// fields, and call the category-specific persist delegate. Both
+    /// categories had near-identical bodies — this collapses them so a fix
+    /// to the apply loop lands in one place.
+    /// </summary>
+    private async Task ApplyJsonPropertyChangesAsync<T>(
+        User localUser,
+        UserSyncItem item,
+        string categoryLabel,
+        Func<MediaBrowser.Model.Dto.UserDto, T?> getTarget,
+        Func<Guid, T, Task> persistAsync)
+        where T : class
     {
         if (string.IsNullOrEmpty(item.MergedValue))
         {
@@ -321,8 +350,8 @@ public class SyncMissingUserTask
         }
 
         var localUserDto = _userManager.GetUserDto(localUser);
-        var localPolicy = localUserDto.Policy
-            ?? throw new InvalidOperationException($"Could not retrieve current policy for user {localUser.Username}");
+        var target = getTarget(localUserDto)
+            ?? throw new InvalidOperationException($"Could not retrieve current {categoryLabel.ToLowerInvariant()} for user {localUser.Username}");
 
         var mergedProps = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.MergedValue);
         if (mergedProps == null)
@@ -331,90 +360,47 @@ public class SyncMissingUserTask
             return;
         }
 
-        var policyType = localPolicy.GetType();
+        var targetType = target.GetType();
         var modified = false;
         var appliedProperties = new List<string>();
+        var skippedProperties = new List<string>();
 
         foreach (var kvp in mergedProps)
         {
             try
             {
-                var property = policyType.GetProperty(kvp.Key);
+                var property = targetType.GetProperty(kvp.Key);
                 if (property == null || !property.CanWrite)
                 {
+                    skippedProperties.Add(kvp.Key);
                     continue;
                 }
 
                 var value = JsonSerializer.Deserialize(kvp.Value.GetRawText(), property.PropertyType);
-                property.SetValue(localPolicy, value);
+                property.SetValue(target, value);
                 modified = true;
                 appliedProperties.Add(kvp.Key);
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Policy: failed to apply property {Property} for {User}", kvp.Key, localUser.Username);
+                Logger.LogWarning(ex, "{Category}: failed to apply property {Property} for {User}", categoryLabel, kvp.Key, localUser.Username);
             }
+        }
+
+        if (skippedProperties.Count > 0)
+        {
+            // Source server's schema has fields that don't exist (or aren't
+            // settable) on local — cross-Jellyfin-version drift. Surface so
+            // the operator can see what didn't make it across.
+            Logger.LogDebug("{Category}: skipped {Count} unknown/unsettable propert(ies) for {User}: {Properties}",
+                categoryLabel, skippedProperties.Count, localUser.Username, string.Join(", ", skippedProperties));
         }
 
         if (modified)
         {
-            Logger.LogDebug("Policy: applying {Count} changes for {User}: {Properties}",
-                appliedProperties.Count, localUser.Username, string.Join(", ", appliedProperties));
-            await _userManager.UpdatePolicyAsync(localUser.Id, localPolicy).ConfigureAwait(false);
-        }
-
-        item.LocalValue = item.MergedValue;
-    }
-
-    private async Task ApplyConfigurationChangesAsync(User localUser, UserSyncItem item)
-    {
-        if (string.IsNullOrEmpty(item.MergedValue))
-        {
-            item.LocalValue = item.MergedValue;
-            return;
-        }
-
-        var localUserDto = _userManager.GetUserDto(localUser);
-        var localConfig = localUserDto.Configuration
-            ?? throw new InvalidOperationException($"Could not retrieve current configuration for user {localUser.Username}");
-
-        var mergedProps = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.MergedValue);
-        if (mergedProps == null)
-        {
-            item.LocalValue = item.MergedValue;
-            return;
-        }
-
-        var configType = localConfig.GetType();
-        var modified = false;
-        var appliedProperties = new List<string>();
-
-        foreach (var kvp in mergedProps)
-        {
-            try
-            {
-                var property = configType.GetProperty(kvp.Key);
-                if (property == null || !property.CanWrite)
-                {
-                    continue;
-                }
-
-                var value = JsonSerializer.Deserialize(kvp.Value.GetRawText(), property.PropertyType);
-                property.SetValue(localConfig, value);
-                modified = true;
-                appliedProperties.Add(kvp.Key);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Configuration: failed to apply property {Property} for {User}", kvp.Key, localUser.Username);
-            }
-        }
-
-        if (modified)
-        {
-            Logger.LogDebug("Configuration: applying {Count} changes for {User}: {Properties}",
-                appliedProperties.Count, localUser.Username, string.Join(", ", appliedProperties));
-            await _userManager.UpdateConfigurationAsync(localUser.Id, localConfig).ConfigureAwait(false);
+            Logger.LogDebug("{Category}: applying {Count} changes for {User}: {Properties}",
+                categoryLabel, appliedProperties.Count, localUser.Username, string.Join(", ", appliedProperties));
+            await persistAsync(localUser.Id, target).ConfigureAwait(false);
         }
 
         item.LocalValue = item.MergedValue;

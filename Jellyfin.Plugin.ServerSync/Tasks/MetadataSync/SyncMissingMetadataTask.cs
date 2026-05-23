@@ -1046,13 +1046,6 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     // ===================================================================
 
     /// <summary>
-    /// Reads a string value from the dict and passes it to the assigner.
-    /// Returns the assigner's result. The value is null when the JSON is
-    /// null, the empty string when the JSON is an empty string, or the
-    /// content otherwise. If the key is absent, returns false and does not
-    /// invoke the assigner.
-    /// </summary>
-    /// <summary>
     /// Removes image types that the metadata sync apply path can't actually
     /// write to a non-Person item. Currently filters out <c>Profile</c>:
     /// Jellyfin's repository silently drops Profile writes on Movie/Series/
