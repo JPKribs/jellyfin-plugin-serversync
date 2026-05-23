@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.60",
+        "changelog": "## Fixes\r\n- Deletion on source server deletion\r\n\r\n## Technical\r\n- Safer pruning when source refresh fails partway\r\n- People metadata persists even if image sync errors\r\n- Renamed Sync People Data to Sync People\r\n- Dedup'd User Policy and Configuration apply\r\n- History keeps local favorites when source data is missing\r\n- Content warns on invalid whitelist IDs\r\n- Cleanup comments\r\n- Add a ton of testing just to help make this easier",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.60/jellyfin-plugin-serversync-10.11.60.zip",
+        "checksum": "bc985265c93f7e8a2cb87c89d8b515e5",
+        "timestamp": "2026-05-23T22:49:16Z"
+      },
+      {
         "version": "10.11.59",
         "changelog": "## Fixes\r\n- Content whitelisting was broken by pagination changes",
         "targetAbi": "10.11.0.0",
