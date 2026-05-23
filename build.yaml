@@ -25,9 +25,12 @@ artifacts:
 - "Microsoft.Kiota.Serialization.Text.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  fixes:
-  - Content whitelisting was broken by pagination changes
   technical:
-  - Add tests for validating changes
-  - Some comment restrucuting to be better and cleaner
-  - Renaming values to keep things more consistent
+  - Safer pruning when source refresh fails partway
+  - People metadata persists even if image sync errors
+  - Renamed "Sync People Data" to "Sync People"
+  - Dedup'd User Policy and Configuration apply
+  - History keeps local favorites when source data is missing
+  - Content warns on invalid whitelist IDs
+  - Cleanup comments
+  - Add a ton of testing just to help make this easier
