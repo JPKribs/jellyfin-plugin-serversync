@@ -572,6 +572,12 @@ public class SourceServerClient : IDisposable
         {
             throw;
         }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        {
+            // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
+            _logger.LogWarning(ex, "Source server {Status} on whitelist root {Id}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, whitelistedId);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Whitelist: failed to fetch item {Id}", whitelistedId);
@@ -623,6 +629,16 @@ public class SourceServerClient : IDisposable
                 }
                 catch (OperationCanceledException)
                 {
+                    throw;
+                }
+                catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+                {
+                    // Any 4xx/5xx: bubble up. `break` here would silently
+                    // truncate the leaf list, which the caller can't tell
+                    // apart from "this folder really has no more children" —
+                    // exactly the kind of silent partial result that drives
+                    // the prune massacre.
+                    _logger.LogWarning(ex, "Source server {Status} listing whitelist children of {ParentId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, parentId);
                     throw;
                 }
                 catch (Exception ex)
@@ -799,6 +815,12 @@ public class SourceServerClient : IDisposable
         {
             throw;
         }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        {
+            // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
+            _logger.LogWarning(ex, "Source server {Status} getting items from library {LibraryId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get items from library {LibraryId}", libraryId);
@@ -966,6 +988,12 @@ public class SourceServerClient : IDisposable
         {
             throw;
         }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        {
+            // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
+            _logger.LogWarning(ex, "Source server {Status} getting item count for library {LibraryId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to get item count for library {LibraryId}", libraryId);
@@ -1117,6 +1145,12 @@ public class SourceServerClient : IDisposable
         {
             throw;
         }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        {
+            // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
+            _logger.LogWarning(ex, "Source server {Status} getting item paths from library {LibraryId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get item paths from library {LibraryId}", libraryId);
@@ -1165,6 +1199,16 @@ public class SourceServerClient : IDisposable
             }
             catch (OperationCanceledException)
             {
+                throw;
+            }
+            catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+            {
+                // Any 4xx/5xx means the source didn't give us a real answer —
+                // not that the requested items don't exist. Letting this
+                // swallow returns a partial result and downstream pruning
+                // then deletes every local row that "wasn't seen this run."
+                // Bubble up so the refresh aborts before the prune step.
+                _logger.LogWarning(ex, "Source server {Status} fetching items batch at index {Index}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, i);
                 throw;
             }
             catch (Exception ex)
@@ -1388,6 +1432,15 @@ public class SourceServerClient : IDisposable
         }
         catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        {
+            // Any 4xx/5xx: bubble up so the User Refresh aborts before prune.
+            // (Refresh's own `_mappingsWithIncompleteDiscovery` guard would
+            // also save this one mapping's rows, but rethrowing is the
+            // consistent "any error = stop" behavior.)
+            _logger.LogWarning(ex, "Source server {Status} getting user details for {UserId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId);
             throw;
         }
         catch (Exception ex)
@@ -1731,6 +1784,15 @@ public class SourceServerClient : IDisposable
         {
             throw;
         }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        {
+            // Any 4xx/5xx isn't "source has no persons" — it's "source didn't
+            // give us a real answer." Returning empty here makes the People
+            // refresh prune every local tracking row. Bubble up so the refresh
+            // aborts before prune.
+            _logger.LogWarning(ex, "Source server {Status} bulk-fetching Persons; aborting refresh to protect tracking rows", ex.ResponseStatusCode);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to bulk-fetch Persons from source server");
@@ -1778,6 +1840,12 @@ public class SourceServerClient : IDisposable
         }
         catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        {
+            // Any 4xx/5xx: bubble up so the History Refresh aborts before prune.
+            _logger.LogWarning(ex, "Source server {Status} fetching user-data items for user {UserId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId);
             throw;
         }
         catch (Exception ex)
@@ -1945,6 +2013,14 @@ public class SourceServerClient : IDisposable
         }
         catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+        {
+            // Any 4xx/5xx: bubble up so the History Refresh aborts before prune.
+            // GetUserPlayedItemIdsAsync already throws on null page, so a rethrow
+            // here propagates the same way.
+            _logger.LogWarning(ex, "Source server {Status} getting played items for user {UserId} in library {LibraryId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId, libraryId);
             throw;
         }
         catch (Exception ex)
