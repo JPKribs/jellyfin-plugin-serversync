@@ -1511,6 +1511,47 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
+    /// HEADs the image endpoint and returns the byte size from Content-Length,
+    /// or null if the request fails or the server omits the header. Bypasses
+    /// the source server's cached <see cref="ImageInfo.Size"/> (which is
+    /// populated from Jellyfin's in-memory item state and goes stale when an
+    /// image file is replaced on disk without re-scanning), so the
+    /// post-replacement size shows up in the table on the next refresh.
+    /// </summary>
+    public async Task<long?> GetItemImageContentLengthAsync(
+        Guid itemId,
+        string imageType,
+        int? imageIndex,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Head,
+            imageIndex.HasValue
+                ? $"{_serverUrl}/Items/{itemId}/Images/{imageType}/{imageIndex.Value}"
+                : $"{_serverUrl}/Items/{itemId}/Images/{imageType}");
+        AddAuthorizationHeader(request);
+
+        try
+        {
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return response.Content.Headers.ContentLength;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "HEAD for image size failed: {ImageType}/{Index} on {ItemId}", imageType, imageIndex, itemId);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Downloads an item image from the source server as a stream.
     /// </summary>
     /// <param name="itemId">Item ID on the source server.</param>

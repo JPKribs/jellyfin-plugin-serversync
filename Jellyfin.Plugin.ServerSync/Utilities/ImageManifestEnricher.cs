@@ -81,6 +81,21 @@ public static class ImageManifestEnricher
                     if (info.Height.HasValue) entry.Height = info.Height.Value;
                     anyChanged = true;
                 }
+
+                // /Items/{id}/Images reads Size from Jellyfin's in-memory
+                // item state, which goes stale when the image file is
+                // replaced on disk without a metadata rescan. HEAD the
+                // actual image URL — Jellyfin's image controller serves
+                // the file directly, so Content-Length is the current
+                // file length and the comparator sees the replacement
+                // even when Jellyfin hasn't re-indexed.
+                int? imageIndex = kvp.Key == "Backdrop" || kvp.Value.Count > 1 ? entry.ImageIndex : null;
+                var headSize = await client.GetItemImageContentLengthAsync(sourceItemId, kvp.Key, imageIndex, cancellationToken).ConfigureAwait(false);
+                if (headSize.HasValue && headSize.Value != entry.Size)
+                {
+                    entry.Size = headSize.Value;
+                    anyChanged = true;
+                }
             }
         }
 
