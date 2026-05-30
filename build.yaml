@@ -1,8 +1,8 @@
 ---
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
-imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.62"
+imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
+version: "10.11.63.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -26,4 +26,4 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   fixes:
-  - Don't prune tables if the source server returns a 400 or 500
+  - Fix missing plugin image

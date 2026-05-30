@@ -213,6 +213,51 @@ main() {
         fi
     done < build.yaml
 
+    # Bundle the plugin image AND a meta.json inside the package so the installed
+    # plugin icon (/Plugins/{id}/{ver}/Image) is served straight from disk with
+    # ZERO dependency on the server downloading imageUrl at install time.
+    # CRITICAL: meta.json "version" must be 4-part to match the assembly version
+    # the web UI uses in the image URL (.NET pads to 4 parts), or GetPlugin()
+    # returns null and the image 404s.
+    local logo_src="$PROJECT_DIR/Assets/Logo.png"
+    if [[ -f "$logo_src" ]]; then
+        log "INFO" "Bundling plugin image: Logo.png"
+        cp "$logo_src" "$temp_dir/Logo.png"
+
+        local target_abi=$(grep '^targetAbi:' build.yaml | cut -d':' -f2 | tr -d ' "')
+        [[ -z "$target_abi" ]] && target_abi="10.11.0.0"
+        local meta_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        # Build the "assemblies" array from the artifacts already copied to temp.
+        local assemblies_json=""
+        for f in "$temp_dir"/*.dll; do
+            [[ -f "$f" ]] || continue
+            local base=$(basename "$f")
+            if [[ -z "$assemblies_json" ]]; then
+                assemblies_json="        \"$base\""
+            else
+                assemblies_json="$assemblies_json,
+        \"$base\""
+            fi
+        done
+
+        log "INFO" "Generating bundled meta.json with imagePath"
+        cat > "$temp_dir/meta.json" <<EOF
+{
+    "guid": "$PLUGIN_GUID",
+    "version": "$VERSION",
+    "targetAbi": "$target_abi",
+    "timestamp": "$meta_timestamp",
+    "imagePath": "Logo.png",
+    "assemblies": [
+$assemblies_json
+    ]
+}
+EOF
+    else
+        log "WARN" "Plugin image not found at $logo_src - installed icon will rely on imageUrl download"
+    fi
+
     # Create ZIP with all files in temp directory
     log "INFO" "Creating ZIP archive"
     if command -v zip >/dev/null 2>&1; then
