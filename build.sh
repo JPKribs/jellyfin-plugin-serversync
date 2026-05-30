@@ -41,7 +41,9 @@ get_plugin_version() {
         fi
     fi
 
-    echo "0.0.0"
+    # Four-part fallback: a 3-part version would normalize the assembly version
+    # mismatched against the install URL and break the plugin image.
+    echo "0.0.0.0"
 }
 
 # Get plugin info from build.yaml

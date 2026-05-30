@@ -1,9 +1,9 @@
 <Project>
     <PropertyGroup>
         <!-- Version is injected at build time from build.yaml -->
-        <!-- Use: dotnet build -p:Version=X.Y.Z -->
-        <!-- Default fallback if not specified -->
-        <Version Condition="'$(Version)' == ''">0.0.0</Version>
+        <!-- Use: dotnet build -p:Version=JJ.JJ.F.B (e.g. 10.11.1.0) -->
+        <!-- Four-part fallback: a 3-part version breaks the installed plugin image -->
+        <Version Condition="'$(Version)' == ''">0.0.0.0</Version>
         <AssemblyVersion>$(Version)</AssemblyVersion>
         <FileVersion>$(Version)</FileVersion>
     </PropertyGroup>
