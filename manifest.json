@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.63.1",
+        "changelog": "## Fixes\r\n- Fix missing plugin image\r\n\r\n## Developer\r\n- Build logic\r\n- README updates\r\n- Versioning Cleanup",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.63.1/jellyfin-plugin-serversync-10.11.63.1.zip",
+        "checksum": "bcd016175e3b5bd73c791185fbe97265",
+        "timestamp": "2026-05-30T18:55:23Z"
+      },
+      {
         "version": "10.11.62",
         "changelog": "## Fixes\r\n- Don't prune tables if the source server returns a 400 or 500",
         "targetAbi": "10.11.0.0",
