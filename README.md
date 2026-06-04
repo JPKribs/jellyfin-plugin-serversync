@@ -2,6 +2,16 @@
 
 A Jellyfin plugin for one-way synchronization between Jellyfin servers. Keep your **Content**, **Watch History**, **Metadata**, **People**, and **User Settings** in sync across multiple Jellyfin installations.
 
+---
+
+**All plugins are made for my personal use cases. I've made these publicly available for anyone who has the same use cases and can benefit from this work. I have no desire to advertise or market for these plugins as these are for personal usage only.**
+
+**Thank you,**
+
+*Joe Kribs*
+
+---
+
 ## How It Works
 
 Server Sync runs on your Local (destination) server and pulls data from a Source server using standard Jellyfin APIs. You configure library and user mappings, then scheduled tasks handle the synchronization. Content is matched by file path, allowing the plugin to track what needs to be downloaded, updated, or removed. No modifications are required on the Source server.
@@ -245,10 +255,8 @@ Releases use a four-part version, `JJ.JJ.F.B`, that matches the supported Jellyf
 
 ---
 
-# AI Disclaimer
+## AI Disclaimer
 
-Claude Code was utilized for this project to resolve issues with GitHub Actions & Build Scripts. For project code, it was used to locally to cleanup inline comments and create first drafts of documentation.
+Claude Code was utilized in the initial structure of this project and first drafts of documentation. All code has been manually reviewed, tested, and revised after its generation. This disclaimer exists in the interest of transparency.
 
-In recent releases, AI has been used as a secondary review for potential code issues as there are many examples I cannot test without a large diversity of systems available. 
-
-**All code was written and tested by humans.**
+**All code was written, or code reviewed and tested, by humans.**
