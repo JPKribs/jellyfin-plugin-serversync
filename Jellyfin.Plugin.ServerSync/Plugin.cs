@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Common.Configuration;
-using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 using Microsoft.Extensions.Logging;
@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.ServerSync;
 /// <summary>
 /// Main plugin entry point for Server Sync.
 /// </summary>
-public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
+public class Plugin : PluginBase<Plugin, PluginConfiguration>
 {
     private readonly ILogger<Plugin> _logger;
 
@@ -25,7 +25,6 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         ILogger<Plugin> logger)
         : base(applicationPaths, xmlSerializer)
     {
-        Instance = this;
         _logger = logger;
 
         _logger.LogInformation("Server Sync plugin initialized");
@@ -40,13 +39,8 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// <inheritdoc />
     public override string Description => "Sync media from a source Jellyfin server to this server.";
 
-    /// <summary>
-    /// Singleton instance, set by the Jellyfin host on construction.
-    /// </summary>
-    public static Plugin? Instance { get; private set; }
-
     /// <inheritdoc />
-    public IEnumerable<PluginPageInfo> GetPages()
+    public override IEnumerable<PluginPageInfo> GetPages()
     {
         var ns = typeof(Plugin).Namespace;
 
@@ -89,5 +83,10 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             Name = "serversync_shared.js",
             EmbeddedResourcePath = $"{ns}.Configuration.serversync_shared.js"
         };
+
+        foreach (var page in GetSharedPages("serversync"))
+        {
+            yield return page;
+        }
     }
 }

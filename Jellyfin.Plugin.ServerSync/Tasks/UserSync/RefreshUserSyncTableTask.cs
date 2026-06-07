@@ -45,14 +45,6 @@ public class RefreshUserSyncTableTask
     private readonly IUserManager _userManager;
     private readonly UserSyncTableService _builder;
 
-    // Per-run record of user mappings whose source-side discovery failed —
-    // GetUserAsync threw, returned null, or local user is missing. Rows for
-    // these mappings must be excluded from pruning so a transient source
-    // hiccup doesn't silently delete the user's tracking rows. Reset at the
-    // top of <see cref="GetListAsync"/>. Serial writes (foreach mapping in
-    // GetListAsync), so no lock needed.
-    private readonly HashSet<(string SourceUserId, string LocalUserId)> _mappingsWithIncompleteDiscovery = new();
-
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
@@ -103,8 +95,6 @@ public class RefreshUserSyncTableTask
             return Array.Empty<UserCategoryWork>();
         }
 
-        _mappingsWithIncompleteDiscovery.Clear();
-
         var config = ConfigManager.Configuration;
         var enabledMappings = config.GetEnabledUserMappings();
         var work = new List<UserCategoryWork>();
@@ -124,11 +114,10 @@ public class RefreshUserSyncTableTask
                 var sourceUser = await Client.GetUserAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
                 if (sourceUser == null)
                 {
-                    // Source user fetch returned null (transient API failure
-                    // or genuinely missing user — we can't tell). Mark the
-                    // mapping incomplete so we don't prune its rows on what
-                    // might be a network blip.
-                    _mappingsWithIncompleteDiscovery.Add((mapping.SourceUserId, mapping.LocalUserId));
+                    // Source user fetch returned null (transient API failure or
+                    // genuinely missing user — we can't tell). Skip pruning this
+                    // run so a network blip doesn't delete the mapping's rows.
+                    MarkSourceUnavailable($"source server unavailable — source user '{mapping.SourceUserName}' not returned");
                     Logger.LogWarning("Source user {Id} not found; skipping mapping {Source} -> {Local}",
                         mapping.SourceUserId, mapping.SourceUserName, mapping.LocalUserName);
                     continue;
@@ -137,7 +126,9 @@ public class RefreshUserSyncTableTask
                 var localUser = _userManager.GetUserById(localUserId);
                 if (localUser == null)
                 {
-                    _mappingsWithIncompleteDiscovery.Add((mapping.SourceUserId, mapping.LocalUserId));
+                    // Local target gone: we can't enumerate this mapping, so skip
+                    // pruning this run rather than treat its rows as deleted.
+                    MarkSourceUnavailable($"local user '{mapping.LocalUserName}' not found; mapping rows cannot be re-confirmed");
                     Logger.LogWarning("Local user {Id} not found; skipping mapping {Source} -> {Local}",
                         mapping.LocalUserId, mapping.SourceUserName, mapping.LocalUserName);
                     continue;
@@ -187,10 +178,9 @@ public class RefreshUserSyncTableTask
             }
             catch (Exception ex)
             {
-                // Guid.Parse or GetUserAsync threw. Same mitigation as the
-                // null/missing paths above — keep the mapping's rows safe
-                // from pruning until next refresh confirms source state.
-                _mappingsWithIncompleteDiscovery.Add((mapping.SourceUserId, mapping.LocalUserId));
+                // Guid.Parse or GetUserAsync threw. Skip pruning this run so the
+                // mapping's rows survive until the next run confirms source state.
+                MarkSourceUnavailable($"source server unavailable preparing mapping '{mapping.SourceUserName}' -> '{mapping.LocalUserName}'");
                 Logger.LogError(ex, "Error preparing work for mapping {Source} -> {Local}",
                     mapping.SourceUserName, mapping.LocalUserName);
             }
@@ -233,12 +223,6 @@ public class RefreshUserSyncTableTask
     protected override (string SourceUserId, string LocalUserId, string PropertyCategory) ExtractKey(UserSyncItem record)
         => (record.SourceUserId, record.LocalUserId, record.PropertyCategory);
 
-    /// <inheritdoc />
-    protected override bool ShouldSkipPruning(UserSyncItem record)
-    {
-        ArgumentNullException.ThrowIfNull(record);
-        return _mappingsWithIncompleteDiscovery.Contains((record.SourceUserId, record.LocalUserId));
-    }
 
     // In scope when the row's user mapping is currently enabled. Disabling a
     // mapping preserves its rows (including Ignored overrides) instead of

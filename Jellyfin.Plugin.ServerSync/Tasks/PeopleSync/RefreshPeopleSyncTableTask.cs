@@ -133,7 +133,23 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         // Returns BaseItemDto with the same field set GetPersonByNameAsync
         // used, so downstream metadata blobs are byte-identical to the
         // previous per-name path.
-        var sourcePersons = await Client.GetAllPersonsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<SdkBaseItemDto> sourcePersons;
+        try
+        {
+            sourcePersons = await Client.GetAllPersonsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Source returned an error (or no real answer). Skip pruning this run
+            // so persons that still exist aren't deleted, and enumerate nothing.
+            MarkSourceUnavailable("source server unavailable bulk-fetching persons");
+            Logger.LogWarning(ex, "Failed to bulk-fetch persons from source; skipping prune this run");
+            return Array.Empty<SdkBaseItemDto>();
+        }
 
         progress.Report(80);
 
@@ -236,7 +252,12 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
                 }
             }
 
-            record.Images.UpdateSource(sourceImg);
+            // Carry sizes enrichment couldn't measure this run forward from the
+            // prior manifest for unchanged images, so a transient enrichment
+            // failure doesn't drop the row back to tag-only and read as a
+            // phantom change against the sized local side.
+            record.Images.UpdateSource(
+                ImageManifestEnricher.CarryForwardSizes(sourceImg, record.Images.Source));
             record.Images.Local = localImg;
         }
         else

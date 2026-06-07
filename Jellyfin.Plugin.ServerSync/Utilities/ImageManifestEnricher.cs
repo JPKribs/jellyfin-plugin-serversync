@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -100,5 +101,72 @@ public static class ImageManifestEnricher
         }
 
         return anyChanged ? JsonSerializer.Serialize(manifest) : sourceManifestJson;
+    }
+
+    /// <summary>
+    /// Fills missing Size / Width / Height on a freshly built (tag-only) source
+    /// manifest from the previously stored manifest, for images whose Tag is
+    /// unchanged. Refresh rebuilds the source side tag-only every run and only
+    /// enriches it with a live HTTP call; when that call fails or is skipped,
+    /// the row would otherwise drop back to Size=0 and read as a change against
+    /// the sized local side until the next successful enrichment. An unchanged
+    /// Tag means the same image, so the previously measured size still holds —
+    /// carrying it forward keeps the comparison honest with no extra HTTP. A
+    /// changed Tag is a real new image and is left tag-only so the change is
+    /// still detected.
+    /// </summary>
+    public static string? CarryForwardSizes(string? newManifestJson, string? oldManifestJson)
+    {
+        if (string.IsNullOrEmpty(newManifestJson) || string.IsNullOrEmpty(oldManifestJson))
+        {
+            return newManifestJson;
+        }
+
+        Dictionary<string, List<ImageInfoDto>>? newManifest;
+        Dictionary<string, List<ImageInfoDto>>? oldManifest;
+        try
+        {
+            newManifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(newManifestJson);
+            oldManifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(oldManifestJson);
+        }
+        catch (JsonException)
+        {
+            return newManifestJson;
+        }
+
+        if (newManifest == null || newManifest.Count == 0 || oldManifest == null || oldManifest.Count == 0)
+        {
+            return newManifestJson;
+        }
+
+        var carried = false;
+        foreach (var kvp in newManifest)
+        {
+            if (!oldManifest.TryGetValue(kvp.Key, out var oldEntries))
+            {
+                continue;
+            }
+
+            foreach (var entry in kvp.Value)
+            {
+                if (entry.Size > 0 || string.IsNullOrEmpty(entry.Tag))
+                {
+                    continue;
+                }
+
+                var match = oldEntries.FirstOrDefault(o => o.Tag == entry.Tag && o.Size > 0);
+                if (match == null)
+                {
+                    continue;
+                }
+
+                entry.Size = match.Size;
+                entry.Width = match.Width;
+                entry.Height = match.Height;
+                carried = true;
+            }
+        }
+
+        return carried ? JsonSerializer.Serialize(newManifest) : newManifestJson;
     }
 }

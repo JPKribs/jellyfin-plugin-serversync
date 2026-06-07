@@ -6,6 +6,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -15,8 +16,8 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Common;
 /// <summary>
 /// Focused tests for <see cref="RefreshSyncTaskBase{TRecord, TSource, TKey}"/>'s
 /// pruning contract. The base owns the "any row not seen this run gets
-/// deleted" sweep — its scoping and skip-pruning hooks must hold or every
-/// module silently loses tracking rows on transient source-side hiccups.
+/// deleted" sweep — its scoping and the source-unavailable guard must hold or
+/// every module silently loses tracking rows on a transient source-side error.
 /// </summary>
 public class RefreshSyncTaskBaseTests
 {
@@ -80,12 +81,14 @@ public class RefreshSyncTaskBaseTests
         public int BulkUpdateStatus(IReadOnlyList<long> ids, SyncStatus status, string? reason = null) => 0;
 
         public PagedResult<TestRecord> Paginate(PaginationRequest request)
-            => new() { Items = Array.Empty<TestRecord>(), TotalCount = 0, Page = 1, PageSize = 0 };
+            => new(Array.Empty<TestRecord>(), 0, 0, 50);
     }
 
     private sealed class FakeConfigManager : IPluginConfigurationManager
     {
         public PluginConfiguration Configuration { get; } = new();
+
+        public string DecryptedSourceServerApiKey => Configuration.SourceServerApiKey;
 
         public void SaveConfiguration()
         {
@@ -120,7 +123,9 @@ public class RefreshSyncTaskBaseTests
 
         public Func<TestRecord, bool>? ScopeFilter { get; set; }
 
-        public Func<TestRecord, bool>? SkipFilter { get; set; }
+        public bool MarkUnavailableDuringDiscovery { get; set; }
+
+        public IList<string> Sources { get; set; } = Array.Empty<string>();
 
         public override string Name => "Test Refresh";
 
@@ -134,17 +139,34 @@ public class RefreshSyncTaskBaseTests
 
         protected override bool IsEnabled() => true;
 
+        protected override Task<bool> TestConnectionAsync(CancellationToken cancellationToken)
+            => Task.FromResult(true);
+
         protected override Task<IList<string>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
-            => Task.FromResult<IList<string>>(Array.Empty<string>());
+        {
+            if (MarkUnavailableDuringDiscovery)
+            {
+                MarkSourceUnavailable("test: source server unavailable");
+            }
+
+            return Task.FromResult(Sources);
+        }
+
+        public bool ThrowDuringBuild { get; set; }
 
         protected override Task<TestRecord?> BuildRecordAsync(string source, IReadOnlyDictionary<string, TestRecord> existing, CancellationToken cancellationToken)
-            => Task.FromResult<TestRecord?>(null);
+        {
+            if (ThrowDuringBuild)
+            {
+                throw new InvalidOperationException("test: build failed");
+            }
+
+            return Task.FromResult<TestRecord?>(null);
+        }
 
         protected override string ExtractKey(TestRecord record) => record.Key;
 
         protected override bool IsInScope(TestRecord record) => ScopeFilter?.Invoke(record) ?? true;
-
-        protected override bool ShouldSkipPruning(TestRecord record) => SkipFilter?.Invoke(record) ?? false;
 
         public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
@@ -235,101 +257,63 @@ public class RefreshSyncTaskBaseTests
     }
 
     /// <summary>
-    /// Rows in scopes flagged via <see cref="RefreshSyncTaskBase{TRecord, TSource, TKey}.ShouldSkipPruning"/>
-    /// are preserved even when in-scope and unseen — this is the partial-discovery safety net.
-    /// True: a transient source hiccup mid-discovery doesn't delete every unseen row.
-    /// False: 4 of 5 sync modules lose tracking rows (Content loses local files) on any blip.
+    /// Any source error during discovery (signalled via MarkSourceUnavailable)
+    /// skips pruning for the ENTIRE run, not just the failed scope.
+    /// True: a source hiccup never deletes tracking rows for items that may
+    /// still exist on the source.
+    /// False: a transient 4xx/5xx/timeout silently deletes unseen rows (Content
+    /// would remove local files).
     /// </summary>
     [Fact]
-    public async Task PruneStaleAsync_ShouldSkipPruning_PreservesRowAcrossRuns()
+    public async Task ExecuteAsync_SourceUnavailableDuringDiscovery_SkipsAllPruning()
     {
         var task = CreateTask(out var manager);
-        var row = Record(7, "fragile");
-        task.SkipFilter = r => r.Key == "fragile";
+        manager.All = new List<TestRecord> { Record(1, "a"), Record(2, "b") };
+        task.MarkUnavailableDuringDiscovery = true;
 
-        var pruned = await task.InvokePruneStaleAsync(Map(row), new HashSet<string>(), CancellationToken.None);
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
-        Assert.Equal(0, pruned);
         Assert.Empty(manager.Deleted);
     }
 
     /// <summary>
-    /// Skip-pruning applies per-row: skipped rows survive while non-skipped stale rows are still deleted.
-    /// True: a single failing library doesn't block pruning for the libraries that did finish.
-    /// False: one bad library would freeze pruning for everything or nothing.
+    /// A clean discovery (no source error) prunes the rows it didn't see — the
+    /// "source answered cleanly with fewer/no items, remove the stale rows" path.
+    /// True: genuinely-removed items get reconciled.
+    /// False: dead rows survive forever and the table grows unbounded.
     /// </summary>
     [Fact]
-    public async Task PruneStaleAsync_ShouldSkipPruning_PartitionsPerRow()
+    public async Task ExecuteAsync_CleanDiscovery_PrunesUnseenRows()
     {
         var task = CreateTask(out var manager);
-        var safe = Record(10, "safe", scopeId: "lib-a");
-        var fragile = Record(20, "fragile", scopeId: "lib-b");
-        task.SkipFilter = r => r.ScopeId == "lib-b";
+        manager.All = new List<TestRecord> { Record(1, "a"), Record(2, "b") };
+        task.MarkUnavailableDuringDiscovery = false;
 
-        var pruned = await task.InvokePruneStaleAsync(Map(safe, fragile), new HashSet<string>(), CancellationToken.None);
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
-        Assert.Equal(1, pruned);
-        Assert.Equal(new[] { 10L }, manager.Deleted);
+        Assert.Equal(2, manager.Deleted.Count);
+        Assert.Contains(1L, manager.Deleted);
+        Assert.Contains(2L, manager.Deleted);
     }
 
     /// <summary>
-    /// Seen-key check fires before skip-pruning check.
-    /// True: skip-pruning only matters for unseen rows; observed rows take the normal path.
-    /// False: a row that was both observed AND in a skipped scope would never run its observed-path side-effects.
+    /// A per-item build failure (e.g. a 4xx/5xx fetching that item's detail)
+    /// also skips pruning for the whole run — the failed item is still on the
+    /// source, just not in the seen set.
+    /// True: a per-item source error never deletes that item's row.
+    /// False: a transient detail-fetch error deletes rows for items that exist.
     /// </summary>
     [Fact]
-    public async Task PruneStaleAsync_SeenTakesPrecedenceOverSkipPruning()
+    public async Task ExecuteAsync_BuildFailureDuringRun_SkipsAllPruning()
     {
         var task = CreateTask(out var manager);
-        var observed = Record(1, "seen");
-        task.SkipFilter = _ => true;
-        var seen = new HashSet<string> { "seen" };
+        manager.All = new List<TestRecord> { Record(1, "a") };
+        task.Sources = new List<string> { "x" };
+        task.ThrowDuringBuild = true;
 
-        var pruned = await task.InvokePruneStaleAsync(Map(observed), seen, CancellationToken.None);
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
-        Assert.Equal(0, pruned);
         Assert.Empty(manager.Deleted);
-    }
-
-    /// <summary>
-    /// Out-of-scope rows are skipped before <see cref="RefreshSyncTaskBase{TRecord, TSource, TKey}.ShouldSkipPruning"/>
-    /// even gets consulted. Order matters because the two guards have different
-    /// recovery semantics — out-of-scope is persistent (a config toggle), skip-
-    /// pruning is per-run (a transient discovery failure).
-    /// True: an out-of-scope row in a fragile scope is treated as out-of-scope.
-    /// False: the two flags blur and operators can't reason about behavior.
-    /// </summary>
-    [Fact]
-    public async Task PruneStaleAsync_OutOfScopeTakesPrecedenceOverSkipPruning()
-    {
-        var task = CreateTask(out var manager);
-        task.ScopeFilter = _ => false;
-        task.SkipFilter = _ => true;
-
-        var pruned = await task.InvokePruneStaleAsync(Map(Record(1, "a")), new HashSet<string>(), CancellationToken.None);
-
-        Assert.Equal(0, pruned);
-        Assert.Empty(manager.Deleted);
-    }
-
-    /// <summary>
-    /// Default <see cref="RefreshSyncTaskBase{TRecord, TSource, TKey}.ShouldSkipPruning"/>
-    /// returns false — subclasses that don't override get the historical
-    /// always-prune behavior.
-    /// True: existing modules that don't opt in keep working unchanged.
-    /// False: adding the hook silently changes pruning behavior for every subclass.
-    /// </summary>
-    [Fact]
-    public async Task PruneStaleAsync_DefaultShouldSkipPruning_IsFalse_AndPrunes()
-    {
-        var task = CreateTask(out var manager);
-        // No SkipFilter assigned — falls through to the base default (false).
-        task.SkipFilter = null;
-
-        var pruned = await task.InvokePruneStaleAsync(Map(Record(1, "a")), new HashSet<string>(), CancellationToken.None);
-
-        Assert.Equal(1, pruned);
-        Assert.Equal(new[] { 1L }, manager.Deleted);
     }
 
     /// <summary>

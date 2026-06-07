@@ -21,8 +21,11 @@ export default function (view) {
     // ============================================
 
     var ServerSyncShared = null;
+    var createPaginatedTable = null;
+    var _filterTableSeq = 0;
     var _sharedPromise = import('/web/configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
+        createPaginatedTable = shared.createPaginatedTable;
     });
 
     // ============================================
@@ -61,13 +64,11 @@ export default function (view) {
     }
 
     function setChecked(id, value) {
-        var el = getEl(id);
-        if (el) el.checked = value;
+        ServerSyncShared.setChecked(id, value);
     }
 
     function getChecked(id) {
-        var el = getEl(id);
-        return el ? el.checked : false;
+        return ServerSyncShared.getChecked(id);
     }
 
     function setValue(id, value) {
@@ -326,10 +327,11 @@ export default function (view) {
 
         var div = document.createElement('div');
         div.className = 'mapping libraryMapping';
+        var filterTableId = 'filterTable_' + (++_filterTableSeq);
         div.innerHTML =
             '<div class="mappingHeader">' +
-                '<label class="checkboxContainer"><input is="emby-checkbox" type="checkbox" class="mappingEnabled" ' + (mapping.IsEnabled ? 'checked' : '') + ' /><span>Enabled</span></label>' +
-                '<button is="emby-button" type="button" class="btnRemoveMapping raised button-destructive"><span>Remove</span></button>' +
+                '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="mappingEnabled" ' + (mapping.IsEnabled ? 'checked' : '') + ' /><span class="checkboxLabel">Enabled</span></label>' +
+                '<button is="emby-button" type="button" class="btnRemoveMapping raised jpk-button-destructive jpk-button-small"><span>Remove</span></button>' +
             '</div>' +
             '<div class="mappingGrid">' +
                 '<div class="mappingColumn">' +
@@ -342,6 +344,7 @@ export default function (view) {
                 '</div>' +
             '</div>' +
             '<div class="filterSection">' +
+                '<h3 class="jpk-subsection-title">Library Filter</h3>' +
                 '<div class="filterHeader">' +
                     '<label>Filter Mode</label>' +
                     '<select is="emby-select" class="filterModeSelect">' +
@@ -351,33 +354,19 @@ export default function (view) {
                     '</select>' +
                 '</div>' +
                 '<div class="filterBrowserContainer" style="display:none;">' +
-                    '<div class="filterItemBrowser">' +
-                        '<div class="filterSearchRow">' +
-                            '<input is="emby-input" type="text" class="filterSearchInput" placeholder="Search items..." />' +
-                            '<span class="filterSearchSpinner material-icons" style="display:none;">autorenew</span>' +
-                        '</div>' +
-                        '<div class="filterItemsList"></div>' +
-                    '</div>' +
+                    '<div class="filterTableContainer" id="' + filterTableId + '"></div>' +
                 '</div>' +
             '</div>';
 
         container.appendChild(div);
 
-        // --- Filter Mode + Item Picker ---
+        // --- Filter Mode + Item Picker (base paginated table) ---
         var filterModeSelect = div.querySelector('.filterModeSelect');
         var filterBrowserContainer = div.querySelector('.filterBrowserContainer');
-        var filterItemsList = div.querySelector('.filterItemsList');
-        var filterSearchInput = div.querySelector('.filterSearchInput');
-        var filterSearchSpinner = div.querySelector('.filterSearchSpinner');
 
         var selectedFilterItems = {};
-        var filterSearchTimeout = null;
-        var filterStartIndex = 0;
         var filterCurrentLibraryId = mapping.SourceLibraryId || '';
-        var filterRequestId = 0;
-
-        filterModeSelect.value = mapping.FilterMode || 'AllowAll';
-        updateFilterVisibility();
+        var filterTable = null;
 
         (mapping.FilteredItems || []).forEach(function(fi) {
             if (fi.ItemId) {
@@ -385,161 +374,95 @@ export default function (view) {
             }
         });
 
-        function updateFilterVisibility() {
-            var mode = filterModeSelect.value;
-            filterBrowserContainer.style.display = (mode === 'AllowAll') ? 'none' : '';
-            if (mode !== 'AllowAll' && filterCurrentLibraryId) {
-                loadFilterItems('');
+        // Renders one source item (thumb + info + selection checkmark) into a base table cell.
+        function renderFilterItem(item) {
+            var sel = !!selectedFilterItems[item.Id];
+            var serverUrl = currentConfig ? (currentConfig.SourceServerExternalUrl || currentConfig.SourceServerUrl) : '';
+            var apiKey = currentConfig ? currentConfig.SourceServerApiKey : '';
+            var thumbHtml;
+            if (serverUrl && apiKey && item.Id) {
+                thumbHtml = '<img class="filterItemThumb" src="' +
+                    escapeHtml(serverUrl) + '/Items/' + escapeHtml(item.Id) + '/Images/Primary?maxHeight=120&api_key=' + escapeHtml(apiKey) +
+                    '" onerror="this.outerHTML=\'<div class=filterItemThumbPlaceholder><span class=material-icons>movie</span></div>\'" />';
+            } else {
+                thumbHtml = '<div class="filterItemThumbPlaceholder"><span class="material-icons">movie</span></div>';
             }
+            var metaParts = [];
+            if (item.Year) metaParts.push(item.Year);
+            if (item.Type) metaParts.push(item.Type);
+            var overviewHtml = '';
+            if (item.Overview) {
+                var snippet = item.Overview.substring(0, 120);
+                if (item.Overview.length > 120) snippet += '...';
+                overviewHtml = '<div class="filterItemOverview">' + escapeHtml(snippet) + '</div>';
+            }
+            return '<div class="filterItem' + (sel ? ' selected' : '') + '">' +
+                thumbHtml +
+                '<div class="filterItemInfo">' +
+                    '<div class="filterItemName">' + escapeHtml(item.Name || '') + '</div>' +
+                    '<div class="filterItemMeta">' + escapeHtml(metaParts.join(' \u2022 ')) + '</div>' +
+                    overviewHtml +
+                '</div>' +
+                '<div class="filterItemCheck"><span class="material-icons">' + (sel ? 'check_box' : 'check_box_outline_blank') + '</span></div>' +
+            '</div>';
         }
 
-        filterModeSelect.addEventListener('change', updateFilterVisibility);
-
-        function showFilterLoading(isNewSearch) {
-            filterSearchSpinner.style.display = '';
-            if (isNewSearch) {
-                filterItemsList.classList.add('filterItemsLoading');
-            }
-        }
-
-        function hideFilterLoading() {
-            filterSearchSpinner.style.display = 'none';
-            filterItemsList.classList.remove('filterItemsLoading');
-        }
-
-        function loadFilterItems(searchTerm) {
-            filterStartIndex = 0;
-            filterRequestId++;
-            var isFirstLoad = filterItemsList.children.length === 0;
-            if (isFirstLoad) {
-                filterItemsList.innerHTML = '<div class="filterBrowserStatus">Loading...</div>';
-            }
-            showFilterLoading(true);
-            fetchFilterItems(searchTerm, 0, filterRequestId);
-        }
-
-        function fetchFilterItems(searchTerm, startIdx, reqId) {
-            var libraryId = filterCurrentLibraryId;
-            if (!libraryId) {
-                hideFilterLoading();
-                filterItemsList.innerHTML = '<div class="filterBrowserStatus">Select a source library first</div>';
-                return;
-            }
-
-            var isAppending = startIdx > 0;
-            if (isAppending) {
-                showFilterLoading(false);
-            }
-
-            var params = 'libraryId=' + encodeURIComponent(libraryId) + '&startIndex=' + startIdx + '&limit=50';
-            if (searchTerm) params += '&search=' + encodeURIComponent(searchTerm);
-
-            apiRequest('SourceLibraryItems?' + params, 'GET').then(function(response) {
-                // Ignore stale responses from superseded searches
-                if (reqId !== filterRequestId) return;
-                hideFilterLoading();
-
-                if (startIdx === 0) {
-                    filterItemsList.innerHTML = '';
-                } else {
-                    var existingMore = filterItemsList.querySelector('.filterLoadMore');
-                    if (existingMore) existingMore.remove();
-                }
-
-                if (!response || !response.Items || response.Items.length === 0) {
-                    if (startIdx === 0) {
-                        filterItemsList.innerHTML = '<div class="filterBrowserStatus">No items found</div>';
-                    }
-                    return;
-                }
-
-                var serverUrl = currentConfig ? (currentConfig.SourceServerExternalUrl || currentConfig.SourceServerUrl) : '';
-                var apiKey = currentConfig ? currentConfig.SourceServerApiKey : '';
-
-                response.Items.forEach(function(item) {
-                    var itemEl = document.createElement('div');
-                    itemEl.className = 'filterItem' + (selectedFilterItems[item.Id] ? ' selected' : '');
-                    itemEl.dataset.itemId = item.Id;
-
-                    var thumbHtml;
-                    if (serverUrl && apiKey && item.Id) {
-                        thumbHtml = '<img class="filterItemThumb" src="' +
-                            escapeHtml(serverUrl) + '/Items/' + escapeHtml(item.Id) + '/Images/Primary?maxHeight=120&api_key=' + escapeHtml(apiKey) +
-                            '" onerror="this.outerHTML=\'<div class=filterItemThumbPlaceholder><span class=material-icons>movie</span></div>\'" />';
-                    } else {
-                        thumbHtml = '<div class="filterItemThumbPlaceholder"><span class="material-icons">movie</span></div>';
-                    }
-
-                    var metaParts = [];
-                    if (item.Year) metaParts.push(item.Year);
-                    if (item.Type) metaParts.push(item.Type);
-
-                    var overviewHtml = '';
-                    if (item.Overview) {
-                        var overviewSnippet = item.Overview.substring(0, 120);
-                        if (item.Overview.length > 120) overviewSnippet += '...';
-                        overviewHtml = '<div class="filterItemOverview">' + escapeHtml(overviewSnippet) + '</div>';
-                    }
-
-                    itemEl.innerHTML = thumbHtml +
-                        '<div class="filterItemInfo">' +
-                            '<div class="filterItemName">' + escapeHtml(item.Name || '') + '</div>' +
-                            '<div class="filterItemMeta">' + escapeHtml(metaParts.join(' \u2022 ')) + '</div>' +
-                            overviewHtml +
-                        '</div>' +
-                        '<div class="filterItemCheck"><span class="material-icons">' + (selectedFilterItems[item.Id] ? 'check_box' : 'check_box_outline_blank') + '</span></div>';
-
-                    itemEl.addEventListener('click', function() {
-                        toggleFilterItem(item, itemEl);
-                    });
-
-                    filterItemsList.appendChild(itemEl);
-                });
-
-                filterStartIndex = startIdx + response.Items.length;
-                var hasMore = filterStartIndex < (response.TotalCount || 0);
-
-                if (hasMore) {
-                    var loadMoreBtn = document.createElement('button');
-                    loadMoreBtn.className = 'filterLoadMore';
-                    loadMoreBtn.textContent = 'Load More (' + filterStartIndex + ' / ' + response.TotalCount + ')';
-                    var capturedStartIndex = filterStartIndex;
-                    loadMoreBtn.addEventListener('click', function() {
-                        fetchFilterItems(filterSearchInput.value.trim(), capturedStartIndex, filterRequestId);
-                    });
-                    filterItemsList.appendChild(loadMoreBtn);
-                }
-            }).catch(function() {
-                if (reqId !== filterRequestId) return;
-                hideFilterLoading();
-                if (startIdx === 0) {
-                    filterItemsList.innerHTML = '<div class="filterBrowserStatus">Failed to load items</div>';
-                }
-            });
-        }
-
-        function toggleFilterItem(item, itemEl) {
+        // Toggles whitelist/blacklist membership. Selection lives in selectedFilterItems so it
+        // persists across searches and pagination (the custom render reads it on every load).
+        function onFilterItemClick(item) {
             if (selectedFilterItems[item.Id]) {
                 delete selectedFilterItems[item.Id];
-                itemEl.classList.remove('selected');
-                itemEl.querySelector('.filterItemCheck .material-icons').textContent = 'check_box_outline_blank';
             } else {
                 selectedFilterItems[item.Id] = { ItemId: item.Id, Name: item.Name || '', Year: item.Year, Path: item.Path || '' };
-                itemEl.classList.add('selected');
-                itemEl.querySelector('.filterItemCheck .material-icons').textContent = 'check_box';
+            }
+            var sel = !!selectedFilterItems[item.Id];
+            var rowEl = filterBrowserContainer.querySelector('.jpk-table-row[data-id="' + item.Id + '"]');
+            if (rowEl) {
+                var wrap = rowEl.querySelector('.filterItem');
+                if (wrap) wrap.classList.toggle('selected', sel);
+                var icon = rowEl.querySelector('.filterItemCheck .material-icons');
+                if (icon) icon.textContent = sel ? 'check_box' : 'check_box_outline_blank';
             }
         }
 
-        filterSearchInput.addEventListener('input', function() {
-            clearTimeout(filterSearchTimeout);
-            filterSearchTimeout = setTimeout(function() {
-                loadFilterItems(filterSearchInput.value.trim());
-            }, 300);
-        });
+        function buildFilterTable() {
+            if (!createPaginatedTable || !filterCurrentLibraryId) return;
+            if (!filterTable) {
+                filterTable = createPaginatedTable(view, ServerSyncShared, {
+                    containerId: filterTableId,
+                    endpoint: 'SourceLibraryItems',
+                    pagination: { pageSize: 50, loadMore: true },
+                    search: { enabled: true, placeholder: 'Search items...' },
+                    selection: { enabled: false, idKey: 'Id' },
+                    emptyState: { message: 'No items found' },
+                    filters: { buildParams: function() { return { libraryId: filterCurrentLibraryId }; } },
+                    columns: [{ key: 'Id', type: 'custom', render: renderFilterItem }],
+                    actions: { onRowClick: onFilterItemClick }
+                });
+            }
+            // Seed a (non-empty) filter value so the table sends libraryId via buildParams, then load.
+            filterTable.setFilterValue(filterCurrentLibraryId);
+            filterTable.reload();
+        }
+
+        function updateFilterVisibility() {
+            var show = (filterModeSelect.value !== 'AllowAll');
+            filterBrowserContainer.style.display = show ? '' : 'none';
+            if (show && filterCurrentLibraryId) {
+                buildFilterTable();
+            }
+        }
+
+        filterModeSelect.value = mapping.FilterMode || 'AllowAll';
+        filterModeSelect.addEventListener('change', updateFilterVisibility);
+        updateFilterVisibility();
 
         // Stored on the div so collectLibraryMappings can read them back.
         div._filterModeSelect = filterModeSelect;
         div._selectedFilterItems = selectedFilterItems;
+        div._disconnectFilterTable = function() {
+            if (filterTable && filterTable.disconnectObserver) filterTable.disconnectObserver();
+        };
 
         var sourceSelect = div.querySelector('.sourceLibrarySelect');
         if (mapping.SourceLibraryId) sourceSelect.dataset.savedValue = mapping.SourceLibraryId;
@@ -562,7 +485,7 @@ export default function (view) {
             selectedFilterItems = {};
             div._selectedFilterItems = selectedFilterItems;
             if (filterModeSelect.value !== 'AllowAll' && filterCurrentLibraryId) {
-                loadFilterItems('');
+                buildFilterTable();
             }
         });
 
@@ -585,7 +508,10 @@ export default function (view) {
             }
         });
 
-        div.querySelector('.btnRemoveMapping').addEventListener('click', function() { div.remove(); });
+        div.querySelector('.btnRemoveMapping').addEventListener('click', function() {
+            if (div._disconnectFilterTable) div._disconnectFilterTable();
+            div.remove();
+        });
     }
 
     function collectLibraryMappings() {
@@ -787,8 +713,8 @@ export default function (view) {
         div.className = 'mapping userMapping';
         div.innerHTML =
             '<div class="mappingHeader">' +
-                '<label class="checkboxContainer"><input is="emby-checkbox" type="checkbox" class="userMappingEnabled" ' + (mapping.IsEnabled !== false ? 'checked' : '') + ' /><span>Enabled</span></label>' +
-                '<button is="emby-button" type="button" class="btnRemoveUserMapping raised button-destructive"><span>Remove</span></button>' +
+                '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="userMappingEnabled" ' + (mapping.IsEnabled !== false ? 'checked' : '') + ' /><span class="checkboxLabel">Enabled</span></label>' +
+                '<button is="emby-button" type="button" class="btnRemoveUserMapping raised jpk-button-destructive jpk-button-small"><span>Remove</span></button>' +
             '</div>' +
             '<div class="mappingGrid">' +
                 '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Source User</label><select is="emby-select" class="sourceUserSelect"></select></div></div>' +
@@ -880,7 +806,9 @@ export default function (view) {
         setValue('txtScheduledDownloadSpeed', config.ScheduledDownloadSpeed || 0);
         setValue('selScheduledDownloadSpeedUnit', config.ScheduledDownloadSpeedUnit || 'MB');
 
-        updateNestedVisibility();
+        ServerSyncShared.bindReveal('chkSkipWatchedByAllUsers', 'watchedFilterUsersSettings');
+        ServerSyncShared.bindReveal('chkEnableRecyclingBin', 'recyclingBinSettings');
+        ServerSyncShared.bindReveal('chkEnableBandwidthScheduling', 'bandwidthScheduleContainer');
     }
 
     function saveContentSettings() {
@@ -1017,14 +945,6 @@ export default function (view) {
         });
     }
 
-    // --- Nested Visibility ---
-
-    function updateNestedVisibility() {
-        setVisible('watchedFilterUsersSettings', getChecked('chkSkipWatchedByAllUsers'));
-        setVisible('recyclingBinSettings', getChecked('chkEnableRecyclingBin'));
-        setVisible('bandwidthScheduleContainer', getChecked('chkEnableBandwidthScheduling'));
-    }
-
     // ============================================
     // PAGE INITIALIZATION
     // ============================================
@@ -1032,30 +952,6 @@ export default function (view) {
     function showMappingSections() {
         setVisible('librariesSection', true);
         setVisible('usersSection', true);
-    }
-
-    function initCollapsibles() {
-        view.querySelectorAll('.collapsibleHeader').forEach(function(header) {
-            header.addEventListener('click', function() {
-                var targetId = this.dataset.target;
-                var content = view.querySelector('#' + targetId);
-                if (content) {
-                    this.classList.toggle('collapsed');
-                    content.classList.toggle('collapsed');
-                    var isExpanded = !this.classList.contains('collapsed');
-                    this.setAttribute('aria-expanded', String(isExpanded));
-                }
-            });
-        });
-    }
-
-    function initNestedVisibilityHandlers() {
-        var chkWatched = view.querySelector('#chkSkipWatchedByAllUsers');
-        var chkRecycle = view.querySelector('#chkEnableRecyclingBin');
-        var chkBandwidth = view.querySelector('#chkEnableBandwidthScheduling');
-        if (chkWatched) chkWatched.addEventListener('change', updateNestedVisibility);
-        if (chkRecycle) chkRecycle.addEventListener('change', updateNestedVisibility);
-        if (chkBandwidth) chkBandwidth.addEventListener('change', updateNestedVisibility);
     }
 
     function loadConfig() {
@@ -1129,8 +1025,7 @@ export default function (view) {
             if (!_initialized) {
                 _initialized = true;
 
-                initCollapsibles();
-                initNestedVisibilityHandlers();
+                ServerSyncShared.initCollapsibles();
 
                 bindClick('btnTestConnection', testConnection);
                 bindClick('btnSaveServer', saveServerConfig);

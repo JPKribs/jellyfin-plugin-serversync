@@ -5,6 +5,7 @@ using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -30,7 +31,7 @@ public partial class ConfigurationController
     /// <returns>Paginated result of history sync item DTOs.</returns>
     [HttpGet("HistoryItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PaginatedResult<HistorySyncItemDto>> GetHistoryItems(
+    public ActionResult<PagedResult<HistorySyncItemDto>> GetHistoryItems(
         [FromServices] HistorySyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
@@ -52,13 +53,11 @@ public partial class ConfigurationController
         var (items, totalCount) = manager.SearchHistoryItemsPaginated(search, statusFilter, sourceUserId, skip, take);
         var config = _configManager.Configuration;
 
-        return Ok(new PaginatedResult<HistorySyncItemDto>
-        {
-            Items = items.Select(i => MapToHistorySyncItemDto(i, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, config.SourceServerApiKey)).ToList(),
-            TotalCount = totalCount,
-            Skip = skip,
-            Take = take
-        });
+        return Ok(new PagedResult<HistorySyncItemDto>(
+            items.Select(i => MapToHistorySyncItemDto(i, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, _configManager.DecryptedSourceServerApiKey)).ToList(),
+            totalCount,
+            skip,
+            take));
     }
 
     /// <summary>

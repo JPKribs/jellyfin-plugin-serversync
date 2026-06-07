@@ -4,7 +4,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jellyfin.Plugin.ServerSync"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jellyfin.Plugin.ServerSync.Tests", "Tests\Jellyfin.Plugin.ServerSync.Tests\Jellyfin.Plugin.ServerSync.Tests.csproj", "{0E0F94EA-3DAD-4233-A987-BA02D4D7AEB5}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jellyfin.Plugin.ServerSync.Tests", "Jellyfin.Plugin.ServerSync.Tests\Jellyfin.Plugin.ServerSync.Tests.csproj", "{0E0F94EA-3DAD-4233-A987-BA02D4D7AEB5}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

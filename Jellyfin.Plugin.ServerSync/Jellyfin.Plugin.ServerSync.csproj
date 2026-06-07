@@ -29,6 +29,7 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
+    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.6.19" />
   </ItemGroup>
 
   <ItemGroup>

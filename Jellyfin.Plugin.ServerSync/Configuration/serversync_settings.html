@@ -16,12 +16,12 @@
 
                     <!-- COLLAPSIBLE SECTION: Server Configuration -->
 
-                    <div class="collapsibleSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="serverConfigContent">
-                            <span class="collapsibleTitle">Server</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverConfigContent">
+                            <span class="jpk-collapsible-title">Server</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="serverConfigContent" class="collapsibleContent collapsed">
+                        <div id="serverConfigContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Server URL Input -->
                             <div class="inputContainer">
@@ -37,6 +37,24 @@
                                 <div class="fieldDescription">Public URL used for loading image thumbnails in the browser. If empty, the Server URL above is used. Useful when syncing over a VPN/internal address that your browser can't reach.</div>
                             </div>
 
+                            <h3 class="jpk-subsection-title">Authentication</h3>
+
+                            <!-- Server Info Display (shows after successful connection) -->
+                            <div id="serverInfoContainer" class="jpk-record-card hidden mb-md">
+                                <div class="jpk-record-row">
+                                    <span class="jpk-record-label">Server</span>
+                                    <span id="txtSourceServerName" class="jpk-mono"></span>
+                                </div>
+                                <div class="jpk-record-row">
+                                    <span class="jpk-record-label">ID</span>
+                                    <span id="txtSourceServerId" class="jpk-mono"></span>
+                                </div>
+                                <div id="authenticatedUserRow" class="jpk-record-row hidden">
+                                    <span class="jpk-record-label">User</span>
+                                    <span id="txtAuthenticatedUser" class="jpk-mono"></span>
+                                </div>
+                            </div>
+
                             <!-- API Key Input -->
                             <div class="inputContainer">
                                 <label for="txtSourceServerApiKey">API Key:</label>
@@ -44,79 +62,60 @@
                                 <div class="fieldDescription">Generate one in the source server's Dashboard &gt; API Keys, or use the token generator below.</div>
                             </div>
 
-                            <!-- Server Info Display (shows after successful connection) -->
-                            <div id="serverInfoContainer" class="server-info-box hidden">
-                                <div class="server-info-row">
-                                    <span class="server-info-label text-muted">Server:</span>
-                                    <span id="txtSourceServerName"></span>
-                                </div>
-                                <div class="server-info-row">
-                                    <span class="server-info-label text-muted">ID:</span>
-                                    <span id="txtSourceServerId"></span>
-                                </div>
-                                <div id="authenticatedUserRow" class="server-info-row hidden">
-                                    <span class="server-info-label text-muted">User:</span>
-                                    <span id="txtAuthenticatedUser"></span>
-                                </div>
-                            </div>
-
                             <!-- Token Generator (alternative to API key) -->
-                            <h4 class="subsectionHeader">Generate Token from Credentials</h4>
-                            <div class="fieldDescription mb-md">Authenticate with username and password to generate an access token. The password is not saved.</div>
-
-                            <!-- Token Generator: Username -->
-                            <div class="inputContainer">
-                                <label for="txtAuthUsername">Username:</label>
-                                <input is="emby-input" type="text" id="txtAuthUsername" placeholder="Enter username" />
-                            </div>
-
-                            <!-- Token Generator: Password -->
-                            <div class="inputContainer">
-                                <label for="txtAuthPassword">Password:</label>
-                                <input is="emby-input" type="password" id="txtAuthPassword" placeholder="Enter password" />
-                            </div>
-
-                            <!-- Token Generator: Actions -->
-                            <div class="flex align-items-center gap-sm">
-                                <button is="emby-button" type="button" id="btnGenerateToken" class="raised button-secondary">
-                                    <span>Generate Token</span>
-                                </button>
-                                <span id="tokenGeneratorStatus"></span>
+                            <div class="jpk-bulk-edit-title">Generate Token from Credentials</div>
+                            <div class="jpk-bulk-edit-bar" id="tokenGeneratorBar" style="padding: 14px; border: 1px solid var(--jpk-border); border-radius: 6px; background: rgba(255, 255, 255, 0.04);">
+                                <div class="fieldDescription">Authenticate with username and password to generate an access token. The password is not saved.</div>
+                                <div class="jpk-edit-line">
+                                    <div class="jpk-field">
+                                        <label for="txtAuthUsername">Username</label>
+                                        <input is="emby-input" type="text" id="txtAuthUsername" placeholder="Enter username" />
+                                    </div>
+                                    <div class="jpk-field">
+                                        <label for="txtAuthPassword">Password</label>
+                                        <input is="emby-input" type="password" id="txtAuthPassword" placeholder="Enter password" />
+                                    </div>
+                                </div>
+                                <div class="flex align-items-center gap-sm">
+                                    <button is="emby-button" type="button" id="btnGenerateToken" class="raised jpk-button-submit jpk-button-small">
+                                        <span>Generate Token</span>
+                                    </button>
+                                    <span id="tokenGeneratorStatus" class="jpk-status-text"></span>
+                                </div>
                             </div>
 
                             <!-- Server Actions -->
-                            <div class="collapsibleActions">
-                                <button is="emby-button" type="button" id="btnSaveServer" class="raised button-primary">
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSaveServer" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
-                                <button is="emby-button" type="button" id="btnTestConnection" class="raised">
+                                <button is="emby-button" type="button" id="btnTestConnection" class="raised jpk-button-small">
                                     <span>Test Connection</span>
                                 </button>
                             </div>
-                            <span id="connectionStatus" class="mt-sm"></span>
+                            <span id="connectionStatus" class="jpk-status-text"></span>
                         </div>
                     </div>
 
                     <!-- COLLAPSIBLE SECTION: Library Mappings -->
 
-                    <div class="collapsibleSection hidden" id="librariesSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="librariesConfigContent">
-                            <span class="collapsibleTitle">Libraries</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section hidden" id="librariesSection">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="librariesConfigContent">
+                            <span class="jpk-collapsible-title">Libraries</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="librariesConfigContent" class="collapsibleContent collapsed">
+                        <div id="librariesConfigContent" class="jpk-collapsible-content collapsed">
                             <div class="fieldDescription mb-md">Map source libraries to local libraries. Used for content sync and watch history sync.</div>
 
                             <!-- Library Mappings Container (dynamically populated) -->
                             <div id="libraryMappingsContainer"></div>
 
-                            <button is="emby-button" type="button" id="btnAddMapping" class="raised button-secondary mt-sm">
-                                <span>Add Library Mapping</span>
-                            </button>
-
-                            <div class="collapsibleActions">
-                                <button is="emby-button" type="button" id="btnSaveLibraries" class="raised button-primary">
-                                    <span>Save Libraries</span>
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSaveLibraries" class="raised jpk-button-submit jpk-button-small">
+                                    <span>Save</span>
+                                </button>
+                                <button is="emby-button" type="button" id="btnAddMapping" class="raised jpk-secondary jpk-button-small">
+                                    <span>Add Library Mapping</span>
                                 </button>
                             </div>
                         </div>
@@ -124,24 +123,23 @@
 
                     <!-- COLLAPSIBLE SECTION: User Mappings -->
 
-                    <div class="collapsibleSection hidden" id="usersSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="usersConfigContent">
-                            <span class="collapsibleTitle">Users</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section hidden" id="usersSection">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="usersConfigContent">
+                            <span class="jpk-collapsible-title">Users</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="usersConfigContent" class="collapsibleContent collapsed">
+                        <div id="usersConfigContent" class="jpk-collapsible-content collapsed">
                             <div class="fieldDescription mb-md">Map source users to local users. Used for watch history sync.</div>
 
                             <!-- User Mappings Container (dynamically populated) -->
                             <div id="userMappingsContainer"></div>
 
-                            <button is="emby-button" type="button" id="btnAddUserMapping" class="raised button-secondary mt-sm">
-                                <span>Add User Mapping</span>
-                            </button>
-
-                            <div class="collapsibleActions">
-                                <button is="emby-button" type="button" id="btnSaveUsers" class="raised button-primary">
-                                    <span>Save Users</span>
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSaveUsers" class="raised jpk-button-submit jpk-button-small">
+                                    <span>Save</span>
+                                </button>
+                                <button is="emby-button" type="button" id="btnAddUserMapping" class="raised jpk-secondary jpk-button-small">
+                                    <span>Add User Mapping</span>
                                 </button>
                             </div>
                         </div>
@@ -155,12 +153,12 @@
 
                     <!-- COLLAPSIBLE SECTION: Content Sync Settings -->
 
-                    <div class="collapsibleSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="contentSyncSettingsContent">
-                            <span class="collapsibleTitle">Content</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="contentSyncSettingsContent">
+                            <span class="jpk-collapsible-title">Content</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="contentSyncSettingsContent" class="collapsibleContent collapsed">
+                        <div id="contentSyncSettingsContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Enable Content Sync -->
                             <div class="settingsGroup">
@@ -176,7 +174,7 @@
                             <div id="contentSyncOptions">
 
                                 <!-- Sync Parameters Subsection -->
-                                <h3 class="subsectionHeader">Sync Parameters</h3>
+                                <h3 class="jpk-subsection-title">Sync Parameters</h3>
                                 <div class="settingsGroup">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -202,14 +200,14 @@
                                         <div class="fieldDescription checkboxFieldDescription">Skip items that have been watched by every user selected below. If at least one selected user has not watched the item, it remains eligible to sync. Items already synced are not affected.</div>
                                     </div>
 
-                                    <div id="watchedFilterUsersSettings" class="nested-settings hidden">
+                                    <div id="watchedFilterUsersSettings" class="jpk-indent hidden">
                                         <div class="fieldDescription">Source users whose watched status determines the filter. Only items unwatched by at least one checked user will sync.</div>
                                         <div id="watchedFilterUsersList"></div>
                                     </div>
                                 </div>
 
                                 <!-- Approval Preferences Subsection -->
-                                <h3 class="subsectionHeader">Approval Preferences</h3>
+                                <h3 class="jpk-subsection-title">Approval Preferences</h3>
                                 <div class="settingsGroup">
                                     <div class="selectContainer">
                                         <label class="selectLabel" for="selDownloadNewContentMode">Download New Content</label>
@@ -252,7 +250,7 @@
                                         <div class="fieldDescription checkboxFieldDescription">Move deleted/replaced files to a recycling bin instead of permanent deletion.</div>
                                     </div>
 
-                                    <div id="recyclingBinSettings" class="nested-settings hidden">
+                                    <div id="recyclingBinSettings" class="jpk-indent hidden">
                                         <div class="inputContainer">
                                             <label for="txtRecyclingBinPath">Recycling Bin Path:</label>
                                             <input is="emby-input" type="text" id="txtRecyclingBinPath" placeholder="/path/to/recycling-bin" />
@@ -276,7 +274,7 @@
                                 </div>
 
                                 <!-- Download Preferences Subsection -->
-                                <h3 class="subsectionHeader">Download Preferences</h3>
+                                <h3 class="jpk-subsection-title">Download Preferences</h3>
                                 <div class="settingsGroup">
                                     <div class="inputContainer">
                                         <label for="txtMaxConcurrentDownloads">Max Concurrent Downloads:</label>
@@ -329,7 +327,7 @@
                                         <div class="fieldDescription checkboxFieldDescription">Use an alternate download speed during scheduled hours.</div>
                                     </div>
 
-                                    <div id="bandwidthScheduleContainer" class="nested-settings hidden">
+                                    <div id="bandwidthScheduleContainer" class="jpk-indent hidden">
                                         <div class="inputContainer inline-inputs">
                                             <div>
                                                 <label for="txtScheduledStartHour">Start Hour:</label>
@@ -358,9 +356,9 @@
                                 </div>
                             </div>
 
-                            <div class="collapsibleActions">
-                                <button is="emby-button" type="button" id="btnSaveContentSettings" class="raised button-primary">
-                                    <span>Save Content Settings</span>
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSaveContentSettings" class="raised jpk-button-submit jpk-button-small">
+                                    <span>Save</span>
                                 </button>
                             </div>
                         </div>
@@ -368,12 +366,12 @@
 
                     <!-- COLLAPSIBLE SECTION: History Sync Settings -->
 
-                    <div class="collapsibleSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="historySyncSettingsContent">
-                            <span class="collapsibleTitle">History</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="historySyncSettingsContent">
+                            <span class="jpk-collapsible-title">History</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="historySyncSettingsContent" class="collapsibleContent collapsed">
+                        <div id="historySyncSettingsContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Enable History Sync -->
                             <div class="settingsGroup">
@@ -389,7 +387,7 @@
                             <div id="historySyncOptions">
 
                                 <!-- Sync Parameters Subsection -->
-                                <h3 class="subsectionHeader">Sync Parameters</h3>
+                                <h3 class="jpk-subsection-title">Sync Parameters</h3>
                                 <div class="settingsGroup">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -433,9 +431,9 @@
                                 </div>
                             </div>
 
-                            <div class="collapsibleActions">
-                                <button is="emby-button" type="button" id="btnSaveHistorySettings" class="raised button-primary">
-                                    <span>Save History Settings</span>
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSaveHistorySettings" class="raised jpk-button-submit jpk-button-small">
+                                    <span>Save</span>
                                 </button>
                             </div>
                         </div>
@@ -443,12 +441,12 @@
 
                     <!-- COLLAPSIBLE SECTION: Metadata Sync Settings -->
 
-                    <div class="collapsibleSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="metadataSyncSettingsContent">
-                            <span class="collapsibleTitle">Metadata</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="metadataSyncSettingsContent">
+                            <span class="jpk-collapsible-title">Metadata</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="metadataSyncSettingsContent" class="collapsibleContent collapsed">
+                        <div id="metadataSyncSettingsContent" class="jpk-collapsible-content collapsed">
                             <!-- Enable Metadata Sync -->
                             <div class="settingsGroup">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
@@ -463,7 +461,7 @@
                             <div id="metadataSyncOptions">
 
                                 <!-- Sync Parameters Subsection -->
-                                <h3 class="subsectionHeader">Sync Parameters</h3>
+                                <h3 class="jpk-subsection-title">Sync Parameters</h3>
                                 <div class="settingsGroup">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -523,21 +521,21 @@
                                 </div>
                             </div>
 
-                            <div class="collapsibleActions">
-                                <button is="emby-button" type="button" id="btnSaveMetadataSettings" class="raised button-primary">
-                                    <span>Save Metadata Settings</span>
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSaveMetadataSettings" class="raised jpk-button-submit jpk-button-small">
+                                    <span>Save</span>
                                 </button>
                             </div>
                         </div>
                     </div>
 
                     <!-- COLLAPSIBLE SECTION: People Sync Settings -->
-                    <div class="collapsibleSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="peopleSyncSettingsContent">
-                            <span class="collapsibleTitle">People</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="peopleSyncSettingsContent">
+                            <span class="jpk-collapsible-title">People</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="peopleSyncSettingsContent" class="collapsibleContent collapsed">
+                        <div id="peopleSyncSettingsContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Enable People Sync -->
                             <div class="settingsGroup">
@@ -551,7 +549,7 @@
                             </div>
 
                             <div id="peopleSyncOptions">
-                                <h3 class="subsectionHeader">Sync Parameters</h3>
+                                <h3 class="jpk-subsection-title">Sync Parameters</h3>
                                 <div class="settingsGroup">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -563,21 +561,21 @@
                                 </div>
                             </div>
 
-                            <div class="collapsibleActions">
-                                <button is="emby-button" type="button" id="btnSavePeopleSettings" class="raised button-primary">
-                                    <span>Save People Settings</span>
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSavePeopleSettings" class="raised jpk-button-submit jpk-button-small">
+                                    <span>Save</span>
                                 </button>
                             </div>
                         </div>
                     </div>
 
                     <!-- COLLAPSIBLE SECTION: User Sync Settings -->
-                    <div class="collapsibleSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="userSyncSettingsContent">
-                            <span class="collapsibleTitle">Users</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="userSyncSettingsContent">
+                            <span class="jpk-collapsible-title">Users</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="userSyncSettingsContent" class="collapsibleContent collapsed">
+                        <div id="userSyncSettingsContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Enable User Sync -->
                             <div class="settingsGroup">
@@ -593,7 +591,7 @@
                             <div id="userSyncOptions">
 
                                 <!-- Sync Parameters Subsection -->
-                                <h3 class="subsectionHeader">Sync Parameters</h3>
+                                <h3 class="jpk-subsection-title">Sync Parameters</h3>
                                 <div class="settingsGroup">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -621,9 +619,9 @@
                                 </div>
                             </div>
 
-                            <div class="collapsibleActions">
-                                <button is="emby-button" type="button" id="btnSaveUserSyncSettings" class="raised button-primary">
-                                    <span>Save User Sync Settings</span>
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSaveUserSyncSettings" class="raised jpk-button-submit jpk-button-small">
+                                    <span>Save</span>
                                 </button>
                             </div>
                         </div>
@@ -637,23 +635,23 @@
 
                     <!-- COLLAPSIBLE SECTION: Database -->
 
-                    <div class="collapsibleSection">
-                        <button type="button" class="collapsibleHeader collapsed" aria-expanded="false" data-target="databaseTroubleshootingContent">
-                            <span class="collapsibleTitle">Database</span>
-                            <span class="collapsibleIcon">&#9660;</span>
+                    <div class="jpk-collapsible-section">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="databaseTroubleshootingContent">
+                            <span class="jpk-collapsible-title">Database</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
-                        <div id="databaseTroubleshootingContent" class="collapsibleContent collapsed">
+                        <div id="databaseTroubleshootingContent" class="jpk-collapsible-content collapsed">
                             <div class="fieldDescription mb-md">Reset individual sync tables or the entire database. These actions are destructive and cannot be undone.</div>
 
                             <!-- Individual Table Resets -->
-                            <h3 class="subsectionHeader">Reset Individual Tables</h3>
+                            <h3 class="jpk-subsection-title">Reset Individual Tables</h3>
                             <div class="resetButtonGroup">
                                 <div class="resetButtonRow">
                                     <div class="resetButtonInfo">
                                         <div>Content Sync</div>
                                         <div class="fieldDescription">Remove all content tracking data. You will need to re-scan content.</div>
                                     </div>
-                                    <button is="emby-button" type="button" id="btnResetContentTable" class="raised button-destructive button-small">
+                                    <button is="emby-button" type="button" id="btnResetContentTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
                                     </button>
                                 </div>
@@ -662,7 +660,7 @@
                                         <div>History Sync</div>
                                         <div class="fieldDescription">Remove all history tracking data. You will need to re-scan history.</div>
                                     </div>
-                                    <button is="emby-button" type="button" id="btnResetHistoryTable" class="raised button-destructive button-small">
+                                    <button is="emby-button" type="button" id="btnResetHistoryTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
                                     </button>
                                 </div>
@@ -671,7 +669,7 @@
                                         <div>Metadata Sync</div>
                                         <div class="fieldDescription">Remove all metadata tracking data. You will need to re-scan metadata.</div>
                                     </div>
-                                    <button is="emby-button" type="button" id="btnResetMetadataTable" class="raised button-destructive button-small">
+                                    <button is="emby-button" type="button" id="btnResetMetadataTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
                                     </button>
                                 </div>
@@ -680,7 +678,7 @@
                                         <div>User Sync</div>
                                         <div class="fieldDescription">Remove all user sync tracking data. You will need to re-scan users.</div>
                                     </div>
-                                    <button is="emby-button" type="button" id="btnResetUserTable" class="raised button-destructive button-small">
+                                    <button is="emby-button" type="button" id="btnResetUserTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
                                     </button>
                                 </div>
@@ -689,21 +687,21 @@
                                         <div>People Sync</div>
                                         <div class="fieldDescription">Remove all people sync tracking data. You will need to re-scan people.</div>
                                     </div>
-                                    <button is="emby-button" type="button" id="btnResetPeopleTable" class="raised button-destructive button-small">
+                                    <button is="emby-button" type="button" id="btnResetPeopleTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
                                     </button>
                                 </div>
                             </div>
 
                             <!-- Full Database Reset -->
-                            <h3 class="subsectionHeader">Reset Entire Database</h3>
+                            <h3 class="jpk-subsection-title">Reset Entire Database</h3>
                             <div class="resetButtonGroup">
                                 <div class="resetButtonRow resetButtonRow-nuclear">
                                     <div class="resetButtonInfo">
                                         <div>Full Database Reset</div>
                                         <div class="fieldDescription">Delete the entire sync database file and recreate it from scratch. All tracking data across all sync types will be lost.</div>
                                     </div>
-                                    <button is="emby-button" type="button" id="btnResetEntireDatabase" class="raised button-destructive button-small">
+                                    <button is="emby-button" type="button" id="btnResetEntireDatabase" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset All</span>
                                     </button>
                                 </div>
@@ -717,6 +715,7 @@
     </div>
 
     <!-- STYLES: Shared -->
+    <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
     <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
 
     <!-- STYLES: Settings-specific -->
@@ -724,7 +723,6 @@
         /* ===== Utility Classes ===== */
         .text-success { color: var(--status-synced-color, #5cb85c); }
         .text-error { color: var(--status-errored-color, #d9534f); }
-        .text-muted { opacity: 0.7; }
         .flex { display: flex; }
         .mt-sm { margin-top: 8px; }
         .mb-md { margin-bottom: 12px; }
@@ -742,59 +740,6 @@
             flex: 1;
         }
 
-        /* ===== Collapsible Sections ===== */
-        .collapsibleSection {
-            margin-bottom: 8px;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .collapsibleHeader {
-            width: 100%;
-            padding: 12px 16px;
-            background: rgba(255,255,255,0.05);
-            border: none;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            color: inherit;
-            font-size: 1.1em;
-            font-weight: 500;
-            text-align: left;
-        }
-        .collapsibleHeader:hover {
-            background: rgba(255,255,255,0.08);
-        }
-        .collapsibleTitle { flex: 1; }
-        .collapsibleIcon {
-            font-size: 0.8em;
-            transition: transform 0.2s;
-        }
-        .collapsibleHeader.collapsed .collapsibleIcon {
-            transform: rotate(-90deg);
-        }
-        .collapsibleContent {
-            padding: 16px;
-            border-top: 1px solid rgba(255,255,255,0.1);
-        }
-        .collapsibleContent.collapsed { display: none; }
-        .collapsibleActions {
-            display: flex;
-            gap: 8px;
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid rgba(255,255,255,0.1);
-        }
-
-        /* ===== Server Info Display ===== */
-        .server-info-box {
-            margin-bottom: 16px;
-            padding: 12px;
-            background: rgba(0,0,0,0.3);
-            border-radius: 4px;
-        }
-        #serverInfoContainer { padding-bottom: 16px; }
 
         /* ===== Mapping Styles ===== */
         .mapping {
@@ -826,7 +771,6 @@
         .filterSection {
             margin-top: 1em;
             padding-top: 0.75em;
-            border-top: 1px solid rgba(85, 85, 85, 0.3);
         }
         .filterSection .filterHeader {
             display: flex;
@@ -841,44 +785,9 @@
         .filterSection .filterModeSelect {
             max-width: 200px;
         }
-        .filterItemBrowser {
-            border: 1px solid rgba(85, 85, 85, 0.4);
-            border-radius: 4px;
-            max-height: 400px;
-            overflow-y: auto;
-            background: rgba(0, 0, 0, 0.15);
-        }
-        .filterSearchRow {
-            display: flex;
-            gap: 8px;
-            padding: 8px;
-            border-bottom: 1px solid rgba(85, 85, 85, 0.3);
-            position: sticky;
-            top: 0;
-            background: rgba(20, 20, 20, 0.95);
-            z-index: 1;
-        }
-        .filterSearchRow input {
-            flex: 1;
-        }
-        .filterSearchSpinner {
-            flex: 0 0 auto;
-            font-size: 20px;
-            color: rgba(255, 255, 255, 0.5);
-            animation: filterSpin 0.8s linear infinite;
-            align-self: center;
-        }
-        @keyframes filterSpin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
         .filterItemsList {
             padding: 0;
             transition: opacity 0.15s;
-        }
-        .filterItemsList.filterItemsLoading {
-            opacity: 0.4;
-            pointer-events: none;
         }
         .filterItem {
             display: flex;
@@ -895,6 +804,12 @@
         .filterItem.selected {
             background: rgba(82, 181, 219, 0.12);
         }
+        /* In the base paginated table the row already provides padding/border/hover,
+           so flatten the inner item (no nested box) and tint the whole row when selected. */
+        .jpk-table-cell .filterItem { padding: 0; border-bottom: none; }
+        .jpk-table-cell .filterItem:hover,
+        .jpk-table-cell .filterItem.selected { background: transparent; }
+        .jpk-table-row:has(.filterItem.selected) { background: rgba(82, 181, 219, 0.12); }
         .filterItemThumb {
             flex: 0 0 40px;
             width: 40px;
@@ -951,20 +866,6 @@
             flex: 0 0 50px;
             border-radius: 50%;
         }
-        .filterLoadMore {
-            display: block;
-            width: 100%;
-            padding: 8px;
-            text-align: center;
-            border: none;
-            background: rgba(255, 255, 255, 0.03);
-            color: rgba(255, 255, 255, 0.6);
-            cursor: pointer;
-            font-size: 0.85em;
-        }
-        .filterLoadMore:hover {
-            background: rgba(255, 255, 255, 0.08);
-        }
         .filterBrowserStatus {
             padding: 12px;
             text-align: center;
@@ -973,26 +874,7 @@
         }
 
         /* ===== Nested Settings ===== */
-        .nested-settings {
-            margin-left: 1.5em;
-            padding-left: 1em;
-            border-left: 2px solid rgba(85, 85, 85, 0.3);
-        }
 
-        /* ===== Subsection Headers ===== */
-        .subsectionHeader {
-            font-size: 0.95em;
-            font-weight: 600;
-            color: rgba(255, 255, 255, 0.6);
-            margin: 16px 0 12px 0;
-            padding-bottom: 6px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .subsectionHeader:first-child {
-            margin-top: 0;
-        }
 
         /* ===== Settings Groups ===== */
         .settingsGroup {
@@ -1023,15 +905,6 @@
             align-items: center;
         }
 
-        /* ===== Server Info Rows ===== */
-        .server-info-row {
-            display: flex;
-            gap: 8px;
-            padding: 2px 0;
-        }
-        .server-info-label {
-            min-width: 50px;
-        }
 
         /* ===== Database Reset Buttons ===== */
         .resetButtonGroup {

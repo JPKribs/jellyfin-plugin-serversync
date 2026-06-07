@@ -653,7 +653,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                             continue;
                         }
 
-                        var tempPath = Path.GetTempFileName();
+                        // Download buffer lives under the plugin's temp directory
+                        // (a Jellyfin folder), so nothing is written outside the
+                        // data tree.
+                        var tempDir = Path.Combine(ConfigManager.GetTempDownloadPath(), "metadata-images");
+                        Directory.CreateDirectory(tempDir);
+                        var tempPath = Path.Combine(tempDir, Guid.NewGuid().ToString("N"));
                         try
                         {
                             using (imageStream)

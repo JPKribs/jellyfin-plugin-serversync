@@ -29,13 +29,16 @@ export default function (view) {
         }
     }
 
-    // Track active poll intervals so we can clean them up on viewhide
+    // Active task-progress pollers, stopped on viewhide. pollTaskProgress returns a { cancel } handle.
     var _activePollIntervals = [];
 
     view.addEventListener('viewshow', onViewShow);
     view.addEventListener('viewhide', function () {
-        // Clear any running pollTaskProgress intervals
-        _activePollIntervals.forEach(function(id) { clearInterval(id); });
+        // Stop any running pollTaskProgress handles
+        _activePollIntervals.forEach(function(handle) {
+            if (handle && typeof handle.cancel === 'function') handle.cancel();
+            else clearInterval(handle);
+        });
         _activePollIntervals.length = 0;
 
         // Disconnect IntersectionObservers on all PaginatedTable instances
@@ -215,6 +218,18 @@ export default function (view) {
                 titleEl.textContent = 'Sync - ' + displayName;
             }
 
+            var descEl = view.querySelector('#syncTypeDescription');
+            if (descEl) {
+                var descriptions = {
+                    content: 'Content sync downloads media files from the source server and mirrors them here. It matches libraries by your mappings, queues missing or updated files, includes companion files like subtitles, and can delete items removed on the source.',
+                    history: 'History sync copies watch state to your mapped users. It syncs played status, play counts, resume positions, last played dates, and favorites, keeping the highest play count and the most recent activity from either server.',
+                    metadata: 'Metadata sync copies item metadata onto matching items, matched by file path. It updates titles, overviews, ratings, genres, tags, studios, people, and images, and you enable each category on the Settings tab.',
+                    people: 'People sync copies person metadata onto matching people, matched by name. It updates biographies, provider IDs, and profile images.',
+                    users: 'User sync copies user settings to your mapped users. It covers permissions, playback and display preferences, and profile images, and translates library permissions through your library mappings.'
+                };
+                descEl.textContent = descriptions[viewName] || '';
+            }
+
             this.currentView = viewName;
 
             // Reconnect IntersectionObserver on the incoming tab's table
@@ -278,7 +293,7 @@ export default function (view) {
                         key: 'name',
                         label: 'Item',
                         type: 'custom',
-                        className: 'pt-cell-with-thumb',
+                        className: 'jpk-table-cell-with-thumb',
                         render: function(item) {
                             var sourcePath = item.SourcePath || '';
                             var sourceLibrary = item.SourceLibraryName || 'Unknown';
@@ -310,9 +325,10 @@ export default function (view) {
                         className: 'pt-cell-details',
                         render: function(item) {
                             if (item.Status === 'Synced') {
-                                return '<span style="opacity: 0.5;">No changes</span>';
+                                return '<span class="jpk-badge gray">No changes</span>';
                             }
-                            return ServerSyncShared.escapeHtml(item.SourceSizeFormatted || '');
+                            var size = item.SourceSizeFormatted || '';
+                            return size ? '<span class="jpk-badge purple">' + ServerSyncShared.escapeHtml(size) + '</span>' : '';
                         }
                     },
                     {
@@ -405,8 +421,8 @@ export default function (view) {
             bulkContainer.innerHTML =
                 '<button is="emby-button" type="button" id="btnBulkIgnore" class="raised pt-bulk-icon-btn" title="Ignore" disabled><span class="material-icons">block</span></button>' +
                 '<button is="emby-button" type="button" id="btnBulkMarkSynced" class="raised pt-bulk-icon-btn" title="Mark Synced" disabled><span class="material-icons">check_circle</span></button>' +
-                '<button is="emby-button" type="button" id="btnBulkQueue" class="raised button-primary pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>' +
-                '<button is="emby-button" type="button" id="btnBulkDelete" class="raised button-destructive pt-bulk-icon-btn" title="Delete from local server only" disabled><span class="material-icons">delete</span></button>';
+                '<button is="emby-button" type="button" id="btnBulkQueue" class="raised jpk-button-submit pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>' +
+                '<button is="emby-button" type="button" id="btnBulkDelete" class="raised jpk-button-destructive pt-bulk-icon-btn" title="Delete from local server only" disabled><span class="material-icons">delete</span></button>';
 
             bulkContainer.querySelector('#btnBulkIgnore').addEventListener('click', function() { self.bulkIgnore(); });
             bulkContainer.querySelector('#btnBulkQueue').addEventListener('click', function() { self.bulkQueue(); });
@@ -987,7 +1003,7 @@ export default function (view) {
                         key: 'name',
                         label: 'Item',
                         type: 'custom',
-                        className: 'pt-cell-with-thumb',
+                        className: 'jpk-table-cell-with-thumb',
                         render: function(item) {
                             var itemName = item.ItemName || 'Unknown';
                             var userMapping = self.findUserMapping(item.SourceUserId, item.LocalUserId);
@@ -1018,7 +1034,7 @@ export default function (view) {
                         className: 'pt-cell-details',
                         render: function(item) {
                             if (!item.HasChanges) {
-                                return '<span style="opacity: 0.5;">No changes</span>';
+                                return '<span class="jpk-badge gray">No changes</span>';
                             }
 
                             var details = [];
@@ -1106,7 +1122,7 @@ export default function (view) {
 
             bulkContainer.innerHTML =
                 '<button is="emby-button" type="button" id="btnHistoryBulkIgnore" class="raised pt-bulk-icon-btn" title="Ignore" disabled><span class="material-icons">block</span></button>' +
-                '<button is="emby-button" type="button" id="btnHistoryBulkQueue" class="raised button-primary pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
+                '<button is="emby-button" type="button" id="btnHistoryBulkQueue" class="raised jpk-button-submit pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
 
             view.querySelector('#btnHistoryBulkIgnore').addEventListener('click', function() { self.bulkIgnore(); });
             view.querySelector('#btnHistoryBulkQueue').addEventListener('click', function() { self.bulkQueue(); });
@@ -1500,7 +1516,7 @@ export default function (view) {
                         key: 'item',
                         label: 'Item',
                         type: 'custom',
-                        className: 'pt-cell-with-thumb',
+                        className: 'jpk-table-cell-with-thumb',
                         render: function(item) {
                             var itemName = item.ItemName || 'Unknown';
                             var sourceLib = item.SourceLibraryName || 'Unknown';
@@ -1529,10 +1545,19 @@ export default function (view) {
                         type: 'custom',
                         className: 'pt-cell-details',
                         render: function(item) {
-                            if (!item.HasChanges) {
-                                return '<span style="opacity: 0.5;">No changes</span>';
+                            // Only count categories enabled in config.
+                            var config = MetadataSyncTableModule.currentConfig || {};
+                            var changes = [];
+                            if (config.MetadataSyncMetadata !== false && item.HasMetadataChanges) changes.push('Metadata');
+                            if (config.MetadataSyncImages !== false && item.HasImagesChanges) changes.push('Images');
+                            if (config.MetadataSyncPeople === true && item.HasPeopleChanges) changes.push('People');
+                            if (config.MetadataSyncStudios !== false && item.HasStudiosChanges) changes.push('Studios');
+                            if (changes.length === 0) {
+                                return '<span class="jpk-badge gray">No changes</span>';
                             }
-                            return ServerSyncShared.escapeHtml(item.ChangesSummary || 'Changes pending');
+                            return changes.map(function (c) {
+                                return '<span class="jpk-badge orange">' + c + '</span>';
+                            }).join(' ');
                         }
                     },
                     {
@@ -1609,7 +1634,7 @@ export default function (view) {
 
             bulkContainer.innerHTML =
                 '<button is="emby-button" type="button" id="btnMetadataBulkIgnore" class="raised pt-bulk-icon-btn" title="Ignore" disabled><span class="material-icons">block</span></button>' +
-                '<button is="emby-button" type="button" id="btnMetadataBulkQueue" class="raised button-primary pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
+                '<button is="emby-button" type="button" id="btnMetadataBulkQueue" class="raised jpk-button-submit pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
 
             view.querySelector('#btnMetadataBulkIgnore').addEventListener('click', function() { self.bulkIgnore(); });
             view.querySelector('#btnMetadataBulkQueue').addEventListener('click', function() { self.bulkQueue(); });
@@ -2352,7 +2377,7 @@ export default function (view) {
                         key: 'user',
                         label: 'User',
                         type: 'custom',
-                        className: 'pt-cell-with-thumb',
+                        className: 'jpk-table-cell-with-thumb',
                         render: function(item) {
                             var sourceUserName = item.SourceUserName || 'Unknown';
                             var localUserName = item.LocalUserName || 'Unknown';
@@ -2380,10 +2405,18 @@ export default function (view) {
                         type: 'custom',
                         className: 'pt-cell-details',
                         render: function(item) {
-                            if (!item.HasChanges) {
-                                return '<span style="opacity: 0.5;">No Changes</span>';
+                            // Only count categories enabled in config.
+                            var config = UserSyncTableModule.currentConfig || {};
+                            var changes = [];
+                            if (config.UserSyncPolicy !== false && item.PolicyHasChanges) changes.push('Policy');
+                            if (config.UserSyncConfiguration !== false && item.ConfigurationHasChanges) changes.push('Configuration');
+                            if (config.UserSyncProfileImage !== false && item.ProfileImageHasChanges) changes.push('Image');
+                            if (changes.length === 0) {
+                                return '<span class="jpk-badge gray">No Changes</span>';
                             }
-                            return ServerSyncShared.escapeHtml(item.TotalChanges || 'Changes pending');
+                            return changes.map(function (c) {
+                                return '<span class="jpk-badge orange">' + c + '</span>';
+                            }).join(' ');
                         }
                     },
                     {
@@ -2462,7 +2495,7 @@ export default function (view) {
 
             bulkContainer.innerHTML =
                 '<button is="emby-button" type="button" id="btnUserBulkIgnore" class="raised pt-bulk-icon-btn" title="Ignore" disabled><span class="material-icons">block</span></button>' +
-                '<button is="emby-button" type="button" id="btnUserBulkQueue" class="raised button-primary pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
+                '<button is="emby-button" type="button" id="btnUserBulkQueue" class="raised jpk-button-submit pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
 
             view.querySelector('#btnUserBulkIgnore').addEventListener('click', function() { self.bulkIgnore(); });
             view.querySelector('#btnUserBulkQueue').addEventListener('click', function() { self.bulkQueue(); });
@@ -3002,7 +3035,7 @@ export default function (view) {
                         key: 'person',
                         label: 'Person',
                         type: 'custom',
-                        className: 'pt-cell-with-thumb',
+                        className: 'jpk-table-cell-with-thumb',
                         render: function(item) {
                             var errorPreview = '';
                             if (item.Status === 'Errored' && item.ErrorMessage) {
@@ -3024,12 +3057,12 @@ export default function (view) {
                         className: 'pt-cell-details',
                         render: function(item) {
                             if (!item.HasChanges) {
-                                return '<span style="opacity: 0.5;">No Changes</span>';
+                                return '<span class="jpk-badge gray">No Changes</span>';
                             }
                             var badges = [];
-                            if (item.HasMetadataChanges) badges.push('<span class="peopleSyncBadge has-changes">Metadata</span>');
-                            if (item.HasImagesChanges) badges.push('<span class="peopleSyncBadge has-changes">Images</span>');
-                            return badges.length > 0 ? badges.join(' ') : '<span style="opacity: 0.5;">No Changes</span>';
+                            if (item.HasMetadataChanges) badges.push('<span class="jpk-badge orange">Metadata</span>');
+                            if (item.HasImagesChanges) badges.push('<span class="jpk-badge orange">Images</span>');
+                            return badges.length > 0 ? badges.join(' ') : '<span class="jpk-badge gray">No Changes</span>';
                         }
                     },
                     {
@@ -3100,7 +3133,7 @@ export default function (view) {
 
             bulkContainer.innerHTML =
                 '<button is="emby-button" type="button" id="btnPeopleBulkIgnore" class="raised pt-bulk-icon-btn" title="Ignore" disabled><span class="material-icons">block</span></button>' +
-                '<button is="emby-button" type="button" id="btnPeopleBulkQueue" class="raised button-primary pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
+                '<button is="emby-button" type="button" id="btnPeopleBulkQueue" class="raised jpk-button-submit pt-bulk-icon-btn" title="Queue" disabled><span class="material-icons">playlist_add</span></button>';
 
             view.querySelector('#btnPeopleBulkIgnore').addEventListener('click', function() { self.bulkIgnore(); });
             view.querySelector('#btnPeopleBulkQueue').addEventListener('click', function() { self.bulkQueue(); });

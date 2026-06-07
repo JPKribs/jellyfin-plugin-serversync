@@ -724,7 +724,7 @@ public sealed class SyncRunFailure
 /// Convenience helpers over <see cref="PluginConfiguration"/>'s mapping
 /// collections. Centralizes the
 /// <c>(config.LibraryMappings ?? new()).Where(m =&gt; m.IsEnabled).ToList()</c>
-/// pattern that used to be repeated across every refresh task.
+/// pattern so refresh tasks share one enabled-mappings accessor.
 /// </summary>
 public static class PluginConfigurationExtensions
 {

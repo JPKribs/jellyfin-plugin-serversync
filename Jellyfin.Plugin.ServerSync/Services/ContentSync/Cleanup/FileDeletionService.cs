@@ -302,7 +302,6 @@ public static class FileDeletionService
 
         var deleted = 0;
         var failed = 0;
-        var dbCleanupErrors = new List<string>();
         var failedItems = new List<(string SourceItemId, string Error)>();
 
         // Per-item atomicity: file delete → immediate DB row delete. The
@@ -373,7 +372,6 @@ public static class FileDeletionService
                     // failedItems because the file IS deleted — re-marking
                     // Errored would be wrong.
                     logger.LogError(ex, "DB cleanup failed for {FileName} ({SourceItemId}) — file already deleted; will retry on next sync", fileName, item.SourceItemId);
-                    dbCleanupErrors.Add(item.SourceItemId);
                 }
             }
         }

@@ -38,7 +38,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Jellyfin.Plugin.ServerSync\Jellyfin.Plugin.ServerSync.csproj" />
+    <ProjectReference Include="..\Jellyfin.Plugin.ServerSync\Jellyfin.Plugin.ServerSync.csproj" />
   </ItemGroup>
 
 </Project>

@@ -16,6 +16,8 @@
 
                     <!-- SECTION: Sync Type Selector -->
 
+                    <div id="syncTypeDescription" class="fieldDescription" style="margin: 0 0 12px 0;"></div>
+
                     <div id="syncTypeContainer" class="selectContainer">
                         <label class="selectLabel" for="syncTypeDropdown">Sync Type</label>
                         <select is="emby-select" id="syncTypeDropdown" class="emby-select-withcolor emby-select">
@@ -34,7 +36,7 @@
                             <span class="material-icons emptyState-icon">sync_disabled</span>
                             <div class="emptyState-title">No Sync Types Enabled</div>
                             <div class="emptyState-subtitle">Enable Content, History, Metadata, User, or People syncing in the Settings tab to get started.</div>
-                            <a is="emby-linkbutton" class="raised button-primary emptyState-button" href="configurationpage?name=serversync_settings">
+                            <a is="emby-linkbutton" class="raised jpk-button-submit emptyState-button" href="configurationpage?name=serversync_settings">
                                 <span class="material-icons" style="font-size:18px; margin-right:6px;">settings</span>
                                 <span>Go to Settings</span>
                             </a>
@@ -49,44 +51,44 @@
 
                         <!-- Status Summary Cards -->
                         <div id="syncStatusSummary">
-                            <div class="statusCards" id="mainStatusRow">
-                                <div class="statusCard statusCard-synced" id="statusGroupSynced" title="">
-                                    <span class="statusCard-count" id="syncedCount">0</span>
-                                    <span class="statusCard-label">Synced</span>
+                            <div class="jpk-cards" id="mainStatusRow">
+                                <div class="jpk-card green" id="statusGroupSynced" title="">
+                                    <span class="jpk-card-count" id="syncedCount">0</span>
+                                    <span class="jpk-card-label">Synced</span>
                                 </div>
-                                <div class="statusCard statusCard-pending" id="statusGroupPending" title="">
-                                    <span class="statusCard-count" id="pendingCount">0</span>
-                                    <span class="statusCard-label">Pending</span>
+                                <div class="jpk-card purple" id="statusGroupPending" title="">
+                                    <span class="jpk-card-count" id="pendingCount">0</span>
+                                    <span class="jpk-card-label">Pending</span>
                                 </div>
-                                <div class="statusCard statusCard-queued" id="statusGroupQueued" title="">
-                                    <span class="statusCard-count" id="queuedCount">0</span>
-                                    <span class="statusCard-label">Queued</span>
+                                <div class="jpk-card orange" id="statusGroupQueued" title="">
+                                    <span class="jpk-card-count" id="queuedCount">0</span>
+                                    <span class="jpk-card-label">Queued</span>
                                 </div>
-                                <div class="statusCard statusCard-errored" id="statusGroupErrored" title="">
-                                    <span class="statusCard-count" id="erroredCount">0</span>
-                                    <span class="statusCard-label">Errored</span>
+                                <div class="jpk-card red" id="statusGroupErrored" title="">
+                                    <span class="jpk-card-count" id="erroredCount">0</span>
+                                    <span class="jpk-card-label">Errored</span>
                                 </div>
-                                <div class="statusCard statusCard-ignored" id="statusGroupIgnored" title="">
-                                    <span class="statusCard-count" id="ignoredCount">0</span>
-                                    <span class="statusCard-label">Ignored</span>
+                                <div class="jpk-card gray" id="statusGroupIgnored" title="">
+                                    <span class="jpk-card-count" id="ignoredCount">0</span>
+                                    <span class="jpk-card-label">Ignored</span>
                                 </div>
                             </div>
-                            <div class="statusCards hidden" id="pendingStatusRow">
-                                <div class="statusCard statusCard-pendingDownload hidden" id="statusGroupPendingDownload" title="">
-                                    <span class="statusCard-count" id="pendingDownloadCount">0</span>
-                                    <span class="statusCard-label">Pending Download</span>
+                            <div class="jpk-cards hidden" id="pendingStatusRow">
+                                <div class="jpk-card purple hidden" id="statusGroupPendingDownload" title="">
+                                    <span class="jpk-card-count" id="pendingDownloadCount">0</span>
+                                    <span class="jpk-card-label">Pending Download</span>
                                 </div>
-                                <div class="statusCard statusCard-pendingReplacement hidden" id="statusGroupPendingReplacement" title="">
-                                    <span class="statusCard-count" id="pendingReplacementCount">0</span>
-                                    <span class="statusCard-label">Pending Replace</span>
+                                <div class="jpk-card blue hidden" id="statusGroupPendingReplacement" title="">
+                                    <span class="jpk-card-count" id="pendingReplacementCount">0</span>
+                                    <span class="jpk-card-label">Pending Replace</span>
                                 </div>
-                                <div class="statusCard statusCard-pendingDeletion hidden" id="statusGroupPendingDeletion" title="">
-                                    <span class="statusCard-count" id="pendingDeletionCount">0</span>
-                                    <span class="statusCard-label">Pending Delete</span>
+                                <div class="jpk-card red hidden" id="statusGroupPendingDeletion" title="">
+                                    <span class="jpk-card-count" id="pendingDeletionCount">0</span>
+                                    <span class="jpk-card-label">Pending Delete</span>
                                 </div>
-                                <div class="statusCard statusCard-deleting hidden" id="statusGroupDeleting" title="">
-                                    <span class="statusCard-count" id="deletingCount">0</span>
-                                    <span class="statusCard-label">Deleting</span>
+                                <div class="jpk-card red hidden" id="statusGroupDeleting" title="">
+                                    <span class="jpk-card-count" id="deletingCount">0</span>
+                                    <span class="jpk-card-label">Deleting</span>
                                 </div>
                             </div>
                         </div>
@@ -114,10 +116,10 @@
                             <button is="emby-button" type="button" id="btnRefreshItems" class="raised syncActionButton">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerSync" class="raised button-primary syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerSync" class="raised jpk-button-submit syncActionButton">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryErrors" class="raised button-primary syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryErrors" class="raised jpk-button-submit syncActionButton hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
@@ -130,11 +132,11 @@
                         </div>
 
                         <!-- Content Item Detail Modal -->
-                        <div id="itemDetailModal" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-                            <div class="dialogContent contentModal-dialog modal-relative">
-                                <button type="button" id="btnModalClose" class="dialogCloseBtn" title="Close" aria-label="Close">&times;</button>
-                                <h2 id="modalTitle" class="modal-title"></h2>
-                                <div id="modalContent" class="modal-body">
+                        <div id="itemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+                            <div class="jpk-dialog-content contentModal-dialog modal-relative">
+                                <button type="button" id="btnModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <h2 id="modalTitle" class="jpk-modal-title"></h2>
+                                <div id="modalContent" class="jpk-modal-body">
                                     <div class="contentModal-topRow">
                                         <span id="modalStatusBadge" class="itemModal-statusBadge"></span>
                                         <span id="modalServerMapping" class="contentModal-serverMapping"></span>
@@ -149,12 +151,12 @@
                                             <div id="modalLibraryMapping" class="contentModal-infoValue">-</div>
                                         </div>
                                     </div>
-                                    <div id="modalErrorSection" class="modal-field hidden">
-                                        <div class="modal-field-label">Error</div>
-                                        <div id="modalError" class="errorMessage"></div>
+                                    <div id="modalErrorSection" class="jpk-modal-field hidden">
+                                        <div class="jpk-modal-field-label">Error</div>
+                                        <div id="modalError" class="jpk-error-message"></div>
                                     </div>
-                                    <div id="modalRetrySection" class="modal-field hidden">
-                                        <div class="modal-field-label">Retry Count</div>
+                                    <div id="modalRetrySection" class="jpk-modal-field hidden">
+                                        <div class="jpk-modal-field-label">Retry Count</div>
                                         <div id="modalRetryCount"></div>
                                     </div>
                                     <div class="contentModal-pathsSection">
@@ -178,22 +180,22 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div id="modalCompanionFilesSection" class="modal-field hidden">
-                                        <div class="modal-field-label">Companion Files</div>
-                                        <div id="modalCompanionFiles" class="modal-field-value"></div>
+                                    <div id="modalCompanionFilesSection" class="jpk-modal-field hidden">
+                                        <div class="jpk-modal-field-label">Companion Files</div>
+                                        <div id="modalCompanionFiles" class="jpk-modal-field-value"></div>
                                     </div>
                                 </div>
-                                <div class="modalButtonRow">
-                                    <button is="emby-button" type="button" id="btnModalIgnore" class="raised modalButton">
+                                <div class="jpk-modal-button-row">
+                                    <button is="emby-button" type="button" id="btnModalIgnore" class="raised jpk-modal-button">
                                         <span>Ignore</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnModalMarkSynced" class="raised modalButton" title="Mark as synced">
+                                    <button is="emby-button" type="button" id="btnModalMarkSynced" class="raised jpk-modal-button" title="Mark as synced">
                                         <span>Mark Synced</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnModalQueue" class="raised button-primary modalButton">
+                                    <button is="emby-button" type="button" id="btnModalQueue" class="raised jpk-button-submit jpk-modal-button">
                                         <span>Queue</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnModalDelete" class="raised button-destructive modalButton" title="Delete from local server only">
+                                    <button is="emby-button" type="button" id="btnModalDelete" class="raised jpk-button-destructive jpk-modal-button" title="Delete from local server only">
                                         <span>Delete</span>
                                     </button>
                                 </div>
@@ -209,22 +211,22 @@
 
                         <!-- Status Summary Cards -->
                         <div id="historySyncStatusSummary">
-                            <div class="statusCards" id="historyStatusRow">
-                                <div class="statusCard statusCard-synced" id="historyStatusGroupSynced" title="">
-                                    <span class="statusCard-count" id="historySyncedCount">0</span>
-                                    <span class="statusCard-label">Synced</span>
+                            <div class="jpk-cards" id="historyStatusRow">
+                                <div class="jpk-card green" id="historyStatusGroupSynced" title="">
+                                    <span class="jpk-card-count" id="historySyncedCount">0</span>
+                                    <span class="jpk-card-label">Synced</span>
                                 </div>
-                                <div class="statusCard statusCard-queued" id="historyStatusGroupQueued" title="">
-                                    <span class="statusCard-count" id="historyQueuedCount">0</span>
-                                    <span class="statusCard-label">Queued</span>
+                                <div class="jpk-card orange" id="historyStatusGroupQueued" title="">
+                                    <span class="jpk-card-count" id="historyQueuedCount">0</span>
+                                    <span class="jpk-card-label">Queued</span>
                                 </div>
-                                <div class="statusCard statusCard-errored" id="historyStatusGroupErrored" title="">
-                                    <span class="statusCard-count" id="historyErroredCount">0</span>
-                                    <span class="statusCard-label">Errored</span>
+                                <div class="jpk-card red" id="historyStatusGroupErrored" title="">
+                                    <span class="jpk-card-count" id="historyErroredCount">0</span>
+                                    <span class="jpk-card-label">Errored</span>
                                 </div>
-                                <div class="statusCard statusCard-ignored" id="historyStatusGroupIgnored" title="">
-                                    <span class="statusCard-count" id="historyIgnoredCount">0</span>
-                                    <span class="statusCard-label">Ignored</span>
+                                <div class="jpk-card gray" id="historyStatusGroupIgnored" title="">
+                                    <span class="jpk-card-count" id="historyIgnoredCount">0</span>
+                                    <span class="jpk-card-label">Ignored</span>
                                 </div>
                             </div>
                         </div>
@@ -252,10 +254,10 @@
                             <button is="emby-button" type="button" id="btnRefreshHistoryItems" class="raised syncActionButton">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerHistorySync" class="raised button-primary syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerHistorySync" class="raised jpk-button-submit syncActionButton">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryHistoryErrors" class="raised button-primary syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryHistoryErrors" class="raised jpk-button-submit syncActionButton hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
@@ -268,11 +270,11 @@
                         </div>
 
                         <!-- History Item Detail Modal -->
-                        <div id="historyItemDetailModal" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
-                            <div class="dialogContent historyModal-dialog modal-relative">
-                                <button type="button" id="btnHistoryModalClose" class="dialogCloseBtn" title="Close" aria-label="Close">&times;</button>
-                                <h2 id="historyModalTitle" class="modal-title"></h2>
-                                <div id="historyModalContent" class="modal-body">
+                        <div id="historyItemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
+                            <div class="jpk-dialog-content historyModal-dialog modal-relative">
+                                <button type="button" id="btnHistoryModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <h2 id="historyModalTitle" class="jpk-modal-title"></h2>
+                                <div id="historyModalContent" class="jpk-modal-body">
                                     <div class="historyModal-topRow">
                                         <span id="historyModalStatusBadge" class="itemModal-statusBadge"></span>
                                         <span id="historyModalServerMapping" class="historyModal-serverMapping"></span>
@@ -283,9 +285,9 @@
                                             <div id="historyModalLastSync" class="historyModal-infoValue">-</div>
                                         </div>
                                     </div>
-                                    <div id="historyModalErrorSection" class="modal-field hidden">
-                                        <div class="modal-field-label">Error</div>
-                                        <div id="historyModalError" class="errorMessage"></div>
+                                    <div id="historyModalErrorSection" class="jpk-modal-field hidden">
+                                        <div class="jpk-modal-field-label">Error</div>
+                                        <div id="historyModalError" class="jpk-error-message"></div>
                                     </div>
                                     <div class="historyModal-userSection">
                                         <div class="historyModal-userRow">
@@ -344,11 +346,11 @@
                                         </tbody>
                                     </table>
                                 </div>
-                                <div class="modalButtonRow">
-                                    <button is="emby-button" type="button" id="btnHistoryModalIgnore" class="raised modalButton">
+                                <div class="jpk-modal-button-row">
+                                    <button is="emby-button" type="button" id="btnHistoryModalIgnore" class="raised jpk-modal-button">
                                         <span>Ignore</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnHistoryModalQueue" class="raised button-primary modalButton">
+                                    <button is="emby-button" type="button" id="btnHistoryModalQueue" class="raised jpk-button-submit jpk-modal-button">
                                         <span>Queue</span>
                                     </button>
                                 </div>
@@ -364,22 +366,22 @@
 
                         <!-- Status Summary Cards -->
                         <div id="metadataSyncStatusSummary">
-                            <div class="statusCards" id="metadataStatusRow">
-                                <div class="statusCard statusCard-synced" id="metadataStatusGroupSynced" title="">
-                                    <span class="statusCard-count" id="metadataSyncedCount">0</span>
-                                    <span class="statusCard-label">Synced</span>
+                            <div class="jpk-cards" id="metadataStatusRow">
+                                <div class="jpk-card green" id="metadataStatusGroupSynced" title="">
+                                    <span class="jpk-card-count" id="metadataSyncedCount">0</span>
+                                    <span class="jpk-card-label">Synced</span>
                                 </div>
-                                <div class="statusCard statusCard-queued" id="metadataStatusGroupQueued" title="">
-                                    <span class="statusCard-count" id="metadataQueuedCount">0</span>
-                                    <span class="statusCard-label">Queued</span>
+                                <div class="jpk-card orange" id="metadataStatusGroupQueued" title="">
+                                    <span class="jpk-card-count" id="metadataQueuedCount">0</span>
+                                    <span class="jpk-card-label">Queued</span>
                                 </div>
-                                <div class="statusCard statusCard-errored" id="metadataStatusGroupErrored" title="">
-                                    <span class="statusCard-count" id="metadataErroredCount">0</span>
-                                    <span class="statusCard-label">Errored</span>
+                                <div class="jpk-card red" id="metadataStatusGroupErrored" title="">
+                                    <span class="jpk-card-count" id="metadataErroredCount">0</span>
+                                    <span class="jpk-card-label">Errored</span>
                                 </div>
-                                <div class="statusCard statusCard-ignored" id="metadataStatusGroupIgnored" title="">
-                                    <span class="statusCard-count" id="metadataIgnoredCount">0</span>
-                                    <span class="statusCard-label">Ignored</span>
+                                <div class="jpk-card gray" id="metadataStatusGroupIgnored" title="">
+                                    <span class="jpk-card-count" id="metadataIgnoredCount">0</span>
+                                    <span class="jpk-card-label">Ignored</span>
                                 </div>
                             </div>
                         </div>
@@ -403,10 +405,10 @@
                             <button is="emby-button" type="button" id="btnRefreshMetadataItems" class="raised syncActionButton">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerMetadataSync" class="raised button-primary syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerMetadataSync" class="raised jpk-button-submit syncActionButton">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryMetadataErrors" class="raised button-primary syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryMetadataErrors" class="raised jpk-button-submit syncActionButton hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
@@ -419,11 +421,11 @@
                         </div>
 
                         <!-- Metadata Item Detail Modal -->
-                        <div id="metadataSyncItemDetailModal" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="metadataSyncModalTitle">
-                            <div class="dialogContent metadataSyncModal-dialog modal-relative">
-                                <button type="button" id="btnMetadataSyncModalClose" class="dialogCloseBtn" title="Close" aria-label="Close">&times;</button>
-                                <h2 id="metadataSyncModalTitle" class="modal-title"></h2>
-                                <div class="modal-body">
+                        <div id="metadataSyncItemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="metadataSyncModalTitle">
+                            <div class="jpk-dialog-content metadataSyncModal-dialog modal-relative">
+                                <button type="button" id="btnMetadataSyncModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <h2 id="metadataSyncModalTitle" class="jpk-modal-title"></h2>
+                                <div class="jpk-modal-body">
                                     <div class="metadataSyncModal-topRow">
                                         <span id="metadataSyncModalStatusBadge" class="itemModal-statusBadge"></span>
                                         <span id="metadataSyncModalServerMapping" class="metadataSyncModal-serverMapping"></span>
@@ -438,9 +440,9 @@
                                             <div id="metadataSyncModalLibrary" class="metadataSyncModal-infoValue">-</div>
                                         </div>
                                     </div>
-                                    <div id="metadataSyncModalErrorSection" class="modal-field hidden">
-                                        <div class="modal-field-label">Error</div>
-                                        <div id="metadataSyncModalError" class="errorMessage"></div>
+                                    <div id="metadataSyncModalErrorSection" class="jpk-modal-field hidden">
+                                        <div class="jpk-modal-field-label">Error</div>
+                                        <div id="metadataSyncModalError" class="jpk-error-message"></div>
                                     </div>
                                     <div id="metadataSyncModalChangesSummary" class="metadataSyncModal-changesSummary"></div>
                                     <div class="metadataSyncModal-pathsSection">
@@ -469,11 +471,11 @@
                                         </table>
                                     </div>
                                 </div>
-                                <div class="modalButtonRow">
-                                    <button is="emby-button" type="button" id="btnMetadataSyncModalIgnore" class="raised modalButton">
+                                <div class="jpk-modal-button-row">
+                                    <button is="emby-button" type="button" id="btnMetadataSyncModalIgnore" class="raised jpk-modal-button">
                                         <span>Ignore</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnMetadataSyncModalQueue" class="raised button-primary modalButton">
+                                    <button is="emby-button" type="button" id="btnMetadataSyncModalQueue" class="raised jpk-button-submit jpk-modal-button">
                                         <span>Queue</span>
                                     </button>
                                 </div>
@@ -489,22 +491,22 @@
 
                         <!-- Status Summary Cards -->
                         <div id="userSyncStatusSummary">
-                            <div class="statusCards">
-                                <div class="statusCard statusCard-synced" id="userStatusGroupSynced" title="">
-                                    <span class="statusCard-count" id="userSyncedCount">0</span>
-                                    <span class="statusCard-label">Synced</span>
+                            <div class="jpk-cards">
+                                <div class="jpk-card green" id="userStatusGroupSynced" title="">
+                                    <span class="jpk-card-count" id="userSyncedCount">0</span>
+                                    <span class="jpk-card-label">Synced</span>
                                 </div>
-                                <div class="statusCard statusCard-queued" id="userStatusGroupQueued" title="">
-                                    <span class="statusCard-count" id="userQueuedCount">0</span>
-                                    <span class="statusCard-label">Queued</span>
+                                <div class="jpk-card orange" id="userStatusGroupQueued" title="">
+                                    <span class="jpk-card-count" id="userQueuedCount">0</span>
+                                    <span class="jpk-card-label">Queued</span>
                                 </div>
-                                <div class="statusCard statusCard-errored" id="userStatusGroupErrored" title="">
-                                    <span class="statusCard-count" id="userErroredCount">0</span>
-                                    <span class="statusCard-label">Errored</span>
+                                <div class="jpk-card red" id="userStatusGroupErrored" title="">
+                                    <span class="jpk-card-count" id="userErroredCount">0</span>
+                                    <span class="jpk-card-label">Errored</span>
                                 </div>
-                                <div class="statusCard statusCard-ignored" id="userStatusGroupIgnored" title="">
-                                    <span class="statusCard-count" id="userIgnoredCount">0</span>
-                                    <span class="statusCard-label">Ignored</span>
+                                <div class="jpk-card gray" id="userStatusGroupIgnored" title="">
+                                    <span class="jpk-card-count" id="userIgnoredCount">0</span>
+                                    <span class="jpk-card-label">Ignored</span>
                                 </div>
                             </div>
                         </div>
@@ -528,10 +530,10 @@
                             <button is="emby-button" type="button" id="btnRefreshUserItems" class="raised syncActionButton">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerUserSync" class="raised button-primary syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerUserSync" class="raised jpk-button-submit syncActionButton">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryUserErrors" class="raised button-primary syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryUserErrors" class="raised jpk-button-submit syncActionButton hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
@@ -544,11 +546,11 @@
                         </div>
 
                         <!-- User Item Detail Modal -->
-                        <div id="userSyncItemDetailModal" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="userSyncModalTitle">
-                            <div class="dialogContent userSyncModal-dialog modal-relative">
-                                <button type="button" id="btnUserSyncModalClose" class="dialogCloseBtn" title="Close" aria-label="Close">&times;</button>
-                                <h2 id="userSyncModalTitle" class="modal-title"></h2>
-                                <div class="modal-body">
+                        <div id="userSyncItemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="userSyncModalTitle">
+                            <div class="jpk-dialog-content userSyncModal-dialog modal-relative">
+                                <button type="button" id="btnUserSyncModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <h2 id="userSyncModalTitle" class="jpk-modal-title"></h2>
+                                <div class="jpk-modal-body">
                                     <div class="userSyncModal-topRow">
                                         <span id="userSyncModalStatusBadge" class="itemModal-statusBadge"></span>
                                         <span id="userSyncModalServerMapping" class="userSyncModal-serverMapping"></span>
@@ -559,9 +561,9 @@
                                             <div id="userSyncModalLastSync" class="userSyncModal-infoValue"></div>
                                         </div>
                                     </div>
-                                    <div id="userSyncModalErrorSection" class="modal-field hidden">
-                                        <div class="modal-field-label">Error</div>
-                                        <div id="userSyncModalError" class="errorMessage"></div>
+                                    <div id="userSyncModalErrorSection" class="jpk-modal-field hidden">
+                                        <div class="jpk-modal-field-label">Error</div>
+                                        <div id="userSyncModalError" class="jpk-error-message"></div>
                                     </div>
                                     <div id="userSyncModalChangesSummary" class="userSyncModal-changesSummary"></div>
                                     <div class="userSyncModal-userSection">
@@ -590,11 +592,11 @@
                                         </table>
                                     </div>
                                 </div>
-                                <div class="modalButtonRow">
-                                    <button is="emby-button" type="button" id="btnUserSyncModalIgnore" class="raised modalButton">
+                                <div class="jpk-modal-button-row">
+                                    <button is="emby-button" type="button" id="btnUserSyncModalIgnore" class="raised jpk-modal-button">
                                         <span>Ignore</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnUserSyncModalQueue" class="raised button-primary modalButton">
+                                    <button is="emby-button" type="button" id="btnUserSyncModalQueue" class="raised jpk-button-submit jpk-modal-button">
                                         <span>Queue</span>
                                     </button>
                                 </div>
@@ -609,22 +611,22 @@
 
                         <!-- Status Summary Cards -->
                         <div id="peopleSyncStatusSummary">
-                            <div class="statusCards">
-                                <div class="statusCard statusCard-synced" id="peopleStatusGroupSynced" title="">
-                                    <span class="statusCard-count" id="peopleSyncedCount">0</span>
-                                    <span class="statusCard-label">Synced</span>
+                            <div class="jpk-cards">
+                                <div class="jpk-card green" id="peopleStatusGroupSynced" title="">
+                                    <span class="jpk-card-count" id="peopleSyncedCount">0</span>
+                                    <span class="jpk-card-label">Synced</span>
                                 </div>
-                                <div class="statusCard statusCard-queued" id="peopleStatusGroupQueued" title="">
-                                    <span class="statusCard-count" id="peopleQueuedCount">0</span>
-                                    <span class="statusCard-label">Queued</span>
+                                <div class="jpk-card orange" id="peopleStatusGroupQueued" title="">
+                                    <span class="jpk-card-count" id="peopleQueuedCount">0</span>
+                                    <span class="jpk-card-label">Queued</span>
                                 </div>
-                                <div class="statusCard statusCard-errored" id="peopleStatusGroupErrored" title="">
-                                    <span class="statusCard-count" id="peopleErroredCount">0</span>
-                                    <span class="statusCard-label">Errored</span>
+                                <div class="jpk-card red" id="peopleStatusGroupErrored" title="">
+                                    <span class="jpk-card-count" id="peopleErroredCount">0</span>
+                                    <span class="jpk-card-label">Errored</span>
                                 </div>
-                                <div class="statusCard statusCard-ignored" id="peopleStatusGroupIgnored" title="">
-                                    <span class="statusCard-count" id="peopleIgnoredCount">0</span>
-                                    <span class="statusCard-label">Ignored</span>
+                                <div class="jpk-card gray" id="peopleStatusGroupIgnored" title="">
+                                    <span class="jpk-card-count" id="peopleIgnoredCount">0</span>
+                                    <span class="jpk-card-label">Ignored</span>
                                 </div>
                             </div>
                         </div>
@@ -648,10 +650,10 @@
                             <button is="emby-button" type="button" id="btnRefreshPeopleItems" class="raised syncActionButton">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerPeopleSync" class="raised button-primary syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerPeopleSync" class="raised jpk-button-submit syncActionButton">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryPeopleErrors" class="raised button-primary syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryPeopleErrors" class="raised jpk-button-submit syncActionButton hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
@@ -664,11 +666,11 @@
                         </div>
 
                         <!-- People Item Detail Modal -->
-                        <div id="peopleSyncItemDetailModal" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="peopleSyncModalTitle">
-                            <div class="dialogContent peopleSyncModal-dialog modal-relative">
-                                <button type="button" id="btnPeopleSyncModalClose" class="dialogCloseBtn" title="Close" aria-label="Close">&times;</button>
-                                <h2 id="peopleSyncModalTitle" class="modal-title"></h2>
-                                <div class="modal-body">
+                        <div id="peopleSyncItemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="peopleSyncModalTitle">
+                            <div class="jpk-dialog-content peopleSyncModal-dialog modal-relative">
+                                <button type="button" id="btnPeopleSyncModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
+                                <h2 id="peopleSyncModalTitle" class="jpk-modal-title"></h2>
+                                <div class="jpk-modal-body">
                                     <div class="peopleSyncModal-topRow">
                                         <span id="peopleSyncModalStatusBadge" class="itemModal-statusBadge"></span>
                                         <span id="peopleSyncModalServerMapping" class="metadataSyncModal-serverMapping"></span>
@@ -679,9 +681,9 @@
                                             <div id="peopleSyncModalLastSync" class="peopleSyncModal-infoValue">-</div>
                                         </div>
                                     </div>
-                                    <div id="peopleSyncModalErrorSection" class="modal-field hidden">
-                                        <div class="modal-field-label">Error</div>
-                                        <div id="peopleSyncModalError" class="errorMessage"></div>
+                                    <div id="peopleSyncModalErrorSection" class="jpk-modal-field hidden">
+                                        <div class="jpk-modal-field-label">Error</div>
+                                        <div id="peopleSyncModalError" class="jpk-error-message"></div>
                                     </div>
                                     <div id="peopleSyncModalChangesSummary" class="peopleSyncModal-changesSummary"></div>
 
@@ -702,11 +704,11 @@
                                     
                                     <!-- Modal Action Buttons -->
                                 </div>
-                                <div class="modalButtonRow">
-                                    <button is="emby-button" type="button" id="btnPeopleSyncModalIgnore" class="raised modalButton">
+                                <div class="jpk-modal-button-row">
+                                    <button is="emby-button" type="button" id="btnPeopleSyncModalIgnore" class="raised jpk-modal-button">
                                         <span>Ignore</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnPeopleSyncModalQueue" class="raised button-primary modalButton">
+                                    <button is="emby-button" type="button" id="btnPeopleSyncModalQueue" class="raised jpk-button-submit jpk-modal-button">
                                         <span>Queue</span>
                                     </button>
                                 </div>
@@ -720,6 +722,7 @@
     </div>
 
     <!-- STYLES: Shared -->
+    <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
     <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
 
     <!-- STYLES: Sync-page-specific -->
@@ -810,11 +813,6 @@
             position: sticky; top: 0; background: var(--theme-background-primary, #1c1c1c); z-index: 1;
         }
 
-        /* ===== Comparison Table Value Styles ===== */
-        .historyCompareTable .value-yes { color: var(--status-synced-color); }
-        .historyCompareTable .value-no { color: var(--status-errored-color); }
-        .historyCompareTable .value-favorite { color: var(--status-queued-color); }
-        .historyCompareTable .value-changed { color: var(--accent-color); }
         .historyCompareTable td.historyCompareTable-value { word-break: break-word; max-width: 200px; }
 
         /* ===== Content Modal Specifics ===== */

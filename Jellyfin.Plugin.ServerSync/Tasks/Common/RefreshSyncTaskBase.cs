@@ -210,23 +210,43 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected virtual bool IsInScope(TRecord record) => true;
 
     /// <summary>
-    /// True if the record should be excluded from pruning even though it
-    /// wasn't seen this run. Override when discovery for the record's scope
-    /// may have completed only partially — e.g. a library whose source-side
-    /// enumeration broke on consecutive errors, or a user mapping whose
-    /// source user fetch failed. Default returns false (no exclusion).
-    /// Without this guard, a transient source-side hiccup mid-discovery
-    /// would silently delete the rows for items the loop just didn't get
-    /// to enumerate.
+    /// Set when the source returns anything other than a clean response during
+    /// discovery this run. Volatile because discovery can run under
+    /// <see cref="System.Threading.Tasks.Parallel"/>.
     /// </summary>
-    protected virtual bool ShouldSkipPruning(TRecord record) => false;
+    private volatile bool _sourceUnavailable;
+
+    /// <summary>
+    /// Records that the source server returned an error — anything other than a
+    /// clean response — during discovery this run. While set, the run skips
+    /// pruning entirely: a partial or failed fetch means rows missing from the
+    /// seen set might still exist on the source, so removing their tracking
+    /// rows would be data loss. Only a run whose discovery completes cleanly
+    /// prunes; the next clean run reconciles. Safe to call repeatedly and from
+    /// concurrent discovery tasks.
+    /// </summary>
+    /// <param name="reason">Short description of what failed, for the log.</param>
+    protected void MarkSourceUnavailable(string reason)
+    {
+        if (_sourceUnavailable)
+        {
+            return;
+        }
+
+        _sourceUnavailable = true;
+        Logger.LogWarning(
+            "{Task}: {Reason}; skipping prune this run so rows not re-confirmed on the source are left in place",
+            Name, reason);
+        RecordRunFailure("Refresh", reason);
+    }
 
     /// <summary>
     /// Removes rows that no longer exist on the source. Default deletes them
     /// outright; subclasses can override for soft-delete (Content marks them
     /// <see cref="SyncStatus.Pending"/> awaiting user approval). Out-of-scope
-    /// rows (per <see cref="IsInScope"/>) and rows in scopes with incomplete
-    /// discovery (per <see cref="ShouldSkipPruning"/>) are never pruned.
+    /// rows (per <see cref="IsInScope"/>) are never pruned. Only called when
+    /// discovery completed cleanly — a run that hit any source error skips
+    /// pruning before reaching here (see <see cref="MarkSourceUnavailable"/>).
     /// Returns the number of rows pruned.
     /// </summary>
     protected virtual Task<int> PruneStaleAsync(
@@ -235,7 +255,6 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         CancellationToken cancellationToken)
     {
         var pruned = 0;
-        var skippedDueToIncompleteDiscovery = 0;
         foreach (var kvp in existing)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -249,12 +268,6 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 continue;
             }
 
-            if (ShouldSkipPruning(kvp.Value))
-            {
-                skippedDueToIncompleteDiscovery++;
-                continue;
-            }
-
             try
             {
                 Manager.DeleteById(kvp.Value.Id);
@@ -264,13 +277,6 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             {
                 Logger.LogWarning(ex, "{Task}: failed to prune stale record id {Id}", Name, kvp.Value.Id);
             }
-        }
-
-        if (skippedDueToIncompleteDiscovery > 0)
-        {
-            Logger.LogWarning(
-                "{Task}: skipped pruning {Count} row(s) in scopes with incomplete discovery this run — re-run after source server stabilizes",
-                Name, skippedDueToIncompleteDiscovery);
         }
 
         return Task.FromResult(pruned);
@@ -328,6 +334,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     private async Task ExecuteCoreAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         Logger.LogInformation("Starting {Task}", Name);
+        _sourceUnavailable = false;
 
         if (!await TestConnectionAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -382,7 +389,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         // Per-item failures during build/upsert get counted so the run
         // summary tells the user how many records didn't make it. A single
-        // bad item must not abort the whole refresh — that's the audit fix.
+        // bad item must not abort the whole refresh.
         var buildFailures = 0;
         var persistFailures = 0;
 
@@ -470,12 +477,34 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         var seenKeySet = new HashSet<TKey>(seenKeys.Keys);
 
-        // 4. Prune rows that are no longer present on the source.
-        var pruned = await PruneStaleAsync(existing, seenKeySet, cancellationToken).ConfigureAwait(false);
-
-        if (pruned > 0)
+        // 4. Prune rows no longer present on the source — but ONLY when the whole
+        // discovery completed cleanly. If the source returned any error this run
+        // (anything other than a real response), rows missing from the seen set
+        // might still exist on the source, so deleting them would be data loss.
+        // Skip pruning entirely and let the next clean run reconcile.
+        var pruned = 0;
+        if (_sourceUnavailable)
         {
-            Logger.LogInformation("{Task}: pruned {Count} stale records", Name, pruned);
+            Logger.LogWarning("{Task}: source was unavailable during discovery — skipping prune; no rows removed this run", Name);
+        }
+        else if (buildFailures > 0 || persistFailures > 0)
+        {
+            // Items the source DID return couldn't all be built or persisted this
+            // run (e.g. a per-item 4xx/5xx fetching detail, or a transient DB
+            // write). Those items aren't in the seen set, so pruning would delete
+            // rows for items that still exist on the source. Skip pruning until a
+            // run completes with no failures.
+            Logger.LogWarning(
+                "{Task}: {BuildFailed} build / {PersistFailed} persist failure(s) this run — skipping prune so partially-processed items aren't deleted",
+                Name, buildFailures, persistFailures);
+        }
+        else
+        {
+            pruned = await PruneStaleAsync(existing, seenKeySet, cancellationToken).ConfigureAwait(false);
+            if (pruned > 0)
+            {
+                Logger.LogInformation("{Task}: pruned {Count} stale records", Name, pruned);
+            }
         }
 
         try
@@ -496,7 +525,16 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         // of rows silently failed to build or persist" (problem). Logs at
         // Warning when any failure occurred and records a config-side
         // failure entry so the dashboard can surface it.
-        if (buildFailures > 0 || persistFailures > 0)
+        if (_sourceUnavailable)
+        {
+            // The failure was already recorded by MarkSourceUnavailable; leave
+            // it in place (don't clear) so the dashboard shows the source was
+            // unavailable and pruning was skipped.
+            Logger.LogWarning(
+                "{Task} complete with source unavailable: {Processed} processed, prune skipped this run",
+                Name, processed);
+        }
+        else if (buildFailures > 0 || persistFailures > 0)
         {
             Logger.LogWarning(
                 "{Task} complete: {Processed} processed, {Pruned} pruned, {BuildFailed} build-failed, {PersistFailed} persist-failed (see prior errors for details)",

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 

@@ -13,6 +13,11 @@ public interface IPluginConfigurationManager
     PluginConfiguration Configuration { get; }
 
     /// <summary>
+    /// Gets the source-server API key decrypted for use (server-side calls or browser image URLs).
+    /// </summary>
+    string DecryptedSourceServerApiKey { get; }
+
+    /// <summary>
     /// Saves the current configuration to disk.
     /// </summary>
     void SaveConfiguration();

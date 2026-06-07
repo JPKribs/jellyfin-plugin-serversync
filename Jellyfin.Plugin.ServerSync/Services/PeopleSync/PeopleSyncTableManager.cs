@@ -5,6 +5,7 @@ using System.Data;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -223,20 +224,8 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
                     }
                 }
 
-                return new PagedResult<PeopleSyncItem>
-                {
-                    Items = items,
-                    TotalCount = totalCount,
-                    Page = page,
-                    PageSize = pageSize
-                };
+                return new PagedResult<PeopleSyncItem>(items, totalCount, skip, pageSize);
             },
-            fallback: new PagedResult<PeopleSyncItem>
-            {
-                Items = Array.Empty<PeopleSyncItem>(),
-                TotalCount = 0,
-                Page = page,
-                PageSize = pageSize
-            });
+            fallback: new PagedResult<PeopleSyncItem>(Array.Empty<PeopleSyncItem>(), 0, skip, pageSize));
     }
 }

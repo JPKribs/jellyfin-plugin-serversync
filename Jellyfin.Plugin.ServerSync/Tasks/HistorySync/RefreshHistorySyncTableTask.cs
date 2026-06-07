@@ -44,15 +44,6 @@ public class RefreshHistorySyncTableTask
     private readonly HistorySyncTableService _historyService;
     private readonly ILibraryManager _libraryManager;
 
-    // Per-run record of source libraries whose discovery broke early —
-    // Phase 2 (paginated path discovery) hit the consecutive-error
-    // threshold, or Phase 3 (user-data batch fetch) returned null for a
-    // batch. Rows belonging to these libraries must be excluded from
-    // pruning — otherwise transient source-side hiccups during discovery
-    // would silently delete tracking rows for items we just didn't get to
-    // enumerate. Reset at the top of <see cref="GetListAsync"/>.
-    private readonly HashSet<string> _librariesWithIncompleteDiscovery = new(StringComparer.OrdinalIgnoreCase);
-
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
@@ -112,8 +103,6 @@ public class RefreshHistorySyncTableTask
         {
             return Array.Empty<HistoryWork>();
         }
-
-        _librariesWithIncompleteDiscovery.Clear();
 
         var config = ConfigManager.Configuration;
         var userMappings = config.UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
@@ -185,17 +174,13 @@ public class RefreshHistorySyncTableTask
                     catch (Exception ex)
                     {
                         Logger.LogWarning(ex, "Discovery page failed for library {Library} at index {Index}", mapping.SourceLibraryName, startIndex);
+
+                        // Any source error means this run can't be sure it
+                        // enumerated every item, so the whole run skips pruning.
+                        MarkSourceUnavailable($"source server unavailable during '{mapping.SourceLibraryName}' discovery");
+
                         if (++consecutiveErrors >= maxConsecutiveErrors)
                         {
-                            // Parallel.ForEachAsync above — guard the shared
-                            // set with a lock. Reads in ShouldSkipPruning
-                            // happen after the await completes, so no read
-                            // synchronization is needed there.
-                            lock (_librariesWithIncompleteDiscovery)
-                            {
-                                _librariesWithIncompleteDiscovery.Add(mapping.SourceLibraryId);
-                            }
-
                             break;
                         }
 
@@ -280,12 +265,9 @@ public class RefreshHistorySyncTableTask
                     if (page?.Items == null)
                     {
                         // Batch fetch failed (logged as warning by the client
-                        // wrapper). The items in this chunk won't make it into
-                        // work, so the base would treat them as stale and prune
-                        // their tracking rows. Mark the library incomplete so
-                        // ShouldSkipPruning protects them. Serial loop here, no
-                        // lock needed.
-                        _librariesWithIncompleteDiscovery.Add(libraryMapping.SourceLibraryId);
+                        // wrapper). Those items won't be in the seen set, so the
+                        // run skips pruning rather than treat them as deleted.
+                        MarkSourceUnavailable($"source server unavailable fetching user-data for '{libraryMapping.SourceLibraryName}'");
                         continue;
                     }
 
@@ -355,12 +337,6 @@ public class RefreshHistorySyncTableTask
         return false;
     }
 
-    /// <inheritdoc />
-    protected override bool ShouldSkipPruning(HistorySyncItem record)
-    {
-        ArgumentNullException.ThrowIfNull(record);
-        return _librariesWithIncompleteDiscovery.Contains(record.SourceLibraryId);
-    }
 
     /// <inheritdoc />
     protected override void DecideStatus(HistorySyncItem record)

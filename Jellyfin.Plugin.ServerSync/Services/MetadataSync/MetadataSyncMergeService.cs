@@ -176,8 +176,12 @@ public static class MetadataSyncMergeService
 
         // UpdateSource recomputes the hash via ImageManifestComparator over
         // the (now enriched) manifest, so the SourceHash short-circuit
-        // remains stable across refreshes.
-        item.Images.UpdateSource(sourceManifestJson);
+        // remains stable across refreshes. Carry sizes the live enrichment
+        // couldn't measure this run forward from the prior manifest for
+        // unchanged images so a transient enrichment failure doesn't drop the
+        // row back to tag-only and read as a phantom change.
+        item.Images.UpdateSource(
+            ImageManifestEnricher.CarryForwardSizes(sourceManifestJson, item.Images.Source));
 
         if (localItem != null)
         {

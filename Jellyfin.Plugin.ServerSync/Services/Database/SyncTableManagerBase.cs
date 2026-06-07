@@ -5,6 +5,7 @@ using System.Data;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
@@ -254,7 +255,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// were NOT present in the table (typically: row was deleted between
     /// the user clicking Queue and the request reaching the server). Used
     /// by the bulk endpoints to surface "5 of 10 items updated; 5 not
-    /// found" in the UI — silent partial failures were the audit gap.
+    /// found" in the UI instead of silently dropping the missing ones.
     /// </summary>
     public (int Updated, IReadOnlyList<long> NotFoundIds) BulkUpdateStatusWithDetails(
         IReadOnlyList<long> ids,

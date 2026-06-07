@@ -5,6 +5,7 @@ using System.Data;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -314,13 +315,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
         var skip = (page - 1) * pageSize;
         var (items, total) = SearchPaginated(request.SearchTerm, request.StatusFilter, pendingType: null, skip, pageSize);
-        return new PagedResult<SyncItem>
-        {
-            Items = (IReadOnlyList<SyncItem>)items,
-            TotalCount = total,
-            Page = page,
-            PageSize = pageSize
-        };
+        return new PagedResult<SyncItem>((IReadOnlyList<SyncItem>)items, total, skip, pageSize);
     }
 
     /// <summary>

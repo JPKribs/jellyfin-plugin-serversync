@@ -8,6 +8,7 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -81,7 +82,7 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(MapToMetadataSyncItemDto(item, config.LibraryMappings, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, config.SourceServerApiKey));
+        return Ok(MapToMetadataSyncItemDto(item, config.LibraryMappings, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, _configManager.DecryptedSourceServerApiKey));
     }
 
     /// <summary>
@@ -160,7 +161,7 @@ public partial class ConfigurationController
     /// <returns>Paginated result of metadata sync item DTOs.</returns>
     [HttpGet("MetadataItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PaginatedResult<MetadataSyncItemDto>> GetMetadataSyncItems(
+    public ActionResult<PagedResult<MetadataSyncItemDto>> GetMetadataSyncItems(
         [FromServices] MetadataSyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
@@ -184,18 +185,16 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
 
-        return Ok(new PaginatedResult<MetadataSyncItemDto>
-        {
-            Items = items.Select(i => MapToMetadataSyncItemDto(
+        return Ok(new PagedResult<MetadataSyncItemDto>(
+            items.Select(i => MapToMetadataSyncItemDto(
                 i,
                 config.LibraryMappings,
                 !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
-                config.SourceServerApiKey,
+                _configManager.DecryptedSourceServerApiKey,
                 includeBlobs: false)).ToList(),
-            TotalCount = totalCount,
-            Skip = skip,
-            Take = take
-        });
+            totalCount,
+            skip,
+            take));
     }
 
     /// <summary>
@@ -355,12 +354,13 @@ public partial class ConfigurationController
         => MapToMetadataSyncItemDto(item, libraryMappings, sourceServerUrl, sourceServerApiKey, includeBlobs: true);
 
     /// <summary>
-    /// Maps a <see cref="MetadataSyncItem"/> to its DTO. When
-    /// <paramref name="includeBlobs"/> is <c>false</c>, the eight large
-    /// JSON-blob fields are left null and per-category change flags are
-    /// derived from hash mismatch alone — used by the list endpoint to keep
-    /// the response compact (a 50-row page would otherwise ship ~megabytes
-    /// of JSON the UI doesn't render).
+    /// Maps a <see cref="MetadataSyncItem"/> to its DTO. The per-category change
+    /// flags always come from the record's deep compare, so a row's
+    /// "changes"/"No changes" matches the modal and the Compare phase. When
+    /// <paramref name="includeBlobs"/> is <c>false</c> the eight large JSON-blob
+    /// fields are dropped from the response to keep the list compact (a 50-row
+    /// page would otherwise ship ~megabytes of JSON the UI doesn't render); the
+    /// flags are unaffected.
     /// </summary>
     private static MetadataSyncItemDto MapToMetadataSyncItemDto(
         MetadataSyncItem item,
@@ -379,45 +379,11 @@ public partial class ConfigurationController
             localLibraryName = mapping.LocalLibraryName;
         }
 
-        bool hasMetadataChanges;
-        bool hasImagesChanges;
-        bool hasPeopleChanges;
-        bool hasStudiosChanges;
-        string? changesSummary;
-
-        if (includeBlobs)
-        {
-            hasMetadataChanges = item.HasMetadataChanges;
-            hasImagesChanges = item.HasImagesChanges;
-            hasPeopleChanges = item.HasPeopleChanges;
-            hasStudiosChanges = item.HasStudiosChanges;
-            changesSummary = item.ChangesSummary;
-        }
-        else
-        {
-            // Hash-mismatch is a fast, blob-free proxy for "has changes".
-            // Used by the list view; the per-item detail endpoint still
-            // returns the full deep-compare answer.
-            static bool HashMismatch(string? src, string? synced)
-                => !string.IsNullOrEmpty(src)
-                    && !string.Equals(src, synced, StringComparison.Ordinal);
-
-            hasMetadataChanges = HashMismatch(item.Metadata.SourceHash, item.Metadata.SyncedHash);
-            hasImagesChanges = HashMismatch(item.Images.SourceHash, item.Images.SyncedHash);
-            hasPeopleChanges = HashMismatch(item.People.SourceHash, item.People.SyncedHash);
-            hasStudiosChanges = HashMismatch(item.Studios.SourceHash, item.Studios.SyncedHash);
-
-            var changedCount = (hasMetadataChanges ? 1 : 0)
-                + (hasImagesChanges ? 1 : 0)
-                + (hasPeopleChanges ? 1 : 0)
-                + (hasStudiosChanges ? 1 : 0);
-            changesSummary = changedCount switch
-            {
-                0 => "No changes",
-                1 => "1 category",
-                _ => $"{changedCount} categories"
-            };
-        }
+        var hasMetadataChanges = item.HasMetadataChanges;
+        var hasImagesChanges = item.HasImagesChanges;
+        var hasPeopleChanges = item.HasPeopleChanges;
+        var hasStudiosChanges = item.HasStudiosChanges;
+        var changesSummary = item.ChangesSummary;
 
         return new MetadataSyncItemDto
         {

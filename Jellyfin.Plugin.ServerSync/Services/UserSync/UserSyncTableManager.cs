@@ -5,6 +5,7 @@ using System.Data;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -248,13 +249,7 @@ public sealed class UserSyncTableManager
                 var groups = new List<UserMappingGroup>();
                 if (mappings.Count == 0)
                 {
-                    return new PagedResult<UserMappingGroup>
-                    {
-                        Items = groups,
-                        TotalCount = totalCount,
-                        Page = page,
-                        PageSize = pageSize
-                    };
+                    return new PagedResult<UserMappingGroup>(groups, totalCount, skip, pageSize);
                 }
 
                 var rowsByMapping = new Dictionary<(string Src, string Loc), List<UserSyncItem>>(mappings.Count);
@@ -307,21 +302,9 @@ public sealed class UserSyncTableManager
                     });
                 }
 
-                return new PagedResult<UserMappingGroup>
-                {
-                    Items = groups,
-                    TotalCount = totalCount,
-                    Page = page,
-                    PageSize = pageSize
-                };
+                return new PagedResult<UserMappingGroup>(groups, totalCount, skip, pageSize);
             },
-            fallback: new PagedResult<UserMappingGroup>
-            {
-                Items = Array.Empty<UserMappingGroup>(),
-                TotalCount = 0,
-                Page = page,
-                PageSize = pageSize
-            });
+            fallback: new PagedResult<UserMappingGroup>(Array.Empty<UserMappingGroup>(), 0, skip, pageSize));
     }
 
     /// <summary>
@@ -518,21 +501,9 @@ public sealed class UserSyncTableManager
                     }
                 }
 
-                return new PagedResult<UserSyncItem>
-                {
-                    Items = items,
-                    TotalCount = totalCount,
-                    Page = page,
-                    PageSize = pageSize
-                };
+                return new PagedResult<UserSyncItem>(items, totalCount, skip, pageSize);
             },
-            fallback: new PagedResult<UserSyncItem>
-            {
-                Items = Array.Empty<UserSyncItem>(),
-                TotalCount = 0,
-                Page = page,
-                PageSize = pageSize
-            });
+            fallback: new PagedResult<UserSyncItem>(Array.Empty<UserSyncItem>(), 0, skip, pageSize));
     }
 }
 

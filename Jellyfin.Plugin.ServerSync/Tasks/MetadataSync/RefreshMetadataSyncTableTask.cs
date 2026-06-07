@@ -37,13 +37,6 @@ public class RefreshMetadataSyncTableTask
 {
     private readonly MetadataSyncTableService _metadataService;
 
-    // Per-run record of source libraries whose Phase 2 discovery broke
-    // early on consecutive errors. Items past the break point aren't
-    // fetched in Phase 3, so they wouldn't be in seenKeys — without this
-    // guard the base would prune their tracking rows on a transient
-    // source-side hiccup. Reset at the top of <see cref="GetListAsync"/>.
-    private readonly HashSet<string> _librariesWithIncompleteDiscovery = new(StringComparer.OrdinalIgnoreCase);
-
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
@@ -115,8 +108,6 @@ public class RefreshMetadataSyncTableTask
         {
             return Array.Empty<MetadataWork>();
         }
-
-        _librariesWithIncompleteDiscovery.Clear();
 
         var config = ConfigManager.Configuration;
         var enabledMappings = config.GetEnabledLibraryMappings();
@@ -308,17 +299,15 @@ public class RefreshMetadataSyncTableTask
             catch (Exception ex)
             {
                 Logger.LogWarning(ex, "Discovery page failed for library {Library} at index {Index}", mapping.SourceLibraryName, startIndex);
+
+                // Any source error means this run can't be sure it enumerated
+                // every item, so the whole run skips pruning. Keep trying a few
+                // more pages before giving up the library so reachable items
+                // still upsert.
+                MarkSourceUnavailable($"source server unavailable during '{mapping.SourceLibraryName}' discovery");
+
                 if (++consecutiveErrors >= maxConsecutiveErrors)
                 {
-                    // Phase 2 discovery aborted partway. Mark the library
-                    // incomplete so ShouldSkipPruning protects its unseen
-                    // rows from being deleted. DiscoverMatchingIdsAsync runs
-                    // under Parallel.ForEachAsync, so guard the shared set.
-                    lock (_librariesWithIncompleteDiscovery)
-                    {
-                        _librariesWithIncompleteDiscovery.Add(mapping.SourceLibraryId);
-                    }
-
                     return;
                 }
 
@@ -480,13 +469,6 @@ public class RefreshMetadataSyncTableTask
     {
         ArgumentNullException.ThrowIfNull(record);
         return (record.SourceLibraryId, record.SourceItemId);
-    }
-
-    /// <inheritdoc />
-    protected override bool ShouldSkipPruning(MetadataSyncItem record)
-    {
-        ArgumentNullException.ThrowIfNull(record);
-        return _librariesWithIncompleteDiscovery.Contains(record.SourceLibraryId);
     }
 
     // In scope when the row's library mapping is currently enabled. Disabling

@@ -9,6 +9,7 @@ using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -32,7 +33,7 @@ public partial class ConfigurationController
     /// <returns>Paginated result of sync item DTOs.</returns>
     [HttpGet("Items")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PaginatedResult<SyncItemDto>> GetSyncItems(
+    public ActionResult<PagedResult<SyncItemDto>> GetSyncItems(
         [FromServices] ContentSyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
@@ -68,9 +69,8 @@ public partial class ConfigurationController
                 g => (SourceName: g.First().SourceLibraryName, LocalName: g.First().LocalLibraryName),
                 StringComparer.OrdinalIgnoreCase);
 
-        return Ok(new PaginatedResult<SyncItemDto>
-        {
-            Items = items.Select(i =>
+        return Ok(new PagedResult<SyncItemDto>(
+            items.Select(i =>
             {
                 libraryNameLookup.TryGetValue(i.SourceLibraryId, out var libraryNames);
                 return new SyncItemDto
@@ -84,7 +84,7 @@ public partial class ConfigurationController
                     SourcePath = i.SourcePath,
                     LocalPath = i.LocalPath,
                     SourceSize = i.SourceSize,
-                    SourceSizeFormatted = FormatUtilities.FormatBytes(i.SourceSize),
+                    SourceSizeFormatted = Jellyfin.Plugin.ServerSync.Utilities.FormatUtilities.FormatBytes(i.SourceSize),
                     SourceCreateDate = i.SourceCreateDate,
                     LocalItemId = i.LocalItemId,
                     Status = i.Status.ToString(),
@@ -94,15 +94,14 @@ public partial class ConfigurationController
                     ErrorMessage = i.Reason,
                     RetryCount = i.RetryCount,
                     SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
-                    SourceServerApiKey = config.SourceServerApiKey,
+                    SourceServerApiKey = _configManager.DecryptedSourceServerApiKey,
                     SourceServerId = config.SourceServerId,
                     CompanionFiles = i.CompanionFiles
                 };
             }).ToList(),
-            TotalCount = totalCount,
-            Skip = skip,
-            Take = take
-        });
+            totalCount,
+            skip,
+            take));
     }
 
     /// <summary>

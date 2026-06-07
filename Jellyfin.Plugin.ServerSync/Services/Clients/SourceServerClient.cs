@@ -1436,11 +1436,10 @@ public class SourceServerClient : IDisposable
         }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx: bubble up so the User Refresh aborts before prune.
-            // (Refresh's own `_mappingsWithIncompleteDiscovery` guard would
-            // also save this one mapping's rows, but rethrowing is the
-            // consistent "any error = stop" behavior.)
-            _logger.LogWarning(ex, "Source server {Status} getting user details for {UserId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId);
+            // Any 4xx/5xx: bubble up so the User Refresh treats it as source-
+            // unavailable and skips pruning, rather than deleting rows for a
+            // user it merely couldn't fetch.
+            _logger.LogWarning(ex, "Source server {Status} getting user details for {UserId}; refresh will skip pruning to protect tracking rows", ex.ResponseStatusCode, userId);
             throw;
         }
         catch (Exception ex)
@@ -1795,8 +1794,13 @@ public class SourceServerClient : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to bulk-fetch Persons from source server");
-            return Array.Empty<BaseItemDto>();
+            // Same reasoning as the 4xx/5xx case: a transport fault, timeout, or
+            // deserialization error is "no real answer," not "source has no
+            // persons." The People refresh has no incomplete-discovery prune
+            // guard, so returning empty here would prune every tracking row.
+            // Bubble up so the refresh aborts before prune.
+            _logger.LogWarning(ex, "Failed to bulk-fetch Persons from source server; aborting refresh to protect tracking rows");
+            throw;
         }
     }
 

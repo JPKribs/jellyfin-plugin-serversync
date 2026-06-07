@@ -5,6 +5,7 @@ using System.Data;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -306,13 +307,7 @@ public sealed class HistorySyncTableManager
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
         var skip = (page - 1) * pageSize;
         var (items, total) = SearchHistoryItemsPaginated(request.SearchTerm, request.StatusFilter, sourceUserId: null, skip, pageSize);
-        return new PagedResult<HistorySyncItem>
-        {
-            Items = (IReadOnlyList<HistorySyncItem>)items,
-            TotalCount = total,
-            Page = page,
-            PageSize = pageSize
-        };
+        return new PagedResult<HistorySyncItem>((IReadOnlyList<HistorySyncItem>)items, total, skip, pageSize);
     }
 
     private static bool? ReadNullableBool(IDataRecord reader, string column)

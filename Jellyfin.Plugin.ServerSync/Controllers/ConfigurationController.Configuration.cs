@@ -251,6 +251,8 @@ public partial class ConfigurationController
         [FromQuery] string? search = null,
         [FromQuery] int startIndex = 0,
         [FromQuery] int limit = 50,
+        [FromQuery] int? skip = null,
+        [FromQuery] int? take = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(libraryId))
@@ -275,8 +277,8 @@ public partial class ConfigurationController
             var result = await client.GetTopLevelLibraryItemsAsync(
                 libraryGuid,
                 search,
-                startIndex,
-                limit,
+                skip ?? startIndex,
+                take ?? limit,
                 cancellationToken).ConfigureAwait(false);
 
             if (result?.Items == null)

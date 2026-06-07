@@ -26,4 +26,7 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Update screenshots
+  - Migrate web to use shared components
+  - Bump base to 2026.6.19
+  - Encrypt remote server token
+  - Test cleanup

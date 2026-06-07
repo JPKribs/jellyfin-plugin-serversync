@@ -5,6 +5,7 @@ using System.Data;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -257,11 +258,11 @@ public sealed class MetadataSyncTableManager
         fallback: (IList<MetadataSyncItem>)Array.Empty<MetadataSyncItem>());
 
     /// <summary>
-    /// Searches metadata items with optional filters. Returns a lightweight
-    /// projection that omits the four <c>Source*Value</c> / <c>Local*Value</c>
-    /// JSON blob columns (several KB each); hashes are loaded so callers can
-    /// compute per-category change flags via hash mismatch. Use
-    /// <see cref="GetByKey"/> when blobs are needed.
+    /// Searches metadata items with optional filters. Loads the full record
+    /// including the <c>Source*Value</c> / <c>Local*Value</c> JSON blobs so the
+    /// per-category change flags deep-compare to the same result the modal and
+    /// the Compare phase produce. The DTO mapper drops the blobs from the
+    /// response (they aren't shipped to the UI); only the flags are.
     /// </summary>
     public (IList<MetadataSyncItem> Items, int TotalCount) SearchMetadataSyncItemsPaginated(
         string? searchTerm = null,
@@ -302,10 +303,10 @@ public sealed class MetadataSyncTableManager
                 SELECT
                     Id, SourceLibraryId, LocalLibraryId, SourceItemId, LocalItemId,
                     ItemName, SourcePath, LocalPath, ItemType, IsFolder,
-                    SourceMetadataHash, SyncedMetadataHash,
-                    SourceImagesHash, SyncedImagesHash,
-                    SourcePeopleHash, SyncedPeopleHash,
-                    SourceStudiosHash, SyncedStudiosHash,
+                    SourceMetadataValue, LocalMetadataValue, SourceMetadataHash, SyncedMetadataHash,
+                    SourceImagesValue, LocalImagesValue, SourceImagesHash, SyncedImagesHash,
+                    SourcePeopleValue, LocalPeopleValue, SourcePeopleHash, SyncedPeopleHash,
+                    SourceStudiosValue, LocalStudiosValue, SourceStudiosHash, SyncedStudiosHash,
                     Status, StatusDate, LastSyncTime, Reason
                 FROM MetadataSyncItems
                 {whereClause}
@@ -319,56 +320,12 @@ public sealed class MetadataSyncTableManager
             using var reader = dataCmd.ExecuteReader();
             while (reader.Read())
             {
-                items.Add(MapFromReaderListView(reader));
+                items.Add(MapFromReader(reader));
             }
 
             return ((IList<MetadataSyncItem>)items, totalCount);
         },
         fallback: ((IList<MetadataSyncItem>)Array.Empty<MetadataSyncItem>(), 0));
-
-    /// <summary>
-    /// Reads the lightweight column set used by the list view. Source/Local
-    /// blob fields are intentionally left null; only hashes are populated so
-    /// the caller can detect per-category changes via hash mismatch without
-    /// shipping megabytes of JSON to the UI.
-    /// </summary>
-    private static MetadataSyncItem MapFromReaderListView(Microsoft.Data.Sqlite.SqliteDataReader reader)
-    {
-        var item = new MetadataSyncItem
-        {
-            Id = reader.GetInt64(reader.GetOrdinal("Id")),
-            SourceLibraryId = reader.GetString(reader.GetOrdinal("SourceLibraryId")),
-            LocalLibraryId = reader.GetString(reader.GetOrdinal("LocalLibraryId")),
-            SourceItemId = reader.GetString(reader.GetOrdinal("SourceItemId")),
-            Status = (SyncStatus)reader.GetInt32(reader.GetOrdinal("Status")),
-            StatusDate = ReadDateTime(reader, "StatusDate")
-        };
-
-        item.LocalItemId = ReadNullableString(reader, "LocalItemId");
-        item.ItemName = ReadNullableString(reader, "ItemName");
-        item.SourcePath = ReadNullableString(reader, "SourcePath");
-        item.LocalPath = ReadNullableString(reader, "LocalPath");
-        item.ItemType = ReadNullableString(reader, "ItemType");
-
-        var isFolderOrd = reader.GetOrdinal("IsFolder");
-        if (!reader.IsDBNull(isFolderOrd))
-        {
-            item.IsFolder = reader.GetInt32(isFolderOrd) != 0;
-        }
-
-        item.Metadata.SourceHash = ReadNullableString(reader, "SourceMetadataHash");
-        item.Metadata.SyncedHash = ReadNullableString(reader, "SyncedMetadataHash");
-        item.Images.SourceHash = ReadNullableString(reader, "SourceImagesHash");
-        item.Images.SyncedHash = ReadNullableString(reader, "SyncedImagesHash");
-        item.People.SourceHash = ReadNullableString(reader, "SourcePeopleHash");
-        item.People.SyncedHash = ReadNullableString(reader, "SyncedPeopleHash");
-        item.Studios.SourceHash = ReadNullableString(reader, "SourceStudiosHash");
-        item.Studios.SyncedHash = ReadNullableString(reader, "SyncedStudiosHash");
-
-        item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
-        item.Reason = ReadNullableString(reader, "Reason");
-        return item;
-    }
 
     /// <inheritdoc />
     public override PagedResult<MetadataSyncItem> Paginate(PaginationRequest request)
@@ -378,13 +335,7 @@ public sealed class MetadataSyncTableManager
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
         var skip = (page - 1) * pageSize;
         var (items, total) = SearchMetadataSyncItemsPaginated(request.SearchTerm, request.StatusFilter, sourceLibraryId: null, skip, pageSize);
-        return new PagedResult<MetadataSyncItem>
-        {
-            Items = (IReadOnlyList<MetadataSyncItem>)items,
-            TotalCount = total,
-            Page = page,
-            PageSize = pageSize
-        };
+        return new PagedResult<MetadataSyncItem>((IReadOnlyList<MetadataSyncItem>)items, total, skip, pageSize);
     }
 
     /// <summary>

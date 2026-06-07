@@ -7,6 +7,7 @@ using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -80,13 +81,14 @@ public partial class ConfigurationController
     /// </summary>
     [HttpGet("PeopleItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PaginatedResult<PeopleSyncItemDto>> GetPeopleSyncItems(
+    public ActionResult<PagedResult<PeopleSyncItemDto>> GetPeopleSyncItems(
         [FromServices] PeopleSyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
+        ArgumentNullException.ThrowIfNull(manager);
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
 
@@ -105,13 +107,11 @@ public partial class ConfigurationController
             StatusFilter = statusFilter
         });
 
-        return Ok(new PaginatedResult<PeopleSyncItemDto>
-        {
-            Items = result.Items.Select(MapToPeopleSyncItemDto).ToList(),
-            TotalCount = result.TotalCount,
-            Skip = skip,
-            Take = take
-        });
+        return Ok(new PagedResult<PeopleSyncItemDto>(
+            result.Items.Select(MapToPeopleSyncItemDto).ToList(),
+            result.TotalCount,
+            skip,
+            take));
     }
 
     /// <summary>
@@ -275,7 +275,7 @@ public partial class ConfigurationController
             SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl)
                 ? config.SourceServerExternalUrl
                 : config.SourceServerUrl,
-            SourceServerApiKey = config.SourceServerApiKey
+            SourceServerApiKey = _configManager.DecryptedSourceServerApiKey
         };
     }
 }

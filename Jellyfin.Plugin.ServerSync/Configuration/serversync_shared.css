@@ -6,43 +6,43 @@
 /* ===== Status Color Variables ===== */
 :root {
     /* Synced - Green */
-    --status-synced-bg: rgba(92, 184, 92, 0.2);
-    --status-synced-color: #5cb85c;
+    --status-synced-bg: var(--jpk-green-bg);
+    --status-synced-color: var(--jpk-green-fg);
     --status-synced-border: rgba(92, 184, 92, 0.3);
 
     /* Queued - Orange/Yellow */
-    --status-queued-bg: rgba(240, 173, 78, 0.2);
-    --status-queued-color: #f0ad4e;
+    --status-queued-bg: var(--jpk-orange-bg);
+    --status-queued-color: var(--jpk-orange-fg);
     --status-queued-border: rgba(240, 173, 78, 0.3);
 
     /* Errored - Red */
-    --status-errored-bg: rgba(217, 83, 79, 0.2);
-    --status-errored-color: #d9534f;
+    --status-errored-bg: var(--jpk-red-bg);
+    --status-errored-color: var(--jpk-red-fg);
     --status-errored-border: rgba(217, 83, 79, 0.3);
 
     /* Ignored - Gray */
-    --status-ignored-bg: rgba(153, 153, 153, 0.2);
-    --status-ignored-color: #999;
+    --status-ignored-bg: var(--jpk-gray-bg);
+    --status-ignored-color: var(--jpk-gray-fg);
     --status-ignored-border: rgba(153, 153, 153, 0.3);
 
     /* Pending - Purple (generic) */
-    --status-pending-bg: rgba(155, 89, 182, 0.2);
-    --status-pending-color: #9b59b6;
+    --status-pending-bg: var(--jpk-purple-bg);
+    --status-pending-color: var(--jpk-purple-fg);
     --status-pending-border: rgba(155, 89, 182, 0.3);
 
     /* Pending Download - Purple */
-    --status-pending-download-bg: rgba(155, 89, 182, 0.2);
-    --status-pending-download-color: #9b59b6;
+    --status-pending-download-bg: var(--jpk-purple-bg);
+    --status-pending-download-color: var(--jpk-purple-fg);
     --status-pending-download-border: rgba(155, 89, 182, 0.3);
 
     /* Pending Replacement - Blue */
-    --status-pending-replacement-bg: rgba(52, 152, 219, 0.2);
-    --status-pending-replacement-color: #3498db;
+    --status-pending-replacement-bg: var(--jpk-blue-bg);
+    --status-pending-replacement-color: var(--jpk-blue-fg);
     --status-pending-replacement-border: rgba(52, 152, 219, 0.3);
 
     /* Pending Deletion - Red */
-    --status-pending-deletion-bg: rgba(217, 83, 79, 0.2);
-    --status-pending-deletion-color: #d9534f;
+    --status-pending-deletion-bg: var(--jpk-red-bg);
+    --status-pending-deletion-color: var(--jpk-red-fg);
     --status-pending-deletion-border: rgba(217, 83, 79, 0.3);
 
     /* Deleting - Brighter Red */
@@ -50,16 +50,7 @@
     --status-deleting-color: #e74c3c;
     --status-deleting-border: rgba(231, 76, 60, 0.3);
 
-    /* Accent - Jellyfin Blue */
-    --accent-color: #00a4dc;
-    --accent-hover: #0088cc;
-
-    /* Destructive - Darker Red (hover) */
-    --destructive-hover: #c9302c;
-
-    /* Shared layout tokens */
-    --border-subtle: #555;
-    --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --font-mono: var(--jpk-mono);
 }
 
 /* ===== Animations ===== */
@@ -68,87 +59,11 @@
     to { transform: rotate(360deg); }
 }
 
-/* ===== Section Title Styling ===== */
-.sectionTitleContainer .sectionTitle {
-    width: 100%;
-    border-bottom: 1px solid var(--border-subtle);
-    padding-bottom: 0.5em;
-    margin-bottom: 1em;
-}
-
-/* ===== Button Styles ===== */
-.button-primary {
-    background-color: var(--accent-color) !important;
-    color: #fff !important;
-}
-.button-primary:hover {
-    background-color: var(--accent-hover) !important;
-}
-.button-destructive {
-    background-color: var(--status-errored-color) !important;
-    color: #fff !important;
-}
-.button-destructive:hover {
-    background-color: var(--destructive-hover) !important;
-}
-
-/* ===== Dialog/Modal Base Styling ===== */
-.dialog {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10000;
-}
-.dialogContent {
-    background: var(--theme-background-primary, #1c1c1c);
-    padding: 24px;
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-    max-height: 90vh;
-    overflow-y: auto;
-}
-.dialogCloseBtn {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    background: none;
-    border: none;
-    color: #fff;
-    font-size: 24px;
-    cursor: pointer;
-    opacity: 0.7;
-    padding: 4px 8px;
-    line-height: 1;
-}
-.dialogCloseBtn:hover {
-    opacity: 1;
-}
-
-/* ===== Error Message Styling ===== */
-.errorMessage {
-    background: var(--status-errored-bg);
-    color: var(--status-errored-color);
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-family: monospace;
-    font-size: 0.9em;
-    word-break: break-all;
-}
-
 /* ===== Layout Utility Classes ===== */
 .hidden { display: none !important; }
 
-/* ===== Modal Field Layout ===== */
-.modal-field { margin-bottom: 12px; }
-.modal-field-label { opacity: 0.7; margin-bottom: 4px; }
-.modal-title { margin-top: 0; padding-right: 32px; }
-.modal-body { margin: 16px 0; }
+.jpk-collapsible-actions { border-top: none; padding-top: 0; }
+
 .modal-relative { position: relative; }
 
 /* ===== Health Dashboard ===== */
@@ -185,41 +100,6 @@
     margin-bottom: 16px;
 }
 
-/* ===== Status Cards ===== */
-.statusCards {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-}
-.statusCard {
-    flex: 1;
-    min-width: 80px;
-    padding: 12px 16px;
-    border-radius: 8px;
-    text-align: center;
-}
-.statusCard-count {
-    display: block;
-    font-size: 1.5em;
-    font-weight: bold;
-    margin-bottom: 4px;
-}
-.statusCard-label {
-    display: block;
-    font-size: 0.85em;
-    opacity: 0.9;
-}
-.statusCard-synced { background: var(--status-synced-bg); color: var(--status-synced-color); }
-.statusCard-queued { background: var(--status-queued-bg); color: var(--status-queued-color); }
-.statusCard-errored { background: var(--status-errored-bg); color: var(--status-errored-color); }
-.statusCard-ignored { background: var(--status-ignored-bg); color: var(--status-ignored-color); }
-.statusCard-pending { background: var(--status-pending-bg); color: var(--status-pending-color); }
-.statusCard-pendingDownload { background: var(--status-pending-download-bg); color: var(--status-pending-download-color); }
-.statusCard-pendingReplacement { background: var(--status-pending-replacement-bg); color: var(--status-pending-replacement-color); }
-.statusCard-pendingDeletion { background: var(--status-pending-deletion-bg); color: var(--status-pending-deletion-color); }
-.statusCard-deleting { background: var(--status-deleting-bg); color: var(--status-deleting-color); }
-
 /* ===== Sync Action Button Row ===== */
 .syncActionButtonRow {
     display: flex;
@@ -242,13 +122,10 @@
     background: rgba(255, 255, 255, 0.7);
     transition: width 0.3s ease;
 }
-.syncActionButton.button-primary .btn-progress {
+.syncActionButton.jpk-button-submit .btn-progress {
     background: rgba(255, 255, 255, 0.5);
 }
 
-/* ===== Modal Button Layout ===== */
-.modalButtonRow { display: flex; gap: 8px; margin-top: 8px; }
-.modalButton { flex: 1; text-align: center; justify-content: center; }
 
 /* ===== Status Badge (Modal) ===== */
 .itemModal-statusBadge {
@@ -361,263 +238,15 @@
     border-radius: 4px;
 }
 
-/* ===== PaginatedTable Wrapper ===== */
-.pt-wrapper {
+/* Change badges wrap onto multiple rows with even spacing when an item has
+   many differences (Metadata, Images, People, Studios, ...). */
+.jpk-table-cell.pt-cell-details {
     display: flex;
-    flex-direction: column;
-}
-.pt-wrapper.pt-loading {
-    opacity: 0.6;
-    pointer-events: none;
-}
-
-/* ===== PaginatedTable Controls ===== */
-.pt-controls {
-    display: flex;
-    gap: 12px;
+    flex-wrap: wrap;
     align-items: center;
-    margin-bottom: 12px;
-}
-.pt-search {
-    flex: 1;
-    min-width: 200px;
-    padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    color: inherit;
-    font-size: 1em;
-    outline: none;
-}
-.pt-search:focus {
-    border-color: rgba(255, 255, 255, 0.3);
-    background: rgba(0, 0, 0, 0.4);
-}
-.pt-search::placeholder {
-    color: rgba(255, 255, 255, 0.5);
-}
-.pt-filter-wrapper {
-    position: relative;
-    flex-shrink: 0;
-    min-width: 140px;
-}
-.pt-filter {
-    width: 100%;
-    padding: 10px 36px 10px 14px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    color: inherit;
-    font-size: 1em;
-    cursor: pointer;
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    outline: none;
-}
-.pt-filter:focus {
-    border-color: rgba(255, 255, 255, 0.3);
-    background: rgba(0, 0, 0, 0.4);
-}
-.pt-filter option {
-    background: var(--theme-background-primary, #1c1c1c);
-    color: #fff;
-}
-.pt-filter-arrow {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    pointer-events: none;
-    opacity: 0.7;
-    font-size: 0.9em;
+    gap: 6px;
 }
 
-/* ===== PaginatedTable Selection Header ===== */
-.pt-selection-header {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 12px;
-    padding: 10px 12px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 4px;
-}
-.pt-select-all-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-}
-.pt-select-all-label input[type="checkbox"] {
-    display: none;
-}
-.pt-checkbox-custom {
-    width: 18px;
-    height: 18px;
-    border: 2px solid rgba(255, 255, 255, 0.5);
-    border-radius: 3px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.15s;
-}
-.pt-select-all-label input[type="checkbox"]:checked + .pt-checkbox-custom {
-    background: var(--accent-color);
-    border-color: var(--accent-color);
-}
-.pt-select-all-label input[type="checkbox"]:checked + .pt-checkbox-custom::after {
-    content: '\2713';
-    color: #fff;
-    font-size: 12px;
-    font-weight: bold;
-}
-.pt-select-all-text {
-    font-size: 0.95em;
-}
-.pt-selected-count {
-    opacity: 0.7;
-    min-width: 80px;
-}
-.pt-bulk-actions {
-    display: flex;
-    gap: 8px;
-}
-.pt-header-spacer {
-    flex: 1;
-}
-
-/* ===== PaginatedTable Reload Button ===== */
-.pt-reload-btn {
-    background: transparent;
-    border: none;
-    padding: 6px 10px;
-    cursor: pointer;
-    opacity: 0.7;
-    transition: opacity 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-}
-.pt-reload-btn:hover {
-    opacity: 1;
-    background: rgba(255, 255, 255, 0.1);
-}
-.pt-reload-btn.spinning .pt-reload-icon {
-    animation: spin 0.8s linear infinite;
-}
-.pt-reload-icon {
-    font-size: 20px;
-    color: #fff;
-}
-
-/* ===== PaginatedTable Body ===== */
-.pt-body {
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-}
-
-/* ===== PaginatedTable Rows ===== */
-.pt-row {
-    display: flex;
-    align-items: center;
-    padding: 10px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    cursor: pointer;
-    transition: background-color 0.15s;
-    -webkit-tap-highlight-color: transparent;
-}
-.pt-row:hover {
-    background: rgba(255, 255, 255, 0.05);
-}
-.pt-row:active {
-    background: rgba(255, 255, 255, 0.1);
-}
-.pt-row:last-child {
-    border-bottom: none;
-}
-
-/* ===== PaginatedTable Cells ===== */
-.pt-cell {
-    flex: 1;
-    padding: 4px 8px;
-    min-width: 0;
-}
-.pt-cell.pt-cell-checkbox {
-    flex: 0 0 40px;
-    padding: 4px;
-}
-.pt-cell.pt-cell-status {
-    flex: 0 0 130px;
-    text-align: right;
-}
-.pt-row-checkbox {
-    cursor: pointer;
-    width: 18px;
-    height: 18px;
-}
-
-/* ===== PaginatedTable Status Badges ===== */
-.pt-status-badge {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-size: 0.85em;
-    white-space: nowrap;
-    border: none;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition: opacity 0.15s, transform 0.1s;
-}
-.pt-status-badge:hover {
-    opacity: 0.85;
-}
-.pt-status-badge:active {
-    transform: scale(0.97);
-}
-.pt-status-badge.Synced { background: var(--status-synced-bg); color: var(--status-synced-color); }
-.pt-status-badge.Queued { background: var(--status-queued-bg); color: var(--status-queued-color); }
-.pt-status-badge.Errored { background: var(--status-errored-bg); color: var(--status-errored-color); }
-.pt-status-badge.Ignored { background: var(--status-ignored-bg); color: var(--status-ignored-color); }
-.pt-status-badge.Pending { background: var(--status-pending-bg); color: var(--status-pending-color); }
-.pt-status-badge.Pending-Download { background: var(--status-pending-download-bg); color: var(--status-pending-download-color); }
-.pt-status-badge.Pending-Replacement { background: var(--status-pending-replacement-bg); color: var(--status-pending-replacement-color); }
-.pt-status-badge.Pending-Deletion { background: var(--status-pending-deletion-bg); color: var(--status-pending-deletion-color); }
-.pt-status-badge.Deleting { background: var(--status-deleting-bg); color: var(--status-deleting-color); }
-
-/* ===== PaginatedTable Empty State ===== */
-.pt-empty {
-    padding: 32px 16px;
-    text-align: center;
-    opacity: 0.7;
-}
-
-/* ===== PaginatedTable Loading Indicator ===== */
-.pt-loading-more {
-    padding: 12px;
-    text-align: center;
-    opacity: 0.7;
-    font-size: 0.9em;
-}
-
-/* ===== PaginatedTable Footer ===== */
-.pt-footer {
-    padding: 8px 12px;
-    font-size: 0.9em;
-    opacity: 0.7;
-}
-
-/* ===== PaginatedTable Bulk Actions ===== */
-.pt-bulk-actions button {
-    padding: 4px 12px !important;
-    min-width: auto !important;
-}
-.pt-bulk-actions button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
 .pt-bulk-icon-btn {
     padding: 4px 8px !important;
     min-width: 36px !important;
@@ -628,24 +257,24 @@
 }
 
 /* ===== PaginatedTable Content Styles ===== */
-.pt-cell .syncItemInfo {
+.jpk-table-cell .syncItemInfo {
     flex: 1;
     min-width: 0;
 }
-.pt-cell .syncItemName {
+.jpk-table-cell .syncItemName {
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.pt-cell .syncItemPath {
+.jpk-table-cell .syncItemPath {
     font-size: 0.85em;
     opacity: 0.7;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.pt-cell .syncItemError {
+.jpk-table-cell .syncItemError {
     font-size: 0.75em;
     color: var(--status-errored-color);
     white-space: nowrap;
@@ -654,158 +283,23 @@
     max-width: 200px;
 }
 
-/* ===== Sync Row Thumbnails ===== */
-.pt-cell.pt-cell-with-thumb {
-    display: flex;
-    align-items: center;
-}
-.pt-row-thumb {
-    height: 60px;
-    border-radius: 4px;
-    object-fit: cover;
-    background: rgba(255, 255, 255, 0.05);
-    margin-right: 10px;
-}
-.pt-row-thumb-portrait {
-    width: 40px;
-    flex: 0 0 40px;
-}
-.pt-row-thumb-landscape {
-    width: 106px;
-    flex: 0 0 106px;
-}
-.pt-row-thumb-placeholder {
-    flex: 0 0 40px;
-    width: 40px;
-    height: 60px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.05);
-    margin-right: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: rgba(255, 255, 255, 0.2);
-    font-size: 24px;
-}
-.pt-row-thumb-user {
-    flex: 0 0 48px;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    object-fit: cover;
-    background: rgba(255, 255, 255, 0.05);
-    margin-right: 10px;
-}
-.pt-row-thumb-user-placeholder {
-    flex: 0 0 48px;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.05);
-    margin-right: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: rgba(255, 255, 255, 0.2);
-    font-size: 20px;
-}
-
 /* ===== Mobile Responsive ===== */
 @media (max-width: 600px) {
     /* Hide the details/changes column on mobile */
-    .pt-cell.pt-cell-details {
+    .jpk-table-cell.pt-cell-details {
         display: none;
     }
 
-    /* Shrink status badge column */
-    .pt-cell.pt-cell-status {
-        flex: 0 0 auto;
-    }
-
-    /* Compact row padding */
-    .pt-row {
-        padding: 8px;
-    }
-
-    /* Smaller thumbnails */
-    .pt-row-thumb {
-        height: 48px;
-    }
-    .pt-row-thumb-portrait {
-        width: 32px;
-        flex: 0 0 32px;
-    }
-    .pt-row-thumb-landscape {
-        width: 85px;
-        flex: 0 0 85px;
-    }
-    .pt-row-thumb-placeholder {
-        flex: 0 0 32px;
-        width: 32px;
-        height: 48px;
-    }
-    .pt-row-thumb-user {
-        flex: 0 0 40px;
-        width: 40px;
-        height: 40px;
-    }
-    .pt-row-thumb-user-placeholder {
-        flex: 0 0 40px;
-        width: 40px;
-        height: 40px;
-    }
-
     /* Tighter item info text */
-    .pt-cell .syncItemName {
+    .jpk-table-cell .syncItemName {
         font-size: 0.9em;
     }
-    .pt-cell .syncItemPath {
+    .jpk-table-cell .syncItemPath {
         font-size: 0.8em;
     }
-    .pt-cell .syncItemError {
+    .jpk-table-cell .syncItemError {
         font-size: 0.7em;
         max-width: 140px;
-    }
-
-    /* Compact status badge */
-    .pt-status-badge {
-        padding: 3px 8px;
-        font-size: 0.8em;
-    }
-
-    /* Stack controls vertically */
-    .pt-controls {
-        flex-direction: column;
-        gap: 8px;
-    }
-    .pt-search {
-        min-width: 0;
-        width: 100%;
-    }
-    .pt-filter-wrapper {
-        width: 100%;
-    }
-
-    /* Wrap selection header */
-    .pt-selection-header {
-        flex-wrap: wrap;
-        gap: 8px;
-        padding: 8px;
-    }
-
-    /* Compact status cards */
-    .statusCards {
-        gap: 6px;
-    }
-    .statusCard {
-        min-width: 60px;
-        padding: 8px 6px;
-    }
-    .statusCard-count {
-        font-size: 1.2em;
-    }
-    .statusCard-label {
-        font-size: 0.75em;
     }
 
     /* Compact action buttons */

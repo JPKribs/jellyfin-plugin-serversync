@@ -8,6 +8,7 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -36,7 +37,7 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
         var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
-        return Ok(MapToUserSyncItemDto(item, url, config.SourceServerApiKey));
+        return Ok(MapToUserSyncItemDto(item, url, _configManager.DecryptedSourceServerApiKey));
     }
 
     /// <summary>
@@ -44,7 +45,7 @@ public partial class ConfigurationController
     /// </summary>
     [HttpGet("UserItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PaginatedResult<UserSyncItemDto>> GetUserSyncItems(
+    public ActionResult<PagedResult<UserSyncItemDto>> GetUserSyncItems(
         [FromServices] UserSyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
@@ -87,13 +88,11 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
         var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
-        return Ok(new PaginatedResult<UserSyncItemDto>
-        {
-            Items = filtered.Select(i => MapToUserSyncItemDto(i, url, config.SourceServerApiKey)).ToList(),
-            TotalCount = result.TotalCount,
-            Skip = skip,
-            Take = take
-        });
+        return Ok(new PagedResult<UserSyncItemDto>(
+            filtered.Select(i => MapToUserSyncItemDto(i, url, _configManager.DecryptedSourceServerApiKey)).ToList(),
+            result.TotalCount,
+            skip,
+            take));
     }
 
     /// <summary>
@@ -237,7 +236,7 @@ public partial class ConfigurationController
     /// </summary>
     [HttpGet("UserSyncUsers")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PaginatedResult<UserSyncUserDto>> GetUserSyncUsers(
+    public ActionResult<PagedResult<UserSyncUserDto>> GetUserSyncUsers(
         [FromServices] UserSyncTableManager manager,
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
@@ -264,13 +263,11 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
         var dtos = result.Items.Select(g => MapToUserSyncUserDto(
-            g.SourceUserId, g.LocalUserId, g.SourceUserName, g.LocalUserName, g.Items.ToList(), config)).ToList();
+            g.SourceUserId, g.LocalUserId, g.SourceUserName, g.LocalUserName, g.Items.ToList(), config, _configManager.DecryptedSourceServerApiKey)).ToList();
 
-        return Ok(new PaginatedResult<UserSyncUserDto>
-        {
-            Items = dtos,
-            TotalCount = result.TotalCount
-        });
+        return Ok(new PagedResult<UserSyncUserDto>(
+            dtos,
+            result.TotalCount));
     }
 
     /// <summary>
@@ -352,8 +349,8 @@ public partial class ConfigurationController
             MergedValue = item.MergedValue,
             SourceImageSize = item.SourceImageSize,
             LocalImageSize = item.LocalImageSize,
-            SourceImageSizeFormatted = item.SourceImageSize.HasValue ? FormatUtilities.FormatBytes(item.SourceImageSize.Value) : null,
-            LocalImageSizeFormatted = item.LocalImageSize.HasValue ? FormatUtilities.FormatBytes(item.LocalImageSize.Value) : null,
+            SourceImageSizeFormatted = item.SourceImageSize.HasValue ? Jellyfin.Plugin.ServerSync.Utilities.FormatUtilities.FormatBytes(item.SourceImageSize.Value) : null,
+            LocalImageSizeFormatted = item.LocalImageSize.HasValue ? Jellyfin.Plugin.ServerSync.Utilities.FormatUtilities.FormatBytes(item.LocalImageSize.Value) : null,
             HasChanges = item.HasChanges,
             ChangesSummary = item.ChangesSummary,
             SourceServerUrl = sourceServerUrl,
@@ -371,7 +368,8 @@ public partial class ConfigurationController
         string? sourceUserName,
         string? localUserName,
         List<UserSyncItem> items,
-        PluginConfiguration config)
+        PluginConfiguration config,
+        string decryptedApiKey)
     {
         var policyItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.Policy);
         var configItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.Configuration);
@@ -384,7 +382,7 @@ public partial class ConfigurationController
             SourceUserName = sourceUserName ?? items.FirstOrDefault()?.SourceUserName,
             LocalUserName = localUserName ?? items.FirstOrDefault()?.LocalUserName,
             SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
-            SourceServerApiKey = config.SourceServerApiKey,
+            SourceServerApiKey = decryptedApiKey,
             PolicyId = policyItem?.Id,
             ConfigurationId = configItem?.Id,
             ProfileImageId = imageItem?.Id,

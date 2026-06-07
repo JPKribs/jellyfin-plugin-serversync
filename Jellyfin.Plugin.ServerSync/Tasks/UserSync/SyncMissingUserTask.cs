@@ -454,18 +454,18 @@ public class SyncMissingUserTask
         using var imageStream = await sourceClient.GetUserImageAsync(sourceUserId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Failed to download profile image for {item.SourceUserName ?? item.SourceUserId}");
 
-        // Avoid Path.GetTempFileName: it creates a 0-byte file we'd then have
-        // to rename to *.jpg, leaking the original.
-        var tempPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".jpg");
         var userDataPath = Path.Combine(
             _serverConfigurationManager.ApplicationPaths.UserConfigurationDirectoryPath,
             localUser.Username);
         var profilePath = Path.Combine(userDataPath, "profile.jpg");
-        // Staging path lives next to the final target so File.Move stays
-        // intra-filesystem (atomic). A separate name during the write-and-
-        // verify phase means the user's existing profile.jpg keeps working
-        // even if the download stalls or fails.
+        // Both the download buffer and the staging file live inside the user's
+        // profile directory (a Jellyfin folder), so nothing is written outside
+        // the data tree and File.Move stays intra-filesystem (atomic). Distinct
+        // sentinel names keep the existing profile.jpg working until the new
+        // image is verified and promoted.
         var stagingPath = Path.Combine(userDataPath, "profile.jpg.serversync.staging");
+        var tempPath = Path.Combine(userDataPath, "profile.jpg.serversync.download");
+        Directory.CreateDirectory(userDataPath);
 
         try
         {
@@ -494,7 +494,6 @@ public class SyncMissingUserTask
             // the stage, the staging file is still present for the next sync
             // run (or manual recovery) and the user's existing profile.jpg
             // remains untouched.
-            Directory.CreateDirectory(userDataPath);
             File.Copy(tempPath, stagingPath, overwrite: true);
 
             // Phase 3: clear the existing image (DB row + file). Safe now
@@ -537,7 +536,7 @@ public class SyncMissingUserTask
             }
             catch (IOException)
             {
-                // Best-effort cleanup; OS will clean temp eventually.
+                // Best-effort cleanup of the in-profile download buffer.
             }
 
             // Clean up staging only if it survived past the move (i.e. the
