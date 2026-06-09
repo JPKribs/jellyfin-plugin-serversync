@@ -2,16 +2,6 @@
 
 A Jellyfin plugin for one-way synchronization between Jellyfin servers. Keep your **Content**, **Watch History**, **Metadata**, **People**, and **User Settings** in sync across multiple Jellyfin installations.
 
----
-
-**All plugins are made for my personal use cases. I've made these publicly available for anyone who has the same use cases and can benefit from this work. I have no desire to advertise or market for these plugins as these are for personal usage only.**
-
-**Thank you,**
-
-*Joe Kribs*
-
----
-
 ## How It Works
 
 Server Sync runs on your Local (destination) server and pulls data from a Source server using standard Jellyfin APIs. You configure library and user mappings, then scheduled tasks handle the synchronization. Content is matched by file path, allowing the plugin to track what needs to be downloaded, updated, or removed. No modifications are required on the Source server.
@@ -20,13 +10,11 @@ Server Sync runs on your Local (destination) server and pulls data from a Source
 
 This plugin modifies live data on your Jellyfin server. While extensively tested, I cannot account for every server configuration or edge case. **Always maintain backups of your Jellyfin data and configuration.** By using this plugin, you accept full responsibility for any data loss or issues that may occur.
 
----
-
 # Settings
 
 | Settings Tab |
 | :--- |
-| ![Plugin Settings](Documentation/Screenshots/Settings/Main.png) |
+| ![Plugin Settings](docs/screenshots/settings/Main.png) |
 
 ## Source Server
 
@@ -34,7 +22,7 @@ The Source Server is the Jellyfin Server you want to sync content **from**. This
 
 | Source Server Configuration |
 | :--- |
-| ![Server Configuration](Documentation/Screenshots/Settings/Server%20Configuration.png) |
+| ![Server Configuration](docs/screenshots/settings/Server%20Configuration.png) |
 
 1. **Generate an API Key** on the source server:
    - Go to **Dashboard > API Keys** on the source server
@@ -52,7 +40,7 @@ The Source Server is the Jellyfin Server you want to sync content **from**. This
 
 | Library Mapping |
 | :--- |
-| ![Library Configuration](Documentation/Screenshots/Settings/Library%20Mapping.png) |
+| ![Library Configuration](docs/screenshots/settings/Library%20Mapping.png) |
 
 1. **Create a new Library Mapping**
 
@@ -71,7 +59,7 @@ The Source Server is the Jellyfin Server you want to sync content **from**. This
 
 | User Mapping |
 | :--- |
-| ![User Configuration](Documentation/Screenshots/Settings/User%20Mapping.png) |
+| ![User Configuration](docs/screenshots/settings/User%20Mapping.png) |
 
 1. **Create a new User Mapping**
 
@@ -87,7 +75,7 @@ The Source Server is the Jellyfin Server you want to sync content **from**. This
 
 | Sync Table |
 | :--- |
-| ![Sync Table](Documentation/Screenshots/Sync%20Table.png) |
+| ![Sync Table](docs/screenshots/Sync%20Table.png) |
 
 ## Content Syncing
 
@@ -97,8 +85,8 @@ Content Syncing copies media files from the Source Server and mirrors them on yo
 
 The Plugin builds a table of all content that exists in the mapped Source Libraries. Source Server files are compared, **by file path**, against files on the Local Server. The following content states are tracked:
 
-* Files missing on Local Server are Queued for download *(or Pending if `Require Approval` is enabled)*
-* Files no longer on Source Server are set to Delete *(can be disabled in settings)*
+* Files missing on Local Server are Queued for download *(or Pending when `Download New Content` is set to require approval)*
+* Files no longer on Source Server are set to Delete only when `Delete Missing Content` is enabled *(off by default)*
 * Companion files (subtitles, NFOs, images) are included with their parent media
 
 Files can be manually approved or ignored using the Approval Process.
@@ -109,9 +97,7 @@ Setting a file to Ignored will skip any future actions.
 
 Using the files found in the Sync Table, all Queued files are downloaded using Jellyfin's API into the Temporary Directory. Once downloaded, files are moved to the mirrored location on the Local Server and any required folders are created. Files with the Pending & Ignored statuses are not processed. Files set to Delete are removed during this step.
 
-#### For complete information, please see our **[Content Syncing Documentation](Documentation/Content.md)**!
-
----
+#### For complete information, please see our **[Content Syncing Documentation](docs/Content.md)**!
 
 ## History Syncing
 
@@ -135,9 +121,7 @@ Setting a file to Ignored will skip any future actions.
 
 Using the watch history found in the Sync Table, all Queued records update content history using Jellyfin's API.
 
-#### For complete information, please see our **[History Syncing Documentation](Documentation/History.md)**!
-
----
+#### For complete information, please see our **[History Syncing Documentation](docs/History.md)**!
 
 ## Metadata Syncing
 
@@ -162,9 +146,7 @@ Setting a file to Ignored will skip any future actions.
 
 Using the metadata found in the Sync Table, all Queued records update content metadata using Jellyfin's API.
 
-#### For complete information, please see our **[Metadata Syncing Documentation](Documentation/Metadata.md)**!
-
----
+#### For complete information, please see our **[Metadata Syncing Documentation](docs/Metadata.md)**!
 
 ## People Syncing
 
@@ -185,9 +167,7 @@ Setting a person to Ignored will skip any future actions.
 
 Using the people found in the Sync Table, all Queued records update person metadata and images using Jellyfin's internal APIs.
 
-#### For complete information, please see our **[People Syncing Documentation](Documentation/People.md)**!
-
----
+#### For complete information, please see our **[People Syncing Documentation](docs/People.md)**!
 
 ## User Syncing
 
@@ -209,7 +189,7 @@ Setting a user to Ignored will skip any future actions.
 
 Using the user configurations found in the Sync Table, all Queued records update user settings using Jellyfin's API.
 
-#### For complete information, please see our **[User Syncing Documentation](Documentation/Users.md)**!
+#### For complete information, please see our **[User Syncing Documentation](docs/Users.md)**!
 
 ---
 
@@ -225,8 +205,6 @@ Releases use a four-part version, `JJ.JJ.F.B`, that matches the supported Jellyf
   │
   └─── 10.11 = Jellyfin version this build was tested/released for
 ```
-
----
 
 # Installation
 

@@ -73,7 +73,9 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(MapToPeopleSyncItemDto(item));
+        var peopleConfig = _configManager.Configuration;
+        var peopleUrl = !string.IsNullOrEmpty(peopleConfig.SourceServerExternalUrl) ? peopleConfig.SourceServerExternalUrl : peopleConfig.SourceServerUrl;
+        return Ok(item.ToDto(peopleUrl, _configManager.DecryptedSourceServerApiKey));
     }
 
     /// <summary>
@@ -107,8 +109,11 @@ public partial class ConfigurationController
             StatusFilter = statusFilter
         });
 
+        var peopleConfig = _configManager.Configuration;
+        var peopleUrl = !string.IsNullOrEmpty(peopleConfig.SourceServerExternalUrl) ? peopleConfig.SourceServerExternalUrl : peopleConfig.SourceServerUrl;
+        var peopleApiKey = _configManager.DecryptedSourceServerApiKey;
         return Ok(new PagedResult<PeopleSyncItemDto>(
-            result.Items.Select(MapToPeopleSyncItemDto).ToList(),
+            result.Items.Select(i => i.ToDto(peopleUrl, peopleApiKey)).ToList(),
             result.TotalCount,
             skip,
             take));
@@ -247,35 +252,5 @@ public partial class ConfigurationController
             _logger.LogError(ex, "Failed to reset people sync database");
             return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
         }
-    }
-
-    /// <summary>
-    /// Maps a PeopleSyncItem to a DTO.
-    /// </summary>
-    private PeopleSyncItemDto MapToPeopleSyncItemDto(PeopleSyncItem item)
-    {
-        var config = _configManager.Configuration;
-        return new PeopleSyncItemDto
-        {
-            Id = item.Id,
-            PersonName = item.PersonName,
-            SourcePersonId = item.SourcePersonId,
-            LocalPersonId = item.LocalPersonId,
-            SourceMetadataValue = item.Metadata.Source,
-            LocalMetadataValue = item.Metadata.Local,
-            SourceImagesValue = item.Images.Source,
-            LocalImagesValue = item.Images.Local,
-            HasMetadataChanges = item.HasMetadataChanges,
-            HasImagesChanges = item.HasImagesChanges,
-            HasChanges = item.HasChanges,
-            Status = item.Status.ToString(),
-            StatusDate = item.StatusDate,
-            LastSyncTime = item.LastSyncTime,
-            ErrorMessage = item.Reason,
-            SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl)
-                ? config.SourceServerExternalUrl
-                : config.SourceServerUrl,
-            SourceServerApiKey = _configManager.DecryptedSourceServerApiKey
-        };
     }
 }

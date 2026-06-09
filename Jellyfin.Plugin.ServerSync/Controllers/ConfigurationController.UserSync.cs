@@ -37,7 +37,7 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
         var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
-        return Ok(MapToUserSyncItemDto(item, url, _configManager.DecryptedSourceServerApiKey));
+        return Ok(item.ToDto(url, _configManager.DecryptedSourceServerApiKey));
     }
 
     /// <summary>
@@ -89,7 +89,7 @@ public partial class ConfigurationController
         var config = _configManager.Configuration;
         var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
         return Ok(new PagedResult<UserSyncItemDto>(
-            filtered.Select(i => MapToUserSyncItemDto(i, url, _configManager.DecryptedSourceServerApiKey)).ToList(),
+            filtered.Select(i => i.ToDto(url, _configManager.DecryptedSourceServerApiKey)).ToList(),
             result.TotalCount,
             skip,
             take));
@@ -334,34 +334,6 @@ public partial class ConfigurationController
 
     // ===== DTO mapping helpers (unchanged from prior version) =====
 
-    private static UserSyncItemDto MapToUserSyncItemDto(UserSyncItem item, string? sourceServerUrl = null, string? sourceServerApiKey = null)
-    {
-        return new UserSyncItemDto
-        {
-            Id = item.Id,
-            SourceUserId = item.SourceUserId,
-            LocalUserId = item.LocalUserId,
-            SourceUserName = item.SourceUserName,
-            LocalUserName = item.LocalUserName,
-            PropertyCategory = item.PropertyCategory,
-            SourceValue = item.SourceValue,
-            LocalValue = item.LocalValue,
-            MergedValue = item.MergedValue,
-            SourceImageSize = item.SourceImageSize,
-            LocalImageSize = item.LocalImageSize,
-            SourceImageSizeFormatted = item.SourceImageSize.HasValue ? Jellyfin.Plugin.ServerSync.Utilities.FormatUtilities.FormatBytes(item.SourceImageSize.Value) : null,
-            LocalImageSizeFormatted = item.LocalImageSize.HasValue ? Jellyfin.Plugin.ServerSync.Utilities.FormatUtilities.FormatBytes(item.LocalImageSize.Value) : null,
-            HasChanges = item.HasChanges,
-            ChangesSummary = item.ChangesSummary,
-            SourceServerUrl = sourceServerUrl,
-            SourceServerApiKey = sourceServerApiKey,
-            Status = item.Status.ToString(),
-            StatusDate = item.StatusDate,
-            LastSyncTime = item.LastSyncTime,
-            ErrorMessage = item.Reason
-        };
-    }
-
     private static UserSyncUserDto MapToUserSyncUserDto(
         string sourceUserId,
         string localUserId,
@@ -432,9 +404,9 @@ public partial class ConfigurationController
             LocalUserId = localUserId,
             SourceUserName = items.FirstOrDefault()?.SourceUserName,
             LocalUserName = items.FirstOrDefault()?.LocalUserName,
-            PolicyItem = policyItem != null ? MapToUserSyncItemDto(policyItem) : null,
-            ConfigurationItem = configItem != null ? MapToUserSyncItemDto(configItem) : null,
-            ProfileImageItem = imageItem != null ? MapToUserSyncItemDto(imageItem) : null,
+            PolicyItem = policyItem != null ? policyItem.ToDto() : null,
+            ConfigurationItem = configItem != null ? configItem.ToDto() : null,
+            ProfileImageItem = imageItem != null ? imageItem.ToDto() : null,
             PolicyEnabled = config.UserSyncPolicy,
             ConfigurationEnabled = config.UserSyncConfiguration,
             ProfileImageEnabled = config.UserSyncProfileImage,

@@ -54,7 +54,7 @@ public partial class ConfigurationController
         var config = _configManager.Configuration;
 
         return Ok(new PagedResult<HistorySyncItemDto>(
-            items.Select(i => MapToHistorySyncItemDto(i, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, _configManager.DecryptedSourceServerApiKey)).ToList(),
+            items.Select(i => i.ToDto(!string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, _configManager.DecryptedSourceServerApiKey)).ToList(),
             totalCount,
             skip,
             take));
@@ -253,46 +253,4 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult TriggerHistorySync()
         => ExecuteScheduledTaskByKey("ServerSyncMissingHistory", "History sync task started", "History sync task not found");
-
-    /// <summary>
-    /// Maps a HistorySyncItem to a DTO.
-    /// </summary>
-    private static HistorySyncItemDto MapToHistorySyncItemDto(HistorySyncItem item, string? sourceServerUrl, string? sourceServerApiKey)
-    {
-        return new HistorySyncItemDto
-        {
-            Id = item.Id,
-            SourceUserId = item.SourceUserId,
-            LocalUserId = item.LocalUserId,
-            SourceLibraryId = item.SourceLibraryId,
-            LocalLibraryId = item.LocalLibraryId,
-            SourceItemId = item.SourceItemId,
-            LocalItemId = item.LocalItemId,
-            ItemName = item.ItemName,
-            SourcePath = item.SourcePath,
-            LocalPath = item.LocalPath,
-            SourceIsPlayed = item.SourceIsPlayed,
-            SourcePlayCount = item.SourcePlayCount,
-            SourcePlaybackPositionTicks = item.SourcePlaybackPositionTicks,
-            SourceLastPlayedDate = item.SourceLastPlayedDate,
-            SourceIsFavorite = item.SourceIsFavorite,
-            LocalIsPlayed = item.LocalIsPlayed,
-            LocalPlayCount = item.LocalPlayCount,
-            LocalPlaybackPositionTicks = item.LocalPlaybackPositionTicks,
-            LocalLastPlayedDate = item.LocalLastPlayedDate,
-            LocalIsFavorite = item.LocalIsFavorite,
-            MergedIsPlayed = item.MergedIsPlayed,
-            MergedPlayCount = item.MergedPlayCount,
-            MergedPlaybackPositionTicks = item.MergedPlaybackPositionTicks,
-            MergedLastPlayedDate = item.MergedLastPlayedDate,
-            MergedIsFavorite = item.MergedIsFavorite,
-            SourceServerUrl = sourceServerUrl,
-            SourceServerApiKey = sourceServerApiKey,
-            Status = item.Status.ToString(),
-            StatusDate = item.StatusDate,
-            LastSyncTime = item.LastSyncTime,
-            ErrorMessage = item.Reason,
-            HasChanges = item.HasChanges
-        };
-    }
 }

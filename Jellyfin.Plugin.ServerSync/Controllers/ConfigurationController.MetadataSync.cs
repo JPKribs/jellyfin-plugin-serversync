@@ -82,7 +82,7 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(MapToMetadataSyncItemDto(item, config.LibraryMappings, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, _configManager.DecryptedSourceServerApiKey));
+        return Ok(item.ToDto(config.LibraryMappings, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, _configManager.DecryptedSourceServerApiKey));
     }
 
     /// <summary>
@@ -186,8 +186,7 @@ public partial class ConfigurationController
         var config = _configManager.Configuration;
 
         return Ok(new PagedResult<MetadataSyncItemDto>(
-            items.Select(i => MapToMetadataSyncItemDto(
-                i,
+            items.Select(i => i.ToDto(
                 config.LibraryMappings,
                 !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
                 _configManager.DecryptedSourceServerApiKey,
@@ -345,78 +344,5 @@ public partial class ConfigurationController
             _logger.LogError(ex, "Failed to reset metadata sync database");
             return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
         }
-    }
-
-    /// <summary>
-    /// Maps a MetadataSyncItem to a DTO.
-    /// </summary>
-    private static MetadataSyncItemDto MapToMetadataSyncItemDto(MetadataSyncItem item, List<LibraryMapping>? libraryMappings, string? sourceServerUrl, string? sourceServerApiKey)
-        => MapToMetadataSyncItemDto(item, libraryMappings, sourceServerUrl, sourceServerApiKey, includeBlobs: true);
-
-    /// <summary>
-    /// Maps a <see cref="MetadataSyncItem"/> to its DTO. The per-category change
-    /// flags always come from the record's deep compare, so a row's
-    /// "changes"/"No changes" matches the modal and the Compare phase. When
-    /// <paramref name="includeBlobs"/> is <c>false</c> the eight large JSON-blob
-    /// fields are dropped from the response to keep the list compact (a 50-row
-    /// page would otherwise ship ~megabytes of JSON the UI doesn't render); the
-    /// flags are unaffected.
-    /// </summary>
-    private static MetadataSyncItemDto MapToMetadataSyncItemDto(
-        MetadataSyncItem item,
-        List<LibraryMapping>? libraryMappings,
-        string? sourceServerUrl,
-        string? sourceServerApiKey,
-        bool includeBlobs)
-    {
-        string? sourceLibraryName = null;
-        string? localLibraryName = null;
-
-        var mapping = libraryMappings?.FirstOrDefault(m => m.SourceLibraryId == item.SourceLibraryId);
-        if (mapping != null)
-        {
-            sourceLibraryName = mapping.SourceLibraryName;
-            localLibraryName = mapping.LocalLibraryName;
-        }
-
-        var hasMetadataChanges = item.HasMetadataChanges;
-        var hasImagesChanges = item.HasImagesChanges;
-        var hasPeopleChanges = item.HasPeopleChanges;
-        var hasStudiosChanges = item.HasStudiosChanges;
-        var changesSummary = item.ChangesSummary;
-
-        return new MetadataSyncItemDto
-        {
-            Id = item.Id,
-            SourceLibraryId = item.SourceLibraryId,
-            LocalLibraryId = item.LocalLibraryId,
-            SourceLibraryName = sourceLibraryName,
-            LocalLibraryName = localLibraryName,
-            SourceItemId = item.SourceItemId,
-            LocalItemId = item.LocalItemId,
-            ItemName = item.ItemName,
-            SourcePath = item.SourcePath,
-            LocalPath = item.LocalPath,
-            SourceMetadataValue = includeBlobs ? item.Metadata.Source : null,
-            LocalMetadataValue = includeBlobs ? item.Metadata.Local : null,
-            SourceImagesValue = includeBlobs ? item.Images.Source : null,
-            LocalImagesValue = includeBlobs ? item.Images.Local : null,
-            SourcePeopleValue = includeBlobs ? item.People.Source : null,
-            LocalPeopleValue = includeBlobs ? item.People.Local : null,
-            SourceStudiosValue = includeBlobs ? item.Studios.Source : null,
-            LocalStudiosValue = includeBlobs ? item.Studios.Local : null,
-            HasMetadataChanges = hasMetadataChanges,
-            HasImagesChanges = hasImagesChanges,
-            HasPeopleChanges = hasPeopleChanges,
-            HasStudiosChanges = hasStudiosChanges,
-            HasChanges = hasMetadataChanges || hasImagesChanges || hasPeopleChanges || hasStudiosChanges,
-            ChangesSummary = changesSummary,
-            SourceServerUrl = sourceServerUrl,
-            SourceServerApiKey = sourceServerApiKey,
-            Status = item.Status.ToString(),
-            StatusDate = item.StatusDate,
-            LastSyncTime = item.LastSyncTime,
-            ErrorMessage = item.Reason
-        };
     }
 }
