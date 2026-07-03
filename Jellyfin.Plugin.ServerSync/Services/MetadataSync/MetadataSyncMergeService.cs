@@ -129,17 +129,20 @@ public static class MetadataSyncMergeService
     /// <summary>
     /// Builds the source-side and local-side image manifest blobs. Source-side
     /// is built from <c>BaseItemDto</c> image tags (free in the bulk list
-    /// response), then enriched with real Size/Width/Height via a per-item
-    /// HTTP call so the <see cref="ImageManifestComparator"/> has honest
-    /// numbers to compare against the sized local manifest. Without enrichment
-    /// the tag-only-vs-sized fallback fires on every row and every refresh
-    /// pointlessly re-queues already-synced images.
+    /// response), then sized via carry-forward from
+    /// <paramref name="priorSourceManifestJson"/> when tags are unchanged, or
+    /// a per-item HTTP enrichment call when they aren't — so the
+    /// <see cref="ImageManifestComparator"/> has honest numbers to compare
+    /// against the sized local manifest without paying one GET + one HEAD per
+    /// image on every unchanged item every refresh.
     /// </summary>
     public static async Task MergeImagesAsync(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
         BaseItem? localItem,
         SourceServerClient? client,
+        string? priorSourceManifestJson,
+        bool deepVerification,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -156,12 +159,14 @@ public static class MetadataSyncMergeService
         {
             try
             {
-                sourceManifestJson = await ImageManifestEnricher.EnrichAsync(
+                sourceManifestJson = await ImageManifestEnricher.EnrichWithCarryForwardAsync(
                     sourceManifestJson,
+                    priorSourceManifestJson,
                     sourceItemGuid,
                     client,
                     logger,
                     item.ItemName ?? item.SourceItemId,
+                    deepVerification,
                     cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -175,13 +180,9 @@ public static class MetadataSyncMergeService
         }
 
         // UpdateSource recomputes the hash via ImageManifestComparator over
-        // the (now enriched) manifest, so the SourceHash short-circuit
-        // remains stable across refreshes. Carry sizes the live enrichment
-        // couldn't measure this run forward from the prior manifest for
-        // unchanged images so a transient enrichment failure doesn't drop the
-        // row back to tag-only and read as a phantom change.
-        item.Images.UpdateSource(
-            ImageManifestEnricher.CarryForwardSizes(sourceManifestJson, item.Images.Source));
+        // the (now sized) manifest, so the SourceHash short-circuit remains
+        // stable across refreshes.
+        item.Images.UpdateSource(sourceManifestJson);
 
         if (localItem != null)
         {

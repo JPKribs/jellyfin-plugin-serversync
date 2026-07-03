@@ -16,6 +16,86 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 public static class ImageManifestEnricher
 {
     /// <summary>
+    /// Enriches a freshly built tag-only manifest, preferring carried-forward
+    /// sizes over live HTTP. Flow:
+    /// <list type="number">
+    /// <item>Carry sizes forward from <paramref name="priorSourceManifestJson"/>
+    /// for entries whose Tag is unchanged (same image → same size).</item>
+    /// <item>If every entry now has a size and <paramref name="deepVerification"/>
+    /// is off, return without any HTTP — the steady-state path. This is what
+    /// keeps refresh from issuing one GET + one HEAD per image per item per
+    /// run on libraries where nothing changed.</item>
+    /// <item>Otherwise fall through to <see cref="EnrichAsync"/> (per-item GET
+    /// + per-image HEAD), then carry forward once more so a partial enrichment
+    /// failure doesn't read as a phantom change.</item>
+    /// </list>
+    /// A changed Tag always misses the carry-forward and triggers live
+    /// enrichment, so real image changes are still detected. The case only
+    /// <paramref name="deepVerification"/> catches: an image file replaced on
+    /// the source's disk without a metadata rescan (same Tag, different bytes).
+    /// </summary>
+    public static async Task<string?> EnrichWithCarryForwardAsync(
+        string? freshManifestJson,
+        string? priorSourceManifestJson,
+        Guid sourceItemId,
+        SourceServerClient client,
+        ILogger logger,
+        string logContext,
+        bool deepVerification,
+        CancellationToken cancellationToken)
+    {
+        var carried = CarryForwardSizes(freshManifestJson, priorSourceManifestJson);
+        if (!deepVerification && HasAllSizes(carried))
+        {
+            return carried;
+        }
+
+        var enriched = await EnrichAsync(carried, sourceItemId, client, logger, logContext, cancellationToken).ConfigureAwait(false);
+        return CarryForwardSizes(enriched, priorSourceManifestJson);
+    }
+
+    /// <summary>
+    /// True when every image entry in the manifest has a measured size.
+    /// Unparseable or empty manifests return false so callers fall through to
+    /// live enrichment rather than skipping on bad data.
+    /// </summary>
+    private static bool HasAllSizes(string? manifestJson)
+    {
+        if (string.IsNullOrEmpty(manifestJson))
+        {
+            return false;
+        }
+
+        Dictionary<string, List<ImageInfoDto>>? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(manifestJson);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (manifest == null || manifest.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var entries in manifest.Values)
+        {
+            foreach (var entry in entries)
+            {
+                if (entry.Size <= 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Returns the enriched manifest JSON, or the input unchanged on any failure.
     /// </summary>
     public static async Task<string?> EnrichAsync(

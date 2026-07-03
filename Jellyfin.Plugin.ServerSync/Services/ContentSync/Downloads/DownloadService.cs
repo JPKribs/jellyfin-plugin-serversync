@@ -288,7 +288,7 @@ public class DownloadService
                     await RetryPolicy.ExecuteWithRetryAsync(
                         async ct =>
                         {
-                            using var stream = await client.DownloadCompanionFileAsync(itemId, companion.SourcePath, ct).ConfigureAwait(false);
+                            using var stream = await client.DownloadCompanionFileAsync(itemId, companion, ct).ConfigureAwait(false);
 
                             if (stream == null)
                             {

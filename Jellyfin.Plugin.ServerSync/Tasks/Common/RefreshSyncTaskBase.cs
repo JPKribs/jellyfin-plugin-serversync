@@ -336,6 +336,23 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         Logger.LogInformation("Starting {Task}", Name);
         _sourceUnavailable = false;
 
+        // Client is created by TestConnectionAsync; the finally covers every
+        // exit path — early return on connection failure, exceptions from
+        // GetListAsync/build/prune, and cancellation — so the API client
+        // wrapper never leaks past the run.
+        try
+        {
+            await RunAsync(progress, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Client?.Dispose();
+            Client = null;
+        }
+    }
+
+    private async Task RunAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
         if (!await TestConnectionAsync(cancellationToken).ConfigureAwait(false))
         {
             // Bumped to LogError + recorded to config so the dashboard can
@@ -358,7 +375,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         progress.Report(0);
 
         // 1. Snapshot existing rows so we can detect stale ones at the end.
-        var existingList = Manager.GetAll();
+        // Strict read: if this silently degraded to an empty list on a
+        // transient DB error, every source item would look new and the
+        // upserts would overwrite user-set statuses (Ignored, pending
+        // approvals). Failing the run is the safe outcome.
+        var existingList = Manager.GetAllStrict();
         var existing = new Dictionary<TKey, TRecord>(existingList.Count);
         foreach (var rec in existingList)
         {
@@ -507,16 +528,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             }
         }
 
-        try
-        {
-            await FinalizeAsync(cancellationToken).ConfigureAwait(false);
-            RecordRunCompletedAndSave();
-        }
-        finally
-        {
-            Client?.Dispose();
-            Client = null;
-        }
+        await FinalizeAsync(cancellationToken).ConfigureAwait(false);
+        RecordRunCompletedAndSave();
 
         progress.Report(100);
 
@@ -569,43 +582,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <summary>
     /// Records the most-recent run failure for this module on the plugin
     /// configuration. Surfaced in the dashboard via the Status endpoint.
-    /// Best-effort — config save failure is logged but doesn't propagate.
     /// </summary>
     private void RecordRunFailure(string phase, string reason)
-    {
-        try
-        {
-            var failures = _configManager.Configuration.LastRunFailures;
-            failures.RemoveAll(f => string.Equals(f.ModuleKey, ModuleMutexKey, StringComparison.OrdinalIgnoreCase));
-            failures.Add(new SyncRunFailure
-            {
-                ModuleKey = ModuleMutexKey,
-                Phase = phase,
-                Reason = reason,
-                Timestamp = DateTime.UtcNow
-            });
-            _configManager.SaveConfiguration();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "{Task}: failed to record run-failure outcome", Name);
-        }
-    }
+        => RunFailureLog.Record(_configManager, ModuleMutexKey, phase, reason, Logger, Name);
 
     private void ClearRunFailure()
-    {
-        try
-        {
-            var failures = _configManager.Configuration.LastRunFailures;
-            var removed = failures.RemoveAll(f => string.Equals(f.ModuleKey, ModuleMutexKey, StringComparison.OrdinalIgnoreCase));
-            if (removed > 0)
-            {
-                _configManager.SaveConfiguration();
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "{Task}: failed to clear run-failure outcome", Name);
-        }
-    }
+        => RunFailureLog.Clear(_configManager, ModuleMutexKey, Logger, Name);
 }

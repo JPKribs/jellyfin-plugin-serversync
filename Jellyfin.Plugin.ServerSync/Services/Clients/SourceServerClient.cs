@@ -101,13 +101,14 @@ public class SourceServerClient : IDisposable
                     Message = "Connection successful"
                 };
             }
-            catch (OperationCanceledException)
+            catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode == 403)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Authenticated /System/Info failed, falling back to /System/Info/Public");
+                // 403 is the only legitimate fallback case (valid token, non-
+                // admin user). /System/Info/Public is anonymous, so falling
+                // back on 401 or transport errors would report "connection
+                // successful" for a revoked/expired API key — the user sees a
+                // green check while every sync silently fails.
+                _logger.LogDebug(ex, "Authenticated /System/Info returned 403 (non-admin token), falling back to /System/Info/Public");
             }
 
             // Fallback: use /System/Info/Public (available to all authenticated users)
@@ -478,60 +479,6 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// <summary>
-    /// Fetches Content-sync-style leaf item rows (Path / DateCreated /
-    /// MediaSources) for a specific set of IDs, batched. Restricts to leaf
-    /// types (Movie / Episode / Audio / Video) so a whitelisted Series ID
-    /// returns nothing here — children of whitelisted folders come back via
-    /// <see cref="GetContentItemsByAncestorsAsync"/>; this method only
-    /// catches whitelisted items that are themselves syncable leaves.
-    /// </summary>
-    public async Task<List<BaseItemDto>> GetContentItemsByIdsAsync(
-        IReadOnlyList<Guid> ids,
-        int batchSize = 50,
-        CancellationToken cancellationToken = default)
-    {
-        var result = new List<BaseItemDto>();
-        if (ids.Count == 0)
-        {
-            return result;
-        }
-
-        for (var i = 0; i < ids.Count; i += batchSize)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
-            try
-            {
-                var client = GetApiClient();
-                var page = await client.Items.GetAsync(
-                    config =>
-                    {
-                        config.QueryParameters.Ids = chunk;
-                        config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
-                        config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
-                    },
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                if (page?.Items != null)
-                {
-                    result.AddRange(page.Items);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to fetch content items batch starting at index {Index}", i);
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>
     /// Fetches the Content-sync leaves for a single whitelisted item: returns
     /// the item itself if it's a leaf, or walks its descendants folder-by-
     /// folder if it's a folder type. The folder walk avoids the
@@ -580,8 +527,13 @@ public class SourceServerClient : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Whitelist: failed to fetch item {Id}", whitelistedId);
-            return result;
+            // Transport faults (connection reset, DNS, TLS) and deserialization
+            // errors land here — Kiota only wraps HTTP status errors as
+            // ApiException. Returning an empty list would make every leaf under
+            // this entry look "missing from source" and schedule its files for
+            // deletion, so bubble up instead.
+            _logger.LogWarning(ex, "Whitelist: failed to fetch item {Id}; aborting to protect tracking rows", whitelistedId);
+            throw;
         }
 
         if (rootItem == null || !rootItem.Id.HasValue)
@@ -643,8 +595,11 @@ public class SourceServerClient : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Whitelist: failed to fetch children of {ParentId}", parentId);
-                    break;
+                    // Transport faults reach here as HttpRequestException, not
+                    // ApiException. A `break` would truncate the leaf list the
+                    // same way a swallowed 5xx would — bubble up instead.
+                    _logger.LogWarning(ex, "Whitelist: failed to fetch children of {ParentId}; aborting to protect tracking rows", parentId);
+                    throw;
                 }
 
                 if (page?.Items == null || page.Items.Count == 0)
@@ -683,98 +638,6 @@ public class SourceServerClient : IDisposable
                 startIndex += page.Items.Count;
             }
         }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Fetches Content-sync leaf items (Movie / Episode / Audio / Video) that
-    /// are descendants of any of <paramref name="ancestorIds"/>. One
-    /// <c>ParentId=&lt;id&gt;&amp;Recursive=true</c> query per entry (up to 4
-    /// concurrent), de-duped by item ID. Leaf-only entries return nothing here
-    /// and are picked up by <see cref="GetContentItemsByIdsAsync"/> instead.
-    /// </summary>
-    public async Task<List<BaseItemDto>> GetContentItemsByAncestorsAsync(
-        IReadOnlyList<Guid> ancestorIds,
-        int pageSize = 1000,
-        int maxParallelism = 4,
-        CancellationToken cancellationToken = default)
-    {
-        var result = new List<BaseItemDto>();
-        if (ancestorIds.Count == 0)
-        {
-            return result;
-        }
-
-        var seen = new HashSet<Guid>();
-        var lockObj = new object();
-
-        await Parallel.ForEachAsync(
-            ancestorIds,
-            new ParallelOptions { MaxDegreeOfParallelism = maxParallelism, CancellationToken = cancellationToken },
-            async (ancestorId, ct) =>
-            {
-                var startIndex = 0;
-                while (true)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    BaseItemDtoQueryResult? page;
-                    try
-                    {
-                        var client = GetApiClient();
-                        page = await client.Items.GetAsync(
-                            config =>
-                            {
-                                config.QueryParameters.ParentId = ancestorId;
-                                config.QueryParameters.Recursive = true;
-                                config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
-                                config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
-                                config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
-                                config.QueryParameters.StartIndex = startIndex;
-                                config.QueryParameters.Limit = pageSize;
-                            },
-                            cancellationToken: ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to fetch descendants of {AncestorId} at offset {Index}", ancestorId, startIndex);
-                        break;
-                    }
-
-                    if (page?.Items == null || page.Items.Count == 0)
-                    {
-                        break;
-                    }
-
-                    lock (lockObj)
-                    {
-                        foreach (var item in page.Items)
-                        {
-                            if (item.Id.HasValue && seen.Add(item.Id.Value))
-                            {
-                                result.Add(item);
-                            }
-                        }
-                    }
-
-                    if (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value)
-                    {
-                        break;
-                    }
-
-                    if (page.Items.Count < pageSize)
-                    {
-                        break;
-                    }
-
-                    startIndex += page.Items.Count;
-                }
-            }).ConfigureAwait(false);
 
         return result;
     }
@@ -1213,7 +1076,11 @@ public class SourceServerClient : IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to fetch items batch starting at index {Index}", i);
+                // Transport faults (HttpRequestException, deserialization) are
+                // "no real answer" just like a 5xx — a swallowed chunk here
+                // gets its rows pruned and loses the user's Ignored overrides.
+                _logger.LogWarning(ex, "Failed to fetch items batch starting at index {Index}; aborting refresh to protect tracking rows", i);
+                throw;
             }
         }
 
@@ -1312,7 +1179,13 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets external companion files (subtitles, etc.) for an item.
+    /// Gets external subtitle companion files for an item. Restricted to
+    /// subtitle streams: they are the only external stream type Jellyfin
+    /// exposes a download route for
+    /// (<c>/Videos/{item}/{mediaSource}/Subtitles/{index}/Stream.{format}</c>).
+    /// External audio tracks are skipped with a log — the previous
+    /// path-parameter approach silently served the item's main video file in
+    /// their place, corrupting the companion on disk.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -1335,18 +1208,38 @@ public class SourceServerClient : IDisposable
                 return companions;
             }
 
-            companions.AddRange(
-                mediaSource.MediaStreams
-                    .Where(stream => stream.IsExternal == true && !string.IsNullOrEmpty(stream.Path))
-                    .Select(stream => new CompanionFileInfo
-                    {
-                        SourcePath = stream.Path!,
-                        FileName = Path.GetFileName(stream.Path)!,
-                        Language = stream.Language,
-                        Codec = stream.Codec,
-                        IsExternal = true,
-                        StreamIndex = stream.Index ?? 0
-                    }));
+            var skippedNonSubtitle = 0;
+            foreach (var stream in mediaSource.MediaStreams)
+            {
+                if (stream.IsExternal != true || string.IsNullOrEmpty(stream.Path))
+                {
+                    continue;
+                }
+
+                if (stream.Type != MediaStream_Type.Subtitle)
+                {
+                    skippedNonSubtitle++;
+                    continue;
+                }
+
+                companions.Add(new CompanionFileInfo
+                {
+                    SourcePath = stream.Path!,
+                    FileName = Path.GetFileName(stream.Path)!,
+                    Language = stream.Language,
+                    Codec = stream.Codec,
+                    IsExternal = true,
+                    StreamIndex = stream.Index ?? 0,
+                    MediaSourceId = mediaSource.Id ?? itemId.ToString("N")
+                });
+            }
+
+            if (skippedNonSubtitle > 0)
+            {
+                _logger.LogInformation(
+                    "Item {ItemId} has {Count} external non-subtitle stream(s) (e.g. audio) that cannot be downloaded via the API; skipping",
+                    itemId, skippedNonSubtitle);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1361,56 +1254,60 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Downloads an external subtitle or companion file by its path.
+    /// Downloads an external subtitle via the canonical
+    /// <c>/Videos/{item}/{mediaSource}/Subtitles/{index}/Stream.{format}</c>
+    /// route. The previously used
+    /// <c>/Videos/{id}/Subtitles/Stream?path=…</c> shape returns 405 on
+    /// Jellyfin 10.11, and its <c>/Items/{id}/File?path=…</c> fallback
+    /// ignores the path parameter and serves the item's main media file —
+    /// verified against a live 10.11 server — which wrote video bytes into
+    /// <c>.srt</c> companions.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
-    /// <param name="filePath">Source file path.</param>
+    /// <param name="companion">Companion stream to download.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Stream of file content or null on failure.</returns>
-    public async Task<Stream?> DownloadCompanionFileAsync(Guid itemId, string filePath, CancellationToken cancellationToken = default)
+    public async Task<Stream?> DownloadCompanionFileAsync(Guid itemId, CompanionFileInfo companion, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(companion);
         HttpResponseMessage? response = null;
-        HttpRequestMessage? activeRequest = null;
+        HttpRequestMessage? request = null;
         try
         {
-            var encodedPath = Uri.EscapeDataString(filePath);
-            var url = $"{_serverUrl}/Videos/{itemId}/Subtitles/Stream?mediaSourceId={itemId}&path={encodedPath}";
-
-            activeRequest = new HttpRequestMessage(HttpMethod.Get, url);
-            AddAuthorizationHeader(activeRequest);
-
-            response = await _httpClient.SendAsync(activeRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-
-            if (!response.IsSuccessStatusCode)
+            // Stream.{format}: use the source file's own extension so the
+            // server returns the subtitle in its original format instead of
+            // converting. Codec name is the fallback for extension-less paths
+            // (subrip files carry the .srt extension, so map that one).
+            var format = Path.GetExtension(companion.SourcePath).TrimStart('.').ToLowerInvariant();
+            if (string.IsNullOrEmpty(format))
             {
-                // Dispose the failed response and request before making the fallback request
-                response.Dispose();
-                activeRequest.Dispose();
-
-                var directUrl = $"{_serverUrl}/Items/{itemId}/File?path={encodedPath}";
-                activeRequest = new HttpRequestMessage(HttpMethod.Get, directUrl);
-                AddAuthorizationHeader(activeRequest);
-
-                response = await _httpClient.SendAsync(activeRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                format = string.Equals(companion.Codec, "subrip", StringComparison.OrdinalIgnoreCase)
+                    ? "srt"
+                    : companion.Codec?.ToLowerInvariant() ?? "srt";
             }
 
+            var url = $"{_serverUrl}/Videos/{itemId}/{Uri.EscapeDataString(companion.MediaSourceId)}/Subtitles/{companion.StreamIndex}/Stream.{Uri.EscapeDataString(format)}";
+            request = new HttpRequestMessage(HttpMethod.Get, url);
+            AddAuthorizationHeader(request);
+
+            response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
             // Transfer ownership of request and response to the stream wrapper
-            return new ResponseDisposingStream(stream, response, activeRequest);
+            return new ResponseDisposingStream(stream, response, request);
         }
         catch (OperationCanceledException)
         {
             response?.Dispose();
-            activeRequest?.Dispose();
+            request?.Dispose();
             throw;
         }
         catch (Exception ex)
         {
             response?.Dispose();
-            activeRequest?.Dispose();
-            _logger.LogError(ex, "Failed to download companion file {FilePath} for {ItemId}", filePath, itemId);
+            request?.Dispose();
+            _logger.LogError(ex, "Failed to download companion subtitle {FilePath} (stream {Index}) for {ItemId}", companion.SourcePath, companion.StreamIndex, itemId);
             return null;
         }
     }
@@ -1667,117 +1564,83 @@ public class SourceServerClient : IDisposable
     // ===== People Sync Methods =====
 
     /// <summary>
-    /// Gets a single Person by name as a full <see cref="BaseItemDto"/> via
-    /// <c>/Persons?searchTerm=…</c>. Jellyfin's searchTerm is fuzzy, so we
-    /// filter for an exact case-insensitive Name match and discard partials.
-    /// </summary>
-    public async Task<BaseItemDto?> GetPersonByNameAsync(
-        string name,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(name))
-        {
-            return null;
-        }
-
-        try
-        {
-            var client = GetApiClient();
-
-            var page = await client.Persons.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.SearchTerm = name;
-                    config.QueryParameters.Limit = 25;
-                    config.QueryParameters.Fields = new[]
-                    {
-                        ItemFields.Overview,
-                        ItemFields.ProviderIds,
-                        ItemFields.Tags,
-                        ItemFields.OriginalTitle,
-                        ItemFields.SortName,
-                        ItemFields.DateCreated,
-                        ItemFields.ProductionLocations,
-                        // Settings populates LockData + LockedFields; without
-                        // it those properties come back null, while local has
-                        // them populated, producing a perpetual false diff in
-                        // the Metadata blob.
-                        ItemFields.Settings
-                    };
-                },
-                cancellationToken).ConfigureAwait(false);
-
-            if (page?.Items == null || page.Items.Count == 0)
-            {
-                return null;
-            }
-
-            // Exact-match (case-insensitive) only. searchTerm returns substring
-            // hits on Jellyfin, so a person "Tom Hanks" search hits "Tom Hanks"
-            // and "Tom Hanky" — discard non-exact matches to avoid syncing the
-            // wrong Person.
-            foreach (var candidate in page.Items)
-            {
-                if (!string.IsNullOrEmpty(candidate.Name)
-                    && string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
-                {
-                    return candidate;
-                }
-            }
-
-            return null;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Person not found or failed to fetch from source server: {PersonName}", name);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Bulk-fetches every Person from the source server in a single
-    /// <c>/Persons?fields=…</c> call so callers can do a local name-keyed join
-    /// instead of one HTTP call per person. Response can be tens of MB on
-    /// libraries with 100k+ persons, but still beats per-name fan-out.
+    /// Bulk-fetches every Person from the source server via paginated
+    /// <c>/Items?includeItemTypes=Person&amp;recursive=true</c> calls so
+    /// callers can do a local name-keyed join instead of one HTTP call per
+    /// person. The <c>/Persons</c> endpoint silently ignores
+    /// <c>StartIndex</c> (verified against a live 10.11 server: the same
+    /// first page repeats), so the generic Items endpoint is the only way to
+    /// page the catalog. Also verified live: for every person <c>/Persons</c>
+    /// returns, <c>/Items</c> returns a byte-identical DTO with the same
+    /// field set, plus a handful of extra Person entries (music artists) that
+    /// are harmless — the People refresh intersects by name against local
+    /// persons. Throws on any failure: a partial catalog would make the
+    /// People refresh prune rows for persons it never saw.
     /// </summary>
     /// <returns>All persons returned by the source server.</returns>
     public async Task<IReadOnlyList<BaseItemDto>> GetAllPersonsAsync(
         CancellationToken cancellationToken = default)
     {
+        const int pageSize = 1000;
+        var persons = new List<BaseItemDto>();
+        var startIndex = 0;
+
         try
         {
             var client = GetApiClient();
-            var result = await client.Persons.GetAsync(
-                config =>
-                {
-                    // No searchTerm and no Limit — request the entire catalog.
-                    config.QueryParameters.Fields = new[]
-                    {
-                        ItemFields.Overview,
-                        ItemFields.ProviderIds,
-                        ItemFields.Tags,
-                        ItemFields.OriginalTitle,
-                        ItemFields.SortName,
-                        ItemFields.DateCreated,
-                        ItemFields.ProductionLocations,
-                        // Settings populates LockData + LockedFields; matches
-                        // GetPersonByNameAsync so blob hashes are identical
-                        // regardless of fetch path.
-                        ItemFields.Settings
-                    };
-                },
-                cancellationToken).ConfigureAwait(false);
-
-            if (result?.Items == null)
+            while (true)
             {
-                return Array.Empty<BaseItemDto>();
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var page = await client.Items.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Person };
+                        config.QueryParameters.Recursive = true;
+                        config.QueryParameters.Fields = new[]
+                        {
+                            ItemFields.Overview,
+                            ItemFields.ProviderIds,
+                            ItemFields.Tags,
+                            ItemFields.OriginalTitle,
+                            ItemFields.SortName,
+                            ItemFields.DateCreated,
+                            ItemFields.ProductionLocations,
+                            // Settings populates LockData + LockedFields;
+                            // without it those come back null while local has
+                            // them populated, producing a perpetual false diff.
+                            ItemFields.Settings
+                        };
+                        config.QueryParameters.SortBy = new[] { ItemSortBy.SortName };
+                        config.QueryParameters.StartIndex = startIndex;
+                        config.QueryParameters.Limit = pageSize;
+                    },
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                if (page?.Items == null)
+                {
+                    // A null page mid-catalog is a failure, not end-of-list —
+                    // treating it as done would return a partial catalog.
+                    throw new InvalidOperationException(
+                        $"Source server returned no response fetching Persons page at index {startIndex}");
+                }
+
+                persons.AddRange(page.Items);
+
+                if (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value)
+                {
+                    break;
+                }
+
+                if (page.Items.Count < pageSize)
+                {
+                    break;
+                }
+
+                startIndex += page.Items.Count;
             }
 
-            return result.Items;
+            return persons;
         }
         catch (OperationCanceledException)
         {

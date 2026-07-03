@@ -419,6 +419,13 @@ public class RefreshMetadataSyncTableTask
         }
 
         var config = ConfigManager.Configuration;
+
+        // Look up the previous row first: its source image manifest feeds the
+        // carry-forward path that skips per-item image enrichment HTTP when
+        // tags are unchanged.
+        var sourceItemId = source.SourceItem.Id!.Value.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        existing.TryGetValue((source.LibraryMapping.SourceLibraryId, sourceItemId), out var priorRecord);
+
         var fresh = await _metadataService.BuildRecordAsync(
             source.LibraryMapping,
             source.SourceItem,
@@ -429,6 +436,8 @@ public class RefreshMetadataSyncTableTask
             syncStudios: config.MetadataSyncStudios,
             syncGenres: config.MetadataSyncGenres,
             syncTags: config.MetadataSyncTags,
+            priorSourceImagesJson: priorRecord?.Images.Source,
+            deepImageVerification: config.MetadataSyncDeepImageVerification,
             Client,
             cancellationToken).ConfigureAwait(false);
 

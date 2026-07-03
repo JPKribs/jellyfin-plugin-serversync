@@ -221,7 +221,11 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// Closes and deletes the current database, then creates a fresh one.
+    /// Closes the current database, moves it aside as a timestamped backup,
+    /// and creates a fresh one. The old file is preserved (not deleted): the
+    /// tracking DB carries user intent — Ignored overrides and pending
+    /// deletion/download approvals — that a transient init failure (disk
+    /// briefly full, permissions hiccup at boot) must not silently destroy.
     /// </summary>
     private void RecreateDatabase()
     {
@@ -229,16 +233,26 @@ public class SyncDatabase : IDisposable
         _connection?.Dispose();
         _connection = null;
 
-        // Delete main database file
         if (File.Exists(_dbPath))
         {
+            var backupPath = _dbPath + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
             try
             {
-                File.Delete(_dbPath);
+                File.Move(_dbPath, backupPath);
+                _logger.LogWarning("Moved unreadable database aside to {BackupPath}; a fresh database will be created", backupPath);
+                PruneOldCorruptBackups();
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to delete corrupted database file, attempting to overwrite");
+                _logger.LogWarning(ex, "Failed to back up unreadable database file; deleting it instead");
+                try
+                {
+                    File.Delete(_dbPath);
+                }
+                catch (Exception deleteEx)
+                {
+                    _logger.LogWarning(deleteEx, "Failed to delete unreadable database file, attempting to overwrite");
+                }
             }
         }
 
@@ -262,6 +276,39 @@ public class SyncDatabase : IDisposable
         DatabaseMigrationService.CreateInitialSchema(_connection);
         DatabaseMigrationService.SetSchemaVersion(_connection, DatabaseMigrationService.CurrentSchemaVersion);
         _logger.LogInformation("Database recreated with fresh schema v{Version}", DatabaseMigrationService.CurrentSchemaVersion);
+    }
+
+    /// <summary>
+    /// Keeps only the three most recent <c>.corrupt-*</c> backups so repeated
+    /// recovery attempts can't fill the disk.
+    /// </summary>
+    private void PruneOldCorruptBackups()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(_dbPath);
+            if (string.IsNullOrEmpty(dir))
+            {
+                return;
+            }
+
+            var backups = Directory.GetFiles(dir, Path.GetFileName(_dbPath) + ".corrupt-*");
+            if (backups.Length <= 3)
+            {
+                return;
+            }
+
+            Array.Sort(backups, StringComparer.Ordinal);
+            for (var i = 0; i < backups.Length - 3; i++)
+            {
+                File.Delete(backups[i]);
+                _logger.LogDebug("Pruned old corrupt-database backup {Path}", backups[i]);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to prune old corrupt-database backups");
+        }
     }
 
     /// <summary>

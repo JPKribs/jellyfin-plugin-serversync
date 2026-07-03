@@ -882,6 +882,7 @@ export default function (view) {
         setChecked('chkMetadataSyncStudios', config.MetadataSyncStudios !== false);
         setChecked('chkMetadataSyncPeople', config.MetadataSyncPeople === true);
         setChecked('chkMetadataSyncImages', config.MetadataSyncImages !== false);
+        setChecked('chkMetadataSyncDeepImageVerification', config.MetadataSyncDeepImageVerification === true);
         setChecked('chkMetadataSyncFolderItems', config.MetadataSyncFolderItems === true);
     }
 
@@ -894,6 +895,7 @@ export default function (view) {
         config.MetadataSyncStudios = getChecked('chkMetadataSyncStudios');
         config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
         config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
+        config.MetadataSyncDeepImageVerification = getChecked('chkMetadataSyncDeepImageVerification');
         config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
 
         ServerSyncShared.saveConfig(config).then(function() {
@@ -908,12 +910,14 @@ export default function (view) {
     function loadPeopleSettings(config) {
         setChecked('chkEnablePeopleSync', config.EnablePeopleSync === true);
         setChecked('chkPeopleSyncImages', config.PeopleSyncImages !== false);
+        setChecked('chkPeopleSyncDeepImageVerification', config.PeopleSyncDeepImageVerification === true);
     }
 
     function savePeopleSettings() {
         var config = currentConfig || {};
         config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
         config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
+        config.PeopleSyncDeepImageVerification = getChecked('chkPeopleSyncDeepImageVerification');
 
         ServerSyncShared.saveConfig(config).then(function() {
             Dashboard.alert('People settings saved');

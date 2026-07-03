@@ -52,6 +52,8 @@ public class RefreshSyncTaskBaseTests
 
         public IList<TestRecord> GetAll() => All;
 
+        public IList<TestRecord> GetAllStrict() => All;
+
         public int Count() => All.Count;
 
         public int CountByStatus(SyncStatus status) => 0;

@@ -229,6 +229,23 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         Logger.LogInformation("Starting {Task}", Name);
         progress.Report(0);
 
+        // Client is created inside BeforeRunAsync; the finally covers every
+        // exit path — pre-flight abort (Client may already exist when the
+        // connection test fails), exceptions from the apply loop, and
+        // cancellation — so the API client wrapper never leaks past the run.
+        try
+        {
+            await RunAsync(progress, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Client?.Dispose();
+            Client = null;
+        }
+    }
+
+    private async Task RunAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
         if (!await BeforeRunAsync(cancellationToken).ConfigureAwait(false))
         {
             // Bumped to LogError + recorded to config so the dashboard can
@@ -313,16 +330,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
 
         var finalizeProgress = new Progress<double>(p =>
             progress.Report(ApplyEnd + ((100.0 - ApplyEnd) * Math.Clamp(p, 0, 100) / 100.0)));
-        try
-        {
-            await FinalizeAsync(finalizeProgress, cancellationToken).ConfigureAwait(false);
-            RecordRunCompletedAndSave();
-        }
-        finally
-        {
-            Client?.Dispose();
-            Client = null;
-        }
+        await FinalizeAsync(finalizeProgress, cancellationToken).ConfigureAwait(false);
+        RecordRunCompletedAndSave();
 
         progress.Report(100);
 
@@ -362,45 +371,12 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     /// <summary>
     /// Records the most-recent run failure for this module on the plugin
     /// configuration. Surfaced in the dashboard via the Status endpoint.
-    /// Best-effort — config save failure is logged but doesn't propagate.
     /// </summary>
     private void RecordRunFailure(string phase, string reason)
-    {
-        try
-        {
-            var failures = _configManager.Configuration.LastRunFailures;
-            failures.RemoveAll(f => string.Equals(f.ModuleKey, ModuleMutexKey, StringComparison.OrdinalIgnoreCase));
-            failures.Add(new Configuration.SyncRunFailure
-            {
-                ModuleKey = ModuleMutexKey,
-                Phase = phase,
-                Reason = reason,
-                Timestamp = DateTime.UtcNow
-            });
-            _configManager.SaveConfiguration();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "{Task}: failed to record run-failure outcome", Name);
-        }
-    }
+        => RunFailureLog.Record(_configManager, ModuleMutexKey, phase, reason, Logger, Name);
 
     private void ClearRunFailure()
-    {
-        try
-        {
-            var failures = _configManager.Configuration.LastRunFailures;
-            var removed = failures.RemoveAll(f => string.Equals(f.ModuleKey, ModuleMutexKey, StringComparison.OrdinalIgnoreCase));
-            if (removed > 0)
-            {
-                _configManager.SaveConfiguration();
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "{Task}: failed to clear run-failure outcome", Name);
-        }
-    }
+        => RunFailureLog.Clear(_configManager, ModuleMutexKey, Logger, Name);
 
     private async Task<bool> ApplyOneAsync(TRecord record, CancellationToken cancellationToken)
     {

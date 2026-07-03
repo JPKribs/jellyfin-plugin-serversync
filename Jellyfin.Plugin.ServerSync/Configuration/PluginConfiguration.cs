@@ -360,6 +360,15 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool MetadataSyncImages { get; set; } = true;
 
     /// <summary>
+    /// Verify source image sizes with live HTTP calls on every refresh, even
+    /// for images whose tag hasn't changed. Catches the rare case of an image
+    /// file replaced on the source's disk without a metadata rescan, at the
+    /// cost of one GET plus one HEAD per image per item per refresh. Off by
+    /// default — unchanged tags reuse the previously measured sizes.
+    /// </summary>
+    public bool MetadataSyncDeepImageVerification { get; set; }
+
+    /// <summary>
     /// Sync metadata for folder-type items (Series, Season, Album, Artist, BoxSet).
     /// When enabled, metadata for container items is synced in addition to leaf items.
     /// </summary>
@@ -382,6 +391,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Sync person images (Primary, etc.) from source to local.
     /// </summary>
     public bool PeopleSyncImages { get; set; } = true;
+
+    /// <summary>
+    /// Verify source person image sizes with live HTTP calls on every
+    /// refresh, even for images whose tag hasn't changed. Same trade-off as
+    /// <see cref="MetadataSyncDeepImageVerification"/>. Off by default.
+    /// </summary>
+    public bool PeopleSyncDeepImageVerification { get; set; }
 
     /// <summary>
     /// Timestamp when the last people sync completed.

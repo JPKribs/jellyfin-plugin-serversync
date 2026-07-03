@@ -82,12 +82,14 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     }
 
     // Bulk fetch + in-memory join: enumerate local Person items, then pull
-    // the full source Person catalog via paginated <c>/Persons?fields=…</c>
-    // calls (no <c>searchTerm</c>) and intersect by name in memory. The
-    // previous per-name fan-out cost one HTTP round-trip per local person
-    // (130k+ requests on a real library, 2.5 hours wall-clock); this
-    // version trades that for ~N/1000 paginated requests and a hashtable
-    // lookup per local name.
+    // the full source Person catalog via paginated
+    // <c>/Items?includeItemTypes=Person</c> calls (the dedicated /Persons
+    // endpoint ignores StartIndex, so the generic Items endpoint is the only
+    // pageable route — field parity verified live) and intersect by name in
+    // memory. The previous per-name fan-out cost one HTTP round-trip per
+    // local person (130k+ requests on a real library, 2.5 hours wall-clock);
+    // this version trades that for ~N/1000 paginated requests and a
+    // hashtable lookup per local name.
     /// <inheritdoc />
     protected override async Task<IList<SdkBaseItemDto>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
@@ -130,9 +132,8 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         }
 
         // Step 2: bulk-fetch the entire source Person catalog in pages.
-        // Returns BaseItemDto with the same field set GetPersonByNameAsync
-        // used, so downstream metadata blobs are byte-identical to the
-        // previous per-name path.
+        // Returns BaseItemDto with the field set the metadata blobs need
+        // (Overview, ProviderIds, Tags, Settings, etc.).
         IReadOnlyList<SdkBaseItemDto> sourcePersons;
         try
         {
@@ -216,30 +217,28 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         {
             var (sourceImg, localImg) = PeopleSyncMergeService.PopulateImageData(source, localPerson);
 
-            // Enrich source-side image manifest with real Size/Width/Height
-            // via /Items/{id}/Images. PopulateImageData builds the source side
-            // tag-only (Size=0) from BaseItemDto.ImageTags — that path is
-            // cheap but leaves the comparator with no honest signal to
-            // compare against the sized local manifest. Without enrichment
-            // here, the comparator's tag-only-vs-sized fallback fires on
-            // every row, every refresh — every row queues, every row
-            // re-applies, every refresh wastes the bandwidth of redownloading
-            // images that already match. One per-person HTTP at refresh time
-            // gives the comparator real numbers, so rows that genuinely
-            // match Source==Local stay Synced and only true divergences
-            // queue.
+            // Size the source-side manifest: carry sizes forward from the
+            // prior manifest for unchanged tags (no HTTP — the steady-state
+            // path), falling back to live /Items/{id}/Images enrichment only
+            // when a tag changed or a size is missing. PopulateImageData
+            // builds the source side tag-only (Size=0) from
+            // BaseItemDto.ImageTags; without sizing, the comparator's
+            // tag-only-vs-sized fallback fires on every row, every refresh —
+            // every row queues and re-downloads images that already match.
             if (Client != null
                 && !string.IsNullOrEmpty(record.SourcePersonId)
                 && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
             {
                 try
                 {
-                    sourceImg = await ImageManifestEnricher.EnrichAsync(
+                    sourceImg = await ImageManifestEnricher.EnrichWithCarryForwardAsync(
                         sourceImg,
+                        record.Images.Source,
                         sourcePersonGuid,
                         Client,
                         Logger,
                         source.Name,
+                        config.PeopleSyncDeepImageVerification,
                         cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
@@ -249,15 +248,11 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
                 catch (Exception ex)
                 {
                     Logger.LogDebug(ex, "Source image enrichment failed for {PersonName}; comparator will fall back to tag-only", source.Name);
+                    sourceImg = ImageManifestEnricher.CarryForwardSizes(sourceImg, record.Images.Source);
                 }
             }
 
-            // Carry sizes enrichment couldn't measure this run forward from the
-            // prior manifest for unchanged images, so a transient enrichment
-            // failure doesn't drop the row back to tag-only and read as a
-            // phantom change against the sized local side.
-            record.Images.UpdateSource(
-                ImageManifestEnricher.CarryForwardSizes(sourceImg, record.Images.Source));
+            record.Images.UpdateSource(sourceImg);
             record.Images.Local = localImg;
         }
         else

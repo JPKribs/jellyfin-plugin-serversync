@@ -6,7 +6,7 @@ Content syncing mirrors missing or updated media files from a source Jellyfin se
 
 * **Enable Content Sync** turns content syncing on.
 * **Temp Download Path** sets the staging folder where files download before they move to the final location.
-* **Include Companion Files** also downloads external subtitles, NFO files, and images with each media file.
+* **Include Companion Files** also downloads external subtitle files with each media file. Other companions (NFO files, local artwork, external audio tracks) have no download route in the Jellyfin API and are skipped.
 * **Max Concurrent Downloads** limits how many files download at once.
 * **Max Download Speed** caps the download rate, where 0 means unlimited.
 * **Download New Content** chooses whether brand new items download automatically or wait for approval.

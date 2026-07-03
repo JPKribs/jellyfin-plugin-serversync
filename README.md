@@ -87,7 +87,7 @@ The Plugin builds a table of all content that exists in the mapped Source Librar
 
 * Files missing on Local Server are Queued for download *(or Pending when `Download New Content` is set to require approval)*
 * Files no longer on Source Server are set to Delete only when `Delete Missing Content` is enabled *(off by default)*
-* Companion files (subtitles, NFOs, images) are included with their parent media
+* External subtitle companion files are included with their parent media
 
 Files can be manually approved or ignored using the Approval Process.
 

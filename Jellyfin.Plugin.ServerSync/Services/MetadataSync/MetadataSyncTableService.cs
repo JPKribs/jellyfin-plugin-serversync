@@ -154,6 +154,9 @@ public class MetadataSyncTableService
     /// local item matches by translated path. Category flags gate which
     /// blobs are populated; <paramref name="syncGenres"/> / <paramref name="syncTags"/>
     /// gate the corresponding subfields inside the metadata blob.
+    /// <paramref name="priorSourceImagesJson"/> is the previous refresh's
+    /// source image manifest for this key — image sizes carry forward from it
+    /// when tags are unchanged, skipping the per-item enrichment HTTP call.
     /// </summary>
     public async Task<MetadataSyncItem?> BuildRecordAsync(
         LibraryMapping libraryMapping,
@@ -165,6 +168,8 @@ public class MetadataSyncTableService
         bool syncStudios,
         bool syncGenres,
         bool syncTags,
+        string? priorSourceImagesJson,
+        bool deepImageVerification,
         SourceServerClient client,
         CancellationToken cancellationToken)
     {
@@ -222,7 +227,10 @@ public class MetadataSyncTableService
 
         if (syncImages)
         {
-            await MetadataSyncMergeService.MergeImagesAsync(item, sourceItem, localItem, client, _logger, cancellationToken).ConfigureAwait(false);
+            await MetadataSyncMergeService.MergeImagesAsync(
+                item, sourceItem, localItem, client,
+                priorSourceImagesJson, deepImageVerification,
+                _logger, cancellationToken).ConfigureAwait(false);
         }
 
         if (syncPeople)

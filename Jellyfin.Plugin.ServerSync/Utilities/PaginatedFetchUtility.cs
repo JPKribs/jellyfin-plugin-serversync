@@ -24,9 +24,11 @@ public readonly record struct PaginatedFetchOutcome(int ProcessedItems, bool Com
 public static class PaginatedFetchUtility
 {
     /// <summary>
-    /// Items fetched per page.
+    /// Items fetched per page. Callers request only light fields (Path /
+    /// DateCreated / MediaSources), so a larger page cuts round-trip count
+    /// against the source server without meaningfully growing the response.
     /// </summary>
-    public const int DefaultBatchSize = 100;
+    public const int DefaultBatchSize = 500;
 
     /// <summary>
     /// Maximum consecutive fetch errors before aborting the loop.
@@ -61,6 +63,7 @@ public static class PaginatedFetchUtility
         var startIndex = 0;
         var processedItems = 0;
         var consecutiveErrors = 0;
+        var processFailures = 0;
         var completedFully = false;
 
         while (true)
@@ -175,8 +178,21 @@ public static class PaginatedFetchUtility
                 }
                 catch (Exception ex)
                 {
+                    // Counted: an item that failed to process is absent from
+                    // the caller's seen set exactly like an item that was
+                    // never fetched, so it must poison CompletedFully or the
+                    // caller's prune would treat it as removed from source.
+                    processFailures++;
                     logger.LogWarning(ex, "Failed to process item {ItemId} ({Path})", item.Id, item.Path);
                 }
+            }
+
+            // Cancellation can break the item loop mid-page; the remaining
+            // items on this page were never processed, so this run must not
+            // report complete discovery.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
             }
 
             startIndex += DefaultBatchSize;
@@ -186,6 +202,14 @@ public static class PaginatedFetchUtility
                 completedFully = true;
                 break;
             }
+        }
+
+        if (processFailures > 0)
+        {
+            logger.LogWarning(
+                "{Count} item(s) in library {LibraryName} failed to process; reporting incomplete discovery so they are not treated as removed",
+                processFailures, libraryName);
+            completedFully = false;
         }
 
         return new PaginatedFetchOutcome(processedItems, completedFully);

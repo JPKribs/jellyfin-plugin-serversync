@@ -150,6 +150,17 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         fallback: (IList<TRecord>)Array.Empty<TRecord>());
 
     /// <inheritdoc />
+    public IList<TRecord> GetAllStrict()
+    {
+        lock (WriteLock)
+        {
+            using var cmd = Connection.CreateCommand();
+            cmd.CommandText = $"SELECT * FROM {TableName}";
+            return ReadAll(cmd);
+        }
+    }
+
+    /// <inheritdoc />
     public int Count() => ExecuteRead(
         conn =>
         {

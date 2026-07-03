@@ -2,16 +2,14 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.63.3"
+version: "10.11.64.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
 description: >
   Server Sync enables one-way content synchronization from a source Jellyfin server to a local server.
   The plugin periodically scans the source server for media items (Movies, Episodes, Audio, Video)
-  and downloads missing or updated content. Features include library-to-library mapping with path
-  translation, ETag-based change detection, configurable approval workflows, bandwidth throttling
-  with time-based scheduling, and companion file support (subtitles, etc.).
+  and downloads missing or updated content.
 category: "Administration"
 owner: "JPKribs"
 artifacts:
@@ -26,6 +24,12 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Bump base to 2026.6.23
-  - Folder cleanup
-  - README cleanup
+  - Fixed external subtitle downloads saving the main video file in place of the subtitle
+  - Refreshes now abort on connection errors instead of treating partial results as source deletions
+  - Connection test no longer reports success for an invalid API key
+  - Unreadable sync databases are backed up instead of deleted
+  - Metadata and People refreshes reuse unchanged image sizes instead of checking every image over HTTP, with new Deep Image Verification settings to force full checks
+  - Person catalog fetch is now paginated
+  - Content discovery pages are larger for fewer round trips
+  - Added an opt in, read only API integration test suite
+  - Removed unused client methods and corrected documentation
