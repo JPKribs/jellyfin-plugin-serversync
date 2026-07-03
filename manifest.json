@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.64.0",
+        "changelog": "## Developer\r\n- Fixed external subtitle downloads saving the main video file in place of the subtitle\r\n- Refreshes now abort on connection errors instead of treating partial results as source deletions\r\n- Connection test no longer reports success for an invalid API key\r\n- Unreadable sync databases are backed up instead of deleted\r\n- Metadata and People refreshes reuse unchanged image sizes instead of checking every image over HTTP, with new Deep Image Verification settings to force full checks\r\n- Person catalog fetch is now paginated\r\n- Content discovery pages are larger for fewer round trips\r\n- Added an opt in, read only API integration test suite\r\n- Removed unused client methods and corrected documentation",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.64.0/jellyfin-plugin-serversync-10.11.64.0.zip",
+        "checksum": "d8db48dae35bbfb6495d24cc715f8854",
+        "timestamp": "2026-07-03T22:51:57Z"
+      },
+      {
         "version": "10.11.63.3",
         "changelog": "## Developer\r\n- Bump base to 2026.6.23\r\n- Folder cleanup\r\n- README cleanup",
         "targetAbi": "10.11.0.0",
