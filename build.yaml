@@ -24,6 +24,6 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Refresh CPU cost reduced - identical blobs skip JSON parsing and date parsing only runs on date-shaped strings
-  - New Configuration > Processing section with a Refresh Parallelism setting (default 8, the previous behavior) to control how much CPU Metadata and People refreshes may use
-  - Deep Image Verification is now a single setting for all sync modules, under Configuration > Processing (re-enable it there if you had it on for Metadata or People)
+  - Add shortcuts to prevent unnecessary Metadata checks where we can determine earlier it's not needed
+  - Add setting for parallel processing for more or less item processing at the same time
+  - Move settings into a processing section
