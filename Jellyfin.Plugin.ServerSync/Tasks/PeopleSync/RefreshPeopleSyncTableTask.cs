@@ -64,13 +64,13 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     /// <inheritdoc />
     protected override string ModuleMutexKey => "People";
 
-    // <c>BuildRecordAsync</c> is HTTP-free now (source data comes from the
-    // bulk <c>/Persons</c> fetch, image data from <c>BaseItemDto.ImageTags</c>);
-    // the only blocking work per item is the local file-size stat for each
-    // matched person's images. A modest parallelism here lets that stat I/O
-    // overlap without contending on Jellyfin's library SQLite.
+    // User-configurable (Configuration > Processing) — shared with the
+    // Metadata refresh. <c>BuildRecordAsync</c> is HTTP-free in steady state
+    // (source data comes from the bulk <c>/Persons</c> fetch, image data
+    // from <c>BaseItemDto.ImageTags</c>), so this dial is effectively "how
+    // much CPU may a refresh use".
     /// <inheritdoc />
-    protected override int BuildRecordParallelism => 4;
+    protected override int BuildRecordParallelism => Math.Clamp(ConfigManager.Configuration.RefreshParallelism, 1, 16);
 
     /// <inheritdoc />
     protected override bool IsEnabled()
@@ -251,7 +251,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
                         Client,
                         Logger,
                         source.Name,
-                        config.PeopleSyncDeepImageVerification,
+                        config.DeepImageVerification,
                         cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)

@@ -66,13 +66,13 @@ public class RefreshMetadataSyncTableTask
     /// <inheritdoc />
     protected override string ModuleMutexKey => "Metadata";
 
-    // Metadata's <c>BuildRecordAsync</c> issues a per-item
-    // <c>GetItemImageInfoAsync</c> HTTP call when image sync is enabled. With
-    // libraries in the tens of thousands of items, serializing these round-
-    // trips makes a refresh take hours. 8 parallel builds turn that into
-    // minutes without overwhelming a typical home Jellyfin source.
+    // User-configurable (Configuration > Processing). The build loop is
+    // mostly CPU-bound now that image sizes carry forward, so this dial is
+    // effectively "how much CPU may a refresh use": 8 (the default) finishes
+    // fastest but can saturate a typical host for the build phase; lower it
+    // to leave headroom for playback/transcode.
     /// <inheritdoc />
-    protected override int BuildRecordParallelism => 8;
+    protected override int BuildRecordParallelism => Math.Clamp(ConfigManager.Configuration.RefreshParallelism, 1, 16);
 
     /// <inheritdoc />
     protected override bool IsEnabled()
@@ -437,7 +437,7 @@ public class RefreshMetadataSyncTableTask
             syncGenres: config.MetadataSyncGenres,
             syncTags: config.MetadataSyncTags,
             priorSourceImagesJson: priorRecord?.Images.Source,
-            deepImageVerification: config.MetadataSyncDeepImageVerification,
+            deepImageVerification: config.DeepImageVerification,
             Client,
             cancellationToken).ConfigureAwait(false);
 

@@ -145,6 +145,38 @@
                         </div>
                     </div>
 
+                    <!-- COLLAPSIBLE SECTION: Processing -->
+
+                    <div class="jpk-collapsible-section">
+                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="processingConfigContent">
+                            <span class="jpk-collapsible-title">Processing</span>
+                            <span class="jpk-collapsible-icon">&#9660;</span>
+                        </button>
+                        <div id="processingConfigContent" class="jpk-collapsible-content collapsed">
+                            <div class="fieldDescription mb-md">Controls how much work sync tasks perform at once. Applies to all sync modules.</div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtRefreshParallelism">Refresh Parallelism</label>
+                                <input is="emby-input" type="number" id="txtRefreshParallelism" min="1" max="16" />
+                                <div class="fieldDescription">Items processed at once during Metadata and People refreshes. Higher finishes faster but uses more CPU while the task runs; lower leaves headroom for playback and transcoding. Default: 8.</div>
+                            </div>
+
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input type="checkbox" is="emby-checkbox" id="chkDeepImageVerification" />
+                                    <span class="checkboxLabel">Deep Image Verification</span>
+                                </label>
+                                <div class="fieldDescription checkboxFieldDescription">Re-verify every source image size over HTTP on every refresh, even when unchanged. Catches images replaced on the source's disk without a rescan, but makes refreshes much slower on large libraries. Applies to Metadata and People sync.</div>
+                            </div>
+
+                            <div class="jpk-collapsible-actions">
+                                <button is="emby-button" type="button" id="btnSaveProcessing" class="raised jpk-button-submit jpk-button-small">
+                                    <span>Save</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- SECTION: Sync Settings Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
@@ -513,14 +545,6 @@
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
-                                            <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncDeepImageVerification" />
-                                            <span class="checkboxLabel">Deep Image Verification</span>
-                                        </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Re-verify every source image size over HTTP on every refresh, even when unchanged. Catches images replaced on the source's disk without a rescan, but makes refreshes much slower on large libraries.</div>
-                                    </div>
-
-                                    <div class="checkboxContainer checkboxContainer-withDescription">
-                                        <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncFolderItems" />
                                             <span class="checkboxLabel">Folder Items (Series, Seasons, Albums, Artists, BoxSets)</span>
                                         </label>
@@ -565,14 +589,6 @@
                                             <span class="checkboxLabel">Images</span>
                                         </label>
                                         <div class="fieldDescription checkboxFieldDescription">Sync person images (primary photo) from source server.</div>
-                                    </div>
-
-                                    <div class="checkboxContainer checkboxContainer-withDescription">
-                                        <label class="emby-checkbox-label">
-                                            <input type="checkbox" is="emby-checkbox" id="chkPeopleSyncDeepImageVerification" />
-                                            <span class="checkboxLabel">Deep Image Verification</span>
-                                        </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Re-verify every source person image size over HTTP on every refresh, even when unchanged. Slower on libraries with many people.</div>
                                     </div>
                                 </div>
                             </div>

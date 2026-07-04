@@ -360,15 +360,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool MetadataSyncImages { get; set; } = true;
 
     /// <summary>
-    /// Verify source image sizes with live HTTP calls on every refresh, even
-    /// for images whose tag hasn't changed. Catches the rare case of an image
-    /// file replaced on the source's disk without a metadata rescan, at the
-    /// cost of one GET plus one HEAD per image per item per refresh. Off by
-    /// default — unchanged tags reuse the previously measured sizes.
-    /// </summary>
-    public bool MetadataSyncDeepImageVerification { get; set; }
-
-    /// <summary>
     /// Sync metadata for folder-type items (Series, Season, Album, Artist, BoxSet).
     /// When enabled, metadata for container items is synced in addition to leaf items.
     /// </summary>
@@ -393,16 +384,32 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool PeopleSyncImages { get; set; } = true;
 
     /// <summary>
-    /// Verify source person image sizes with live HTTP calls on every
-    /// refresh, even for images whose tag hasn't changed. Same trade-off as
-    /// <see cref="MetadataSyncDeepImageVerification"/>. Off by default.
-    /// </summary>
-    public bool PeopleSyncDeepImageVerification { get; set; }
-
-    /// <summary>
     /// Timestamp when the last people sync completed.
     /// </summary>
     public DateTime? LastPeopleSyncTime { get; set; }
+
+    // ===== Processing Configuration =====
+
+    /// <summary>
+    /// Concurrent items processed during the Metadata and People refresh
+    /// build phases. Higher values finish refreshes faster but use more CPU
+    /// for the duration; the build work is mostly CPU-bound (blob
+    /// serialization, hashing, comparison) now that image sizes carry
+    /// forward. Default 8 — the historical behavior. Clamped 1–16.
+    /// </summary>
+    public int RefreshParallelism { get; set; } = 8;
+
+    /// <summary>
+    /// Verify source image sizes with live HTTP calls on every refresh, even
+    /// for images whose tag hasn't changed. Applies to all sync modules.
+    /// Catches the rare case of an image file replaced on the source's disk
+    /// without a metadata rescan, at the cost of one GET plus one HEAD per
+    /// image per item per refresh. Off by default — unchanged tags reuse the
+    /// previously measured sizes. Replaces the per-module
+    /// MetadataSyncDeepImageVerification / PeopleSyncDeepImageVerification
+    /// settings from 10.11.64.0.
+    /// </summary>
+    public bool DeepImageVerification { get; set; }
 
     /// <summary>
     /// Validates configuration values and returns a list of validation errors.
@@ -656,6 +663,7 @@ public class PluginConfiguration : BasePluginConfiguration
         RecyclingBinRetentionDays = Math.Clamp(RecyclingBinRetentionDays, 1, 365);
         MaxRetryCount = Math.Clamp(MaxRetryCount, 1, 10);
         SizeMatchToleranceBytes = Math.Max(0, SizeMatchToleranceBytes);
+        RefreshParallelism = Math.Clamp(RefreshParallelism, 1, 16);
 
         // Normalize URLs
         if (!string.IsNullOrWhiteSpace(SourceServerUrl))

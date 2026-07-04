@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.64.1"
+version: "10.11.64.2"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -24,7 +24,6 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Fixed People sync finding zero source people on servers configured with a non-admin token (catalog is fetched via /Persons again)
-  - Refreshes no longer prune tracking rows when the source answers with an empty catalog, and never remove more than half the table in a single run
-  - Fixed a permanent verification loop when servers store the same premiere/end date with different times of day
-  - Task progress now moves through fetch, build, and prune in proportion to the actual work instead of freezing near the end of large runs
+  - Refresh CPU cost reduced - identical blobs skip JSON parsing and date parsing only runs on date-shaped strings
+  - New Configuration > Processing section with a Refresh Parallelism setting (default 8, the previous behavior) to control how much CPU Metadata and People refreshes may use
+  - Deep Image Verification is now a single setting for all sync modules, under Configuration > Processing (re-enable it there if you had it on for Metadata or People)

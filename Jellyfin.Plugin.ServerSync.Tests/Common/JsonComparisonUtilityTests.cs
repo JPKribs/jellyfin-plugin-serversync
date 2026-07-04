@@ -247,4 +247,50 @@ public class JsonComparisonUtilityTests
         Assert.Null(JsonComparisonUtility.ToDateOnlyString((DateTime?)null));
         Assert.Null(JsonComparisonUtility.ToDateOnlyString((DateTimeOffset?)null));
     }
+
+    /// <summary>
+    /// The same UTC instant in different serializations ("Z" vs "+00:00")
+    /// still compares equal through the ISO-shape prefilter added for CPU.
+    /// True: format jitter between SDK and local serialization stays invisible.
+    /// False: the prefilter broke date tolerance and every date field diffs.
+    /// </summary>
+    [Fact]
+    public void JsonEquals_DateStrings_FormatJitterStillEqual()
+    {
+        Assert.True(JsonComparisonUtility.JsonEquals(
+            "{\"d\":\"2026-01-15T07:00:00+00:00\"}",
+            "{\"d\":\"2026-01-15T07:00:00Z\"}"));
+    }
+
+    /// <summary>
+    /// Non-date strings that merely differ are unequal, and never take the
+    /// date-parse path (which historically ran on every unequal string pair,
+    /// including multi-hundred-character overviews).
+    /// True: text fields compare as text.
+    /// False: the prefilter admits or equates strings it shouldn't.
+    /// </summary>
+    [Fact]
+    public void JsonEquals_NonDateStrings_CompareAsText()
+    {
+        Assert.False(JsonComparisonUtility.JsonEquals(
+            "{\"overview\":\"A long plot summary about things.\"}",
+            "{\"overview\":\"A different plot summary about things.\"}"));
+        Assert.True(JsonComparisonUtility.JsonEquals(
+            "{\"overview\":\"Same text.\"}",
+            "{\"overview\":\"Same text.\"}"));
+    }
+
+    /// <summary>
+    /// Byte-identical blobs short-circuit to equal before any parsing. The
+    /// fast path must agree with the parsed answer for identical inputs.
+    /// True: in-sync rows (mirrored builders, identical key order) skip the
+    /// parse+walk that was saturating cores during large refreshes.
+    /// False: the fast path diverges from semantic equality.
+    /// </summary>
+    [Fact]
+    public void JsonEquals_IdenticalBlobs_Equal()
+    {
+        const string blob = "{\"Name\":\"X\",\"PremiereDate\":\"2026-01-15\",\"Tags\":[\"a\",\"b\"]}";
+        Assert.True(JsonComparisonUtility.JsonEquals(blob, blob));
+    }
 }

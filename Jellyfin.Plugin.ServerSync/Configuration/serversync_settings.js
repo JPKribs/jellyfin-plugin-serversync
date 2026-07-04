@@ -882,7 +882,6 @@ export default function (view) {
         setChecked('chkMetadataSyncStudios', config.MetadataSyncStudios !== false);
         setChecked('chkMetadataSyncPeople', config.MetadataSyncPeople === true);
         setChecked('chkMetadataSyncImages', config.MetadataSyncImages !== false);
-        setChecked('chkMetadataSyncDeepImageVerification', config.MetadataSyncDeepImageVerification === true);
         setChecked('chkMetadataSyncFolderItems', config.MetadataSyncFolderItems === true);
     }
 
@@ -895,7 +894,6 @@ export default function (view) {
         config.MetadataSyncStudios = getChecked('chkMetadataSyncStudios');
         config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
         config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
-        config.MetadataSyncDeepImageVerification = getChecked('chkMetadataSyncDeepImageVerification');
         config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
 
         ServerSyncShared.saveConfig(config).then(function() {
@@ -910,14 +908,12 @@ export default function (view) {
     function loadPeopleSettings(config) {
         setChecked('chkEnablePeopleSync', config.EnablePeopleSync === true);
         setChecked('chkPeopleSyncImages', config.PeopleSyncImages !== false);
-        setChecked('chkPeopleSyncDeepImageVerification', config.PeopleSyncDeepImageVerification === true);
     }
 
     function savePeopleSettings() {
         var config = currentConfig || {};
         config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
         config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
-        config.PeopleSyncDeepImageVerification = getChecked('chkPeopleSyncDeepImageVerification');
 
         ServerSyncShared.saveConfig(config).then(function() {
             Dashboard.alert('People settings saved');
@@ -949,6 +945,25 @@ export default function (view) {
         });
     }
 
+    // --- Processing Settings ---
+
+    function loadProcessingSettings(config) {
+        setValue('txtRefreshParallelism', config.RefreshParallelism || 8);
+        setChecked('chkDeepImageVerification', config.DeepImageVerification === true);
+    }
+
+    function saveProcessingSettings() {
+        var config = currentConfig || {};
+        config.RefreshParallelism = Math.min(16, Math.max(1, getIntValue('txtRefreshParallelism', 8)));
+        config.DeepImageVerification = getChecked('chkDeepImageVerification');
+
+        ServerSyncShared.saveConfig(config).then(function() {
+            Dashboard.alert('Processing settings saved');
+        }).catch(function() {
+            Dashboard.alert('Failed to save processing settings');
+        });
+    }
+
     // ============================================
     // PAGE INITIALIZATION
     // ============================================
@@ -968,6 +983,7 @@ export default function (view) {
             loadMetadataSettings(config);
             loadPeopleSettings(config);
             loadUserSyncSettings(config);
+            loadProcessingSettings(config);
 
             if (config.SourceServerUrl && config.SourceServerApiKey) {
                 showMappingSections();
@@ -1040,6 +1056,7 @@ export default function (view) {
 
                 bindClick('btnAddUserMapping', function() { addUserMappingRow(); });
                 bindClick('btnSaveUsers', saveUsers);
+                bindClick('btnSaveProcessing', saveProcessingSettings);
 
                 bindClick('btnSaveContentSettings', saveContentSettings);
                 bindClick('btnSaveHistorySettings', saveHistorySettings);

@@ -30,6 +30,18 @@ public static class JsonComparisonUtility
             return false;
         }
 
+        // Byte-identical blobs are trivially equal — skip the parse + walk.
+        // This is the hot path on refresh: source/local blobs come from
+        // hand-mirrored builders with identical key order, so in-sync rows
+        // usually serialize identically, and this check runs for every
+        // record whose hash short-circuit missed. Parsing two documents and
+        // walking them with per-object dictionary allocations across 100k+
+        // rows was saturating every core during the build phase.
+        if (string.Equals(json1, json2, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
         try
         {
             using var doc1 = JsonDocument.Parse(json1);
@@ -244,6 +256,20 @@ public static class JsonComparisonUtility
         => s.Length <= max ? s : string.Concat(s.AsSpan(0, max), "…");
 
     /// <summary>
+    /// Cheap shape check for ISO-8601 date strings (<c>yyyy-MM-dd…</c>) —
+    /// every date this plugin serializes starts that way. Filters which
+    /// string pairs are worth a <see cref="DateTimeOffset.TryParse(string, out DateTimeOffset)"/>
+    /// attempt in <see cref="JsonElementEquals"/>.
+    /// </summary>
+    private static bool LooksLikeIsoDate(string? s) =>
+        s is { Length: >= 10 and <= 40 }
+        && char.IsAsciiDigit(s[0])
+        && char.IsAsciiDigit(s[1])
+        && char.IsAsciiDigit(s[2])
+        && char.IsAsciiDigit(s[3])
+        && s[4] == '-';
+
+    /// <summary>
     /// Checks if a JsonElement represents an "empty" value (null, empty string, empty array, empty object).
     /// </summary>
     private static bool IsEmptyValue(JsonElement e)
@@ -411,8 +437,12 @@ public static class JsonComparisonUtility
 
                 // Compare as dates via DateTimeOffset to avoid the DateTime
                 // Unspecified-kind TZ shift. AssumeUniversal makes offset-less
-                // strings UTC.
-                if (System.DateTimeOffset.TryParse(s1, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto1) &&
+                // strings UTC. Gated on an ISO-date shape check first — blobs
+                // are full of long non-date strings (overviews, taglines) and
+                // attempting a culture-aware parse on every unequal pair was
+                // measurable CPU across 100k-row refreshes.
+                if (LooksLikeIsoDate(s1) && LooksLikeIsoDate(s2) &&
+                    System.DateTimeOffset.TryParse(s1, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto1) &&
                     System.DateTimeOffset.TryParse(s2, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto2))
                 {
                     if (dto1.UtcDateTime == dto2.UtcDateTime)
