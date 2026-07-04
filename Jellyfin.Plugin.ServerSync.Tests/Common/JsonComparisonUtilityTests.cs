@@ -202,4 +202,49 @@ public class JsonComparisonUtilityTests
         Assert.False(JsonComparisonUtility.DateOnlyEquals(new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc), null));
         Assert.False(JsonComparisonUtility.DateOnlyEquals(null, new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
     }
+
+    /// <summary>
+    /// Same calendar date with different times of day normalizes to the same
+    /// string. This is the field-level regression from the 07:01-vs-07:00
+    /// EndDate loop: the apply step (DateOnlyEquals) said "equal, nothing to
+    /// write" while the blob comparison said "divergent" — rows never
+    /// converged. Blobs storing this normalized form keep both in agreement.
+    /// True: time-of-day jitter between servers can't diverge date fields.
+    /// False: the verification loop comes back.
+    /// </summary>
+    [Fact]
+    public void ToDateOnlyString_SameDateDifferentTimes_Match()
+    {
+        var source = (DateTimeOffset?)new DateTimeOffset(2026, 1, 15, 7, 1, 0, TimeSpan.Zero);
+        var local = (DateTime?)new DateTime(2026, 1, 15, 7, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal("2026-01-15", JsonComparisonUtility.ToDateOnlyString(source));
+        Assert.Equal(JsonComparisonUtility.ToDateOnlyString(source), JsonComparisonUtility.ToDateOnlyString(local));
+    }
+
+    /// <summary>
+    /// Normalization agrees with DateOnlyEquals on Unspecified-kind values:
+    /// both treat them as already-UTC rather than shifting via local time.
+    /// True: blob comparison and apply-step comparison share one calendar.
+    /// False: a TZ-dependent shift reintroduces the compare/apply split on
+    /// machines west or east of UTC.
+    /// </summary>
+    [Fact]
+    public void ToDateOnlyString_UnspecifiedKind_TreatedAsUtc()
+    {
+        var unspecified = (DateTime?)new DateTime(2026, 1, 15, 23, 30, 0, DateTimeKind.Unspecified);
+
+        Assert.Equal("2026-01-15", JsonComparisonUtility.ToDateOnlyString(unspecified));
+    }
+
+    /// <summary>
+    /// Null in, null out — so absent dates stay absent in the blob instead of
+    /// becoming a "null"/empty-string diff against the other side.
+    /// </summary>
+    [Fact]
+    public void ToDateOnlyString_Null_ReturnsNull()
+    {
+        Assert.Null(JsonComparisonUtility.ToDateOnlyString((DateTime?)null));
+        Assert.Null(JsonComparisonUtility.ToDateOnlyString((DateTimeOffset?)null));
+    }
 }

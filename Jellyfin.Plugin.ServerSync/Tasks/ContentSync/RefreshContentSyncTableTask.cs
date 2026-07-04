@@ -399,35 +399,41 @@ public class UpdateSyncTablesTask
     protected override Task<int> PruneStaleAsync(
         IReadOnlyDictionary<string, SyncItem> existing,
         HashSet<string> seenKeys,
+        IProgress<double> progress,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(progress);
+
         var deleteMode = ConfigManager.Configuration.DeleteMissingContentMode;
         if (deleteMode == ApprovalMode.Disabled)
         {
+            progress.Report(100);
             return Task.FromResult(0);
         }
 
         var typedManager = (ContentSyncTableManager)Manager;
-        var pruned = 0;
+
+        // Skip rows already seen, and rows whose library mapping is currently
+        // disabled (or removed from config) — without the scope guard,
+        // disabling a mapping silently schedules every synced file under it
+        // for deletion.
+        var stale = new List<SyncItem>();
         foreach (var kvp in existing)
         {
+            if (!seenKeys.Contains(kvp.Key) && IsInScope(kvp.Value))
+            {
+                stale.Add(kvp.Value);
+            }
+        }
+
+        var pruned = 0;
+        var reportEvery = Math.Max(1, stale.Count / 100);
+        for (var i = 0; i < stale.Count; i++)
+        {
             cancellationToken.ThrowIfCancellationRequested();
-            if (seenKeys.Contains(kvp.Key))
-            {
-                continue;
-            }
-
-            // Skip rows whose library mapping is currently disabled (or removed
-            // from config). Without this guard, disabling a mapping silently
-            // schedules every synced file under it for deletion.
-            if (!IsInScope(kvp.Value))
-            {
-                continue;
-            }
-
             try
             {
-                var result = SyncStateService.ProcessMissingItem(typedManager, kvp.Value, deleteMode, Logger);
+                var result = SyncStateService.ProcessMissingItem(typedManager, stale[i], deleteMode, Logger);
                 if (result.Changed)
                 {
                     pruned++;
@@ -435,10 +441,16 @@ public class UpdateSyncTablesTask
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Failed to process missing item {SourceItemId}", kvp.Value.SourceItemId);
+                Logger.LogWarning(ex, "Failed to process missing item {SourceItemId}", stale[i].SourceItemId);
+            }
+
+            if ((i + 1) % reportEvery == 0)
+            {
+                progress.Report(100.0 * (i + 1) / stale.Count);
             }
         }
 
+        progress.Report(100);
         return Task.FromResult(pruned);
     }
 

@@ -74,9 +74,11 @@ public static class MetadataSyncMergeService
             ["CommunityRating"] = sourceItem.CommunityRating,
             ["CriticRating"] = sourceItem.CriticRating,
 
-            // Dates
-            ["PremiereDate"] = sourceItem.PremiereDate,
-            ["EndDate"] = sourceItem.EndDate,
+            // Dates — stored date-only: the apply step syncs these as
+            // calendar dates (DateOnlyEquals), so the blobs must not carry
+            // time-of-day or comparison and apply disagree forever.
+            ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(sourceItem.PremiereDate),
+            ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(sourceItem.EndDate),
             ["ProductionYear"] = sourceItem.ProductionYear,
 
             // External provider IDs
@@ -311,8 +313,9 @@ public static class MetadataSyncMergeService
             ["CustomRating"] = localItem.CustomRating,
             ["CommunityRating"] = localItem.CommunityRating,
             ["CriticRating"] = localItem.CriticRating,
-            ["PremiereDate"] = localItem.PremiereDate,
-            ["EndDate"] = localItem.EndDate,
+            // Date-only — see source-side comment in MergeMetadataFields.
+            ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.PremiereDate),
+            ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.EndDate),
             ["ProductionYear"] = localItem.ProductionYear,
             ["ProviderIds"] = localItem.ProviderIds?
                 .Where(kvp => kvp.Value != null)

@@ -291,6 +291,28 @@ public static class JsonComparisonUtility
             : dt.ToUniversalTime();
 
     /// <summary>
+    /// Normalizes a date-only semantic field (premiere/end/birth/death dates)
+    /// to its UTC calendar date as <c>yyyy-MM-dd</c>. Blob builders store
+    /// this instead of the raw timestamp so the JSON comparison agrees with
+    /// the apply step's <see cref="DateOnlyEquals"/> — servers routinely hold
+    /// the same date with different times of day (TZ-shifted midnights,
+    /// provider quirks like 07:01), and comparing timestamps left rows
+    /// permanently diverged that the apply step correctly refused to touch.
+    /// </summary>
+    public static string? ToDateOnlyString(DateTime? value) =>
+        value.HasValue
+            ? AsUtcSafe(value.Value).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+            : null;
+
+    /// <summary>
+    /// <see cref="ToDateOnlyString(DateTime?)"/> for the SDK's offset-typed dates.
+    /// </summary>
+    public static string? ToDateOnlyString(DateTimeOffset? value) =>
+        value.HasValue
+            ? value.Value.UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+            : null;
+
+    /// <summary>
     /// Recursively compares two JsonElements for equality.
     /// Treats null, undefined, empty string, empty array, and empty object as equivalent.
     /// </summary>

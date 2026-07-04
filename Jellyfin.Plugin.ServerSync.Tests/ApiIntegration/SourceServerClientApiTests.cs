@@ -188,70 +188,36 @@ public class SourceServerClientApiTests
     }
 
     // =====================================================================
-    // Persons — the /Items?includeItemTypes=Person pagination must be a
-    // faithful (or better) replacement for the unpaginatable /Persons
-    // endpoint: nothing missing, no duplicates, identical field payloads.
+    // Persons — the client must return the complete /Persons catalog in one
+    // call: no duplicates, nothing missing versus the raw endpoint. /Persons
+    // (not /Items?recursive) is load-bearing here: recursive Items queries
+    // scope to the requesting user's libraries and return an empty 200 for
+    // non-admin tokens, which is how 10.11.64.0 wiped the People table.
     // =====================================================================
 
     [ApiFact]
-    public async Task GetAllPersons_PaginatedFetch_IsFaithfulSupersetOfPersonsEndpoint()
+    public async Task GetAllPersons_MatchesRawPersonsEndpoint()
     {
         var persons = await _fx.Client.GetAllPersonsAsync();
 
-        if (persons.Count == 0)
-        {
-            _output.WriteLine("Server has no persons — nothing to compare.");
-            return;
-        }
-
-        // No duplicate IDs across page boundaries.
+        // No duplicate IDs.
         var clientIds = new HashSet<Guid>();
         foreach (var p in persons)
         {
             Assert.NotNull(p.Id);
-            Assert.True(clientIds.Add(p.Id!.Value), $"Duplicate person {p.Id} returned by paginated fetch");
+            Assert.True(clientIds.Add(p.Id!.Value), $"Duplicate person {p.Id} returned by bulk fetch");
         }
 
-        // Wire-format comparison: hash every person from the raw /Persons
-        // endpoint and from the raw paginated /Items endpoint, then require
-        // /Items ⊇ /Persons with byte-identical canonical JSON per person.
         const string fields = "Overview,ProviderIds,Tags,OriginalTitle,SortName,DateCreated,ProductionLocations,Settings";
         var personsEndpoint = await HashItemsAsync($"/Persons?fields={fields}");
-        var itemsEndpoint = new Dictionary<string, string>();
-        var startIndex = 0;
-        while (true)
-        {
-            var (page, total) = await HashItemsPageAsync(
-                $"/Items?includeItemTypes=Person&recursive=true&fields={fields}&sortBy=SortName&startIndex={startIndex}&limit=1000");
-            if (page.Count == 0)
-            {
-                break;
-            }
 
-            foreach (var kvp in page)
-            {
-                itemsEndpoint[kvp.Key] = kvp.Value;
-            }
+        _output.WriteLine($"/Persons unique: {personsEndpoint.Count}; client returned: {persons.Count}");
 
-            startIndex += page.Count;
-            if (startIndex >= total)
-            {
-                break;
-            }
-        }
-
-        _output.WriteLine($"/Persons unique: {personsEndpoint.Count}; /Items Person unique: {itemsEndpoint.Count}; client returned: {persons.Count}");
-
-        var missing = personsEndpoint.Keys.Where(id => !itemsEndpoint.ContainsKey(id)).Take(5).ToList();
-        Assert.True(missing.Count == 0, $"Persons missing from paginated /Items fetch: {string.Join(", ", missing)}");
-
-        var mismatched = personsEndpoint.Where(kvp => itemsEndpoint[kvp.Key] != kvp.Value).Take(5).Select(kvp => kvp.Key).ToList();
-        Assert.True(mismatched.Count == 0, $"Persons with differing payloads between endpoints: {string.Join(", ", mismatched)}");
-
-        // And the client's own result covers everything /Persons knows about.
+        // The client's result covers everything the raw endpoint knows about.
         var clientIdSet = clientIds.Select(g => g.ToString("N")).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missingFromClient = personsEndpoint.Keys.Where(id => !clientIdSet.Contains(id)).Take(5).ToList();
         Assert.True(missingFromClient.Count == 0, $"Persons missing from GetAllPersonsAsync: {string.Join(", ", missingFromClient)}");
+        Assert.Equal(personsEndpoint.Count, persons.Count);
     }
 
     // =====================================================================

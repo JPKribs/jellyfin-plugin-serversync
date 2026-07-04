@@ -58,8 +58,11 @@ public static class PeopleSyncMergeService
             // synced.
             ["ForcedSortName"] = sourcePerson.ForcedSortName,
             ["Overview"] = sourcePerson.Overview,
-            ["PremiereDate"] = sourcePerson.PremiereDate,
-            ["EndDate"] = sourcePerson.EndDate,
+            // Birth/death dates stored date-only: the apply step syncs these
+            // as calendar dates (DateOnlyEquals), so the blobs must not carry
+            // time-of-day or comparison and apply disagree forever.
+            ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(sourcePerson.PremiereDate),
+            ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(sourcePerson.EndDate),
             ["ProductionYear"] = sourcePerson.ProductionYear,
             ["ProductionLocations"] = StringNormalizationUtility.NormalizeStringArray(sourcePerson.ProductionLocations),
             ["Tags"] = StringNormalizationUtility.NormalizeStringArray(sourcePerson.Tags),
@@ -94,8 +97,9 @@ public static class PeopleSyncMergeService
             // SortName excluded — see source-side comment.
             ["ForcedSortName"] = localPerson.ForcedSortName,
             ["Overview"] = localPerson.Overview,
-            ["PremiereDate"] = localPerson.PremiereDate,
-            ["EndDate"] = localPerson.EndDate,
+            // Date-only — see source-side comment in BuildSourceMetadata.
+            ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(localPerson.PremiereDate),
+            ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(localPerson.EndDate),
             ["ProductionYear"] = localPerson.ProductionYear,
             ["ProductionLocations"] = StringNormalizationUtility.NormalizeStringArray(localPerson.ProductionLocations),
             ["Tags"] = StringNormalizationUtility.NormalizeStringArray(localPerson.Tags),

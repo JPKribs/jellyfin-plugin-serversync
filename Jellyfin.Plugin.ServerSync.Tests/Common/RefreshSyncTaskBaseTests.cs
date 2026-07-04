@@ -173,7 +173,7 @@ public class RefreshSyncTaskBaseTests
         public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
         public Task<int> InvokePruneStaleAsync(IReadOnlyDictionary<string, TestRecord> existing, HashSet<string> seenKeys, CancellationToken cancellationToken)
-            => PruneStaleAsync(existing, seenKeys, cancellationToken);
+            => PruneStaleAsync(existing, seenKeys, new Progress<double>(), cancellationToken);
     }
 
     private static TestableRefreshTask CreateTask(out FakeManager manager)
@@ -333,5 +333,85 @@ public class RefreshSyncTaskBaseTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => task.InvokePruneStaleAsync(existing, new HashSet<string>(), cts.Token));
+    }
+
+    // -----------------------------------------------------------------------
+    // Prune circuit-breaker tests
+    // -----------------------------------------------------------------------
+
+    private static List<TestRecord> ManyRecords(int count)
+    {
+        var records = new List<TestRecord>(count);
+        for (var i = 0; i < count; i++)
+        {
+            records.Add(Record(i + 1, $"key-{i}"));
+        }
+
+        return records;
+    }
+
+    /// <summary>
+    /// A clean-looking discovery that would prune more than half of a large
+    /// table is refused. An empty-but-200 catalog answer passes every error
+    /// guard (no exception, no 4xx/5xx, no build failures) — this breaker is
+    /// what stands between that answer and the table being wiped.
+    /// True: a source-side truncation can destroy at most half the table.
+    /// False: one bad-but-clean answer deletes every tracking row (and, for
+    /// Content, schedules the files for deletion).
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_CleanDiscoveryWipingLargeTable_PruneBlocked()
+    {
+        var task = CreateTask(out var manager);
+        manager.All = ManyRecords(100);
+        task.Sources = Array.Empty<string>();
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Empty(manager.Deleted);
+    }
+
+    /// <summary>
+    /// The breaker only guards large tables — a small table (below the
+    /// minimum-row threshold) can legitimately turn over completely.
+    /// True: small tables still reconcile fully.
+    /// False: a user with a handful of rows can never prune them all.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_CleanDiscoveryWipingSmallTable_StillPrunes()
+    {
+        var task = CreateTask(out var manager);
+        manager.All = ManyRecords(10);
+        task.Sources = Array.Empty<string>();
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(10, manager.Deleted.Count);
+    }
+
+    /// <summary>
+    /// Out-of-scope rows don't count toward the breaker's stale fraction —
+    /// they are never pruned, so a disabled mapping covering most of the
+    /// table must not block reconciliation of the enabled remainder.
+    /// True: the breaker measures only rows actually up for deletion.
+    /// False: disabling a large mapping permanently blocks pruning.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_MostRowsOutOfScope_InScopeStaleStillPruned()
+    {
+        var task = CreateTask(out var manager);
+        var records = ManyRecords(100);
+        for (var i = 0; i < 80; i++)
+        {
+            records[i].ScopeId = "disabled";
+        }
+
+        manager.All = records;
+        task.Sources = Array.Empty<string>();
+        task.ScopeFilter = r => r.ScopeId != "disabled";
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(20, manager.Deleted.Count);
     }
 }

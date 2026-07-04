@@ -1564,83 +1564,56 @@ public class SourceServerClient : IDisposable
     // ===== People Sync Methods =====
 
     /// <summary>
-    /// Bulk-fetches every Person from the source server via paginated
-    /// <c>/Items?includeItemTypes=Person&amp;recursive=true</c> calls so
-    /// callers can do a local name-keyed join instead of one HTTP call per
-    /// person. The <c>/Persons</c> endpoint silently ignores
-    /// <c>StartIndex</c> (verified against a live 10.11 server: the same
-    /// first page repeats), so the generic Items endpoint is the only way to
-    /// page the catalog. Also verified live: for every person <c>/Persons</c>
-    /// returns, <c>/Items</c> returns a byte-identical DTO with the same
-    /// field set, plus a handful of extra Person entries (music artists) that
-    /// are harmless — the People refresh intersects by name against local
-    /// persons. Throws on any failure: a partial catalog would make the
-    /// People refresh prune rows for persons it never saw.
+    /// Bulk-fetches every Person from the source server in a single
+    /// <c>/Persons?fields=…</c> call so callers can do a local name-keyed
+    /// join instead of one HTTP call per person. <c>/Persons</c> ignores
+    /// <c>StartIndex</c> so the catalog cannot be paginated, but unlike
+    /// <c>/Items?recursive=true</c> it is not scoped to the requesting
+    /// user's libraries — Person items live outside library folders, so the
+    /// Items route returns an empty 200 for non-admin tokens (which is how
+    /// 10.11.64.0 wiped the People tracking table). Response can be tens of
+    /// MB on libraries with 100k+ persons, but it is the only route that
+    /// answers correctly for every token type. Throws on any failure: a
+    /// partial catalog would make the People refresh prune rows for persons
+    /// it never saw.
     /// </summary>
     /// <returns>All persons returned by the source server.</returns>
     public async Task<IReadOnlyList<BaseItemDto>> GetAllPersonsAsync(
         CancellationToken cancellationToken = default)
     {
-        const int pageSize = 1000;
-        var persons = new List<BaseItemDto>();
-        var startIndex = 0;
-
         try
         {
             var client = GetApiClient();
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var page = await client.Items.GetAsync(
-                    config =>
+            var result = await client.Persons.GetAsync(
+                config =>
+                {
+                    // No searchTerm and no Limit — request the entire catalog.
+                    config.QueryParameters.Fields = new[]
                     {
-                        config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Person };
-                        config.QueryParameters.Recursive = true;
-                        config.QueryParameters.Fields = new[]
-                        {
-                            ItemFields.Overview,
-                            ItemFields.ProviderIds,
-                            ItemFields.Tags,
-                            ItemFields.OriginalTitle,
-                            ItemFields.SortName,
-                            ItemFields.DateCreated,
-                            ItemFields.ProductionLocations,
-                            // Settings populates LockData + LockedFields;
-                            // without it those come back null while local has
-                            // them populated, producing a perpetual false diff.
-                            ItemFields.Settings
-                        };
-                        config.QueryParameters.SortBy = new[] { ItemSortBy.SortName };
-                        config.QueryParameters.StartIndex = startIndex;
-                        config.QueryParameters.Limit = pageSize;
-                    },
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                        ItemFields.Overview,
+                        ItemFields.ProviderIds,
+                        ItemFields.Tags,
+                        ItemFields.OriginalTitle,
+                        ItemFields.SortName,
+                        ItemFields.DateCreated,
+                        ItemFields.ProductionLocations,
+                        // Settings populates LockData + LockedFields;
+                        // without it those come back null while local has
+                        // them populated, producing a perpetual false diff.
+                        ItemFields.Settings
+                    };
+                },
+                cancellationToken).ConfigureAwait(false);
 
-                if (page?.Items == null)
-                {
-                    // A null page mid-catalog is a failure, not end-of-list —
-                    // treating it as done would return a partial catalog.
-                    throw new InvalidOperationException(
-                        $"Source server returned no response fetching Persons page at index {startIndex}");
-                }
-
-                persons.AddRange(page.Items);
-
-                if (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value)
-                {
-                    break;
-                }
-
-                if (page.Items.Count < pageSize)
-                {
-                    break;
-                }
-
-                startIndex += page.Items.Count;
+            if (result?.Items == null)
+            {
+                // A null response is a failure, not an empty catalog —
+                // treating it as empty would prune every tracking row.
+                throw new InvalidOperationException(
+                    "Source server returned no response fetching the Persons catalog");
             }
 
-            return persons;
+            return result.Items;
         }
         catch (OperationCanceledException)
         {

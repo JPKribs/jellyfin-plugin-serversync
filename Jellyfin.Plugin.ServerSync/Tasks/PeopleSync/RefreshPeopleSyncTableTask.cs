@@ -82,14 +82,13 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     }
 
     // Bulk fetch + in-memory join: enumerate local Person items, then pull
-    // the full source Person catalog via paginated
-    // <c>/Items?includeItemTypes=Person</c> calls (the dedicated /Persons
-    // endpoint ignores StartIndex, so the generic Items endpoint is the only
-    // pageable route — field parity verified live) and intersect by name in
-    // memory. The previous per-name fan-out cost one HTTP round-trip per
-    // local person (130k+ requests on a real library, 2.5 hours wall-clock);
-    // this version trades that for ~N/1000 paginated requests and a
-    // hashtable lookup per local name.
+    // the full source Person catalog in one /Persons call and intersect by
+    // name in memory. /Persons is the only route that works for every token
+    // type — /Items?recursive=true scopes to the requesting user's libraries
+    // and returns an empty 200 for non-admin tokens because Person items
+    // live outside library folders. The per-name fan-out this replaced cost
+    // one HTTP round-trip per local person (130k+ requests on a real
+    // library, 2.5 hours wall-clock).
     /// <inheritdoc />
     protected override async Task<IList<SdkBaseItemDto>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
@@ -124,14 +123,17 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
             Name,
             _localPersonsByName.Count);
 
-        progress.Report(10);
+        // Local enumeration is the long pole of this phase on large
+        // libraries (single blocking GetItemList call), so it owns the
+        // front of the fetch band; the /Persons download owns the rest.
+        progress.Report(35);
 
         if (_localPersonsByName.Count == 0)
         {
             return Array.Empty<SdkBaseItemDto>();
         }
 
-        // Step 2: bulk-fetch the entire source Person catalog in pages.
+        // Step 2: bulk-fetch the entire source Person catalog via /Persons.
         // Returns BaseItemDto with the field set the metadata blobs need
         // (Overview, ProviderIds, Tags, Settings, etc.).
         IReadOnlyList<SdkBaseItemDto> sourcePersons;
@@ -152,7 +154,18 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
             return Array.Empty<SdkBaseItemDto>();
         }
 
-        progress.Report(80);
+        if (sourcePersons.Count == 0)
+        {
+            // A server whose library overlaps ours never has zero persons —
+            // an empty 200 means the source didn't give a real answer (mid-
+            // startup, migrating, or an endpoint/auth regression). Treating
+            // it as truth is what wiped the tracking table on 10.11.64.0.
+            MarkSourceUnavailable(
+                $"source returned 0 persons while {_localPersonsByName.Count} exist locally — treating as an unreliable answer");
+            return Array.Empty<SdkBaseItemDto>();
+        }
+
+        progress.Report(85);
 
         // Step 3: intersect by name in memory. Source duplicates (same name
         // appearing twice on source) keep the first occurrence — the local

@@ -241,44 +241,72 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     }
 
     /// <summary>
+    /// Fraction of the existing table a single run is allowed to prune. A
+    /// clean-looking discovery that would delete more than this is far more
+    /// likely a source-side truncation (empty-but-200 answer, half a catalog)
+    /// than a real mass removal, so the run refuses and leaves the rows for a
+    /// later run to reconcile. Applies only when the table has at least
+    /// <see cref="PruneGuardMinRows"/> rows — tiny tables can legitimately
+    /// turn over completely.
+    /// </summary>
+    private const double MaxPruneFraction = 0.5;
+
+    /// <summary>
+    /// Minimum existing-row count before <see cref="MaxPruneFraction"/> kicks in.
+    /// </summary>
+    private const int PruneGuardMinRows = 50;
+
+    /// <summary>
     /// Removes rows that no longer exist on the source. Default deletes them
     /// outright; subclasses can override for soft-delete (Content marks them
     /// <see cref="SyncStatus.Pending"/> awaiting user approval). Out-of-scope
     /// rows (per <see cref="IsInScope"/>) are never pruned. Only called when
     /// discovery completed cleanly — a run that hit any source error skips
     /// pruning before reaching here (see <see cref="MarkSourceUnavailable"/>).
+    /// <paramref name="progress"/> reports 0–100 for the prune phase only;
+    /// the base scales it into the run's overall allocation — large prunes
+    /// (100k+ rows) take real time and the bar must move through them.
     /// Returns the number of rows pruned.
     /// </summary>
     protected virtual Task<int> PruneStaleAsync(
         IReadOnlyDictionary<TKey, TRecord> existing,
         HashSet<TKey> seenKeys,
+        IProgress<double> progress,
         CancellationToken cancellationToken)
     {
-        var pruned = 0;
+        ArgumentNullException.ThrowIfNull(progress);
+
+        var stale = new List<TRecord>();
         foreach (var kvp in existing)
         {
+            if (!seenKeys.Contains(kvp.Key) && IsInScope(kvp.Value))
+            {
+                stale.Add(kvp.Value);
+            }
+        }
+
+        var pruned = 0;
+        var reportEvery = Math.Max(1, stale.Count / 100);
+        for (var i = 0; i < stale.Count; i++)
+        {
             cancellationToken.ThrowIfCancellationRequested();
-            if (seenKeys.Contains(kvp.Key))
-            {
-                continue;
-            }
-
-            if (!IsInScope(kvp.Value))
-            {
-                continue;
-            }
-
             try
             {
-                Manager.DeleteById(kvp.Value.Id);
+                Manager.DeleteById(stale[i].Id);
                 pruned++;
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "{Task}: failed to prune stale record id {Id}", Name, kvp.Value.Id);
+                Logger.LogWarning(ex, "{Task}: failed to prune stale record id {Id}", Name, stale[i].Id);
+            }
+
+            if ((i + 1) % reportEvery == 0)
+            {
+                progress.Report(100.0 * (i + 1) / stale.Count);
             }
         }
 
+        progress.Report(100);
         return Task.FromResult(pruned);
     }
 
@@ -367,11 +395,14 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         // Progress allocation:
         //   0–  3 %  existing-row snapshot
         //   3– 50 %  source-side fetch (sub-reported by GetListAsync)
-        //  50– 95 %  per-item BuildRecordAsync + Upsert
-        //  95–100 %  prune + finalize
+        //  50– 99 %  split between per-item build and prune, weighted by how
+        //            many rows each phase will actually touch — a run that
+        //            builds nothing but prunes 100k rows spends its band on
+        //            the prune instead of freezing at the tail
+        //  99–100 %  finalize
         const double SnapshotEnd = 3.0;
         const double FetchEnd = 50.0;
-        const double BuildEnd = 95.0;
+        const double WorkEnd = 99.0;
         progress.Report(0);
 
         // 1. Snapshot existing rows so we can detect stale ones at the end.
@@ -407,6 +438,19 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         var processed = 0;
         var total = Math.Max(sourceItems.Count, 1);
         var parallelism = Math.Max(1, BuildRecordParallelism);
+
+        // Split FetchEnd–WorkEnd between build and prune proportional to the
+        // rows each will touch. The prune count isn't exact until the build
+        // finishes, but (existing − source) is a solid lower bound; deletes
+        // are weighted cheaper than builds (no HTTP, no blob work). Without
+        // this, a run that builds 0 items and prunes 130k rows jumps to the
+        // build band's end instantly and then sits frozen through the prune.
+        const double PruneRowWeight = 0.25;
+        var buildWeight = (double)sourceItems.Count;
+        var pruneWeight = Math.Max(0, existing.Count - sourceItems.Count) * PruneRowWeight;
+        var buildEnd = buildWeight + pruneWeight <= 0
+            ? WorkEnd
+            : FetchEnd + ((WorkEnd - FetchEnd) * buildWeight / (buildWeight + pruneWeight));
 
         // Per-item failures during build/upsert get counted so the run
         // summary tells the user how many records didn't make it. A single
@@ -471,7 +515,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             finally
             {
                 var p = Interlocked.Increment(ref processed);
-                progress.Report(FetchEnd + ((BuildEnd - FetchEnd) * p / total));
+                progress.Report(FetchEnd + ((buildEnd - FetchEnd) * p / total));
             }
         }
 
@@ -521,13 +565,40 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
         else
         {
-            pruned = await PruneStaleAsync(existing, seenKeySet, cancellationToken).ConfigureAwait(false);
-            if (pruned > 0)
+            // Circuit breaker: a discovery that looked clean but would delete
+            // most of the table is treated as a source-side truncation, not a
+            // real mass removal. An empty-but-200 catalog answer passes every
+            // error guard above; this is the last line of defense before the
+            // table (and, for Content, local files) is destroyed.
+            var staleInScope = 0;
+            foreach (var kvp in existing)
             {
-                Logger.LogInformation("{Task}: pruned {Count} stale records", Name, pruned);
+                if (!seenKeySet.Contains(kvp.Key) && IsInScope(kvp.Value))
+                {
+                    staleInScope++;
+                }
+            }
+
+            if (existing.Count >= PruneGuardMinRows && staleInScope > existing.Count * MaxPruneFraction)
+            {
+                Logger.LogWarning(
+                    "{Task}: refusing to prune {Stale} of {Existing} rows (>{Percent:P0} of the table) in one run — this usually means the source answered with a truncated or empty catalog. If the removal is real, it will reconcile once the source returns a majority of the rows; to force it, reset this module's sync table from the dashboard",
+                    Name, staleInScope, existing.Count, MaxPruneFraction);
+                RecordRunFailure("Refresh", $"Prune of {staleInScope}/{existing.Count} rows blocked by safety limit — source likely returned a truncated catalog");
+            }
+            else
+            {
+                var pruneProgress = new Progress<double>(p =>
+                    progress.Report(buildEnd + ((WorkEnd - buildEnd) * Math.Clamp(p, 0, 100) / 100.0)));
+                pruned = await PruneStaleAsync(existing, seenKeySet, pruneProgress, cancellationToken).ConfigureAwait(false);
+                if (pruned > 0)
+                {
+                    Logger.LogInformation("{Task}: pruned {Count} stale records", Name, pruned);
+                }
             }
         }
 
+        progress.Report(WorkEnd);
         await FinalizeAsync(cancellationToken).ConfigureAwait(false);
         RecordRunCompletedAndSave();
 
