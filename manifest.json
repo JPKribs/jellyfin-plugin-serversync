@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.64.2",
+        "changelog": "## Developer\r\n- Add shortcuts to prevent unnecessary Metadata checks where we can determine earlier it's not needed\r\n- Add setting for parallel processing for more or less item processing at the same time\r\n- Move settings into a processing section",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.64.2/jellyfin-plugin-serversync-10.11.64.2.zip",
+        "checksum": "ca4afa08675413160adf6985a8aae293",
+        "timestamp": "2026-07-04T16:31:38Z"
+      },
+      {
         "version": "10.11.64.1",
         "changelog": "## Developer\r\n- Fixed People sync finding zero source people on servers configured with a non-admin token (catalog is fetched via /Persons again)\r\n- Refreshes no longer prune tracking rows when the source answers with an empty catalog, and never remove more than half the table in a single run\r\n- Fixed a permanent verification loop when servers store the same premiere/end date with different times of day\r\n- Task progress now moves through fetch, build, and prune in proportion to the actual work instead of freezing near the end of large runs",
         "targetAbi": "10.11.0.0",
