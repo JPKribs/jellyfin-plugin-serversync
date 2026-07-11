@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.64.3",
+        "changelog": "## Developer\r\n- Bump Base to 2026.7.12",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.64.3/jellyfin-plugin-serversync-10.11.64.3.zip",
+        "checksum": "8c1f1c7fcea7d40298472f6305e84c38",
+        "timestamp": "2026-07-11T23:30:26Z"
+      },
+      {
         "version": "10.11.64.2",
         "changelog": "## Developer\r\n- Add shortcuts to prevent unnecessary Metadata checks where we can determine earlier it's not needed\r\n- Add setting for parallel processing for more or less item processing at the same time\r\n- Move settings into a processing section",
         "targetAbi": "10.11.0.0",
