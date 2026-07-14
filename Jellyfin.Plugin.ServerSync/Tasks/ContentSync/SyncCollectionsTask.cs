@@ -325,7 +325,7 @@ public class SyncCollectionsTask : IScheduledTask
         // be adopted and rewritten. Only an empty same name collection is
         // claimed. A non empty one blocks mirroring for this collection so
         // no duplicate is created either.
-        if (byName != null && byName.GetLinkedChildren().Any())
+        if (byName != null && byName.GetLinkedChildren().Count > 0)
         {
             nameConflict = true;
             _logger.LogWarning(

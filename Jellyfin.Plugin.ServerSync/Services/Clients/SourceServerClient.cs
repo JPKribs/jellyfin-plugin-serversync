@@ -817,6 +817,7 @@ public class SourceServerClient : IDisposable
         var members = new List<BaseItemDto>();
         var memberIds = new HashSet<Guid>();
         var startIndex = 0;
+        var rawFetched = 0;
         const int pageSize = 1000;
         int? expectedTotal = null;
         var client = GetApiClient();
@@ -858,8 +859,14 @@ public class SourceServerClient : IDisposable
             }
 
             expectedTotal ??= page.TotalRecordCount;
+            rawFetched += page.Items.Count;
             foreach (var item in page.Items)
             {
+                // A playlist may legitimately hold the same item more than
+                // once, so dedupe the returned members. The mid-scan
+                // consistency check below uses the RAW count (which includes
+                // those legitimate duplicates) against TotalRecordCount, so a
+                // duplicate never looks like a shifted catalog.
                 if (item.Id.HasValue && memberIds.Add(item.Id.Value))
                 {
                     members.Add(item);
@@ -874,10 +881,10 @@ public class SourceServerClient : IDisposable
             startIndex += page.Items.Count;
         }
 
-        if (expectedTotal.HasValue && members.Count != expectedTotal.Value && memberIds.Count != expectedTotal.Value)
+        if (expectedTotal.HasValue && rawFetched != expectedTotal.Value)
         {
             throw new InvalidOperationException(
-                $"Playlist {playlistId} changed during enumeration (expected {expectedTotal.Value} members, fetched {members.Count})");
+                $"Playlist {playlistId} changed during enumeration (expected {expectedTotal.Value} members, fetched {rawFetched})");
         }
 
         return members;
