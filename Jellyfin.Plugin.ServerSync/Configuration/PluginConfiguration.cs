@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.ServerSync.Configuration;
@@ -412,6 +412,50 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool DeepImageVerification { get; set; }
 
     /// <summary>
+    /// When enabled, whitelisted source collections are mirrored locally by
+    /// the Sync Collections task: a matching local collection is created and
+    /// its membership tracks the synced counterparts of the source
+    /// collection's items. Defaults to on — the whole point of whitelisting
+    /// a collection is seeing it on this server.
+    /// </summary>
+    public bool MirrorSyncedCollections { get; set; } = true;
+
+    /// <summary>
+    /// Legacy 10.11.64.0 element. XML deserialization drops unknown elements,
+    /// so without this shim a user who enabled per-module deep verification
+    /// would have the feature silently reset to off on upgrade. Reads map onto
+    /// <see cref="DeepImageVerification"/>; never serialized back out.
+    /// </summary>
+    [System.Xml.Serialization.XmlElement("MetadataSyncDeepImageVerification")]
+    [System.ComponentModel.Browsable(false)]
+    public bool LegacyMetadataSyncDeepImageVerification
+    {
+        get => false;
+        set => DeepImageVerification |= value;
+    }
+
+    /// <summary>
+    /// Legacy 10.11.64.0 element; see <see cref="LegacyMetadataSyncDeepImageVerification"/>.
+    /// </summary>
+    [System.Xml.Serialization.XmlElement("PeopleSyncDeepImageVerification")]
+    [System.ComponentModel.Browsable(false)]
+    public bool LegacyPeopleSyncDeepImageVerification
+    {
+        get => false;
+        set => DeepImageVerification |= value;
+    }
+
+    /// <summary>
+    /// Suppresses serialization of the legacy metadata element.
+    /// </summary>
+    public bool ShouldSerializeLegacyMetadataSyncDeepImageVerification() => false;
+
+    /// <summary>
+    /// Suppresses serialization of the legacy people element.
+    /// </summary>
+    public bool ShouldSerializeLegacyPeopleSyncDeepImageVerification() => false;
+
+    /// <summary>
     /// Validates configuration values and returns a list of validation errors.
     /// </summary>
     /// <returns>List of validation error messages.</returns>
@@ -680,24 +724,33 @@ public class PluginConfiguration : BasePluginConfiguration
         DownloadSpeedUnit = NormalizeSpeedUnit(DownloadSpeedUnit);
         ScheduledDownloadSpeedUnit = NormalizeSpeedUnit(ScheduledDownloadSpeedUnit);
 
-        // Normalize filesystem paths to remove traversal sequences
-        if (!string.IsNullOrWhiteSpace(TempDownloadPath))
-        {
-            TempDownloadPath = System.IO.Path.GetFullPath(TempDownloadPath);
-        }
+        // Normalize filesystem paths to remove traversal sequences. An
+        // unparseable path (embedded NUL, absurd length) is dropped rather
+        // than allowed to throw — SanitizeValues runs inside every save,
+        // including the settings page's, and a throw would 500 the save.
+        TempDownloadPath = NormalizePathOrNull(TempDownloadPath);
+        RecyclingBinPath = NormalizePathOrNull(RecyclingBinPath);
 
-        if (!string.IsNullOrWhiteSpace(RecyclingBinPath))
-        {
-            RecyclingBinPath = System.IO.Path.GetFullPath(RecyclingBinPath);
-        }
-
-        // Normalize library mapping local root paths
         foreach (var mapping in LibraryMappings)
         {
-            if (!string.IsNullOrWhiteSpace(mapping.LocalRootPath))
-            {
-                mapping.LocalRootPath = System.IO.Path.GetFullPath(mapping.LocalRootPath);
-            }
+            mapping.LocalRootPath = NormalizePathOrNull(mapping.LocalRootPath) ?? string.Empty;
+        }
+    }
+
+    private static string? NormalizePathOrNull(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return path;
+        }
+
+        try
+        {
+            return System.IO.Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or System.IO.PathTooLongException or NotSupportedException or System.Security.SecurityException)
+        {
+            return null;
         }
     }
 

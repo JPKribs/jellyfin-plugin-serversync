@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
@@ -70,8 +71,6 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// Executes a read operation with error handling for transient SQLite errors.
-    /// <summary>
     /// Checks if a directory is writable by attempting to create a temp file.
     /// </summary>
     private static bool IsDirectoryWritable(string dirPath)
@@ -131,6 +130,25 @@ public class SyncDatabase : IDisposable
                 _logger.LogWarning(ex, "Failed to delete file {FilePath}", filePath);
                 throw;
             }
+        }
+    }
+
+    /// <summary>
+    /// Moves a WAL/SHM journal file alongside its backed-up database,
+    /// falling back to leaving it in place on error.
+    /// </summary>
+    private void MoveJournalFile(string from, string to)
+    {
+        try
+        {
+            if (File.Exists(from))
+            {
+                File.Move(from, to);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to move journal file {From} alongside backup", from);
         }
     }
 
@@ -205,9 +223,15 @@ public class SyncDatabase : IDisposable
 
             _logger.LogDebug("Sync database initialized at {DbPath} (schema v{Version})", _dbPath, DatabaseMigrationService.CurrentSchemaVersion);
         }
-        catch (Exception ex)
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 11 || ex.SqliteErrorCode == 26)
         {
-            _logger.LogError(ex, "Failed to initialize database, attempting recovery");
+            // SQLITE_CORRUPT / SQLITE_NOTADB: the file itself is unusable, so
+            // recreation is the only way forward. Anything else — a locked
+            // file at boot, a permissions hiccup, a full disk — is transient:
+            // recreating would reset every tracking table and the user's
+            // Ignored/approval state over a condition that fixes itself, so
+            // those propagate and the plugin retries on the next start.
+            _logger.LogError(ex, "Sync database is corrupt (SQLite error {Code}), attempting recovery", ex.SqliteErrorCode);
             try
             {
                 RecreateDatabase();
@@ -239,6 +263,13 @@ public class SyncDatabase : IDisposable
             try
             {
                 File.Move(_dbPath, backupPath);
+
+                // The WAL belongs to the moved database and may hold committed-
+                // but-uncheckpointed transactions (e.g. approvals set just
+                // before a crash); it must travel with the backup, not be
+                // deleted, or a restore from the backup loses those commits.
+                MoveJournalFile(_dbPath + "-wal", backupPath + "-wal");
+                MoveJournalFile(_dbPath + "-shm", backupPath + "-shm");
                 _logger.LogWarning("Moved unreadable database aside to {BackupPath}; a fresh database will be created", backupPath);
                 PruneOldCorruptBackups();
             }
@@ -292,17 +323,24 @@ public class SyncDatabase : IDisposable
                 return;
             }
 
-            var backups = Directory.GetFiles(dir, Path.GetFileName(_dbPath) + ".corrupt-*");
-            if (backups.Length <= 3)
+            // Group by backup stem: each backup may carry -wal/-shm
+            // companions (moved alongside it), which must neither count
+            // toward the keep-3 limit nor be orphaned by partial deletes.
+            var stems = Directory.GetFiles(dir, Path.GetFileName(_dbPath) + ".corrupt-*")
+                .Where(f => !f.EndsWith("-wal", StringComparison.Ordinal) && !f.EndsWith("-shm", StringComparison.Ordinal))
+                .ToArray();
+            if (stems.Length <= 3)
             {
                 return;
             }
 
-            Array.Sort(backups, StringComparer.Ordinal);
-            for (var i = 0; i < backups.Length - 3; i++)
+            Array.Sort(stems, StringComparer.Ordinal);
+            for (var i = 0; i < stems.Length - 3; i++)
             {
-                File.Delete(backups[i]);
-                _logger.LogDebug("Pruned old corrupt-database backup {Path}", backups[i]);
+                File.Delete(stems[i]);
+                DeleteFileWithRetry(stems[i] + "-wal");
+                DeleteFileWithRetry(stems[i] + "-shm");
+                _logger.LogDebug("Pruned old corrupt-database backup {Path}", stems[i]);
             }
         }
         catch (Exception ex)

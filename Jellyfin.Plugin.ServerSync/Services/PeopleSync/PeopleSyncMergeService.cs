@@ -7,8 +7,9 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
-using MediaBrowser.Controller.Entities;
+using JPKribs.Jellyfin.Base;
 using LocalImageType = MediaBrowser.Model.Entities.ImageType;
+using MediaBrowser.Controller.Entities;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 

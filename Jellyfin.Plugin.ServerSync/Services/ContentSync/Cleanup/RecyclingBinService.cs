@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -157,6 +158,43 @@ public static class RecyclingBinService
         }
 
         return mainSuccess;
+    }
+
+    /// <summary>
+    /// Returns true when the recycling bin path overlaps a configured library
+    /// root (bin inside a library, or a library inside the bin). Cleanup
+    /// falls back to LastWriteTimeUtc for files without a recycled-timestamp
+    /// name, so running it against a media folder would permanently delete
+    /// ordinary media files older than the retention period.
+    /// </summary>
+    public static bool OverlapsLibraryRoot(string recyclingBinPath, Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (string.IsNullOrEmpty(recyclingBinPath))
+        {
+            return false;
+        }
+
+        var bin = Path.GetFullPath(recyclingBinPath);
+        foreach (var mapping in config.LibraryMappings)
+        {
+            if (string.IsNullOrEmpty(mapping.LocalRootPath))
+            {
+                continue;
+            }
+
+            var root = Path.GetFullPath(mapping.LocalRootPath);
+            var binInRoot = !Path.GetRelativePath(root, bin).StartsWith("..", StringComparison.Ordinal)
+                && !Path.IsPathRooted(Path.GetRelativePath(root, bin));
+            var rootInBin = !Path.GetRelativePath(bin, root).StartsWith("..", StringComparison.Ordinal)
+                && !Path.IsPathRooted(Path.GetRelativePath(bin, root));
+            if (binInRoot || rootInBin)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

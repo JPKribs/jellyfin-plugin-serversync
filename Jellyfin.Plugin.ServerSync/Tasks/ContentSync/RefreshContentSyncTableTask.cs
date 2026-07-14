@@ -43,6 +43,62 @@ public class UpdateSyncTablesTask
     private readonly ILibraryManager _libraryManager;
 
     /// <summary>
+    /// Items the source reported per mapping this run, keyed by
+    /// SourceLibraryId. 0 means the source answered with nothing for a
+    /// mapping that may still hold rows — <see cref="PruneStaleAsync"/>
+    /// refuses to prune those rows, because a stale/recreated library ID or
+    /// a transient empty answer is indistinguishable from real removal and
+    /// returns 200-empty with no error. -1 marks a whitelist mapping whose
+    /// FilteredItems list is explicitly empty (intentional; prune allowed).
+    /// Safe as instance state: runs are serialized by the module mutex.
+    /// </summary>
+    private readonly Dictionary<string, int> _seenPerMapping = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// SourceItemIds ("N") excluded this run because a BLACKLISTED collection
+    /// contains them. Path-prefix blacklist matching can't see collection
+    /// membership, so blacklisted BoxSet entries are expanded to leaf IDs
+    /// up front. Also consulted at prune time: rows excluded by a collection
+    /// edit go through deletion approval, like path-blacklist narrowing.
+    /// Same lifecycle rules as <see cref="_seenPerMapping"/>.
+    /// </summary>
+    private readonly HashSet<string> _blacklistCollectionExcluded = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Records how many items a mapping's fetch produced. Multiple mappings
+    /// can share a SourceLibraryId (rows carry only the library ID, so their
+    /// pools are indistinguishable at prune time) — merge instead of
+    /// overwrite: a suspicious 0 is sticky, an intentionally-empty whitelist
+    /// (-1) never overrides a real answer, and positive counts accumulate.
+    /// </summary>
+    private void RecordMappingSeen(string sourceLibraryId, int count)
+    {
+        var hasExisting = _seenPerMapping.TryGetValue(sourceLibraryId, out var existing);
+        if (hasExisting && existing == 0)
+        {
+            return;
+        }
+
+        if (count == 0)
+        {
+            _seenPerMapping[sourceLibraryId] = 0;
+            return;
+        }
+
+        if (count == -1)
+        {
+            if (!hasExisting)
+            {
+                _seenPerMapping[sourceLibraryId] = -1;
+            }
+
+            return;
+        }
+
+        _seenPerMapping[sourceLibraryId] = !hasExisting || existing == -1 ? count : existing + count;
+    }
+
+    /// <summary>
     /// Initializes a new instance.
     /// </summary>
     public UpdateSyncTablesTask(
@@ -104,6 +160,12 @@ public class UpdateSyncTablesTask
 
         var config = ConfigManager.Configuration;
         var enabledMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
+        _seenPerMapping.Clear();
+        _blacklistCollectionExcluded.Clear();
+
+        // Playlist expansion is user-scoped on the source; the token-generation
+        // flow stores the authenticating user's id for exactly this.
+        Guid? playlistUserId = Guid.TryParse(config.SourceServerAuthenticatedUserId, out var authUserId) ? authUserId : null;
 
         // Pre-fetch per-library counts so per-item progress reporting has a
         // denominator. For whitelist mappings we know the count up front
@@ -202,18 +264,22 @@ public class UpdateSyncTablesTask
                     Logger.LogInformation(
                         "{Library} is in whitelist mode but FilteredItems is empty — nothing to fetch.",
                         mapping.SourceLibraryName);
+                    RecordMappingSeen(mapping.SourceLibraryId, -1);
                     continue;
                 }
 
                 var seen = new HashSet<Guid>();
                 var collected = 0;
+                var pathless = 0;
+                var outsideRoot = 0;
+                var sourceRoot = (mapping.SourceRootPath ?? string.Empty).TrimEnd('/', '\\');
                 foreach (var whitelistedId in ids)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     List<BaseItemDto> leaves;
                     try
                     {
-                        leaves = await Client.GetWhitelistedItemLeavesAsync(whitelistedId, cancellationToken).ConfigureAwait(false);
+                        leaves = await Client.GetWhitelistedItemLeavesAsync(whitelistedId, playlistUserId, cancellationToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -239,6 +305,28 @@ public class UpdateSyncTablesTask
                             continue;
                         }
 
+                        // A leaf with no Path can't be synced and must not count
+                        // as "seen": if the API key lost admin rights Jellyfin
+                        // omits Path on everything, and counting those would let
+                        // the prune treat every row as legitimately removed.
+                        if (string.IsNullOrEmpty(item.Path))
+                        {
+                            pathless++;
+                            continue;
+                        }
+
+                        // A collection can contain items from other libraries.
+                        // TranslatePath would silently flatten those into this
+                        // mapping's root with just their filename — skip them
+                        // instead; syncing them needs a mapping for THEIR
+                        // library with the same collection whitelisted.
+                        if (sourceRoot.Length > 0
+                            && !item.Path.Replace('\\', '/').StartsWith(sourceRoot.Replace('\\', '/') + "/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            outsideRoot++;
+                            continue;
+                        }
+
                         var hitWatched = watchedByAll != null && watchedByAll.Contains(item.Id.Value);
                         work.Add(new ContentRefreshWork(mapping, item, hitWatched));
                         collected++;
@@ -250,22 +338,105 @@ public class UpdateSyncTablesTask
                     }
                 }
 
+                if (pathless > 0)
+                {
+                    Logger.LogWarning(
+                        "{Library}: {Count} whitelisted leaf item(s) came back without a file path and were skipped — this usually means the API key lacks admin rights on the source",
+                        mapping.SourceLibraryName, pathless);
+                }
+
+                if (outsideRoot > 0)
+                {
+                    Logger.LogInformation(
+                        "{Library}: {Count} whitelisted leaf item(s) live outside this mapping's source root and were skipped — to sync them, whitelist the same entry under a mapping for their library",
+                        mapping.SourceLibraryName, outsideRoot);
+                }
+
                 Logger.LogInformation(
                     "{Library} whitelist resolved to {Count} leaf item(s) from {WhitelistCount} whitelisted entry/entries.",
                     mapping.SourceLibraryName,
                     collected,
                     ids.Count);
 
+                RecordMappingSeen(mapping.SourceLibraryId, collected);
                 continue;
             }
 
             // Blacklist / AllowAll: bulk-fetch and post-filter via the
             // FetchAllPagesAsync utility, which honors the same FilterMode
             // semantics that BuildRecordAsync uses.
+            //
+            // Blacklisted COLLECTIONS need ID-based exclusion: the path
+            // filter can't see membership (a collection's path prefixes no
+            // media file). Expand them to leaf IDs first; if an expansion
+            // fails, skip this mapping's discovery entirely — fetching with
+            // no exclusions would sync everything the user excluded, then
+            // schedule it all for deletion once expansion recovers.
+            var excludedThisMapping = 0;
+            if (mapping.FilterMode == LibraryFilterMode.Blacklist && mapping.FilteredItems != null)
+            {
+                var failedExpansion = false;
+                foreach (var fi in mapping.FilteredItems)
+                {
+                    var isContainer = string.Equals(fi.Type, "BoxSet", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(fi.Type, "Playlist", StringComparison.OrdinalIgnoreCase);
+                    if (!isContainer || !Guid.TryParse(fi.ItemId, out var blacklistedCollectionId))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var members = await Client.GetWhitelistedItemLeavesAsync(blacklistedCollectionId, playlistUserId, cancellationToken).ConfigureAwait(false);
+                        foreach (var member in members)
+                        {
+                            if (member.Id.HasValue
+                                && _blacklistCollectionExcluded.Add(member.Id.Value.ToString("N", CultureInfo.InvariantCulture)))
+                            {
+                                excludedThisMapping++;
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        MarkSourceUnavailable($"failed to expand blacklisted {fi.Type} '{fi.Name}' in '{mapping.SourceLibraryName}'");
+                        Logger.LogWarning(ex,
+                            "Blacklisted container {Id} in {Library} could not be expanded; skipping this mapping's discovery so excluded items aren't synced",
+                            fi.ItemId, mapping.SourceLibraryName);
+                        failedExpansion = true;
+                        break;
+                    }
+                }
+
+                if (failedExpansion)
+                {
+                    continue;
+                }
+
+                if (excludedThisMapping > 0)
+                {
+                    Logger.LogInformation(
+                        "{Library}: {Count} item(s) excluded via blacklisted collection(s)/playlist(s)",
+                        mapping.SourceLibraryName, excludedThisMapping);
+                }
+            }
+
+            var workBefore = work.Count;
             var outcome = await PaginatedFetchUtility.FetchAllPagesAsync(
                 fetchPage: (startIndex, batchSize, ct) => Client.GetLibraryItemsAsync(sourceLibraryId, startIndex, batchSize, ct),
                 processItem: (item, _) =>
                 {
+                    if (item.Id.HasValue
+                        && _blacklistCollectionExcluded.Count > 0
+                        && _blacklistCollectionExcluded.Contains(item.Id.Value.ToString("N", CultureInfo.InvariantCulture)))
+                    {
+                        return Task.FromResult(false);
+                    }
+
                     var hitWatched = watchedByAll != null && item.Id.HasValue && watchedByAll.Contains(item.Id.Value);
                     work.Add(new ContentRefreshWork(mapping, item, hitWatched));
                     return Task.FromResult(true);
@@ -289,6 +460,8 @@ public class UpdateSyncTablesTask
             {
                 MarkSourceUnavailable($"source server unavailable during '{mapping.SourceLibraryName}' discovery");
             }
+
+            RecordMappingSeen(mapping.SourceLibraryId, work.Count - workBefore);
         }
 
         progress.Report(100);
@@ -325,11 +498,20 @@ public class UpdateSyncTablesTask
 
         if (existingItem != null
             && existingItem.Status == SyncStatus.Synced
-            && config.DeleteMissingContentMode != ApprovalMode.Disabled
             && !string.IsNullOrEmpty(existingItem.LocalPath)
             && !System.IO.File.Exists(existingItem.LocalPath))
         {
-            return Task.FromResult<SyncItem?>(null);
+            // A crash between the two phases of a download replacement leaves
+            // the user's file stranded as a .replacing sidecar next to the
+            // (now missing) target. Restore it before concluding the file is
+            // gone — otherwise the row is dropped and the item re-downloads.
+            TryRestoreReplacingSidecar(existingItem.LocalPath);
+
+            if (config.DeleteMissingContentMode != ApprovalMode.Disabled
+                && !System.IO.File.Exists(existingItem.LocalPath))
+            {
+                return Task.FromResult<SyncItem?>(null);
+            }
         }
 
         if (existingItem != null)
@@ -385,6 +567,22 @@ public class UpdateSyncTablesTask
         return false;
     }
 
+    // Rows the prune would no-op on (see SyncStateService.ProcessMissingItem):
+    // already Ignored or already awaiting deletion approval. Excluding them
+    // from the circuit-breaker's stale count keeps gradual legitimate
+    // removals from accumulating into a permanently tripped breaker.
+    /// <inheritdoc />
+    protected override bool IsPruneCandidate(SyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return record.Status != SyncStatus.Ignored
+            && !(record.Status == SyncStatus.Pending && record.PendingType == PendingType.Deletion);
+    }
+
+    /// <inheritdoc />
+    protected override bool PruneGuardApplies =>
+        ConfigManager.Configuration.DeleteMissingContentMode != ApprovalMode.Disabled;
+
     // No-op — <see cref="BuildRecordAsync"/> sets the status itself based
     // on the configured approval modes (DownloadNewContentMode,
     // ReplaceExistingContentMode), so the default Queued/Synced decision
@@ -416,14 +614,48 @@ public class UpdateSyncTablesTask
         // Skip rows already seen, and rows whose library mapping is currently
         // disabled (or removed from config) — without the scope guard,
         // disabling a mapping silently schedules every synced file under it
-        // for deletion.
+        // for deletion. Rows under a mapping the source reported ZERO items
+        // for are also refused: a deleted/recreated source library ID or a
+        // transient empty answer returns 200-empty with no error, and pruning
+        // on it would schedule the mapping's entire local content for
+        // deletion. (-1 = explicitly emptied whitelist, prune allowed.)
         var stale = new List<SyncItem>();
+        var blockedMappings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var kvp in existing)
         {
-            if (!seenKeys.Contains(kvp.Key) && IsInScope(kvp.Value))
+            if (seenKeys.Contains(kvp.Key) || !IsInScope(kvp.Value))
             {
-                stale.Add(kvp.Value);
+                continue;
             }
+
+            if (_seenPerMapping.GetValueOrDefault(kvp.Value.SourceLibraryId, 0) == 0)
+            {
+                blockedMappings.Add(kvp.Value.SourceLibraryId);
+                continue;
+            }
+
+            stale.Add(kvp.Value);
+        }
+
+        if (blockedMappings.Count > 0)
+        {
+            Logger.LogWarning(
+                "Refusing to prune rows under {Count} mapping(s) the source reported no items for — a stale library ID or transient empty answer is indistinguishable from real removal. If the library really is empty (or was re-created with a new ID), fix or reset the mapping from the dashboard",
+                blockedMappings.Count);
+            MarkPruneBlocked($"Prune blocked for {blockedMappings.Count} library mapping(s): source reported 0 items while local rows exist — check the mapping's source library ID");
+        }
+
+        // Items stale because the USER narrowed a blacklist (the item still
+        // exists on the source; the current config just excludes it) go
+        // through approval even in auto-delete mode — a filter edit is a
+        // scope change like disabling a mapping, not a source-side removal.
+        // Whitelist narrowing can't be distinguished from source removal
+        // without a per-item source query, so it keeps list-is-authority
+        // semantics.
+        var mappingById = new Dictionary<string, LibraryMapping>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mapping in ConfigManager.Configuration.GetEnabledLibraryMappings())
+        {
+            mappingById.TryAdd(mapping.SourceLibraryId, mapping);
         }
 
         var pruned = 0;
@@ -433,7 +665,17 @@ public class UpdateSyncTablesTask
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var result = SyncStateService.ProcessMissingItem(typedManager, stale[i], deleteMode, Logger);
+                var effectiveMode = deleteMode;
+                if (deleteMode == ApprovalMode.Enabled
+                    && (_blacklistCollectionExcluded.Contains(stale[i].SourceItemId)
+                        || (mappingById.TryGetValue(stale[i].SourceLibraryId, out var rowMapping)
+                            && rowMapping.FilterMode == LibraryFilterMode.Blacklist
+                            && PathUtilities.IsItemFiltered(stale[i].SourcePath, rowMapping.SourceRootPath ?? string.Empty, rowMapping.FilterMode, rowMapping.FilteredItems))))
+                {
+                    effectiveMode = ApprovalMode.RequireApproval;
+                }
+
+                var result = SyncStateService.ProcessMissingItem(typedManager, stale[i], effectiveMode, Logger);
                 if (result.Changed)
                 {
                     pruned++;
@@ -557,6 +799,38 @@ public class UpdateSyncTablesTask
         item.PendingType = null;
         item.StatusDate = DateTime.UtcNow;
         return item;
+    }
+
+    /// <summary>
+    /// Restores the newest <c>*.replacing.*</c> sidecar (left by a crash
+    /// mid-replacement in DownloadService) back to its original path.
+    /// </summary>
+    private void TryRestoreReplacingSidecar(string localPath)
+    {
+        try
+        {
+            var dir = System.IO.Path.GetDirectoryName(localPath);
+            if (string.IsNullOrEmpty(dir) || !System.IO.Directory.Exists(dir))
+            {
+                return;
+            }
+
+            var candidates = System.IO.Directory.GetFiles(dir, System.IO.Path.GetFileName(localPath) + ".replacing.*");
+            if (candidates.Length == 0)
+            {
+                return;
+            }
+
+            Array.Sort(candidates, (a, b) => System.IO.File.GetLastWriteTimeUtc(b).CompareTo(System.IO.File.GetLastWriteTimeUtc(a)));
+            System.IO.File.Move(candidates[0], localPath);
+            Logger.LogWarning(
+                "Restored {Path} from a .replacing sidecar left behind by an interrupted replacement",
+                localPath);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to restore {Path} from its .replacing sidecar", localPath);
+        }
     }
 
     /// <summary>

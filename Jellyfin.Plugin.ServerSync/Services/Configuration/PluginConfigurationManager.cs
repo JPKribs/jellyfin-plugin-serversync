@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Configuration;
@@ -40,14 +41,21 @@ public class PluginConfigurationManager : IPluginConfigurationManager
     {
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("Plugin is not initialized");
 
-        // Sanitize values before saving to prevent invalid configuration from persisting
-        plugin.Configuration.SanitizeValues();
+        // Single plugin-wide lock: XmlSerializer enumerates LastRunFailures
+        // while writing the file, so an unsynchronized save racing another
+        // module's RunFailureLog mutation throws mid-write and can truncate
+        // the config XML.
+        lock (ConfigurationSaveLock.Sync)
+        {
+            // Sanitize values before saving to prevent invalid configuration from persisting
+            plugin.Configuration.SanitizeValues();
 
-        // Encrypt the source-server API key at rest. Protect() no-ops on already-encrypted or empty,
-        // so this is idempotent across saves.
-        plugin.Configuration.SourceServerApiKey = _secrets.Protect(plugin.Configuration.SourceServerApiKey);
+            // Encrypt the source-server API key at rest. Protect() no-ops on already-encrypted or empty,
+            // so this is idempotent across saves.
+            plugin.Configuration.SourceServerApiKey = _secrets.Protect(plugin.Configuration.SourceServerApiKey);
 
-        plugin.SaveConfiguration();
+            plugin.SaveConfiguration();
+        }
     }
 
     /// <inheritdoc />

@@ -1,7 +1,7 @@
 using System;
 using System.IO;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Microsoft.Extensions.Logging;
@@ -85,6 +85,18 @@ public static class SyncStateService
 
         if (existingItem.Status == SyncStatus.Ignored)
         {
+            return existingItem;
+        }
+
+        if (existingItem.Status == SyncStatus.Deleting)
+        {
+            // Scheduled for deletion but back on the source: restore instead
+            // of deleting a file that would immediately re-download.
+            existingItem.Status = SyncStatus.Queued;
+            existingItem.PendingType = null;
+            existingItem.StatusDate = DateTime.UtcNow;
+            UpdateItemMetadata(existingItem, sourcePath, sourceSize, sourceCreateDate, localPath);
+            logger.LogDebug("Restored {FileName} (reappeared on source before deletion ran)", Path.GetFileName(sourcePath));
             return existingItem;
         }
 

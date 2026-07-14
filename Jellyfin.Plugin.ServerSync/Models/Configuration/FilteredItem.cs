@@ -24,4 +24,11 @@ public class FilteredItem
     /// Gets or sets the source-relative path of the item (used for path-based child matching).
     /// </summary>
     public string Path { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the item type on the source server (e.g. "BoxSet" for a
+    /// collection). Collections get special handling: the collection-sync
+    /// task mirrors them locally, and their expansion may span libraries.
+    /// </summary>
+    public string? Type { get; set; }
 }

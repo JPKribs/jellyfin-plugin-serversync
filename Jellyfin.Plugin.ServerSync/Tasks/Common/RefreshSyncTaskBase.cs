@@ -210,11 +210,48 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected virtual bool IsInScope(TRecord record) => true;
 
     /// <summary>
+    /// Returns true if pruning this record would actually change anything.
+    /// Rows the module's prune would no-op on (e.g. Content's already
+    /// Ignored / pending-deletion rows) must not count toward the prune
+    /// circuit breaker, or gradual legitimate removals accumulate until the
+    /// breaker trips permanently. Default counts every row.
+    /// </summary>
+    protected virtual bool IsPruneCandidate(TRecord record) => true;
+
+    /// <summary>
+    /// Returns false when the module's prune is configured to be a complete
+    /// no-op (e.g. Content with deletion disabled), so the circuit breaker
+    /// doesn't record a scary "prune blocked" failure for a prune that would
+    /// have done nothing anyway.
+    /// </summary>
+    protected virtual bool PruneGuardApplies => true;
+
+    /// <summary>
     /// Set when the source returns anything other than a clean response during
     /// discovery this run. Volatile because discovery can run under
     /// <see cref="System.Threading.Tasks.Parallel"/>.
     /// </summary>
     private volatile bool _sourceUnavailable;
+
+    /// <summary>
+    /// Set when this run's prune was fully or partially refused by a safety
+    /// guard (the base circuit breaker or a subclass guard such as Content's
+    /// per-mapping empty-catalog check). While set, the end-of-run summary
+    /// keeps the recorded failure instead of clearing it — otherwise a
+    /// blocked prune would look like a fully successful run on the dashboard.
+    /// </summary>
+    private bool _pruneBlocked;
+
+    /// <summary>
+    /// Records that a prune safety guard refused to remove rows this run.
+    /// The reason is surfaced on the dashboard and preserved through the
+    /// end-of-run summary.
+    /// </summary>
+    protected void MarkPruneBlocked(string reason)
+    {
+        _pruneBlocked = true;
+        RecordRunFailure("Refresh", reason);
+    }
 
     /// <summary>
     /// Records that the source server returned an error — anything other than a
@@ -363,6 +400,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     {
         Logger.LogInformation("Starting {Task}", Name);
         _sourceUnavailable = false;
+        _pruneBlocked = false;
 
         // Client is created by TestConnectionAsync; the finally covers every
         // exit path — early return on connection failure, exceptions from
@@ -570,21 +608,35 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             // real mass removal. An empty-but-200 catalog answer passes every
             // error guard above; this is the last line of defense before the
             // table (and, for Content, local files) is destroyed.
+            // Both counts are measured against the in-scope population only:
+            // rows under disabled mappings would otherwise dilute the fraction
+            // and let a truncation wipe 100% of an enabled mapping while
+            // staying under the table-wide threshold. Rows the prune would
+            // no-op on (IsPruneCandidate false) are excluded from the stale
+            // count so already-pending/ignored rows can't accumulate into a
+            // permanently tripped breaker.
+            var inScope = 0;
             var staleInScope = 0;
             foreach (var kvp in existing)
             {
-                if (!seenKeySet.Contains(kvp.Key) && IsInScope(kvp.Value))
+                if (!IsInScope(kvp.Value))
+                {
+                    continue;
+                }
+
+                inScope++;
+                if (!seenKeySet.Contains(kvp.Key) && IsPruneCandidate(kvp.Value))
                 {
                     staleInScope++;
                 }
             }
 
-            if (existing.Count >= PruneGuardMinRows && staleInScope > existing.Count * MaxPruneFraction)
+            if (PruneGuardApplies && inScope >= PruneGuardMinRows && staleInScope > inScope * MaxPruneFraction)
             {
                 Logger.LogWarning(
-                    "{Task}: refusing to prune {Stale} of {Existing} rows (>{Percent:P0} of the table) in one run — this usually means the source answered with a truncated or empty catalog. If the removal is real, it will reconcile once the source returns a majority of the rows; to force it, reset this module's sync table from the dashboard",
-                    Name, staleInScope, existing.Count, MaxPruneFraction);
-                RecordRunFailure("Refresh", $"Prune of {staleInScope}/{existing.Count} rows blocked by safety limit — source likely returned a truncated catalog");
+                    "{Task}: refusing to prune {Stale} of {Existing} in-scope rows (>{Percent:P0}) in one run — this usually means the source answered with a truncated or empty catalog. If the removal is real, it will reconcile once the source returns a majority of the rows; to force it, reset this module's sync table from the dashboard",
+                    Name, staleInScope, inScope, MaxPruneFraction);
+                MarkPruneBlocked($"Prune of {staleInScope}/{inScope} rows blocked by safety limit — source likely returned a truncated catalog");
             }
             else
             {
@@ -616,6 +668,15 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             // unavailable and pruning was skipped.
             Logger.LogWarning(
                 "{Task} complete with source unavailable: {Processed} processed, prune skipped this run",
+                Name, processed);
+        }
+        else if (_pruneBlocked)
+        {
+            // The failure was already recorded when the breaker fired; leave
+            // it in place so the dashboard shows the prune was blocked instead
+            // of this branch's ClearRunFailure wiping it in the same run.
+            Logger.LogWarning(
+                "{Task} complete with prune blocked by safety limit: {Processed} processed, no rows removed this run",
                 Name, processed);
         }
         else if (buildFailures > 0 || persistFailures > 0)

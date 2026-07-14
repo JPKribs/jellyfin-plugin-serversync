@@ -82,7 +82,24 @@ export default function (view) {
     }
 
     function getIntValue(id, fallback) {
-        return parseInt(getValue(id, '0')) || fallback;
+        var v = parseInt(getValue(id, ''), 10);
+        return isNaN(v) ? fallback : v;
+    }
+
+    // Section saves re-fetch the config and apply only this section's
+    // fields: a page-load snapshot posted whole would clobber values other
+    // writers changed since — task-written timestamps/failure records and
+    // the other dashboard tab's sections.
+    function saveSection(mutator, successMessage, failureMessage) {
+        return ServerSyncShared.getConfig().then(function (config) {
+            mutator(config);
+            currentConfig = config;
+            return ServerSyncShared.saveConfig(config);
+        }).then(function () {
+            Dashboard.alert(successMessage);
+        }).catch(function () {
+            Dashboard.alert(failureMessage);
+        });
     }
 
     // ============================================
@@ -96,7 +113,9 @@ export default function (view) {
         var apiKeyEl = view.querySelector('#txtSourceServerApiKey');
         var externalUrlEl = view.querySelector('#txtSourceServerExternalUrl');
         if (urlEl) urlEl.value = config.SourceServerUrl || '';
-        if (apiKeyEl) apiKeyEl.value = config.SourceServerApiKey || '';
+        // Never show the stored (encrypted) key; the sentinel round-trips
+        // untouched and the server keeps the existing secret on save.
+        if (apiKeyEl) apiKeyEl.value = config.SourceServerApiKey ? ServerSyncShared.SECRET_KEPT : '';
         if (externalUrlEl) externalUrlEl.value = config.SourceServerExternalUrl || '';
 
         if (config.SourceServerName || config.SourceServerId) {
@@ -160,19 +179,24 @@ export default function (view) {
     }
 
     function saveServerConfig() {
-        var config = currentConfig || {};
-        var urlEl = view.querySelector('#txtSourceServerUrl');
-        var apiKeyEl = view.querySelector('#txtSourceServerApiKey');
-        var externalUrlEl = view.querySelector('#txtSourceServerExternalUrl');
-        config.SourceServerUrl = urlEl ? urlEl.value : '';
-        config.SourceServerApiKey = apiKeyEl ? apiKeyEl.value : '';
-        config.SourceServerExternalUrl = externalUrlEl ? externalUrlEl.value : '';
+        saveSection(function (config) {
+            var urlEl = view.querySelector('#txtSourceServerUrl');
+            var apiKeyEl = view.querySelector('#txtSourceServerApiKey');
+            var externalUrlEl = view.querySelector('#txtSourceServerExternalUrl');
+            config.SourceServerUrl = urlEl ? urlEl.value : '';
+            config.SourceServerApiKey = apiKeyEl ? apiKeyEl.value : '';
+            config.SourceServerExternalUrl = externalUrlEl ? externalUrlEl.value : '';
 
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('Server settings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save server settings');
-        });
+            // Test Connection stores the discovered server name/id only in
+            // currentConfig; carry them into the freshly fetched config or
+            // they are lost on save.
+            if (currentConfig && currentConfig.SourceServerName) {
+                config.SourceServerName = currentConfig.SourceServerName;
+            }
+            if (currentConfig && currentConfig.SourceServerId) {
+                config.SourceServerId = currentConfig.SourceServerId;
+            }
+        }, 'Server settings saved', 'Failed to save server settings');
     }
 
     // --- Token Generation ---
@@ -229,15 +253,16 @@ export default function (view) {
                     currentConfig.SourceServerId = response.ServerId;
                 }
 
-                var config = currentConfig || {};
-                config.SourceServerUrl = serverUrl;
-                config.SourceServerApiKey = response.AccessToken;
-                config.SourceServerAuthenticatedUser = response.Username || username;
-                config.SourceServerAuthenticatedUserId = response.UserId || '';
-                config.SourceServerName = response.ServerName;
-                config.SourceServerId = response.ServerId;
-
-                ServerSyncShared.saveConfig(config).then(function() {
+                ServerSyncShared.getConfig().then(function (config) {
+                    config.SourceServerUrl = serverUrl;
+                    config.SourceServerApiKey = response.AccessToken;
+                    config.SourceServerAuthenticatedUser = response.Username || username;
+                    config.SourceServerAuthenticatedUserId = response.UserId || '';
+                    config.SourceServerName = response.ServerName;
+                    config.SourceServerId = response.ServerId;
+                    currentConfig = config;
+                    return ServerSyncShared.saveConfig(config);
+                }).then(function() {
                     if (statusEl) statusEl.innerHTML = '<span class="text-success">Token generated and saved!</span>';
 
                     // Fetch source data now that we have valid credentials
@@ -354,6 +379,11 @@ export default function (view) {
                     '</select>' +
                 '</div>' +
                 '<div class="filterBrowserContainer" style="display:none;">' +
+                    '<div class="filterBrowseToggle">' +
+                        '<button is="emby-button" type="button" class="raised button-submit filterBrowseItems" data-browse="items">Files</button>' +
+                        '<button is="emby-button" type="button" class="raised filterBrowseCollections" data-browse="collections">Collections</button>' +
+                        '<button is="emby-button" type="button" class="raised filterBrowsePlaylists" data-browse="playlists">Playlists</button>' +
+                    '</div>' +
                     '<div class="filterTableContainer" id="' + filterTableId + '"></div>' +
                 '</div>' +
             '</div>';
@@ -367,23 +397,23 @@ export default function (view) {
         var selectedFilterItems = {};
         var filterCurrentLibraryId = mapping.SourceLibraryId || '';
         var filterTable = null;
+        var filterBrowseMode = 'items';
 
         (mapping.FilteredItems || []).forEach(function(fi) {
             if (fi.ItemId) {
-                selectedFilterItems[fi.ItemId] = { ItemId: fi.ItemId, Name: fi.Name || '', Year: fi.Year, Path: fi.Path || '' };
+                selectedFilterItems[fi.ItemId] = { ItemId: fi.ItemId, Name: fi.Name || '', Year: fi.Year, Path: fi.Path || '', Type: fi.Type || null };
             }
         });
 
         // Renders one source item (thumb + info + selection checkmark) into a base table cell.
         function renderFilterItem(item) {
             var sel = !!selectedFilterItems[item.Id];
-            var serverUrl = currentConfig ? (currentConfig.SourceServerExternalUrl || currentConfig.SourceServerUrl) : '';
-            var apiKey = currentConfig ? currentConfig.SourceServerApiKey : '';
             var thumbHtml;
-            if (serverUrl && apiKey && item.Id) {
-                thumbHtml = '<img class="filterItemThumb" src="' +
-                    escapeHtml(serverUrl) + '/Items/' + escapeHtml(item.Id) + '/Images/Primary?maxHeight=120&api_key=' + escapeHtml(apiKey) +
-                    '" onerror="this.outerHTML=\'<div class=filterItemThumbPlaceholder><span class=material-icons>movie</span></div>\'" />';
+            if (ServerSyncShared && item.Id) {
+                var thumbId = 'ss-filter-thumb-' + escapeHtml(String(item.Id));
+                ServerSyncShared.scheduleProxyImage(thumbId, item.Id, false, 120);
+                thumbHtml = '<img id="' + thumbId + '" class="filterItemThumb" />' +
+                    '<div class="filterItemThumbPlaceholder" style="display:none"><span class="material-icons">movie</span></div>';
             } else {
                 thumbHtml = '<div class="filterItemThumbPlaceholder"><span class="material-icons">movie</span></div>';
             }
@@ -413,7 +443,7 @@ export default function (view) {
             if (selectedFilterItems[item.Id]) {
                 delete selectedFilterItems[item.Id];
             } else {
-                selectedFilterItems[item.Id] = { ItemId: item.Id, Name: item.Name || '', Year: item.Year, Path: item.Path || '' };
+                selectedFilterItems[item.Id] = { ItemId: item.Id, Name: item.Name || '', Year: item.Year, Path: item.Path || '', Type: item.Type || null };
             }
             var sel = !!selectedFilterItems[item.Id];
             var rowEl = filterBrowserContainer.querySelector('.jpk-table-row[data-id="' + item.Id + '"]');
@@ -435,7 +465,7 @@ export default function (view) {
                     search: { enabled: true, placeholder: 'Search items...' },
                     selection: { enabled: false, idKey: 'Id' },
                     emptyState: { message: 'No items found' },
-                    filters: { buildParams: function() { return { libraryId: filterCurrentLibraryId }; } },
+                    filters: { buildParams: function() { return { libraryId: filterCurrentLibraryId, collections: filterBrowseMode === 'collections', playlists: filterBrowseMode === 'playlists' }; } },
                     columns: [{ key: 'Id', type: 'custom', render: renderFilterItem }],
                     actions: { onRowClick: onFilterItemClick }
                 });
@@ -455,6 +485,26 @@ export default function (view) {
 
         filterModeSelect.value = mapping.FilterMode || 'AllowAll';
         filterModeSelect.addEventListener('change', updateFilterVisibility);
+
+        // Files/ Collections / Playlists browse toggle. Collections
+        // and playlists are sync selectors: whitelisting one syncs its
+        // members (membership re-resolved every refresh), blacklisting one
+        // excludes them. button-submit is Jellyfin's accent (primary) button
+        // style; unselected sides stay plain raised (secondary) buttons.
+        var browseButtons = div.querySelectorAll('.filterBrowseToggle > button');
+        function setBrowseMode(mode) {
+            filterBrowseMode = mode;
+            browseButtons.forEach(function (btn) {
+                btn.classList.toggle('button-submit', btn.dataset.browse === mode);
+            });
+            if (filterTable) {
+                filterTable.reload();
+            }
+        }
+        browseButtons.forEach(function (btn) {
+            btn.addEventListener('click', function () { setBrowseMode(btn.dataset.browse); });
+        });
+
         updateFilterVisibility();
 
         // Stored on the div so collectLibraryMappings can read them back.
@@ -529,7 +579,8 @@ export default function (view) {
                     ItemId: fi.ItemId,
                     Name: fi.Name || '',
                     Year: fi.Year || null,
-                    Path: fi.Path || ''
+                    Path: fi.Path || '',
+                    Type: fi.Type || null
                 });
             });
 
@@ -549,13 +600,9 @@ export default function (view) {
     }
 
     function saveLibraries() {
-        var config = currentConfig || {};
-        config.LibraryMappings = collectLibraryMappings();
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('Library mappings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save library mappings');
-        });
+        saveSection(function (config) {
+            config.LibraryMappings = collectLibraryMappings();
+        }, 'Library mappings saved', 'Failed to save library mappings');
     }
 
     // ============================================
@@ -599,9 +646,6 @@ export default function (view) {
         var list = document.createElement('div');
         list.className = 'filterItemsList';
 
-        var serverUrl = currentConfig ? currentConfig.SourceServerUrl : '';
-        var apiKey = currentConfig ? currentConfig.SourceServerApiKey : '';
-
         sourceUsers.forEach(function(user) {
             var isSelected = !!selectedSet[user.Id];
 
@@ -610,10 +654,11 @@ export default function (view) {
             itemEl.dataset.userId = user.Id;
 
             var thumbHtml;
-            var imgUrl = ServerSyncShared.buildSourceUserImageUrl(serverUrl, apiKey, user.Id, 120);
-            if (imgUrl) {
-                thumbHtml = '<img class="filterItemThumb filterItemThumbSquare" src="' + escapeHtml(imgUrl) +
-                    '" onerror="this.outerHTML=\'<div class=&quot;filterItemThumbPlaceholder filterItemThumbSquare&quot;><span class=material-icons>person</span></div>\'" />';
+            if (ServerSyncShared && user.Id) {
+                var userThumbId = 'ss-user-thumb-' + escapeHtml(String(user.Id));
+                ServerSyncShared.scheduleProxyImage(userThumbId, user.Id, true, 120);
+                thumbHtml = '<img id="' + userThumbId + '" class="filterItemThumb filterItemThumbSquare" />' +
+                    '<div class="filterItemThumbPlaceholder filterItemThumbSquare" style="display:none"><span class="material-icons">person</span></div>';
             } else {
                 thumbHtml = '<div class="filterItemThumbPlaceholder filterItemThumbSquare"><span class="material-icons">person</span></div>';
             }
@@ -765,13 +810,9 @@ export default function (view) {
     }
 
     function saveUsers() {
-        var config = currentConfig || {};
-        config.UserMappings = collectUserMappings();
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('User mappings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save user mappings');
-        });
+        saveSection(function (config) {
+            config.UserMappings = collectUserMappings();
+        }, 'User mappings saved', 'Failed to save user mappings');
     }
 
     // ============================================
@@ -783,6 +824,7 @@ export default function (view) {
     function loadContentSettings(config) {
         setChecked('chkEnableContentSync', config.EnableContentSync || false);
         setChecked('chkDetectUpdatedFiles', config.DetectUpdatedFiles !== false);
+        setChecked('chkMirrorSyncedCollections', config.MirrorSyncedCollections !== false);
         setChecked('chkIncludeCompanionFiles', config.IncludeCompanionFiles || false);
         setChecked('chkSkipWatchedByAllUsers', config.SkipWatchedByAllUsers || false);
         renderWatchedFilterUsers(config.WatchedFilterUserIds || []);
@@ -799,10 +841,10 @@ export default function (view) {
         setValue('txtTempDownloadPath', config.TempDownloadPath || '');
         setValue('txtMaxDownloadSpeed', config.MaxDownloadSpeed || 0);
         setValue('selDownloadSpeedUnit', config.DownloadSpeedUnit || 'MB');
-        setValue('txtMinFreeDiskSpace', config.MinimumFreeDiskSpaceGb || 10);
+        setValue('txtMinFreeDiskSpace', config.MinimumFreeDiskSpaceGb == null ? 10 : config.MinimumFreeDiskSpaceGb);
         setChecked('chkEnableBandwidthScheduling', config.EnableBandwidthScheduling || false);
         setValue('txtScheduledStartHour', config.ScheduledStartHour || 0);
-        setValue('txtScheduledEndHour', config.ScheduledEndHour || 6);
+        setValue('txtScheduledEndHour', config.ScheduledEndHour == null ? 6 : config.ScheduledEndHour);
         setValue('txtScheduledDownloadSpeed', config.ScheduledDownloadSpeed || 0);
         setValue('selScheduledDownloadSpeedUnit', config.ScheduledDownloadSpeedUnit || 'MB');
 
@@ -812,37 +854,34 @@ export default function (view) {
     }
 
     function saveContentSettings() {
-        var config = currentConfig || {};
-        config.EnableContentSync = getChecked('chkEnableContentSync');
-        config.DetectUpdatedFiles = getChecked('chkDetectUpdatedFiles');
-        config.IncludeCompanionFiles = getChecked('chkIncludeCompanionFiles');
-        config.SkipWatchedByAllUsers = getChecked('chkSkipWatchedByAllUsers');
-        config.WatchedFilterUserIds = collectWatchedFilterUsers();
-        config.DownloadNewContentMode = getValue('selDownloadNewContentMode', 'Enabled');
-        config.ReplaceExistingContentMode = getValue('selReplaceExistingContentMode', 'Enabled');
-        config.DeleteMissingContentMode = getValue('selDeleteMissingContentMode', 'Disabled');
-        config.EnableRecyclingBin = getChecked('chkEnableRecyclingBin');
-        config.RecyclingBinPath = getValue('txtRecyclingBinPath');
-        config.RecyclingBinRetentionDays = getIntValue('txtRecyclingBinRetentionDays', 7);
-        config.RemoveEmptyFoldersOnDelete = getChecked('chkRemoveEmptyFolders');
-        config.MaxConcurrentDownloads = getIntValue('txtMaxConcurrentDownloads', 2);
-        config.MaxRetryCount = getIntValue('txtMaxRetryCount', 3);
-        config.SizeMatchToleranceBytes = getIntValue('txtSizeMatchToleranceBytes', 0);
-        config.TempDownloadPath = getValue('txtTempDownloadPath') || null;
-        config.MaxDownloadSpeed = getIntValue('txtMaxDownloadSpeed', 0);
-        config.DownloadSpeedUnit = getValue('selDownloadSpeedUnit', 'MB');
-        config.MinimumFreeDiskSpaceGb = getIntValue('txtMinFreeDiskSpace', 10);
-        config.EnableBandwidthScheduling = getChecked('chkEnableBandwidthScheduling');
-        config.ScheduledStartHour = getIntValue('txtScheduledStartHour', 0);
-        config.ScheduledEndHour = getIntValue('txtScheduledEndHour', 6);
-        config.ScheduledDownloadSpeed = getIntValue('txtScheduledDownloadSpeed', 0);
-        config.ScheduledDownloadSpeedUnit = getValue('selScheduledDownloadSpeedUnit', 'MB');
+        saveSection(function (config) {
+            config.EnableContentSync = getChecked('chkEnableContentSync');
+            config.DetectUpdatedFiles = getChecked('chkDetectUpdatedFiles');
+            config.MirrorSyncedCollections = getChecked('chkMirrorSyncedCollections');
+            config.IncludeCompanionFiles = getChecked('chkIncludeCompanionFiles');
+            config.SkipWatchedByAllUsers = getChecked('chkSkipWatchedByAllUsers');
+            config.WatchedFilterUserIds = collectWatchedFilterUsers();
+            config.DownloadNewContentMode = getValue('selDownloadNewContentMode', 'Enabled');
+            config.ReplaceExistingContentMode = getValue('selReplaceExistingContentMode', 'Enabled');
+            config.DeleteMissingContentMode = getValue('selDeleteMissingContentMode', 'Disabled');
+            config.EnableRecyclingBin = getChecked('chkEnableRecyclingBin');
+            config.RecyclingBinPath = getValue('txtRecyclingBinPath');
+            config.RecyclingBinRetentionDays = getIntValue('txtRecyclingBinRetentionDays', 7);
+            config.RemoveEmptyFoldersOnDelete = getChecked('chkRemoveEmptyFolders');
+            config.MaxConcurrentDownloads = getIntValue('txtMaxConcurrentDownloads', 2);
+            config.MaxRetryCount = getIntValue('txtMaxRetryCount', 3);
+            config.SizeMatchToleranceBytes = getIntValue('txtSizeMatchToleranceBytes', 0);
+            config.TempDownloadPath = getValue('txtTempDownloadPath') || null;
+            config.MaxDownloadSpeed = getIntValue('txtMaxDownloadSpeed', 0);
+            config.DownloadSpeedUnit = getValue('selDownloadSpeedUnit', 'MB');
+            config.MinimumFreeDiskSpaceGb = getIntValue('txtMinFreeDiskSpace', 10);
+            config.EnableBandwidthScheduling = getChecked('chkEnableBandwidthScheduling');
+            config.ScheduledStartHour = getIntValue('txtScheduledStartHour', 0);
+            config.ScheduledEndHour = getIntValue('txtScheduledEndHour', 6);
+            config.ScheduledDownloadSpeed = getIntValue('txtScheduledDownloadSpeed', 0);
+            config.ScheduledDownloadSpeedUnit = getValue('selScheduledDownloadSpeedUnit', 'MB');
 
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('Content settings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save content settings');
-        });
+        }, 'Content settings saved', 'Failed to save content settings');
     }
 
     // --- History Settings ---
@@ -857,19 +896,15 @@ export default function (view) {
     }
 
     function saveHistorySettings() {
-        var config = currentConfig || {};
-        config.EnableHistorySync = getChecked('chkEnableHistorySync');
-        config.HistorySyncPlayedStatus = getChecked('chkHistorySyncPlayedStatus');
-        config.HistorySyncPlaybackPosition = getChecked('chkHistorySyncPlaybackPosition');
-        config.HistorySyncPlayCount = getChecked('chkHistorySyncPlayCount');
-        config.HistorySyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
-        config.HistorySyncFavorites = getChecked('chkHistorySyncFavorites');
+        saveSection(function (config) {
+            config.EnableHistorySync = getChecked('chkEnableHistorySync');
+            config.HistorySyncPlayedStatus = getChecked('chkHistorySyncPlayedStatus');
+            config.HistorySyncPlaybackPosition = getChecked('chkHistorySyncPlaybackPosition');
+            config.HistorySyncPlayCount = getChecked('chkHistorySyncPlayCount');
+            config.HistorySyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
+            config.HistorySyncFavorites = getChecked('chkHistorySyncFavorites');
 
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('History settings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save history settings');
-        });
+        }, 'History settings saved', 'Failed to save history settings');
     }
 
     // --- Metadata Settings ---
@@ -886,21 +921,17 @@ export default function (view) {
     }
 
     function saveMetadataSettings() {
-        var config = currentConfig || {};
-        config.EnableMetadataSync = getChecked('chkEnableMetadataSync');
-        config.MetadataSyncMetadata = getChecked('chkMetadataSyncMetadata');
-        config.MetadataSyncGenres = getChecked('chkMetadataSyncGenres');
-        config.MetadataSyncTags = getChecked('chkMetadataSyncTags');
-        config.MetadataSyncStudios = getChecked('chkMetadataSyncStudios');
-        config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
-        config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
-        config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
+        saveSection(function (config) {
+            config.EnableMetadataSync = getChecked('chkEnableMetadataSync');
+            config.MetadataSyncMetadata = getChecked('chkMetadataSyncMetadata');
+            config.MetadataSyncGenres = getChecked('chkMetadataSyncGenres');
+            config.MetadataSyncTags = getChecked('chkMetadataSyncTags');
+            config.MetadataSyncStudios = getChecked('chkMetadataSyncStudios');
+            config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
+            config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
+            config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
 
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('Metadata settings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save metadata settings');
-        });
+        }, 'Metadata settings saved', 'Failed to save metadata settings');
     }
 
     // --- People Sync Settings ---
@@ -911,15 +942,11 @@ export default function (view) {
     }
 
     function savePeopleSettings() {
-        var config = currentConfig || {};
-        config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
-        config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
+        saveSection(function (config) {
+            config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
+            config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
 
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('People settings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save people settings');
-        });
+        }, 'People settings saved', 'Failed to save people settings');
     }
 
     // --- User Sync Settings ---
@@ -932,17 +959,13 @@ export default function (view) {
     }
 
     function saveUserSyncSettings() {
-        var config = currentConfig || {};
-        config.EnableUserSync = getChecked('chkEnableUserSync');
-        config.UserSyncPolicy = getChecked('chkUserSyncPolicy');
-        config.UserSyncConfiguration = getChecked('chkUserSyncConfiguration');
-        config.UserSyncProfileImage = getChecked('chkUserSyncProfileImage');
+        saveSection(function (config) {
+            config.EnableUserSync = getChecked('chkEnableUserSync');
+            config.UserSyncPolicy = getChecked('chkUserSyncPolicy');
+            config.UserSyncConfiguration = getChecked('chkUserSyncConfiguration');
+            config.UserSyncProfileImage = getChecked('chkUserSyncProfileImage');
 
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('User sync settings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save user sync settings');
-        });
+        }, 'User sync settings saved', 'Failed to save user sync settings');
     }
 
     // --- Processing Settings ---
@@ -953,15 +976,11 @@ export default function (view) {
     }
 
     function saveProcessingSettings() {
-        var config = currentConfig || {};
-        config.RefreshParallelism = Math.min(16, Math.max(1, getIntValue('txtRefreshParallelism', 8)));
-        config.DeepImageVerification = getChecked('chkDeepImageVerification');
+        saveSection(function (config) {
+            config.RefreshParallelism = Math.min(16, Math.max(1, getIntValue('txtRefreshParallelism', 8)));
+            config.DeepImageVerification = getChecked('chkDeepImageVerification');
 
-        ServerSyncShared.saveConfig(config).then(function() {
-            Dashboard.alert('Processing settings saved');
-        }).catch(function() {
-            Dashboard.alert('Failed to save processing settings');
-        });
+        }, 'Processing settings saved', 'Failed to save processing settings');
     }
 
     // ============================================

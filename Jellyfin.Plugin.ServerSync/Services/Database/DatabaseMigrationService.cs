@@ -381,9 +381,10 @@ public static class DatabaseMigrationService
             logger.LogInformation("Database migration completed successfully");
             return true;
         }
-        catch (Exception ex)
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 11 || ex.SqliteErrorCode == 26)
         {
-            logger.LogError(ex, "Database migration failed");
+            // Corrupt database: signal the caller to recreate.
+            logger.LogError(ex, "Database migration failed on a corrupt database");
             return false;
         }
     }

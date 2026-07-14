@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
@@ -51,6 +52,17 @@ public class CleanupTempFilesTask : IScheduledTask
         if (!Directory.Exists(tempPath))
         {
             _logger.LogDebug("Temp directory does not exist: {TempPath}", tempPath);
+            return Task.CompletedTask;
+        }
+
+        // Same hazard class as the recycling bin: this task deletes every
+        // stale top-level file in the directory, so a temp path overlapping
+        // a library root would delete media.
+        if (RecyclingBinService.OverlapsLibraryRoot(tempPath, config))
+        {
+            _logger.LogError(
+                "Temp download path {Path} overlaps a configured library root — cleanup would delete media files. Skipping cleanup until the path is corrected.",
+                tempPath);
             return Task.CompletedTask;
         }
 
@@ -120,6 +132,16 @@ public class CleanupTempFilesTask : IScheduledTask
 
                     if (fileInfo.LastWriteTimeUtc < cutoffTime)
                     {
+                        // The snapshot above can be minutes old on big dirs; a
+                        // download that started mid-scan reuses deterministic
+                        // temp names, so re-check right before the unlink.
+                        if (ActiveDownloadTracker.IsTempFileInUse(file))
+                        {
+                            _logger.LogDebug("Skipping newly-active download: {FileName}", fileInfo.Name);
+                            skippedCount++;
+                            continue;
+                        }
+
                         var fileSize = fileInfo.Length;
                         fileInfo.Delete();
                         deletedCount++;

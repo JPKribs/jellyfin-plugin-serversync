@@ -140,22 +140,24 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         fallback: (IList<TRecord>)Array.Empty<TRecord>());
 
     /// <inheritdoc />
-    public IList<TRecord> GetAll() => ExecuteRead(
-        conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"SELECT * FROM {TableName}";
-            return ReadAll(cmd);
-        },
-        fallback: (IList<TRecord>)Array.Empty<TRecord>());
-
-    /// <inheritdoc />
     public IList<TRecord> GetAllStrict()
     {
         lock (WriteLock)
         {
             using var cmd = Connection.CreateCommand();
             cmd.CommandText = $"SELECT * FROM {TableName}";
+            return ReadAll(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public IList<TRecord> GetByStatusStrict(SyncStatus status)
+    {
+        lock (WriteLock)
+        {
+            using var cmd = Connection.CreateCommand();
+            cmd.CommandText = $"SELECT * FROM {TableName} WHERE Status = @Status";
+            cmd.Parameters.AddWithValue("@Status", (int)status);
             return ReadAll(cmd);
         }
     }

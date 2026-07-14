@@ -98,7 +98,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// <inheritdoc />
     protected override IList<MetadataSyncItem> GetItemsToApply()
     {
-        var items = Manager.GetByStatus(SyncStatus.Queued).ToList();
+        var items = Manager.GetByStatusStrict(SyncStatus.Queued).ToList();
         items.Sort((a, b) =>
         {
             var orderA = GetItemTypeOrder(a.ItemType);
@@ -112,6 +112,17 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         });
 
         return items;
+    }
+
+    // Parallel applies within a tier are fine, but a Season must not apply
+    // while its Series is still in flight — group boundaries are barriers.
+    /// <inheritdoc />
+    protected override IEnumerable<IList<MetadataSyncItem>> GetApplyGroups(IList<MetadataSyncItem> items)
+    {
+        return items
+            .GroupBy(i => GetItemTypeOrder(i.ItemType))
+            .OrderBy(g => g.Key)
+            .Select(g => (IList<MetadataSyncItem>)g.ToList());
     }
 
     /// <inheritdoc />

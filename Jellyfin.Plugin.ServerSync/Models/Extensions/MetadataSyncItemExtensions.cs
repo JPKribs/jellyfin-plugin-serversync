@@ -14,14 +14,12 @@ public static class MetadataSyncItemExtensions
     /// <param name="item">The metadata sync item.</param>
     /// <param name="libraryMappings">The configured library mappings, used to resolve library names.</param>
     /// <param name="sourceServerUrl">The source server URL surfaced to the client.</param>
-    /// <param name="sourceServerApiKey">The source server API key surfaced to the client.</param>
     /// <param name="includeBlobs">When false the large JSON blob fields are omitted, for list views.</param>
     /// <returns>The DTO representation.</returns>
     public static MetadataSyncItemDto ToDto(
         this MetadataSyncItem item,
         List<LibraryMapping>? libraryMappings,
         string? sourceServerUrl,
-        string? sourceServerApiKey,
         bool includeBlobs = true)
     {
         string? sourceLibraryName = null;
@@ -67,7 +65,6 @@ public static class MetadataSyncItemExtensions
             HasChanges = hasMetadataChanges || hasImagesChanges || hasPeopleChanges || hasStudiosChanges,
             ChangesSummary = changesSummary,
             SourceServerUrl = sourceServerUrl,
-            SourceServerApiKey = sourceServerApiKey,
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,

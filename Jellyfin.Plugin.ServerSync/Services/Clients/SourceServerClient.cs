@@ -6,8 +6,8 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk;
@@ -489,6 +489,7 @@ public class SourceServerClient : IDisposable
     /// </summary>
     public async Task<List<BaseItemDto>> GetWhitelistedItemLeavesAsync(
         Guid whitelistedId,
+        Guid? playlistUserId = null,
         CancellationToken cancellationToken = default)
     {
         var leafTypes = new HashSet<BaseItemDto_Type?>
@@ -538,8 +539,15 @@ public class SourceServerClient : IDisposable
 
         if (rootItem == null || !rootItem.Id.HasValue)
         {
-            _logger.LogWarning("Whitelist: source server returned no item for id {Id}", whitelistedId);
-            return result;
+            // An entry that no longer exists on the source (deleted
+            // collection, deleted item) returns 200-with-nothing — treating
+            // that as an empty expansion would mark every leaf under it as
+            // removed and schedule the files for deletion. Fail the entry
+            // instead; the refresh marks the source unavailable, keeps
+            // syncing the other entries, and skips pruning until the user
+            // removes the dead entry from the whitelist.
+            throw new InvalidOperationException(
+                $"Whitelist entry {whitelistedId} no longer exists on the source server — remove it from the mapping's whitelist to resume pruning");
         }
 
         if (leafTypes.Contains(rootItem.Type))
@@ -551,8 +559,37 @@ public class SourceServerClient : IDisposable
 
         // Folder-like (Series / Season / BoxSet / Album / Artist): walk
         // children breadth-first one folder at a time, collecting leaves.
+        // Playlists are user-scoped and don't answer ParentId child queries,
+        // so their members come from the playlist endpoint and seed the same
+        // walk (members are usually leaves already; folders still expand).
         var queue = new Queue<Guid>();
-        queue.Enqueue(rootItem.Id.Value);
+        if (rootItem.Type == BaseItemDto_Type.Playlist)
+        {
+            var members = await GetPlaylistItemsAsync(rootItem.Id.Value, playlistUserId, cancellationToken).ConfigureAwait(false);
+            foreach (var member in members)
+            {
+                if (!member.Id.HasValue)
+                {
+                    continue;
+                }
+
+                if (leafTypes.Contains(member.Type))
+                {
+                    if (seen.Add(member.Id.Value))
+                    {
+                        result.Add(member);
+                    }
+                }
+                else if (seen.Add(member.Id.Value))
+                {
+                    queue.Enqueue(member.Id.Value);
+                }
+            }
+        }
+        else
+        {
+            queue.Enqueue(rootItem.Id.Value);
+        }
 
         while (queue.Count > 0)
         {
@@ -561,6 +598,9 @@ public class SourceServerClient : IDisposable
 
             var startIndex = 0;
             const int pageSize = 1000;
+            var parentSeen = new HashSet<Guid>();
+            var rawFetched = 0;
+            int? expectedTotal = null;
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -607,9 +647,29 @@ public class SourceServerClient : IDisposable
                     break;
                 }
 
+                expectedTotal ??= page.TotalRecordCount;
+                rawFetched += page.Items.Count;
+
                 foreach (var child in page.Items)
                 {
-                    if (!child.Id.HasValue || !seen.Add(child.Id.Value))
+                    if (!child.Id.HasValue)
+                    {
+                        continue;
+                    }
+
+                    // A repeated ID within one parent means page boundaries
+                    // shifted mid-scan; the matching skip on the other side is
+                    // invisible and would be pruned as "removed". Throwing
+                    // marks the source unavailable, which skips pruning.
+                    if (!parentSeen.Add(child.Id.Value))
+                    {
+                        throw new InvalidOperationException(
+                            $"Whitelist children of {parentId} changed during enumeration (duplicate item across pages)");
+                    }
+
+                    // Global dedupe stays separate: BoxSet children legitimately
+                    // repeat across whitelist entries.
+                    if (!seen.Add(child.Id.Value))
                     {
                         continue;
                     }
@@ -636,6 +696,12 @@ public class SourceServerClient : IDisposable
                 }
 
                 startIndex += page.Items.Count;
+            }
+
+            if (expectedTotal.HasValue && rawFetched != expectedTotal.Value)
+            {
+                throw new InvalidOperationException(
+                    $"Whitelist children of {parentId} changed during enumeration (expected {expectedTotal.Value}, fetched {rawFetched})");
             }
         }
 
@@ -666,9 +732,12 @@ public class SourceServerClient : IDisposable
                     config.QueryParameters.Recursive = true;
                     config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
                     config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
-                    // Sort by Id so pagination is stable across page boundaries —
-                    // without this, items added/removed mid-sync can dupe or skip.
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
+                    // The API has no by-Id sort, so a fully stable order isn't
+                    // possible; the multi-key sort makes tie order deterministic
+                    // and PaginatedFetchUtility's TotalRecordCount check catches
+                    // mid-enumeration catalog changes so they can't turn into
+                    // silent skips that the prune would read as removals.
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
@@ -687,6 +756,175 @@ public class SourceServerClient : IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get items from library {LibraryId}", libraryId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Lists collections (BoxSets) on the source server for the whitelist
+    /// picker. Collections live outside libraries, so this is a server-wide
+    /// recursive BoxSet query.
+    /// </summary>
+    /// <param name="searchTerm">Optional search term.</param>
+    /// <param name="startIndex">Starting index for pagination.</param>
+    /// <param name="limit">Maximum items to return.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Query result with collections.</returns>
+    public async Task<BaseItemDtoQueryResult?> GetCollectionsAsync(
+        string? searchTerm = null,
+        int startIndex = 0,
+        int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = GetApiClient();
+            return await client.Items.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.BoxSet };
+                    config.QueryParameters.Recursive = true;
+                    config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.Overview, ItemFields.DateCreated, ItemFields.ChildCount };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.SortName };
+                    config.QueryParameters.SortOrder = new[] { SortOrder.Ascending };
+                    config.QueryParameters.StartIndex = startIndex;
+                    config.QueryParameters.Limit = limit;
+                    if (!string.IsNullOrWhiteSpace(searchTerm))
+                    {
+                        config.QueryParameters.SearchTerm = searchTerm;
+                    }
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list collections from source server");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Fetches a playlist's members, paged, failing loud on any error or
+    /// mid-scan inconsistency — a truncated member list would mark the
+    /// missing items as removed and schedule their files for deletion.
+    /// </summary>
+    private async Task<List<BaseItemDto>> GetPlaylistItemsAsync(Guid playlistId, Guid? userId, CancellationToken cancellationToken)
+    {
+        var members = new List<BaseItemDto>();
+        var memberIds = new HashSet<Guid>();
+        var startIndex = 0;
+        const int pageSize = 1000;
+        int? expectedTotal = null;
+        var client = GetApiClient();
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            BaseItemDtoQueryResult? page;
+            try
+            {
+                page = await client.Playlists[playlistId].Items.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.UserId = userId;
+                        config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                        config.QueryParameters.StartIndex = startIndex;
+                        config.QueryParameters.Limit = pageSize;
+                    },
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
+            {
+                _logger.LogWarning(ex, "Source server {Status} listing playlist {Id} members; aborting refresh to protect tracking rows", ex.ResponseStatusCode, playlistId);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Playlist: failed to fetch members of {Id}; aborting to protect tracking rows", playlistId);
+                throw;
+            }
+
+            if (page?.Items == null || page.Items.Count == 0)
+            {
+                break;
+            }
+
+            expectedTotal ??= page.TotalRecordCount;
+            foreach (var item in page.Items)
+            {
+                if (item.Id.HasValue && memberIds.Add(item.Id.Value))
+                {
+                    members.Add(item);
+                }
+            }
+
+            if (page.Items.Count < pageSize)
+            {
+                break;
+            }
+
+            startIndex += page.Items.Count;
+        }
+
+        if (expectedTotal.HasValue && members.Count != expectedTotal.Value && memberIds.Count != expectedTotal.Value)
+        {
+            throw new InvalidOperationException(
+                $"Playlist {playlistId} changed during enumeration (expected {expectedTotal.Value} members, fetched {members.Count})");
+        }
+
+        return members;
+    }
+
+    /// <summary>
+    /// Lists playlists on the source server for the whitelist picker.
+    /// Playlists, like collections, live outside libraries.
+    /// </summary>
+    /// <param name="searchTerm">Optional search term.</param>
+    /// <param name="startIndex">Starting index for pagination.</param>
+    /// <param name="limit">Maximum items to return.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Query result with playlists.</returns>
+    public async Task<BaseItemDtoQueryResult?> GetPlaylistsAsync(
+        string? searchTerm = null,
+        int startIndex = 0,
+        int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = GetApiClient();
+            return await client.Items.GetAsync(
+                config =>
+                {
+                    config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Playlist };
+                    config.QueryParameters.Recursive = true;
+                    config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.Overview, ItemFields.DateCreated, ItemFields.ChildCount };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.SortName };
+                    config.QueryParameters.SortOrder = new[] { SortOrder.Ascending };
+                    config.QueryParameters.StartIndex = startIndex;
+                    config.QueryParameters.Limit = limit;
+                    if (!string.IsNullOrWhiteSpace(searchTerm))
+                    {
+                        config.QueryParameters.SearchTerm = searchTerm;
+                    }
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list playlists from source server");
             return null;
         }
     }
@@ -806,7 +1044,7 @@ public class SourceServerClient : IDisposable
                         ItemFields.Settings,     // For LockedFields, PreferredMetadataLanguage, PreferredMetadataCountryCode
                         ItemFields.CustomRating  // For CustomRating field
                     };
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
@@ -913,7 +1151,7 @@ public class SourceServerClient : IDisposable
                         ItemFields.Settings,
                         ItemFields.CustomRating
                     };
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
@@ -998,7 +1236,7 @@ public class SourceServerClient : IDisposable
                     config.QueryParameters.Recursive = true;
                     config.QueryParameters.IncludeItemTypes = includeTypes;
                     config.QueryParameters.Fields = new[] { ItemFields.Path };
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
@@ -1729,7 +1967,7 @@ public class SourceServerClient : IDisposable
                         ItemFields.MediaSources
                     };
                     config.QueryParameters.EnableUserData = true;
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
@@ -1845,7 +2083,7 @@ public class SourceServerClient : IDisposable
                     };
                     config.QueryParameters.EnableUserData = true;
                     config.QueryParameters.IsPlayed = true;
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated };
+                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },

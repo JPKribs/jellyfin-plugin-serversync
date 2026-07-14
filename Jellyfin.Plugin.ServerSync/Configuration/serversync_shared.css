@@ -315,3 +315,27 @@
         min-width: calc(50% - 8px);
     }
 }
+
+/* Files <-> Collections toggle in the whitelist picker */
+.filterBrowseToggle {
+    display: flex;
+    gap: 0.6em;
+    margin-bottom: 0.9em;
+}
+
+.filterBrowseToggle > button {
+    margin: 0;
+    padding: 0.5em 1.4em;
+    border-radius: 0.3em;
+    font-weight: 600;
+    transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+/* Unselected side: quiet secondary button */
+.filterBrowseToggle > button:not(.button-submit) {
+    opacity: 0.75;
+}
+
+.filterBrowseToggle > button:not(.button-submit):hover {
+    opacity: 1;
+}

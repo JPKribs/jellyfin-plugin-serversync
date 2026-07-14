@@ -158,7 +158,7 @@
                             <div class="inputContainer">
                                 <label class="inputLabel inputLabelUnfocused" for="txtRefreshParallelism">Refresh Parallelism</label>
                                 <input is="emby-input" type="number" id="txtRefreshParallelism" min="1" max="16" />
-                                <div class="fieldDescription">Items processed at once during Metadata and People refreshes. Higher finishes faster but uses more CPU while the task runs; lower leaves headroom for playback and transcoding. Default: 8.</div>
+                                <div class="fieldDescription">Items processed at once during Metadata and People refreshes. Higher finishes faster but uses more CPU. Lower leaves headroom for playback and transcoding. Default: 8.</div>
                             </div>
 
                             <div class="checkboxContainer checkboxContainer-withDescription">
@@ -166,7 +166,7 @@
                                     <input type="checkbox" is="emby-checkbox" id="chkDeepImageVerification" />
                                     <span class="checkboxLabel">Deep Image Verification</span>
                                 </label>
-                                <div class="fieldDescription checkboxFieldDescription">Re-verify every source image size over HTTP on every refresh, even when unchanged. Catches images replaced on the source's disk without a rescan, but makes refreshes much slower on large libraries. Applies to Metadata and People sync.</div>
+                                <div class="fieldDescription checkboxFieldDescription">Verify every source image size over HTTP on every refresh, even when unchanged. Catches images replaced on the source's disk without a rescan but makes refreshes much slower on large libraries. Applies to Metadata and People sync.</div>
                             </div>
 
                             <div class="jpk-collapsible-actions">
@@ -213,7 +213,15 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkDetectUpdatedFiles" />
                                             <span class="checkboxLabel">Detect Updated Files</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Re-queue files if the source file size differs or if the source was modified after last sync.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Requeue files if the source file size differs or if the source was modified after last sync.</div>
+                                    </div>
+
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkMirrorSyncedCollections" />
+                                            <span class="checkboxLabel">Mirror Synced Collections</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Recreate whitelisted source collections on this server, containing the synced copies of their members (runs as the "Sync Collections" task).</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -323,7 +331,7 @@
                                     <div class="inputContainer">
                                         <label for="txtSizeMatchToleranceBytes">Size Match Tolerance (bytes):</label>
                                         <input is="emby-input" type="number" id="txtSizeMatchToleranceBytes" min="0" />
-                                        <div class="fieldDescription">Tolerance in bytes when comparing local file size against the source's recorded size. 0 (default) requires exact match. Increase if Jellyfin metadata drift on the source is causing files to be re-queued unnecessarily. Post-download integrity is always verified against the HTTP Content-Length, regardless of this value.</div>
+                                        <div class="fieldDescription">Tolerance in bytes when comparing local file size against the source's recorded size. 0 (default) requires an exact match. Increase if metadata drift on the source is requeuing files unnecessarily. Downloads are always verified against the HTTP Content Length.</div>
                                     </div>
 
                                     <div class="inputContainer">
@@ -516,7 +524,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncTags" checked />
                                             <span class="checkboxLabel">Tags</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Sync user-defined tags from source to local items.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Sync tags from source to local items.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -532,7 +540,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncPeople" />
                                             <span class="checkboxLabel">People</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Sync cast and crew information (actors, directors, writers). Can be resource-intensive.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Sync cast and crew information (actors, directors, writers). Can be resource heavy.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -548,7 +556,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncFolderItems" />
                                             <span class="checkboxLabel">Folder Items (Series, Seasons, Albums, Artists, BoxSets)</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Sync metadata for container/folder-type items in addition to leaf items. Matches by translated file path.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Sync metadata for folders (shows, seasons, albums) in addition to individual items. Matches by translated file path.</div>
                                     </div>
                                 </div>
                             </div>
@@ -681,7 +689,7 @@
                                 <div class="resetButtonRow">
                                     <div class="resetButtonInfo">
                                         <div>Content Sync</div>
-                                        <div class="fieldDescription">Remove all content tracking data. You will need to re-scan content.</div>
+                                        <div class="fieldDescription">Remove all content tracking data. Content will need a rescan.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetContentTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
@@ -690,7 +698,7 @@
                                 <div class="resetButtonRow">
                                     <div class="resetButtonInfo">
                                         <div>History Sync</div>
-                                        <div class="fieldDescription">Remove all history tracking data. You will need to re-scan history.</div>
+                                        <div class="fieldDescription">Remove all history tracking data. History will need a rescan.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetHistoryTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
@@ -699,7 +707,7 @@
                                 <div class="resetButtonRow">
                                     <div class="resetButtonInfo">
                                         <div>Metadata Sync</div>
-                                        <div class="fieldDescription">Remove all metadata tracking data. You will need to re-scan metadata.</div>
+                                        <div class="fieldDescription">Remove all metadata tracking data. Metadata will need a rescan.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetMetadataTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
@@ -708,7 +716,7 @@
                                 <div class="resetButtonRow">
                                     <div class="resetButtonInfo">
                                         <div>User Sync</div>
-                                        <div class="fieldDescription">Remove all user sync tracking data. You will need to re-scan users.</div>
+                                        <div class="fieldDescription">Remove all user sync tracking data. Users will need a rescan.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetUserTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
@@ -717,7 +725,7 @@
                                 <div class="resetButtonRow">
                                     <div class="resetButtonInfo">
                                         <div>People Sync</div>
-                                        <div class="fieldDescription">Remove all people sync tracking data. You will need to re-scan people.</div>
+                                        <div class="fieldDescription">Remove all people sync tracking data. People will need a rescan.</div>
                                     </div>
                                     <button is="emby-button" type="button" id="btnResetPeopleTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>

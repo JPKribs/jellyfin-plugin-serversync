@@ -8,6 +8,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

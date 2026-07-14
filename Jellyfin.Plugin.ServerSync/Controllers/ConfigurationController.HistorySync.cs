@@ -45,7 +45,7 @@ public partial class ConfigurationController
         skip = Math.Max(0, skip);
 
         SyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus) && Enum.IsDefined(parsedStatus))
         {
             statusFilter = parsedStatus;
         }
@@ -54,7 +54,7 @@ public partial class ConfigurationController
         var config = _configManager.Configuration;
 
         return Ok(new PagedResult<HistorySyncItemDto>(
-            items.Select(i => i.ToDto(!string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, _configManager.DecryptedSourceServerApiKey)).ToList(),
+            items.Select(i => i.ToDto(!string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl)).ToList(),
             totalCount,
             skip,
             take));
@@ -96,7 +96,7 @@ public partial class ConfigurationController
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(request);
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var status))
+        if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status))
         {
             return BadRequest("Invalid status value");
         }

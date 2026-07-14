@@ -294,6 +294,22 @@ public class RefreshHistorySyncTableTask
     {
         var sourceItemId = source.SourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
         var record = _historyService.BuildRecord(source.UserMapping, source.LibraryMapping, source.SourceItem, sourceItemId);
+
+        // Carry forward the Synced baseline from the existing row, same as
+        // the Metadata refresh: the service builds a fresh record with a
+        // null SyncedHash, and without this the SourceHash == SyncedHash
+        // short-circuit in HasChanges can never fire and every refresh
+        // destroys the baseline the Sync task recorded via MarkSynced.
+        if (record != null && existing.TryGetValue((record.SourceUserId, record.SourceItemId), out var prev))
+        {
+            record.Id = prev.Id;
+            record.Status = prev.Status;
+            record.LastSyncTime = prev.LastSyncTime;
+            record.Reason = prev.Reason;
+            record.SourceState.Synced = prev.SourceState.Synced;
+            record.SourceState.SyncedHash = prev.SourceState.SyncedHash;
+        }
+
         return Task.FromResult(record);
     }
 

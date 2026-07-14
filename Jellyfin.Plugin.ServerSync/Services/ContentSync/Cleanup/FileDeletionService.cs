@@ -72,12 +72,19 @@ public static class FileDeletionService
     /// <param name="libraryRootPath">Optional library root path to prevent walking above the library boundary.</param>
     public static void TryRemoveEmptyFolders(string directoryPath, ILogger logger, string? libraryRootPath = null)
     {
+        // Without a known root the walk-up has no boundary and could climb
+        // through the library root into mount-point parents — skip cleanup
+        // rather than walk unbounded.
+        if (string.IsNullOrEmpty(libraryRootPath))
+        {
+            logger.LogDebug("Skipping empty-folder cleanup for {Directory}: no library root resolved to bound the walk", directoryPath);
+            return;
+        }
+
         try
         {
             // Normalize the boundary path for comparison
-            var normalizedRoot = !string.IsNullOrEmpty(libraryRootPath)
-                ? Path.GetFullPath(libraryRootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                : null;
+            var normalizedRoot = Path.GetFullPath(libraryRootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
             // Walk up the directory tree and remove empty folders
             var currentDir = directoryPath;
@@ -85,14 +92,11 @@ public static class FileDeletionService
             while (!string.IsNullOrEmpty(currentDir) && Directory.Exists(currentDir))
             {
                 // Stop if we've reached or gone above the library root
-                if (normalizedRoot != null)
+                var normalizedCurrent = Path.GetFullPath(currentDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (string.Equals(normalizedCurrent, normalizedRoot, StringComparison.OrdinalIgnoreCase)
+                    || !normalizedCurrent.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 {
-                    var normalizedCurrent = Path.GetFullPath(currentDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    if (string.Equals(normalizedCurrent, normalizedRoot, StringComparison.OrdinalIgnoreCase)
-                        || !normalizedCurrent.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-                    {
-                        break;
-                    }
+                    break;
                 }
 
                 // Check if directory is empty (no files and no subdirectories)
@@ -325,6 +329,24 @@ public static class FileDeletionService
 
             if (!string.IsNullOrEmpty(localPath) && File.Exists(localPath))
             {
+                // Same boundary check the manual deletion endpoint enforces:
+                // the unattended path must never delete a file outside every
+                // configured library root, no matter what the row says.
+                var containingRoot = FileValidationService.GetContainingLibraryRoot(localPath, config);
+                if (containingRoot == null)
+                {
+                    failedItems.Add((item.SourceItemId, "Deletion refused: path is outside all configured library roots"));
+                    logger.LogError("Refused to delete {FileName}: {Path} is outside all configured library roots", fileName, localPath);
+                    continue;
+                }
+
+                if (FileValidationService.HasSymlinkedDirectoryComponent(localPath, containingRoot))
+                {
+                    failedItems.Add((item.SourceItemId, "Deletion refused: path traverses a symlinked directory"));
+                    logger.LogError("Refused to delete {FileName}: {Path} traverses a symlinked directory, so the physical file may live outside the library", fileName, localPath);
+                    continue;
+                }
+
                 DeletionResult result;
                 if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
                 {

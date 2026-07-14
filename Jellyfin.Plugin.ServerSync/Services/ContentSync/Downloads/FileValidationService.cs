@@ -5,6 +5,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 
@@ -77,6 +78,74 @@ public static class FileValidationService
     /// <param name="path">Path to validate.</param>
     /// <param name="config">Plugin configuration containing library mappings.</param>
     /// <returns>True if path is within a configured library.</returns>
+    /// <summary>
+    /// Returns the LocalRootPath of the enabled library mapping containing
+    /// <paramref name="path"/>, or null when no mapping contains it.
+    /// </summary>
+    public static string? GetContainingLibraryRoot(string? path, PluginConfiguration config)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        var normalizedPath = Path.GetFullPath(path);
+        foreach (var mapping in config.LibraryMappings.Where(m => m.IsEnabled && !string.IsNullOrEmpty(m.LocalRootPath)))
+        {
+            var normalizedLibraryPath = Path.GetFullPath(mapping.LocalRootPath);
+            var relativePath = Path.GetRelativePath(normalizedLibraryPath, normalizedPath);
+            if (!relativePath.StartsWith("..", StringComparison.Ordinal)
+                && !Path.IsPathRooted(relativePath))
+            {
+                return mapping.LocalRootPath;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns true when any DIRECTORY between the file and the library root
+    /// is a symlink/junction. The lexical containment check can't see that a
+    /// linked directory points outside the library, so deleting "inside" the
+    /// root would remove a physical file elsewhere. The file itself being a
+    /// link is fine (deleting a link leaves the target intact). Errors count
+    /// as linked — refusal is the safe direction for a deletion guard.
+    /// </summary>
+    public static bool HasSymlinkedDirectoryComponent(string filePath, string libraryRootPath)
+    {
+        try
+        {
+            var root = Path.GetFullPath(libraryRootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
+
+            while (!string.IsNullOrEmpty(dir))
+            {
+                var normalized = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (string.Equals(normalized, root, StringComparison.OrdinalIgnoreCase)
+                    || !normalized.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+
+                var di = new DirectoryInfo(dir);
+                if (di.Exists && (di.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    return true;
+                }
+
+                dir = Path.GetDirectoryName(dir);
+            }
+
+            return false;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
     public static bool IsPathWithinLibrary(string? path, PluginConfiguration config)
     {
         if (string.IsNullOrEmpty(path))

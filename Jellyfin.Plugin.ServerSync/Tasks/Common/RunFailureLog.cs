@@ -7,16 +7,18 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 
 /// <summary>
 /// Records per-module run outcomes on the plugin configuration for the
-/// dashboard's Status endpoint. All mutations go through a single static lock:
-/// different modules hold different <see cref="SyncModuleMutex"/> keys, so a
-/// Content refresh and a Metadata sync can both finish at the same moment and
-/// would otherwise race on the shared <c>LastRunFailures</c> list.
+/// dashboard's Status endpoint. All mutations go through the plugin-wide
+/// <see cref="Services.Configuration.ConfigurationSaveLock"/>: different
+/// modules hold different <see cref="SyncModuleMutex"/> keys, so a Content
+/// refresh and a Metadata sync can both finish at the same moment and would
+/// otherwise race on the shared <c>LastRunFailures</c> list — including
+/// against the XmlSerializer enumerating it mid-save on another thread.
 /// Best-effort — a failed config save is logged but never propagates, so it
 /// can't mask the actual run result.
 /// </summary>
 internal static class RunFailureLog
 {
-    private static readonly object _lock = new();
+    private static readonly object _lock = Services.Configuration.ConfigurationSaveLock.Sync;
 
     /// <summary>
     /// Records (or replaces) the most-recent run failure for a module.

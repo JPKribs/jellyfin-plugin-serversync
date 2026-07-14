@@ -2,6 +2,7 @@ using System;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Models.UserSync;
 

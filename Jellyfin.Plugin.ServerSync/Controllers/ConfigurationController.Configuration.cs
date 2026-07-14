@@ -48,7 +48,7 @@ public partial class ConfigurationController
             });
         }
 
-        using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, request.ApiKey);
+        using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, ResolveRequestApiKey(request.ApiKey));
 
         var result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -157,7 +157,7 @@ public partial class ConfigurationController
 
         try
         {
-            using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, request.ApiKey);
+            using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, ResolveRequestApiKey(request.ApiKey));
 
             // Pass authenticated user ID for non-admin fallback
             var config = Plugin.Instance?.Configuration;
@@ -209,7 +209,7 @@ public partial class ConfigurationController
 
         try
         {
-            using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, request.ApiKey);
+            using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, ResolveRequestApiKey(request.ApiKey));
 
             // Pass authenticated user ID for non-admin fallback
             var config = Plugin.Instance?.Configuration;
@@ -242,7 +242,7 @@ public partial class ConfigurationController
     /// <param name="startIndex">Starting index for pagination.</param>
     /// <param name="limit">Maximum items to return.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of source library items.</returns>
+    /// <returns>List of source files.</returns>
     [HttpGet("SourceLibraryItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -253,11 +253,27 @@ public partial class ConfigurationController
         [FromQuery] int limit = 50,
         [FromQuery] int? skip = null,
         [FromQuery] int? take = null,
+        [FromQuery] bool collections = false,
+        [FromQuery] bool playlists = false,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(libraryId))
+        if (!collections && !playlists && string.IsNullOrWhiteSpace(libraryId))
         {
             return BadRequest("Library ID is required");
+        }
+
+        // Same clamps as every other list endpoint — an unclamped take pulls
+        // an entire source library into one response.
+        startIndex = Math.Max(0, startIndex);
+        limit = Math.Clamp(limit, 1, 200);
+        if (skip.HasValue)
+        {
+            skip = Math.Max(0, skip.Value);
+        }
+
+        if (take.HasValue)
+        {
+            take = Math.Clamp(take.Value, 1, 200);
         }
 
         var config = _configManager.Configuration;
@@ -266,7 +282,7 @@ public partial class ConfigurationController
             return BadRequest("Source server is not configured");
         }
 
-        if (!Guid.TryParse(libraryId, out var libraryGuid))
+        if (!collections && !playlists && !Guid.TryParse(libraryId, out _))
         {
             return BadRequest("Invalid library ID format");
         }
@@ -274,12 +290,28 @@ public partial class ConfigurationController
         try
         {
             using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-            var result = await client.GetTopLevelLibraryItemsAsync(
-                libraryGuid,
-                search,
-                skip ?? startIndex,
-                take ?? limit,
-                cancellationToken).ConfigureAwait(false);
+
+            // Collections and playlists live outside libraries (server-wide
+            // meta-folders), so the picker browses them without a parent
+            // library scope.
+            var result = collections
+                ? await client.GetCollectionsAsync(
+                    search,
+                    skip ?? startIndex,
+                    take ?? limit,
+                    cancellationToken).ConfigureAwait(false)
+                : playlists
+                    ? await client.GetPlaylistsAsync(
+                        search,
+                        skip ?? startIndex,
+                        take ?? limit,
+                        cancellationToken).ConfigureAwait(false)
+                    : await client.GetTopLevelLibraryItemsAsync(
+                        Guid.Parse(libraryId),
+                        search,
+                        skip ?? startIndex,
+                        take ?? limit,
+                        cancellationToken).ConfigureAwait(false);
 
             if (result?.Items == null)
             {
@@ -308,7 +340,7 @@ public partial class ConfigurationController
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to get source library items for library {LibraryId}", libraryId);
+            _logger.LogWarning(ex, "Failed to get source files for library {LibraryId}", libraryId);
             return BadRequest("Failed to fetch items from source server");
         }
     }
@@ -380,6 +412,15 @@ public partial class ConfigurationController
         if (!uri.IsDefaultPort)
         {
             normalizedUrl += $":{uri.Port}";
+        }
+
+        // Keep a sub-path (reverse proxy serving Jellyfin at /jellyfin) —
+        // dropping it made such servers impossible to configure, with a
+        // misleading "connection failed" as the only symptom.
+        var path = uri.AbsolutePath.TrimEnd('/');
+        if (!string.IsNullOrEmpty(path) && path != "/")
+        {
+            normalizedUrl += path;
         }
 
         return new ValidateUrlResponse

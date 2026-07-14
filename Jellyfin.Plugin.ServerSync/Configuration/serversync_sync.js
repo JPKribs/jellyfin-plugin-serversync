@@ -215,7 +215,7 @@ export default function (view) {
             }
             var titleEl = view.querySelector('#syncPageTitle');
             if (titleEl) {
-                titleEl.textContent = 'Sync - ' + displayName;
+                titleEl.textContent = displayName + ' Sync';
             }
 
             var descEl = view.querySelector('#syncTypeDescription');
@@ -307,7 +307,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
 
-                            return ServerSyncShared.renderItemThumb(item.SourceServerUrl, item.SourceServerApiKey, item.SourceItemId) +
+                            return ServerSyncShared.renderItemThumb(item.SourceItemId) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName" title="' +
                                     ServerSyncShared.escapeHtml(sourcePath) + '">' +
@@ -823,7 +823,7 @@ export default function (view) {
 
             var queueBtnSpan = btnQueue.querySelector('span');
             if (isSynced) {
-                queueBtnSpan.textContent = 'Re-sync';
+                queueBtnSpan.textContent = 'Resync';
             } else {
                 queueBtnSpan.textContent = 'Queue';
             }
@@ -1018,7 +1018,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
 
-                            return ServerSyncShared.renderItemThumb(item.SourceServerUrl, item.SourceServerApiKey, item.SourceItemId) +
+                            return ServerSyncShared.renderItemThumb(item.SourceItemId) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName" title="' + ServerSyncShared.escapeHtml(itemName) + '">' +
                                 ServerSyncShared.escapeHtml(itemName) + '</div>' +
@@ -1530,7 +1530,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
 
-                            return ServerSyncShared.renderItemThumb(item.SourceServerUrl, item.SourceServerApiKey, item.SourceItemId) +
+                            return ServerSyncShared.renderItemThumb(item.SourceItemId) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName" title="' + ServerSyncShared.escapeHtml(itemName) + '">' +
                                 ServerSyncShared.escapeHtml(itemName) + '</div>' +
@@ -2391,7 +2391,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
 
-                            return ServerSyncShared.renderUserThumb(item.SourceServerUrl, item.SourceServerApiKey, item.SourceUserId) +
+                            return ServerSyncShared.renderUserThumb(item.SourceUserId) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName">' + ServerSyncShared.escapeHtml(sourceUserName) + ' \u2192 ' + ServerSyncShared.escapeHtml(localUserName) + '</div>' +
                                 '<div class="syncItemPath">' + ServerSyncShared.escapeHtml(sourceServerName) + ' \u2192 ' + ServerSyncShared.escapeHtml(localServerName) + '</div>' +
@@ -3043,7 +3043,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '">' +
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
-                            return ServerSyncShared.renderPersonThumb(item.SourceServerUrl, item.SourceServerApiKey, item.SourcePersonId) +
+                            return ServerSyncShared.renderPersonThumb(item.SourcePersonId) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName">' + ServerSyncShared.escapeHtml(item.PersonName || 'Unknown') + '</div>' +
                                 errorPreview +

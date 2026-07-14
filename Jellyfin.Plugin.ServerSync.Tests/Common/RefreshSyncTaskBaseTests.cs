@@ -50,7 +50,7 @@ public class RefreshSyncTaskBaseTests
 
         public IList<TestRecord> GetByStatus(SyncStatus status, int? limit = null) => Array.Empty<TestRecord>();
 
-        public IList<TestRecord> GetAll() => All;
+        public IList<TestRecord> GetByStatusStrict(SyncStatus status) => Array.Empty<TestRecord>();
 
         public IList<TestRecord> GetAllStrict() => All;
 
@@ -125,6 +125,10 @@ public class RefreshSyncTaskBaseTests
 
         public Func<TestRecord, bool>? ScopeFilter { get; set; }
 
+        public Func<TestRecord, bool>? PruneCandidateFilter { get; set; }
+
+        public bool GuardApplies { get; set; } = true;
+
         public bool MarkUnavailableDuringDiscovery { get; set; }
 
         public IList<string> Sources { get; set; } = Array.Empty<string>();
@@ -169,6 +173,10 @@ public class RefreshSyncTaskBaseTests
         protected override string ExtractKey(TestRecord record) => record.Key;
 
         protected override bool IsInScope(TestRecord record) => ScopeFilter?.Invoke(record) ?? true;
+
+        protected override bool IsPruneCandidate(TestRecord record) => PruneCandidateFilter?.Invoke(record) ?? true;
+
+        protected override bool PruneGuardApplies => GuardApplies;
 
         public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
@@ -413,5 +421,84 @@ public class RefreshSyncTaskBaseTests
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
         Assert.Equal(20, manager.Deleted.Count);
+    }
+
+    /// <summary>
+    /// The breaker measures the stale fraction against the IN-SCOPE
+    /// population, not the whole table. A large disabled mapping must not
+    /// dilute the denominator and let a truncation wipe 100% of the enabled
+    /// mapping's rows while staying under a table-wide threshold.
+    /// True: an enabled mapping is protected regardless of table composition.
+    /// False: any mapping under half the total row count can be wiped by one
+    /// empty-but-200 answer.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_InScopeMajorityStale_BlockedEvenWhenMinorityOfTable()
+    {
+        var task = CreateTask(out var manager);
+        var records = ManyRecords(200);
+        for (var i = 0; i < 140; i++)
+        {
+            records[i].ScopeId = "disabled";
+        }
+
+        manager.All = records;
+        task.Sources = Array.Empty<string>();
+        task.ScopeFilter = r => r.ScopeId != "disabled";
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        // 60 in-scope rows (>= the 50-row guard minimum), all stale → blocked,
+        // even though 60 of 200 is far below the table-wide 50% mark.
+        Assert.Empty(manager.Deleted);
+    }
+
+    /// <summary>
+    /// Rows the prune would no-op on (Content's Ignored / pending-deletion)
+    /// don't count toward the breaker's stale fraction.
+    /// True: gradual legitimate removals accumulating as pending approvals
+    /// can't permanently trip the breaker and freeze reconciliation.
+    /// False: after enough unapproved deletions the breaker locks and newly
+    /// missing items are never marked.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_NonCandidatesExcluded_PruneProceeds()
+    {
+        var task = CreateTask(out var manager);
+        var records = ManyRecords(100);
+        for (var i = 0; i < 60; i++)
+        {
+            records[i].ScopeId = "already-pending";
+        }
+
+        manager.All = records;
+        task.Sources = Array.Empty<string>();
+        task.PruneCandidateFilter = r => r.ScopeId != "already-pending";
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        // 40 candidates of 100 in-scope = 40% stale → under the 50% limit,
+        // prune proceeds (the base prune itself still deletes all 100 stale
+        // rows; candidacy only shapes the breaker's math).
+        Assert.Equal(100, manager.Deleted.Count);
+    }
+
+    /// <summary>
+    /// When the module reports its prune is configured off (Content with
+    /// deletion disabled), the breaker never fires.
+    /// True: no scary "prune blocked" failure for a prune that is a no-op.
+    /// False: users with deletion disabled see phantom safety-limit errors.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_GuardDisabled_BreakerNeverBlocks()
+    {
+        var task = CreateTask(out var manager);
+        manager.All = ManyRecords(100);
+        task.Sources = Array.Empty<string>();
+        task.GuardApplies = false;
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(100, manager.Deleted.Count);
     }
 }

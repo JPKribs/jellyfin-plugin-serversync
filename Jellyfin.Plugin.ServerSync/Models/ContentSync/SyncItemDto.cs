@@ -45,8 +45,6 @@ public class SyncItemDto
 
     public string? SourceServerUrl { get; set; }
 
-    public string? SourceServerApiKey { get; set; }
-
     public string? SourceServerId { get; set; }
 
     public string? CompanionFiles { get; set; }

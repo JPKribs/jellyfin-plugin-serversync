@@ -39,7 +39,7 @@ public class SourceLibraryItemDto
 }
 
 /// <summary>
-/// Response for the source library items browsing endpoint.
+/// Response for the source files browsing endpoint.
 /// </summary>
 public class SourceLibraryItemsResponse
 {

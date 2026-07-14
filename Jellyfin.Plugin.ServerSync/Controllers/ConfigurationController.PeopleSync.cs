@@ -75,7 +75,7 @@ public partial class ConfigurationController
 
         var peopleConfig = _configManager.Configuration;
         var peopleUrl = !string.IsNullOrEmpty(peopleConfig.SourceServerExternalUrl) ? peopleConfig.SourceServerExternalUrl : peopleConfig.SourceServerUrl;
-        return Ok(item.ToDto(peopleUrl, _configManager.DecryptedSourceServerApiKey));
+        return Ok(item.ToDto(peopleUrl));
     }
 
     /// <summary>
@@ -95,7 +95,7 @@ public partial class ConfigurationController
         skip = Math.Max(0, skip);
 
         SyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus) && Enum.IsDefined(parsedStatus))
         {
             statusFilter = parsedStatus;
         }
@@ -111,9 +111,8 @@ public partial class ConfigurationController
 
         var peopleConfig = _configManager.Configuration;
         var peopleUrl = !string.IsNullOrEmpty(peopleConfig.SourceServerExternalUrl) ? peopleConfig.SourceServerExternalUrl : peopleConfig.SourceServerUrl;
-        var peopleApiKey = _configManager.DecryptedSourceServerApiKey;
         return Ok(new PagedResult<PeopleSyncItemDto>(
-            result.Items.Select(i => i.ToDto(peopleUrl, peopleApiKey)).ToList(),
+            result.Items.Select(i => i.ToDto(peopleUrl)).ToList(),
             result.TotalCount,
             skip,
             take));
@@ -151,7 +150,7 @@ public partial class ConfigurationController
         [FromBody] UpdatePeopleSyncItemStatusRequest request,
         [FromServices] PeopleSyncTableManager manager)
     {
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var parsedStatus))
+        if (!Enum.TryParse<SyncStatus>(request.Status, out var parsedStatus) || !Enum.IsDefined(parsedStatus))
         {
             return BadRequest("Invalid status value");
         }

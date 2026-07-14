@@ -145,11 +145,6 @@ public class HistorySyncItemDto
     /// </summary>
     public string? SourceServerUrl { get; set; }
 
-    /// <summary>
-    /// Gets or sets the source server API key (for authenticated image URLs).
-    /// </summary>
-    public string? SourceServerApiKey { get; set; }
-
     // ===== Sync Tracking =====
 
     /// <summary>

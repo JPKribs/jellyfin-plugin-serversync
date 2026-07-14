@@ -195,9 +195,25 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     /// <summary>
     /// Returns the items to apply this run. Default is rows in
     /// <see cref="SyncStatus.Queued"/>. Content overrides to also include
-    /// errored-with-retries-left rows.
+    /// errored-with-retries-left rows. Strict read: the lenient
+    /// <c>GetByStatus</c> returns an empty list on transient DB errors,
+    /// which would make this run stamp a clean completion while the queue
+    /// silently went unprocessed.
     /// </summary>
-    protected virtual IList<TRecord> GetItemsToApply() => Manager.GetByStatus(SyncStatus.Queued);
+    protected virtual IList<TRecord> GetItemsToApply() => Manager.GetByStatusStrict(SyncStatus.Queued);
+
+    /// <summary>
+    /// Splits the items into sequentially-applied groups: groups run in
+    /// order with a full barrier between them, while items inside a group
+    /// may apply in parallel (per <see cref="MaxDegreeOfParallelism"/>).
+    /// Default is a single group. Metadata overrides so parent folders
+    /// (Series/Season/…) are fully applied before their leaves — a sorted
+    /// flat list alone doesn't guarantee that once the loop is parallel.
+    /// </summary>
+    protected virtual IEnumerable<IList<TRecord>> GetApplyGroups(IList<TRecord> items)
+    {
+        yield return items;
+    }
 
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
@@ -271,60 +287,74 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         var processed = 0;
 
         var maxParallel = Math.Max(1, MaxDegreeOfParallelism);
-        if (maxParallel == 1 || queued.Count <= 1)
+        foreach (var group in GetApplyGroups(queued))
         {
-            for (int i = 0; i < queued.Count; i++)
+            if (cancellationToken.IsCancellationRequested)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    Logger.LogInformation("{Task}: cancellation requested, stopping queue processing", Name);
-                    break;
-                }
-
-                var record = queued[i];
-                if (await ApplyOneAsync(record, cancellationToken).ConfigureAwait(false))
-                {
-                    successes++;
-                }
-                else
-                {
-                    failures++;
-                }
-
-                processed++;
-                progress.Report(ApplyEnd * processed / total);
+                break;
             }
-        }
-        else
-        {
-            var options = new ParallelOptions
-            {
-                MaxDegreeOfParallelism = maxParallel,
-                CancellationToken = cancellationToken
-            };
 
-            try
+            if (maxParallel == 1 || group.Count <= 1)
             {
-                await Parallel.ForEachAsync(queued, options, async (record, ct) =>
+                for (int i = 0; i < group.Count; i++)
                 {
-                    if (await ApplyOneAsync(record, ct).ConfigureAwait(false))
+                    if (cancellationToken.IsCancellationRequested)
                     {
-                        Interlocked.Increment(ref successes);
+                        Logger.LogInformation("{Task}: cancellation requested, stopping queue processing", Name);
+                        break;
+                    }
+
+                    var record = group[i];
+                    if (await ApplyOneAsync(record, cancellationToken).ConfigureAwait(false))
+                    {
+                        successes++;
                     }
                     else
                     {
-                        Interlocked.Increment(ref failures);
+                        failures++;
                     }
 
-                    var done = Interlocked.Increment(ref processed);
-                    progress.Report(ApplyEnd * done / total);
-                }).ConfigureAwait(false);
+                    processed++;
+                    progress.Report(ApplyEnd * processed / total);
+                }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            else
             {
-                Logger.LogInformation("{Task}: cancellation requested, stopping queue processing", Name);
+                var options = new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxParallel,
+                    CancellationToken = cancellationToken
+                };
+
+                try
+                {
+                    await Parallel.ForEachAsync(group, options, async (record, ct) =>
+                    {
+                        if (await ApplyOneAsync(record, ct).ConfigureAwait(false))
+                        {
+                            Interlocked.Increment(ref successes);
+                        }
+                        else
+                        {
+                            Interlocked.Increment(ref failures);
+                        }
+
+                        var done = Interlocked.Increment(ref processed);
+                        progress.Report(ApplyEnd * done / total);
+                    }).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    Logger.LogInformation("{Task}: cancellation requested, stopping queue processing", Name);
+                }
             }
         }
+
+        // A cancelled run must not fall through to the completion path below:
+        // stamping the last-sync timestamp and clearing the failure record
+        // would make an aborted run (with items still queued) look like a
+        // clean finished one on the dashboard. Propagate like the refresh base.
+        cancellationToken.ThrowIfCancellationRequested();
 
         progress.Report(ApplyEnd);
 

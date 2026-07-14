@@ -1,5 +1,6 @@
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Models;
 
@@ -11,9 +12,8 @@ public static class UserSyncItemExtensions
     /// <summary>Projects a user sync item to its API DTO.</summary>
     /// <param name="item">The user sync item.</param>
     /// <param name="sourceServerUrl">The source server URL surfaced to the client.</param>
-    /// <param name="sourceServerApiKey">The source server API key surfaced to the client.</param>
     /// <returns>The DTO representation.</returns>
-    public static UserSyncItemDto ToDto(this UserSyncItem item, string? sourceServerUrl = null, string? sourceServerApiKey = null)
+    public static UserSyncItemDto ToDto(this UserSyncItem item, string? sourceServerUrl = null)
     {
         return new UserSyncItemDto
         {
@@ -33,7 +33,6 @@ public static class UserSyncItemExtensions
             HasChanges = item.HasChanges,
             ChangesSummary = item.ChangesSummary,
             SourceServerUrl = sourceServerUrl,
-            SourceServerApiKey = sourceServerApiKey,
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,

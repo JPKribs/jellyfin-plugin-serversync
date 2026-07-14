@@ -10,6 +10,7 @@ using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
@@ -103,7 +104,7 @@ public class SyncMissingContentTask
         var maxRetries = ConfigManager.Configuration.MaxRetryCount > 0
             ? ConfigManager.Configuration.MaxRetryCount
             : DefaultMaxRetries;
-        return typedManager.GetByStatus(SyncStatus.Queued)
+        return typedManager.GetByStatusStrict(SyncStatus.Queued)
             .Concat(typedManager.GetErroredItemsForRetry(maxRetries))
             .ToList();
     }

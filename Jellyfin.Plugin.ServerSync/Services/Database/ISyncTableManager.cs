@@ -32,12 +32,6 @@ public interface ISyncTableManager<TRecord, TKey>
     IList<TRecord> GetByStatus(SyncStatus status, int? limit = null);
 
     /// <summary>
-    /// Returns all records in the table. Transient database errors return an
-    /// empty list (logged) — safe for UI reads, unsafe for refresh snapshots.
-    /// </summary>
-    IList<TRecord> GetAll();
-
-    /// <summary>
     /// Returns all records in the table, propagating database errors instead
     /// of degrading to an empty list. Refresh tasks use this for the
     /// existing-row snapshot: an empty snapshot makes every source item look
@@ -45,6 +39,16 @@ public interface ISyncTableManager<TRecord, TKey>
     /// (Ignored, pending approvals) with freshly computed ones.
     /// </summary>
     IList<TRecord> GetAllStrict();
+
+    /// <summary>
+    /// Returns all records with the given status, letting database errors
+    /// propagate instead of degrading to an empty list. Use where an
+    /// empty-on-error answer would be read as "nothing to do" and stamp a
+    /// clean run.
+    /// </summary>
+    /// <param name="status">Status to filter by.</param>
+    /// <returns>All records with that status.</returns>
+    IList<TRecord> GetByStatusStrict(SyncStatus status);
 
     /// <summary>
     /// Returns the total row count.

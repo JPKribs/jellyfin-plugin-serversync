@@ -65,6 +65,16 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
+    /// Resolves an API key posted from a settings page. The page shows the
+    /// kept-sentinel instead of the stored secret, so a request carrying the
+    /// sentinel means "use the configured key".
+    /// </summary>
+    private string ResolveRequestApiKey(string? requestApiKey)
+        => string.Equals(requestApiKey, JPKribs.Jellyfin.Base.SecretProtector.KeptSentinel, StringComparison.Ordinal)
+            ? _configManager.DecryptedSourceServerApiKey
+            : requestApiKey ?? string.Empty;
+
+    /// <summary>
     /// Builds a <see cref="BulkOperationResult"/> from a manager's
     /// <c>BulkUpdateStatusWithDetails</c> tuple. Logs at Warning if any
     /// items were not found so log readers can correlate UI alerts to

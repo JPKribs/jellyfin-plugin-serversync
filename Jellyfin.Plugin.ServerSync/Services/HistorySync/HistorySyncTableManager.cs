@@ -195,7 +195,10 @@ public sealed class HistorySyncTableManager
                     LastSyncTime = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.LastSyncTime ELSE @lastSync END,
                     Reason = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.Reason ELSE @reason END,
                     SourceStateHash = @srcStateHash,
-                    SyncedStateHash = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.SyncedStateHash ELSE @syncedStateHash END";
+                    SyncedStateHash = CASE
+                        WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.SyncedStateHash
+                        WHEN @syncedStateHash IS NOT NULL THEN @syncedStateHash
+                        ELSE HistorySyncItems.SyncedStateHash END";
 
             cmd.Parameters.AddWithValue("@sourceUserId", record.SourceUserId);
             cmd.Parameters.AddWithValue("@localUserId", record.LocalUserId);

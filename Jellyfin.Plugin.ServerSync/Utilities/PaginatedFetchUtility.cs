@@ -64,6 +64,11 @@ public static class PaginatedFetchUtility
         var processedItems = 0;
         var consecutiveErrors = 0;
         var processFailures = 0;
+        var pathlessSkipped = 0;
+        var rawFetched = 0;
+        var duplicateIds = 0;
+        var fetchedIds = new HashSet<Guid>();
+        int? expectedTotal = null;
         var completedFully = false;
 
         while (true)
@@ -144,6 +149,8 @@ public static class PaginatedFetchUtility
             }
 
             consecutiveErrors = 0;
+            expectedTotal ??= result.TotalRecordCount;
+            rawFetched += result.Items.Count;
 
             foreach (var item in result.Items)
             {
@@ -152,8 +159,30 @@ public static class PaginatedFetchUtility
                     break;
                 }
 
-                if (item.Id == null || string.IsNullOrEmpty(item.Path))
+                if (item.Id == null)
                 {
+                    continue;
+                }
+
+                if (!fetchedIds.Add(item.Id.Value))
+                {
+                    // A repeated ID means page boundaries shifted mid-scan
+                    // (tie reorder or source mutation). A duplicate on one
+                    // side implies a silent skip on the other — and the
+                    // count-based check below can't see a swap, because the
+                    // duplicate keeps the totals matching.
+                    duplicateIds++;
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(item.Path))
+                {
+                    // Distinct from a plain skip: a Path-less item is invisible
+                    // to the caller's seen set, and Jellyfin omits Path on
+                    // every item when the API key lacks admin rights — the
+                    // per-mapping zero-seen guard catches the all-pathless
+                    // case, this counter surfaces partial ones.
+                    pathlessSkipped++;
                     continue;
                 }
 
@@ -202,6 +231,37 @@ public static class PaginatedFetchUtility
                 completedFully = true;
                 break;
             }
+        }
+
+        // Offset pagination races with catalog mutations: an item deleted on
+        // the source mid-enumeration shifts everything after it down one slot,
+        // silently skipping an unrelated item at the next page boundary — and
+        // a skipped item is indistinguishable from a removed one to the
+        // caller's prune. The first page's TotalRecordCount tells us how many
+        // items existed at scan start; fetching a different number means the
+        // catalog changed underneath us, so report incomplete discovery and
+        // let the next run get a consistent snapshot.
+        if (completedFully && expectedTotal.HasValue && rawFetched != expectedTotal.Value)
+        {
+            logger.LogWarning(
+                "Library {LibraryName} changed during enumeration (expected {Expected} items, fetched {Fetched}) — reporting incomplete discovery so shifted items are not treated as removed",
+                libraryName, expectedTotal.Value, rawFetched);
+            completedFully = false;
+        }
+
+        if (duplicateIds > 0)
+        {
+            logger.LogWarning(
+                "{Count} duplicate item ID(s) across pages in library {LibraryName} — page boundaries shifted during enumeration; reporting incomplete discovery so skipped items are not treated as removed",
+                duplicateIds, libraryName);
+            completedFully = false;
+        }
+
+        if (pathlessSkipped > 0)
+        {
+            logger.LogWarning(
+                "{Count} item(s) in library {LibraryName} came back without a file path and were skipped — if this is unexpected, check that the API key has admin rights on the source",
+                pathlessSkipped, libraryName);
         }
 
         if (processFailures > 0)

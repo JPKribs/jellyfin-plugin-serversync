@@ -7,6 +7,7 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

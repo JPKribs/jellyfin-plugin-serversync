@@ -82,7 +82,7 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(item.ToDto(config.LibraryMappings, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl, _configManager.DecryptedSourceServerApiKey));
+        return Ok(item.ToDto(config.LibraryMappings, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl));
     }
 
     /// <summary>
@@ -175,7 +175,7 @@ public partial class ConfigurationController
         skip = Math.Max(0, skip);
 
         SyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus) && Enum.IsDefined(parsedStatus))
         {
             statusFilter = parsedStatus;
         }
@@ -189,7 +189,6 @@ public partial class ConfigurationController
             items.Select(i => i.ToDto(
                 config.LibraryMappings,
                 !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
-                _configManager.DecryptedSourceServerApiKey,
                 includeBlobs: false)).ToList(),
             totalCount,
             skip,
@@ -235,7 +234,7 @@ public partial class ConfigurationController
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(request);
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var status))
+        if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status))
         {
             return BadRequest("Invalid status value");
         }

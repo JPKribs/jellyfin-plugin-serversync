@@ -333,7 +333,7 @@ public class LocalServerClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get library items for {LibraryId}", libraryId);
+            _logger.LogError(ex, "Failed to get files for {LibraryId}", libraryId);
             return new List<BaseItem>();
         }
     }
@@ -365,7 +365,7 @@ public class LocalServerClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get library items with user data for user {UserId}, library {LibraryId}", userId, libraryId);
+            _logger.LogError(ex, "Failed to get files with user data for user {UserId}, library {LibraryId}", userId, libraryId);
         }
 
         return result;

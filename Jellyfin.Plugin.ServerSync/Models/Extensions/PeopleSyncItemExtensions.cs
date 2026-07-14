@@ -10,9 +10,8 @@ public static class PeopleSyncItemExtensions
     /// <summary>Projects a people sync item to its API DTO.</summary>
     /// <param name="item">The people sync item.</param>
     /// <param name="sourceServerUrl">The source server URL surfaced to the client.</param>
-    /// <param name="sourceServerApiKey">The source server API key surfaced to the client.</param>
     /// <returns>The DTO representation.</returns>
-    public static PeopleSyncItemDto ToDto(this PeopleSyncItem item, string? sourceServerUrl, string? sourceServerApiKey)
+    public static PeopleSyncItemDto ToDto(this PeopleSyncItem item, string? sourceServerUrl)
     {
         return new PeopleSyncItemDto
         {
@@ -32,7 +31,6 @@ public static class PeopleSyncItemExtensions
             LastSyncTime = item.LastSyncTime,
             ErrorMessage = item.Reason,
             SourceServerUrl = sourceServerUrl,
-            SourceServerApiKey = sourceServerApiKey
         };
     }
 }

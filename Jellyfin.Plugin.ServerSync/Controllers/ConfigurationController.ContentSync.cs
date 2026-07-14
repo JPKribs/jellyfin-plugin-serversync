@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -48,13 +48,13 @@ public partial class ConfigurationController
         skip = Math.Max(0, skip);
 
         SyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus))
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsedStatus) && Enum.IsDefined(parsedStatus))
         {
             statusFilter = parsedStatus;
         }
 
         PendingType? pendingTypeFilter = null;
-        if (!string.IsNullOrEmpty(pendingType) && Enum.TryParse<PendingType>(pendingType, out var parsedPendingType))
+        if (!string.IsNullOrEmpty(pendingType) && Enum.TryParse<PendingType>(pendingType, out var parsedPendingType) && Enum.IsDefined(parsedPendingType))
         {
             pendingTypeFilter = parsedPendingType;
         }
@@ -84,7 +84,7 @@ public partial class ConfigurationController
                     SourcePath = i.SourcePath,
                     LocalPath = i.LocalPath,
                     SourceSize = i.SourceSize,
-                    SourceSizeFormatted = Jellyfin.Plugin.ServerSync.Utilities.FormatUtilities.FormatBytes(i.SourceSize),
+                    SourceSizeFormatted = FormatUtilities.FormatBytes(i.SourceSize),
                     SourceCreateDate = i.SourceCreateDate,
                     LocalItemId = i.LocalItemId,
                     Status = i.Status.ToString(),
@@ -94,7 +94,6 @@ public partial class ConfigurationController
                     ErrorMessage = i.Reason,
                     RetryCount = i.RetryCount,
                     SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
-                    SourceServerApiKey = _configManager.DecryptedSourceServerApiKey,
                     SourceServerId = config.SourceServerId,
                     CompanionFiles = i.CompanionFiles
                 };
@@ -273,8 +272,12 @@ public partial class ConfigurationController
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(request);
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var status))
+        if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status)
+            || status == SyncStatus.Deleting)
         {
+            // Deleting schedules unattended file removal; it is only ever set
+            // by the refresh pipeline or the approval flow, never directly.
+
             return BadRequest("Invalid status value");
         }
 
@@ -467,6 +470,20 @@ public partial class ConfigurationController
                 continue;
             }
 
+            if (!string.IsNullOrEmpty(item.LocalPath))
+            {
+                var containingRoot = FileValidationService.GetContainingLibraryRoot(item.LocalPath, config);
+                if (containingRoot != null && FileValidationService.HasSymlinkedDirectoryComponent(item.LocalPath, containingRoot))
+                {
+                    _logger.LogWarning(
+                        "SKIPPED DELETE: {FileName} - Path traverses a symlinked directory; the physical file may live outside the library. Local path: {LocalPath}",
+                        sanitizedFileName,
+                        sanitizedLocalPath);
+                    skippedCount++;
+                    continue;
+                }
+            }
+
             MediaBrowser.Controller.Entities.BaseItem? localItem = null;
 
             if (!string.IsNullOrEmpty(item.LocalItemId) && Guid.TryParse(item.LocalItemId, out var localItemGuid))
@@ -477,6 +494,27 @@ public partial class ConfigurationController
             if (localItem == null && !string.IsNullOrEmpty(item.LocalPath))
             {
                 localItem = _libraryManager.FindByPath(item.LocalPath, isFolder: false);
+            }
+
+            // The id-based delete removes whatever file the Jellyfin item
+            // points at, and LocalItemId can go stale when a mapping's root
+            // changes — so the RESOLVED path must pass the same checks the
+            // tracked path did, and must actually be the tracked file.
+            if (localItem != null)
+            {
+                var resolvedPath = localItem.Path;
+                var mismatch = !string.IsNullOrEmpty(item.LocalPath)
+                    && !string.Equals(resolvedPath, item.LocalPath, StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrEmpty(resolvedPath)
+                    || mismatch
+                    || !FileValidationService.IsPathWithinLibrary(resolvedPath, config))
+                {
+                    _logger.LogWarning(
+                        "Stale LocalItemId for {FileName}: resolved item path {ResolvedPath} does not match the tracked path or escapes library roots; falling back to the tracked path",
+                        sanitizedFileName,
+                        SanitizeForLog(resolvedPath));
+                    localItem = null;
+                }
             }
 
             var fileExists = localItem != null || (!string.IsNullOrEmpty(item.LocalPath) && System.IO.File.Exists(item.LocalPath));

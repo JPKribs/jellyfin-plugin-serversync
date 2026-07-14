@@ -49,9 +49,10 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             WHEN 0 THEN 0
             WHEN 3 THEN 1
             WHEN 1 THEN 2
-            WHEN 4 THEN 3
-            WHEN 2 THEN 4
-            ELSE 5
+            WHEN 5 THEN 3
+            WHEN 4 THEN 4
+            WHEN 2 THEN 5
+            ELSE 6
         END";
 
     /// <inheritdoc />
@@ -132,11 +133,11 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
                     SourceCreateDate = @sourceCreateDate,
                     LocalItemId = @localItemId,
                     LocalPath = @localPath,
-                    StatusDate = @statusDate,
-                    Status = @status,
-                    PendingType = @pendingType,
-                    LastSyncTime = @lastSyncTime,
-                    Reason = @reason,
+                    StatusDate = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.StatusDate ELSE @statusDate END,
+                    Status = CASE WHEN SyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
+                    PendingType = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.PendingType ELSE @pendingType END,
+                    LastSyncTime = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.LastSyncTime ELSE @lastSyncTime END,
+                    Reason = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.Reason ELSE @reason END,
                     RetryCount = @retryCount,
                     CompanionFiles = @companionFiles";
 
@@ -155,6 +156,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             AddNullable(cmd, "@reason", record.Reason);
             cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
             AddNullable(cmd, "@companionFiles", record.CompanionFiles);
+            cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
             cmd.ExecuteNonQuery();
         });
     }

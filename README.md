@@ -1,6 +1,6 @@
 ![Server Sync](Jellyfin.Plugin.ServerSync/Assets/Logo.png)
 
-A Jellyfin plugin for one-way synchronization between Jellyfin servers. Keep your **Content**, **Watch History**, **Metadata**, **People**, and **User Settings** in sync across multiple Jellyfin installations.
+A Jellyfin plugin for one way synchronization between Jellyfin servers. Keep your **Content**, **Watch History**, **Metadata**, **People**, and **User Settings** in sync across multiple Jellyfin installations.
 
 ## How It Works
 
@@ -88,6 +88,8 @@ The Plugin builds a table of all content that exists in the mapped Source Librar
 * Files missing on Local Server are Queued for download *(or Pending when `Download New Content` is set to require approval)*
 * Files no longer on Source Server are set to Delete only when `Delete Missing Content` is enabled *(off by default)*
 * External subtitle companion files are included with their parent media
+
+Each Library Mapping can sync everything, a Whitelist, or everything except a Blacklist. The item picker browses Files, Collections, and Playlists. A whitelisted Collection or Playlist syncs whatever it currently contains, checked on every Refresh, so anyone who can edit it on the Source Server controls what syncs. A blacklisted Collection or Playlist excludes its items the same way. Whitelisted Collections are also recreated on the Local Server with the synced copies of their items when `Mirror Synced Collections` is enabled.
 
 Files can be manually approved or ignored using the Approval Process.
 
@@ -195,7 +197,7 @@ Using the user configurations found in the Sync Table, all Queued records update
 
 # Versioning
 
-Releases use a four-part version, `JJ.JJ.F.B`, that matches the supported Jellyfin version with the plugin's own feature/bug count:
+Releases use a four part version, `JJ.JJ.F.B`, that matches the supported Jellyfin version with the plugin's own feature and bug count:
 
 ```
 10.11.1.2

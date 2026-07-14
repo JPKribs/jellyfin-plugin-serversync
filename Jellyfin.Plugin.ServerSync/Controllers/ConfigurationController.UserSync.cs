@@ -37,7 +37,7 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
         var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
-        return Ok(item.ToDto(url, _configManager.DecryptedSourceServerApiKey));
+        return Ok(item.ToDto(url));
     }
 
     /// <summary>
@@ -58,7 +58,7 @@ public partial class ConfigurationController
         skip = Math.Max(0, skip);
 
         SyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsed))
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsed) && Enum.IsDefined(parsed))
         {
             statusFilter = parsed;
         }
@@ -89,7 +89,7 @@ public partial class ConfigurationController
         var config = _configManager.Configuration;
         var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
         return Ok(new PagedResult<UserSyncItemDto>(
-            filtered.Select(i => i.ToDto(url, _configManager.DecryptedSourceServerApiKey)).ToList(),
+            filtered.Select(i => i.ToDto(url)).ToList(),
             result.TotalCount,
             skip,
             take));
@@ -127,7 +127,7 @@ public partial class ConfigurationController
         [FromBody] UpdateUserSyncItemStatusRequest request,
         [FromServices] UserSyncTableManager manager)
     {
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var status))
+        if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status))
         {
             return BadRequest("Invalid status value");
         }
@@ -247,7 +247,7 @@ public partial class ConfigurationController
         skip = Math.Max(0, skip);
 
         SyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsed))
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsed) && Enum.IsDefined(parsed))
         {
             statusFilter = parsed;
         }
@@ -263,7 +263,7 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
         var dtos = result.Items.Select(g => MapToUserSyncUserDto(
-            g.SourceUserId, g.LocalUserId, g.SourceUserName, g.LocalUserName, g.Items.ToList(), config, _configManager.DecryptedSourceServerApiKey)).ToList();
+            g.SourceUserId, g.LocalUserId, g.SourceUserName, g.LocalUserName, g.Items.ToList(), config)).ToList();
 
         return Ok(new PagedResult<UserSyncUserDto>(
             dtos,
@@ -340,8 +340,7 @@ public partial class ConfigurationController
         string? sourceUserName,
         string? localUserName,
         List<UserSyncItem> items,
-        PluginConfiguration config,
-        string decryptedApiKey)
+        PluginConfiguration config)
     {
         var policyItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.Policy);
         var configItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.Configuration);
@@ -354,7 +353,6 @@ public partial class ConfigurationController
             SourceUserName = sourceUserName ?? items.FirstOrDefault()?.SourceUserName,
             LocalUserName = localUserName ?? items.FirstOrDefault()?.LocalUserName,
             SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
-            SourceServerApiKey = decryptedApiKey,
             PolicyId = policyItem?.Id,
             ConfigurationId = configItem?.Id,
             ProfileImageId = imageItem?.Id,
