@@ -23,6 +23,7 @@ export default function (view) {
     var ServerSyncShared = null;
     var createPaginatedTable = null;
     var _filterTableSeq = 0;
+    var _filterThumbSeq = 0;
     var _sharedPromise = import('/web/configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
         createPaginatedTable = shared.createPaginatedTable;
@@ -410,7 +411,7 @@ export default function (view) {
             var sel = !!selectedFilterItems[item.Id];
             var thumbHtml;
             if (ServerSyncShared && item.Id) {
-                var thumbId = 'ss-filter-thumb-' + escapeHtml(String(item.Id));
+                var thumbId = 'ss-filter-thumb-' + (++_filterThumbSeq);
                 ServerSyncShared.scheduleProxyImage(thumbId, item.Id, false, 120);
                 thumbHtml = '<img id="' + thumbId + '" class="filterItemThumb" />' +
                     '<div class="filterItemThumbPlaceholder" style="display:none"><span class="material-icons">movie</span></div>';

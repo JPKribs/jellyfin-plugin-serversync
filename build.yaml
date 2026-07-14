@@ -26,7 +26,7 @@ changelog:
   developer:
   - Added Collection and Playlist syncing. Whitelist one to sync its items or blacklist one to exclude them and membership is rechecked every refresh
   - New Sync Collections task recreates whitelisted collections on this server with the synced copies of their items
-  - The source API key is now encrypted on every save and is never sent to the browser
+  - The source API key is now encrypted on every save and is never sent to the browser in plaintext
   - Thumbnails load through a new plugin image proxy
   - Refreshes refuse to prune a mapping when the source reports zero items for it
   - Refreshes detect catalogs that change mid scan and skip pruning for that run
@@ -35,6 +35,7 @@ changelog:
   - Deletion never follows symlinked directories or paths outside library roots
   - Recycling bin and temp folder cleanup refuse to run when their path points at a library
   - Cancelled runs no longer record a clean completion
+  - Saving one settings section no longer overwrites changes made by running tasks or the other settings tab
   - Metadata sync applies shows and seasons before their episodes
   - History sync reuses unchanged comparison baselines instead of comparing every item every run
   - Fixed a bandwidth schedule ending at midnight resetting to 6 AM
