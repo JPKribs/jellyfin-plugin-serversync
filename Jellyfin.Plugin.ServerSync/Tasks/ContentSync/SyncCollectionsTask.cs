@@ -227,7 +227,12 @@ public class SyncCollectionsTask : IScheduledTask
             }
         }
 
-        var existing = FindLocalMirror(localBoxSets, sourceIdN, root.Name!);
+        var existing = FindLocalMirror(localBoxSets, sourceIdN, root.Name!, out var nameConflict);
+        if (nameConflict)
+        {
+            return;
+        }
+
         if (existing == null)
         {
             if (targetIds.Count == 0)
@@ -262,6 +267,18 @@ public class SyncCollectionsTask : IScheduledTask
         var toAdd = targetIds.Where(id => !currentIds.Contains(id)).ToList();
         var toRemove = currentIds.Where(id => !targetIds.Contains(id)).ToList();
 
+        // The source still has members but none resolved locally (library
+        // mid rescan, LocalRootPath edited). Emptying the mirror over a
+        // resolution failure is wrong even though it would self heal, so
+        // keep the members and let the next run reconcile.
+        if (targetIds.Count == 0 && leaves.Count > 0 && toRemove.Count > 0)
+        {
+            _logger.LogWarning(
+                "Sync Collections: '{Name}' has {Count} source member(s) but none resolved to local items. Leaving the local mirror unchanged this run",
+                existing.Name, leaves.Count);
+            return;
+        }
+
         if (toAdd.Count > 0)
         {
             await _collectionManager.AddToCollectionAsync(existing.Id, toAdd).ConfigureAwait(false);
@@ -280,8 +297,9 @@ public class SyncCollectionsTask : IScheduledTask
         }
     }
 
-    private static BoxSet? FindLocalMirror(IReadOnlyList<BaseItem> localBoxSets, string sourceIdN, string sourceName)
+    private BoxSet? FindLocalMirror(IReadOnlyList<BaseItem> localBoxSets, string sourceIdN, string sourceName, out bool nameConflict)
     {
+        nameConflict = false;
         BoxSet? byName = null;
         foreach (var item in localBoxSets)
         {
@@ -300,6 +318,20 @@ public class SyncCollectionsTask : IScheduledTask
             {
                 byName = boxSet;
             }
+        }
+
+        // Mirrored collections track the source, including removals, so a
+        // hand curated local collection that merely shares the name must not
+        // be adopted and rewritten. Only an empty same name collection is
+        // claimed. A non empty one blocks mirroring for this collection so
+        // no duplicate is created either.
+        if (byName != null && byName.GetLinkedChildren().Any())
+        {
+            nameConflict = true;
+            _logger.LogWarning(
+                "Sync Collections: a local collection named '{Name}' already exists with its own members. Mirroring is skipped for it. Rename or empty the local collection to let the mirror take over",
+                sourceName);
+            return null;
         }
 
         return byName;

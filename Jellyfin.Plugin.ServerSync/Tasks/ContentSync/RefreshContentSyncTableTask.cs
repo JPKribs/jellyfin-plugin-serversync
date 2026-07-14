@@ -56,13 +56,20 @@ public class UpdateSyncTablesTask
 
     /// <summary>
     /// SourceItemIds ("N") excluded this run because a BLACKLISTED collection
-    /// contains them. Path-prefix blacklist matching can't see collection
-    /// membership, so blacklisted BoxSet entries are expanded to leaf IDs
-    /// up front. Also consulted at prune time: rows excluded by a collection
-    /// edit go through deletion approval, like path-blacklist narrowing.
-    /// Same lifecycle rules as <see cref="_seenPerMapping"/>.
+    /// or playlist contains them, keyed by the blacklisting mapping's
+    /// SourceLibraryId. Path-prefix blacklist matching can't see container
+    /// membership, so blacklisted entries are expanded to leaf IDs up front.
+    /// Scoped per mapping: containers can hold items from any library, and a
+    /// global set would let mapping A's blacklist suppress items mapping B
+    /// legitimately syncs. Also consulted at prune time so rows dropped by a
+    /// container edit go through deletion approval. Same lifecycle rules as
+    /// <see cref="_seenPerMapping"/>.
     /// </summary>
-    private readonly HashSet<string> _blacklistCollectionExcluded = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HashSet<string>> _blacklistExcludedByMapping = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool IsBlacklistExcluded(string sourceLibraryId, string sourceItemIdN)
+        => _blacklistExcludedByMapping.TryGetValue(sourceLibraryId, out var excluded)
+            && excluded.Contains(sourceItemIdN);
 
     /// <summary>
     /// Records how many items a mapping's fetch produced. Multiple mappings
@@ -161,7 +168,7 @@ public class UpdateSyncTablesTask
         var config = ConfigManager.Configuration;
         var enabledMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
         _seenPerMapping.Clear();
-        _blacklistCollectionExcluded.Clear();
+        _blacklistExcludedByMapping.Clear();
 
         // Playlist expansion is user-scoped on the source; the token-generation
         // flow stores the authenticating user's id for exactly this.
@@ -375,6 +382,9 @@ public class UpdateSyncTablesTask
             var excludedThisMapping = 0;
             if (mapping.FilterMode == LibraryFilterMode.Blacklist && mapping.FilteredItems != null)
             {
+                var mappingExcluded = _blacklistExcludedByMapping.TryGetValue(mapping.SourceLibraryId, out var existingSet)
+                    ? existingSet
+                    : (_blacklistExcludedByMapping[mapping.SourceLibraryId] = new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                 var failedExpansion = false;
                 foreach (var fi in mapping.FilteredItems)
                 {
@@ -391,7 +401,7 @@ public class UpdateSyncTablesTask
                         foreach (var member in members)
                         {
                             if (member.Id.HasValue
-                                && _blacklistCollectionExcluded.Add(member.Id.Value.ToString("N", CultureInfo.InvariantCulture)))
+                                && mappingExcluded.Add(member.Id.Value.ToString("N", CultureInfo.InvariantCulture)))
                             {
                                 excludedThisMapping++;
                             }
@@ -431,8 +441,7 @@ public class UpdateSyncTablesTask
                 processItem: (item, _) =>
                 {
                     if (item.Id.HasValue
-                        && _blacklistCollectionExcluded.Count > 0
-                        && _blacklistCollectionExcluded.Contains(item.Id.Value.ToString("N", CultureInfo.InvariantCulture)))
+                        && IsBlacklistExcluded(mapping.SourceLibraryId, item.Id.Value.ToString("N", CultureInfo.InvariantCulture)))
                     {
                         return Task.FromResult(false);
                     }
@@ -667,10 +676,12 @@ public class UpdateSyncTablesTask
             {
                 var effectiveMode = deleteMode;
                 if (deleteMode == ApprovalMode.Enabled
-                    && (_blacklistCollectionExcluded.Contains(stale[i].SourceItemId)
+                    && (IsBlacklistExcluded(stale[i].SourceLibraryId, stale[i].SourceItemId)
                         || (mappingById.TryGetValue(stale[i].SourceLibraryId, out var rowMapping)
-                            && rowMapping.FilterMode == LibraryFilterMode.Blacklist
-                            && PathUtilities.IsItemFiltered(stale[i].SourcePath, rowMapping.SourceRootPath ?? string.Empty, rowMapping.FilterMode, rowMapping.FilteredItems))))
+                            && ((rowMapping.FilterMode == LibraryFilterMode.Blacklist
+                                    && PathUtilities.IsItemFiltered(stale[i].SourcePath, rowMapping.SourceRootPath ?? string.Empty, rowMapping.FilterMode, rowMapping.FilteredItems))
+                                || (rowMapping.FilterMode == LibraryFilterMode.Whitelist
+                                    && HasContainerEntry(rowMapping))))))
                 {
                     effectiveMode = ApprovalMode.RequireApproval;
                 }
@@ -805,6 +816,32 @@ public class UpdateSyncTablesTask
     /// Restores the newest <c>*.replacing.*</c> sidecar (left by a crash
     /// mid-replacement in DownloadService) back to its original path.
     /// </summary>
+    /// <summary>
+    /// True when a whitelist mapping holds a collection or playlist entry.
+    /// A stale row under such a mapping can mean a container membership edit
+    /// or a source permission change rather than a real source removal, so
+    /// auto-delete is demoted to approval for those rows. Direct-item
+    /// whitelists have no such ambiguity and keep list-is-authority deletes.
+    /// </summary>
+    private static bool HasContainerEntry(LibraryMapping mapping)
+    {
+        if (mapping.FilteredItems == null)
+        {
+            return false;
+        }
+
+        foreach (var fi in mapping.FilteredItems)
+        {
+            if (string.Equals(fi.Type, "BoxSet", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fi.Type, "Playlist", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void TryRestoreReplacingSidecar(string localPath)
     {
         try
