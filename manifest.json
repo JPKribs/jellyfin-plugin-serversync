@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.66.2",
+        "changelog": "## Developer\r\n- Fixed releases failing to publish their manifest entry when new commits landed after the tag was cut\r\n- Restored the missing 10.11.66.1 manifest entry so that release can be installed",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.66.2/jellyfin-plugin-serversync-10.11.66.2.zip",
+        "checksum": "7dbac603ff0eba5444767c743d467d65",
+        "timestamp": "2026-08-01T04:55:25Z"
+      },
+      {
         "version": "10.11.66.1",
         "changelog": "## Developer\r\n- Fixed dropdowns showing two chevrons\r\n- Fixed the Metadata table showing no items after updating to 66.0\r\n- Content sync progress now tracks bytes downloaded instead of item count, including within a single large file\r\n- Metadata and History refresh progress now moves through source discovery instead of freezing until it finishes",
         "targetAbi": "10.11.0.0",
