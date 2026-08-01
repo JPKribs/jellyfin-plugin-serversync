@@ -179,24 +179,13 @@ public class HistorySyncItem : SyncRecord
     }
 
     /// <inheritdoc />
-    public override bool HasChanges
-    {
-        get
-        {
-            // Hash short-circuit first: when source state hasn't moved we
-            // skip the merged-vs-local check entirely. The comparator-equality
-            // fallback inside SyncableValue.HasChanges would compare Source
-            // to Local, which is meaningless here (the bundle is source-only),
-            // so we only honour the fast-path side.
-            if (!string.IsNullOrEmpty(SourceState.SourceHash)
-                && string.Equals(SourceState.SourceHash, SourceState.SyncedHash, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            return HistorySyncMergeService.HasChangesToSync(this);
-        }
-    }
+    /// <remarks>
+    /// Always the merged-vs-local check. The old <c>SourceHash == SyncedHash</c>
+    /// short-circuit asked whether the SOURCE had moved, so a local playback
+    /// after a sync was never reconciled until the source item changed again.
+    /// See <see cref="SyncableValue{T}.HasChanges"/> for the full reasoning.
+    /// </remarks>
+    public override bool HasChanges => HistorySyncMergeService.HasChangesToSync(this);
 
     /// <inheritdoc />
     public override void MarkSynced() => SourceState.MarkSynced();

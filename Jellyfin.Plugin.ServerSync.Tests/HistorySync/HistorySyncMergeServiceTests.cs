@@ -402,4 +402,100 @@ public class HistorySyncMergeServiceTests
         Assert.Contains("PlayCount", summary);
         Assert.Contains("Favorite", summary);
     }
+
+    // ===================================================================
+    // Sub-second drift. Jellyfin does not round-trip sub-second precision
+    // through its user-data store, so the value read back after an apply is
+    // not bit-identical to the value written. With the SourceHash
+    // short-circuit removed, an exact comparison here would report a change
+    // on the very row we just synced and requeue it on every run forever.
+    // ===================================================================
+
+    /// <summary>
+    /// A LastPlayedDate differing only below the second is not a change.
+    /// True: a synced row settles and stays out of the queue.
+    /// False: the row requeues on every refresh forever — the change detector
+    /// insists it differs while the verifier insists the write landed.
+    /// </summary>
+    [Fact]
+    public void HasChangesToSync_SubSecondLastPlayedDrift_IsNotAChange()
+    {
+        var item = MakeItem();
+        item.MergedIsPlayed = true;
+        item.LocalIsPlayed = true;
+        item.MergedPlayCount = 3;
+        item.LocalPlayCount = 3;
+        item.MergedPlaybackPositionTicks = 100;
+        item.LocalPlaybackPositionTicks = 100;
+        item.MergedIsFavorite = false;
+        item.LocalIsFavorite = false;
+
+        item.MergedLastPlayedDate = new DateTime(2026, 7, 31, 10, 0, 0, DateTimeKind.Utc).AddTicks(1234567);
+        item.LocalLastPlayedDate = new DateTime(2026, 7, 31, 10, 0, 0, DateTimeKind.Utc);
+
+        Assert.False(HistorySyncMergeService.HasChangesToSync(item));
+    }
+
+    /// <summary>
+    /// A whole-second difference is still a real change.
+    /// True: the tolerance is narrow enough to keep detecting genuine playback.
+    /// False: rounding to seconds has swallowed real differences.
+    /// </summary>
+    [Fact]
+    public void HasChangesToSync_WholeSecondLastPlayedDifference_IsAChange()
+    {
+        var item = MakeItem();
+        item.MergedIsPlayed = true;
+        item.LocalIsPlayed = true;
+        item.MergedPlayCount = 3;
+        item.LocalPlayCount = 3;
+        item.MergedPlaybackPositionTicks = 100;
+        item.LocalPlaybackPositionTicks = 100;
+        item.MergedIsFavorite = false;
+        item.LocalIsFavorite = false;
+
+        item.MergedLastPlayedDate = new DateTime(2026, 7, 31, 10, 0, 5, DateTimeKind.Utc);
+        item.LocalLastPlayedDate = new DateTime(2026, 7, 31, 10, 0, 0, DateTimeKind.Utc);
+
+        Assert.True(HistorySyncMergeService.HasChangesToSync(item));
+    }
+
+    /// <summary>
+    /// Merged has a date and local has none — a real change.
+    /// True: first-time history for an item is pushed to local.
+    /// False: never-played local items stay unsynced.
+    /// </summary>
+    [Fact]
+    public void HasChangesToSync_LocalHasNoDate_IsAChange()
+    {
+        var item = MakeItem();
+        item.MergedIsPlayed = true;
+        item.LocalIsPlayed = true;
+        item.MergedPlayCount = 1;
+        item.LocalPlayCount = 1;
+        item.MergedIsFavorite = false;
+        item.LocalIsFavorite = false;
+        item.MergedLastPlayedDate = new DateTime(2026, 7, 31, 10, 0, 0, DateTimeKind.Utc);
+        item.LocalLastPlayedDate = null;
+
+        Assert.True(HistorySyncMergeService.HasChangesToSync(item));
+    }
+
+    /// <summary>
+    /// The shared instant comparison used by both the detector and the verifier.
+    /// True: they can never disagree about whether a write landed.
+    /// False: one says "changed" while the other says "applied", and the row
+    /// oscillates between Queued and Synced.
+    /// </summary>
+    [Fact]
+    public void SameInstantToSecond_MatchesVerifierSemantics()
+    {
+        var baseTime = new DateTime(2026, 7, 31, 10, 0, 0, DateTimeKind.Utc);
+
+        Assert.True(HistorySyncMergeService.SameInstantToSecond(null, null));
+        Assert.False(HistorySyncMergeService.SameInstantToSecond(baseTime, null));
+        Assert.False(HistorySyncMergeService.SameInstantToSecond(null, baseTime));
+        Assert.True(HistorySyncMergeService.SameInstantToSecond(baseTime, baseTime.AddTicks(9999999)));
+        Assert.False(HistorySyncMergeService.SameInstantToSecond(baseTime, baseTime.AddSeconds(1)));
+    }
 }

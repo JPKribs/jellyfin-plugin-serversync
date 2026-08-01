@@ -117,13 +117,53 @@ public static class HistorySyncMergeService
             return true;
         }
 
-        if (item.MergedLastPlayedDate != item.LocalLastPlayedDate && item.MergedLastPlayedDate.HasValue)
+        // Second resolution, not exact equality. Jellyfin does not round-trip
+        // sub-second precision through its user-data store, so an exact
+        // comparison reports a difference on the very value we just wrote and
+        // the row requeues on every run forever. The post-apply verifier has
+        // always truncated to seconds for this reason; the change detector has
+        // to agree with it, or "changed" and "applied correctly" contradict.
+        // Previously masked by the SourceHash short-circuit, which stopped this
+        // check from running at all once a row had been synced.
+        if (item.MergedLastPlayedDate.HasValue
+            && !SameInstantToSecond(item.MergedLastPlayedDate, item.LocalLastPlayedDate))
         {
             return true;
         }
 
         return false;
     }
+
+    /// <summary>
+    /// Compares two nullable timestamps at second resolution. The single
+    /// definition of "the same instant" for history sync — used by both the
+    /// change detector and the post-apply verifier so they can never disagree.
+    /// </summary>
+    /// <param name="a">First timestamp.</param>
+    /// <param name="b">Second timestamp.</param>
+    /// <returns>True when both are null or both land in the same second.</returns>
+    public static bool SameInstantToSecond(DateTime? a, DateTime? b)
+    {
+        if (!a.HasValue && !b.HasValue)
+        {
+            return true;
+        }
+
+        if (!a.HasValue || !b.HasValue)
+        {
+            return false;
+        }
+
+        return TruncateToSecond(a.Value) == TruncateToSecond(b.Value);
+    }
+
+    /// <summary>
+    /// Drops sub-second precision, preserving <see cref="DateTime.Kind"/>.
+    /// </summary>
+    /// <param name="value">Timestamp to truncate.</param>
+    /// <returns>The timestamp with milliseconds and ticks removed.</returns>
+    public static DateTime TruncateToSecond(DateTime value)
+        => new DateTime(value.Year, value.Month, value.Day, value.Hour, value.Minute, value.Second, value.Kind);
 
     /// <summary>
     /// Creates a summary of changes for logging/display purposes.

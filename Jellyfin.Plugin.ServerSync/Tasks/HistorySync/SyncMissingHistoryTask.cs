@@ -161,17 +161,16 @@ public class SyncMissingHistoryTask
             diffs.Add($"Favorite wanted={record.MergedIsFavorite.Value}, got={fresh.IsFavorite}");
         }
 
-        // LastPlayedDate is harder — comparing nullable DateTime across
-        // serialization round-trips can show sub-second drift. Compare to
-        // second resolution only.
-        if (record.MergedLastPlayedDate.HasValue)
+        // LastPlayedDate is harder — Jellyfin does not round-trip sub-second
+        // precision. Shares its definition of "the same instant" with
+        // HasChangesToSync, so the change detector and this verifier can never
+        // disagree about whether the write landed.
+        if (record.MergedLastPlayedDate.HasValue
+            && !HistorySyncMergeService.SameInstantToSecond(record.MergedLastPlayedDate, fresh.LastPlayedDate))
         {
-            var wantSec = TruncateToSecond(record.MergedLastPlayedDate.Value);
-            var gotSec = fresh.LastPlayedDate.HasValue ? TruncateToSecond(fresh.LastPlayedDate.Value) : (DateTime?)null;
-            if (gotSec != wantSec)
-            {
-                diffs.Add($"LastPlayedDate wanted={wantSec:o}, got={gotSec:o}");
-            }
+            diffs.Add(
+                $"LastPlayedDate wanted={HistorySyncMergeService.TruncateToSecond(record.MergedLastPlayedDate.Value):o}, "
+                + $"got={(fresh.LastPlayedDate.HasValue ? HistorySyncMergeService.TruncateToSecond(fresh.LastPlayedDate.Value).ToString("o", System.Globalization.CultureInfo.InvariantCulture) : "null")}");
         }
 
         if (diffs.Count > 0)
@@ -180,11 +179,6 @@ public class SyncMissingHistoryTask
         }
 
         return (true, null);
-    }
-
-    private static DateTime TruncateToSecond(DateTime dt)
-    {
-        return new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, dt.Second, dt.Kind);
     }
 
     // HistorySyncItem has no SyncableValue fields (its base MarkSynced is

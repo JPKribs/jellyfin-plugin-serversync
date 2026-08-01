@@ -5,8 +5,9 @@ namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
 /// One comparable field on a <see cref="SyncRecord"/>: source / local /
-/// synced snapshots plus content fingerprints used to short-circuit
-/// semantic comparison when <c>SourceHash == SyncedHash</c>.
+/// synced snapshots, plus content fingerprints recording what was last
+/// applied. Change detection compares source against local through the
+/// comparator — see <see cref="HasChanges"/>.
 /// </summary>
 /// <typeparam name="T">Value type, typically <see cref="string"/> for JSON blobs.</typeparam>
 public sealed class SyncableValue<T>
@@ -25,7 +26,8 @@ public sealed class SyncableValue<T>
 
     /// <summary>
     /// Gets or sets the value that was last successfully applied to local.
-    /// Used as the baseline for the hash short-circuit.
+    /// Recorded for display and per-module bookkeeping; not consulted by
+    /// <see cref="HasChanges"/>.
     /// </summary>
     public T? Synced { get; set; }
 
@@ -37,9 +39,10 @@ public sealed class SyncableValue<T>
 
     /// <summary>
     /// Gets or sets the content fingerprint of <see cref="Source"/> at the
-    /// time of the most recent successful Sync. When equal to
-    /// <see cref="SourceHash"/> the source has not moved and we can short-
-    /// circuit the comparison.
+    /// time of the most recent successful Sync. Equality with
+    /// <see cref="SourceHash"/> tells you the source has not moved since that
+    /// apply — which is NOT the same as local still matching it, so this is
+    /// no longer used to skip comparison. See <see cref="HasChanges"/>.
     /// </summary>
     public string? SyncedHash { get; set; }
 
@@ -51,23 +54,29 @@ public sealed class SyncableValue<T>
 
     /// <summary>
     /// Gets a value indicating whether <see cref="Source"/> differs meaningfully
-    /// from <see cref="Local"/>. Uses the hash short-circuit when both source
-    /// and synced hashes are known and equal; otherwise falls through to the
-    /// comparator's <see cref="ISyncComparator{T}.Equals"/>.
+    /// from <see cref="Local"/>, per the comparator.
+    /// <para>
+    /// This used to short-circuit to <c>false</c> whenever
+    /// <see cref="SourceHash"/> equalled <see cref="SyncedHash"/>. That asks
+    /// "has the source moved since the last apply?", which is not the same
+    /// question: local can drift on its own. Because the refresh calls
+    /// <c>MarkSynced</c> on any row where source already matched local, nearly
+    /// every row carried a baseline — so a later local edit (an overview
+    /// rewritten, a tag dropped, an image replaced on this server) was invisible
+    /// until the source item happened to change.
+    /// </para>
+    /// <para>
+    /// Restoring the fast path correctly would need the local fingerprint at
+    /// apply time persisted alongside <see cref="SyncedHash"/>. It is not worth
+    /// it: <see cref="ISyncComparator{T}.ComputeHash"/> is a raw-bytes digest
+    /// and is documented as unstable across code paths, and the refresh
+    /// materializes both blobs before consulting this property anyway — the
+    /// short-circuit only ever skipped a comparison of two strings already in
+    /// memory. <see cref="SyncedHash"/> is still maintained for the modal and
+    /// for module-specific bookkeeping.
+    /// </para>
     /// </summary>
-    public bool HasChanges
-    {
-        get
-        {
-            if (!string.IsNullOrEmpty(SourceHash)
-                && string.Equals(SourceHash, SyncedHash, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            return !Comparator.Equals(Source, Local);
-        }
-    }
+    public bool HasChanges => !Comparator.Equals(Source, Local);
 
     /// <summary>
     /// Recomputes <see cref="SourceHash"/> from the current <see cref="Source"/>.

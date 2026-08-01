@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.65.1"
+version: "10.11.66.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -24,6 +24,10 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
+  - User Sync no longer copies any setting that carries an identifier. Blocked Media Folders, Blocked Channels, and Access Schedules were writing source server identifiers onto local users
+  - Enabled Folders and Content Deletion From Folders are no longer synced either. Translating them dropped every library without a mapping, which quietly removed access nobody asked to remove
+  - Changes made on this server are now detected. Editing an item locally used to be invisible until the same item happened to change on the source, so the two servers stayed out of step indefinitely
+  - Watch history compares last played times to the second, matching what the verifier already required
   - Fixed the settings page refusing to expand its categories when this server is hosted under a base url such as /jellyfin
   - Items scheduled for deletion are no longer dropped from tracking when a refresh runs before the sync that would delete them
   - Fixed source paths mapping into the wrong local folder when one library root is a name prefix of another

@@ -63,12 +63,13 @@ public class HistorySyncItemTests
     }
 
     /// <summary>
-    /// Hash short-circuits HasChanges when SourceHash == SyncedHash even with a merge diff.
-    /// True: source hasn't moved so we skip work, even if Local now differs from Merged.
-    /// False: short-circuit isn't firing and rows are re-evaluated unnecessarily.
+    /// Local drift is detected even when the source state has not moved. The
+    /// old contract short-circuited here on SourceHash == SyncedHash.
+    /// True: watching something locally after a sync gets reconciled.
+    /// False: local playback is ignored until the source item changes again.
     /// </summary>
     [Fact]
-    public void HasChanges_ShortCircuits_WhenSourceHashEqualsSyncedHash()
+    public void HasChanges_IsTrue_WhenLocalDrifts_EvenIfSourceStateUnmoved()
     {
         var item = MakeQueueableItem();
         item.SourceIsPlayed = true;
@@ -78,7 +79,7 @@ public class HistorySyncItemTests
         item.MergedIsPlayed = true;
         item.LocalIsPlayed = false;
 
-        Assert.False(item.HasChanges);
+        Assert.True(item.HasChanges);
     }
 
     /// <summary>

@@ -190,7 +190,9 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         else
         {
             // Source matches local — record the current source as the synced
-            // baseline so future runs can short-circuit via SyncedHash.
+            // baseline. This no longer suppresses future comparisons (see
+            // SyncableValue.HasChanges); it keeps Synced/SyncedHash meaningful
+            // for the modal and for per-module bookkeeping.
             record.MarkSynced();
             record.Status = SyncStatus.Synced;
             record.LastSyncTime = DateTime.UtcNow;

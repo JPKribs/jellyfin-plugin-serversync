@@ -12,17 +12,46 @@ public class SyncableValueTests
     };
 
     /// <summary>
-    /// The SourceHash == SyncedHash fast path suppresses the deep compare.
-    /// True: source hasn't moved since the last sync, so no work is needed even if Local diverges.
-    /// False: the short-circuit isn't firing and every refresh would re-evaluate from scratch.
+    /// Local drift is detected even when the source has not moved since the
+    /// last successful sync. This is the inverse of the old contract: the
+    /// SourceHash == SyncedHash fast path used to suppress the compare here.
+    /// True: an edit made on THIS server is noticed and requeued.
+    /// False: any local change (overview rewritten, tag dropped, image
+    /// replaced) is invisible until the source item happens to change, which
+    /// may be never.
     /// </summary>
     [Fact]
-    public void HasChanges_IsFalse_WhenSourceHashEqualsSyncedHash()
+    public void HasChanges_IsTrue_WhenLocalDrifts_EvenIfSourceUnmoved()
     {
         var v = NewValue();
         v.UpdateSource("{\"a\":1}");
+        v.Local = "{\"a\":1}";
         v.MarkSynced();
+
+        Assert.False(v.HasChanges);
+
+        // Someone edits the item on the local server. Source never moved.
         v.Local = "{\"a\":2}";
+
+        Assert.True(v.HasChanges);
+    }
+
+    /// <summary>
+    /// A synced, still-matching row stays quiet across refreshes.
+    /// True: unchanged rows don't churn back into the queue.
+    /// False: every row requeues on every run, making the queue meaningless.
+    /// </summary>
+    [Fact]
+    public void HasChanges_IsFalse_WhenSourceStillMatchesLocal_AfterMarkSynced()
+    {
+        var v = NewValue();
+        v.UpdateSource("{\"a\":1}");
+        v.Local = "{\"a\":1}";
+        v.MarkSynced();
+
+        // Next refresh rebuilds both sides from unchanged servers.
+        v.UpdateSource("{\"a\":1}");
+        v.Local = "{\"a\":1}";
 
         Assert.False(v.HasChanges);
     }

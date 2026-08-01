@@ -106,17 +106,42 @@ public class UserSyncItemTests
     }
 
     /// <summary>
-    /// Policy HasChanges short-circuits on hash match, even with a divergent LocalValue.
-    /// True: a stable source policy doesn't re-queue rows whose local just happens to differ.
-    /// False: every refresh would re-queue Policy rows for no reason.
+    /// Policy drift on the local server is detected even when the source
+    /// policy has not moved. Inverts the old short-circuit contract.
+    /// True: an admin flag flipped locally is pulled back in line with source.
+    /// False: local policy edits stick silently and the two servers stay
+    /// diverged for as long as the source policy is untouched.
     /// </summary>
     [Fact]
-    public void HasChanges_Policy_ShortCircuitsOnHashMatch()
+    public void HasChanges_Policy_DetectsLocalDrift_WhenSourceUnmoved()
     {
         var item = MakePolicyItem();
         item.UpdateMergedValue("{\"IsAdministrator\":true}");
+        item.LocalValue = "{\"IsAdministrator\":true}";
         item.MarkSynced();
+
+        Assert.False(item.HasChanges);
+
         item.LocalValue = "{\"IsAdministrator\":false}";
+
+        Assert.True(item.HasChanges);
+    }
+
+    /// <summary>
+    /// A settled policy row stays out of the queue across refreshes.
+    /// True: unchanged rows don't churn.
+    /// False: every Policy row requeues on every run.
+    /// </summary>
+    [Fact]
+    public void HasChanges_Policy_StaysQuiet_WhenNothingMoved()
+    {
+        var item = MakePolicyItem();
+        item.UpdateMergedValue("{\"IsAdministrator\":true}");
+        item.LocalValue = "{\"IsAdministrator\":true}";
+        item.MarkSynced();
+
+        item.UpdateMergedValue("{\"IsAdministrator\":true}");
+        item.LocalValue = "{\"IsAdministrator\":true}";
 
         Assert.False(item.HasChanges);
     }

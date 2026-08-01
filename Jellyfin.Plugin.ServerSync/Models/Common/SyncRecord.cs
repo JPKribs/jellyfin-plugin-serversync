@@ -46,8 +46,10 @@ public abstract class SyncRecord
 
     /// <summary>
     /// Marks this record as successfully synced. Implementations call
-    /// <see cref="SyncableValue{T}.MarkSynced"/> on each constituent field so
-    /// future Refresh runs can short-circuit via <see cref="SyncableValue{T}.SyncedHash"/>.
+    /// <see cref="SyncableValue{T}.MarkSynced"/> on each constituent field to
+    /// record the applied baseline in <see cref="SyncableValue{T}.Synced"/> /
+    /// <see cref="SyncableValue{T}.SyncedHash"/>. Change detection does not
+    /// consult those — see <see cref="SyncableValue{T}.HasChanges"/>.
     /// </summary>
     public abstract void MarkSynced();
 }

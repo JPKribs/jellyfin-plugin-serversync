@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -269,5 +270,289 @@ public class UserSyncMergeServiceTests
     {
         Assert.True(UserSyncMergeService.JsonEquals("{\"a\":1,\"b\":2}", "{\"b\":2,\"a\":1}"));
         Assert.False(UserSyncMergeService.JsonEquals("{\"a\":1}", "{\"a\":2}"));
+    }
+
+    // ===================================================================
+    // GUID exclusion. Identifiers are per-install, so a source library /
+    // channel / user GUID written into a local user's policy either grants
+    // nothing or leaves a dangling reference. These run against the REAL
+    // Jellyfin and SDK types so a model change upstream fails the build
+    // rather than silently resuming the leak.
+    // ===================================================================
+
+    /// <summary>
+    /// The type walker recognises every shape a Guid reaches us in.
+    /// True: Guid[], List&lt;Guid?&gt;, and complex types embedding a Guid are all caught.
+    /// False: the shapes it misses get copied across servers verbatim.
+    /// </summary>
+    [Fact]
+    public void IsGuidBearingType_RecognisesEveryGuidShape()
+    {
+        Assert.True(UserSyncMergeService.IsGuidBearingType(typeof(System.Guid)));
+        Assert.True(UserSyncMergeService.IsGuidBearingType(typeof(System.Guid?)));
+        Assert.True(UserSyncMergeService.IsGuidBearingType(typeof(System.Guid[])));
+        Assert.True(UserSyncMergeService.IsGuidBearingType(typeof(List<System.Guid?>)));
+
+        // AccessSchedule is not a Guid, but it carries the source user's UserId.
+        Assert.True(UserSyncMergeService.IsGuidBearingType(
+            typeof(Jellyfin.Database.Implementations.Entities.AccessSchedule)));
+        Assert.True(UserSyncMergeService.IsGuidBearingType(
+            typeof(Jellyfin.Database.Implementations.Entities.AccessSchedule[])));
+    }
+
+    /// <summary>
+    /// Guid-free types must still sync — the exclusion has to be surgical.
+    /// True: booleans, strings, enums, and string collections pass through.
+    /// False: over-broad exclusion silently stops syncing ordinary settings.
+    /// </summary>
+    [Fact]
+    public void IsGuidBearingType_LeavesOrdinaryTypesAlone()
+    {
+        Assert.False(UserSyncMergeService.IsGuidBearingType(typeof(bool)));
+        Assert.False(UserSyncMergeService.IsGuidBearingType(typeof(bool?)));
+        Assert.False(UserSyncMergeService.IsGuidBearingType(typeof(string)));
+        Assert.False(UserSyncMergeService.IsGuidBearingType(typeof(string[])));
+        Assert.False(UserSyncMergeService.IsGuidBearingType(typeof(List<string>)));
+        Assert.False(UserSyncMergeService.IsGuidBearingType(typeof(int?)));
+        Assert.False(UserSyncMergeService.IsGuidBearingType(
+            typeof(Jellyfin.Database.Implementations.Enums.SubtitlePlaybackMode)));
+    }
+
+    /// <summary>
+    /// Exhaustive contract over the live models: nothing Guid-bearing may be
+    /// declared syncable, on either the local entity type or the SDK type.
+    /// True: no source identifier can reach a local user's policy or configuration.
+    /// False: fields like BlockedMediaFolders / BlockedChannels / AccessSchedules
+    /// copy source GUIDs into local rows, which is exactly the leak this guards.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(MediaBrowser.Model.Users.UserPolicy), true)]
+    [InlineData(typeof(Jellyfin.Sdk.Generated.Models.UserPolicy), true)]
+    [InlineData(typeof(MediaBrowser.Model.Configuration.UserConfiguration), false)]
+    [InlineData(typeof(Jellyfin.Sdk.Generated.Models.UserConfiguration), false)]
+    public void NoGuidBearingPropertyIsSyncable(System.Type modelType, bool isPolicy)
+    {
+        var leaked = new List<string>();
+
+        foreach (var property in modelType.GetProperties(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+        {
+            if (!UserSyncMergeService.IsGuidBearingType(property.PropertyType))
+            {
+                continue;
+            }
+
+            var syncable = isPolicy
+                ? UserSyncMergeService.ShouldSyncPolicyProperty(property)
+                : UserSyncMergeService.ShouldSyncConfigurationProperty(property);
+
+            if (syncable)
+            {
+                leaked.Add(property.Name);
+            }
+        }
+
+        Assert.True(
+            leaked.Count == 0,
+            $"{modelType.Name} would sync Guid-bearing propert(ies): {string.Join(", ", leaked)}");
+    }
+
+    /// <summary>
+    /// End-to-end on the extracted blob: the serialized policy must not contain
+    /// any of the known identifier fields.
+    /// True: the JSON actually written to the sync table is identifier-free.
+    /// False: the filter is right but the extraction path bypasses it.
+    /// </summary>
+    [Fact]
+    public void ExtractPolicyJson_OmitsIdentifierFields()
+    {
+        var policy = new MediaBrowser.Model.Users.UserPolicy
+        {
+            IsAdministrator = true,
+            EnabledFolders = new[] { System.Guid.NewGuid() },
+            BlockedMediaFolders = new[] { System.Guid.NewGuid() },
+            EnabledChannels = new[] { System.Guid.NewGuid() },
+            BlockedChannels = new[] { System.Guid.NewGuid() },
+            EnabledDevices = new[] { "device-a" },
+            EnableContentDeletionFromFolders = new[] { System.Guid.NewGuid().ToString() }
+        };
+
+        var json = UserSyncMergeService.ExtractPolicyJson(policy);
+        var props = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json!)!;
+
+        foreach (var excluded in new[]
+        {
+            "EnabledFolders", "BlockedMediaFolders", "EnabledChannels", "BlockedChannels",
+            "EnabledDevices", "EnableContentDeletionFromFolders", "AccessSchedules"
+        })
+        {
+            Assert.False(props.ContainsKey(excluded), $"{excluded} must not be synced");
+        }
+
+        // Ordinary settings still come across.
+        Assert.True(props.ContainsKey("IsAdministrator"));
+        Assert.True(props.ContainsKey("EnableAllFolders"));
+    }
+
+    /// <summary>
+    /// Same contract for the configuration blob.
+    /// </summary>
+    [Fact]
+    public void ExtractConfigurationJson_OmitsIdentifierFields()
+    {
+        var config = new MediaBrowser.Model.Configuration.UserConfiguration
+        {
+            PlayDefaultAudioTrack = true,
+            GroupedFolders = new[] { System.Guid.NewGuid() },
+            OrderedViews = new[] { System.Guid.NewGuid() },
+            LatestItemsExcludes = new[] { System.Guid.NewGuid() },
+            MyMediaExcludes = new[] { System.Guid.NewGuid() }
+        };
+
+        var json = UserSyncMergeService.ExtractConfigurationJson(config);
+        var props = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json!)!;
+
+        foreach (var excluded in new[]
+        {
+            "GroupedFolders", "OrderedViews", "LatestItemsExcludes", "MyMediaExcludes", "CastReceiverId"
+        })
+        {
+            Assert.False(props.ContainsKey(excluded), $"{excluded} must not be synced");
+        }
+
+        Assert.True(props.ContainsKey("PlayDefaultAudioTrack"));
+        Assert.True(props.ContainsKey("SubtitleMode"));
+    }
+
+    // ===================================================================
+    // Settling. With the SourceHash short-circuit removed, HasChanges runs
+    // the comparator on every refresh. If the source-side and local-side
+    // blobs can never be made equal for an unchanged user — mismatched enum
+    // numbering, a differing key set between the SDK type and the local
+    // entity type — the row requeues forever instead of going quiet after
+    // one sync. These round-trip the REAL models to prove they converge.
+    // ===================================================================
+
+    /// <summary>
+    /// Enum members shared by the local and SDK models must carry identical
+    /// numeric values. Both blobs serialize enums as numbers, so a numbering
+    /// mismatch is a diff no apply can ever close.
+    /// True: enum-valued settings converge after a sync.
+    /// False: the row requeues on every run forever, rewriting the local user
+    /// each time — the failure mode the removed hash short-circuit used to hide.
+    /// </summary>
+    [Fact]
+    public void EnumsSerializedIntoBlobs_HaveMatchingNumericValues()
+    {
+        Assert.Equal(
+            (int)Jellyfin.Database.Implementations.Enums.SyncPlayUserAccessType.CreateAndJoinGroups,
+            (int)Jellyfin.Sdk.Generated.Models.UserPolicy_SyncPlayAccess.CreateAndJoinGroups);
+        Assert.Equal(
+            (int)Jellyfin.Database.Implementations.Enums.SyncPlayUserAccessType.JoinGroups,
+            (int)Jellyfin.Sdk.Generated.Models.UserPolicy_SyncPlayAccess.JoinGroups);
+        Assert.Equal(
+            (int)Jellyfin.Database.Implementations.Enums.SyncPlayUserAccessType.None,
+            (int)Jellyfin.Sdk.Generated.Models.UserPolicy_SyncPlayAccess.None);
+
+        Assert.Equal(
+            (int)Jellyfin.Database.Implementations.Enums.SubtitlePlaybackMode.Default,
+            (int)Jellyfin.Sdk.Generated.Models.UserConfiguration_SubtitleMode.Default);
+        Assert.Equal(
+            (int)Jellyfin.Database.Implementations.Enums.SubtitlePlaybackMode.Smart,
+            (int)Jellyfin.Sdk.Generated.Models.UserConfiguration_SubtitleMode.Smart);
+        Assert.Equal(
+            (int)Jellyfin.Database.Implementations.Enums.SubtitlePlaybackMode.OnlyForced,
+            (int)Jellyfin.Sdk.Generated.Models.UserConfiguration_SubtitleMode.OnlyForced);
+        Assert.Equal(
+            (int)Jellyfin.Database.Implementations.Enums.SubtitlePlaybackMode.None,
+            (int)Jellyfin.Sdk.Generated.Models.UserConfiguration_SubtitleMode.None);
+    }
+
+    /// <summary>
+    /// Extraction is deterministic: the same policy yields byte-identical JSON.
+    /// True: an unchanged user compares equal on the cheap ordinal fast path.
+    /// False: identical state serializes differently run to run and every row
+    /// requeues forever.
+    /// </summary>
+    [Fact]
+    public void ExtractPolicyJson_IsDeterministic()
+    {
+        var policy = new MediaBrowser.Model.Users.UserPolicy
+        {
+            IsAdministrator = true,
+            MaxActiveSessions = 3,
+            AllowedTags = new[] { "tag-a", "tag-b" },
+            SyncPlayAccess = Jellyfin.Database.Implementations.Enums.SyncPlayUserAccessType.CreateAndJoinGroups
+        };
+
+        var first = UserSyncMergeService.ExtractPolicyJson(policy);
+        var second = UserSyncMergeService.ExtractPolicyJson(policy);
+
+        Assert.Equal(first, second);
+        Assert.True(UserSyncMergeService.JsonEquals(first, second));
+    }
+
+    /// <summary>
+    /// A merged blob round-tripped through ComputeMergedPolicy still compares
+    /// equal to its input, so a settled row stays settled.
+    /// True: the merge step is idempotent and does not itself create a diff.
+    /// False: merging perturbs the blob and the row never converges.
+    /// </summary>
+    [Fact]
+    public void ComputeMergedPolicy_IsIdempotent()
+    {
+        var policy = new MediaBrowser.Model.Users.UserPolicy
+        {
+            IsAdministrator = true,
+            MaxActiveSessions = 3,
+            AllowedTags = new[] { "tag-a" }
+        };
+
+        var extracted = UserSyncMergeService.ExtractPolicyJson(policy);
+        var once = UserSyncMergeService.ComputeMergedPolicy(extracted, MakeMappings());
+        var twice = UserSyncMergeService.ComputeMergedPolicy(once, MakeMappings());
+
+        Assert.True(UserSyncMergeService.JsonEquals(once, twice));
+        Assert.True(UserSyncMergeService.JsonEquals(extracted, once));
+    }
+
+    /// <summary>
+    /// The two model types must expose the same syncable key set. A key present
+    /// on one side only is a permanent diff no apply can close.
+    /// True: source and local blobs are comparable field for field.
+    /// False: rows never settle regardless of the values in them.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(MediaBrowser.Model.Users.UserPolicy), typeof(Jellyfin.Sdk.Generated.Models.UserPolicy), true)]
+    [InlineData(typeof(MediaBrowser.Model.Configuration.UserConfiguration), typeof(Jellyfin.Sdk.Generated.Models.UserConfiguration), false)]
+    public void SyncableKeySets_MatchAcrossLocalAndSdkModels(System.Type localType, System.Type sdkType, bool isPolicy)
+    {
+        static System.Collections.Generic.HashSet<string> Keys(System.Type t, bool policy)
+        {
+            var keys = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+            foreach (var p in t.GetProperties(
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                var ok = policy
+                    ? UserSyncMergeService.ShouldSyncPolicyProperty(p)
+                    : UserSyncMergeService.ShouldSyncConfigurationProperty(p);
+                if (ok)
+                {
+                    keys.Add(p.Name);
+                }
+            }
+
+            return keys;
+        }
+
+        var localKeys = Keys(localType, isPolicy);
+        var sdkKeys = Keys(sdkType, isPolicy);
+
+        var localOnly = localKeys.Except(sdkKeys).ToList();
+        var sdkOnly = sdkKeys.Except(localKeys).ToList();
+
+        Assert.True(
+            localOnly.Count == 0 && sdkOnly.Count == 0,
+            $"Syncable key sets diverge. local-only: [{string.Join(", ", localOnly)}] sdk-only: [{string.Join(", ", sdkOnly)}]");
     }
 }

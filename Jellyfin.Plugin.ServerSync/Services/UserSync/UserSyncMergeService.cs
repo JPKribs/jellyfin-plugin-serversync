@@ -96,11 +96,22 @@ public static class UserSyncMergeService
 
     /// <summary>
     /// Properties that should NOT be synced (server-specific).
+    /// <para>
+    /// Guid-typed identifiers are rejected by <see cref="IsGuidBearingType"/>
+    /// and don't need naming here. This list exists for the ones reflection
+    /// can't recognise: identifiers Jellyfin models as <c>string</c>, plus
+    /// runtime state and local-only security settings.
+    /// </para>
     /// </summary>
     public static readonly HashSet<string> ExcludedPolicyProperties = new(StringComparer.OrdinalIgnoreCase)
     {
-        "EnabledChannels",        // Channel IDs differ
-        "EnabledDevices",         // Device IDs are server-specific
+        "EnabledChannels",        // Channel IDs differ (also Guid-typed)
+        "EnabledDevices",         // Device IDs are server-specific (string[])
+        // Library IDs held as strings, so the type walker can't see them.
+        // Untranslated they name libraries that don't exist locally, and
+        // translating them silently drops any library without a mapping —
+        // which revokes local deletion rights the operator never touched.
+        "EnableContentDeletionFromFolders",
         "InvalidLoginAttemptCount", // Runtime state
         "AuthenticationProviderId", // Provider-specific
         "PasswordResetProviderId"   // Provider-specific
@@ -120,7 +131,87 @@ public static class UserSyncMergeService
     };
 
     /// <summary>
-    /// Checks if a policy property should be synced.
+    /// True when a type carries a Jellyfin identifier: a <see cref="Guid"/>, a
+    /// nullable Guid, a collection of either, or a complex type with a Guid
+    /// anywhere inside it.
+    /// <para>
+    /// Identifiers are per-install. A source server's library, channel, or user
+    /// GUID names nothing on the local server, so copying one into a local
+    /// user's policy either silently grants no access or writes a dangling
+    /// reference. <c>BlockedMediaFolders</c> and <c>BlockedChannels</c> are
+    /// plain <c>Guid[]</c>, and <c>AccessSchedules</c> embeds the source user's
+    /// own <c>UserId</c> — none of which a name-based blocklist caught.
+    /// </para>
+    /// <para>
+    /// Driven by type rather than by name so a future Jellyfin release that
+    /// adds a Guid-bearing field is excluded automatically instead of silently
+    /// syncing until someone notices.
+    /// </para>
+    /// </summary>
+    /// <param name="type">Property type to inspect.</param>
+    /// <returns>True when the type can carry a server-specific identifier.</returns>
+    public static bool IsGuidBearingType(Type type) => IsGuidBearingType(type, new HashSet<Type>());
+
+    private static bool IsGuidBearingType(Type? type, HashSet<Type> visited)
+    {
+        if (type == null || !visited.Add(type))
+        {
+            return false;
+        }
+
+        var underlying = Nullable.GetUnderlyingType(type) ?? type;
+        if (underlying == typeof(Guid))
+        {
+            return true;
+        }
+
+        // Leaf types can't contain anything.
+        if (underlying.IsPrimitive
+            || underlying.IsEnum
+            || underlying == typeof(string)
+            || underlying == typeof(decimal)
+            || underlying == typeof(DateTime)
+            || underlying == typeof(DateTimeOffset)
+            || underlying == typeof(TimeSpan))
+        {
+            return false;
+        }
+
+        // Collections: inspect what they hold, not the collection's own members.
+        if (typeof(System.Collections.IEnumerable).IsAssignableFrom(underlying))
+        {
+            if (underlying.IsArray)
+            {
+                return IsGuidBearingType(underlying.GetElementType(), visited);
+            }
+
+            foreach (var arg in underlying.GetGenericArguments())
+            {
+                if (IsGuidBearingType(arg, visited))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Complex type — one Guid property anywhere makes the whole value unsafe
+        // to copy across servers (AccessSchedule.UserId).
+        foreach (var property in underlying.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (IsGuidBearingType(property.PropertyType, visited))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if a policy property should be synced, by name only. Prefer the
+    /// <see cref="PropertyInfo"/> overload — it also rejects Guid-bearing types.
     /// </summary>
     public static bool ShouldSyncPolicyProperty(string propertyName)
     {
@@ -128,11 +219,33 @@ public static class UserSyncMergeService
     }
 
     /// <summary>
-    /// Checks if a configuration property should be synced.
+    /// Checks if a configuration property should be synced, by name only.
+    /// Prefer the <see cref="PropertyInfo"/> overload.
     /// </summary>
     public static bool ShouldSyncConfigurationProperty(string propertyName)
     {
         return !ExcludedConfigurationProperties.Contains(propertyName);
+    }
+
+    /// <summary>
+    /// Checks if a policy property should be synced: not on the name blocklist
+    /// (which covers identifiers Jellyfin models as strings, so reflection
+    /// can't see them) and not carrying a Guid.
+    /// </summary>
+    public static bool ShouldSyncPolicyProperty(PropertyInfo property)
+    {
+        ArgumentNullException.ThrowIfNull(property);
+        return ShouldSyncPolicyProperty(property.Name) && !IsGuidBearingType(property.PropertyType);
+    }
+
+    /// <summary>
+    /// Checks if a configuration property should be synced. See
+    /// <see cref="ShouldSyncPolicyProperty(PropertyInfo)"/>.
+    /// </summary>
+    public static bool ShouldSyncConfigurationProperty(PropertyInfo property)
+    {
+        ArgumentNullException.ThrowIfNull(property);
+        return ShouldSyncConfigurationProperty(property.Name) && !IsGuidBearingType(property.PropertyType);
     }
 
     /// <summary>
@@ -155,13 +268,17 @@ public static class UserSyncMergeService
 
         foreach (var prop in policyType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (!ShouldSyncPolicyProperty(prop.Name)) continue;
+            if (!ShouldSyncPolicyProperty(prop)) continue;
 
             try
             {
                 var value = prop.GetValue(policy);
 
-                // Translate library IDs if needed
+                // Retained seam: no property currently reaches this branch,
+                // because every library-ID field is Guid-typed and therefore
+                // excluded above. It stays wired so re-enabling translated
+                // library access is a one-line change to the exclusion rule
+                // rather than a rewrite.
                 if (libraryMappings != null && RequiresLibraryTranslation(prop.Name) && value is IEnumerable<string> ids)
                 {
                     value = TranslateLibraryIds(ids.ToArray(), libraryMappings);
@@ -190,7 +307,7 @@ public static class UserSyncMergeService
 
         foreach (var prop in configType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (!ShouldSyncConfigurationProperty(prop.Name)) continue;
+            if (!ShouldSyncConfigurationProperty(prop)) continue;
 
             try
             {
