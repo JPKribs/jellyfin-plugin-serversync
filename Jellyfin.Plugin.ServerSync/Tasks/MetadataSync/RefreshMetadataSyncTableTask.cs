@@ -144,6 +144,28 @@ public class RefreshMetadataSyncTableTask
         var matchedLeavesByMapping = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentBag<Guid>>();
         var matchedFoldersByMapping = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentBag<Guid>>();
 
+        // Per-page discovery reporting. Without it the bar sat frozen at 8%
+        // for the whole discovery pagination — minutes on big libraries.
+        // Totals come from each pagination's first-page TotalRecordCount, so
+        // the denominator firms up as pages land; clamp keeps the band's end
+        // reserved for actual completion.
+        var discoveryProgress = new System.Collections.Concurrent.ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
+        void ReportDiscovery(string key, long fetched, long total)
+        {
+            discoveryProgress[key] = (fetched, total);
+            long fetchedSum = 0, totalSum = 0;
+            foreach (var v in discoveryProgress.Values)
+            {
+                fetchedSum += v.Fetched;
+                totalSum += v.Total;
+            }
+
+            if (totalSum > 0)
+            {
+                progress.Report(8 + Math.Min(31.0, 32.0 * fetchedSum / totalSum));
+            }
+        }
+
         await Parallel.ForEachAsync(
             enabledMappings,
             new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
@@ -155,10 +177,10 @@ public class RefreshMetadataSyncTableTask
                 var leafBag = matchedLeavesByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new System.Collections.Concurrent.ConcurrentBag<Guid>());
                 var folderBag = matchedFoldersByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new System.Collections.Concurrent.ConcurrentBag<Guid>());
 
-                await DiscoverMatchingIdsAsync(mapping, sourceLibraryId, leafTypes, localPaths.Leaves, leafBag, ct).ConfigureAwait(false);
+                await DiscoverMatchingIdsAsync(mapping, sourceLibraryId, leafTypes, localPaths.Leaves, leafBag, mapping.SourceLibraryId + "|leaves", ReportDiscovery, ct).ConfigureAwait(false);
                 if (includeFolderItems)
                 {
-                    await DiscoverMatchingIdsAsync(mapping, sourceLibraryId, folderTypes, localPaths.Folders, folderBag, ct).ConfigureAwait(false);
+                    await DiscoverMatchingIdsAsync(mapping, sourceLibraryId, folderTypes, localPaths.Folders, folderBag, mapping.SourceLibraryId + "|folders", ReportDiscovery, ct).ConfigureAwait(false);
                 }
             }).ConfigureAwait(false);
 
@@ -274,12 +296,15 @@ public class RefreshMetadataSyncTableTask
         BaseItemKind[] includeTypes,
         Dictionary<string, BaseItem> localPaths,
         System.Collections.Concurrent.ConcurrentBag<Guid> matchedIds,
+        string progressKey,
+        Action<string, long, long> reportDiscovery,
         CancellationToken cancellationToken)
     {
         if (Client == null || localPaths.Count == 0) return;
 
         const int pageSize = 1000;
         var startIndex = 0;
+        var fetchedSoFar = 0L;
         var consecutiveErrors = 0;
         const int maxConsecutiveErrors = 3;
 
@@ -320,6 +345,9 @@ public class RefreshMetadataSyncTableTask
             {
                 return;
             }
+
+            fetchedSoFar += page.Items.Count;
+            reportDiscovery(progressKey, fetchedSoFar, page.TotalRecordCount ?? fetchedSoFar);
 
             foreach (var item in page.Items)
             {

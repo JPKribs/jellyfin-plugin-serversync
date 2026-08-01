@@ -133,6 +133,27 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     protected abstract Task ApplyAsync(TRecord record, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Progress-aware apply. The default forwards to
+    /// <see cref="ApplyAsync(TRecord, CancellationToken)"/> and ignores
+    /// <paramref name="itemProgress"/> — right for modules whose per-item work
+    /// is near-instant. Content overrides this to stream download progress
+    /// (fraction 0–1 of the item) so a multi-hour file moves the bar instead
+    /// of freezing it.
+    /// </summary>
+    protected virtual Task ApplyAsync(TRecord record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
+        => ApplyAsync(record, cancellationToken);
+
+    /// <summary>
+    /// Relative progress weight of one record. Default 1 — every item counts
+    /// equally, which is honest when per-item cost is uniform (a history
+    /// write, a policy update). Content overrides with the file size in
+    /// bytes: a 50 GB movie is not the same amount of work as a 5 MB episode,
+    /// and counting them equally made the bar sprint through small files and
+    /// crawl through large ones.
+    /// </summary>
+    protected virtual long GetApplyWeight(TRecord record) => 1;
+
+    /// <summary>
     /// Called after a successful <see cref="ApplyAsync"/> to confirm the write
     /// landed. Default is a no-op; modules that mutate live Jellyfin state
     /// override to re-read and compare. Throwing transitions the record to
@@ -277,15 +298,78 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         }
 
         // Progress allocation:
-        //   0– 90 %  per-item ApplyAsync loop
+        //   0– 90 %  per-item ApplyAsync loop, weighted by GetApplyWeight and
+        //            fed by per-item in-flight fractions — a run downloading
+        //            one huge file and nine small ones reports bytes moved,
+        //            not "1 of 10 items"
         //  90–100 %  FinalizeAsync (Content's library-refresh phase fits here
         //            so the bar moves while ValidateMediaLibrary runs)
         const double ApplyEnd = 90.0;
         var queued = GetItemsToApply();
-        var total = Math.Max(queued.Count, 1);
         var successes = 0;
         var failures = 0;
-        var processed = 0;
+
+        long totalWeight = 0;
+        foreach (var record in queued)
+        {
+            totalWeight += Math.Max(1, GetApplyWeight(record));
+        }
+
+        totalWeight = Math.Max(1, totalWeight);
+
+        // completedWeight counts finished items (success or failure — either
+        // way their share of the run is spent); inflight carries each running
+        // item's partial contribution. Guarded by one gate because byte
+        // callbacks arrive from parallel download workers.
+        var progressGate = new object();
+        double completedWeight = 0;
+        var inflight = new Dictionary<TRecord, double>(ReferenceEqualityComparer.Instance);
+
+        void ReportOverall()
+        {
+            double fraction;
+            lock (progressGate)
+            {
+                var sum = completedWeight;
+                foreach (var kvp in inflight)
+                {
+                    sum += kvp.Value;
+                }
+
+                fraction = sum / totalWeight;
+            }
+
+            progress.Report(ApplyEnd * Math.Clamp(fraction, 0, 1));
+        }
+
+        void OnItemProgress(TRecord record, long weight, double fraction)
+        {
+            var contribution = Math.Clamp(fraction, 0, 1) * weight;
+            lock (progressGate)
+            {
+                // Monotone per item: a download retry restarts the file's
+                // byte count, and a bar that visibly rewinds reads as a bug.
+                if (inflight.TryGetValue(record, out var previous) && contribution <= previous)
+                {
+                    return;
+                }
+
+                inflight[record] = contribution;
+            }
+
+            ReportOverall();
+        }
+
+        void OnItemDone(TRecord record, long weight)
+        {
+            lock (progressGate)
+            {
+                inflight.Remove(record);
+                completedWeight += weight;
+            }
+
+            ReportOverall();
+        }
 
         var maxParallel = Math.Max(1, MaxDegreeOfParallelism);
         foreach (var group in GetApplyGroups(queued))
@@ -306,7 +390,9 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
                     }
 
                     var record = group[i];
-                    if (await ApplyOneAsync(record, cancellationToken).ConfigureAwait(false))
+                    var weight = Math.Max(1, GetApplyWeight(record));
+                    var itemProgress = new DelegateProgress(f => OnItemProgress(record, weight, f));
+                    if (await ApplyOneAsync(record, itemProgress, cancellationToken).ConfigureAwait(false))
                     {
                         successes++;
                     }
@@ -315,8 +401,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
                         failures++;
                     }
 
-                    processed++;
-                    progress.Report(ApplyEnd * processed / total);
+                    OnItemDone(record, weight);
                 }
             }
             else
@@ -331,7 +416,9 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
                 {
                     await Parallel.ForEachAsync(group, options, async (record, ct) =>
                     {
-                        if (await ApplyOneAsync(record, ct).ConfigureAwait(false))
+                        var weight = Math.Max(1, GetApplyWeight(record));
+                        var itemProgress = new DelegateProgress(f => OnItemProgress(record, weight, f));
+                        if (await ApplyOneAsync(record, itemProgress, ct).ConfigureAwait(false))
                         {
                             Interlocked.Increment(ref successes);
                         }
@@ -340,8 +427,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
                             Interlocked.Increment(ref failures);
                         }
 
-                        var done = Interlocked.Increment(ref processed);
-                        progress.Report(ApplyEnd * done / total);
+                        OnItemDone(record, weight);
                     }).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -409,11 +495,25 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     private void ClearRunFailure()
         => RunFailureLog.Clear(_configManager, ModuleMutexKey, Logger, Name);
 
-    private async Task<bool> ApplyOneAsync(TRecord record, CancellationToken cancellationToken)
+    /// <summary>
+    /// Plain-lambda IProgress. <see cref="Progress{T}"/> posts through the
+    /// captured SynchronizationContext, which reorders and defers reports;
+    /// progress math here is already thread-safe, so report inline.
+    /// </summary>
+    private sealed class DelegateProgress : IProgress<double>
+    {
+        private readonly Action<double> _handler;
+
+        public DelegateProgress(Action<double> handler) => _handler = handler;
+
+        public void Report(double value) => _handler(value);
+    }
+
+    private async Task<bool> ApplyOneAsync(TRecord record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
     {
         try
         {
-            await ApplyAsync(record, cancellationToken).ConfigureAwait(false);
+            await ApplyAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
             await VerifyAfterApplyAsync(record, cancellationToken).ConfigureAwait(false);
 
             OnApplySucceeded(record);

@@ -159,8 +159,22 @@ public class SyncMissingContentTask
         return true;
     }
 
+    // Weight items by file size so the run's percentage tracks bytes moved,
+    // not item count — one 50 GB movie plus nine small episodes used to jump
+    // 10% per episode and then freeze for the movie's entire download.
     /// <inheritdoc />
-    protected override async Task ApplyAsync(SyncItem record, CancellationToken cancellationToken)
+    protected override long GetApplyWeight(SyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return Math.Max(1, record.SourceSize);
+    }
+
+    /// <inheritdoc />
+    protected override Task ApplyAsync(SyncItem record, CancellationToken cancellationToken)
+        => ApplyAsync(record, itemProgress: null, cancellationToken);
+
+    /// <inheritdoc />
+    protected override async Task ApplyAsync(SyncItem record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(record);
 
@@ -216,7 +230,7 @@ public class SyncMissingContentTask
         {
             var result = await _downloadService.DownloadItemAsync(
                 Client, record, _tempPath, _speedLimit,
-                config.IncludeCompanionFiles, config, cancellationToken).ConfigureAwait(false);
+                config.IncludeCompanionFiles, config, itemProgress, cancellationToken).ConfigureAwait(false);
 
             if (result.Success)
             {

@@ -41,6 +41,7 @@ public class DownloadService
     /// <param name="speedLimitBytesPerSecond">Download speed limit in bytes per second.</param>
     /// <param name="includeCompanionFiles">Whether to download companion files.</param>
     /// <param name="config">Plugin configuration.</param>
+    /// <param name="progress">Optional per-item progress (fraction 0–1 of the main file's bytes).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Download result.</returns>
     public async Task<DownloadResult> DownloadItemAsync(
@@ -50,7 +51,8 @@ public class DownloadService
         long speedLimitBytesPerSecond,
         bool includeCompanionFiles,
         PluginConfiguration config,
-        CancellationToken cancellationToken)
+        IProgress<double>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(item.LocalPath))
         {
@@ -84,7 +86,16 @@ public class DownloadService
 
                         using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
                         {
-                            await StreamUtilities.CopyWithSpeedLimitAsync(sourceStream, fileStream, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
+                            // Content-Length is authoritative; the recorded
+                            // SourceSize is the fallback (can be stale but is
+                            // the right order of magnitude). No basis → no
+                            // in-file reporting; the item still completes its
+                            // share when it finishes.
+                            var expectedBytes = contentLength ?? (item.SourceSize > 0 ? item.SourceSize : (long?)null);
+                            Stream destination = progress != null && expectedBytes.HasValue
+                                ? new ProgressReportingStream(fileStream, expectedBytes.Value, progress)
+                                : fileStream;
+                            await StreamUtilities.CopyWithSpeedLimitAsync(sourceStream, destination, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
                         }
                     }
 

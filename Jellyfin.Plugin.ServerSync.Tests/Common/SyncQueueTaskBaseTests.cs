@@ -133,6 +133,29 @@ public class SyncQueueTaskBaseTests
 
         public Func<TestRecord, CancellationToken, Task>? ApplyBody { get; set; }
 
+        public Func<TestRecord, long>? Weight { get; set; }
+
+        public Func<TestRecord, IProgress<double>?, CancellationToken, Task>? ProgressApplyBody { get; set; }
+
+        protected override long GetApplyWeight(TestRecord record)
+            => Weight?.Invoke(record) ?? base.GetApplyWeight(record);
+
+        protected override async Task ApplyAsync(TestRecord record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
+        {
+            if (ProgressApplyBody != null)
+            {
+                lock (ApplyOrder)
+                {
+                    ApplyOrder.Add(record);
+                }
+
+                await ProgressApplyBody(record, itemProgress, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await base.ApplyAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
+        }
+
         public List<TestRecord> ApplyOrder { get; } = new();
 
         public override string Name => "Test Sync";
@@ -306,5 +329,139 @@ public class SyncQueueTaskBaseTests
 
         Assert.False(task.RunCompletedRecorded);
         Assert.Empty(manager.Upserted);
+    }
+
+    // -----------------------------------------------------------------------
+    // Weighted progress. The apply band used to advance by item count, so a
+    // 50 GB movie and a 5 MB episode moved the bar equally and a single huge
+    // file froze it entirely.
+    // -----------------------------------------------------------------------
+
+    private sealed class CapturingProgress : IProgress<double>
+    {
+        public List<double> Reports { get; } = new();
+
+        public void Report(double value)
+        {
+            lock (Reports)
+            {
+                Reports.Add(value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Items advance the bar by weight, not by count.
+    /// True: after a 90-weight item completes the bar reads ~81 (90% of the
+    /// 0-90 apply band), not 45.
+    /// False: mixed-size download queues sprint through small files and crawl
+    /// through big ones with no relation to actual bytes moved.
+    /// </summary>
+    [Fact]
+    public async Task Progress_IsWeighted_NotItemCounted()
+    {
+        var manager = new FakeManager();
+        var big = Record(1, "big");
+        var small = Record(2, "small");
+        manager.Queued.AddRange(new[] { big, small });
+
+        var task = new TestableQueueTask(manager)
+        {
+            Weight = r => r.Key == "big" ? 90 : 10
+        };
+
+        var captured = new CapturingProgress();
+        await task.ExecuteAsync(captured, CancellationToken.None);
+
+        // After the big item completes: 90/100 of the 90-point band = 81.
+        Assert.Contains(captured.Reports, r => Math.Abs(r - 81.0) < 0.001);
+        // Both done: full apply band.
+        Assert.Contains(captured.Reports, r => Math.Abs(r - 90.0) < 0.001);
+    }
+
+    /// <summary>
+    /// An in-flight item's own fraction moves the overall bar.
+    /// True: a single multi-hour download advances the bar continuously.
+    /// False: the bar freezes for the entire file and jumps at the end —
+    /// the exact behaviour this change removes.
+    /// </summary>
+    [Fact]
+    public async Task Progress_InFlightFraction_MovesOverallBar()
+    {
+        var manager = new FakeManager();
+        manager.Queued.Add(Record(1, "only"));
+
+        var task = new TestableQueueTask(manager)
+        {
+            ProgressApplyBody = (record, itemProgress, ct) =>
+            {
+                itemProgress!.Report(0.5);
+                return Task.CompletedTask;
+            }
+        };
+
+        var captured = new CapturingProgress();
+        await task.ExecuteAsync(captured, CancellationToken.None);
+
+        // Half of the single item = half of the 90-point band.
+        Assert.Contains(captured.Reports, r => Math.Abs(r - 45.0) < 0.001);
+        Assert.Contains(captured.Reports, r => Math.Abs(r - 90.0) < 0.001);
+    }
+
+    /// <summary>
+    /// The overall bar never moves backwards, even when an item's fraction
+    /// regresses (a download retry restarts the file's byte count).
+    /// True: retries hold the bar steady instead of visibly rewinding it.
+    /// False: every retry looks like the task is undoing its own work.
+    /// </summary>
+    [Fact]
+    public async Task Progress_IsMonotonic_AcrossItemRetries()
+    {
+        var manager = new FakeManager();
+        manager.Queued.AddRange(new[] { Record(1, "a"), Record(2, "b") });
+
+        var task = new TestableQueueTask(manager)
+        {
+            ProgressApplyBody = (record, itemProgress, ct) =>
+            {
+                itemProgress!.Report(0.8);
+                // Simulated retry: the item starts over.
+                itemProgress.Report(0.1);
+                itemProgress.Report(0.4);
+                return Task.CompletedTask;
+            }
+        };
+
+        var captured = new CapturingProgress();
+        await task.ExecuteAsync(captured, CancellationToken.None);
+
+        for (var i = 1; i < captured.Reports.Count; i++)
+        {
+            Assert.True(
+                captured.Reports[i] >= captured.Reports[i - 1] - 0.0001,
+                $"progress went backwards: {captured.Reports[i - 1]} -> {captured.Reports[i]}");
+        }
+    }
+
+    /// <summary>
+    /// Modules that never touch itemProgress (History, User, Metadata,
+    /// People) still complete the apply band normally.
+    /// True: the weighting change is invisible to uniform-cost modules.
+    /// False: four modules' progress bars broke to improve one.
+    /// </summary>
+    [Fact]
+    public async Task Progress_DefaultWeighting_ReachesApplyEnd()
+    {
+        var manager = new FakeManager();
+        manager.Queued.AddRange(new[] { Record(1, "a"), Record(2, "b"), Record(3, "c") });
+
+        var task = new TestableQueueTask(manager);
+        var captured = new CapturingProgress();
+        await task.ExecuteAsync(captured, CancellationToken.None);
+
+        Assert.Contains(captured.Reports, r => Math.Abs(r - 30.0) < 0.001);
+        Assert.Contains(captured.Reports, r => Math.Abs(r - 60.0) < 0.001);
+        Assert.Contains(captured.Reports, r => Math.Abs(r - 90.0) < 0.001);
+        Assert.Contains(captured.Reports, r => Math.Abs(r - 100.0) < 0.001);
     }
 }

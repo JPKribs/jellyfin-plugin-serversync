@@ -26,3 +26,5 @@ changelog:
   developer:
   - Fixed dropdowns showing two chevrons
   - Fixed the Metadata table showing no items after updating to 66.0
+  - Content sync progress now tracks bytes downloaded instead of item count, including within a single large file
+  - Metadata and History refresh progress now moves through source discovery instead of freezing until it finishes

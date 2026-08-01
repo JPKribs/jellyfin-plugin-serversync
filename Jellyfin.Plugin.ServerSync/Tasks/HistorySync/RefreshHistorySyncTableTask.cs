@@ -141,6 +141,25 @@ public class RefreshHistorySyncTableTask
         // Phase 2: light source discovery — find source IDs of items whose
         // translated path exists locally. One pass per library, regardless
         // of how many users we sync.
+        // Per-page reporting into the 8–30 band; without it the bar froze at
+        // 8% for the entire discovery pagination.
+        var discoveryProgress = new ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
+        void ReportDiscovery(string key, long fetched, long total)
+        {
+            discoveryProgress[key] = (fetched, total);
+            long fetchedSum = 0, totalSum = 0;
+            foreach (var v in discoveryProgress.Values)
+            {
+                fetchedSum += v.Fetched;
+                totalSum += v.Total;
+            }
+
+            if (totalSum > 0)
+            {
+                progress.Report(8 + Math.Min(21.0, 22.0 * fetchedSum / totalSum));
+            }
+        }
+
         var matchedIdsByLibrary = new ConcurrentDictionary<string, HashSet<Guid>>();
         await Parallel.ForEachAsync(
             libraryMappings,
@@ -155,6 +174,7 @@ public class RefreshHistorySyncTableTask
                 var leafTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
                 const int pageSize = 1000;
                 var startIndex = 0;
+                var fetchedSoFar = 0L;
                 var consecutiveErrors = 0;
                 const int maxConsecutiveErrors = 3;
 
@@ -189,6 +209,9 @@ public class RefreshHistorySyncTableTask
 
                     consecutiveErrors = 0;
                     if (page?.Items == null || page.Items.Count == 0) break;
+
+                    fetchedSoFar += page.Items.Count;
+                    ReportDiscovery(mapping.SourceLibraryId, fetchedSoFar, page.TotalRecordCount ?? fetchedSoFar);
 
                     foreach (var item in page.Items)
                     {
@@ -257,11 +280,20 @@ public class RefreshHistorySyncTableTask
 
                 var ids = matchedIds.ToArray();
                 const int batchSize = 50;
+                var batchesForPair = (ids.Length + batchSize - 1) / batchSize;
+                var batchesDone = 0;
                 for (var i = 0; i < ids.Length; i += batchSize)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
                     var page = await Client.GetItemsWithUserDataByIdsAsync(sourceUserId, chunk, cancellationToken).ConfigureAwait(false);
+
+                    // Sub-pair reporting: a pair covering a large library runs
+                    // many 50-item batches, and per-pair ticks left the bar
+                    // frozen through all of them.
+                    batchesDone++;
+                    progress.Report(Math.Min(100, 30 + (70.0 * (pairsDone + ((double)batchesDone / batchesForPair)) / pairsTotal)));
+
                     if (page?.Items == null)
                     {
                         // Batch fetch failed (logged as warning by the client
