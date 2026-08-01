@@ -293,4 +293,45 @@ public sealed class SyncStateServiceTests : IDisposable
 
         Assert.Equal(SyncStatus.Queued, _manager.GetByKey("a")!.Status);
     }
+
+    /// <summary>
+    /// Queued through UpdateStatus is an operator action and must reset the
+    /// retry counter, in one well-formed UPDATE. This exercises the real SQL
+    /// against SQLite — the transition clauses briefly emitted "RetryCount = 0"
+    /// twice for this path.
+    /// True: a Retry click hands the row its full MaxRetryCount allowance.
+    /// False: a row at the cap gets one attempt and drops back out, or the
+    /// UPDATE itself is malformed and every Queue/Retry action fails.
+    /// </summary>
+    [Fact]
+    public void UpdateStatus_Queued_ResetsRetryCount()
+    {
+        var row = Row("a", SyncStatus.Errored);
+        row.RetryCount = 3;
+        _manager.Upsert(row);
+
+        _manager.UpdateStatus("a", SyncStatus.Queued);
+
+        var after = _manager.GetByKey("a")!;
+        Assert.Equal(SyncStatus.Queued, after.Status);
+        Assert.Equal(0, after.RetryCount);
+    }
+
+    /// <summary>
+    /// Errored through UpdateStatus increments the retry counter.
+    /// True: repeated failures accumulate toward the ceiling.
+    /// False: the ceiling never trips because failures don't count.
+    /// </summary>
+    [Fact]
+    public void UpdateStatus_Errored_IncrementsRetryCount()
+    {
+        var row = Row("a", SyncStatus.Queued);
+        row.RetryCount = 1;
+        _manager.Upsert(row);
+
+        _manager.UpdateStatus("a", SyncStatus.Errored, errorMessage: "boom");
+
+        var after = _manager.GetByKey("a")!;
+        Assert.Equal(2, after.RetryCount);
+    }
 }

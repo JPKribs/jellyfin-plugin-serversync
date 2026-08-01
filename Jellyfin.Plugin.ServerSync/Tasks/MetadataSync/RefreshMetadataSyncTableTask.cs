@@ -459,6 +459,9 @@ public class RefreshMetadataSyncTableTask
             fresh.Status = prev.Status;
             fresh.LastSyncTime = prev.LastSyncTime;
             fresh.Reason = prev.Reason;
+            // Without this the freshly built record resets to 0 every refresh
+            // and the retry ceiling in DecideStatus can never trip.
+            fresh.RetryCount = prev.RetryCount;
 
             fresh.Metadata.Synced = prev.Metadata.Synced;
             fresh.Metadata.SyncedHash = prev.Metadata.SyncedHash;

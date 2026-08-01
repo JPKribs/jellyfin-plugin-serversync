@@ -306,6 +306,9 @@ public class RefreshHistorySyncTableTask
             record.Status = prev.Status;
             record.LastSyncTime = prev.LastSyncTime;
             record.Reason = prev.Reason;
+            // Without this the freshly built record resets to 0 every refresh
+            // and the retry ceiling in DecideStatus can never trip.
+            record.RetryCount = prev.RetryCount;
             record.SourceState.Synced = prev.SourceState.Synced;
             record.SourceState.SyncedHash = prev.SourceState.SyncedHash;
         }
@@ -354,28 +357,11 @@ public class RefreshHistorySyncTableTask
     }
 
 
-    /// <inheritdoc />
-    protected override void DecideStatus(HistorySyncItem record)
-    {
-        ArgumentNullException.ThrowIfNull(record);
-        if (record.Status == SyncStatus.Ignored)
-        {
-            return;
-        }
-
-        if (record.HasChanges)
-        {
-            record.Status = SyncStatus.Queued;
-        }
-        else
-        {
-            record.Status = SyncStatus.Synced;
-            record.LastSyncTime = DateTime.UtcNow;
-        }
-
-        record.StatusDate = DateTime.UtcNow;
-        record.Reason = null;
-    }
+    // DecideStatus intentionally NOT overridden. An override here used to
+    // duplicate the base minus MarkSynced; with comparator-based change
+    // detection MarkSynced is harmless bookkeeping, and the override was
+    // silently bypassing the base's retry ceiling — an Errored history row
+    // at MaxRetryCount was re-queued on every refresh anyway.
 
     /// <inheritdoc />
     protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)

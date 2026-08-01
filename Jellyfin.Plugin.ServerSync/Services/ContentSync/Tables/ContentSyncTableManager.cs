@@ -442,20 +442,14 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         string? localPath = null,
         string? errorMessage = null,
         long? sourceSize = null,
-        string? companionFiles = null,
-        bool resetRetryCount = false) => ExecuteWrite(conn =>
+        string? companionFiles = null) => ExecuteWrite(conn =>
     {
         using var cmd = conn.CreateCommand();
-        var clauses = BuildStatusTransitionClauses(status, trackRetryCount: true);
-
-        // Explicit operator retry: clear the counter so the row gets a full
-        // MaxRetryCount allowance again. Without it a row already at the cap
-        // got exactly one more attempt from the user's click and then dropped
-        // straight back out of the auto-retry pool.
-        if (resetRetryCount && status != SyncStatus.Synced)
-        {
-            clauses.Add("RetryCount = 0");
-        }
+        // Queued through this path is an operator action (Queue / Retry), and
+        // the base transition clauses reset RetryCount for it — the explicit
+        // resetRetryCount parameter this method briefly had would have emitted
+        // a second "RetryCount = 0" into the same SET list.
+        var clauses = BuildStatusTransitionClauses(status);
 
         // PendingType is set when transitioning to Pending, otherwise cleared.
         clauses.Add(status == SyncStatus.Pending ? "PendingType = @pendingType" : "PendingType = NULL");
