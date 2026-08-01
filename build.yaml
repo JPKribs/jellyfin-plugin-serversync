@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.66.2"
+version: "10.11.66.3"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -24,5 +24,4 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Fixed releases failing to publish their manifest entry when new commits landed after the tag was cut
-  - Restored the missing 10.11.66.1 manifest entry so that release can be installed
+  - Change badges in the Metadata and People detail views now explain themselves. The exact diverging image or field is named, so a badge can no longer disagree with rows that look identical

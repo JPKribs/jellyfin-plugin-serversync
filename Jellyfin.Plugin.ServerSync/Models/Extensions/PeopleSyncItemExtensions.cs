@@ -1,3 +1,5 @@
+using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 
 namespace Jellyfin.Plugin.ServerSync.Models;
@@ -25,6 +27,12 @@ public static class PeopleSyncItemExtensions
             LocalImagesValue = item.Images.Local,
             HasMetadataChanges = item.HasMetadataChanges,
             HasImagesChanges = item.HasImagesChanges,
+            ImagesChangesDetail = item.HasImagesChanges
+                ? (item.Images.Comparator as ImageManifestComparator)?.DescribeDifference(item.Images.Source, item.Images.Local)
+                : null,
+            MetadataChangesDetail = item.HasMetadataChanges
+                ? string.Join(", ", JsonComparisonUtility.GetDifferingFields(item.Metadata.Source, item.Metadata.Local))
+                : null,
             HasChanges = item.HasChanges,
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,

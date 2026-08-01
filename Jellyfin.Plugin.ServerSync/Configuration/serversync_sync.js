@@ -1930,6 +1930,9 @@ export default function (view) {
             if (metadataEnabled) {
                 html += '<tr class="metadataSyncModal-sectionHeader"><td colspan="4">Metadata</td></tr>';
                 html += self.buildCoreMetadataRows(sourceMetadata, localMetadata);
+                if (item.HasMetadataChanges) {
+                    html += self.buildChangeDetailRow(item.MetadataChangesDetail);
+                }
             }
 
             if (genresEnabled) {
@@ -1955,6 +1958,9 @@ export default function (view) {
             if (imagesEnabled) {
                 html += '<tr class="metadataSyncModal-sectionHeader"><td colspan="4">Images</td></tr>';
                 html += self.buildImagesRows(sourceImages, localImages, item);
+                if (item.HasImagesChanges) {
+                    html += self.buildChangeDetailRow(item.ImagesChangesDetail);
+                }
             }
 
             if (html === '') {
@@ -1972,6 +1978,16 @@ export default function (view) {
                 console.error('Failed to parse JSON:', e);
                 return null;
             }
+        },
+
+        // Full-width muted note naming the server-computed reason a category's
+        // badge says Changes. The visible rows aggregate (image size sums) or
+        // render a fixed field list, so without this a badge can be
+        // unexplainable from the UI.
+        buildChangeDetailRow: function(text) {
+            if (!text) return '';
+            return '<tr><td colspan="4" style="opacity:0.6;font-size:0.85em;">Changed: ' +
+                ServerSyncShared.escapeHtml(text) + '</td></tr>';
         },
 
         buildCoreMetadataRows: function(source, local) {
@@ -3378,6 +3394,10 @@ export default function (view) {
                     self._addComparisonRow(tbody, 'Provider IDs', '-', '-', false);
                 }
 
+                if (detail.HasMetadataChanges) {
+                    self._addChangeDetailRow(tbody, detail.MetadataChangesDetail);
+                }
+
                 self._addSectionHeader(tbody, 'Images');
 
                 var sourceImages = self._parseJson(detail.SourceImagesValue);
@@ -3402,11 +3422,28 @@ export default function (view) {
                     self._addComparisonRow(tbody, 'Images', '-', localImages ? 'Present' : '-', false);
                 }
 
+                if (detail.HasImagesChanges) {
+                    self._addChangeDetailRow(tbody, detail.ImagesChangesDetail);
+                }
+
                 view.querySelector('#peopleSyncItemDetailModal').classList.remove('hidden');
             }).catch(function(err) {
                 console.error('Failed to load person detail:', err);
                 ServerSyncShared.showAlert('Failed to load person details');
             });
+        },
+
+        // Same role as the metadata modal's buildChangeDetailRow, DOM-style.
+        _addChangeDetailRow: function(tbody, text) {
+            if (!text) return;
+            var row = document.createElement('tr');
+            var cell = document.createElement('td');
+            cell.colSpan = 4;
+            cell.style.opacity = '0.6';
+            cell.style.fontSize = '0.85em';
+            cell.textContent = 'Changed: ' + text;
+            row.appendChild(cell);
+            tbody.appendChild(row);
         },
 
         _addSectionHeader: function(tbody, title) {

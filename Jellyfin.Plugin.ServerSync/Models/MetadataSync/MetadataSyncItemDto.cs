@@ -134,6 +134,23 @@ public class MetadataSyncItemDto
     /// </summary>
     public string? ChangesSummary { get; set; }
 
+    /// <summary>
+    /// Gets or sets the comparator's precise reason the image manifests
+    /// differ (e.g. which type and index, and both sizes). Null when images
+    /// match or on list views. The modal shows per-type size SUMS, which can
+    /// look identical while per-index sizes differ — without this the
+    /// "Images: Changes" badge is unexplainable from the UI.
+    /// </summary>
+    public string? ImagesChangesDetail { get; set; }
+
+    /// <summary>
+    /// Gets or sets the names of the metadata fields that differ, computed
+    /// server-side over the full blobs. The modal renders a fixed field
+    /// list, so a field added to the sync blob but not to the modal would
+    /// otherwise show a "Changes" badge with no visible difference.
+    /// </summary>
+    public string? MetadataChangesDetail { get; set; }
+
     // ===== Source Server =====
 
     /// <summary>

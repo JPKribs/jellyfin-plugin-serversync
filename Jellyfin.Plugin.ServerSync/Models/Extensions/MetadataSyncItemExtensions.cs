@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
+using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 
@@ -60,6 +62,12 @@ public static class MetadataSyncItemExtensions
             LocalStudiosValue = includeBlobs ? item.Studios.Local : null,
             HasMetadataChanges = hasMetadataChanges,
             HasImagesChanges = hasImagesChanges,
+            ImagesChangesDetail = includeBlobs && hasImagesChanges
+                ? (item.Images.Comparator as ImageManifestComparator)?.DescribeDifference(item.Images.Source, item.Images.Local)
+                : null,
+            MetadataChangesDetail = includeBlobs && hasMetadataChanges
+                ? string.Join(", ", JsonComparisonUtility.GetDifferingFields(item.Metadata.Source, item.Metadata.Local))
+                : null,
             HasPeopleChanges = hasPeopleChanges,
             HasStudiosChanges = hasStudiosChanges,
             HasChanges = hasMetadataChanges || hasImagesChanges || hasPeopleChanges || hasStudiosChanges,

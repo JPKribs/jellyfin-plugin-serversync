@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Xunit;
 
@@ -192,5 +193,85 @@ public class MetadataSyncItemTests
         Assert.Equal(item.Images.SourceHash, item.Images.SyncedHash);
         Assert.Equal(item.People.SourceHash, item.People.SyncedHash);
         Assert.Equal(item.Studios.SourceHash, item.Studios.SyncedHash);
+    }
+
+    // ===================================================================
+    // Change-detail surfacing. The badges are computed server-side over the
+    // full blobs while the modal renders aggregates and fixed field lists,
+    // so a badge could say Changes with no visible difference. The DTO now
+    // names the reason.
+    // ===================================================================
+
+    /// <summary>
+    /// A per-index image size difference that display SUMS would hide is
+    /// named in the DTO detail.
+    /// True: "Images: Changes" is always explainable from the modal.
+    /// False: identical-looking rows with a Changes badge, unexplainable.
+    /// </summary>
+    [Fact]
+    public void ToDto_ImagesDiffer_NamesTheDivergingImage()
+    {
+        var item = new MetadataSyncItem
+        {
+            SourceLibraryId = "lib",
+            SourceItemId = "i1",
+            LocalItemId = "local-1",
+            StatusDate = System.DateTime.UtcNow
+        };
+        item.Images.UpdateSource("{\"Backdrop\":[{\"ImageType\":\"Backdrop\",\"ImageIndex\":0,\"Size\":500},{\"ImageType\":\"Backdrop\",\"ImageIndex\":1,\"Size\":400}]}");
+        item.Images.Local = "{\"Backdrop\":[{\"ImageType\":\"Backdrop\",\"ImageIndex\":0,\"Size\":400},{\"ImageType\":\"Backdrop\",\"ImageIndex\":1,\"Size\":500}]}";
+
+        var dto = item.ToDto(null, "http://src", includeBlobs: true);
+
+        Assert.True(dto.HasImagesChanges);
+        Assert.NotNull(dto.ImagesChangesDetail);
+        Assert.Contains("Backdrop", dto.ImagesChangesDetail);
+    }
+
+    /// <summary>
+    /// A differing metadata field is named even if the modal's fixed field
+    /// list were to omit it.
+    /// </summary>
+    [Fact]
+    public void ToDto_MetadataDiffers_NamesTheField()
+    {
+        var item = new MetadataSyncItem
+        {
+            SourceLibraryId = "lib",
+            SourceItemId = "i1",
+            LocalItemId = "local-1",
+            StatusDate = System.DateTime.UtcNow
+        };
+        item.Metadata.UpdateSource("{\"Name\":\"A\",\"Overview\":\"new text\"}");
+        item.Metadata.Local = "{\"Name\":\"A\",\"Overview\":\"old text\"}";
+
+        var dto = item.ToDto(null, "http://src", includeBlobs: true);
+
+        Assert.True(dto.HasMetadataChanges);
+        Assert.Equal("Overview", dto.MetadataChangesDetail);
+    }
+
+    /// <summary>
+    /// List views (includeBlobs false) skip the detail computation — it
+    /// deserializes both blobs per row and the table only shows badges.
+    /// </summary>
+    [Fact]
+    public void ToDto_ListView_OmitsChangeDetails()
+    {
+        var item = new MetadataSyncItem
+        {
+            SourceLibraryId = "lib",
+            SourceItemId = "i1",
+            LocalItemId = "local-1",
+            StatusDate = System.DateTime.UtcNow
+        };
+        item.Metadata.UpdateSource("{\"Name\":\"A\"}");
+        item.Metadata.Local = "{\"Name\":\"B\"}";
+
+        var dto = item.ToDto(null, "http://src", includeBlobs: false);
+
+        Assert.True(dto.HasMetadataChanges);
+        Assert.Null(dto.MetadataChangesDetail);
+        Assert.Null(dto.ImagesChangesDetail);
     }
 }
