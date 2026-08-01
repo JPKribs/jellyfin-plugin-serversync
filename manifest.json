@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "10.11.66.3",
+        "changelog": "## Developer\r\n- Change badges in the Metadata and People detail views now explain themselves. The exact diverging image or field is named, so a badge can no longer disagree with rows that look identical",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v10.11.66.3/jellyfin-plugin-serversync-10.11.66.3.zip",
+        "checksum": "0c8c706d33437df707b429d4aa23b046",
+        "timestamp": "2026-08-01T05:05:41Z"
+      },
+      {
         "version": "10.11.66.2",
         "changelog": "## Developer\r\n- Fixed releases failing to publish their manifest entry when new commits landed after the tag was cut\r\n- Restored the missing 10.11.66.1 manifest entry so that release can be installed",
         "targetAbi": "10.11.0.0",
