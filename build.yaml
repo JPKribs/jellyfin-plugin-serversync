@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.66.0"
+version: "10.11.66.1"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Sync media content from a source Jellyfin server to this server."
@@ -24,24 +24,4 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - User Sync no longer copies any setting that carries an identifier. Blocked Media Folders, Blocked Channels, and Access Schedules were writing source server identifiers onto local users
-  - Enabled Folders and Content Deletion From Folders are no longer synced either. Translating them dropped every library without a mapping, which quietly removed access nobody asked to remove
-  - Changes made on this server are now detected. Editing an item locally used to be invisible until the same item happened to change on the source, so the two servers stayed out of step indefinitely
-  - Watch history compares last played times to the second, matching what the verifier already required
-  - When image sizes cannot be read from the source, images are no longer re downloaded on every run. Image count and type changes are still detected
-  - Failing to read image info from the source is now logged as a warning instead of being silent
-  - Metadata, People, User and History sync now stop retrying a row that keeps failing, the same way content sync always has. Queue or Retry from the table gives it a fresh set of attempts
-  - People sync no longer prunes its table when this server reports no people while tracked rows exist, which happens while a library is rescanning
-  - Downgrading the plugin no longer leaves an unreadable database behind. The newer file is kept aside and a fresh one is created
-  - Fixed the settings page refusing to expand its categories when this server is hosted under a base url such as /jellyfin
-  - Items scheduled for deletion are no longer dropped from tracking when a refresh runs before the sync that would delete them
-  - Fixed source paths mapping into the wrong local folder when one library root is a name prefix of another
-  - Rejected source server URLs now explain why instead of failing with a server error
-  - Source server URLs written as an IPv6 literal are now checked against the same address rules as everything else
-  - Cancelling a refresh no longer records a false connection failure on the dashboard
-  - A bandwidth schedule with the same start and end hour now applies all day instead of never
-  - Retrying an errored item from the table gives it a full set of attempts again
-  - Recycling bin file names now use a fixed calendar so retention works on every locale
-  - Nested provider values no longer resolve to a type name instead of an actual value
-  - Source server responses are always released now, even when cleanup itself fails
-  - Cleaned up static analysis findings across the source client, the table managers, and the plugin entry point
+  - Fixed dropdowns showing two chevrons
