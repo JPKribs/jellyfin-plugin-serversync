@@ -102,6 +102,33 @@ public sealed class SyncStateServiceTests : IDisposable
     }
 
     /// <summary>
+    /// A row already marked Deleting is still awaiting the Sync run that will
+    /// remove its file, so a second refresh must leave it alone.
+    /// True: the scheduled deletion survives until Sync executes it.
+    /// False: the row falls through to the not-Synced branch below and its
+    /// tracking row is deleted while the file stays on disk — the file is then
+    /// orphaned permanently, with nothing left pointing at it. Reachable any
+    /// time a refresh lands between the mark and the sync (aborted pre-flight,
+    /// cancelled run, or the default 10h/12h trigger cadence drifting).
+    /// </summary>
+    [Fact]
+    public void ProcessMissingItem_AlreadyDeleting_NoOp()
+    {
+        var row = Row("a", SyncStatus.Deleting);
+        _manager.Upsert(row);
+        var persisted = _manager.GetByKey("a")!;
+
+        var result = SyncStateService.ProcessMissingItem(_manager, persisted, ApprovalMode.Enabled, NullLogger.Instance);
+
+        Assert.False(result.Changed);
+
+        // The row must still be there for FileDeletionService to pick up.
+        var after = _manager.GetByKey("a");
+        Assert.NotNull(after);
+        Assert.Equal(SyncStatus.Deleting, after!.Status);
+    }
+
+    /// <summary>
     /// A non-Synced row (never downloaded) loses only its tracking row — no
     /// file is scheduled for deletion.
     /// </summary>
