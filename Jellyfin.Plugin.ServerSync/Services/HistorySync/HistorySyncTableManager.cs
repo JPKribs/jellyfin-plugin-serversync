@@ -97,6 +97,7 @@ public sealed class HistorySyncTableManager
 
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
+        item.RetryCount = ReadNullableInt32(reader, "RetryCount") ?? 0;
         item.SourceState.SourceHash = ReadNullableString(reader, "SourceStateHash");
         item.SourceState.SyncedHash = ReadNullableString(reader, "SyncedStateHash");
         return item;
@@ -156,7 +157,7 @@ public sealed class HistorySyncTableManager
                     SourceIsPlayed, SourcePlayCount, SourcePlaybackPositionTicks, SourceLastPlayedDate, SourceIsFavorite,
                     LocalIsPlayed, LocalPlayCount, LocalPlaybackPositionTicks, LocalLastPlayedDate, LocalIsFavorite,
                     MergedIsPlayed, MergedPlayCount, MergedPlaybackPositionTicks, MergedLastPlayedDate, MergedIsFavorite,
-                    Status, StatusDate, LastSyncTime, Reason,
+                    Status, StatusDate, LastSyncTime, Reason, RetryCount,
                     SourceStateHash, SyncedStateHash
                 ) VALUES (
                     @sourceUserId, @localUserId, @sourceLibraryId, @localLibraryId,
@@ -164,7 +165,7 @@ public sealed class HistorySyncTableManager
                     @srcPlayed, @srcCount, @srcPos, @srcLast, @srcFav,
                     @locPlayed, @locCount, @locPos, @locLast, @locFav,
                     @mrgPlayed, @mrgCount, @mrgPos, @mrgLast, @mrgFav,
-                    @status, @statusDate, @lastSync, @reason,
+                    @status, @statusDate, @lastSync, @reason, @retryCount,
                     @srcStateHash, @syncedStateHash
                 )
                 ON CONFLICT(SourceUserId, SourceItemId) DO UPDATE SET
@@ -194,12 +195,14 @@ public sealed class HistorySyncTableManager
                     StatusDate = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.StatusDate ELSE @statusDate END,
                     LastSyncTime = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.LastSyncTime ELSE @lastSync END,
                     Reason = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.Reason ELSE @reason END,
+                    RetryCount = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.RetryCount ELSE @retryCount END,
                     SourceStateHash = @srcStateHash,
                     SyncedStateHash = CASE
                         WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.SyncedStateHash
                         WHEN @syncedStateHash IS NOT NULL THEN @syncedStateHash
                         ELSE HistorySyncItems.SyncedStateHash END";
 
+            cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
             cmd.Parameters.AddWithValue("@sourceUserId", record.SourceUserId);
             cmd.Parameters.AddWithValue("@localUserId", record.LocalUserId);
             cmd.Parameters.AddWithValue("@sourceLibraryId", record.SourceLibraryId);

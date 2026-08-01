@@ -64,9 +64,9 @@ public class DatabaseMigrationServiceTests
     /// False: a future bump forgot to update this test, hiding the need to think through migration paths.
     /// </summary>
     [Fact]
-    public void CurrentSchemaVersion_IsTwentyOne()
+    public void CurrentSchemaVersion_IsTwentyTwo()
     {
-        Assert.Equal(21, DatabaseMigrationService.CurrentSchemaVersion);
+        Assert.Equal(22, DatabaseMigrationService.CurrentSchemaVersion);
     }
 
     /// <summary>
@@ -175,7 +175,7 @@ public class DatabaseMigrationServiceTests
         Assert.DoesNotContain("OldColumn", cols);
         Assert.Contains("SourceItemId", cols);
         Assert.Contains("PendingType", cols);
-        Assert.Equal(21, GetVersion(conn));
+        Assert.Equal(22, GetVersion(conn));
     }
 
     /// <summary>
@@ -277,7 +277,7 @@ public class DatabaseMigrationServiceTests
             Assert.True(reader.IsDBNull(0));
         }
 
-        Assert.Equal(21, GetVersion(conn));
+        Assert.Equal(22, GetVersion(conn));
     }
 
     /// <summary>
@@ -331,7 +331,7 @@ public class DatabaseMigrationServiceTests
 
         var historyCols = GetColumnNames(conn, "HistorySyncItems");
         Assert.Contains("SourceStateHash", historyCols);
-        Assert.Equal(21, GetVersion(conn));
+        Assert.Equal(22, GetVersion(conn));
     }
 
     /// <summary>
@@ -397,7 +397,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 20, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(21, GetVersion(conn));
+        Assert.Equal(22, GetVersion(conn));
     }
 
     /// <summary>
@@ -406,7 +406,56 @@ public class DatabaseMigrationServiceTests
     /// False: re-running migrations on every startup would crash or corrupt state.
     /// </summary>
     [Fact]
-    public void MigrateSchema_FromV21_NoOp_StillReturnsOk()
+    public void MigrateSchema_FromCurrent_NoOp_StillReturnsOk()
+    {
+        using var conn = OpenConnection();
+        DatabaseMigrationService.CreateInitialSchema(conn);
+        SetVersion(conn, 22);
+
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 22, NullLogger.Instance);
+
+        Assert.True(ok);
+        Assert.Equal(22, GetVersion(conn));
+    }
+
+    /// <summary>
+    /// v21 to v22 adds RetryCount to the four tables that lacked it.
+    /// True: every module gets the retry ceiling Content already had.
+    /// False: the ceiling silently does nothing outside Content and a row that
+    /// can never converge is re-applied on every run forever.
+    /// </summary>
+    [Fact]
+    public void MigrateSchema_FromV21_AddsRetryCountToEveryTable()
+    {
+        using var conn = OpenConnection();
+        DatabaseMigrationService.CreateInitialSchema(conn);
+        foreach (var table in new[] { "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
+        {
+            using var drop = conn.CreateCommand();
+            drop.CommandText = $"ALTER TABLE {table} DROP COLUMN RetryCount";
+            drop.ExecuteNonQuery();
+        }
+
+        SetVersion(conn, 21);
+
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 21, NullLogger.Instance);
+
+        Assert.True(ok);
+        Assert.Equal(22, GetVersion(conn));
+        foreach (var table in new[] { "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
+        {
+            Assert.Contains("RetryCount", GetColumnNames(conn, table));
+        }
+    }
+
+    /// <summary>
+    /// Re-running the v22 ALTER against tables that already have the column
+    /// succeeds, so a crashed upgrade can be resumed.
+    /// True: a partially applied upgrade recovers on the next start.
+    /// False: the plugin is stuck failing migration on every boot.
+    /// </summary>
+    [Fact]
+    public void MigrateSchema_FromV21_Idempotent_WhenRetryCountAlreadyExists()
     {
         using var conn = OpenConnection();
         DatabaseMigrationService.CreateInitialSchema(conn);
@@ -415,6 +464,6 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 21, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(21, GetVersion(conn));
+        Assert.Equal(22, GetVersion(conn));
     }
 }

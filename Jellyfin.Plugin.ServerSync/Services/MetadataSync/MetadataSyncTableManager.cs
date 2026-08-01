@@ -108,6 +108,7 @@ public sealed class MetadataSyncTableManager
 
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
+        item.RetryCount = ReadNullableInt32(reader, "RetryCount") ?? 0;
         return item;
     }
 
@@ -166,7 +167,7 @@ public sealed class MetadataSyncTableManager
                     SourceImagesValue, LocalImagesValue, SourceImagesHash, SyncedImagesHash,
                     SourcePeopleValue, LocalPeopleValue, SourcePeopleHash, SyncedPeopleHash,
                     SourceStudiosValue, LocalStudiosValue, SourceStudiosHash, SyncedStudiosHash,
-                    Status, StatusDate, LastSyncTime, Reason
+                    Status, StatusDate, LastSyncTime, Reason, RetryCount
                 ) VALUES (
                     @sourceLibraryId, @localLibraryId, @sourceItemId, @localItemId,
                     @itemName, @sourcePath, @localPath, @itemType, @isFolder,
@@ -174,7 +175,7 @@ public sealed class MetadataSyncTableManager
                     @srcImg, @locImg, @srcImgHash, @syncedImgHash,
                     @srcPeople, @locPeople, @srcPeopleHash, @syncedPeopleHash,
                     @srcStudios, @locStudios, @srcStudiosHash, @syncedStudiosHash,
-                    @status, @statusDate, @lastSync, @reason
+                    @status, @statusDate, @lastSync, @reason, @retryCount
                 )
                 ON CONFLICT(SourceLibraryId, SourceItemId) DO UPDATE SET
                     LocalLibraryId = @localLibraryId,
@@ -203,7 +204,8 @@ public sealed class MetadataSyncTableManager
                     Status = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
                     StatusDate = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.StatusDate ELSE @statusDate END,
                     LastSyncTime = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.LastSyncTime ELSE @lastSync END,
-                    Reason = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.Reason ELSE @reason END";
+                    Reason = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.Reason ELSE @reason END,
+                    RetryCount = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.RetryCount ELSE @retryCount END";
 
             cmd.Parameters.AddWithValue("@sourceLibraryId", record.SourceLibraryId);
             cmd.Parameters.AddWithValue("@localLibraryId", record.LocalLibraryId);
@@ -239,6 +241,7 @@ public sealed class MetadataSyncTableManager
             AddTimestamp(cmd, "@statusDate", record.StatusDate);
             AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
             AddNullable(cmd, "@reason", record.Reason);
+            cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
             cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
             cmd.ExecuteNonQuery();
         });

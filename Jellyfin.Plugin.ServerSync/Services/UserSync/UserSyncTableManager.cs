@@ -74,6 +74,7 @@ public sealed class UserSyncTableManager
 
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
+        item.RetryCount = ReadNullableInt32(reader, "RetryCount") ?? 0;
         return item;
     }
 
@@ -378,7 +379,7 @@ public sealed class UserSyncTableManager
                     SourceValueHash, SyncedValueHash,
                     SourceImageHash, LocalImageHash, SyncedImageHash,
                     SourceImageSize, LocalImageSize, SyncedImageSize,
-                    Status, StatusDate, LastSyncTime, Reason
+                    Status, StatusDate, LastSyncTime, Reason, RetryCount
                 ) VALUES (
                     @src, @loc, @srcName, @locName,
                     @cat,
@@ -386,7 +387,7 @@ public sealed class UserSyncTableManager
                     @srcValHash, @syncedValHash,
                     @srcImgHash, @locImgHash, @syncedImgHash,
                     @srcImgSize, @locImgSize, @syncedImgSize,
-                    @status, @statusDate, @lastSync, @reason
+                    @status, @statusDate, @lastSync, @reason, @retryCount
                 )
                 ON CONFLICT(SourceUserId, LocalUserId, PropertyCategory) DO UPDATE SET
                     SourceUserName = @srcName,
@@ -405,7 +406,8 @@ public sealed class UserSyncTableManager
                     Status = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
                     StatusDate = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.StatusDate ELSE @statusDate END,
                     LastSyncTime = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.LastSyncTime ELSE @lastSync END,
-                    Reason = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.Reason ELSE @reason END";
+                    Reason = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.Reason ELSE @reason END,
+                    RetryCount = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.RetryCount ELSE @retryCount END";
 
             cmd.Parameters.AddWithValue("@src", record.SourceUserId);
             cmd.Parameters.AddWithValue("@loc", record.LocalUserId);
@@ -427,6 +429,7 @@ public sealed class UserSyncTableManager
             AddTimestamp(cmd, "@statusDate", record.StatusDate);
             AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
             AddNullable(cmd, "@reason", record.Reason);
+            cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
             cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
             cmd.ExecuteNonQuery();
         });

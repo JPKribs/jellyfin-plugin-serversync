@@ -30,6 +30,9 @@ changelog:
   - Watch history compares last played times to the second, matching what the verifier already required
   - When image sizes cannot be read from the source, images are no longer re downloaded on every run. Image count and type changes are still detected
   - Failing to read image info from the source is now logged as a warning instead of being silent
+  - Metadata, People, User and History sync now stop retrying a row that keeps failing, the same way content sync always has. Queue or Retry from the table gives it a fresh set of attempts
+  - People sync no longer prunes its table when this server reports no people while tracked rows exist, which happens while a library is rescanning
+  - Downgrading the plugin no longer leaves an unreadable database behind. The newer file is kept aside and a fresh one is created
   - Fixed the settings page refusing to expand its categories when this server is hosted under a base url such as /jellyfin
   - Items scheduled for deletion are no longer dropped from tracking when a refresh runs before the sync that would delete them
   - Fixed source paths mapping into the wrong local folder when one library root is a name prefix of another

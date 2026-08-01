@@ -183,6 +183,18 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             return;
         }
 
+        // A row that has burned its retry allowance stays Errored. Without
+        // this the refresh re-queues it every run and the sync re-applies it
+        // every run, so a row that can never converge churns forever —
+        // re-downloading images, rewriting user policies — with the failure
+        // reason overwritten each cycle. The operator clears it with a Queue
+        // or Retry action, which resets the count.
+        if (record.Status == SyncStatus.Errored
+            && record.RetryCount >= Math.Max(1, ConfigManager.Configuration.MaxRetryCount))
+        {
+            return;
+        }
+
         if (record.HasChanges)
         {
             record.Status = SyncStatus.Queued;

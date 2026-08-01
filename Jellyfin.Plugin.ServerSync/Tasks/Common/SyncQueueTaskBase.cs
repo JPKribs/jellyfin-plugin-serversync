@@ -164,7 +164,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     /// </summary>
     protected virtual void OnApplyFailed(TRecord record)
     {
-        // Default: nothing to do.
+        ArgumentNullException.ThrowIfNull(record);
+        record.RetryCount++;
     }
 
     /// <summary>

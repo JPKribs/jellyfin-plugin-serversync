@@ -340,7 +340,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <param name="status">Target status.</param>
     /// <param name="trackRetryCount">Whether to manage RetryCount column.</param>
     /// <returns>SET clause fragments to be joined with commas.</returns>
-    protected static List<string> BuildStatusTransitionClauses(SyncStatus status, bool trackRetryCount = false)
+    protected static List<string> BuildStatusTransitionClauses(SyncStatus status, bool trackRetryCount = true)
     {
         var clauses = new List<string>
         {
@@ -356,6 +356,15 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
             {
                 clauses.Add("RetryCount = 0");
             }
+        }
+        else if (status == SyncStatus.Queued && trackRetryCount)
+        {
+            // Reaching Queued through this path means an operator asked for it
+            // (a Queue or Retry action), so hand back the full allowance. The
+            // refresh re-queues through Upsert instead, which preserves the
+            // count — that is what lets the ceiling actually stop a row that
+            // can never converge.
+            clauses.Add("RetryCount = 0");
         }
         else if (status == SyncStatus.Errored && trackRetryCount)
         {

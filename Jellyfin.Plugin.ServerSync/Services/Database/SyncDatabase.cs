@@ -210,6 +210,21 @@ public class SyncDatabase : IDisposable
                 DatabaseMigrationService.CreateInitialSchema(_connection);
                 DatabaseMigrationService.SetSchemaVersion(_connection, DatabaseMigrationService.CurrentSchemaVersion);
             }
+            else if (currentVersion > DatabaseMigrationService.CurrentSchemaVersion)
+            {
+                // Downgrade: the file was written by a newer plugin build and
+                // may have columns this one doesn't know about (or be missing
+                // ones it needs). Carrying on produces a stream of confusing
+                // per-query SQLite errors. Move it aside — RecreateDatabase
+                // keeps it as a timestamped backup — so re-upgrading can
+                // restore it, and start clean on the schema this build expects.
+                _logger.LogError(
+                    "Sync database is schema v{Found}, newer than this plugin's v{Expected}. The plugin was downgraded. Moving the database aside and starting fresh; the existing file is kept as a .corrupt-* backup and is still readable by the newer build",
+                    currentVersion,
+                    DatabaseMigrationService.CurrentSchemaVersion);
+                RecreateDatabase();
+                return;
+            }
             else if (currentVersion < DatabaseMigrationService.CurrentSchemaVersion)
             {
                 var migrationSucceeded = DatabaseMigrationService.MigrateSchema(_connection, currentVersion, _logger);

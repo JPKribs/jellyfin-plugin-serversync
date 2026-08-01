@@ -31,7 +31,9 @@ public class RefreshSyncTaskBaseTests
 
         public string ScopeId { get; set; } = string.Empty;
 
-        public override bool HasChanges => false;
+        public bool Changed { get; set; }
+
+        public override bool HasChanges => Changed;
 
         public override void MarkSynced()
         {
@@ -169,6 +171,8 @@ public class RefreshSyncTaskBaseTests
 
             return Task.FromResult<TestRecord?>(null);
         }
+
+        public void InvokeDecideStatus(TestRecord record) => DecideStatus(record);
 
         protected override string ExtractKey(TestRecord record) => record.Key;
 
@@ -500,5 +504,90 @@ public class RefreshSyncTaskBaseTests
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
         Assert.Equal(100, manager.Deleted.Count);
+    }
+
+    // -----------------------------------------------------------------------
+    // Retry ceiling. Without it the refresh re-queues an Errored row on every
+    // run and the sync re-applies it on every run, so a row that can never
+    // converge churns forever — re-downloading images, rewriting policies —
+    // with the failure reason overwritten each cycle.
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// An Errored row that has burned its allowance is left alone.
+    /// True: a permanently failing row stops being re-applied.
+    /// False: it is re-queued and re-applied on every single run, forever.
+    /// </summary>
+    [Fact]
+    public void DecideStatus_ErroredAtRetryCeiling_StaysErrored()
+    {
+        var (task, config) = NewDecideStatusTask();
+        config.Configuration.MaxRetryCount = 3;
+
+        var record = new TestRecord { Key = "a", Status = SyncStatus.Errored, RetryCount = 3, Changed = true };
+
+        task.InvokeDecideStatus(record);
+
+        Assert.Equal(SyncStatus.Errored, record.Status);
+    }
+
+    /// <summary>
+    /// An Errored row below the ceiling is still retried.
+    /// True: transient failures recover on their own.
+    /// False: one failure permanently parks the row.
+    /// </summary>
+    [Fact]
+    public void DecideStatus_ErroredBelowCeiling_IsRequeued()
+    {
+        var (task, config) = NewDecideStatusTask();
+        config.Configuration.MaxRetryCount = 3;
+
+        var record = new TestRecord { Key = "a", Status = SyncStatus.Errored, RetryCount = 2, Changed = true };
+
+        task.InvokeDecideStatus(record);
+
+        Assert.Equal(SyncStatus.Queued, record.Status);
+    }
+
+    /// <summary>
+    /// The ceiling must not touch rows that are not Errored.
+    /// True: normal rows are unaffected by the retry bookkeeping.
+    /// False: a stale RetryCount silently blocks healthy rows from syncing.
+    /// </summary>
+    [Fact]
+    public void DecideStatus_NonErroredRowWithHighRetryCount_StillQueues()
+    {
+        var (task, config) = NewDecideStatusTask();
+        config.Configuration.MaxRetryCount = 1;
+
+        var record = new TestRecord { Key = "a", Status = SyncStatus.Synced, RetryCount = 99, Changed = true };
+
+        task.InvokeDecideStatus(record);
+
+        Assert.Equal(SyncStatus.Queued, record.Status);
+    }
+
+    /// <summary>
+    /// Ignored still wins over everything, ceiling included.
+    /// True: an operator override is never overwritten.
+    /// False: user intent is lost.
+    /// </summary>
+    [Fact]
+    public void DecideStatus_IgnoredRow_IsUntouched()
+    {
+        var (task, _) = NewDecideStatusTask();
+
+        var record = new TestRecord { Key = "a", Status = SyncStatus.Ignored, RetryCount = 99, Changed = true };
+
+        task.InvokeDecideStatus(record);
+
+        Assert.Equal(SyncStatus.Ignored, record.Status);
+    }
+
+    private static (TestableRefreshTask Task, FakeConfigManager Config) NewDecideStatusTask()
+    {
+        var config = new FakeConfigManager();
+        var task = new TestableRefreshTask(new FakeManager(), config, new FakeClientFactory());
+        return (task, config);
     }
 }

@@ -59,12 +59,6 @@ public class SyncItem : SyncRecord
     public PendingType? PendingType { get; set; }
 
     /// <summary>
-    /// Gets or sets the count of failed sync attempts. Used by the retry pass
-    /// to skip items that have failed too many times.
-    /// </summary>
-    public int RetryCount { get; set; }
-
-    /// <summary>
     /// Gets or sets the comma-separated list of companion file names that
     /// were downloaded with this item (subtitles, NFO, etc.).
     /// </summary>

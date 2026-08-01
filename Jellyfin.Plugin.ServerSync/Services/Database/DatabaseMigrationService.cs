@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 21;
+    public const int CurrentSchemaVersion = 22;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -98,6 +98,7 @@ public static class DatabaseMigrationService
                 StatusDate TEXT NOT NULL,
                 LastSyncTime TEXT,
                 Reason TEXT,
+                RetryCount INTEGER NOT NULL DEFAULT 0,
                 SourceStateHash TEXT,
                 SyncedStateHash TEXT,
                 UNIQUE(SourceUserId, SourceItemId)
@@ -137,6 +138,7 @@ public static class DatabaseMigrationService
                 StatusDate TEXT NOT NULL,
                 LastSyncTime TEXT,
                 Reason TEXT,
+                RetryCount INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(SourceUserId, LocalUserId, PropertyCategory)
             );
             CREATE INDEX IF NOT EXISTS idx_user_sync_mapping ON UserSyncItems(SourceUserId, LocalUserId);
@@ -168,6 +170,7 @@ public static class DatabaseMigrationService
                 StatusDate TEXT NOT NULL,
                 LastSyncTime TEXT,
                 Reason TEXT,
+                RetryCount INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(PersonName)
             );
             CREATE INDEX IF NOT EXISTS idx_people_sync_name ON PeopleSyncItems(PersonName);
@@ -213,6 +216,7 @@ public static class DatabaseMigrationService
                 StatusDate TEXT NOT NULL,
                 LastSyncTime TEXT,
                 Reason TEXT,
+                RetryCount INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(SourceLibraryId, SourceItemId)
             );
             CREATE INDEX IF NOT EXISTS idx_metadata_sync_item ON MetadataSyncItems(SourceItemId);
@@ -375,6 +379,41 @@ public static class DatabaseMigrationService
                 }
 
                 v21Transaction.Commit();
+            }
+
+            // v22: give every module the retry ceiling Content already had.
+            // Without a RetryCount the refresh re-queued an Errored row on
+            // every run and the sync re-applied it, so a row that could never
+            // converge churned forever.
+            if (fromVersion >= 19 && fromVersion < 22)
+            {
+                logger.LogWarning(
+                    "Schema upgrade to v22: adding RetryCount to the History, User, People and Metadata tables so permanently failing rows stop being retried without bound.");
+
+                using var v22Transaction = connection.BeginTransaction();
+
+                foreach (var table in new[]
+                {
+                    "HistorySyncItems",
+                    "UserSyncItems",
+                    "PeopleSyncItems",
+                    "MetadataSyncItems"
+                })
+                {
+                    using var addCol = connection.CreateCommand();
+                    addCol.Transaction = v22Transaction;
+                    addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN RetryCount INTEGER NOT NULL DEFAULT 0";
+                    try
+                    {
+                        addCol.ExecuteNonQuery();
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Idempotent — tolerate a partially applied upgrade.
+                    }
+                }
+
+                v22Transaction.Commit();
             }
 
             SetSchemaVersion(connection, CurrentSchemaVersion);

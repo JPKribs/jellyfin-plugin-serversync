@@ -95,6 +95,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         ArgumentNullException.ThrowIfNull(progress);
         if (Client == null)
         {
+            MarkSourceUnavailable("no source client available for this run");
             return Array.Empty<SdkBaseItemDto>();
         }
 
@@ -130,6 +131,18 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
 
         if (_localPersonsByName.Count == 0)
         {
+            // Mirror of the zero-source guard below. Jellyfin rebuilds the
+            // people table during a library rescan, so a momentary empty read
+            // is normal — and with an empty work list every tracked row falls
+            // out of the seen set and looks removed. The table-wide circuit
+            // breaker only catches this above 50 rows; below that the whole
+            // table would go. Refuse to prune instead.
+            if (Manager.Count() > 0)
+            {
+                MarkSourceUnavailable(
+                    "no Person items found on this server while tracking rows exist — local catalog is likely mid rescan, so pruning is skipped");
+            }
+
             return Array.Empty<SdkBaseItemDto>();
         }
 

@@ -38,6 +38,15 @@ public abstract class SyncRecord
     public string? Reason { get; set; }
 
     /// <summary>
+    /// Gets or sets how many times an apply has failed for this row since the
+    /// last success. Refresh refuses to re-queue a row that has reached
+    /// <c>MaxRetryCount</c>, so a row that can never converge stops being
+    /// re-applied on every run instead of churning forever. Reset to zero on a
+    /// successful apply and by an explicit operator requeue.
+    /// </summary>
+    public int RetryCount { get; set; }
+
+    /// <summary>
     /// Gets a value indicating whether this record has differences that should
     /// be synced. Implementations typically OR together the
     /// <see cref="SyncableValue{T}.HasChanges"/> of their constituent fields.
