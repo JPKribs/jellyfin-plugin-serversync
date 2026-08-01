@@ -24,7 +24,5 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Fixed dropdowns showing two chevrons
-  - Fixed the Metadata table showing no items after updating to 66.0
-  - Content sync progress now tracks bytes downloaded instead of item count, including within a single large file
-  - Metadata and History refresh progress now moves through source discovery instead of freezing until it finishes
+  - Fixed releases failing to publish their manifest entry when new commits landed after the tag was cut
+  - Restored the missing 10.11.66.1 manifest entry so that release can be installed

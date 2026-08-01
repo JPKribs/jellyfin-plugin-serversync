@@ -54,13 +54,16 @@ jobs:
           echo "checksum=${CHECKSUM}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
 
-      - name: Update Manifest
+      - name: Build Manifest Entry
         run: |
           # Sanitize changelog by removing backticks
           SANITIZED_CHANGELOG=$(echo "${{ github.event.release.body }}" | tr -d '\`')
 
-          # Use jq to safely construct the JSON object
-          NEW_VERSION=$(jq -n \
+          # Only the new version entry is built here. It is inserted into
+          # whatever manifest.json is on master at push time (next step) —
+          # editing the tag-commit's copy and pushing it wholesale could
+          # clobber entries added to master after the tag was cut.
+          jq -n \
             --arg version "${{ steps.release_info.outputs.build_version }}" \
             --arg changelog "$SANITIZED_CHANGELOG" \
             --arg targetAbi "${{ steps.release_info.outputs.target_abi }}" \
@@ -74,16 +77,38 @@ jobs:
               sourceUrl: $sourceUrl,
               checksum: $checksum,
               timestamp: $timestamp
-            }')
-
-          # Add new version to the beginning of versions array
-          jq --argjson newVersion "$NEW_VERSION" '.[0].versions = [$newVersion] + .[0].versions' manifest.json > manifest_temp.json
-          mv manifest_temp.json manifest.json
+            }' > /tmp/new-version.json
 
       - name: Commit Changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add manifest.json
-          git commit -m "Update manifest for release ${{ github.event.release.tag_name }}" || exit 0
-          git push origin HEAD:master
+
+          # The checkout is the release tag's commit (detached HEAD), and
+          # master may have moved past it — a blind push of a commit based on
+          # the tag gets rejected, which is exactly how v10.11.66.1 failed to
+          # publish. Instead: fetch CURRENT master, insert the new entry into
+          # master's manifest, push, and retry if master moves mid-publish.
+          # The select() drops any existing entry with the same version, so a
+          # re-run of a failed publish is idempotent.
+          for attempt in 1 2 3; do
+            git fetch origin master
+            git checkout -f -B master FETCH_HEAD
+            jq --argjson newVersion "$(cat /tmp/new-version.json)" \
+              '.[0].versions = [$newVersion] + [ .[0].versions[] | select(.version != $newVersion.version) ]' \
+              manifest.json > manifest_temp.json
+            mv manifest_temp.json manifest.json
+            git add manifest.json
+            if git diff --cached --quiet; then
+              echo "Manifest already up to date on master; nothing to push"
+              exit 0
+            fi
+            git commit -m "Update manifest for release ${{ github.event.release.tag_name }}"
+            if git push origin master; then
+              exit 0
+            fi
+            echo "Push rejected (master moved during publish); retrying (${attempt}/3)"
+            sleep 5
+          done
+          echo "Failed to push the manifest update after 3 attempts"
+          exit 1
