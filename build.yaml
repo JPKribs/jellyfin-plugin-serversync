@@ -28,6 +28,8 @@ changelog:
   - Enabled Folders and Content Deletion From Folders are no longer synced either. Translating them dropped every library without a mapping, which quietly removed access nobody asked to remove
   - Changes made on this server are now detected. Editing an item locally used to be invisible until the same item happened to change on the source, so the two servers stayed out of step indefinitely
   - Watch history compares last played times to the second, matching what the verifier already required
+  - When image sizes cannot be read from the source, images are no longer re downloaded on every run. Image count and type changes are still detected
+  - Failing to read image info from the source is now logged as a warning instead of being silent
   - Fixed the settings page refusing to expand its categories when this server is hosted under a base url such as /jellyfin
   - Items scheduled for deletion are no longer dropped from tracking when a refresh runs before the sync that would delete them
   - Fixed source paths mapping into the wrong local folder when one library root is a name prefix of another

@@ -1720,7 +1720,11 @@ public class SourceServerClient : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to get image info for item {ItemId}", itemId);
+            // Warning, not Debug: without sizes the manifest stays tag-only,
+            // image comparison degrades to count-only, and genuine image
+            // changes stop being detected. A 403 here (non-admin token) is
+            // silent otherwise.
+            _logger.LogWarning(ex, "Failed to get image info for item {ItemId}; image sizes will be unavailable and image changes may go undetected", itemId);
             return null;
         }
     }

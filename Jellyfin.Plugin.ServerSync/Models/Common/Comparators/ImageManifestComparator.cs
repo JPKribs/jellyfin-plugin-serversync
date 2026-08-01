@@ -85,12 +85,31 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
                     continue;
                 }
 
-                // Tag-only source vs sized local: queue. Treating it as equal
-                // would silently desync. MarkSynced after a successful apply
-                // makes the next refresh short-circuit on SourceHash.
+                // Tag-only source vs sized local: indeterminate, NOT a
+                // difference.
+                //
+                // This used to report a difference, relying on "MarkSynced
+                // after a successful apply makes the next refresh
+                // short-circuit on SourceHash" to stop it repeating. That
+                // short-circuit is gone (see SyncableValue.HasChanges), and
+                // without it the pair loops: refresh queues the row, sync
+                // re-downloads every image, verify enriches and hits the same
+                // unmeasurable source, the row lands Errored, and the next
+                // refresh queues it again — forever, re-pulling every image
+                // each cycle.
+                //
+                // Reporting equal is also the more defensible claim. A source
+                // size of 0 means enrichment could not measure the image (the
+                // /Items/{id}/Images call failed — a non-admin token gets 403
+                // here). We cannot assert the images differ, and an apply
+                // built on that guess fails verification for the same reason,
+                // so queueing it only burns bandwidth. Real divergence in
+                // image COUNT or type is still caught above, and once
+                // enrichment works again sizes populate and the strict
+                // compare resumes.
                 if (s.Size == 0 && l.Size > 0)
                 {
-                    return $"type {type}[{i}]: source manifest is tag-only (size unknown), local size {l.Size}; cannot confirm match without enrichment";
+                    continue;
                 }
 
                 // Local file missing or unreadable (Size=0). Queue for re-pull.

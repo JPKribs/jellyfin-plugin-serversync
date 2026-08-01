@@ -88,19 +88,9 @@ public class ImageManifestComparatorTests
         Assert.False(Cmp.Equals(src, loc));
     }
 
-    /// <summary>
-    /// Source with Size=0 (tag-only manifest) and a sized local compare not-equal.
-    /// True: pre-enrichment refresh doesn't accidentally mark divergent rows Synced.
-    /// False: the 10.11.x silent-desync regression where modal shows different KB but row is Synced.
-    /// </summary>
-    [Fact]
-    public void Equals_TagOnlySource_SizedLocal_IsDifferent()
-    {
-        var src = Manifest(("Primary", 0, 0, 0, 0, "t"));
-        var loc = Manifest(("Primary", 0, 5000, 100, 100, "t"));
-
-        Assert.False(Cmp.Equals(src, loc));
-    }
+    // The tag-only-source case is covered below in the degraded-manifest
+    // section; it is now indeterminate rather than a difference. See
+    // Equals_TagOnlySourceVsSizedLocal_IsNotADifference for why.
 
     /// <summary>
     /// Sized source and Size=0 local (missing file) compare not-equal.
@@ -239,5 +229,73 @@ public class ImageManifestComparatorTests
         Assert.Contains("Primary", desc);
         Assert.Contains("5000", desc);
         Assert.Contains("6000", desc);
+    }
+
+    // ===================================================================
+    // Degraded (tag-only) source manifests. A source Size of 0 means
+    // enrichment could not measure the image — /Items/{id}/Images failed,
+    // which a non-admin token reproduces with a 403.
+    // ===================================================================
+
+    /// <summary>
+    /// A tag-only source entry against a sized local entry is indeterminate,
+    /// not a difference.
+    /// True: enrichment failure degrades to count-only comparison and the row settles.
+    /// False: the row queues, sync re-downloads every image, verify hits the
+    /// same unmeasurable source and errors, and the next refresh queues it
+    /// again — an unbounded re-download loop. The removed SourceHash
+    /// short-circuit used to be what stopped this repeating.
+    /// </summary>
+    [Fact]
+    public void Equals_TagOnlySourceVsSizedLocal_IsNotADifference()
+    {
+        var src = Manifest(("Primary", 0, 0, 0, 0, "t"));
+        var loc = Manifest(("Primary", 0, 5000, 100, 100, null));
+
+        Assert.True(Cmp.Equals(src, loc));
+        Assert.Null(Cmp.DescribeDifference(src, loc));
+    }
+
+    /// <summary>
+    /// Losing sizes must not hide a change in image COUNT.
+    /// True: a genuinely missing image is still queued while enrichment is down.
+    /// False: the degraded path swallows real divergence.
+    /// </summary>
+    [Fact]
+    public void Equals_TagOnlySource_StillDetectsCountMismatch()
+    {
+        var src = Manifest(("Primary", 0, 0, 0, 0, "t"), ("Primary", 1, 0, 0, 0, "t2"));
+        var loc = Manifest(("Primary", 0, 5000, 100, 100, null));
+
+        Assert.False(Cmp.Equals(src, loc));
+    }
+
+    /// <summary>
+    /// Losing sizes must not hide a missing image TYPE.
+    /// True: a type absent locally is still queued.
+    /// False: the degraded path swallows real divergence.
+    /// </summary>
+    [Fact]
+    public void Equals_TagOnlySource_StillDetectsMissingType()
+    {
+        var src = Manifest(("Primary", 0, 0, 0, 0, "t"), ("Backdrop", 0, 0, 0, 0, "b"));
+        var loc = Manifest(("Primary", 0, 5000, 100, 100, null));
+
+        Assert.False(Cmp.Equals(src, loc));
+    }
+
+    /// <summary>
+    /// A measurable source against a missing or unreadable local file is still
+    /// a difference, so the image gets re-pulled.
+    /// True: a broken local image is repaired.
+    /// False: missing local images are never restored.
+    /// </summary>
+    [Fact]
+    public void Equals_SizedSourceVsZeroLocal_IsStillADifference()
+    {
+        var src = Manifest(("Primary", 0, 5000, 100, 100, "t"));
+        var loc = Manifest(("Primary", 0, 0, 0, 0, null));
+
+        Assert.False(Cmp.Equals(src, loc));
     }
 }
