@@ -25,3 +25,4 @@ artifacts:
 changelog:
   developer:
   - Fixed dropdowns showing two chevrons
+  - Fixed the Metadata table showing no items after updating to 66.0

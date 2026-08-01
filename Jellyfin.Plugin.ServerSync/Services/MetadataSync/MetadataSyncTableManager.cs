@@ -302,16 +302,15 @@ public sealed class MetadataSyncTableManager
             }
 
             using var dataCmd = conn.CreateCommand();
+            // SELECT * like every other query that feeds MapFromReader. This
+            // was a hand-written column list, and when RetryCount was added
+            // to the schema the list wasn't updated — GetOrdinal then threw
+            // ArgumentOutOfRangeException on every row, Jellyfin's exception
+            // middleware turned that into a 400, and the Metadata tab
+            // rendered empty. A projection here can never drift from the
+            // mapper; the mapper defines what it needs.
             dataCmd.CommandText = $@"
-                SELECT
-                    Id, SourceLibraryId, LocalLibraryId, SourceItemId, LocalItemId,
-                    ItemName, SourcePath, LocalPath, ItemType, IsFolder,
-                    SourceMetadataValue, LocalMetadataValue, SourceMetadataHash, SyncedMetadataHash,
-                    SourceImagesValue, LocalImagesValue, SourceImagesHash, SyncedImagesHash,
-                    SourcePeopleValue, LocalPeopleValue, SourcePeopleHash, SyncedPeopleHash,
-                    SourceStudiosValue, LocalStudiosValue, SourceStudiosHash, SyncedStudiosHash,
-                    Status, StatusDate, LastSyncTime, Reason
-                FROM MetadataSyncItems
+                SELECT * FROM MetadataSyncItems
                 {whereClause}
                 ORDER BY {StatusPriorityOrderBy}, ItemName ASC, Id ASC
                 LIMIT @take OFFSET @skip";
