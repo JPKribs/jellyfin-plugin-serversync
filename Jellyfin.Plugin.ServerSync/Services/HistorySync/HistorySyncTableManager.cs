@@ -260,7 +260,7 @@ public sealed class HistorySyncTableManager
         SyncStatus? status = null,
         string? sourceUserId = null,
         int skip = 0,
-        int take = 50) => ExecuteRead(
+        int take = 50) => ExecuteRead<(IList<HistorySyncItem> Items, int TotalCount)>(
         conn =>
         {
             var conditions = new List<string>();
@@ -300,7 +300,7 @@ public sealed class HistorySyncTableManager
             dataCmd.Parameters.AddWithValue("@skip", skip);
             return (ReadAll(dataCmd), totalCount);
         },
-        fallback: ((IList<HistorySyncItem>)Array.Empty<HistorySyncItem>(), 0));
+        fallback: (Array.Empty<HistorySyncItem>(), 0));
 
     /// <inheritdoc />
     public override PagedResult<HistorySyncItem> Paginate(PaginationRequest request)

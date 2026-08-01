@@ -161,8 +161,9 @@ public class DownloadService
                 {
                     if (backupMain != null && File.Exists(backupMain) && !File.Exists(item.LocalPath))
                     {
+                        // No need to clear backupMain: this block always
+                        // rethrows, so the archive step below is unreachable.
                         File.Move(backupMain, item.LocalPath);
-                        backupMain = null;
                     }
                 }
                 catch (Exception restoreEx)

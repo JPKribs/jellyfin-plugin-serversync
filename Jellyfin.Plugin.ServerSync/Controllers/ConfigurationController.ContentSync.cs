@@ -240,11 +240,13 @@ public partial class ConfigurationController
         [FromBody] BulkItemsRequest? request = null)
     {
         ArgumentNullException.ThrowIfNull(manager);
+        // resetRetryCount: the user explicitly asked for a retry, so give the
+        // row its full allowance back instead of one final attempt.
         if (request?.SourceItemIds?.Count > 0)
         {
             foreach (var itemId in request.SourceItemIds)
             {
-                manager.UpdateStatus(itemId, SyncStatus.Queued);
+                manager.UpdateStatus(itemId, SyncStatus.Queued, resetRetryCount: true);
             }
         }
         else
@@ -252,7 +254,7 @@ public partial class ConfigurationController
             var erroredItems = manager.GetByStatus(SyncStatus.Errored);
             foreach (var item in erroredItems)
             {
-                manager.UpdateStatus(item.SourceItemId, SyncStatus.Queued);
+                manager.UpdateStatus(item.SourceItemId, SyncStatus.Queued, resetRetryCount: true);
             }
         }
 

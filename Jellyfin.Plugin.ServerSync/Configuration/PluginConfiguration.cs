@@ -135,9 +135,14 @@ public class PluginConfiguration : BasePluginConfiguration
         }
 
         var currentHour = DateTime.Now.Hour;
-        var isInScheduledWindow = ScheduledStartHour <= ScheduledEndHour
-            ? currentHour >= ScheduledStartHour && currentHour < ScheduledEndHour
-            : currentHour >= ScheduledStartHour || currentHour < ScheduledEndHour;
+
+        // Equal start and end reads as "all day", not "never". The general
+        // same-day branch evaluates to `hour >= X && hour < X`, which is always
+        // false, so a schedule of 3 to 3 silently did nothing.
+        var isInScheduledWindow = ScheduledStartHour == ScheduledEndHour
+            || (ScheduledStartHour < ScheduledEndHour
+                ? currentHour >= ScheduledStartHour && currentHour < ScheduledEndHour
+                : currentHour >= ScheduledStartHour || currentHour < ScheduledEndHour);
 
         return isInScheduledWindow ? GetScheduledDownloadSpeedBytes() : GetMaxDownloadSpeedBytes();
     }

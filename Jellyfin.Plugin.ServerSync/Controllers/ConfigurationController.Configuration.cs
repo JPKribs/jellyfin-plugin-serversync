@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -48,11 +48,27 @@ public partial class ConfigurationController
             });
         }
 
-        using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, ResolveRequestApiKey(request.ApiKey));
+        // The factory re-runs the SSRF gate and throws on rejection. Without this
+        // catch the settings page got an opaque 500 instead of the reason.
+        SourceServerClient client;
+        try
+        {
+            client = _clientFactory.Create(urlValidation.NormalizedUrl!, ResolveRequestApiKey(request.ApiKey));
+        }
+        catch (ArgumentException ex)
+        {
+            return Ok(new ConnectionTestResult
+            {
+                Success = false,
+                ErrorMessage = ex.Message,
+                Message = ex.Message
+            });
+        }
 
-        var result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-
-        return Ok(result);
+        using (client)
+        {
+            return Ok(await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false));
+        }
     }
 
     /// <summary>
@@ -120,13 +136,26 @@ public partial class ConfigurationController
             return Ok(result);
         }
 
-        using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, result.AccessToken!);
+        SourceServerClient client;
+        try
+        {
+            client = _clientFactory.Create(urlValidation.NormalizedUrl!, result.AccessToken!);
+        }
+        catch (ArgumentException ex)
+        {
+            result.Success = false;
+            result.Message = ex.Message;
+            return Ok(result);
+        }
 
-        var connectionTest = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+        using (client)
+        {
+            var connectionTest = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-        result.ServerName = connectionTest.ServerName;
-        result.ServerId = connectionTest.ServerId;
-        result.Message = "Authentication successful";
+            result.ServerName = connectionTest.ServerName;
+            result.ServerId = connectionTest.ServerId;
+            result.Message = "Authentication successful";
+        }
 
         return Ok(result);
     }
@@ -175,6 +204,11 @@ public partial class ConfigurationController
         catch (OperationCanceledException)
         {
             throw; // Let ASP.NET Core handle cancellation
+        }
+        catch (ArgumentException ex)
+        {
+            // SSRF gate in the factory rejected the URL; surface the reason.
+            return BadRequest(ex.Message);
         }
         catch (HttpRequestException ex)
         {
@@ -226,6 +260,11 @@ public partial class ConfigurationController
         catch (OperationCanceledException)
         {
             throw; // Let ASP.NET Core handle cancellation
+        }
+        catch (ArgumentException ex)
+        {
+            // SSRF gate in the factory rejected the URL; surface the reason.
+            return BadRequest(ex.Message);
         }
         catch (HttpRequestException ex)
         {
@@ -346,67 +385,36 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Validates and normalizes a server URL.
+    /// Validates and normalizes a server URL. Classification is delegated to
+    /// <see cref="ConfigurationUtilities.ValidateServerUrlForSsrf"/> — the same
+    /// gate <see cref="ISourceServerClientFactory.Create"/> enforces. A second,
+    /// weaker copy lived here and ignored
+    /// <c>AllowSourceServerOnPrivateNetwork</c>, so a rejected URL passed this
+    /// check and then threw out of the factory as an unhandled 500 instead of
+    /// surfacing the reason the code had already written.
     /// </summary>
     /// <param name="url">URL to validate.</param>
     /// <returns>Validation response with normalized URL.</returns>
-    private static ValidateUrlResponse ValidateServerUrl(string url)
+    private ValidateUrlResponse ValidateServerUrl(string url)
     {
-        if (string.IsNullOrWhiteSpace(url))
+        var ssrfError = ConfigurationUtilities.ValidateServerUrlForSsrf(
+            url,
+            _configManager.Configuration.AllowSourceServerOnPrivateNetwork);
+        if (ssrfError != null)
         {
             return new ValidateUrlResponse
             {
                 IsValid = false,
-                Message = "URL cannot be empty"
+                Message = ssrfError
             };
         }
 
-        if (url.Contains("..", StringComparison.Ordinal) || url.Contains("./", StringComparison.Ordinal))
-        {
-            return new ValidateUrlResponse
-            {
-                IsValid = false,
-                Message = "URL contains invalid path sequences"
-            };
-        }
-
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-        {
-            return new ValidateUrlResponse
-            {
-                IsValid = false,
-                Message = "Invalid URL format"
-            };
-        }
-
-        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-        {
-            return new ValidateUrlResponse
-            {
-                IsValid = false,
-                Message = "Only HTTP and HTTPS URLs are allowed"
-            };
-        }
+        // Guaranteed to parse — ValidateServerUrlForSsrf rejects anything that doesn't.
+        var uri = new Uri(url, UriKind.Absolute);
 
         var isLocalhost = uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
                           uri.Host.Equals("127.0.0.1", StringComparison.Ordinal) ||
                           uri.Host.Equals("::1", StringComparison.Ordinal);
-
-        // Block cloud metadata endpoints and link-local addresses (SSRF protection)
-        if (IPAddress.TryParse(uri.Host, out var ipAddress))
-        {
-            var addrBytes = ipAddress.GetAddressBytes();
-            // Block link-local (169.254.x.x) which includes cloud metadata endpoints (e.g. 169.254.169.254)
-            if (ipAddress.IsIPv6LinkLocal ||
-                (addrBytes.Length == 4 && addrBytes[0] == 169 && addrBytes[1] == 254))
-            {
-                return new ValidateUrlResponse
-                {
-                    IsValid = false,
-                    Message = "Link-local addresses are not allowed"
-                };
-            }
-        }
 
         var normalizedUrl = $"{uri.Scheme}://{uri.Host}";
         if (!uri.IsDefaultPort)

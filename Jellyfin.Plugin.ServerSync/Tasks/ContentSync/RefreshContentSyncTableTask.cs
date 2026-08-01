@@ -577,14 +577,16 @@ public class UpdateSyncTablesTask
     }
 
     // Rows the prune would no-op on (see SyncStateService.ProcessMissingItem):
-    // already Ignored or already awaiting deletion approval. Excluding them
-    // from the circuit-breaker's stale count keeps gradual legitimate
-    // removals from accumulating into a permanently tripped breaker.
+    // already Ignored, already scheduled for deletion, or already awaiting
+    // deletion approval. Excluding them from the circuit-breaker's stale count
+    // keeps gradual legitimate removals from accumulating into a permanently
+    // tripped breaker.
     /// <inheritdoc />
     protected override bool IsPruneCandidate(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
         return record.Status != SyncStatus.Ignored
+            && record.Status != SyncStatus.Deleting
             && !(record.Status == SyncStatus.Pending && record.PendingType == PendingType.Deletion);
     }
 

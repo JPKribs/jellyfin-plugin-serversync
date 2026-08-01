@@ -21,7 +21,12 @@ import {
     createPaginatedTable,
     generateGuid,
     SECRET_KEPT
-} from '/web/configurationpage?name=serversync_jpkribs_shared.js';
+// Relative specifier, not '/web/...': it resolves against this module's own
+// URL, so a server hosted under a base URL (http://host:8096/jellyfin) still
+// loads the bundle. An absolute path skipped the base URL, the import
+// rejected, and the page controller never initialized — the settings
+// categories silently refused to expand.
+} from './configurationpage?name=serversync_jpkribs_shared.js';
 
 export { createPaginatedTable, generateGuid, SECRET_KEPT };
 

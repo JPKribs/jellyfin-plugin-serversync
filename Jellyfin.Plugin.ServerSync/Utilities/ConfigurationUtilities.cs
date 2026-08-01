@@ -47,7 +47,11 @@ public static class ConfigurationUtilities
         }
 
         // IP-literal hosts are validated here; DNS names go through the HTTP stack.
-        if (IPAddress.TryParse(uri.Host, out var ipAddress))
+        // Uri.Host keeps the brackets on an IPv6 literal ("[::1]"), which
+        // IPAddress.TryParse rejects — every IPv6 literal skipped classification
+        // entirely until the brackets were trimmed.
+        var host = uri.Host.Trim('[', ']');
+        if (IPAddress.TryParse(host, out var ipAddress))
         {
             var rejection = ClassifyIpAddress(ipAddress, allowPrivateNetwork);
             if (rejection != null)

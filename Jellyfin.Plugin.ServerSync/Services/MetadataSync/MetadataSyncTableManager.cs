@@ -269,7 +269,7 @@ public sealed class MetadataSyncTableManager
         SyncStatus? status = null,
         string? sourceLibraryId = null,
         int skip = 0,
-        int take = 50) => ExecuteRead(
+        int take = 50) => ExecuteRead<(IList<MetadataSyncItem> Items, int TotalCount)>(
         conn =>
         {
             var conditions = new List<string>();
@@ -323,9 +323,9 @@ public sealed class MetadataSyncTableManager
                 items.Add(MapFromReader(reader));
             }
 
-            return ((IList<MetadataSyncItem>)items, totalCount);
+            return (items, totalCount);
         },
-        fallback: ((IList<MetadataSyncItem>)Array.Empty<MetadataSyncItem>(), 0));
+        fallback: (Array.Empty<MetadataSyncItem>(), 0));
 
     /// <inheritdoc />
     public override PagedResult<MetadataSyncItem> Paginate(PaginationRequest request)

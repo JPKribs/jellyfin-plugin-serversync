@@ -357,4 +357,39 @@ public class PathUtilitiesTests
             LibraryFilterMode.Whitelist,
             filtered));
     }
+
+    /// <summary>
+    /// A sibling root that merely shares a name prefix must not match.
+    /// True: "/media/Movies 4K/film.mkv" falls back to localRoot + filename
+    /// rather than being treated as living under "/media/Movies".
+    /// False: the relative tail is computed from the wrong offset and the file
+    /// is written to a garbage folder (localRoot + "/ 4K/film.mkv") with no error.
+    /// </summary>
+    [Fact]
+    public void TranslatePath_SiblingRootSharingPrefix_DoesNotMatchRoot()
+    {
+        var result = PathUtilities.TranslatePath(
+            "/media/Movies 4K/film.mkv",
+            "/media/Movies",
+            "/data/library");
+
+        Assert.Equal(Path.Combine("/data/library", "film.mkv"), result);
+    }
+
+    /// <summary>
+    /// The boundary check must not reject the root itself or a real child.
+    /// True: exact-root and separator-delimited children still translate.
+    /// False: tightening the prefix match would break every normal path.
+    /// </summary>
+    [Fact]
+    public void TranslatePath_ExactRootAndChild_StillMatch()
+    {
+        Assert.Equal(
+            "/data/library",
+            PathUtilities.TranslatePath("/media/Movies", "/media/Movies", "/data/library"));
+
+        Assert.Equal(
+            Path.Combine("/data/library", "film.mkv"),
+            PathUtilities.TranslatePath("/media/Movies/film.mkv", "/media/Movies", "/data/library"));
+    }
 }

@@ -182,7 +182,16 @@ public static class SyncStateService
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(logger);
 
+        // Deleting belongs here alongside pending-deletion: the row is already
+        // scheduled and the file is still on disk waiting for the next Sync run
+        // to remove it. Falling through to the not-Synced branch below deleted
+        // the tracking row instead, stranding the file permanently with nothing
+        // left pointing at it. Reachable whenever a Refresh lands between the
+        // mark and the Sync that would execute it — an aborted pre-flight
+        // (disk space, circuit breaker, connection), a cancelled run, or just
+        // the default 10h refresh / 12h sync cadence drifting.
         if (item.Status == SyncStatus.Ignored ||
+            item.Status == SyncStatus.Deleting ||
             (item.Status == SyncStatus.Pending && item.PendingType == PendingType.Deletion))
         {
             return new TransitionResult(false, "Already pending deletion or ignored");

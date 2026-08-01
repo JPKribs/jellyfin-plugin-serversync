@@ -267,7 +267,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         SyncStatus? status = null,
         PendingType? pendingType = null,
         int skip = 0,
-        int take = 50) => ExecuteRead(
+        int take = 50) => ExecuteRead<(IList<SyncItem> Items, int TotalCount)>(
         conn =>
         {
             var conditions = new List<string>();
@@ -307,7 +307,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             dataCmd.Parameters.AddWithValue("@skip", skip);
             return (ReadAll(dataCmd), totalCount);
         },
-        fallback: ((IList<SyncItem>)Array.Empty<SyncItem>(), 0));
+        fallback: (Array.Empty<SyncItem>(), 0));
 
     /// <inheritdoc />
     public override PagedResult<SyncItem> Paginate(PaginationRequest request)
@@ -442,10 +442,20 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         string? localPath = null,
         string? errorMessage = null,
         long? sourceSize = null,
-        string? companionFiles = null) => ExecuteWrite(conn =>
+        string? companionFiles = null,
+        bool resetRetryCount = false) => ExecuteWrite(conn =>
     {
         using var cmd = conn.CreateCommand();
         var clauses = BuildStatusTransitionClauses(status, trackRetryCount: true);
+
+        // Explicit operator retry: clear the counter so the row gets a full
+        // MaxRetryCount allowance again. Without it a row already at the cap
+        // got exactly one more attempt from the user's click and then dropped
+        // straight back out of the auto-retry pool.
+        if (resetRetryCount && status != SyncStatus.Synced)
+        {
+            clauses.Add("RetryCount = 0");
+        }
 
         // PendingType is set when transitioning to Pending, otherwise cleared.
         clauses.Add(status == SyncStatus.Pending ? "PendingType = @pendingType" : "PendingType = NULL");

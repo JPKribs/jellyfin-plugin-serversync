@@ -53,7 +53,10 @@ public static class MediaItemUtilities
                 UntypedDecimal udec => udec.GetValue().ToString(System.Globalization.CultureInfo.InvariantCulture),
                 UntypedFloat uf => uf.GetValue().ToString(System.Globalization.CultureInfo.InvariantCulture),
                 UntypedNull => null,
-                _ => node.ToString()
+                // Composite nodes (UntypedObject / UntypedArray) have no
+                // primitive form; the default ToString() yields the CLR type
+                // name, which callers would store as if it were a real value.
+                _ => null
             };
         }
 

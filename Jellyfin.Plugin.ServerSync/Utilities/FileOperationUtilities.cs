@@ -99,7 +99,11 @@ public static class FileOperationUtilities
             .Replace(':', '.')
             .Trim('.');
 
-        var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss");
+        // InvariantCulture: ExtractTimestampFromFileName parses with it, and a
+        // host on a non-Gregorian calendar (th-TH, ar-SA) would otherwise write
+        // a year the parser can't read, silently dropping retention back to
+        // LastWriteTimeUtc.
+        var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture);
         var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
         var extension = Path.GetExtension(fileName);
 

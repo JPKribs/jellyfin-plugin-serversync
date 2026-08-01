@@ -27,7 +27,7 @@ public static class PathUtilities
         sourceRoot = sourceRoot.TrimEnd(PathSeparators);
         localRoot = localRoot.TrimEnd(PathSeparators);
 
-        if (sourcePath.StartsWith(sourceRoot, StringComparison.OrdinalIgnoreCase))
+        if (StartsWithRootSegment(sourcePath, sourceRoot))
         {
             var relativePath = sourcePath.Substring(sourceRoot.Length).TrimStart(PathSeparators);
 
@@ -64,6 +64,32 @@ public static class PathUtilities
 
         var fileName = Path.GetFileName(sourcePath);
         return Path.Combine(localRoot, fileName);
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> lies under <paramref name="root"/> on a
+    /// path-segment boundary. A bare <c>StartsWith</c> matched sibling roots that
+    /// merely share a name prefix — with a root of <c>/media/Movies</c>, a path of
+    /// <c>/media/Movies 4K/film.mkv</c> matched and translated to
+    /// <c>&lt;LocalRoot&gt;/ 4K/film.mkv</c>, silently writing the file to the wrong
+    /// folder. An empty root matches everything, preserving the "no source root
+    /// configured" behavior.
+    /// </summary>
+    private static bool StartsWithRootSegment(string path, string root)
+    {
+        if (root.Length == 0)
+        {
+            return true;
+        }
+
+        if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return path.Length == root.Length
+            || path[root.Length] == '/'
+            || path[root.Length] == '\\';
     }
 
     /// <summary>

@@ -79,6 +79,58 @@ public class PluginConfigurationTests
     }
 
     /// <summary>
+    /// Equal start and end hours mean the scheduled speed applies all day.
+    /// True: the schedule the user configured actually takes effect.
+    /// False: the same-day comparison reduces to "hour >= X && hour &lt; X",
+    /// which is never true, so the window silently never applies.
+    /// </summary>
+    [Fact]
+    public void GetEffectiveDownloadSpeedBytes_EqualStartAndEndHour_UsesScheduledSpeed()
+    {
+        var config = new PluginConfiguration
+        {
+            EnableBandwidthScheduling = true,
+            ScheduledStartHour = 3,
+            ScheduledEndHour = 3,
+            ScheduledDownloadSpeed = 5,
+            ScheduledDownloadSpeedUnit = "MB",
+            MaxDownloadSpeed = 50,
+            DownloadSpeedUnit = "MB"
+        };
+
+        Assert.Equal(5L * 1024 * 1024, config.GetEffectiveDownloadSpeedBytes());
+    }
+
+    /// <summary>
+    /// A normal same-day window still only applies inside its hours.
+    /// True: the equal-hours fix did not turn every schedule into all-day.
+    /// False: the unscheduled speed would never be used.
+    /// </summary>
+    [Fact]
+    public void GetEffectiveDownloadSpeedBytes_OutsideSameDayWindow_UsesMaxSpeed()
+    {
+        var hour = System.DateTime.Now.Hour;
+        var config = new PluginConfiguration
+        {
+            EnableBandwidthScheduling = true,
+            // A one-hour window that cannot contain the current hour.
+            ScheduledStartHour = (hour + 2) % 24,
+            ScheduledEndHour = (hour + 3) % 24,
+            ScheduledDownloadSpeed = 5,
+            ScheduledDownloadSpeedUnit = "MB",
+            MaxDownloadSpeed = 50,
+            DownloadSpeedUnit = "MB"
+        };
+
+        // Skip when the modular arithmetic produced a wrapping window that
+        // would legitimately contain the current hour.
+        if (config.ScheduledStartHour < config.ScheduledEndHour)
+        {
+            Assert.Equal(50L * 1024 * 1024, config.GetEffectiveDownloadSpeedBytes());
+        }
+    }
+
+    /// <summary>
     /// Upgrade path for the removed 10.11.64.0 per-module flags: a config XML
     /// carrying either legacy element must land as DeepImageVerification=true
     /// instead of silently resetting the feature for users who enabled it.

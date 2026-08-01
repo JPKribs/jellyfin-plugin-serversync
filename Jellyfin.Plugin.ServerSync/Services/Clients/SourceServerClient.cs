@@ -135,13 +135,13 @@ public class SourceServerClient : IDisposable
         }
         catch (OperationCanceledException)
         {
-            var errorMsg = "Connection test was cancelled";
-            return new ConnectionTestResult
-            {
-                Success = false,
-                ErrorMessage = errorMsg,
-                Message = errorMsg
-            };
+            // Propagate rather than reporting a failed connection. Both task
+            // bases treat a false result as "unreachable or credentials
+            // invalid" and pin that on the dashboard until a clean run clears
+            // it — so cancelling a task from Scheduled Tasks used to tell the
+            // user their API key was bad. The genuine-timeout case is caught
+            // by the TaskCanceledException/TimeoutException clause above.
+            throw;
         }
         catch (HttpRequestException ex)
         {
@@ -1380,6 +1380,7 @@ public class SourceServerClient : IDisposable
     {
         HttpResponseMessage? response = null;
         HttpRequestMessage? request = null;
+        var ownershipTransferred = false;
         try
         {
             // /Items/{id}/Download — direct-download URL. Authentication is
@@ -1399,18 +1400,16 @@ public class SourceServerClient : IDisposable
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
             // Transfer ownership of request and response to the stream wrapper
-            return (new ResponseDisposingStream(stream, response, request), contentLength);
+            var wrapper = new ResponseDisposingStream(stream, response, request);
+            ownershipTransferred = true;
+            return (wrapper, contentLength);
         }
         catch (OperationCanceledException)
         {
-            response?.Dispose();
-            request?.Dispose();
             throw;
         }
         catch (Exception ex)
         {
-            response?.Dispose();
-            request?.Dispose();
             _logger.LogError(ex, "Failed to download item {ItemId}", itemId);
             // Re-throw with a context-rich message so the per-row Reason
             // field surfaces what actually went wrong (timeout, 5xx,
@@ -1420,6 +1419,14 @@ public class SourceServerClient : IDisposable
             throw new InvalidOperationException(
                 $"Source download failed for item {itemId}: {ex.GetType().Name}: {ex.Message}",
                 ex);
+        }
+        finally
+        {
+            if (!ownershipTransferred)
+            {
+                DisposeQuiet(response);
+                DisposeQuiet(request);
+            }
         }
     }
 
@@ -1517,6 +1524,7 @@ public class SourceServerClient : IDisposable
         ArgumentNullException.ThrowIfNull(companion);
         HttpResponseMessage? response = null;
         HttpRequestMessage? request = null;
+        var ownershipTransferred = false;
         try
         {
             // Stream.{format}: use the source file's own extension so the
@@ -1540,20 +1548,26 @@ public class SourceServerClient : IDisposable
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
             // Transfer ownership of request and response to the stream wrapper
-            return new ResponseDisposingStream(stream, response, request);
+            var wrapper = new ResponseDisposingStream(stream, response, request);
+            ownershipTransferred = true;
+            return wrapper;
         }
         catch (OperationCanceledException)
         {
-            response?.Dispose();
-            request?.Dispose();
             throw;
         }
         catch (Exception ex)
         {
-            response?.Dispose();
-            request?.Dispose();
             _logger.LogError(ex, "Failed to download companion subtitle {FilePath} (stream {Index}) for {ItemId}", companion.SourcePath, companion.StreamIndex, itemId);
             return null;
+        }
+        finally
+        {
+            if (!ownershipTransferred)
+            {
+                DisposeQuiet(response);
+                DisposeQuiet(request);
+            }
         }
     }
 
@@ -1600,6 +1614,7 @@ public class SourceServerClient : IDisposable
     public async Task<Stream?> GetUserImageAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         HttpResponseMessage? response = null;
+        var ownershipTransferred = false;
         try
         {
             var url = $"{_serverUrl}/Users/{userId}/Images/Primary";
@@ -1613,7 +1628,6 @@ public class SourceServerClient : IDisposable
                 if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
                     // User has no profile image
-                    response.Dispose();
                     return null;
                 }
 
@@ -1621,18 +1635,25 @@ public class SourceServerClient : IDisposable
             }
 
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            return new ResponseDisposingStream(stream, response);
+            var wrapper = new ResponseDisposingStream(stream, response);
+            ownershipTransferred = true;
+            return wrapper;
         }
         catch (OperationCanceledException)
         {
-            response?.Dispose();
             throw;
         }
         catch (Exception ex)
         {
-            response?.Dispose();
             _logger.LogError(ex, "Failed to get profile image for user {UserId}", userId);
             return null;
+        }
+        finally
+        {
+            if (!ownershipTransferred)
+            {
+                DisposeQuiet(response);
+            }
         }
     }
 
@@ -1761,6 +1782,13 @@ public class SourceServerClient : IDisposable
     {
         HttpResponseMessage? response = null;
         HttpRequestMessage? request = null;
+
+        // Ownership flips to the returned stream wrapper only on the success
+        // path; the finally cleans up every other exit. The previous
+        // per-branch `response.Dispose(); request.Dispose();` pairs leaked the
+        // request whenever the first disposal (or the log call before it)
+        // threw.
+        var ownershipTransferred = false;
         try
         {
             var url = imageIndex.HasValue
@@ -1776,33 +1804,52 @@ public class SourceServerClient : IDisposable
             {
                 _logger.LogWarning("Failed to download image {ImageType}/{Index} for item {ItemId}: {StatusCode}",
                     imageType, imageIndex, itemId, response.StatusCode);
-                response.Dispose();
-                request.Dispose();
                 return (null, null);
             }
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
-            // Transfer ownership of request and response to the stream wrapper
-            return (new ResponseDisposingStream(stream, response, request), contentType);
+            var wrapper = new ResponseDisposingStream(stream, response, request);
+            ownershipTransferred = true;
+            return (wrapper, contentType);
         }
         catch (OperationCanceledException)
         {
-            response?.Dispose();
-            request?.Dispose();
             throw;
         }
         catch (Exception ex)
         {
-            response?.Dispose();
-            request?.Dispose();
             // Bumped from LogDebug — failures here were invisible at the
             // default Jellyfin log level and made "verify says local empty,
             // source non-empty" failures impossible to root-cause without
             // turning on plugin debug logs.
             _logger.LogWarning(ex, "Failed to download image {ImageType}/{Index} for item {ItemId}", imageType, imageIndex, itemId);
             return (null, null);
+        }
+        finally
+        {
+            if (!ownershipTransferred)
+            {
+                DisposeQuiet(response);
+                DisposeQuiet(request);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Disposes a request/response without letting a disposal fault mask the
+    /// original outcome, and without stopping the next disposal from running.
+    /// </summary>
+    private static void DisposeQuiet(IDisposable? disposable)
+    {
+        try
+        {
+            disposable?.Dispose();
+        }
+        catch (Exception)
+        {
+            // Already disposed or shutting down — nothing useful to do.
         }
     }
 

@@ -24,7 +24,8 @@ export default function (view) {
     var createPaginatedTable = null;
     var _filterTableSeq = 0;
     var _filterThumbSeq = 0;
-    var _sharedPromise = import('/web/configurationpage?name=serversync_shared.js').then(function(shared) {
+    // Relative specifier so a server hosted under a base URL still resolves it.
+    var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
         createPaginatedTable = shared.createPaginatedTable;
     });

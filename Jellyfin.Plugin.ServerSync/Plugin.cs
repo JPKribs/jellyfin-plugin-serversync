@@ -12,7 +12,12 @@ namespace Jellyfin.Plugin.ServerSync;
 /// <summary>
 /// Main plugin entry point for Server Sync.
 /// </summary>
-public class Plugin : PluginBase<Plugin, PluginConfiguration>
+/// <remarks>
+/// Sealed: the constructor calls the virtual <c>SaveConfiguration</c> to
+/// encrypt a pre-encryption API key at startup, and a derived override would
+/// run against a half-built instance.
+/// </remarks>
+public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 {
     private readonly ILogger<Plugin> _logger;
     private readonly Lazy<SecretProtector> _secrets;
