@@ -194,8 +194,8 @@ public class UserSyncItem : SyncRecord
                 return SourceImageSize != LocalImageSize;
             }
 
-            // Policy / Configuration: the SyncableValue handles both the
-            // hash short-circuit and the comparator fallback.
+            // Policy / Configuration: the SyncableValue compares the merged
+            // source blob against the local blob through the comparator.
             return Value.HasChanges;
         }
     }

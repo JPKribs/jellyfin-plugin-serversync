@@ -709,11 +709,11 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         // filesystem. The comparator can only compare sizes when both sides
         // have non-zero values; otherwise it has no honest signal. Enrich
         // the source side here (one HTTP call) so the verify is meaningful.
-        // The enriched manifest is local to this method — record.Images.Source
-        // stays tag-only on disk so the SourceHash short-circuit on the next
-        // refresh keeps working (the hash is computed over the tag-only
-        // manifest both before and after apply, so SyncedHash stays
-        // comparable to future SourceHash recomputations).
+        // The enriched manifest stays local to this method; the refresh path
+        // does its own enrichment when it rebuilds the record. If enrichment
+        // is unavailable on both sides the comparator treats unmeasurable
+        // source sizes as indeterminate rather than as a difference, so the
+        // row settles instead of re-pulling every image each run.
         string? enrichedSource = record.Images.Source;
         if (Client != null
             && !string.IsNullOrEmpty(record.SourcePersonId)
