@@ -6,8 +6,16 @@ on:
     types:
       - created
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
 jobs:
   call:
     uses: jellyfin/jellyfin-meta-plugins/.github/workflows/command-dispatch.yaml@master
     secrets:
-      token: .
+      # Dispatching repository_dispatch events needs a real PAT: events created with the workflow's
+      # own GITHUB_TOKEN never trigger other workflows, and a placeholder value silently breaks
+      # /rebase and /update-prep. Configure JF_BOT_TOKEN under the repository's Actions secrets.
+      token: ${{ secrets.JF_BOT_TOKEN }}

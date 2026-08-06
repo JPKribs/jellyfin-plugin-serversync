@@ -13,9 +13,14 @@ on:
       - '**/*.md'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     uses: jellyfin/jellyfin-meta-plugins/.github/workflows/build.yaml@master
+    with:
+      dotnet-version: 10.0.x
 
   patch-artifact:
     needs: build

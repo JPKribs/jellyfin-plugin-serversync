@@ -13,6 +13,12 @@ on:
       - '**/*.md'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   call:
     uses: jellyfin/jellyfin-meta-plugins/.github/workflows/test.yaml@master
+    with:
+      dotnet-version: 10.0.x
