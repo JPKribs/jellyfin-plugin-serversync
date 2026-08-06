@@ -157,7 +157,7 @@ main() {
     fi
     
     # Find the built DLL
-    local dll_path="$PROJECT_DIR/bin/$CONFIGURATION/net9.0/Jellyfin.Plugin.ServerSync.dll"
+    local dll_path="$PROJECT_DIR/bin/$CONFIGURATION/net10.0/Jellyfin.Plugin.ServerSync.dll"
     if [[ ! -f "$dll_path" ]]; then
         log "ERROR" "Could not find built DLL at: $dll_path"
         exit 1
@@ -178,7 +178,7 @@ main() {
     
     # Get artifacts list from build.yaml and copy all to temp directory
     log "INFO" "Copying artifacts to package directory"
-    local build_dir="$PROJECT_DIR/bin/$CONFIGURATION/net9.0"
+    local build_dir="$PROJECT_DIR/bin/$CONFIGURATION/net10.0"
 
     # Read artifacts from build.yaml (parse YAML artifact list using grep/sed)
     # The artifacts section looks like:

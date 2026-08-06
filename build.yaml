@@ -2,9 +2,9 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "10.11.66.3"
-targetAbi: "10.11.0.0"
-framework: "net9.0"
+version: "12.0.0.0"
+targetAbi: "12.0.0.0"
+framework: "net10.0"
 overview: "Sync media content from a source Jellyfin server to this server."
 description: >
   Server Sync enables one-way content synchronization from a source Jellyfin server to a local server.
@@ -25,3 +25,4 @@ artifacts:
 changelog:
   developer:
   - Change badges in the Metadata and People detail views now explain themselves. The exact diverging image or field is named, so a badge can no longer disagree with rows that look identical
+  - Rebuilt for Jellyfin 12.0 on .NET 10, with the target ABI raised to 12.0.0.0

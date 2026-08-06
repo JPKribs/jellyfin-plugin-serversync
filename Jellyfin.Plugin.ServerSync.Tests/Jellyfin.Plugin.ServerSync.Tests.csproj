@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Jellyfin.Plugin.ServerSync.Tests</RootNamespace>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -25,16 +25,18 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
 
     <!--
       Tests touch types from the plugin's Jellyfin dependencies (BaseItemDto
       from the SDK, etc.). We mirror the main project's package set without
       PrivateAssets so the types are visible at compile time here.
     -->
-    <PackageReference Include="Jellyfin.Controller" Version="10.11.0" />
-    <PackageReference Include="Jellyfin.Model" Version="10.11.0" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.0.0-rc4" />
+    <PackageReference Include="Jellyfin.Model" Version="12.0.0-rc4" />
     <PackageReference Include="Jellyfin.Sdk" Version="2025.10.21" />
+    <!-- Matches the pin in the main project. 1.20.1 carries GHSA-7j59-v9qr-6fq9, patched in 1.22.0. -->
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.22.2" />
   </ItemGroup>
 
   <ItemGroup>
