@@ -21,8 +21,10 @@ artifacts:
 - "Microsoft.Kiota.Serialization.Json.dll"
 - "Microsoft.Kiota.Serialization.Multipart.dll"
 - "Microsoft.Kiota.Serialization.Text.dll"
+- "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
   developer:
   - Change badges in the Metadata and People detail views now explain themselves. The exact diverging image or field is named, so a badge can no longer disagree with rows that look identical
   - Rebuilt for Jellyfin 12.0 on .NET 10, with the target ABI raised to 12.0.0.0
+  - Moved to the unstable Jellyfin SDK so the source server client matches the 12.0 API during pre release testing. The SDK now carries Kiota 2.0, so Microsoft.IO.RecyclableMemoryStream ships with the plugin
