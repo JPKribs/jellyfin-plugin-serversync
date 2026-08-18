@@ -462,128 +462,151 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             return false;
         }
 
-        // Clear local images for any type we're about to write, so a source
-        // count of 1 doesn't leave behind extra local images and produce a
-        // "source has 1, local has 2" verify failure (e.g. when local picked
-        // up a second Primary from a prior provider scrape). RemoveImage
-        // mutates the in-memory ImageInfos list; call UpdateToRepositoryAsync
-        // afterward so the repo reflects the cleared state before SaveImage
-        // runs (without this, SaveImage's own DB write doesn't see our
-        // removals and the old rows survive).
-        var typesBeingWritten = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (t, _) in work) typesBeingWritten.Add(t);
-        var anyRemoved = false;
-        foreach (var typeName in typesBeingWritten)
-        {
-            if (Enum.TryParse<ImageType>(typeName, true, out var parsed))
-            {
-                var existing = localPerson.GetImages(parsed).ToList();
-                foreach (var img in existing)
-                {
-                    try
-                    {
-                        localPerson.RemoveImage(img);
-                        anyRemoved = true;
-                    }
-                    catch (InvalidOperationException ex) { Logger.LogDebug(ex, "Could not remove existing {Type} for {PersonName}", typeName, record.PersonName); }
-                    catch (IOException ex) { Logger.LogDebug(ex, "Could not remove existing {Type} file for {PersonName}", typeName, record.PersonName); }
-                }
-            }
-        }
+        // Order the work by type, then by source index, and hand each image
+        // a sequential target slot within its type. See
+        // AssignSequentialSlots for why multi image types cannot be written
+        // in an arbitrary order.
+        var ordered = LocalImageUtilities.AssignSequentialSlots(work);
 
-        if (anyRemoved)
-        {
-            try
-            {
-                await localPerson.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Persisting pre-clear of images for {PersonName} threw; SaveImage may still see stale rows", record.PersonName);
-            }
-        }
-
+        var personContext = record.PersonName ?? record.SourcePersonId ?? localPerson.Id.ToString();
         var appliedAny = false;
         var downloadFailures = 0;
         var saveFailures = 0;
 
-        foreach (var (imageType, imageIndex) in work)
-        {
-            var (stream, contentType) = await imageClient.DownloadItemImageAsync(
-                sourcePersonId,
-                imageType,
-                imageIndex,
-                cancellationToken).ConfigureAwait(false);
+        // Pass 1: download every image to a temp file before touching local
+        // state. The clear in pass 2 is a hard delete, so a download that
+        // 404s afterwards would leave the person with nothing at all. Buffer
+        // first, and a type whose downloads did not all land simply keeps
+        // what it already has.
+        var tempDir = Path.Combine(ConfigManager.GetTempDownloadPath(), "person-images");
+        Directory.CreateDirectory(tempDir);
+        var downloaded = new List<(string ImageType, int? SourceIndex, int TargetIndex, string TempPath, string ContentType, long Bytes)>();
+        var failedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            if (stream == null)
+        try
+        {
+            foreach (var (imageType, imageIndex, targetIndex) in ordered)
             {
-                downloadFailures++;
-                Logger.LogWarning(
-                    "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned null (404/timeout/network — see prior LogDebug for details). Source manifest claims this image exists; source server may have stale ImageTags pointing at deleted image data.",
-                    record.PersonName, imageType, imageIndex, sourcePersonId);
-                continue;
+                var (stream, contentType) = await imageClient.DownloadItemImageAsync(
+                    sourcePersonId,
+                    imageType,
+                    imageIndex,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (stream == null)
+                {
+                    downloadFailures++;
+                    failedTypes.Add(imageType);
+                    Logger.LogWarning(
+                        "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned null (404/timeout/network — see prior LogDebug for details). Source manifest claims this image exists; source server may have stale ImageTags pointing at deleted image data.",
+                        record.PersonName, imageType, imageIndex, sourcePersonId);
+                    continue;
+                }
+
+                // Download buffer lives under the plugin's temp directory (a Jellyfin
+                // folder), so nothing is written outside the data tree.
+                var tempPath = Path.Combine(tempDir, Guid.NewGuid().ToString("N"));
+                long tempBytes = 0;
+                var buffered = false;
+                try
+                {
+                    await using (stream.ConfigureAwait(false))
+                    {
+                        using var fileStream = File.Create(tempPath);
+                        await stream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    try { tempBytes = new FileInfo(tempPath).Length; } catch (IOException) { }
+
+                    if (tempBytes == 0)
+                    {
+                        // 200 OK with empty body — source served the request but
+                        // had no actual image data. SaveImage will silently no-op
+                        // on a zero-byte file, which produces a "verify says local
+                        // is empty" failure with no other clue. Skip the save and
+                        // log loudly so the cause is visible.
+                        Logger.LogWarning(
+                            "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned 0 bytes (Content-Type: {Ct}). Source server delivered the response but had no image data — likely stale ImageTags pointing at deleted file.",
+                            record.PersonName, imageType, imageIndex, sourcePersonId, contentType ?? "(none)");
+                        downloadFailures++;
+                        failedTypes.Add(imageType);
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(contentType)
+                        && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Non-image Content-Type means we got an error page (HTML
+                        // 404, JSON error, etc.) wrapped in a 200 response. Don't
+                        // save garbage as a Primary image.
+                        Logger.LogWarning(
+                            "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned non-image Content-Type '{Ct}' ({Bytes} bytes). Refusing to save.",
+                            record.PersonName, imageType, imageIndex, sourcePersonId, contentType, tempBytes);
+                        downloadFailures++;
+                        failedTypes.Add(imageType);
+                        continue;
+                    }
+
+                    if (!Enum.TryParse<ImageType>(imageType, true, out _))
+                    {
+                        Logger.LogWarning("Image apply for {PersonName}: unknown image type '{Type}' returned by source", record.PersonName, imageType);
+                        failedTypes.Add(imageType);
+                        continue;
+                    }
+
+                    downloaded.Add((imageType, imageIndex, targetIndex, tempPath, contentType ?? "image/jpeg", tempBytes));
+                    buffered = true;
+                }
+                finally
+                {
+                    if (!buffered)
+                    {
+                        try { File.Delete(tempPath); } catch (IOException) { }
+                    }
+                }
             }
 
-            // Download buffer lives under the plugin's temp directory (a Jellyfin
-            // folder), so nothing is written outside the data tree.
-            var tempDir = Path.Combine(ConfigManager.GetTempDownloadPath(), "person-images");
-            Directory.CreateDirectory(tempDir);
-            var tempPath = Path.Combine(tempDir, Guid.NewGuid().ToString("N"));
-            long tempBytes = 0;
-            try
+            // Pass 2, per type. Wipe the local set, then write the whole
+            // source set back in slot order. Wiping first is what makes a
+            // shrinking multi image type land correctly. Three local
+            // backdrops replaced by two source backdrops has to lose the
+            // third, entry and file, or the next scan re-adopts it and the
+            // variance comes straight back.
+            foreach (var group in downloaded.GroupBy(d => d.ImageType, StringComparer.OrdinalIgnoreCase))
             {
-                await using (stream.ConfigureAwait(false))
+                if (failedTypes.Contains(group.Key))
                 {
-                    using var fileStream = File.Create(tempPath);
-                    await stream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
-                }
-
-                try { tempBytes = new FileInfo(tempPath).Length; } catch (IOException) { }
-
-                if (tempBytes == 0)
-                {
-                    // 200 OK with empty body — source served the request but
-                    // had no actual image data. SaveImage will silently no-op
-                    // on a zero-byte file, which produces a "verify says local
-                    // is empty" failure with no other clue. Skip the save and
-                    // log loudly so the cause is visible.
+                    // Partial set, so do not wipe what we cannot fully replace.
                     Logger.LogWarning(
-                        "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned 0 bytes (Content-Type: {Ct}). Source server delivered the response but had no image data — likely stale ImageTags pointing at deleted file.",
-                        record.PersonName, imageType, imageIndex, sourcePersonId, contentType ?? "(none)");
-                    downloadFailures++;
+                        "Image apply for {PersonName}: not all {Type} downloads succeeded, keeping existing local images",
+                        record.PersonName, group.Key);
                     continue;
                 }
 
-                if (!string.IsNullOrEmpty(contentType)
-                    && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                if (!Enum.TryParse<ImageType>(group.Key, true, out var parsedImageType))
                 {
-                    // Non-image Content-Type means we got an error page (HTML
-                    // 404, JSON error, etc.) wrapped in a 200 response. Don't
-                    // save garbage as a Primary image.
-                    Logger.LogWarning(
-                        "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned non-image Content-Type '{Ct}' ({Bytes} bytes). Refusing to save.",
-                        record.PersonName, imageType, imageIndex, sourcePersonId, contentType, tempBytes);
-                    downloadFailures++;
                     continue;
                 }
 
-                if (Enum.TryParse<ImageType>(imageType, true, out var parsedImageType))
+                await LocalImageUtilities.ClearImagesAsync(
+                    localPerson, parsedImageType, Logger, personContext, cancellationToken).ConfigureAwait(false);
+
+                foreach (var entry in group.OrderBy(d => d.TargetIndex))
                 {
                     int beforeCount = 0;
                     try { beforeCount = localPerson.GetImages(parsedImageType).Count(); }
                     catch (InvalidOperationException) { }
                     catch (IOException) { }
 
-                    using var fileStream = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    using var fileStream = new FileStream(entry.TempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
                     try
                     {
                         await _providerManager.SaveImage(
                             localPerson,
                             fileStream,
-                            contentType ?? "image/jpeg",
+                            entry.ContentType,
                             parsedImageType,
-                            imageIndex,
+                            entry.TargetIndex,
                             cancellationToken).ConfigureAwait(false);
 
                         appliedAny = true;
@@ -601,30 +624,29 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                         {
                             Logger.LogWarning(
                                 "Image apply for {PersonName}: SaveImage returned for {Type}/{Index} ({Bytes} bytes) but local count did not increase ({Before} → {After}). SaveImage silently no-op'd — likely an unsupported image type for Person items, a path issue, or a Jellyfin internal rejection.",
-                                record.PersonName, imageType, imageIndex, tempBytes, beforeCount, afterCount);
+                                record.PersonName, entry.ImageType, entry.TargetIndex, entry.Bytes, beforeCount, afterCount);
                         }
                         else
                         {
                             Logger.LogInformation(
                                 "Image apply for {PersonName}: SaveImage applied {Type}/{Index} ({Bytes} bytes); local count {Before} → {After}",
-                                record.PersonName, imageType, imageIndex, tempBytes, beforeCount, afterCount);
+                                record.PersonName, entry.ImageType, entry.TargetIndex, entry.Bytes, beforeCount, afterCount);
                         }
                     }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex)
                     {
                         saveFailures++;
-                        Logger.LogWarning(ex, "Image apply for {PersonName}: SaveImage threw for {Type}/{Index} ({Bytes} bytes)", record.PersonName, imageType, imageIndex, tempBytes);
+                        Logger.LogWarning(ex, "Image apply for {PersonName}: SaveImage threw for {Type}/{Index} ({Bytes} bytes)", record.PersonName, entry.ImageType, entry.TargetIndex, entry.Bytes);
                     }
                 }
-                else
-                {
-                    Logger.LogWarning("Image apply for {PersonName}: unknown image type '{Type}' returned by source", record.PersonName, imageType);
-                }
             }
-            finally
+        }
+        finally
+        {
+            foreach (var entry in downloaded)
             {
-                try { File.Delete(tempPath); } catch (IOException) { }
+                try { File.Delete(entry.TempPath); } catch (IOException) { }
             }
         }
 

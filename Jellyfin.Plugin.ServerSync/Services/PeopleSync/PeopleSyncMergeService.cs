@@ -22,6 +22,17 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// </summary>
 public static class PeopleSyncMergeService
 {
+    /// <summary>
+    /// Local image types read into a person's manifest. Primary is the usual
+    /// case, and Backdrop is here because it is the one type a person can
+    /// hold several of.
+    /// </summary>
+    private static readonly LocalImageType[] LocalImageTypes =
+    {
+        LocalImageType.Primary,
+        LocalImageType.Backdrop
+    };
+
     // ===================================================================
     // Per-category source + local blob building
     // ===================================================================
@@ -115,12 +126,10 @@ public static class PeopleSyncMergeService
     }
 
     /// <summary>
-    /// Builds the source-side and local-side image manifests for a person.
-    /// Source side comes from <see cref="BaseItemDto.ImageTags"/> returned
-    /// by the bulk <c>/Persons</c> fetch (tag-only — no per-person HTTP);
-    /// local side reads on-disk image dimensions and size. Caller pipes the
-    /// result through <see cref="SyncableValue{T}.UpdateSource"/> so the
-    /// comparator handles hashing uniformly.
+    /// Builds the source side and local side image manifests for a person.
+    /// Source side reads <see cref="BaseItemDto.ImageTags"/> and
+    /// <see cref="BaseItemDto.BackdropImageTags"/>, and local side reads the
+    /// on disk size and dimensions for the same types.
     /// </summary>
     public static (string? SourceImagesValue, string? LocalImagesValue) PopulateImageData(
         BaseItemDto? sourcePerson,
@@ -129,26 +138,43 @@ public static class PeopleSyncMergeService
         string? sourceImagesValue = null;
         string? localImagesValue = null;
 
-        if (sourcePerson?.ImageTags?.AdditionalData != null)
+        if (sourcePerson != null)
         {
             var sourceImagesByType = new Dictionary<string, List<ImageInfoDto>>();
-            foreach (var kvp in sourcePerson.ImageTags.AdditionalData)
+            if (sourcePerson.ImageTags?.AdditionalData != null)
             {
-                var tag = MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value);
-                if (string.IsNullOrEmpty(tag))
+                foreach (var kvp in sourcePerson.ImageTags.AdditionalData)
                 {
-                    continue;
-                }
-
-                sourceImagesByType[kvp.Key] = new List<ImageInfoDto>
-                {
-                    new ImageInfoDto
+                    var tag = MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value);
+                    if (string.IsNullOrEmpty(tag))
                     {
-                        ImageType = kvp.Key,
-                        ImageIndex = 0,
-                        Tag = tag
+                        continue;
                     }
-                };
+
+                    sourceImagesByType[kvp.Key] = new List<ImageInfoDto>
+                    {
+                        new ImageInfoDto
+                        {
+                            ImageType = kvp.Key,
+                            ImageIndex = 0,
+                            Tag = tag
+                        }
+                    };
+                }
+            }
+
+            // Backdrops arrive as their own tag list, not as an ImageTags
+            // entry, and there can be more than one. This sits outside the
+            // ImageTags guard because a person whose only images are
+            // backdrops has no ImageTags at all, and skipping them there
+            // would leave the manifest null and the backdrops permanently
+            // unsynced. It is assigned last so it wins over any stray single
+            // tag Backdrop entry above.
+            if (sourcePerson.BackdropImageTags?.Count > 0)
+            {
+                sourceImagesByType["Backdrop"] = sourcePerson.BackdropImageTags
+                    .Select((tag, idx) => new ImageInfoDto { ImageType = "Backdrop", ImageIndex = idx, Tag = tag })
+                    .ToList();
             }
 
             if (sourceImagesByType.Count > 0)
@@ -157,13 +183,20 @@ public static class PeopleSyncMergeService
             }
         }
 
-        // Local images — people typically only have Primary images.
+        // Local images. People usually carry only a Primary, but Backdrop
+        // has to be read too. Otherwise a source with several backdrops has
+        // nothing to compare against and the apply can never be verified.
         if (localPerson != null)
         {
             var localImagesByType = new Dictionary<string, List<ImageInfoDto>>();
-            var images = localPerson.GetImages(LocalImageType.Primary).ToList();
-            if (images.Count > 0)
+            foreach (var imageType in LocalImageTypes)
             {
+                var images = localPerson.GetImages(imageType).ToList();
+                if (images.Count == 0)
+                {
+                    continue;
+                }
+
                 var imageInfoList = new List<ImageInfoDto>();
                 for (int idx = 0; idx < images.Count; idx++)
                 {
@@ -184,7 +217,7 @@ public static class PeopleSyncMergeService
 
                     imageInfoList.Add(new ImageInfoDto
                     {
-                        ImageType = LocalImageType.Primary.ToString(),
+                        ImageType = imageType.ToString(),
                         ImageIndex = idx,
                         Size = fileSize,
                         Width = img.Width,
@@ -192,7 +225,7 @@ public static class PeopleSyncMergeService
                     });
                 }
 
-                localImagesByType[LocalImageType.Primary.ToString()] = imageInfoList;
+                localImagesByType[imageType.ToString()] = imageInfoList;
             }
 
             if (localImagesByType.Count > 0)

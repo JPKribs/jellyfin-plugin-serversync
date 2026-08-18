@@ -25,6 +25,8 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
+  - Backdrops now sync as a complete set. When an item or a person differs from the source, this server deletes its whole set for that image type, files included, then downloads every source image back in order. A leftover backdrop file can no longer be re-adopted by the next library scan and reinstate the difference
+  - People image sync now covers backdrops as well as profile images, so a person carrying several backdrops on the source is tracked and applied instead of being ignored
   - Change badges in the Metadata and People detail views now explain themselves. The exact diverging image or field is named, so a badge can no longer disagree with rows that look identical
   - Rebuilt for Jellyfin 12.0 on .NET 10, with the target ABI raised to 12.0.0.0
   - Moved to the unstable Jellyfin SDK so the source server client matches the 12.0 API during pre release testing. The SDK now carries Kiota 2.0, so Microsoft.IO.RecyclableMemoryStream ships with the plugin

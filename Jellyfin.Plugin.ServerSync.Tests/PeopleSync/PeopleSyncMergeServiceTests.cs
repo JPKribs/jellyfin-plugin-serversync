@@ -152,6 +152,52 @@ public class PeopleSyncMergeServiceTests
     }
 
     /// <summary>
+    /// Several BackdropImageTags become one Backdrop entry per tag, indexed by position.
+    /// True: the apply downloads and writes every source backdrop instead of just the first.
+    /// False: a single-entry Backdrop manifest would silently drop the rest and never report the variance.
+    /// </summary>
+    [Fact]
+    public void PopulateImageData_SourceWithMultipleBackdrops_EmitsOneEntryPerTag()
+    {
+        var dto = MakeSourcePerson(d => d.BackdropImageTags = new List<string> { "bd-0", "bd-1", "bd-2" });
+
+        var (src, _) = PeopleSyncMergeService.PopulateImageData(dto, null);
+
+        Assert.NotNull(src);
+        var manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(src!);
+        var backdrops = manifest!["Backdrop"];
+
+        Assert.Equal(3, backdrops.Count);
+        Assert.Equal(new[] { 0, 1, 2 }, backdrops.ConvertAll(b => b.ImageIndex));
+        Assert.Equal(new[] { "bd-0", "bd-1", "bd-2" }, backdrops.ConvertAll(b => b.Tag));
+    }
+
+    /// <summary>
+    /// Backdrops and a Primary tag coexist in the same source manifest.
+    /// True: a person with both syncs both, and the comparator sees each type's real count.
+    /// False: one type overwriting the other would queue an apply that can never verify.
+    /// </summary>
+    [Fact]
+    public void PopulateImageData_SourceWithPrimaryAndBackdrops_KeepsBothTypes()
+    {
+        var dto = MakeSourcePerson(d =>
+        {
+            d.ImageTags = new BaseItemDto_ImageTags
+            {
+                AdditionalData = new Dictionary<string, object> { ["Primary"] = "primary-tag" }
+            };
+            d.BackdropImageTags = new List<string> { "bd-0", "bd-1" };
+        });
+
+        var (src, _) = PeopleSyncMergeService.PopulateImageData(dto, null);
+
+        var manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(src!);
+
+        Assert.Single(manifest!["Primary"]);
+        Assert.Equal(2, manifest["Backdrop"].Count);
+    }
+
+    /// <summary>
     /// DTO without ImageTags returns null source-image manifest.
     /// True: HasImagesChanges treats null as nothing to sync.
     /// False: a non-null but empty manifest could trigger a no-op apply that then fails verify.

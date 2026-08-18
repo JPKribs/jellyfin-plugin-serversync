@@ -718,27 +718,24 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                     continue;
                 }
 
-                // Pass 2: delete existing + apply, all-or-nothing per type.
-                // If a remove or save fails, any partial mutation already
-                // made stays (we can't unwind a RemoveImage), but we log the
-                // type as failed so verification + user reason are honest.
-                var existingImages = localItem.GetImages(imageType).ToList();
-                foreach (var existingImage in existingImages)
+                // Pass 2: delete existing, then apply, all or nothing per
+                // type. If a save fails, any partial mutation already made
+                // stays, because we cannot unwind a delete. We log the type
+                // as failed so verification and the user reason stay honest.
+                //
+                // The clear is a hard delete of the entry and the file, not a
+                // RemoveImage. Multi image types make that necessary. A
+                // source with two backdrops over a local five leaves
+                // backdrop2 through backdrop4 sitting in the media folder,
+                // the next scan re-adopts them, and the row is pinned at
+                // "source has 2, local has 5" forever. Wiping the type first
+                // and then writing the full source set in order is the only
+                // shape that settles.
+                var cleared = await LocalImageUtilities.ClearImagesAsync(
+                    localItem, imageType, Logger, localItem.Name ?? item.ItemName ?? localItem.Id.ToString(), cancellationToken).ConfigureAwait(false);
+                if (cleared > 0)
                 {
-                    try
-                    {
-                        localItem.RemoveImage(existingImage);
-                        anyChanged = true;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogWarning(ex, "Failed to remove existing {ImageType} image for {ItemName}", imageTypeName, localItem.Name);
-                        typeErrors.Add($"remove existing: {ex.Message}");
-                    }
+                    anyChanged = true;
                 }
 
                 foreach (var (index, tempPath, contentType) in tempFiles)
