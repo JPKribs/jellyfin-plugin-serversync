@@ -34,7 +34,7 @@
     -->
     <PackageReference Include="Jellyfin.Controller" Version="12.0.0-rc5" />
     <PackageReference Include="Jellyfin.Model" Version="12.0.0-rc5" />
-    <PackageReference Include="Jellyfin.Sdk" Version="2026.8.6-unstable.202608060350" />
+    <PackageReference Include="Jellyfin.Sdk" Version="2026.8.18-unstable.202608180158" />
   </ItemGroup>
 
   <ItemGroup>
