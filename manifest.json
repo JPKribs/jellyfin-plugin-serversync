@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.0.0.0",
+        "changelog": "## Developer\r\n- Backdrops now sync as a complete set. When an item or a person differs from the source, this server deletes its whole set for that image type, files included, then downloads every source image back in order. A leftover backdrop file can no longer be re-adopted by the next library scan and reinstate the difference\r\n- People image sync now covers backdrops as well as profile images, so a person carrying several backdrops on the source is tracked and applied instead of being ignored\r\n- Change badges in the Metadata and People detail views now explain themselves. The exact diverging image or field is named, so a badge can no longer disagree with rows that look identical\r\n- Rebuilt for Jellyfin 12.0 on .NET 10, with the target ABI raised to 12.0.0.0\r\n- Moved to the unstable Jellyfin SDK so the source server client matches the 12.0 API during pre release testing. The SDK now carries Kiota 2.0, so Microsoft.IO.RecyclableMemoryStream ships with the plugin\r\n- CI builds, tests, and CodeQL now run on .NET 10, and label sync has the token scope it needs",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.0.0.0/jellyfin-plugin-serversync-12.0.0.0.zip",
+        "checksum": "7e23867e8410ae107acc5d36675120b1",
+        "timestamp": "2026-09-08T02:44:35Z"
+      },
+      {
         "version": "10.11.66.3",
         "changelog": "## Developer\r\n- Change badges in the Metadata and People detail views now explain themselves. The exact diverging image or field is named, so a badge can no longer disagree with rows that look identical",
         "targetAbi": "10.11.0.0",
