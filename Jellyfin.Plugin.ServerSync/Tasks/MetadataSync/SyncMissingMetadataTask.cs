@@ -836,6 +836,10 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
             if (!string.IsNullOrEmpty(personInfo.Name))
             {
+                // The blob is in source billing order. Jellyfin displays
+                // credits by SortOrder before anything else, so pinning it to
+                // the position is what makes the cast order survive locally.
+                personInfo.SortOrder = people.Count;
                 people.Add(personInfo);
             }
         }
@@ -976,50 +980,18 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         MediaBrowser.Controller.Entities.BaseItem freshLocal,
         MetadataSyncItem record)
     {
-        // Direct count check first — Jellyfin sometimes silently no-ops the
-        // people write on item types that aggregate from children (Series).
-        var sourceList = ParsePeopleList(record.People.Source);
-        var localPeople = _libraryManager.GetPeople(freshLocal);
-        if (sourceList == null)
-        {
-            return (false, "source people blob deserialized to null");
-        }
+        // Same comparator the refresh uses. A looser check here (names only)
+        // let a row verify as Synced that the next refresh would immediately
+        // flag again, so the pair looped forever.
+        _metadataService.RefreshLocalSnapshot(record, syncMetadata: false, syncImages: false, syncPeople: true, syncStudios: false, syncGenres: false, syncTags: false);
 
-        var localCount = localPeople?.Count ?? 0;
-        if (localCount != sourceList.Count)
-        {
-            return (false, $"wrote {sourceList.Count} entries but {localCount} are now linked on local — Jellyfin overwrote the manual write (item type: {freshLocal.GetType().Name})");
-        }
+        var diff = record.People.Comparator is Models.Common.Comparators.PeopleListComparator comparator
+            ? comparator.DescribeDifference(record.People.Source, record.People.Local)
+            : (record.People.Comparator.Equals(record.People.Source, record.People.Local) ? null : "people differ");
 
-        // Names must match (case-insensitive). Roles vary harmlessly across
-        // Jellyfin builds; matching names is enough to confirm persistence.
-        var sourceNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in sourceList)
-        {
-            if (p.TryGetValue("Name", out var n) && !string.IsNullOrEmpty(n))
-            {
-                sourceNames.Add(n);
-            }
-        }
-
-        var localNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (localPeople != null)
-        {
-            foreach (var p in localPeople)
-            {
-                if (!string.IsNullOrEmpty(p.Name))
-                {
-                    localNames.Add(p.Name);
-                }
-            }
-        }
-
-        if (!sourceNames.SetEquals(localNames))
-        {
-            return (false, $"name set mismatch: source has {sourceNames.Count}, local has {localNames.Count} after write (item type: {freshLocal.GetType().Name})");
-        }
-
-        return (true, null);
+        return diff == null
+            ? (true, null)
+            : (false, $"people after apply do not match source: {diff} (item type: {freshLocal.GetType().Name})");
     }
 
     private (bool Succeeded, string? FailureReason) VerifyStudiosApplied(
@@ -1112,18 +1084,4 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
         return true;
     }
-
-    private static List<Dictionary<string, string>>? ParsePeopleList(string? blob)
-    {
-        if (string.IsNullOrEmpty(blob)) return new List<Dictionary<string, string>>();
-        try
-        {
-            return JsonSerializer.Deserialize<List<Dictionary<string, string>>>(blob);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
 }

@@ -107,6 +107,13 @@ public static class UserSyncMergeService
     {
         "EnabledChannels",        // Channel IDs differ (also Guid-typed)
         "EnabledDevices",         // Device IDs are server-specific (string[])
+        // The "all" switches only mean something next to the id lists above,
+        // and those lists stay local. Copying EnableAllFolders=false onto a
+        // user whose local EnabledFolders is empty locks them out of every
+        // library, and copying true overrides a local restriction.
+        "EnableAllFolders",
+        "EnableAllChannels",
+        "EnableAllDevices",
         // Library IDs held as strings, so the type walker can't see them.
         // Untranslated they name libraries that don't exist locally, and
         // translating them silently drops any library without a mapping —

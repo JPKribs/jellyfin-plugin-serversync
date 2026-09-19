@@ -46,7 +46,9 @@ public class PeopleSyncMergeServiceTests
         Assert.NotNull(blob);
         var deserialized = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(blob);
         Assert.NotNull(deserialized);
-        Assert.Equal("Source Person", deserialized["Name"].GetString());
+        // Name is the match key and is never synced.
+        Assert.False(deserialized.ContainsKey("Name"));
+        Assert.True(deserialized.ContainsKey("Overview"));
     }
 
     /// <summary>

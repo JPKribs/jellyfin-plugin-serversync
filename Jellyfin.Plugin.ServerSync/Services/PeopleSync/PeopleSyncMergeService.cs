@@ -61,9 +61,14 @@ public static class PeopleSyncMergeService
         // identically. The JSON comparator compares element-by-element and
         // would otherwise flag differently-ordered-but-same-content arrays
         // as "changed" forever, even after a successful apply.
+        // Name is deliberately absent. It is the match key, compared without
+        // case, so the two sides only ever differ by casing. Writing the
+        // source casing onto the local Person item does not stick: Jellyfin
+        // resolves people by the name held in its credits table, finds the
+        // item path no longer matches, and recreates the item blank under the
+        // old casing. The row then diffs again on every refresh.
         var metadata = new Dictionary<string, object?>
         {
-            ["Name"] = sourcePerson.Name,
             ["OriginalTitle"] = sourcePerson.OriginalTitle,
             // SortName excluded — server-derived from Name, never matches
             // across servers. ForcedSortName is the user override and IS
@@ -104,7 +109,6 @@ public static class PeopleSyncMergeService
 
         var metadata = new Dictionary<string, object?>
         {
-            ["Name"] = localPerson.Name,
             ["OriginalTitle"] = localPerson.OriginalTitle,
             // SortName excluded — see source-side comment.
             ["ForcedSortName"] = localPerson.ForcedSortName,

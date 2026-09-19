@@ -196,7 +196,10 @@ public static class MetadataSyncMergeService
     /// <summary>
     /// Builds the source-side and local-side people blobs (actors, directors,
     /// writers). Compares by Name + Role + Type rather than GUID so syncing
-    /// across servers with different person IDs still matches.
+    /// across servers with different person IDs still matches. Both sides
+    /// keep billing order: the source DTO already arrives in display order,
+    /// and the local side is put through the same ordering so the apply can
+    /// carry the cast order across instead of alphabetising it.
     /// </summary>
     public static void MergePeople(
         MetadataSyncItem item,
@@ -231,7 +234,6 @@ public static class MetadataSyncMergeService
                 }
             }
 
-            sourcePeople.Sort(ComparePeopleDicts);
             item.People.UpdateSource(JsonSerializer.Serialize(sourcePeople));
         }
         else
@@ -418,7 +420,7 @@ public static class MetadataSyncMergeService
         }
 
         var localPeople = new List<Dictionary<string, string>>();
-        foreach (var person in localPeopleList)
+        foreach (var person in OrderLikeSourceDto(localPeopleList))
         {
             if (string.IsNullOrEmpty(person.Name)) continue;
 
@@ -428,7 +430,6 @@ public static class MetadataSyncMergeService
             localPeople.Add(personDict);
         }
 
-        localPeople.Sort(ComparePeopleDicts);
         item.People.Local = JsonSerializer.Serialize(localPeople);
     }
 
@@ -543,29 +544,23 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Compares two people dictionaries by Name, then Role, then Type for
-    /// consistent sorting across servers.
+    /// Orders local credits the way Jellyfin's DtoService orders the People
+    /// array it returns from the source: SortOrder first, then a fixed person
+    /// type rank, stable over the stored list order.
     /// </summary>
-    private static int ComparePeopleDicts(Dictionary<string, string> a, Dictionary<string, string> b)
+    private static IEnumerable<PersonInfo> OrderLikeSourceDto(IReadOnlyList<PersonInfo> people)
     {
-        a.TryGetValue("Name", out var nameA);
-        b.TryGetValue("Name", out var nameB);
-        var nameCompare = string.Compare(nameA, nameB, StringComparison.OrdinalIgnoreCase);
-        if (nameCompare != 0)
-        {
-            return nameCompare;
-        }
-
-        a.TryGetValue("Role", out var roleA);
-        b.TryGetValue("Role", out var roleB);
-        var roleCompare = string.Compare(roleA, roleB, StringComparison.OrdinalIgnoreCase);
-        if (roleCompare != 0)
-        {
-            return roleCompare;
-        }
-
-        a.TryGetValue("Type", out var typeA);
-        b.TryGetValue("Type", out var typeB);
-        return string.Compare(typeA, typeB, StringComparison.OrdinalIgnoreCase);
+        return people
+            .OrderBy(p => p.SortOrder ?? int.MaxValue)
+            .ThenBy(p => p.Type switch
+            {
+                Jellyfin.Data.Enums.PersonKind.Actor => 0,
+                Jellyfin.Data.Enums.PersonKind.GuestStar => 1,
+                Jellyfin.Data.Enums.PersonKind.Director => 2,
+                Jellyfin.Data.Enums.PersonKind.Writer => 3,
+                Jellyfin.Data.Enums.PersonKind.Producer => 4,
+                Jellyfin.Data.Enums.PersonKind.Composer => 4,
+                _ => 10
+            });
     }
 }

@@ -25,9 +25,8 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Backdrops now sync as a complete set. When an item or a person differs from the source, this server deletes its whole set for that image type, files included, then downloads every source image back in order. A leftover backdrop file can no longer be re-adopted by the next library scan and reinstate the difference
-  - People image sync now covers backdrops as well as profile images, so a person carrying several backdrops on the source is tracked and applied instead of being ignored
-  - Change badges in the Metadata and People detail views now explain themselves. The exact diverging image or field is named, so a badge can no longer disagree with rows that look identical
-  - Rebuilt for Jellyfin 12.0 on .NET 10, with the target ABI raised to 12.0.0.0
-  - Moved to the unstable Jellyfin SDK so the source server client matches the 12.0 API during pre release testing. The SDK now carries Kiota 2.0, so Microsoft.IO.RecyclableMemoryStream ships with the plugin
-  - CI builds, tests, and CodeQL now run on .NET 10, and label sync has the token scope it needs
+  - Items with several backdrops no longer queue on every refresh. Jellyfin stores images without an order, so the same set can come back shuffled on either server. Image sizes are now matched as a set within each image type instead of by position
+  - Metadata Sync people no longer queue again right after a successful sync. Credits are compared the way Jellyfin stores them, ignoring case and padding on names and roles and collapsing duplicate credits, and the post apply check uses the same comparison as the refresh
+  - Cast order now carries across. People were being written in alphabetical order, and they are now written in the source billing order. Expect one round of people syncs while existing items pick up the correct order
+  - People Sync no longer syncs the person name. The name is the match key, so the two sides can only differ by casing, and rewriting it made Jellyfin recreate the person blank. The local person is now found by its id first
+  - User Sync no longer copies EnableAllFolders, EnableAllChannels, or EnableAllDevices. The id lists they depend on stay local, so copying the switch alone could lock a user out of every library or lift a local restriction

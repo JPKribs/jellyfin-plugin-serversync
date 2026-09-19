@@ -383,7 +383,8 @@ public class UserSyncMergeServiceTests
         foreach (var excluded in new[]
         {
             "EnabledFolders", "BlockedMediaFolders", "EnabledChannels", "BlockedChannels",
-            "EnabledDevices", "EnableContentDeletionFromFolders", "AccessSchedules"
+            "EnabledDevices", "EnableContentDeletionFromFolders", "AccessSchedules",
+            "EnableAllFolders", "EnableAllChannels", "EnableAllDevices"
         })
         {
             Assert.False(props.ContainsKey(excluded), $"{excluded} must not be synced");
@@ -391,7 +392,7 @@ public class UserSyncMergeServiceTests
 
         // Ordinary settings still come across.
         Assert.True(props.ContainsKey("IsAdministrator"));
-        Assert.True(props.ContainsKey("EnableAllFolders"));
+        Assert.True(props.ContainsKey("EnableContentDeletion"));
     }
 
     /// <summary>

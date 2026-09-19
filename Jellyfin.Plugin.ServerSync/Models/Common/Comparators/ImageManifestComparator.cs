@@ -11,10 +11,10 @@ namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 /// <summary>
 /// Comparator for serialized image manifests of the form
 /// <c>Dictionary&lt;ImageType, List&lt;ImageInfoDto&gt;&gt;</c>. Equality compares
-/// per-type counts and per-image file sizes (sizes of zero are treated as
-/// "unknown" and ignored). Hashing produces a stable fingerprint over the
-/// type/size/dimensions tuple — order-independent across types since they're
-/// sorted by name first.
+/// per-type counts and the set of image file sizes within each type (a source
+/// size of zero is "unknown" and matches anything). Hashing produces a stable
+/// fingerprint over the tag/size/dimensions tuples — order-independent both
+/// across types and within a type.
 /// </summary>
 public sealed class ImageManifestComparator : ISyncComparator<string>
 {
@@ -69,58 +69,41 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
                 return $"type {type}: source has {sourceImages.Count} image(s), local has {localImages.Count}";
             }
 
-            for (int i = 0; i < sourceImages.Count; i++)
+            // Sizes are matched as a multiset, not by position. Jellyfin
+            // persists an item's images with no order column and a fresh
+            // random key on every save, so the order of a multi image type
+            // (backdrops) reshuffles whenever either server reloads the item.
+            // A positional compare then reports "backdrop[0] size differs"
+            // on a set that is byte for byte identical, the apply re-pulls
+            // every backdrop, and the row never settles.
+            //
+            // A source size of 0 means enrichment could not measure the image
+            // (the /Items/{id}/Images call failed — a non-admin token gets
+            // 403 here). That is indeterminate, NOT a difference: we cannot
+            // assert the images differ, and an apply built on that guess
+            // fails verification for the same reason, so queueing it only
+            // burns bandwidth. Counts are equal at this point, so an
+            // unmeasured source image pairs with whatever local image is left
+            // over. Only a measured source size with no local twin is a real
+            // difference, which also covers a local file that is missing or
+            // unreadable (Size=0).
+            var unmatchedLocal = new List<long>(localImages.Count);
+            foreach (var l in localImages)
             {
-                var s = sourceImages[i];
-                var l = localImages[i];
+                unmatchedLocal.Add(l.Size);
+            }
 
-                // Both sides have real sizes — canonical case, strict compare.
-                if (s.Size > 0 && l.Size > 0)
-                {
-                    if (s.Size != l.Size)
-                    {
-                        return $"type {type}[{i}]: source size {s.Size}, local size {l.Size}";
-                    }
-
-                    continue;
-                }
-
-                // Tag-only source vs sized local: indeterminate, NOT a
-                // difference.
-                //
-                // This used to report a difference, relying on "MarkSynced
-                // after a successful apply makes the next refresh
-                // short-circuit on SourceHash" to stop it repeating. That
-                // short-circuit is gone (see SyncableValue.HasChanges), and
-                // without it the pair loops: refresh queues the row, sync
-                // re-downloads every image, verify enriches and hits the same
-                // unmeasurable source, the row lands Errored, and the next
-                // refresh queues it again — forever, re-pulling every image
-                // each cycle.
-                //
-                // Reporting equal is also the more defensible claim. A source
-                // size of 0 means enrichment could not measure the image (the
-                // /Items/{id}/Images call failed — a non-admin token gets 403
-                // here). We cannot assert the images differ, and an apply
-                // built on that guess fails verification for the same reason,
-                // so queueing it only burns bandwidth. Real divergence in
-                // image COUNT or type is still caught above, and once
-                // enrichment works again sizes populate and the strict
-                // compare resumes.
-                if (s.Size == 0 && l.Size > 0)
+            foreach (var s in sourceImages)
+            {
+                if (s.Size <= 0)
                 {
                     continue;
                 }
 
-                // Local file missing or unreadable (Size=0). Queue for re-pull.
-                if (s.Size > 0 && l.Size == 0)
+                if (!unmatchedLocal.Remove(s.Size))
                 {
-                    return $"type {type}[{i}]: source size {s.Size}, local size 0 (file missing or unreadable)";
+                    return $"type {type}: source image of size {s.Size} has no local match (unmatched local sizes: {string.Join(",", unmatchedLocal)})";
                 }
-
-                // Both sides Size=0: indeterminate, fall through — nothing
-                // actionable. Tag change invalidates the SourceHash so we'll
-                // re-enrich on the next refresh anyway.
             }
         }
 
@@ -162,7 +145,7 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
             var fingerprint = string.Join(
                 ";",
                 map.OrderBy(k => k.Key, StringComparer.Ordinal)
-                    .Select(k => $"{k.Key}:{string.Join(",", k.Value.Select(v => $"{v.Tag ?? string.Empty}_{v.Size}_{v.Width}x{v.Height}"))}"));
+                    .Select(k => $"{k.Key}:{string.Join(",", k.Value.Select(v => $"{v.Tag ?? string.Empty}_{v.Size}_{v.Width}x{v.Height}").OrderBy(v => v, StringComparer.Ordinal))}"));
 
             var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(fingerprint));
             return Convert.ToHexString(bytes).ToLowerInvariant();

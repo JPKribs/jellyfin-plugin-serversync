@@ -46,11 +46,18 @@ public class PeopleSyncTableService
         ArgumentNullException.ThrowIfNull(record);
         if (string.IsNullOrEmpty(record.PersonName)) return;
 
-        var personStub = _libraryManager.GetPerson(record.PersonName);
-        if (personStub == null) return;
+        // Id first, see SyncMissingPeopleTask.ResolveLocalPerson.
+        var localPerson = Guid.TryParse(record.LocalPersonId, out var knownId)
+            ? _libraryManager.GetItemById(knownId)
+            : null;
+        if (localPerson == null)
+        {
+            var personStub = _libraryManager.GetPerson(record.PersonName);
+            if (personStub == null) return;
 
-        var localPerson = _libraryManager.GetItemById(personStub.Id);
-        if (localPerson == null) return;
+            localPerson = _libraryManager.GetItemById(personStub.Id);
+            if (localPerson == null) return;
+        }
 
         record.Metadata.Local = PeopleSyncMergeService.BuildLocalMetadata(localPerson);
 

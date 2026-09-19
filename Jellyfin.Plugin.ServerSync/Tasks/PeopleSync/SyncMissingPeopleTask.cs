@@ -221,8 +221,17 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         }
     }
 
+    // Prefer the id the refresh matched. GetPerson builds the item path from
+    // the name it is given, and a name that differs from the stored one only
+    // by casing makes Jellyfin recreate the Person blank over the real one.
     private (Guid LocalPersonId, BaseItem LocalPerson) ResolveLocalPerson(PeopleSyncItem record)
     {
+        if (Guid.TryParse(record.LocalPersonId, out var knownId)
+            && _libraryManager.GetItemById(knownId) is MediaBrowser.Controller.Entities.Person known)
+        {
+            return (knownId, known);
+        }
+
         var personStub = _libraryManager.GetPerson(record.PersonName)
             ?? throw new InvalidOperationException($"Local person not found: {record.PersonName}");
 
@@ -275,8 +284,8 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
         var hasChanges = false;
 
-        // Strings — assign through nulls.
-        hasChanges |= JsonFieldHelpers.AssignString(metadata, "Name", v => { if (!string.IsNullOrEmpty(v) && localPerson.Name != v) { localPerson.Name = v; return true; } return false; });
+        // Strings — assign through nulls. Name is the match key and is never
+        // written, see PeopleSyncMergeService.BuildSourceMetadata.
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "OriginalTitle", v => { if (localPerson.OriginalTitle != v) { localPerson.OriginalTitle = v; return true; } return false; });
         // SortName intentionally not synced — Jellyfin derives it from
         // Name independently per server, so cross-server writes never

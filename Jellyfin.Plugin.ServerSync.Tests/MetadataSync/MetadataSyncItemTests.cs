@@ -219,7 +219,7 @@ public class MetadataSyncItemTests
             StatusDate = System.DateTime.UtcNow
         };
         item.Images.UpdateSource("{\"Backdrop\":[{\"ImageType\":\"Backdrop\",\"ImageIndex\":0,\"Size\":500},{\"ImageType\":\"Backdrop\",\"ImageIndex\":1,\"Size\":400}]}");
-        item.Images.Local = "{\"Backdrop\":[{\"ImageType\":\"Backdrop\",\"ImageIndex\":0,\"Size\":400},{\"ImageType\":\"Backdrop\",\"ImageIndex\":1,\"Size\":500}]}";
+        item.Images.Local = "{\"Backdrop\":[{\"ImageType\":\"Backdrop\",\"ImageIndex\":0,\"Size\":400},{\"ImageType\":\"Backdrop\",\"ImageIndex\":1,\"Size\":450}]}";
 
         var dto = item.ToDto(null, "http://src", includeBlobs: true);
 

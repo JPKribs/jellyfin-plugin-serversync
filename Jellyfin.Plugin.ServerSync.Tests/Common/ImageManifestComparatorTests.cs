@@ -298,4 +298,42 @@ public class ImageManifestComparatorTests
 
         Assert.False(Cmp.Equals(src, loc));
     }
+
+    /// <summary>
+    /// The same backdrops in a different order are not a difference.
+    /// True: Jellyfin stores images with no order column, so either server can reshuffle a backdrop set on reload.
+    /// False: a positional compare re-queues every multi backdrop item on every refresh.
+    /// </summary>
+    [Fact]
+    public void Equals_SameBackdropsInDifferentOrder_AreEqual()
+    {
+        var source = Manifest(("Backdrop", 0, 500, 0, 0, "a"), ("Backdrop", 1, 400, 0, 0, "b"), ("Backdrop", 2, 400, 0, 0, "c"));
+        var local = Manifest(("Backdrop", 0, 400, 0, 0, null), ("Backdrop", 1, 500, 0, 0, null), ("Backdrop", 2, 400, 0, 0, null));
+
+        Assert.True(Cmp.Equals(source, local));
+    }
+
+    /// <summary>
+    /// A reordered set that also swaps one image out is still a difference.
+    /// </summary>
+    [Fact]
+    public void Equals_ReorderedBackdropsWithOneReplaced_IsDifferent()
+    {
+        var source = Manifest(("Backdrop", 0, 500, 0, 0, "a"), ("Backdrop", 1, 400, 0, 0, "b"));
+        var local = Manifest(("Backdrop", 0, 400, 0, 0, null), ("Backdrop", 1, 450, 0, 0, null));
+
+        Assert.False(Cmp.Equals(source, local));
+    }
+
+    /// <summary>
+    /// The source fingerprint does not move when the source reorders its backdrops.
+    /// </summary>
+    [Fact]
+    public void ComputeHash_IgnoresOrderWithinType()
+    {
+        var a = Manifest(("Backdrop", 0, 500, 0, 0, "a"), ("Backdrop", 1, 400, 0, 0, "b"));
+        var b = Manifest(("Backdrop", 0, 400, 0, 0, "b"), ("Backdrop", 1, 500, 0, 0, "a"));
+
+        Assert.Equal(Cmp.ComputeHash(a), Cmp.ComputeHash(b));
+    }
 }

@@ -82,10 +82,10 @@ public class MetadataSyncItem : SyncRecord
     public SyncableValue<string> Images { get; } = new() { Comparator = new ImageManifestComparator() };
 
     /// <summary>
-    /// Gets the people array (cast / crew, by Name+Role+Type). JSON-equality
-    /// comparison.
+    /// Gets the people array (cast / crew, by Name+Role+Type, in billing
+    /// order). Uses the dedicated <see cref="PeopleListComparator"/>.
     /// </summary>
-    public SyncableValue<string> People { get; } = new() { Comparator = new JsonBlobComparator() };
+    public SyncableValue<string> People { get; } = new() { Comparator = new PeopleListComparator() };
 
     /// <summary>
     /// Gets the studios array (just studio names). JSON-equality comparison.
