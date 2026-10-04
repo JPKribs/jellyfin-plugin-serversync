@@ -1,9 +1,8 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
-using MediaBrowser.Model.Activity;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -18,18 +17,15 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 public sealed class HintActivityLog
 {
     private const string Prefix = "Server Sync: ";
-    private readonly IActivityManager _activity;
-    private readonly ILogger<HintActivityLog> _logger;
+    private readonly ActivityLogger _activity;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HintActivityLog"/> class.
     /// </summary>
-    /// <param name="activity">Jellyfin's activity log.</param>
-    /// <param name="logger">Logger.</param>
-    public HintActivityLog(IActivityManager activity, ILogger<HintActivityLog> logger)
+    /// <param name="activity">The shared writer for Jellyfin's activity log.</param>
+    public HintActivityLog(ActivityLogger activity)
     {
         _activity = activity;
-        _logger = logger;
     }
 
     /// <summary>A short description of what a hint concerns, for logs and the dashboard.</summary>
@@ -222,22 +218,7 @@ public sealed class HintActivityLog
     public Task ResentAsync(string peerName, int count)
         => WriteAsync(Prefix + $"sent {count} hint(s) to {peerName} again", "ServerSync.HintResent", "the peer accepted them earlier but no longer held them", LogLevel.Warning);
 
-    private async Task WriteAsync(string name, string type, string? overview, LogLevel severity)
-    {
-        try
-        {
-            var entry = new ActivityLog(name, type, Guid.Empty)
-            {
-                ShortOverview = overview is null ? null : Trim(overview),
-                LogSeverity = severity
-            };
-            await _activity.CreateAsync(entry).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Could not write an activity log entry: {Name}", name);
-        }
-    }
-
-    private static string Trim(string text) => text.Length > 500 ? text[..500] : text;
+    // Never throws, and cuts the text to what the activity log keeps.
+    private Task WriteAsync(string name, string type, string? overview, LogLevel severity)
+        => _activity.LogAsync(name, type, overview, severity);
 }

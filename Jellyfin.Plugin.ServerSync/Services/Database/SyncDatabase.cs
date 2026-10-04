@@ -2,6 +2,7 @@ using System;
 using System.Data;
 using System.IO;
 using System.Linq;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
@@ -175,25 +176,6 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// Moves a WAL/SHM journal file alongside its backed-up database,
-    /// falling back to leaving it in place on error.
-    /// </summary>
-    private void MoveJournalFile(string from, string to)
-    {
-        try
-        {
-            if (File.Exists(from))
-            {
-                File.Move(from, to);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to move journal file {From} alongside backup", from);
-        }
-    }
-
-    /// <summary>
     /// Deletes WAL and SHM journal files associated with the database.
     /// </summary>
     private void DeleteWalFiles()
@@ -231,74 +213,48 @@ public class SyncDatabase : IDisposable
         try
         {
             _connection = OpenConnection();
-
-            var currentVersion = DatabaseMigrationService.GetSchemaVersion(_connection);
-
-            if (currentVersion == 0)
+            var action = OpenSchema(_connection);
+            switch (action)
             {
-                DatabaseMigrationService.CreateInitialSchema(_connection);
-                DatabaseMigrationService.StampSchema(_connection);
-            }
-            else if (currentVersion > DatabaseMigrationService.CurrentSchemaVersion
-                && DatabaseMigrationService.GetMinReaderVersion(_connection) is { } minReader
-                && minReader <= DatabaseMigrationService.CurrentSchemaVersion)
-            {
-                // A newer build wrote this database and says builds from v{minReader} on can still use it,
-                // since everything it added since is extra. It is used as is, version untouched, so the
-                // newer build finds it exactly as it left it.
-                _logger.LogInformation(
-                    "Sync database is schema v{Found}, newer than this plugin's v{Expected}, and readable by v{MinReader} and later. Using it as is",
-                    currentVersion,
-                    DatabaseMigrationService.CurrentSchemaVersion,
-                    minReader);
-                return;
-            }
-            else if (currentVersion > DatabaseMigrationService.CurrentSchemaVersion)
-            {
-                // Downgrade: the file was written by a newer plugin build and
-                // may have columns this one doesn't know about (or be missing
-                // ones it needs). Carrying on produces a stream of confusing
-                // per-query SQLite errors. Move it aside, RecreateDatabase
-                // keeps it as a timestamped backup, so re-upgrading can
-                // restore it, and start clean on the schema this build expects.
-                _logger.LogError(
-                    "Sync database is schema v{Found}, newer than this plugin's v{Expected}. The plugin was downgraded. Moving the database aside and starting fresh. The existing file is kept as a .corrupt-* backup and is still readable by the newer build",
-                    currentVersion,
-                    DatabaseMigrationService.CurrentSchemaVersion);
-                RecreateDatabase();
-                return;
-            }
-            else if (currentVersion < DatabaseMigrationService.CurrentSchemaVersion)
-            {
-                var migrationSucceeded = DatabaseMigrationService.MigrateSchema(_connection, currentVersion, _logger);
-                if (!migrationSucceeded)
-                {
-                    _logger.LogWarning("Migration failed, recreating database with fresh schema");
-                    RecreateDatabase();
+                case SchemaAction.UsedNewer:
+                    // A newer build wrote this database and says this one can still use it, since everything
+                    // it added since is extra. It is used as is, so the newer build finds it as it left it.
+                    _logger.LogInformation(
+                        "Sync database is schema v{Found}, newer than this plugin's v{Expected}, and readable by v{MinReader} and later. Using it as is",
+                        DatabaseSchema.GetVersion(_connection),
+                        DatabaseMigrationService.CurrentSchemaVersion,
+                        DatabaseSchema.GetMinReaderVersion(_connection));
                     return;
-                }
-            }
 
-            // A database already at this version from a build that did not record the marker gets it now.
-            if (DatabaseMigrationService.GetMinReaderVersion(_connection) != DatabaseMigrationService.MinReaderVersion)
-            {
-                DatabaseMigrationService.StampSchema(_connection);
+                case SchemaAction.TooNew:
+                    // A newer build wrote this database and this one cannot read it. Carrying on would produce
+                    // a stream of confusing per query errors, so it is kept as a backup the newer build can
+                    // still read, and this build starts fresh.
+                    _logger.LogError(
+                        "Sync database is schema v{Found}, newer than this plugin's v{Expected}, and this version cannot read it. It is kept as a .newer-* backup the newer version can still read, and a fresh database is started",
+                        DatabaseSchema.GetVersion(_connection),
+                        DatabaseMigrationService.CurrentSchemaVersion);
+                    RecreateDatabase("newer");
+                    return;
+
+                case SchemaAction.MigrationFailed:
+                    _logger.LogWarning("Migration failed. The database is kept as a .corrupt-* backup and a fresh one is started");
+                    RecreateDatabase("corrupt");
+                    return;
             }
 
             _logger.LogDebug("Sync database initialized at {DbPath} (schema v{Version})", _dbPath, DatabaseMigrationService.CurrentSchemaVersion);
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 11 || ex.SqliteErrorCode == 26)
         {
-            // SQLITE_CORRUPT / SQLITE_NOTADB: the file itself is unusable, so
-            // recreation is the only way forward. Anything else, a locked
-            // file at boot, a permissions hiccup, a full disk, is transient:
-            // recreating would reset every tracking table and the user's
-            // Ignored/approval state over a condition that fixes itself, so
-            // those propagate and the plugin retries on the next start.
+            // SQLITE_CORRUPT / SQLITE_NOTADB: the file itself is unusable, so recreation is the only way
+            // forward. Anything else, a locked file at boot, a permissions hiccup, a full disk, is transient.
+            // Recreating would reset every tracking table and the user's Ignored and approval state over a
+            // condition that fixes itself, so those propagate and the plugin retries on the next start.
             _logger.LogError(ex, "Sync database is corrupt (SQLite error {Code}), attempting recovery", ex.SqliteErrorCode);
             try
             {
-                RecreateDatabase();
+                RecreateDatabase("corrupt");
             }
             catch (Exception recreateEx)
             {
@@ -316,94 +272,28 @@ public class SyncDatabase : IDisposable
         }
     }
 
+    private SchemaAction OpenSchema(SqliteConnection connection)
+        => DatabaseSchema.Open(
+            connection,
+            DatabaseMigrationService.CurrentSchemaVersion,
+            DatabaseMigrationService.MinReaderVersion,
+            c => DatabaseMigrationService.CreateInitialSchema((SqliteConnection)c),
+            (c, fromVersion) => DatabaseMigrationService.MigrateSchema((SqliteConnection)c, fromVersion, _logger));
+
     /// <summary>
-    /// Closes the current database, moves it aside as a timestamped backup,
-    /// and creates a fresh one. The old file is preserved (not deleted): the
-    /// tracking DB carries user intent, Ignored overrides and pending
-    /// deletion/download approvals, that a transient init failure (disk
-    /// briefly full, permissions hiccup at boot) must not silently destroy.
+    /// Closes the current database, moves it aside as a timestamped backup with its journal, and creates a
+    /// fresh one. The old file is kept, not deleted: the tracking database carries user intent, Ignored
+    /// overrides and pending approvals, that a recovery must not silently destroy. The three newest backups
+    /// for each reason are kept.
     /// </summary>
-    private void RecreateDatabase()
+    /// <param name="reason">The word in the backup's name, <c>corrupt</c> or <c>newer</c>.</param>
+    private void RecreateDatabase(string reason)
     {
         CloseConnection();
-
-        if (File.Exists(_dbPath))
-        {
-            var backupPath = _dbPath + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
-            try
-            {
-                File.Move(_dbPath, backupPath);
-
-                // The WAL belongs to the moved database and may hold committed-
-                // but-uncheckpointed transactions (e.g. approvals set just
-                // before a crash). It must travel with the backup, not be
-                // deleted, or a restore from the backup loses those commits.
-                MoveJournalFile(_dbPath + "-wal", backupPath + "-wal");
-                MoveJournalFile(_dbPath + "-shm", backupPath + "-shm");
-                _logger.LogWarning("Moved unreadable database aside to {BackupPath}. A fresh database will be created", backupPath);
-                PruneOldCorruptBackups();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to back up unreadable database file. Deleting it instead");
-                try
-                {
-                    File.Delete(_dbPath);
-                }
-                catch (Exception deleteEx)
-                {
-                    _logger.LogWarning(deleteEx, "Failed to delete unreadable database file, attempting to overwrite");
-                }
-            }
-        }
-
-        // Also delete WAL and SHM files if they exist
-        DeleteWalFiles();
-
+        DatabaseSchema.SetAside(_dbPath, reason, 3, _logger);
         _connection = OpenConnection();
-        DatabaseMigrationService.CreateInitialSchema(_connection);
-        DatabaseMigrationService.StampSchema(_connection);
+        OpenSchema(_connection);
         _logger.LogInformation("Database recreated with fresh schema v{Version}", DatabaseMigrationService.CurrentSchemaVersion);
-    }
-
-    /// <summary>
-    /// Keeps only the three most recent <c>.corrupt-*</c> backups so repeated
-    /// recovery attempts can't fill the disk.
-    /// </summary>
-    private void PruneOldCorruptBackups()
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(_dbPath);
-            if (string.IsNullOrEmpty(dir))
-            {
-                return;
-            }
-
-            // Group by backup stem: each backup may carry -wal/-shm
-            // companions (moved alongside it), which must neither count
-            // toward the keep-3 limit nor be orphaned by partial deletes.
-            var stems = Directory.GetFiles(dir, Path.GetFileName(_dbPath) + ".corrupt-*")
-                .Where(f => !f.EndsWith("-wal", StringComparison.Ordinal) && !f.EndsWith("-shm", StringComparison.Ordinal))
-                .ToArray();
-            if (stems.Length <= 3)
-            {
-                return;
-            }
-
-            Array.Sort(stems, StringComparer.Ordinal);
-            for (var i = 0; i < stems.Length - 3; i++)
-            {
-                File.Delete(stems[i]);
-                DeleteFileWithRetry(stems[i] + "-wal");
-                DeleteFileWithRetry(stems[i] + "-shm");
-                _logger.LogDebug("Pruned old corrupt-database backup {Path}", stems[i]);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to prune old corrupt-database backups");
-        }
     }
 
     /// <summary>

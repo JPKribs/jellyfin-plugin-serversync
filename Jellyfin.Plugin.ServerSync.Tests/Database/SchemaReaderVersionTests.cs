@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Services;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -46,8 +47,8 @@ public sealed class SchemaReaderVersionTests : IDisposable
     {
         Open().Dispose();
         using var conn = Raw();
-        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion, DatabaseMigrationService.GetSchemaVersion(conn));
-        Assert.Equal(DatabaseMigrationService.MinReaderVersion, DatabaseMigrationService.GetMinReaderVersion(conn));
+        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion, DatabaseSchema.GetVersion(conn));
+        Assert.Equal(DatabaseMigrationService.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(conn));
     }
 
     /// <summary>
@@ -62,12 +63,12 @@ public sealed class SchemaReaderVersionTests : IDisposable
         using (var conn = Raw())
         {
             Exec(conn, "CREATE TABLE FutureTable (Id INTEGER)");
-            DatabaseMigrationService.SetSchemaVersion(conn, DatabaseMigrationService.CurrentSchemaVersion + 1);
+            DatabaseSchema.SetVersion(conn, DatabaseMigrationService.CurrentSchemaVersion + 1);
         }
 
         Open().Dispose();
         using var after = Raw();
-        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion + 1, DatabaseMigrationService.GetSchemaVersion(after));
+        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion + 1, DatabaseSchema.GetVersion(after));
         Assert.Equal(1L, Scalar(after, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'FutureTable'"));
         Assert.Empty(Backups());
     }
@@ -86,12 +87,12 @@ public sealed class SchemaReaderVersionTests : IDisposable
         using (var conn = Raw())
         {
             Exec(conn, dropMarker ? "DROP TABLE SchemaInfo" : $"UPDATE SchemaInfo SET Value = {DatabaseMigrationService.CurrentSchemaVersion + 1}");
-            DatabaseMigrationService.SetSchemaVersion(conn, DatabaseMigrationService.CurrentSchemaVersion + 1);
+            DatabaseSchema.SetVersion(conn, DatabaseMigrationService.CurrentSchemaVersion + 1);
         }
 
         Open().Dispose();
         using var after = Raw();
-        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion, DatabaseMigrationService.GetSchemaVersion(after));
+        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion, DatabaseSchema.GetVersion(after));
         Assert.NotEmpty(Backups());
     }
 
@@ -111,7 +112,7 @@ public sealed class SchemaReaderVersionTests : IDisposable
 
         Open().Dispose();
         using var after = Raw();
-        Assert.Equal(DatabaseMigrationService.MinReaderVersion, DatabaseMigrationService.GetMinReaderVersion(after));
+        Assert.Equal(DatabaseMigrationService.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(after));
     }
 
     private SyncDatabase Open() => new(NullLogger<SyncDatabase>.Instance, _dataPath);
@@ -124,7 +125,7 @@ public sealed class SchemaReaderVersionTests : IDisposable
         return conn;
     }
 
-    private string[] Backups() => Directory.GetFiles(Path.GetDirectoryName(_dbPath)!, "sync.db.corrupt-*").Where(f => !f.EndsWith("-wal", StringComparison.Ordinal) && !f.EndsWith("-shm", StringComparison.Ordinal)).ToArray();
+    private string[] Backups() => Directory.GetFiles(Path.GetDirectoryName(_dbPath)!, "sync.db.newer-*").Where(f => !f.EndsWith("-wal", StringComparison.Ordinal) && !f.EndsWith("-shm", StringComparison.Ordinal)).ToArray();
 
     private static void Exec(SqliteConnection conn, string sql)
     {

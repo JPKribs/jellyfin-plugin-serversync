@@ -359,71 +359,6 @@ public static class DatabaseMigrationService
     }
 
     /// <summary>
-    /// Gets the current schema version from the database.
-    /// </summary>
-    /// <param name="connection">Database connection.</param>
-    /// <returns>Current schema version number.</returns>
-    public static int GetSchemaVersion(SqliteConnection connection)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA user_version";
-        var result = command.ExecuteScalar();
-        return Convert.ToInt32(result);
-    }
-
-    /// <summary>
-    /// Marks the database as this build's schema: the version, and the oldest version that can still read
-    /// it. Called whenever this build creates or upgrades the database.
-    /// </summary>
-    /// <param name="connection">Database connection.</param>
-    public static void StampSchema(SqliteConnection connection)
-    {
-        ArgumentNullException.ThrowIfNull(connection);
-        using var command = connection.CreateCommand();
-        command.CommandText = @"
-            CREATE TABLE IF NOT EXISTS SchemaInfo (Key TEXT NOT NULL PRIMARY KEY, Value INTEGER NOT NULL);
-            INSERT INTO SchemaInfo (Key, Value) VALUES ('MinReaderVersion', @min)
-            ON CONFLICT(Key) DO UPDATE SET Value = @min;";
-        command.Parameters.AddWithValue("@min", MinReaderVersion);
-        command.ExecuteNonQuery();
-        SetSchemaVersion(connection, CurrentSchemaVersion);
-    }
-
-    /// <summary>
-    /// Reads the oldest schema version the database says can still read it, or null when the database
-    /// was written by a build that did not record one.
-    /// </summary>
-    /// <param name="connection">Database connection.</param>
-    /// <returns>The version, or null.</returns>
-    public static int? GetMinReaderVersion(SqliteConnection connection)
-    {
-        ArgumentNullException.ThrowIfNull(connection);
-        using var probe = connection.CreateCommand();
-        probe.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SchemaInfo'";
-        if (Convert.ToInt32(probe.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
-        {
-            return null;
-        }
-
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Value FROM SchemaInfo WHERE Key = 'MinReaderVersion'";
-        var value = command.ExecuteScalar();
-        return value is null or DBNull ? null : Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>
-    /// Sets the schema version in the database.
-    /// </summary>
-    /// <param name="connection">Database connection.</param>
-    /// <param name="version">Version number to set.</param>
-    public static void SetSchemaVersion(SqliteConnection connection, int version)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = $"PRAGMA user_version = {version}";
-        command.ExecuteNonQuery();
-    }
-
-    /// <summary>
     /// Migrates the database schema from an older version to the current version.
     /// Any version below 19 is a hard reset. Its tables are dropped and recreated.
     /// </summary>
@@ -671,7 +606,7 @@ public static class DatabaseMigrationService
                 CreateV28Additions(connection);
             }
 
-            StampSchema(connection);
+            JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, CurrentSchemaVersion, MinReaderVersion);
             logger.LogInformation("Database migration completed successfully");
             return true;
         }

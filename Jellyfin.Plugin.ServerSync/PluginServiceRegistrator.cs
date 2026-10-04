@@ -40,6 +40,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             return StableSecretProtection.CreateProtector(sp.GetService<MediaBrowser.Common.Configuration.IApplicationPaths>(), logger);
         });
 
+        // The shared writer for Jellyfin's activity log, from the base package.
+        serviceCollection.AddSingleton<ActivityLogger>();
+
         // The hint pipeline runs for the life of the server. Each worker is registered once as itself,
         // by the attribute scan above, and once more as a hosted service that resolves that same
         // instance, so the controllers and the publisher talk to the running worker.

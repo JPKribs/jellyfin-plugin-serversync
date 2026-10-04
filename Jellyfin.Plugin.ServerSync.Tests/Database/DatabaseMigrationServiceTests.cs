@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Jellyfin.Plugin.ServerSync.Services;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -67,35 +68,6 @@ public class DatabaseMigrationServiceTests
     public void CurrentSchemaVersion_IsTwentySix()
     {
         Assert.Equal(28, DatabaseMigrationService.CurrentSchemaVersion);
-    }
-
-    /// <summary>
-    /// GetSchemaVersion reads SQLite PRAGMA user_version.
-    /// True: callers can detect a stale schema and decide whether to migrate.
-    /// False: every plugin start would mis-detect schema state and either skip or re-run migrations.
-    /// </summary>
-    [Fact]
-    public void GetSchemaVersion_ReadsPragmaUserVersion()
-    {
-        using var conn = OpenConnection();
-        SetVersion(conn, 17);
-
-        Assert.Equal(17, DatabaseMigrationService.GetSchemaVersion(conn));
-    }
-
-    /// <summary>
-    /// SetSchemaVersion writes SQLite PRAGMA user_version.
-    /// True: a completed migration's version-bump persists so the next plugin start sees current state.
-    /// False: version-bumps wouldn't stick and migrations would re-run every plugin start.
-    /// </summary>
-    [Fact]
-    public void SetSchemaVersion_WritesPragmaUserVersion()
-    {
-        using var conn = OpenConnection();
-
-        DatabaseMigrationService.SetSchemaVersion(conn, 42);
-
-        Assert.Equal(42, GetVersion(conn));
     }
 
     /// <summary>
