@@ -46,8 +46,6 @@ All routes sit behind Jellyfin's RequiresElevation policy. The caller presents a
 
 **POST /ServerSync/Peer/Versions.** Returns effective versions for a batch of keys. Used by the full scan against a Both peer so that conflicts resolve on origin versions rather than saved dates.
 
-**DELETE /ServerSync/Peer/Queue/{id}.** Operator removes a poisoned inbound row.
-
 **Response codes seen by the sender.**
 
 | Code | Meaning on the sender |

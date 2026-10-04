@@ -29,3 +29,4 @@ artifacts:
 changelog:
   developer:
   - An applied change writes "Synced [name]." to the activity log, with "[type] [name] was updated from [server]." as the detail
+  - The duplicate DELETE /ServerSync/Peer/Queue/{id} route is gone. Every route requires an administrator, which a unit test and the integration suite now enforce

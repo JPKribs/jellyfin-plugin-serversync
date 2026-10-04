@@ -412,10 +412,6 @@ Negotiate watch history. Each entry proposes a merged state for one of the recei
 
 `Outcome` is `Applied`, `Unchanged`, `Stale`, `NotFound`, or `Failed`. A null field in a state means no opinion and matches anything.
 
-### DELETE /ServerSync/Peer/Queue/{id}
-
-Removes one inbound row by its `Id` from `Status`, for a row that will never apply. Answers `204`, or `404` when there is no such row.
-
 ## Operator routes
 
 These back the dashboard, and are handy for scripting or for watching a pool from the outside.

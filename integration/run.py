@@ -851,13 +851,16 @@ def scenario_content_and_user_hints(creds, apis):
     # User settings are never announced live, since Jellyfin raises no event for them. A policy change
     # on source-a stays put until the scheduled task runs, then arrives.
     viewer_a, viewer_l = (creds["servers"][n]["viewerId"] for n in ("source-a", "local"))
+    before = apis["local"].get(f"/Users/{viewer_l}")["Policy"].get("MaxActiveSessions")
+    # A value the pool has not used before, so a reused pool still sees a change.
+    limit = 10 + (int(time.time()) % 80)
     policy = apis["source-a"].get(f"/Users/{viewer_a}")["Policy"]
-    policy["MaxActiveSessions"] = 5
+    policy["MaxActiveSessions"] = limit
     apis["source-a"].post(f"/Users/{viewer_a}/Policy", policy, expect=204)
     time.sleep(12)
-    expect(apis["local"].get(f"/Users/{viewer_l}")["Policy"].get("MaxActiveSessions") != 5 and queues_empty(), "a policy change raises no hint and the pool stays quiet")
+    expect(apis["local"].get(f"/Users/{viewer_l}")["Policy"].get("MaxActiveSessions") == before and queues_empty(), "a policy change raises no hint and the pool stays quiet")
     run_task(apis["local"], "ServerSyncInformation")
-    expect(apis["local"].get(f"/Users/{viewer_l}")["Policy"].get("MaxActiveSessions") == 5, "the scheduled Sync Information task carries the policy change")
+    expect(apis["local"].get(f"/Users/{viewer_l}")["Policy"].get("MaxActiveSessions") == limit, "the scheduled Sync Information task carries the policy change")
 
     for n in ("source-a", "source-b"):
         configure_server(creds, apis[n], n, [])
@@ -884,11 +887,22 @@ def scenario_peer_endpoint_auth(creds, apis):
     local = apis["local"]
     e = creds["servers"]["local"]
     anon = Api("local", SERVERS["local"]["port"], "it-anon")
-    for method, path in (("POST", "/ServerSync/Peer/Queue"), ("GET", "/ServerSync/Peer/Status"), ("GET", "/ServerSync/Peer/Link?serverId=x"),
-                         ("POST", "/ServerSync/Peer/History"), ("GET", "/ServerSync/Hints"), ("POST", "/ServerSync/Hints/CheckPeer"),
-                         ("GET", "/ServerSync/Hints/Version?kind=People&name=x"), ("DELETE", "/ServerSync/Servers/x/Rows")):
+    routes = (("GET", "/ServerSync/Peer/Capabilities"), ("GET", "/ServerSync/Peer/Link?serverId=x"), ("POST", "/ServerSync/Peer/Queue"),
+              ("POST", "/ServerSync/Peer/Complete"), ("GET", "/ServerSync/Peer/Status"), ("POST", "/ServerSync/Peer/Versions"), ("POST", "/ServerSync/Peer/History"),
+              ("GET", "/ServerSync/Hints"), ("POST", "/ServerSync/Hints/Run"), ("POST", "/ServerSync/Hints/CheckPeer"),
+              ("GET", "/ServerSync/Hints/Version?kind=People&name=x"), ("DELETE", "/ServerSync/Hints/Outbound/1"), ("DELETE", "/ServerSync/Hints/Inbound/1"),
+              ("DELETE", "/ServerSync/Servers/x/Rows"),
+              ("GET", "/ServerSync/Items"), ("GET", "/ServerSync/ImageProxy?itemId=00000000000000000000000000000000"), ("GET", "/ServerSync/MetadataItems"),
+              ("GET", "/ServerSync/HistoryItems"), ("GET", "/ServerSync/PeopleItems"), ("GET", "/ServerSync/UserSyncUsers"), ("POST", "/ServerSync/TestConnection"),
+              ("POST", "/ServerSync/TriggerSync"), ("POST", "/ServerSync/ResetSyncDatabase"), ("GET", "/ServerSync/ValidateConfiguration"))
+    refused = 0
+    for method, path in routes:
         status, _ = anon.call(method, path, {} if method == "POST" else None)
-        expect(status == 401, f"{method} {path} without a token is refused ({status})")
+        if status == 401:
+            refused += 1
+        else:
+            expect(False, f"{method} {path} without a token answered {status} instead of 401")
+    expect(refused == len(routes), f"every route refuses a caller with no token ({refused} of {len(routes)})")
     status, auth = local.post("/Users/AuthenticateByName", {"Username": "viewer", "Pw": ""}, expect=200)
     viewer = Api("local", SERVERS["local"]["port"], "it-viewer")
     viewer.token = auth["AccessToken"]

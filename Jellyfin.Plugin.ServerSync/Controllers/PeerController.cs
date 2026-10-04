@@ -234,17 +234,6 @@ public class PeerController : ControllerBase
         return Ok(new VersionsResponse { Items = _versions.GetMany(request.Kind, request.Keys).ToList() });
     }
 
-    /// <summary>Removes one inbound row that will never apply. An operator action.</summary>
-    /// <param name="id">The row id from <see cref="Status"/>.</param>
-    /// <returns>No content, or not found.</returns>
-    [HttpDelete("Queue/{id}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult RemoveQueued([FromRoute] long id)
-    {
-        return _inbound.Delete(id) ? NoContent() : NotFound();
-    }
-
     // What makes a hint impossible to apply here, or null when it can be queued. Decided on receipt so
     // the sender hears straight away and the row never sits in the queue.
     private string? Unmappable(Models.Configuration.SourceServer origin, SyncHint hint)
