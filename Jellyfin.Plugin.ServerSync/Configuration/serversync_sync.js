@@ -3726,9 +3726,14 @@ export default function (view) {
                 var paused = p.PausedUntil && new Date(p.PausedUntil) > new Date();
                 var state = paused ? 'Paused until ' + QueueModule._time(p.PausedUntil)
                     : p.LastAttempt ? 'Delivered ' + QueueModule._ago(p.LastAttempt) : 'Nothing sent yet';
+                // What goes to this peer follows the modules selected there.
+                var sends = p.Sends === null || p.Sends === undefined ? 'Sends everything until the peer says what it applies'
+                    : p.Sends.length === 0 ? 'Sends nothing: every module is off there'
+                    : 'Sends ' + p.Sends.map(QueueModule._kindLabel).join(', ');
                 return '<div class="healthCard queuePeerCard">' +
                     '<span class="healthLabel">' + ServerSyncShared.escapeHtml(p.Name || p.Key) + '</span>' +
                     '<span class="healthValue' + (paused ? ' paused' : '') + '">' + ServerSyncShared.escapeHtml(state) + '</span>' +
+                    '<div class="queuePeerReason">' + ServerSyncShared.escapeHtml(sends) + '</div>' +
                     (p.Reason ? '<div class="queuePeerReason">' + ServerSyncShared.escapeHtml(p.Reason) + '</div>' : '') +
                     '</div>';
             }).join('');
@@ -3794,6 +3799,10 @@ export default function (view) {
             else what = QueueModule._fileName(path) || key;
             return '<span class="queueChangeKind">' + ServerSyncShared.escapeHtml(QueueModule._kindName(kind)) + '</span>' +
                 '<span class="queueChangeWhat" title="' + ServerSyncShared.escapeHtml(path || '') + '">' + ServerSyncShared.escapeHtml(what || '') + '</span>';
+        },
+
+        _kindLabel: function(kind) {
+            return { History: 'watch history', Metadata: 'metadata', People: 'people', Content: 'files', Users: 'user settings' }[kind] || String(kind).toLowerCase();
         },
 
         _kindName: function(kind) {

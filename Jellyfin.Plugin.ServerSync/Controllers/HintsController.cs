@@ -320,7 +320,8 @@ public class HintsController : ControllerBase
                 Name = peer.DisplayName,
                 LastAttempt = state?.LastAttempt,
                 PausedUntil = state?.PausedUntil,
-                Reason = state?.Reason
+                Reason = state?.Reason,
+                Sends = state?.Accepts?.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList()
             });
         }
 
@@ -507,4 +508,10 @@ public class PeerHintStateDto
 
     /// <summary>Gets or sets why the last delivery did not go through.</summary>
     public string? Reason { get; set; }
+
+    /// <summary>
+    /// Gets or sets the kinds this server sends to the peer, which are the modules selected there, or
+    /// null when the peer has not said yet, in which case everything is sent.
+    /// </summary>
+    public List<string>? Sends { get; set; }
 }
