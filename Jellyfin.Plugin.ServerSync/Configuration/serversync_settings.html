@@ -505,7 +505,7 @@
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableUserSync" />
                                         <span class="checkboxLabel">Enable User Sync</span>
                                     </label>
-                                    <div class="fieldDescription checkboxFieldDescription">Sync user settings (policy, configuration, profile images) from source to local server for mapped users.</div>
+                                    <div class="fieldDescription checkboxFieldDescription">Sync user settings (policy, configuration, profile images) from source to local server for mapped users. User settings travel on the scheduled Sync Information task only. They are not announced as they happen, because Jellyfin raises no event for policy and configuration changes.</div>
                                 </div>
                             </div>
 

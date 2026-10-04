@@ -3749,6 +3749,20 @@ export default function (view) {
                     (data.LastUnmatched ? '. Last: ' + data.LastUnmatched : '') + '. Check the Libraries and Users steps of those servers.';
             }
 
+            // What is still gathering: named the moment it is noticed, with when it goes out.
+            var gathering = data.Gathering || [];
+            var gatherBody = view.querySelector('#queueGatheringBody');
+            gatherBody.innerHTML = gathering.map(function(g) {
+                return '<tr>' +
+                    '<td><span class="queueChangeKind">' + ServerSyncShared.escapeHtml(QueueModule._kindName(g.Kind) + (g.Recorded === false ? ' \u00b7 provider' : '')) + '</span>' +
+                        '<span class="queueChangeWhat">' + ServerSyncShared.escapeHtml(g.Change || '') + '</span></td>' +
+                    '<td>' + ServerSyncShared.escapeHtml(QueueModule._ago(g.EditedAt)) + '</td>' +
+                    '<td>' + ServerSyncShared.escapeHtml(QueueModule._time(g.DueAt) || 'now') + '</td>' +
+                    '</tr>';
+            }).join('');
+            view.querySelector('#queueGatheringEmpty').classList.toggle('hidden', gathering.length > 0);
+            view.querySelector('#queueGatheringTable').classList.toggle('hidden', gathering.length === 0);
+
             var outBody = view.querySelector('#queueOutboundBody');
             outBody.innerHTML = outbound.map(function(r) {
                 var state = QueueModule._stateName(r.State);

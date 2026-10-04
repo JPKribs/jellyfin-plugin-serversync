@@ -9,6 +9,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Library;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Microsoft.AspNetCore.Authorization;
@@ -40,6 +41,8 @@ public class HintsController : ControllerBase
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly IServerApplicationHost _applicationHost;
     private readonly VersionStore _versions;
+    private readonly ILibraryManager _libraryManager;
+    private readonly IUserManager _userManager;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HintsController"/> class.
@@ -53,6 +56,8 @@ public class HintsController : ControllerBase
     /// <param name="clientFactory">Client factory for peers.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="versions">The version store, for the detail modals.</param>
+    /// <param name="libraryManager">Library manager, to name the changes still gathering.</param>
+    /// <param name="userManager">User manager, to name the changes still gathering.</param>
     public HintsController(
         OutboundHintStore outbound,
         InboundHintStore inbound,
@@ -62,8 +67,12 @@ public class HintsController : ControllerBase
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
         IServerApplicationHost applicationHost,
-        VersionStore versions)
+        VersionStore versions,
+        ILibraryManager libraryManager,
+        IUserManager userManager)
     {
+        _libraryManager = libraryManager;
+        _userManager = userManager;
         _versions = versions;
         _outbound = outbound;
         _inbound = inbound;
@@ -171,7 +180,7 @@ public class HintsController : ControllerBase
                 result.Severity = mode == ServerMode.Pull ? "warn" : "error";
                 result.Message = mode == ServerMode.Pull
                     ? $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes, so this server will pull on a schedule only. Update it there for changes as they happen."
-                    : $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes; update it before using Push or Sync.";
+                    : $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes. Update it before using Push or Sync.";
                 return Ok(result);
             }
 
@@ -179,13 +188,13 @@ public class HintsController : ControllerBase
             var skew = capabilities.ServerTime.HasValue ? (DateTime.UtcNow - capabilities.ServerTime.Value.ToUniversalTime()).Duration() : TimeSpan.Zero;
             result.ClockSkewSeconds = (int)Math.Round(skew.TotalSeconds);
             var skewNote = skew > HintProtocol.ClockSkewWarning
-                ? $" Its clock is about {FormatSkew(skew)} off from this server's, so edits made on both within that window may be settled the wrong way round; put both servers on NTP."
+                ? $" Its clock is about {FormatSkew(skew)} off from this server's, so edits made on both within that window may be settled the wrong way round. Put both servers on NTP."
                 : string.Empty;
 
             result.Accepts = capabilities.Accepts;
             var acceptsNote = capabilities.Accepts is null ? string.Empty
                 : capabilities.Accepts.Count == 0 ? " Every module is off there, so it applies no changes from this server."
-                : $" It applies {string.Join(", ", capabilities.Accepts.Select(DescribeKind))} from this server; other kinds are off there.";
+                : $" It applies {JoinWords(capabilities.Accepts.Select(DescribeKind).ToList())} from this server. Other kinds are off there.";
 
             var link = await client.GetPeerLinkAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
             result.ListsThisServer = link is { Listed: true, Enabled: true, PullsFromYou: true };
@@ -267,6 +276,15 @@ public class HintsController : ControllerBase
         _ => kind.ToLowerInvariant()
     };
 
+    // "a", "a and b", "a, b, and c".
+    private static string JoinWords(List<string> words) => words.Count switch
+    {
+        0 => string.Empty,
+        1 => words[0],
+        2 => $"{words[0]} and {words[1]}",
+        _ => string.Join(", ", words.Take(words.Count - 1)) + ", and " + words[^1]
+    };
+
     private static string FormatSkew(TimeSpan skew)
         => skew.TotalMinutes >= 1 ? $"{Math.Round(skew.TotalMinutes)} minute(s)" : $"{Math.Round(skew.TotalSeconds)} second(s)";
 
@@ -288,6 +306,22 @@ public class HintsController : ControllerBase
         foreach (var (state, count) in _outbound.CountByState())
         {
             overview.OutboundCounts[state.ToString()] = count;
+        }
+
+        // What is still gathering, named, so the operator sees a change the moment it is noticed.
+        foreach (var change in _observer.Gathering().Take(OverviewRows))
+        {
+            var item = change.ItemId == Guid.Empty ? null : _libraryManager.GetItemById(change.ItemId);
+            var userName = change.UserId == Guid.Empty ? null : _userManager.GetUserById(change.UserId)?.Username;
+            var name = change.Kind == HintKind.People ? item?.Name : userName;
+            overview.Gathering.Add(new GatheringDto
+            {
+                Kind = change.Kind,
+                Change = HintActivityLog.Subject(change.Kind, item?.Path, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N")),
+                EditedAt = change.EditedAt,
+                DueAt = change.Due,
+                Recorded = change.Recorded
+            });
         }
 
         foreach (var row in _outbound.GetRecent(OverviewRows))
@@ -430,6 +464,9 @@ public class HintsOverview
     /// <summary>Gets or sets the last such change, described.</summary>
     public string? LastUnmatched { get; set; }
 
+    /// <summary>Gets or sets the changes still gathering before they become hints, newest edit first.</summary>
+    public List<GatheringDto> Gathering { get; set; } = new();
+
     /// <summary>Gets or sets the newest outbound rows, at most a few hundred.</summary>
     public List<OutboundHintDto> Outbound { get; set; } = new();
 
@@ -444,6 +481,25 @@ public class HintsOverview
 
     /// <summary>Gets or sets the delivery state of every server this one sends to.</summary>
     public List<PeerHintStateDto> Peers { get; set; } = new();
+}
+
+/// <summary>One change still gathering, as shown to the operator.</summary>
+public class GatheringDto
+{
+    /// <summary>Gets or sets the kind.</summary>
+    public HintKind Kind { get; set; }
+
+    /// <summary>Gets or sets what changed, named.</summary>
+    public string Change { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets when it was last edited, in UTC.</summary>
+    public DateTime EditedAt { get; set; }
+
+    /// <summary>Gets or sets when it is sent unless edited again, in UTC.</summary>
+    public DateTime DueAt { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a hand made edit is among the gathered changes.</summary>
+    public bool Recorded { get; set; } = true;
 }
 
 /// <summary>One outbound row as shown to the operator.</summary>

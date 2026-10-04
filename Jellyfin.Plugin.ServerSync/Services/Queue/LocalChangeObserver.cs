@@ -17,9 +17,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
 /// Listens for changes made on this server and raises hints for them: user data saves for history,
-/// item updates for metadata and people, items added for content, and user updates for users. Policy
-/// and configuration changes raise no Jellyfin event, so mapped users are also checked on a timer
-/// against a snapshot. The module switches are the receiver's business: a server raises a hint for
+/// item updates for metadata and people, and items added for content. User settings are not
+/// announced: Jellyfin raises no event for policy and configuration changes, so the scheduled Sync
+/// Information task carries them. The module switches are the receiver's business: a server raises a hint for
 /// anything a peer it sends to has mapped, and the peer decides. A metadata edit or an image change
 /// raises an item hint. Provider work during a scan or a refresh is marked as such, since a server
 /// that fetches its own metadata after receiving a file would otherwise push that over the other
@@ -43,7 +43,6 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalChangeObserver> _logger;
     private readonly ConcurrentDictionary<string, PendingChange> _pending = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<Guid, string> _userPrints = new();
     private readonly ConcurrentDictionary<Guid, byte> _refreshing = new();
     private CancellationTokenSource? _stopping;
     private Task? _flushLoop;
@@ -100,6 +99,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <summary>Gets a description of the last change that matched no mapping, or null.</summary>
     public string? LastUnmatched => _lastUnmatched;
 
+    /// <summary>Gets the changes still gathering, newest edit first, for the dashboard.</summary>
+    /// <returns>A snapshot.</returns>
+    public IReadOnlyList<GatheringChange> Gathering()
+        => _pending.Values.Select(c => new GatheringChange(c.Kind, c.UserId, c.ItemId, c.EditedAt, c.Due, c.Recorded)).OrderByDescending(c => c.EditedAt).ToList();
+
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -107,11 +111,10 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager.UserDataSaved += OnUserDataSaved;
         _libraryManager.ItemUpdated += OnItemUpdated;
         _libraryManager.ItemAdded += OnItemAdded;
-        _userManager.OnUserUpdated += OnUserUpdated;
         _providerManager.RefreshStarted += OnRefreshStarted;
         _providerManager.RefreshCompleted += OnRefreshCompleted;
         _flushLoop = Task.Run(() => FlushLoopAsync(_stopping.Token), CancellationToken.None);
-        _logger.LogInformation("Server Sync is watching for local history changes");
+        _logger.LogInformation("Server Sync is watching for local changes to watch history, metadata, people, and files. User settings are not announced live, since Jellyfin raises no event for policy and configuration changes; the scheduled Sync Information task carries them");
         return Task.CompletedTask;
     }
 
@@ -121,7 +124,6 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager.UserDataSaved -= OnUserDataSaved;
         _libraryManager.ItemUpdated -= OnItemUpdated;
         _libraryManager.ItemAdded -= OnItemAdded;
-        _userManager.OnUserUpdated -= OnUserUpdated;
         _providerManager.RefreshStarted -= OnRefreshStarted;
         _providerManager.RefreshCompleted -= OnRefreshCompleted;
         if (_stopping is not null)
@@ -336,117 +338,6 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
-    private void OnUserUpdated(object? sender, Jellyfin.Data.Events.GenericEventArgs<Jellyfin.Database.Implementations.Entities.User> e)
-    {
-        try
-        {
-            if (e?.Argument is null)
-            {
-                return;
-            }
-
-            NoteUser(e.Argument.Id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Could not record a local user change");
-        }
-    }
-
-    /// <summary>
-    /// Takes a fresh picture of a user after a peer's change was applied here, so the write is not
-    /// reported back as a local edit when the timer next looks.
-    /// </summary>
-    /// <param name="userId">The local user.</param>
-    public void ResetUserSnapshot(Guid userId)
-    {
-        var print = Fingerprint(userId);
-        if (print is null)
-        {
-            _userPrints.TryRemove(userId, out _);
-        }
-        else
-        {
-            _userPrints[userId] = print;
-        }
-    }
-
-    private void NoteUser(Guid userId)
-    {
-        var key = HintProtocol.UsersKey(userId);
-        if (_guard.IsApplying(HintProtocol.GuardKey(HintKind.Users, key)))
-        {
-            ResetUserSnapshot(userId);
-            return;
-        }
-
-        ResetUserSnapshot(userId);
-        Note(HintKind.Users, key, userId, Guid.Empty);
-    }
-
-    // Policy and configuration saves raise no event, so every user mapped to a peer this server
-    // sends to is compared against a snapshot on a timer. The first look only takes the snapshot.
-    private void PollUsers()
-    {
-        var config = _configManager.Configuration;
-        var mapped = new HashSet<Guid>();
-        foreach (var peer in config.Servers.Where(s => s.Pushes))
-        {
-            foreach (var mapping in peer.GetEnabledUserMappings())
-            {
-                if (Guid.TryParse(mapping.LocalUserId, out var id))
-                {
-                    mapped.Add(id);
-                }
-            }
-        }
-
-        foreach (var stale in _userPrints.Keys.Where(k => !mapped.Contains(k)).ToList())
-        {
-            _userPrints.TryRemove(stale, out _);
-        }
-
-        foreach (var userId in mapped)
-        {
-            var print = Fingerprint(userId);
-            if (print is null)
-            {
-                continue;
-            }
-
-            if (!_userPrints.TryGetValue(userId, out var previous))
-            {
-                _userPrints[userId] = print;
-                continue;
-            }
-
-            if (!string.Equals(previous, print, StringComparison.Ordinal))
-            {
-                NoteUser(userId);
-            }
-        }
-    }
-
-    private string? Fingerprint(Guid userId)
-    {
-        try
-        {
-            var user = _userManager.GetUserById(userId);
-            if (user is null)
-            {
-                return null;
-            }
-
-            var dto = _userManager.GetUserDto(user);
-            return System.Text.Json.JsonSerializer.Serialize(new { dto.Name, dto.PrimaryImageTag, dto.Policy, dto.Configuration });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Could not read user {User} for change detection", userId);
-            return null;
-        }
-    }
-
     // A change gathers with the others to the same object. One hand made edit in the window makes the
     // whole hint a recorded edit; a window of nothing but provider work travels as provider work.
     private void Note(HintKind kind, string localKey, Guid userId, Guid itemId, bool recorded = true)
@@ -467,25 +358,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private async Task FlushLoopAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        var nextUserPoll = DateTime.UtcNow + HintProtocol.UserPoll;
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
             if (!_pending.IsEmpty)
             {
                 Flush(DateTime.UtcNow);
-            }
-
-            if (DateTime.UtcNow >= nextUserPoll)
-            {
-                nextUserPoll = DateTime.UtcNow + HintProtocol.UserPoll;
-                try
-                {
-                    PollUsers();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "User change check failed");
-                }
             }
         }
     }
@@ -493,17 +370,6 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private void Raise(PendingChange change)
     {
         var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = change.EditedAt };
-        if (change.Kind == HintKind.Users)
-        {
-            var changedUser = _userManager.GetUserById(change.UserId);
-            if (changedUser is not null)
-            {
-                NoteUnmatched(_publisher.PublishUsers(change.UserId, changedUser.Username, version, excludePeerKey: null), HintKind.Users, null, changedUser.Username);
-            }
-
-            return;
-        }
-
         var item = _libraryManager.GetItemById(change.ItemId);
         if (item is null)
         {
@@ -550,6 +416,15 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded);
 }
+
+/// <summary>One change still gathering before it becomes a hint.</summary>
+/// <param name="Kind">The kind.</param>
+/// <param name="UserId">The local user, for history.</param>
+/// <param name="ItemId">The local item.</param>
+/// <param name="EditedAt">When it was last edited, in UTC.</param>
+/// <param name="Due">When it is sent unless edited again, in UTC.</param>
+/// <param name="Recorded">Whether a hand made edit is among the gathered changes.</param>
+public sealed record GatheringChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded);
 
 /// <summary>What an item update is, as the observer sorts it.</summary>
 public enum ChangeOrigin

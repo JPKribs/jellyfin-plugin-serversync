@@ -33,7 +33,6 @@ public class SyncMissingUserTask
     private readonly IProviderManager _providerManager;
     private readonly IServerConfigurationManager _serverConfigurationManager;
     private readonly Services.Queue.AppliedVersionRecorder? _applied;
-    private readonly Services.Queue.LocalChangeObserver? _observer;
 
     /// <summary>
     /// Initializes a new instance.
@@ -46,23 +45,20 @@ public class SyncMissingUserTask
         IProviderManager providerManager,
         IServerConfigurationManager serverConfigurationManager,
         UserSyncTableManager manager,
-        Services.Queue.AppliedVersionRecorder? applied = null,
-        Services.Queue.LocalChangeObserver? observer = null)
+        Services.Queue.AppliedVersionRecorder? applied = null)
         : base(logger, manager, clientFactory, configManager)
     {
         _userManager = userManager;
         _providerManager = providerManager;
         _serverConfigurationManager = serverConfigurationManager;
         _applied = applied;
-        _observer = observer;
     }
 
     /// <inheritdoc />
     protected override IDisposable? EnterApplyGuard(UserSyncItem record)
         => _applied?.Enter(Models.Queue.HintKind.Users, Guid.TryParse(record?.LocalUserId, out var id) ? Services.Queue.HintProtocol.UsersKey(id) : string.Empty);
 
-    // The version is recorded once per user, and the change observer's picture of the user is
-    // refreshed so the write just made here is not reported back as a local edit.
+    // The version is recorded once per user.
     /// <inheritdoc />
     protected override async Task AfterApplySucceededAsync(UserSyncItem record, CancellationToken cancellationToken)
     {
@@ -76,7 +72,6 @@ public class SyncMissingUserTask
             await _applied.RecordAsync(Models.Queue.HintKind.Users, Services.Queue.HintProtocol.UsersKey(localId), Services.Queue.HintProtocol.UsersKey(sourceId), SourceFor(record), cancellationToken).ConfigureAwait(false);
         }
 
-        _observer?.ResetUserSnapshot(localId);
     }
 
     /// <inheritdoc />

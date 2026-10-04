@@ -6,7 +6,7 @@ A Jellyfin plugin that keeps several Jellyfin servers in step. Keep your **Conte
 
 Server Sync runs on your Local (destination) server and pulls data from one or more Source servers using standard Jellyfin APIs. You configure each server with its own library and user mappings, then two scheduled tasks, **Sync Content** and **Sync Information**, handle the synchronization. Content is matched by file path, allowing the plugin to track what needs to be downloaded, updated, or removed. No modifications are required on a Source server that is only scanned.
 
-When a Source server also runs Server Sync, the two can keep each other current between scheduled runs. A server entry in **Push** or **Sync** mode is told about changes as they happen, from a play or a favorite to a metadata edit, a person edit, a user's settings, or a new file, and pulls each change within seconds. The scheduled tasks remain the safety net. See **[Live Changes](#live-changes-between-servers)**.
+When a Source server also runs Server Sync, the two can keep each other current between scheduled runs. A server entry in **Push** or **Sync** mode is told about changes as they happen, from a play or a favorite to a metadata edit, a person edit, or a new file, and pulls each change within seconds. User settings travel on the scheduled task only, since Jellyfin raises no event for them. The scheduled tasks remain the safety net. See **[Live Changes](#live-changes-between-servers)**.
 
 When several servers are configured, their order is their priority. If two servers offer the same item, the server higher in the list supplies it and the lower one only contributes what the higher one lacks. Reordering the list moves an item to the new winner on the next refresh without deleting anything already downloaded.
 
@@ -121,7 +121,7 @@ When two servers disagree, watch history merges three way against what the serve
 | :--- |
 | ![Change Queue](docs/screenshots/Queue.png) |
 
-The **Queue** view on the Sync page shows what is owed to each peer, what peers have sent that is not yet applied, and each peer's delivery state with the reason when it is paused. When a change here matched no library or user mapping on any Push or Sync server, the view says so and names the last one, since that is the usual reason nothing is sent. Every hint that reaches a conclusion also writes a line to Jellyfin's activity log. A paused peer keeps at most ten thousand pending hints; beyond that the oldest are dropped and the scheduled tasks carry the change instead. Each item's detail dialog shows which server last edited it and when.
+The **Queue** view on the Sync page shows the changes still gathering before they are sent, what is owed to each peer, what peers have sent that is not yet applied, and each peer's delivery state with the reason when it is paused. When a change here matched no library or user mapping on any Push or Sync server, the view says so and names the last one, since that is the usual reason nothing is sent. Every change applied from a peer writes a line to Jellyfin's activity log, "Metadata for Only A (2021) was updated" with the peer it was triggered from in the detail, and every drop, retry, and pause writes one too. A paused peer keeps at most ten thousand pending hints; beyond that the oldest are dropped and the scheduled tasks carry the change instead. Each item's detail dialog shows which server last edited it and when.
 
 | Item Detail |
 | :--- |
@@ -272,7 +272,7 @@ What this installation can negotiate. A `404` means the plugin is not installed 
   "ServerId": "2f40d5d86aba4689819184b48738d2ad",
   "PluginVersion": "12.2.1.1",
   "Features": ["history-negotiate", "hints"],
-  "Accepts": ["History", "Metadata", "People"],
+  "Accepts": ["History", "Metadata", "People", "Content"],
   "ServerTime": "2026-10-03T19:30:47.9590000Z"
 }
 ```
@@ -320,7 +320,7 @@ Offer a batch of change hints. A hint says what changed and where, never the val
 }
 ```
 
-`Recorded` says whether the change was made by hand (`true`) or is a provider's work such as a poster a scan fetched (`false`). Provider work is applied only where the receiver has recorded no edit of its own and leaves no version behind. Absent from older peers, which is read as `true`. `Kind` is one of `History`, `Metadata`, `People`, `Content`, or `Users`. `Key` is the sender's own key for the object: the item id for metadata and content, the user id for users, the person's name for people, and `userId|itemId` for history. `ItemPath` and `UserName` are what the receiver maps through its own library and user mappings for the sender.
+`Recorded` says whether the change was made by hand (`true`) or is a provider's work such as a poster a scan fetched (`false`). Provider work is applied only where the receiver has recorded no edit of its own and leaves no version behind. Absent from older peers, which is read as `true`. `Kind` is one of `History`, `Metadata`, `People`, or `Content`. `Users` is declined, since user settings travel on the scheduled task only. `Key` is the sender's own key for the object: the item id for metadata and content, the user id for users, the person's name for people, and `userId|itemId` for history. `ItemPath` and `UserName` are what the receiver maps through its own library and user mappings for the sender.
 
 The answer is one result per hint, in request order. `200` means queued, not applied. A hint for something the receiver does not map is answered as not accepted with the reason, and the sender treats that as done.
 
@@ -427,6 +427,7 @@ Both queues on this server and the delivery state of every peer it sends to.
 ```json
 {
   "Pending": 0,
+  "Gathering": [ { "Kind": "Metadata", "Change": "Metadata for Only A (2021)", "EditedAt": "…", "DueAt": "…", "Recorded": true } ],
   "Outbound": [
     { "Id": 42, "HintId": "…:42", "PeerKey": "…", "PeerName": "source-a", "Kind": "Metadata", "Key": "…", "ItemPath": "…", "UserName": null,
       "State": "Sent", "Attempts": 1, "NextAttempt": "…", "SentAt": "…", "LastError": null, "CreatedAt": "…" }
@@ -436,7 +437,7 @@ Both queues on this server and the delivery state of every peer it sends to.
 }
 ```
 
-`Pending` counts local edits still gathering before they become hints. `Unmatched` counts local changes since start that no Push or Sync server mapped, with the last one described in `LastUnmatched`, which is the first thing to check when nothing is being sent. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. `Sends` lists the kinds this server sends to that peer, which are the modules selected there, or is null until the peer has said. The lists hold at most five hundred rows each; `OutboundCounts` by state name and `InboundCount` cover the whole table.
+`Pending` counts local edits still gathering before they become hints, and `Gathering` names them with when each goes out. `Unmatched` counts local changes since start that no Push or Sync server mapped, with the last one described in `LastUnmatched`, which is the first thing to check when nothing is being sent. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. `Sends` lists the kinds this server sends to that peer, which are the modules selected there, or is null until the peer has said. The lists hold at most five hundred rows each; `OutboundCounts` by state name and `InboundCount` cover the whole table.
 
 ### POST /ServerSync/Hints/Run
 

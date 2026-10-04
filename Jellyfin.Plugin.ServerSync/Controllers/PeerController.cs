@@ -287,17 +287,9 @@ public class PeerController : ControllerBase
                 return HintMapping.FindBySourcePath(origin, hint.ItemPath) is null ? "the path is not in a library mapped on this server" : null;
 
             case HintKind.Users:
-                if (!config.EnableUserSync)
-                {
-                    return "user sync is off on this server";
-                }
-
-                if (!Guid.TryParse(hint.Key, out var hintedUser))
-                {
-                    return "the key is not a user id";
-                }
-
-                return HintMapping.FindBySourceUser(origin, hintedUser) is null ? "the user is not mapped on this server" : null;
+                // Never announced live. Jellyfin raises no event for policy and configuration changes,
+                // so user settings travel on the scheduled task only.
+                return "user settings are not announced live, the scheduled Sync Information task carries them";
 
             case HintKind.History:
                 if (!config.EnableHistorySync)

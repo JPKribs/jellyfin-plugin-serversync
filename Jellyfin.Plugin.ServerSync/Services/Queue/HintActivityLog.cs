@@ -52,17 +52,41 @@ public sealed class HintActivityLog
         };
     }
 
-    /// <summary>Records that a hint from a peer was applied here.</summary>
+    /// <summary>The subject of a hint as a short title, such as "Metadata for Only A (2021)".</summary>
+    /// <param name="kind">The kind.</param>
+    /// <param name="itemPath">The item's path, when the kind concerns an item.</param>
+    /// <param name="userName">The username, when the kind concerns a user.</param>
+    /// <param name="key">The key, as a fallback.</param>
+    /// <returns>The subject.</returns>
+    public static string Subject(HintKind kind, string? itemPath, string? userName, string key)
+    {
+        var file = string.IsNullOrEmpty(itemPath) ? null : Path.GetFileNameWithoutExtension(itemPath);
+        return kind switch
+        {
+            HintKind.History => string.IsNullOrEmpty(userName) ? $"Watch history for {file ?? key}" : $"Watch history for {file ?? key} ({userName})",
+            HintKind.Metadata => $"Metadata for {file ?? key}",
+            HintKind.People => $"Person {userName ?? key}",
+            HintKind.Content => $"File {file ?? key}",
+            HintKind.Users => $"User {userName ?? key}",
+            _ => key
+        };
+    }
+
+    /// <summary>
+    /// Records that a hint from a peer was applied here: "[type] [name] was updated", with the peer it
+    /// came from in the detail.
+    /// </summary>
     /// <param name="hint">The hint.</param>
     /// <param name="originName">The peer's display name.</param>
     /// <returns>A task.</returns>
     public Task AppliedAsync(InboundHint hint, string originName)
     {
         ArgumentNullException.ThrowIfNull(hint);
+        var subject = Subject(hint.Kind, hint.ItemPath, hint.UserName, hint.Key);
         return WriteAsync(
-            Prefix + $"applied {Describe(hint.Kind, hint.ItemPath, hint.UserName, hint.Key)} from {originName}",
+            $"{subject} was updated",
             "ServerSync.HintApplied",
-            hint.ItemPath,
+            $"{subject} was triggered from {originName}.",
             LogLevel.Information);
     }
 

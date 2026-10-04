@@ -54,7 +54,7 @@ public static class HintProtocol
     /// <summary>How often a sender re-reads what each peer accepts, so a module switched on there is noticed within a minute.</summary>
     public static readonly TimeSpan CapabilityRefresh = TimeSpan.FromSeconds(60);
 
-    /// <summary>The kinds a server applies, by its module switches.</summary>
+    /// <summary>The kinds a server applies from hints, by its module switches. Users are never among them.</summary>
     /// <param name="config">The configuration.</param>
     /// <returns>The kinds whose module is on.</returns>
     public static IReadOnlyList<HintKind> AcceptedKinds(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
@@ -81,11 +81,8 @@ public static class HintProtocol
             kinds.Add(HintKind.Content);
         }
 
-        if (config.EnableUserSync)
-        {
-            kinds.Add(HintKind.Users);
-        }
-
+        // User settings are never announced live: Jellyfin raises no event for policy and configuration
+        // changes, so the scheduled task carries them.
         return kinds;
     }
 
@@ -128,9 +125,6 @@ public static class HintProtocol
     /// <param name="userId">The user id.</param>
     /// <returns>The key.</returns>
     public static string UsersKey(Guid userId) => userId.ToString("N", CultureInfo.InvariantCulture);
-
-    /// <summary>How often local users are checked for policy and configuration changes, which Jellyfin raises no event for.</summary>
-    public static readonly TimeSpan UserPoll = TimeSpan.FromSeconds(30);
 
     /// <summary>Builds the people key for a person, which is the name folded for comparison.</summary>
     /// <param name="name">The person's name.</param>

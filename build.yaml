@@ -29,4 +29,7 @@ artifacts:
 changelog:
   developer:
   - Every metadata and image change travels, posters included. Provider work from a scan or a refresh is marked, fills in where the other server has recorded no edit, and never replaces a poster or field set by hand. Sync database schema v26
-  - The Queue view's To Send card is now Pending, matching the row badges
+  - The Queue view lists the changes still gathering, named, with when each goes out, and its To Send card is now Pending
+  - An applied change writes "[type] [name] was updated" to the activity log, with the peer it was triggered from in the detail
+  - User settings are no longer announced live, since Jellyfin raises no event for policy and configuration changes. The scheduled Sync Information task carries them, and the Users settings say so
+  - Check Link reads as plain sentences

@@ -72,7 +72,7 @@ public static class HintDelivery
     /// <returns>The reason.</returns>
     public static string PauseReason(int statusCode, string body) => statusCode switch
     {
-        401 or 403 => "the peer refused this server's key. Push and Sync need an administrator's key for the peer; check the key for this server entry",
+        401 or 403 => "the peer refused this server's key. Push and Sync need an administrator's key for the peer. Check the key on this server entry",
         404 => "Server Sync is not installed on the peer, or its version predates hints",
         _ => "the peer does not list this server as a source: " + body
     };

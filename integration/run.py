@@ -848,21 +848,16 @@ def scenario_content_and_user_hints(creds, apis):
     wait_until(queues_empty, 60, "every queue drained after the download")
     wait_until(lambda: find_item(apis["local"], "Movie", "Only A Two") is not None, 120, "local's library picked the new film up through the queued scan")
 
-    # A policy change on source-a reaches local, and a later change on local wins everywhere.
-    viewer_a, viewer_l, viewer_b = (creds["servers"][n]["viewerId"] for n in ("source-a", "local", "source-b"))
+    # User settings are never announced live, since Jellyfin raises no event for them. A policy change
+    # on source-a stays put until the scheduled task runs, then arrives.
+    viewer_a, viewer_l = (creds["servers"][n]["viewerId"] for n in ("source-a", "local"))
     policy = apis["source-a"].get(f"/Users/{viewer_a}")["Policy"]
     policy["MaxActiveSessions"] = 5
     apis["source-a"].post(f"/Users/{viewer_a}/Policy", policy, expect=204)
-    wait_until(lambda: apis["local"].get(f"/Users/{viewer_l}")["Policy"].get("MaxActiveSessions") == 5, 120, "a policy change on source-a reached local without a scan")
-    wait_until(queues_empty, 90, "every queue drained after the policy change")
-    policy = apis["local"].get(f"/Users/{viewer_l}")["Policy"]
-    policy["MaxActiveSessions"] = 7
-    apis["local"].post(f"/Users/{viewer_l}/Policy", policy, expect=204)
-    wait_until(lambda: apis["source-a"].get(f"/Users/{viewer_a}")["Policy"].get("MaxActiveSessions") == 7
-               and apis["source-b"].get(f"/Users/{viewer_b}")["Policy"].get("MaxActiveSessions") == 7, 120, "a later policy change on local reached both sources")
-    wait_until(queues_empty, 90, "every queue drained after the second policy change")
-    time.sleep(8)
-    expect(queues_empty(), "the pool is quiet after the user changes")
+    time.sleep(12)
+    expect(apis["local"].get(f"/Users/{viewer_l}")["Policy"].get("MaxActiveSessions") != 5 and queues_empty(), "a policy change raises no hint and the pool stays quiet")
+    run_task(apis["local"], "ServerSyncInformation")
+    expect(apis["local"].get(f"/Users/{viewer_l}")["Policy"].get("MaxActiveSessions") == 5, "the scheduled Sync Information task carries the policy change")
 
     for n in ("source-a", "source-b"):
         configure_server(creds, apis[n], n, [])
@@ -872,7 +867,7 @@ def scenario_content_and_user_hints(creds, apis):
 def activity(api, needle, limit=40):
     """Server Sync activity log entries whose name contains the needle, newest first."""
     items = api.get(f"/System/ActivityLog/Entries?limit={limit}")["Items"]
-    return [e for e in items if e["Name"].startswith("Server Sync") and needle in e["Name"]]
+    return [e for e in items if (e.get("Type") or "").startswith("ServerSync") and needle.lower() in e["Name"].lower()]
 
 
 def restart_container(name, api):
@@ -1055,13 +1050,6 @@ def scenario_non_admin_peer_key(creds, apis):
     wait_until(lambda: overview(local, "Person", "Alice Actor") == bio, 90, "people: an edit on source-a reached local with the viewer's key")
     expect(len(activity(local, "person Alice Actor")) >= 1, "people: local wrote an activity entry")
 
-    # Users: the viewer's own policy.
-    policy = a.get(f"/Users/{ea['viewerId']}")["Policy"]
-    policy["MaxActiveSessions"] = 9
-    a.post(f"/Users/{ea['viewerId']}/Policy", policy, expect=204)
-    wait_until(lambda: local.get(f"/Users/{el['viewerId']}")["Policy"].get("MaxActiveSessions") == 9, 120, "users: the viewer's own policy change on source-a reached local with the viewer's key")
-    expect(len(activity(local, "user viewer")) >= 1, "users: local wrote an activity entry")
-
     # Content: a new film on source-a, downloaded with the viewer's key.
     # A fresh title each run, so a reused pool still has to download something.
     title = f"Only A Three {time.strftime('%H%M%S')} (2025)"
@@ -1087,7 +1075,7 @@ SCENARIOS = [
     ("user sync carries policy, configuration, and avatar", scenario_user_sync),
     ("history hints travel across three servers without loops", scenario_hints_three_servers),
     ("metadata and people hints, newest edit wins, scan keeps newer local", scenario_item_hints),
-    ("content and user hints across the pool", scenario_content_and_user_hints),
+    ("content hints across the pool, user settings by task", scenario_content_and_user_hints),
     ("peer and operator endpoints require Jellyfin authentication", scenario_peer_endpoint_auth),
     ("check link judges the pairing by direction", scenario_check_link_by_direction),
     ("push responses: paused peers, declined hints, activity entries", scenario_push_responses),
