@@ -12,7 +12,7 @@ When several servers are configured, their order is their priority. If two serve
 
 ## Use At Your Own Risk
 
-This plugin modifies live data on your Jellyfin server. While extensively tested, I cannot account for every server configuration or edge case. **Always maintain backups of your Jellyfin data and configuration.** By using this plugin, you accept full responsibility for any data loss or issues that may occur.
+This plugin modifies live data on your Jellyfin server. While extensively tested, I maintain this plugin for my person use case and I do not account for every server configuration. **Always maintain backups of your Jellyfin data and configuration.** By using this plugin, you accept full responsibility for any data loss or issues that may occur.
 
 # Setup
 
