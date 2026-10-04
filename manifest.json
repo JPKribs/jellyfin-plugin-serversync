@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.1.4",
+        "changelog": "## Developer\r\n- A peer's version can no longer lie ahead of this server's clock. A hint dated more than five minutes ahead is declined, anything less is read as now, and the version store never holds a future stamp\r\n- Requests that name a sender must prove it. Each server issues the servers it lists a pairing secret over its own connection to them, and a batch, completion, or history negotiation without the right secret answers 428 until the real server pairs, which Check Link and the workers do on their own. A server held with a standard user's key cannot be issued one and is taken on its word, as before\r\n- A completion removes only the reporting peer's own rows\r\n- An entry that disallows private networks now holds a name to the same rule as an address, at save time and on every connection\r\n- The inbound queue keeps at most ten thousand rows per origin, finished ids are capped, and a peer's answer is read up to thirty two megabytes\r\n- Nothing gathers or shows for a kind no Push or Sync server applies, though a hand made edit still records its version, and the ancestor walk that sorts provider images from edits runs only when it decides anything\r\n- An applied episode logs Synced [series] S01E02 with [type] [series] S01E02 - [episode] was updated from [server], activity entries no longer end in a full stop, and provider work applied from a peer's scan writes none\r\n- A pass of metadata hints reads the origin's items in pages of fifty, as the scheduled scan does, instead of one request per hint\r\n- The Queue view shows episodes and videos in a wide frame, and its count cards wrap three then two on a phone",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.1.4/jellyfin-plugin-serversync-12.2.1.4.zip",
+        "checksum": "51244300d74e2708556e3bec4b6ac078",
+        "timestamp": "2026-10-04T08:00:53Z"
+      },
+      {
         "version": "12.2.1.3",
         "changelog": "## Developer\r\n- An applied change writes Synced [name]. to the activity log, with [type] [name] was updated from [server]. as the detail\r\n- The duplicate DELETE /ServerSync/Peer/Queue/{id} route is gone. Every route requires an administrator, which a unit test and the integration suite now enforce\r\n- The Queue view is one list. Each change is one row for its whole life with a status chip, Jellyfin's title and poster, the user for watch history, a ticking countdown while it gathers, the summary cards and peers as filters, and a layout that stacks on phones",
         "targetAbi": "12.1.0.0",
