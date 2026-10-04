@@ -414,8 +414,19 @@ def plugin_config(api):
     return api.get(f"/Plugins/{PLUGIN_GUID}/Configuration")
 
 
+# Every server in the pool once the scenarios run, so a configuration change on one can be announced to the rest.
+POOL_APIS = {}
+
+
 def save_plugin_config(api, config):
     api.post(f"/Plugins/{PLUGIN_GUID}/Configuration", config, expect=204)
+    # A sender re-reads what a peer accepts once a minute. The scenarios change modules far faster than
+    # that, so every server is asked to re-read now, the way Run Now on the dashboard does.
+    for other in POOL_APIS.values():
+        try:
+            other.post("/ServerSync/Hints/Run", None, expect=204)
+        except Exception:
+            pass
 
 
 def server_entry(creds, name, key=None, local="local", mode="Pull"):
@@ -888,7 +899,9 @@ def scenario_peer_endpoint_auth(creds, apis):
         expect(status == 403, f"{method} {path} with a standard user's token is refused ({status})")
     admin = Api("local", SERVERS["local"]["port"], "it-key")
     admin.token = e["apiKey"]
-    expect(admin.call("GET", "/ServerSync/Peer/Capabilities")[0] == 200, "an administrator's API key reaches the peer endpoints")
+    status, caps = admin.call("GET", "/ServerSync/Peer/Capabilities")
+    expect(status == 200, "an administrator's API key reaches the peer endpoints")
+    expect(isinstance(caps.get("Accepts"), list) and "ServerTime" in caps, "capabilities list the kinds this server applies and its clock")
     expect(admin.call("GET", "/ServerSync/Hints")[0] == 200, "an administrator's API key reaches the operator endpoint")
     status, removed = admin.call("DELETE", "/ServerSync/Servers/no-such-key/Rows")
     expect(status == 200 and removed and all(v == 0 for v in removed.values()), "forgetting an unknown server removes nothing and answers with the counts")
@@ -900,8 +913,8 @@ def scenario_push_responses(creds, apis):
     off declines and the sender drops the row, and each pause writes an activity entry."""
     local = apis["local"]
     e = creds["servers"]["local"]
-    # 409: source-b does not list local. 403: a bad key for source-a. 404: a path with no plugin behind it.
-    configure_server(creds, apis["source-b"], "source-b", [])
+    # 409: source-b wants metadata but does not list local. 403: a bad key for source-a. 404: a path with no plugin behind it.
+    configure_server(creds, apis["source-b"], "source-b", [], **INFO_FLAGS)
     configure_server(creds, apis["source-a"], "source-a", ["local"], {"local": "Sync"}, EnableHistorySync=True, HistorySyncNegotiate=True,
                      EnableMetadataSync=False, EnablePeopleSync=True, PeopleSyncImages=True)
     configure_server(creds, local, "local", ["source-a", "source-b"], {"source-a": "Sync", "source-b": "Sync"}, **INFO_FLAGS)
@@ -935,7 +948,7 @@ def scenario_push_responses(creds, apis):
         local.call("DELETE", f"/ServerSync/Hints/Outbound/{r['Id']}", expect=204)
     applied_before = len(activity(apis["source-a"], "metadata for Shared Movie"))
     set_overview(local, "Movie", "Shared Movie", f"Declined test {time.strftime('%H:%M:%S')}")
-    wait_until(lambda: not [r for r in hints(local)["Outbound"] if r["PeerName"] == "source-a"], 60, "a hint the receiver declined (module off) was dropped by the sender after a 200")
+    wait_until(lambda: not [r for r in hints(local)["Outbound"] if r["PeerName"] == "source-a"], 60, "a hint for a module the receiver has off is never owed to it, or is dropped once it declines")
     wait_until(lambda: not hints(local)["Outbound"], 60, "the same hint was accepted and completed by the peer whose module is on")
     expect(len(activity(apis["source-a"], "metadata for Shared Movie")) == applied_before, "the declining receiver applied nothing")
 
@@ -1095,6 +1108,8 @@ def expect(condition, message):
 
 def run_scenarios(creds, apis):
     """Runs every scenario, or only those whose title contains one of the words given after the command."""
+    POOL_APIS.clear()
+    POOL_APIS.update(apis)
     only = [w.lower() for w in sys.argv[2:]]
     for title, fn in SCENARIOS:
         if only and not any(w in title.lower() for w in only):

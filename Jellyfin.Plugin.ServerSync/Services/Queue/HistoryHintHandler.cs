@@ -32,6 +32,7 @@ public sealed class HistoryHintHandler
     private readonly VersionStore _versions;
     private readonly LocalHintPublisher _publisher;
     private readonly IServerApplicationHost _applicationHost;
+    private readonly IPluginConfigurationManager _configManager;
     private readonly ILogger<HistoryHintHandler> _logger;
 
     /// <summary>
@@ -44,6 +45,7 @@ public sealed class HistoryHintHandler
     /// <param name="versions">The version store.</param>
     /// <param name="publisher">Publishes changes of this server's own to the other peers.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
+    /// <param name="configManager">Plugin configuration, for the history switch.</param>
     /// <param name="logger">Logger.</param>
     public HistoryHintHandler(
         HistorySyncTableService tableService,
@@ -53,8 +55,10 @@ public sealed class HistoryHintHandler
         VersionStore versions,
         LocalHintPublisher publisher,
         IServerApplicationHost applicationHost,
+        IPluginConfigurationManager configManager,
         ILogger<HistoryHintHandler> logger)
     {
+        _configManager = configManager;
         _tableService = tableService;
         _table = table;
         _localClient = localClient;
@@ -76,6 +80,11 @@ public sealed class HistoryHintHandler
         ArgumentNullException.ThrowIfNull(hint);
         ArgumentNullException.ThrowIfNull(origin);
         ArgumentNullException.ThrowIfNull(client);
+
+        if (!_configManager.Configuration.EnableHistorySync)
+        {
+            return HintApplyResult.Dropped("history sync is off on this server");
+        }
 
         if (!HintProtocol.TryParseHistoryKey(hint.Key, out var originUserId, out var originItemId))
         {

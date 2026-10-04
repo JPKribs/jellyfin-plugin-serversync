@@ -691,7 +691,7 @@ export default function (view) {
     }
 
     function addLibraryMappingRow(mapping, index) {
-        mapping = mapping || {};
+        mapping = mapping || { IsEnabled: true };
         var container = view.querySelector('#libraryMappingsContainer');
         if (!container) return;
         if (index === undefined) index = container.children.length;

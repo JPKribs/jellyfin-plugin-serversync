@@ -132,7 +132,7 @@ public sealed class LocalHintPublisher
         var queued = 0;
         foreach (var peer in _configManager.Configuration.Servers)
         {
-            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase) || !mapped(peer))
+            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase) || !_worker.PeerAccepts(peer.Key, kind) || !mapped(peer))
             {
                 continue;
             }
@@ -183,7 +183,7 @@ public sealed class LocalHintPublisher
         var queued = 0;
         foreach (var peer in _configManager.Configuration.Servers)
         {
-            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase))
+            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase) || !_worker.PeerAccepts(peer.Key, HintKind.History))
             {
                 continue;
             }

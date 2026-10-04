@@ -69,6 +69,16 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     /// <summary>Gets the delivery state of every peer that has been tried, by entry key.</summary>
     public IReadOnlyDictionary<string, PeerDeliveryState> PeerStates => _peers;
 
+    /// <summary>
+    /// Whether a peer applies a kind of hint, as last read from its capabilities. A peer not yet asked,
+    /// or one too old to say, is taken to accept everything, and it declines what it does not want.
+    /// </summary>
+    /// <param name="peerKey">The peer's entry key.</param>
+    /// <param name="kind">The kind.</param>
+    /// <returns><c>true</c> unless the peer said its module for that kind is off.</returns>
+    public bool PeerAccepts(string peerKey, HintKind kind)
+        => !_peers.TryGetValue(peerKey, out var state) || state.Accepts is null || state.Accepts.Contains(kind);
+
     /// <summary>Asks the worker to deliver now rather than at its next idle tick.</summary>
     public void Wake()
     {
@@ -113,10 +123,17 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
     /// <summary>One delivery pass over every peer. Public so the dashboard and tests can run it on demand.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="refreshCapabilities">Re-read what every peer accepts now, rather than only when the last answer is old.</param>
     /// <returns>A task.</returns>
-    public async Task DeliverAsync(CancellationToken cancellationToken)
+    public async Task DeliverAsync(CancellationToken cancellationToken, bool refreshCapabilities = false)
     {
         var config = _configManager.Configuration;
+        foreach (var peer in config.GetPushServers())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await RefreshAcceptsAsync(peer, _peers.GetOrAdd(peer.Key, _ => new PeerDeliveryState()), refreshCapabilities, cancellationToken).ConfigureAwait(false);
+        }
+
         foreach (var peerKey in _outbound.GetPeerKeys())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -305,6 +322,59 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         }
     }
 
+    // Reads the peer's capabilities every few minutes so the publisher skips kinds the peer has off. A
+    // failed read keeps the last answer; a peer that never answered is sent everything.
+    private async Task RefreshAcceptsAsync(SourceServer peer, PeerDeliveryState state, bool force, CancellationToken cancellationToken)
+    {
+        if (!force && (state.PausedUntil > DateTime.UtcNow || DateTime.UtcNow - state.AcceptsReadAt < HintProtocol.CapabilityRefresh))
+        {
+            return;
+        }
+
+        state.AcceptsReadAt = DateTime.UtcNow;
+        try
+        {
+            using var client = _clientFactory.Create(peer);
+            var capabilities = await client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
+            if (capabilities?.Accepts is null)
+            {
+                state.Accepts = null;
+                return;
+            }
+
+            var accepts = new HashSet<HintKind>();
+            foreach (var name in capabilities.Accepts)
+            {
+                if (Enum.TryParse<HintKind>(name, ignoreCase: true, out var kind))
+                {
+                    accepts.Add(kind);
+                }
+            }
+
+            if (state.Accepts is null || !state.Accepts.SetEquals(accepts))
+            {
+                _logger.LogInformation("'{Peer}' accepts {Kinds}", peer.DisplayName, accepts.Count == 0 ? "no hints" : string.Join(", ", accepts));
+            }
+
+            state.Accepts = accepts;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        {
+            // The key is refused, so nothing is known about the peer any more. Everything is sent so the
+            // refusal surfaces as a pause with its reason rather than a silent skip.
+            state.Accepts = null;
+            _logger.LogDebug("'{Peer}' refused the key when asked what it accepts; sending everything until it answers", peer.DisplayName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read what '{Peer}' accepts; keeping the last answer", peer.DisplayName);
+        }
+    }
+
     private bool CheckDue(string peerKey, DateTime now)
     {
         if (_lastStatusCheck.TryGetValue(peerKey, out var last) && now - last < StatusCheckSpacing)
@@ -401,4 +471,10 @@ public sealed class PeerDeliveryState
 
     /// <summary>Gets or sets why the last delivery did not go through, or null after a success.</summary>
     public string? Reason { get; set; }
+
+    /// <summary>Gets or sets the kinds the peer applies, or null when not known.</summary>
+    public HashSet<HintKind>? Accepts { get; set; }
+
+    /// <summary>Gets or sets when the peer's capabilities were last read, in UTC.</summary>
+    public DateTime AcceptsReadAt { get; set; }
 }

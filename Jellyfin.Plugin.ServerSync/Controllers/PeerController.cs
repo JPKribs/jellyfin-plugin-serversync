@@ -76,6 +76,7 @@ public class PeerController : ControllerBase
             ServerId = _applicationHost.SystemId,
             PluginVersion = _configManager.PluginVersion,
             Features = new List<string> { PeerHistoryNegotiator.HistoryFeature, HintProtocol.HintFeature },
+            Accepts = HintProtocol.AcceptedKinds(_configManager.Configuration).Select(k => k.ToString()).ToList(),
             ServerTime = DateTime.UtcNow
         });
     }
@@ -299,6 +300,11 @@ public class PeerController : ControllerBase
                 return HintMapping.FindBySourceUser(origin, hintedUser) is null ? "the user is not mapped on this server" : null;
 
             case HintKind.History:
+                if (!config.EnableHistorySync)
+                {
+                    return "history sync is off on this server";
+                }
+
                 if (!HintProtocol.TryParseHistoryKey(hint.Key, out var userId, out _))
                 {
                     return "the key is not a user id and item id";

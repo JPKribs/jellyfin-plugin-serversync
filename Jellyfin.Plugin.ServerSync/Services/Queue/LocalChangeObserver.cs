@@ -35,6 +35,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly ILibraryManager _libraryManager;
     private readonly IPluginConfigurationManager _configManager;
     private readonly LocalHintPublisher _publisher;
+    private readonly OutboundHintWorker _worker;
     private readonly ApplyGuard _guard;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalChangeObserver> _logger;
@@ -53,6 +54,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <param name="libraryManager">Library manager.</param>
     /// <param name="configManager">Plugin configuration.</param>
     /// <param name="publisher">The publisher that writes the outbound rows.</param>
+    /// <param name="worker">The delivery worker, which knows what each peer accepts.</param>
     /// <param name="guard">The apply guard.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="logger">Logger.</param>
@@ -62,10 +64,12 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         ILibraryManager libraryManager,
         IPluginConfigurationManager configManager,
         LocalHintPublisher publisher,
+        OutboundHintWorker worker,
         ApplyGuard guard,
         IServerApplicationHost applicationHost,
         ILogger<LocalChangeObserver> logger)
     {
+        _worker = worker;
         _userDataManager = userDataManager;
         _userManager = userManager;
         _libraryManager = libraryManager;
@@ -138,7 +142,9 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         var raised = 0;
         foreach (var entry in _pending.ToArray())
         {
-            if (entry.Value.Due > utcNow)
+            // Due moves with every edit; a stream of progress reports would hold the change forever,
+            // so a change is also raised once it has gathered for the longest allowed.
+            if (entry.Value.Due > utcNow && utcNow - entry.Value.FirstSeen < HintProtocol.MaxGather)
             {
                 continue;
             }
@@ -366,7 +372,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         var now = DateTime.UtcNow;
         _pending.AddOrUpdate(
             HintProtocol.GuardKey(kind, localKey),
-            _ => new PendingChange(kind, userId, itemId, now, now + HintProtocol.Debounce),
+            _ => new PendingChange(kind, userId, itemId, now, now + HintProtocol.Debounce, now),
             (_, existing) => existing with { EditedAt = now, Due = now + HintProtocol.Debounce });
     }
 
@@ -444,7 +450,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     // with no Push or Sync entry is not misconfigured, it just does not send.
     private void NoteUnmatched(int queued, HintKind kind, string? itemPath, string? userName)
     {
-        if (queued > 0 || !_configManager.Configuration.Servers.Any(s => s.Pushes))
+        if (queued > 0 || !_configManager.Configuration.Servers.Any(s => s.Pushes && _worker.PeerAccepts(s.Key, kind)))
         {
             return;
         }
@@ -454,5 +460,5 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", _lastUnmatched);
     }
 
-    private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due);
+    private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, DateTime FirstSeen);
 }

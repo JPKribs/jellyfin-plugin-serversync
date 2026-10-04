@@ -32,6 +32,9 @@ public class PeerCheckResult
     /// <summary>Gets or sets a value indicating whether it sends hints back to this server.</summary>
     public bool SendsToThisServer { get; set; }
 
+    /// <summary>Gets or sets the kinds the peer applies, by name, or null when it is too old to say.</summary>
+    public System.Collections.Generic.List<string>? Accepts { get; set; }
+
     /// <summary>Gets or sets how many seconds the peer's clock differs from this server's, when it could be read.</summary>
     public int ClockSkewSeconds { get; set; }
 

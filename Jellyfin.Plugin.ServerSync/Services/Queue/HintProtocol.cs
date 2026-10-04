@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 
@@ -40,6 +41,50 @@ public static class HintProtocol
 
     /// <summary>How long local edits to one object are gathered before one hint is raised.</summary>
     public static readonly TimeSpan Debounce = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The longest an object's edits are gathered when they never stop coming, as playback progress
+    /// does, so a peer hears about a play while it is still going rather than only when it ends.
+    /// </summary>
+    public static readonly TimeSpan MaxGather = TimeSpan.FromSeconds(60);
+
+    /// <summary>How often a sender re-reads what each peer accepts, so a module switched on there is noticed within a minute.</summary>
+    public static readonly TimeSpan CapabilityRefresh = TimeSpan.FromSeconds(60);
+
+    /// <summary>The kinds a server applies, by its module switches.</summary>
+    /// <param name="config">The configuration.</param>
+    /// <returns>The kinds whose module is on.</returns>
+    public static IReadOnlyList<HintKind> AcceptedKinds(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        var kinds = new List<HintKind>(5);
+        if (config.EnableHistorySync)
+        {
+            kinds.Add(HintKind.History);
+        }
+
+        if (config.EnableMetadataSync)
+        {
+            kinds.Add(HintKind.Metadata);
+        }
+
+        if (config.EnablePeopleSync)
+        {
+            kinds.Add(HintKind.People);
+        }
+
+        if (config.EnableContentSync)
+        {
+            kinds.Add(HintKind.Content);
+        }
+
+        if (config.EnableUserSync)
+        {
+            kinds.Add(HintKind.Users);
+        }
+
+        return kinds;
+    }
 
     /// <summary>Builds the history key for a user and an item.</summary>
     /// <param name="userId">The user id.</param>

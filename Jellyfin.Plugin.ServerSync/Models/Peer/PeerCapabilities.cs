@@ -19,6 +19,13 @@ public class PeerCapabilities
     public List<string> Features { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets the kinds of hint this server applies, by name: the modules that are on here. A
+    /// sender only announces these kinds, so a module turned off on the receiver costs no traffic.
+    /// Absent from older peers, which is read as every kind.
+    /// </summary>
+    public List<string>? Accepts { get; set; }
+
+    /// <summary>
     /// Gets or sets the peer's clock at the time of the answer, in UTC. Conflicts between two edits made
     /// within the skew window are decided by these clocks, so Check Link reports a peer whose clock is off.
     /// </summary>

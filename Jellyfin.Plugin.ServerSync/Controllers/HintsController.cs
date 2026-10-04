@@ -182,6 +182,11 @@ public class HintsController : ControllerBase
                 ? $" Its clock is about {FormatSkew(skew)} off from this server's, so edits made on both within that window may be settled the wrong way round; put both servers on NTP."
                 : string.Empty;
 
+            result.Accepts = capabilities.Accepts;
+            var acceptsNote = capabilities.Accepts is null ? string.Empty
+                : capabilities.Accepts.Count == 0 ? " Every module is off there, so it applies no changes from this server."
+                : $" It applies {string.Join(", ", capabilities.Accepts.Select(DescribeKind))} from this server; other kinds are off there.";
+
             var link = await client.GetPeerLinkAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
             result.ListsThisServer = link is { Listed: true, Enabled: true, PullsFromYou: true };
             result.PeerMode = link?.Mode;
@@ -236,6 +241,11 @@ public class HintsController : ControllerBase
                     break;
             }
 
+            if (mode != ServerMode.Pull || result.SendsToThisServer)
+            {
+                result.Message += acceptsNote;
+            }
+
             if (skewNote.Length > 0)
             {
                 result.Message += skewNote;
@@ -248,6 +258,14 @@ public class HintsController : ControllerBase
             return Ok(result);
         }
     }
+
+    private static string DescribeKind(string kind) => kind switch
+    {
+        "History" => "watch history",
+        "Users" => "user settings",
+        "Content" => "files",
+        _ => kind.ToLowerInvariant()
+    };
 
     private static string FormatSkew(TimeSpan skew)
         => skew.TotalMinutes >= 1 ? $"{Math.Round(skew.TotalMinutes)} minute(s)" : $"{Math.Round(skew.TotalSeconds)} second(s)";
@@ -352,7 +370,7 @@ public class HintsController : ControllerBase
         return Ok(new ObjectVersionDto { ServerId = version.ServerId, ServerName = serverName, Timestamp = version.Timestamp, IsThisServer = string.Equals(version.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase) });
     }
 
-    /// <summary>Raises every gathered local change now, delivers, and applies, instead of waiting for the workers.</summary>
+    /// <summary>Raises every gathered local change now, re-reads what each peer accepts, delivers, and applies, instead of waiting for the workers.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>No content.</returns>
     [HttpPost("Run")]
@@ -360,7 +378,7 @@ public class HintsController : ControllerBase
     public async Task<ActionResult> Run(CancellationToken cancellationToken)
     {
         _observer.Flush(DateTime.MaxValue);
-        await _outboundWorker.DeliverAsync(cancellationToken).ConfigureAwait(false);
+        await _outboundWorker.DeliverAsync(cancellationToken, refreshCapabilities: true).ConfigureAwait(false);
         await _inboundWorker.ApplyAsync(cancellationToken).ConfigureAwait(false);
         return NoContent();
     }

@@ -113,7 +113,7 @@ Every server entry has a direction. **Pull** reads from that server on a schedul
 
 A standard user's key, from signing in as someone who is not an administrator, pulls what that user can see and that one user's watch history, one way. Push and Sync, two way history, and user sync need an administrator's key, because Server Sync's own endpoints and the user APIs on the other server require elevation. The page says which kind of key an entry holds after a connection test or sign in.
 
-A change is announced as a hint that says what changed and where, never the value. The other server pulls the live state through the same code the scan uses, so a hint and a scan can never disagree. Hints are kept on both ends until the work is done, retried with backoff, and recovered if lost, and the dashboard shows both queues and any paused peer with the reason. A write made because of a hint never raises a hint of its own, and a value that already matches is never written, so a pool of three or more servers settles without echoing.
+A server only announces the kinds of change the other side applies: it reads the peer's enabled modules every few minutes and skips the rest, and the peer declines anything it does not want in the meantime. Edits to one object are gathered for five seconds before one hint is raised, and at most a minute when they never stop, as playback progress does. A change is announced as a hint that says what changed and where, never the value. The other server pulls the live state through the same code the scan uses, so a hint and a scan can never disagree. Hints are kept on both ends until the work is done, retried with backoff, and recovered if lost, and the dashboard shows both queues and any paused peer with the reason. A write made because of a hint never raises a hint of its own, and a value that already matches is never written, so a pool of three or more servers settles without echoing.
 
 When two servers disagree, watch history merges three way against what the servers last agreed on, and everything else resolves on where and when the value was last edited, so the newest edit wins. Only a metadata edit raises an item hint. Metadata and images a provider fetches are left to the scheduled scan. Replacements and removals of files are also left to Sync Content.
 
@@ -270,13 +270,14 @@ What this installation can negotiate. A `404` means the plugin is not installed 
 ```json
 {
   "ServerId": "2f40d5d86aba4689819184b48738d2ad",
-  "PluginVersion": "12.2.1.0",
+  "PluginVersion": "12.2.1.1",
   "Features": ["history-negotiate", "hints"],
+  "Accepts": ["History", "Metadata", "People"],
   "ServerTime": "2026-10-03T19:30:47.9590000Z"
 }
 ```
 
-`ServerTime` is the peer's clock, which Check Link compares against the caller's.
+`Accepts` lists the kinds this server applies, which are the modules that are on. A sender announces only those kinds. `ServerTime` is the peer's clock, which Check Link compares against the caller's.
 
 ### GET /ServerSync/Peer/Link?serverId={id}
 
@@ -455,6 +456,7 @@ What the Servers tab's Check Link button calls. Judges a server entry against th
   "Reachable": true, "ServerName": "source-a", "ServerId": "…",
   "HasPlugin": true, "PluginVersion": "12.2.1.0", "SupportsHints": true,
   "ListsThisServer": true, "PeerMode": "Sync", "SendsToThisServer": true,
+  "Accepts": ["History", "Metadata", "People"],
   "ClockSkewSeconds": 0,
   "Severity": "ok",
   "Message": "Ready. Server Sync 12.2.1.0 there lists this server as Sync, so changes travel both ways as they happen."
