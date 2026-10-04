@@ -738,27 +738,27 @@
 
                     <div id="syncView-queue" class="syncView hidden">
 
-                        <!-- Status Summary Cards -->
-                        <div class="jpk-cards">
-                            <div class="jpk-card orange" id="queueCardPending" title="Hints waiting to be delivered to a peer">
+                        <!-- Summary cards double as filters -->
+                        <div class="jpk-cards qCards">
+                            <div class="jpk-card gray qCard on" data-state="Gathering" title="Local edits still gathering before they become hints">
+                                <span class="jpk-card-count" id="queueGatheringCount">0</span>
+                                <span class="jpk-card-label">Gathering</span>
+                            </div>
+                            <div class="jpk-card orange qCard on" data-state="Pending" title="Hints waiting to be delivered to a peer">
                                 <span class="jpk-card-count" id="queuePendingCount">0</span>
                                 <span class="jpk-card-label">Pending</span>
                             </div>
-                            <div class="jpk-card blue" id="queueCardSent" title="Hints a peer has accepted and is working on">
+                            <div class="jpk-card blue qCard on" data-state="Sent" title="Hints a peer has accepted and is working on">
                                 <span class="jpk-card-count" id="queueSentCount">0</span>
                                 <span class="jpk-card-label">Sent</span>
                             </div>
-                            <div class="jpk-card red" id="queueCardFailed" title="Hints a peer rejected as malformed">
-                                <span class="jpk-card-count" id="queueFailedCount">0</span>
-                                <span class="jpk-card-label">Failed</span>
-                            </div>
-                            <div class="jpk-card purple" id="queueCardInbound" title="Hints received from peers and not yet applied">
+                            <div class="jpk-card purple qCard on" data-state="Received" title="Hints received from peers and not yet applied">
                                 <span class="jpk-card-count" id="queueInboundCount">0</span>
                                 <span class="jpk-card-label">Received</span>
                             </div>
-                            <div class="jpk-card gray" id="queueCardGathering" title="Local edits still gathering before they become hints">
-                                <span class="jpk-card-count" id="queueGatheringCount">0</span>
-                                <span class="jpk-card-label">Gathering</span>
+                            <div class="jpk-card red qCard on" data-state="Failed" title="Hints a peer rejected as malformed">
+                                <span class="jpk-card-count" id="queueFailedCount">0</span>
+                                <span class="jpk-card-label">Failed</span>
                             </div>
                         </div>
 
@@ -781,57 +781,16 @@
 
                         <div class="syncSectionSeparator"></div>
 
-                        <!-- Gathering -->
-                        <div class="jpk-subsection-title">Gathering</div>
-                        <div id="queueGatheringEmpty" class="jpk-empty hidden">Nothing is gathering.</div>
-                        <div class="queueTableContainer">
-                            <table class="historyCompareTable queueTable" id="queueGatheringTable">
-                                <thead>
-                                    <tr>
-                                        <th>Change</th>
-                                        <th>Last Edit</th>
-                                        <th>Sends</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="queueGatheringBody"></tbody>
-                            </table>
+                        <!-- Direction and peer filters -->
+                        <div class="qFilters" id="queueFilters">
+                            <button type="button" class="qFilter on" data-dir="all">All</button>
+                            <button type="button" class="qFilter" data-dir="out">Outbound</button>
+                            <button type="button" class="qFilter" data-dir="in">Inbound</button>
                         </div>
 
-                        <!-- Outbound -->
-                        <div class="jpk-subsection-title">Outbound</div>
-                        <div id="queueOutboundEmpty" class="jpk-empty hidden">Nothing is owed to any peer.</div>
-                        <div class="queueTableContainer">
-                            <table class="historyCompareTable queueTable" id="queueOutboundTable">
-                                <thead>
-                                    <tr>
-                                        <th>Peer</th>
-                                        <th>Change</th>
-                                        <th>State</th>
-                                        <th>Detail</th>
-                                        <th class="queueTable-actions"></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="queueOutboundBody"></tbody>
-                            </table>
-                        </div>
-
-                        <!-- Inbound -->
-                        <div class="jpk-subsection-title">Inbound</div>
-                        <div id="queueInboundEmpty" class="jpk-empty hidden">Nothing is waiting to be applied.</div>
-                        <div class="queueTableContainer">
-                            <table class="historyCompareTable queueTable" id="queueInboundTable">
-                                <thead>
-                                    <tr>
-                                        <th>From</th>
-                                        <th>Change</th>
-                                        <th>Received</th>
-                                        <th>Detail</th>
-                                        <th class="queueTable-actions"></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="queueInboundBody"></tbody>
-                            </table>
-                        </div>
+                        <!-- One list: a change is one row for its whole life -->
+                        <div id="queueEmpty" class="jpk-empty hidden">Nothing is moving between servers right now.</div>
+                        <div id="queueList" class="qList"></div>
                     </div>
 
                 </div>
@@ -1008,16 +967,57 @@
         }
 
         /* ===== Change Queue ===== */
-        .queueTableContainer { overflow-x: auto; margin-bottom: 1.5em; }
-        .queueTable { width: 100%; }
-        .queueTable th, .queueTable td { text-align: left; vertical-align: top; }
-        .queueTable th.queueTable-actions, .queueTable td.queueTable-actions { width: 44px; text-align: right; }
-        .queueTable .queueChangeKind { font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.65; display: block; margin-bottom: 2px; }
-        .queueTable .queueChangeWhat { word-break: break-all; }
-        .queueTable .queueDetail { font-size: 0.85em; opacity: 0.8; }
-        .queueTable .queueDetail.queueDetail-error { color: var(--jpk-error); opacity: 1; }
+        .qCards .qCard { cursor: pointer; opacity: .45; transition: opacity .15s; }
+        .qCards .qCard.on { opacity: 1; }
         .queuePeerCard .healthValue { font-size: 0.95em; }
         .queuePeerCard .healthValue.paused { color: var(--jpk-error); }
         .queuePeerCard .queuePeerReason { font-size: 0.8em; opacity: 0.75; margin-top: 4px; }
+        .qFilters { display: flex; gap: 8px; margin: 0 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+        .qFilters::-webkit-scrollbar { display: none; }
+        .qFilter { flex: 0 0 auto; font: inherit; font-size: .85em; background: var(--jpk-surface); border: 1px solid var(--jpk-border); color: inherit; padding: 6px 12px; border-radius: 14px; cursor: pointer; }
+        .qFilter.on { background: var(--jpk-accent); border-color: var(--jpk-accent); color: #fff; }
+        .qList { border: 1px solid var(--jpk-border); border-radius: 8px; overflow: hidden; margin-bottom: 1.5em; }
+        .qRow { display: grid; grid-template-columns: 56px 1fr auto; gap: 14px; align-items: center; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.06); background: var(--jpk-surface); }
+        .qRow:last-child { border-bottom: 0; }
+        .qRow:hover { background: rgba(255,255,255,.04); }
+        .qThumb { width: 44px; height: 64px; border-radius: 4px; object-fit: cover; background: rgba(255,255,255,.06); display: block; }
+        .qThumb.round { width: 44px; height: 44px; border-radius: 50%; }
+        .qThumbHolder { width: 44px; height: 64px; border-radius: 4px; background: rgba(255,255,255,.06); display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.3); }
+        .qThumbHolder.round { height: 44px; border-radius: 50%; }
+        .qInfo { min-width: 0; }
+        .qTitle { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .qTitle .qEp { color: rgba(255,255,255,.6); font-weight: 400; }
+        .qSub { font-size: .85em; line-height: 20px; color: rgba(255,255,255,.55); display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 3px; }
+        .qSub > * { white-space: nowrap; }
+        .qWho { display: inline-flex; align-items: center; gap: 6px; color: rgba(255,255,255,.75); }
+        .qWho::after { content: "\00b7"; color: rgba(255,255,255,.35); margin-left: 2px; }
+        .qAvatar { width: 16px; height: 16px; border-radius: 50%; object-fit: cover; background: rgba(255,255,255,.15); display: inline-block; flex: 0 0 16px; }
+        .qBadges { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+        .qRight { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 190px; }
+        .qChip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 14px; font-size: .82em; border: 1px solid; white-space: nowrap; }
+        .qChip.gathering { border-color: #777; color: #ccc; } .qChip.pending { border-color: var(--jpk-orange-fg); color: var(--jpk-orange-fg); }
+        .qChip.sent { border-color: var(--jpk-blue-fg); color: var(--jpk-blue-fg); } .qChip.received { border-color: var(--jpk-purple-fg); color: #c08bd6; }
+        .qChip.failed { border-color: var(--jpk-red-fg); color: var(--jpk-red-fg); }
+        .qRing { width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(#ccc var(--p, 0%), #333 0); flex: 0 0 14px; }
+        .qMeta { font-size: .8em; color: rgba(255,255,255,.5); }
+        .qMeta.err { color: var(--jpk-error); }
+        .qAct { background: none; border: 0; color: rgba(255,255,255,.45); cursor: pointer; font-size: 1.1em; padding: 2px 4px; }
+        .qAct:hover { color: var(--jpk-error); }
+        @media (max-width: 720px) {
+            .qRow { grid-template-columns: 44px 1fr; grid-template-areas: "thumb info" "state state"; gap: 10px 12px; padding: 12px; }
+            .qRow .qThumbWrap { grid-area: thumb; }
+            .qThumb, .qThumbHolder { width: 40px; height: 58px; } .qThumb.round, .qThumbHolder.round { width: 40px; height: 40px; }
+            .qRow .qInfo { grid-area: info; }
+            .qRow .qRight { grid-area: state; min-width: 0; flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; text-align: left; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.08); }
+            .qRow .qRight .qMeta { flex: 1 1 auto; text-align: right; }
+            .qRow .qRight .qMeta.err { flex-basis: 100%; text-align: left; }
+            .qRow .qRight .qAct { margin-left: auto; }
+            .qTitle { white-space: normal; }
+            .qTitle .qEp { display: block; font-size: .9em; }
+            .qTitle .qEp .qSep { display: none; }
+            .qSub { flex-wrap: wrap; line-height: 18px; } .qSub > * { white-space: normal; }
+            .pluginConfigurationPage .jpk-cards.qCards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+            .pluginConfigurationPage .jpk-cards.qCards .jpk-card { min-width: 0; padding: 10px 6px; }
+        }
     </style>
 </div>

@@ -268,6 +268,33 @@ public class HintsController : ControllerBase
         }
     }
 
+    // Jellyfin's own title for a local item, and a second line: the episode under its series, the year
+    // under a film, the user under a watch history change. Falls back to the file or the name.
+    private static (string Title, string? Subtitle) DisplayOf(MediaBrowser.Controller.Entities.BaseItem? item, HintKind kind, string? userName)
+    {
+        if (item is null)
+        {
+            return (userName ?? string.Empty, null);
+        }
+
+        if (item is MediaBrowser.Controller.Entities.TV.Episode episode)
+        {
+            var code = episode.ParentIndexNumber.HasValue && episode.IndexNumber.HasValue
+                ? $"S{episode.ParentIndexNumber.Value:D2}E{episode.IndexNumber.Value:D2} · "
+                : string.Empty;
+            return (episode.SeriesName ?? item.Name, code + item.Name);
+        }
+
+        if (kind == HintKind.People)
+        {
+            return (item.Name, null);
+        }
+
+        // A title that already ends with its year, as test libraries and some folder names do, is not repeated.
+        var year = item.ProductionYear?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return (item.Name, year is not null && item.Name.EndsWith($"({year})", StringComparison.Ordinal) ? null : year);
+    }
+
     private static string DescribeKind(string kind) => kind switch
     {
         "History" => "watch history",
@@ -314,10 +341,16 @@ public class HintsController : ControllerBase
             var item = change.ItemId == Guid.Empty ? null : _libraryManager.GetItemById(change.ItemId);
             var userName = change.UserId == Guid.Empty ? null : _userManager.GetUserById(change.UserId)?.Username;
             var name = change.Kind == HintKind.People ? item?.Name : userName;
+            var (title, subtitle) = DisplayOf(item, change.Kind, name);
             overview.Gathering.Add(new GatheringDto
             {
                 Kind = change.Kind,
                 Change = HintActivityLog.Subject(change.Kind, item?.Path, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N")),
+                Title = title,
+                Subtitle = subtitle,
+                ItemId = change.ItemId == Guid.Empty ? null : change.ItemId.ToString("N"),
+                UserId = change.UserId == Guid.Empty ? null : change.UserId.ToString("N"),
+                UserName = userName,
                 EditedAt = change.EditedAt,
                 DueAt = change.Due,
                 Recorded = change.Recorded
@@ -326,8 +359,14 @@ public class HintsController : ControllerBase
 
         foreach (var row in _outbound.GetRecent(OverviewRows))
         {
+            var item = Guid.TryParse(row.ItemId, out var itemId) ? _libraryManager.GetItemById(itemId) : null;
+            var (title, subtitle) = DisplayOf(item, row.Kind, row.UserName);
             overview.Outbound.Add(new OutboundHintDto
             {
+                Title = title,
+                Subtitle = subtitle,
+                ItemId = row.ItemId,
+                UserId = row.UserId,
                 Id = row.Id,
                 HintId = row.HintId,
                 PeerKey = row.PeerKey,
@@ -492,6 +531,21 @@ public class GatheringDto
     /// <summary>Gets or sets what changed, named.</summary>
     public string Change { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets Jellyfin's title for the item, or the person or user.</summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the second line: the episode, the year, or null.</summary>
+    public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets the local item id, for its poster.</summary>
+    public string? ItemId { get; set; }
+
+    /// <summary>Gets or sets the local user id, for the avatar on a watch history change.</summary>
+    public string? UserId { get; set; }
+
+    /// <summary>Gets or sets the local username.</summary>
+    public string? UserName { get; set; }
+
     /// <summary>Gets or sets when it was last edited, in UTC.</summary>
     public DateTime EditedAt { get; set; }
 
@@ -507,6 +561,18 @@ public class OutboundHintDto
 {
     /// <summary>Gets or sets the row id.</summary>
     public long Id { get; set; }
+
+    /// <summary>Gets or sets Jellyfin's title for the item, or the person or user.</summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the second line: the episode, the year, or null.</summary>
+    public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets the local item id, for its poster.</summary>
+    public string? ItemId { get; set; }
+
+    /// <summary>Gets or sets the local user id, for the avatar on a watch history change.</summary>
+    public string? UserId { get; set; }
 
     /// <summary>Gets or sets the hint id.</summary>
     public string HintId { get; set; } = string.Empty;

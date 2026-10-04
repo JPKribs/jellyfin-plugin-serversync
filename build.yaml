@@ -30,3 +30,4 @@ changelog:
   developer:
   - An applied change writes "Synced [name]." to the activity log, with "[type] [name] was updated from [server]." as the detail
   - The duplicate DELETE /ServerSync/Peer/Queue/{id} route is gone. Every route requires an administrator, which a unit test and the integration suite now enforce
+  - The Queue view is one list. Each change is one row for its whole life with a status chip, Jellyfin's title and poster, the user for watch history, a ticking countdown while it gathers, the summary cards and peers as filters, and a layout that stacks on phones

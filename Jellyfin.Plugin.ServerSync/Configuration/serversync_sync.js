@@ -3652,7 +3652,13 @@ export default function (view) {
 
     var QueueModule = {
         _timer: null,
+        _tick: null,
         _bound: false,
+        _config: null,
+        _data: null,
+        _states: { Gathering: true, Pending: true, Sent: true, Received: true, Failed: true },
+        _dir: 'all',
+        _peer: null,
 
         init: function() {
             var self = this;
@@ -3660,8 +3666,22 @@ export default function (view) {
                 this._bound = true;
                 view.querySelector('#btnQueueRefresh').addEventListener('click', function() { self.load(); });
                 view.querySelector('#btnQueueRun').addEventListener('click', function() { self.runNow(); });
-                view.querySelector('#queueOutboundBody').addEventListener('click', function(e) { self._onDiscard(e, 'Outbound'); });
-                view.querySelector('#queueInboundBody').addEventListener('click', function(e) { self._onDiscard(e, 'Inbound'); });
+                view.querySelector('#queueList').addEventListener('click', function(e) { self._onDiscard(e); });
+                view.querySelectorAll('.qCards .qCard').forEach(function(card) {
+                    card.addEventListener('click', function() {
+                        self._states[card.dataset.state] = !self._states[card.dataset.state];
+                        card.classList.toggle('on', self._states[card.dataset.state]);
+                        self.renderList();
+                    });
+                });
+                view.querySelector('#queueFilters').addEventListener('click', function(e) {
+                    var btn = e.target.closest('.qFilter');
+                    if (!btn) return;
+                    if (btn.dataset.dir) { self._dir = btn.dataset.dir; self._peer = null; }
+                    else { self._peer = self._peer === btn.dataset.peer ? null : btn.dataset.peer; self._dir = 'all'; }
+                    self._reflectFilters();
+                    self.renderList();
+                });
             }
             this.load();
         },
@@ -3670,20 +3690,21 @@ export default function (view) {
             var self = this;
             this.stopAutoRefresh();
             this._timer = setInterval(function() { self.load(); }, 8000);
+            // Countdowns tick between refreshes.
+            this._tick = setInterval(function() { self._tickChips(); }, 1000);
         },
 
         stopAutoRefresh: function() {
-            if (this._timer) {
-                clearInterval(this._timer);
-                this._timer = null;
-            }
+            if (this._timer) { clearInterval(this._timer); this._timer = null; }
+            if (this._tick) { clearInterval(this._tick); this._tick = null; }
         },
 
         load: function() {
             var self = this;
             if (!ServerSyncShared) return Promise.resolve();
             return ServerSyncShared.apiRequest('Hints', 'GET').then(function(data) {
-                self.render(data || {});
+                self._data = data || {};
+                self.render();
             }).catch(function() {
                 // Leave the last picture in place; the next tick tries again.
             });
@@ -3704,29 +3725,27 @@ export default function (view) {
             });
         },
 
-        render: function(data) {
+        render: function() {
+            var data = this._data || {};
             var outbound = data.Outbound || [];
             var inbound = data.Inbound || [];
             var peers = data.Peers || [];
-            // The lists are capped by the server; the counts cover the whole table.
             var counts = data.OutboundCounts || {};
             var count = function(state) {
                 if (counts[state] !== undefined) return counts[state];
-                return outbound.filter(function(r) { return r.State === state || r.State === QueueModule._stateNumber(state); }).length;
+                return outbound.filter(function(r) { return QueueModule._stateName(r.State) === state; }).length;
             };
-
             view.querySelector('#queuePendingCount').textContent = count('Pending');
             view.querySelector('#queueSentCount').textContent = count('Sent');
             view.querySelector('#queueFailedCount').textContent = count('Failed');
             view.querySelector('#queueInboundCount').textContent = data.InboundCount !== undefined ? data.InboundCount : inbound.length;
-            view.querySelector('#queueGatheringCount').textContent = data.Pending || 0;
+            view.querySelector('#queueGatheringCount').textContent = (data.Gathering || []).length || data.Pending || 0;
 
             var peerRow = view.querySelector('#queuePeerRow');
             peerRow.innerHTML = peers.map(function(p) {
                 var paused = p.PausedUntil && new Date(p.PausedUntil) > new Date();
                 var state = paused ? 'Paused until ' + QueueModule._time(p.PausedUntil)
                     : p.LastAttempt ? 'Delivered ' + QueueModule._ago(p.LastAttempt) : 'Nothing sent yet';
-                // What goes to this peer follows the modules selected there.
                 var sends = p.Sends === null || p.Sends === undefined ? 'Sends everything until the peer says what it applies'
                     : p.Sends.length === 0 ? 'Sends nothing: every module is off there'
                     : 'Sends ' + p.Sends.map(QueueModule._kindLabel).join(', ');
@@ -3740,7 +3759,6 @@ export default function (view) {
             view.querySelector('#queuePeers').classList.toggle('hidden', peers.length === 0);
             view.querySelector('#queueNoPeers').classList.toggle('hidden', peers.length > 0);
 
-            // Changes that matched no mapping are the usual answer to "why is nothing being sent".
             var unmatchedEl = view.querySelector('#queueUnmatched');
             var unmatched = data.Unmatched || 0;
             unmatchedEl.classList.toggle('hidden', unmatched === 0);
@@ -3749,81 +3767,164 @@ export default function (view) {
                     (data.LastUnmatched ? '. Last: ' + data.LastUnmatched : '') + '. Check the Libraries and Users steps of those servers.';
             }
 
-            // What is still gathering: named the moment it is noticed, with when it goes out.
-            var gathering = data.Gathering || [];
-            var gatherBody = view.querySelector('#queueGatheringBody');
-            gatherBody.innerHTML = gathering.map(function(g) {
-                return '<tr>' +
-                    '<td><span class="queueChangeKind">' + ServerSyncShared.escapeHtml(QueueModule._kindName(g.Kind) + (g.Recorded === false ? ' \u00b7 provider' : '')) + '</span>' +
-                        '<span class="queueChangeWhat">' + ServerSyncShared.escapeHtml(g.Change || '') + '</span></td>' +
-                    '<td>' + ServerSyncShared.escapeHtml(QueueModule._ago(g.EditedAt)) + '</td>' +
-                    '<td>' + ServerSyncShared.escapeHtml(QueueModule._time(g.DueAt) || 'now') + '</td>' +
-                    '</tr>';
-            }).join('');
-            view.querySelector('#queueGatheringEmpty').classList.toggle('hidden', gathering.length > 0);
-            view.querySelector('#queueGatheringTable').classList.toggle('hidden', gathering.length === 0);
+            // Peer filters follow the peers that exist.
+            var filters = view.querySelector('#queueFilters');
+            filters.querySelectorAll('[data-peer]').forEach(function(b) { b.remove(); });
+            peers.forEach(function(p) {
+                var b = document.createElement('button');
+                b.type = 'button'; b.className = 'qFilter'; b.dataset.peer = p.Key; b.textContent = p.Name || p.Key;
+                filters.appendChild(b);
+            });
+            this._reflectFilters();
+            this.renderList();
+        },
 
-            var outBody = view.querySelector('#queueOutboundBody');
-            outBody.innerHTML = outbound.map(function(r) {
+        _reflectFilters: function() {
+            var self = this;
+            view.querySelectorAll('#queueFilters .qFilter').forEach(function(b) {
+                b.classList.toggle('on', b.dataset.dir ? (self._peer === null && b.dataset.dir === self._dir) : b.dataset.peer === self._peer);
+            });
+        },
+
+        // Every change as one row, whatever lane it is in, newest activity first.
+        _rows: function() {
+            var data = this._data || {};
+            var rows = [];
+            (data.Gathering || []).forEach(function(g) {
+                rows.push({ lane: 'gathering', state: 'Gathering', dir: 'out', at: g.EditedAt, kind: g.Kind, recorded: g.Recorded,
+                    title: g.Title || g.Change, subtitle: g.Subtitle, itemId: g.ItemId, userId: g.UserId, userName: g.UserName, dueAt: g.DueAt, what: QueueModule._what(g.Kind) });
+            });
+            (data.Outbound || []).forEach(function(r) {
                 var state = QueueModule._stateName(r.State);
-                var detail;
-                if (state === 'Sent') detail = 'accepted ' + QueueModule._ago(r.SentAt) + ', waiting for the peer to finish';
-                else if (state === 'Failed') detail = r.LastError || 'rejected';
-                else if (r.Attempts > 0) detail = (r.LastError || 'retrying') + '; next try ' + QueueModule._time(r.NextAttempt);
-                else detail = 'waiting for delivery';
-                return '<tr>' +
-                    '<td>' + ServerSyncShared.escapeHtml(r.PeerName || r.PeerKey) + '</td>' +
-                    '<td>' + QueueModule._change(r.Kind, r.ItemPath, r.UserName, r.Key, r.Recorded) + '</td>' +
-                    '<td><span class="jpk-badge ' + (state === 'Sent' ? 'blue' : state === 'Failed' ? 'red' : 'orange') + '">' + state + '</span></td>' +
-                    '<td><span class="queueDetail' + (state === 'Failed' || r.Attempts > 0 ? ' queueDetail-error' : '') + '">' + ServerSyncShared.escapeHtml(detail) + '</span></td>' +
-                    '<td class="queueTable-actions"><button type="button" class="jpk-row-btn" data-discard="' + r.Id + '" title="Discard this hint. The scheduled task still covers the change."><span class="material-icons">delete</span></button></td>' +
-                    '</tr>';
-            }).join('');
-            view.querySelector('#queueOutboundEmpty').classList.toggle('hidden', outbound.length > 0);
-            view.querySelector('#queueOutboundTable').classList.toggle('hidden', outbound.length === 0);
-
-            var inBody = view.querySelector('#queueInboundBody');
-            inBody.innerHTML = inbound.map(function(r) {
-                var detail = r.Attempts > 0 ? (r.LastError || 'retrying') : 'waiting to be applied';
-                return '<tr>' +
-                    '<td>' + ServerSyncShared.escapeHtml(QueueModule._originName(r.OriginServerId)) + '</td>' +
-                    '<td>' + QueueModule._change(r.Kind, r.ItemPath, r.UserName, r.Key, r.Recorded) + '</td>' +
-                    '<td>' + ServerSyncShared.escapeHtml(QueueModule._ago(r.ReceivedAt)) + '</td>' +
-                    '<td><span class="queueDetail' + (r.Attempts > 0 ? ' queueDetail-error' : '') + '">' + ServerSyncShared.escapeHtml(detail) + (r.Attempts > 0 ? ' (' + r.Attempts + ' attempt' + (r.Attempts === 1 ? '' : 's') + ')' : '') + '</span></td>' +
-                    '<td class="queueTable-actions"><button type="button" class="jpk-row-btn" data-discard="' + r.Id + '" title="Discard this hint. The scheduled task still covers the change."><span class="material-icons">delete</span></button></td>' +
-                    '</tr>';
-            }).join('');
-            view.querySelector('#queueInboundEmpty').classList.toggle('hidden', inbound.length > 0);
-            view.querySelector('#queueInboundTable').classList.toggle('hidden', inbound.length === 0);
+                rows.push({ lane: 'out', state: state, dir: 'out', at: r.SentAt || r.CreatedAt, kind: r.Kind, recorded: r.Recorded, id: r.Id, peerKey: r.PeerKey, peerName: r.PeerName || r.PeerKey,
+                    title: r.Title || QueueModule._fileName(r.ItemPath) || r.UserName || r.Key, subtitle: r.Subtitle, itemId: r.ItemId, userId: r.UserId, userName: r.UserName,
+                    attempts: r.Attempts, lastError: r.LastError, nextAttempt: r.NextAttempt, sentAt: r.SentAt, what: QueueModule._what(r.Kind) });
+            });
+            (data.Inbound || []).forEach(function(r) {
+                var origin = QueueModule._origin(r.OriginServerId);
+                rows.push({ lane: 'in', state: 'Received', dir: 'in', at: r.ReceivedAt, kind: r.Kind, recorded: r.Recorded, id: r.Id, peerKey: origin ? origin.Key : null, peerName: origin ? (origin.Name || origin.ServerName || origin.Url) : r.OriginServerId,
+                    title: QueueModule._fileName(r.ItemPath) || r.UserName || r.Key, subtitle: null, originItemId: r.ItemId, userName: r.UserName,
+                    attempts: r.Attempts, lastError: r.LastError, receivedAt: r.ReceivedAt, what: QueueModule._what(r.Kind) });
+            });
+            rows.sort(function(a, b) { return new Date(b.at || 0) - new Date(a.at || 0); });
+            return rows;
         },
 
-        _config: null,
+        renderList: function() {
+            var self = this;
+            var rows = this._rows().filter(function(r) {
+                if (!self._states[r.state]) return false;
+                if (self._peer) return r.peerKey === self._peer;
+                return self._dir === 'all' || r.dir === self._dir;
+            });
+            var list = view.querySelector('#queueList');
+            list.innerHTML = rows.map(function(r) { return QueueModule._row(r); }).join('');
+            view.querySelector('#queueEmpty').classList.toggle('hidden', rows.length > 0);
+            list.classList.toggle('hidden', rows.length === 0);
+        },
 
-        _originName: function(serverId) {
+        _row: function(r) {
+            var esc = ServerSyncShared.escapeHtml;
+            var isPerson = r.kind === 'People' || r.kind === 2;
+            var isUser = r.kind === 'Users' || r.kind === 4;
+            var thumb;
+            if (r.itemId && !isUser) {
+                var url = ApiClient.getImageUrl(r.itemId, { type: 'Primary', maxHeight: 128 });
+                thumb = '<img class="qThumb' + (isPerson ? ' round' : '') + '" src="' + esc(url) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" />' +
+                    '<div class="qThumbHolder' + (isPerson ? ' round' : '') + '" style="display:none"><span class="material-icons">' + (isPerson ? 'person' : 'movie') + '</span></div>';
+            } else if (r.originItemId && r.peerKey && !isUser) {
+                var id = 'ss-q-thumb-' + Math.random().toString(36).slice(2);
+                ServerSyncShared.scheduleProxyImage(id, r.originItemId, false, 128, r.peerKey);
+                thumb = '<img id="' + id + '" class="qThumb' + (isPerson ? ' round' : '') + '" alt="" />' +
+                    '<div class="qThumbHolder' + (isPerson ? ' round' : '') + '" style="display:none"><span class="material-icons">' + (isPerson ? 'person' : 'movie') + '</span></div>';
+            } else {
+                thumb = '<div class="qThumbHolder' + (isPerson || isUser ? ' round' : '') + '"><span class="material-icons">' + (isUser ? 'person' : isPerson ? 'person' : 'movie') + '</span></div>';
+            }
+
+            var who = '';
+            if (r.userName && (r.kind === 'History' || r.kind === 0)) {
+                var avatar = r.userId ? '<img class="qAvatar" src="' + esc(ApiClient.getUserImageUrl(r.userId, { type: 'Primary', height: 32 })) + '" alt="" onerror="this.style.visibility=\'hidden\'" />' : '<i class="qAvatar"></i>';
+                who = '<span class="qWho">' + avatar + esc(r.userName) + '</span>';
+            }
+            var where = r.dir === 'in' ? 'from ' + esc(r.peerName || 'a peer') : (r.peerName ? 'to ' + esc(r.peerName) : '');
+            var sub = who + '<span>' + esc(r.what) + (where ? ' · ' + where : '') + '</span>';
+            var badges = '<span class="jpk-badge ' + QueueModule._kindColor(r.kind) + '">' + esc(QueueModule._kindLabelTitle(r.kind)) + '</span>' +
+                (r.recorded === false ? '<span class="jpk-badge gray">provider</span>' : '');
+
+            var chip, meta = '', err = false, act = '';
+            if (r.state === 'Gathering') {
+                chip = '<span class="qChip gathering" data-due="' + esc(r.dueAt || '') + '" data-edited="' + esc(r.at || '') + '"><i class="qRing"></i><span class="qChipText">Gathering · ' + QueueModule._countdown(r.dueAt) + '</span></span>';
+                meta = 'edited ' + QueueModule._ago(r.at);
+            } else if (r.state === 'Pending') {
+                chip = '<span class="qChip pending">Pending' + (r.attempts > 0 ? ' · retry ' + QueueModule._time(r.nextAttempt) : ' · ' + esc(r.peerName)) + '</span>';
+                if (r.attempts > 0) { meta = (r.lastError || 'retrying') + ', attempt ' + r.attempts; err = true; } else { meta = 'waiting for delivery'; }
+                act = '<button type="button" class="qAct" data-lane="Outbound" data-discard="' + r.id + '" title="Discard this hint. The scheduled task still covers the change.">✕</button>';
+            } else if (r.state === 'Sent') {
+                chip = '<span class="qChip sent">Sent · waiting for ' + esc(r.peerName) + '</span>';
+                meta = 'accepted ' + QueueModule._ago(r.sentAt);
+                act = '<button type="button" class="qAct" data-lane="Outbound" data-discard="' + r.id + '" title="Discard this hint. The scheduled task still covers the change.">✕</button>';
+            } else if (r.state === 'Failed') {
+                chip = '<span class="qChip failed">Failed · ' + esc(r.peerName) + '</span>';
+                meta = r.lastError || 'rejected'; err = true;
+                act = '<button type="button" class="qAct" data-lane="Outbound" data-discard="' + r.id + '" title="Discard this hint.">✕</button>';
+            } else {
+                chip = '<span class="qChip received">Received · ' + (r.attempts > 0 ? 'retrying' : 'applying next pass') + '</span>';
+                if (r.attempts > 0) { meta = (r.lastError || 'retrying') + ', attempt ' + r.attempts; err = true; } else { meta = QueueModule._ago(r.receivedAt); }
+                act = '<button type="button" class="qAct" data-lane="Inbound" data-discard="' + r.id + '" title="Discard this hint. The scheduled task still covers the change.">✕</button>';
+            }
+
+            var title = esc(r.title || '') + (r.subtitle ? ' <span class="qEp"><i class="qSep">· </i>' + esc(r.subtitle) + '</span>' : '');
+            return '<div class="qRow">' +
+                '<div class="qThumbWrap">' + thumb + '</div>' +
+                '<div class="qInfo"><div class="qTitle">' + title + '</div><div class="qSub">' + sub + '</div><div class="qBadges">' + badges + '</div></div>' +
+                '<div class="qRight">' + chip + '<span class="qMeta' + (err ? ' err' : '') + '">' + esc(meta) + '</span>' + act + '</div>' +
+                '</div>';
+        },
+
+        // The gathering countdown moves every second without a round trip.
+        _tickChips: function() {
+            view.querySelectorAll('#queueList .qChip.gathering').forEach(function(chip) {
+                var due = chip.getAttribute('data-due');
+                var edited = chip.getAttribute('data-edited');
+                if (!due) return;
+                var text = chip.querySelector('.qChipText');
+                if (text) text.textContent = 'Gathering · ' + QueueModule._countdown(due);
+                var ring = chip.querySelector('.qRing');
+                if (ring && edited) {
+                    var total = new Date(due) - new Date(edited);
+                    var done = Date.now() - new Date(edited);
+                    ring.style.setProperty('--p', Math.max(0, Math.min(100, total > 0 ? 100 * done / total : 100)) + '%');
+                }
+            });
+        },
+
+        _countdown: function(iso) {
+            if (!iso) return '';
+            var s = Math.round((new Date(iso) - Date.now()) / 1000);
+            if (s <= 0) return 'sending now';
+            return s < 120 ? 'sends in ' + s + 's' : 'sends in ' + Math.round(s / 60) + 'm';
+        },
+
+        _origin: function(serverId) {
             var servers = (this._config && this._config.Servers) || [];
-            var match = servers.find(function(s) { return s.ServerId === serverId; });
-            return match ? (match.Name || match.ServerName || match.Url) : (serverId || 'unknown server');
+            return servers.find(function(s) { return s.ServerId === serverId; }) || null;
         },
 
-        _change: function(kind, path, userName, key, recorded) {
-            var what;
-            if (kind === 'History' || kind === 0) what = (userName ? userName + ' on ' : '') + QueueModule._fileName(path);
-            else if (kind === 'Users' || kind === 4) what = userName || key;
-            else if (kind === 'People' || kind === 2) what = userName || key;
-            else what = QueueModule._fileName(path) || key;
-            // Provider work, such as a poster a scan fetched, is marked: it fills in on the other side but never replaces a hand made edit.
-            var kindLabel = QueueModule._kindName(kind) + (recorded === false ? ' \u00b7 provider' : '');
-            return '<span class="queueChangeKind">' + ServerSyncShared.escapeHtml(kindLabel) + '</span>' +
-                '<span class="queueChangeWhat" title="' + ServerSyncShared.escapeHtml(path || '') + '">' + ServerSyncShared.escapeHtml(what || '') + '</span>';
+        _what: function(kind) {
+            return { 0: 'watch history', 1: 'metadata', 2: 'biography and images', 3: 'new file', 4: 'user settings',
+                History: 'watch history', Metadata: 'metadata', People: 'biography and images', Content: 'new file', Users: 'user settings' }[kind] || String(kind);
         },
 
         _kindLabel: function(kind) {
             return { History: 'watch history', Metadata: 'metadata', People: 'people', Content: 'files', Users: 'user settings' }[kind] || String(kind).toLowerCase();
         },
 
-        _kindName: function(kind) {
-            var names = { 0: 'History', 1: 'Metadata', 2: 'Person', 3: 'File', 4: 'User', History: 'History', Metadata: 'Metadata', People: 'Person', Content: 'File', Users: 'User' };
-            return names[kind] || String(kind);
+        _kindLabelTitle: function(kind) {
+            return { 0: 'Watch history', 1: 'Metadata', 2: 'Person', 3: 'File', 4: 'User', History: 'Watch history', Metadata: 'Metadata', People: 'Person', Content: 'File', Users: 'User' }[kind] || String(kind);
+        },
+
+        _kindColor: function(kind) {
+            return { 0: 'purple', 1: 'blue', 2: 'green', 3: 'orange', 4: 'gray', History: 'purple', Metadata: 'blue', People: 'green', Content: 'orange', Users: 'gray' }[kind] || 'gray';
         },
 
         _stateName: function(state) {
@@ -3831,14 +3932,11 @@ export default function (view) {
             return names[state] || String(state);
         },
 
-        _stateNumber: function(name) {
-            return { Pending: 0, Sent: 1, Failed: 2 }[name];
-        },
-
         _fileName: function(path) {
             if (!path) return '';
             var parts = path.split(/[\\/]/);
-            return parts[parts.length - 1] || path;
+            var last = parts[parts.length - 1] || path;
+            return last.replace(/\.[^.]+$/, '');
         },
 
         _ago: function(iso) {
@@ -3861,12 +3959,12 @@ export default function (view) {
             return d.toLocaleString();
         },
 
-        _onDiscard: function(e, lane) {
+        _onDiscard: function(e) {
             var btn = e.target.closest('[data-discard]');
             if (!btn) return;
             var self = this;
             btn.disabled = true;
-            ServerSyncShared.apiRequest('Hints/' + lane + '/' + btn.getAttribute('data-discard'), 'DELETE').then(function() {
+            ServerSyncShared.apiRequest('Hints/' + btn.getAttribute('data-lane') + '/' + btn.getAttribute('data-discard'), 'DELETE').then(function() {
                 ServerSyncShared.showAlert('Hint discarded');
                 return self.load();
             }).catch(function() {

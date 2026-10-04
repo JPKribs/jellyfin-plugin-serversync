@@ -117,11 +117,11 @@ A server only announces the kinds of change the other side applies: it reads the
 
 When two servers disagree, watch history merges three way against what the servers last agreed on, and everything else resolves on where and when the value was last edited, so the newest edit wins. Every metadata and image change raises an item hint, including posters and metadata a provider fetches during a scan or a refresh. Provider work is marked as such: it fills in on a server that has recorded no edit of its own for the item and never replaces a poster or a field someone set by hand, and it leaves no version behind, so a hand made edit anywhere in the pool still wins over it. Replacements and removals of files are also left to Sync Content.
 
-| Change Queue |
-| :--- |
-| ![Change Queue](docs/screenshots/Queue.png) |
+| Change Queue | On a phone |
+| :--- | :--- |
+| ![Change Queue](docs/screenshots/Queue.png) | ![Change Queue on a phone](docs/screenshots/Queue%20Phone.png) |
 
-The **Queue** view on the Sync page shows the changes still gathering before they are sent, what is owed to each peer, what peers have sent that is not yet applied, and each peer's delivery state with the reason when it is paused. When a change here matched no library or user mapping on any Push or Sync server, the view says so and names the last one, since that is the usual reason nothing is sent. Every change applied from a peer writes a line to Jellyfin's activity log, "Synced Only A (2021)." with "Metadata for Only A (2021) was updated from source-a." as the detail, and every drop, retry, and pause writes one too. A paused peer keeps at most ten thousand pending hints; beyond that the oldest are dropped and the scheduled tasks carry the change instead. Each item's detail dialog shows which server last edited it and when.
+The **Queue** view on the Sync page is one list. Each change is one row for its whole life, from gathering with a countdown, to pending and sent to a peer, to received from one, with Jellyfin's title and poster, the user for watch history, and a status chip. The summary cards and the peers act as filters, and each peer's card shows its delivery state with the reason when it is paused. When a change here matched no library or user mapping on any Push or Sync server, the view says so and names the last one, since that is the usual reason nothing is sent. Every change applied from a peer writes a line to Jellyfin's activity log, "Synced Only A (2021)." with "Metadata for Only A (2021) was updated from source-a." as the detail, and every drop, retry, and pause writes one too. A paused peer keeps at most ten thousand pending hints; beyond that the oldest are dropped and the scheduled tasks carry the change instead. Each item's detail dialog shows which server last edited it and when.
 
 | Item Detail |
 | :--- |
@@ -423,9 +423,9 @@ Both queues on this server and the delivery state of every peer it sends to.
 ```json
 {
   "Pending": 0,
-  "Gathering": [ { "Kind": "Metadata", "Change": "Metadata for Only A (2021)", "EditedAt": "…", "DueAt": "…", "Recorded": true } ],
+  "Gathering": [ { "Kind": "Metadata", "Change": "Metadata for Only A (2021)", "Title": "Only A", "Subtitle": "2021", "ItemId": "…", "UserId": null, "UserName": null, "EditedAt": "…", "DueAt": "…", "Recorded": true } ],
   "Outbound": [
-    { "Id": 42, "HintId": "…:42", "PeerKey": "…", "PeerName": "source-a", "Kind": "Metadata", "Key": "…", "ItemPath": "…", "UserName": null,
+    { "Id": 42, "HintId": "…:42", "PeerKey": "…", "PeerName": "source-a", "Kind": "Metadata", "Key": "…", "Title": "Only A", "Subtitle": "2021", "ItemId": "…", "ItemPath": "…", "UserId": null, "UserName": null,
       "State": "Sent", "Attempts": 1, "NextAttempt": "…", "SentAt": "…", "LastError": null, "CreatedAt": "…" }
   ],
   "Inbound": [ { "Id": 7, "HintId": "…", "OriginServerId": "…", "Kind": "History", "Key": "…", "ReceivedAt": "…", "Attempts": 0, "LastError": null } ],

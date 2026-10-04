@@ -78,6 +78,15 @@ public class InboundHintDto
     /// <summary>Gets or sets the origin's key.</summary>
     public string Key { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the item's path on the origin.</summary>
+    public string? ItemPath { get; set; }
+
+    /// <summary>Gets or sets the origin's item id, for a poster through the image proxy.</summary>
+    public string? ItemId { get; set; }
+
+    /// <summary>Gets or sets the username on the origin.</summary>
+    public string? UserName { get; set; }
+
     /// <summary>Gets or sets when the hint arrived, in UTC.</summary>
     public DateTime ReceivedAt { get; set; }
 
@@ -103,6 +112,9 @@ public class InboundHintDto
             OriginServerId = row.OriginServerId,
             Kind = row.Kind,
             Key = row.Key,
+            ItemPath = row.ItemPath,
+            ItemId = row.ItemId,
+            UserName = row.UserName,
             ReceivedAt = row.ReceivedAt,
             Attempts = row.Attempts,
             LastError = row.LastError,
