@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
+using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
@@ -92,13 +93,14 @@ public class SourceServerClient : IDisposable
             try
             {
                 var info = await client.System.Info.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-
+                var isAdministrator = await IsAdministratorAsync(client, cancellationToken).ConfigureAwait(false);
                 return new ConnectionTestResult
                 {
                     Success = true,
                     ServerName = info?.ServerName,
                     ServerId = info?.Id,
-                    Message = "Connection successful"
+                    IsAdministrator = isAdministrator,
+                    Message = isAdministrator ? "Connection successful" : "Connection successful, with a standard user's access"
                 };
             }
             catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode == 403)
@@ -119,7 +121,8 @@ public class SourceServerClient : IDisposable
                 Success = true,
                 ServerName = publicInfo?.ServerName,
                 ServerId = publicInfo?.Id,
-                Message = "Connection successful"
+                IsAdministrator = false,
+                Message = "Connection successful, with a standard user's access"
             };
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
@@ -243,6 +246,7 @@ public class SourceServerClient : IDisposable
             // Get user info
             string? authenticatedUsername = null;
             string? authenticatedUserId = null;
+            bool? isAdministrator = null;
             if (authResponse.RootElement.TryGetProperty("User", out var userProp))
             {
                 if (userProp.TryGetProperty("Name", out var nameProp))
@@ -254,6 +258,13 @@ public class SourceServerClient : IDisposable
                 {
                     authenticatedUserId = idProp.GetString();
                 }
+
+                if (userProp.TryGetProperty("Policy", out var policyProp)
+                    && policyProp.TryGetProperty("IsAdministrator", out var adminProp)
+                    && adminProp.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                {
+                    isAdministrator = adminProp.GetBoolean();
+                }
             }
 
             return new AuthenticateResponse
@@ -262,6 +273,7 @@ public class SourceServerClient : IDisposable
                 AccessToken = accessToken,
                 Username = authenticatedUsername ?? username,
                 UserId = authenticatedUserId,
+                IsAdministrator = isAdministrator,
                 ServerId = serverName
             };
         }
@@ -2226,8 +2238,233 @@ public class SourceServerClient : IDisposable
         // "MediaBrowser " into the parameter too, yielding a double-scheme
         // header that some Jellyfin endpoints (notably Download) reject
         // with 400 Bad Request.
-        var authValue = $"Client=\"{DefaultClientName}\", Device=\"{_localServerName}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{_pluginVersion}\", Token=\"{_apiKey}\"";
+        // The device name is this server's name, which may hold characters a header cannot carry.
+        var authValue = $"Client=\"{DefaultClientName}\", Device=\"{HeaderSafe(_localServerName)}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{_pluginVersion}\", Token=\"{_apiKey}\"";
         request.Headers.Authorization = new AuthenticationHeaderValue("MediaBrowser", authValue);
+    }
+
+    /// <summary>
+    /// Reduces a name to what an HTTP header value can carry: printable ASCII without quotes or
+    /// backslashes. A server named with emoji otherwise makes every hand built request fail with
+    /// "request headers must contain only ASCII characters", while the SDK's own requests go through.
+    /// </summary>
+    /// <param name="name">The name.</param>
+    /// <returns>The safe name, or a fixed fallback when nothing printable is left.</returns>
+    public static string HeaderSafe(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return DefaultClientName;
+        }
+
+        var builder = new System.Text.StringBuilder(name.Length);
+        foreach (var c in name)
+        {
+            if (c >= ' ' && c <= '~' && c != '"' && c != '\\')
+            {
+                builder.Append(c);
+            }
+        }
+
+        var safe = builder.ToString().Trim();
+        return safe.Length == 0 ? DefaultClientName : safe;
+    }
+
+    // Any signed in user may read the system info, so that call says nothing about elevation. The
+    // current user's own policy does. An API key has no user behind it and the call fails, and an API
+    // key is always elevated, so a failure there means administrator.
+    private static async Task<bool> IsAdministratorAsync(JellyfinApiClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var me = await client.Users.Me.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+            return me?.Policy?.IsAdministrator ?? true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
+    // Jellyfin serializes with Pascal case names and enums as strings. Reading is case insensitive so
+    // either casing on the wire is accepted.
+    private static readonly System.Text.Json.JsonSerializerOptions PeerJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+    };
+
+    /// <summary>
+    /// Asks the source whether it runs Server Sync and what it can negotiate. Returns null when the
+    /// source answers 404, which means the plugin is not installed there or predates peer support.
+    /// Any other failure is raised with its status, so a caller can tell a refused key from a peer
+    /// that is down.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's capabilities, or null when the source has no peer endpoint.</returns>
+    public async Task<PeerCapabilities?> GetPeerCapabilitiesAsync(CancellationToken cancellationToken = default)
+    {
+        var (status, parsed, body) = await PeerRequestAsync<PeerCapabilities>(HttpMethod.Get, "/ServerSync/Peer/Capabilities", null, cancellationToken).ConfigureAwait(false);
+        if (status == 404)
+        {
+            return null;
+        }
+
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException($"The peer answered {status} to the capabilities request: {body}", null, (System.Net.HttpStatusCode)status);
+        }
+
+        return parsed;
+    }
+
+    /// <summary>
+    /// Sends merged history states to the source's Server Sync plugin. The source writes each one only
+    /// if its live state still matches what this server expected, and reports the outcome per entry.
+    /// </summary>
+    /// <param name="peerRequest">The entries to negotiate.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The source's per entry results.</returns>
+    public async Task<PeerHistoryResponse> NegotiateHistoryAsync(PeerHistoryRequest peerRequest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(peerRequest);
+        var (status, parsed, body) = await PeerRequestAsync<PeerHistoryResponse>(HttpMethod.Post, "/ServerSync/Peer/History", peerRequest, cancellationToken).ConfigureAwait(false);
+        if (status is < 200 or >= 300)
+        {
+            throw new Peer.PeerRefusedException((System.Net.HttpStatusCode)status, $"Source server refused the history negotiation with {status}: {body}");
+        }
+
+        return parsed ?? new PeerHistoryResponse();
+    }
+
+    /// <summary>
+    /// Offers a batch of hints to the peer's Server Sync. Never throws on an HTTP answer: the status
+    /// code is returned so the caller can decide between done, paused, and retry.
+    /// </summary>
+    /// <param name="queueRequest">The hints.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The status code, the parsed answer on 200, and the body text otherwise.</returns>
+    public async Task<(int StatusCode, Models.Queue.QueueResponse? Response, string? Body)> SendHintsAsync(Models.Queue.QueueRequest queueRequest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(queueRequest);
+        var (status, parsed, body) = await PeerRequestAsync<Models.Queue.QueueResponse>(HttpMethod.Post, "/ServerSync/Peer/Queue", queueRequest, cancellationToken).ConfigureAwait(false);
+        return status == 200 ? (status, parsed ?? new Models.Queue.QueueResponse(), null) : (status, null, body);
+    }
+
+    /// <summary>Asks the peer whether it lists this server, and how.</summary>
+    /// <param name="thisServerId">This server's id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The listing, or null when the peer has no Server Sync that can answer.</returns>
+    public async Task<Models.Peer.PeerLinkResponse?> GetPeerLinkAsync(string thisServerId, CancellationToken cancellationToken = default)
+    {
+        var (_, parsed, _) = await PeerRequestAsync<Models.Peer.PeerLinkResponse>(HttpMethod.Get, "/ServerSync/Peer/Link?serverId=" + Uri.EscapeDataString(thisServerId ?? string.Empty), null, cancellationToken).ConfigureAwait(false);
+        return parsed;
+    }
+
+    /// <summary>Reads one person by name with the fields the people module compares.</summary>
+    /// <param name="name">The person's name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The person, or null when the peer has none by that name.</returns>
+    public async Task<BaseItemDto?> GetPersonByNameAsync(string name, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        try
+        {
+            var client = GetApiClient();
+            return await client.Persons[name].GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode == 404)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Asks the peer which versions it holds for a batch of its own keys.</summary>
+    /// <param name="versionsRequest">The kind and keys.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The versions by key, or null when the peer did not answer with versions.</returns>
+    public async Task<Dictionary<string, Models.Queue.ObjectVersion>?> GetPeerVersionsAsync(Models.Queue.VersionsRequest versionsRequest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(versionsRequest);
+        var (status, parsed, _) = await PeerRequestAsync<Models.Queue.VersionsResponse>(HttpMethod.Post, "/ServerSync/Peer/Versions", versionsRequest, cancellationToken).ConfigureAwait(false);
+        if (status is < 200 or >= 300)
+        {
+            return null;
+        }
+
+        var map = new Dictionary<string, Models.Queue.ObjectVersion>(StringComparer.Ordinal);
+        foreach (var version in parsed?.Items ?? new List<Models.Queue.ObjectVersion>())
+        {
+            map[version.Key] = version;
+        }
+
+        return map;
+    }
+
+    /// <summary>Tells the origin of some hints that they are done.</summary>
+    /// <param name="completeRequest">The finished hints.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> when the origin accepted the report.</returns>
+    public async Task<bool> CompleteHintsAsync(Models.Queue.CompleteRequest completeRequest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(completeRequest);
+        var (status, _, _) = await PeerRequestAsync<object>(HttpMethod.Post, "/ServerSync/Peer/Complete", completeRequest, cancellationToken).ConfigureAwait(false);
+        return status is >= 200 and < 300;
+    }
+
+    /// <summary>Reads the peer's inbound hint queue, to find out whether hints sent earlier are still held.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The queue, or null when the peer did not answer with one.</returns>
+    public async Task<Models.Queue.QueueStatusResponse?> GetPeerQueueStatusAsync(CancellationToken cancellationToken = default)
+    {
+        var (_, parsed, _) = await PeerRequestAsync<Models.Queue.QueueStatusResponse>(HttpMethod.Get, "/ServerSync/Peer/Status", null, cancellationToken).ConfigureAwait(false);
+        return parsed;
+    }
+
+    /// <summary>
+    /// One call to the peer's Server Sync endpoints. Builds the request, signs it, sends it, and on a
+    /// success parses the answer, otherwise reads the body as text. Every peer method is a short rule
+    /// over this, so the transport and its error handling live in one place.
+    /// </summary>
+    /// <typeparam name="TResponse">The shape of a successful answer.</typeparam>
+    /// <param name="method">GET or POST.</param>
+    /// <param name="pathAndQuery">The path under the server URL.</param>
+    /// <param name="body">The request body to send as JSON, or null for none.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The status, the parsed answer on success, and the body text on failure.</returns>
+    private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
+        where TResponse : class
+    {
+        using var request = new HttpRequestMessage(method, _serverUrl + pathAndQuery);
+        AddAuthorizationHeader(request);
+        if (body is not null)
+        {
+            request.Content = new StringContent(
+                System.Text.Json.JsonSerializer.Serialize(body, PeerJsonOptions),
+                System.Text.Encoding.UTF8,
+                "application/json");
+        }
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var status = (int)response.StatusCode;
+        if (!response.IsSuccessStatusCode)
+        {
+            return (status, null, await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        }
+
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using (stream.ConfigureAwait(false))
+        {
+            return (status, await System.Text.Json.JsonSerializer.DeserializeAsync<TResponse>(stream, PeerJsonOptions, cancellationToken).ConfigureAwait(false), null);
+        }
     }
 
     /// <summary>

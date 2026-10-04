@@ -11,139 +11,9 @@
                     <!-- SECTION: Configuration Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
-                        <h1 class="sectionTitle">Configuration</h1>
+                        <h1 class="sectionTitle">Settings</h1>
                     </div>
-
-                    <!-- COLLAPSIBLE SECTION: Server Configuration -->
-
-                    <div class="jpk-collapsible-section">
-                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverConfigContent">
-                            <span class="jpk-collapsible-title">Server</span>
-                            <span class="jpk-collapsible-icon">&#9660;</span>
-                        </button>
-                        <div id="serverConfigContent" class="jpk-collapsible-content collapsed">
-
-                            <!-- Server URL Input -->
-                            <div class="inputContainer">
-                                <label for="txtSourceServerUrl">Server URL:</label>
-                                <input is="emby-input" type="text" id="txtSourceServerUrl" placeholder="http://server:8096" />
-                                <div class="fieldDescription">URL of the source Jellyfin server to sync from.</div>
-                            </div>
-
-                            <!-- External URL Input -->
-                            <div class="inputContainer">
-                                <label for="txtSourceServerExternalUrl">External URL (optional):</label>
-                                <input is="emby-input" type="text" id="txtSourceServerExternalUrl" placeholder="https://media.example.com" />
-                                <div class="fieldDescription">Public URL used for loading image thumbnails in the browser. If empty, the Server URL above is used. Useful when syncing over a VPN/internal address that your browser can't reach.</div>
-                            </div>
-
-                            <h3 class="jpk-subsection-title">Authentication</h3>
-
-                            <!-- Server Info Display (shows after successful connection) -->
-                            <div id="serverInfoContainer" class="jpk-record-card hidden mb-md">
-                                <div class="jpk-record-row">
-                                    <span class="jpk-record-label">Server</span>
-                                    <span id="txtSourceServerName" class="jpk-mono"></span>
-                                </div>
-                                <div class="jpk-record-row">
-                                    <span class="jpk-record-label">ID</span>
-                                    <span id="txtSourceServerId" class="jpk-mono"></span>
-                                </div>
-                                <div id="authenticatedUserRow" class="jpk-record-row hidden">
-                                    <span class="jpk-record-label">User</span>
-                                    <span id="txtAuthenticatedUser" class="jpk-mono"></span>
-                                </div>
-                            </div>
-
-                            <!-- API Key Input -->
-                            <div class="inputContainer">
-                                <label for="txtSourceServerApiKey">API Key:</label>
-                                <input is="emby-input" type="password" id="txtSourceServerApiKey" />
-                                <div class="fieldDescription">Generate one in the source server's Dashboard &gt; API Keys, or use the token generator below.</div>
-                            </div>
-
-                            <!-- Token Generator (alternative to API key) -->
-                            <div class="jpk-bulk-edit-title">Generate Token from Credentials</div>
-                            <div class="jpk-bulk-edit-bar" id="tokenGeneratorBar" style="padding: 14px; border: 1px solid var(--jpk-border); border-radius: 6px; background: rgba(255, 255, 255, 0.04);">
-                                <div class="fieldDescription">Authenticate with username and password to generate an access token. The password is not saved.</div>
-                                <div class="jpk-edit-line">
-                                    <div class="jpk-field">
-                                        <label for="txtAuthUsername">Username</label>
-                                        <input is="emby-input" type="text" id="txtAuthUsername" placeholder="Enter username" />
-                                    </div>
-                                    <div class="jpk-field">
-                                        <label for="txtAuthPassword">Password</label>
-                                        <input is="emby-input" type="password" id="txtAuthPassword" placeholder="Enter password" />
-                                    </div>
-                                </div>
-                                <div class="flex align-items-center gap-sm">
-                                    <button is="emby-button" type="button" id="btnGenerateToken" class="raised jpk-button-submit jpk-button-small">
-                                        <span>Generate Token</span>
-                                    </button>
-                                    <span id="tokenGeneratorStatus" class="jpk-status-text"></span>
-                                </div>
-                            </div>
-
-                            <!-- Server Actions -->
-                            <div class="jpk-collapsible-actions">
-                                <button is="emby-button" type="button" id="btnSaveServer" class="raised jpk-button-submit jpk-button-small">
-                                    <span>Save</span>
-                                </button>
-                                <button is="emby-button" type="button" id="btnTestConnection" class="raised jpk-button-small">
-                                    <span>Test Connection</span>
-                                </button>
-                            </div>
-                            <span id="connectionStatus" class="jpk-status-text"></span>
-                        </div>
-                    </div>
-
-                    <!-- COLLAPSIBLE SECTION: Library Mappings -->
-
-                    <div class="jpk-collapsible-section hidden" id="librariesSection">
-                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="librariesConfigContent">
-                            <span class="jpk-collapsible-title">Libraries</span>
-                            <span class="jpk-collapsible-icon">&#9660;</span>
-                        </button>
-                        <div id="librariesConfigContent" class="jpk-collapsible-content collapsed">
-                            <div class="fieldDescription mb-md">Map source libraries to local libraries. Used for content sync and watch history sync.</div>
-
-                            <!-- Library Mappings Container (dynamically populated) -->
-                            <div id="libraryMappingsContainer"></div>
-
-                            <div class="jpk-collapsible-actions">
-                                <button is="emby-button" type="button" id="btnSaveLibraries" class="raised jpk-button-submit jpk-button-small">
-                                    <span>Save</span>
-                                </button>
-                                <button is="emby-button" type="button" id="btnAddMapping" class="raised jpk-secondary jpk-button-small">
-                                    <span>Add Library Mapping</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- COLLAPSIBLE SECTION: User Mappings -->
-
-                    <div class="jpk-collapsible-section hidden" id="usersSection">
-                        <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="usersConfigContent">
-                            <span class="jpk-collapsible-title">Users</span>
-                            <span class="jpk-collapsible-icon">&#9660;</span>
-                        </button>
-                        <div id="usersConfigContent" class="jpk-collapsible-content collapsed">
-                            <div class="fieldDescription mb-md">Map source users to local users. Used for watch history sync.</div>
-
-                            <!-- User Mappings Container (dynamically populated) -->
-                            <div id="userMappingsContainer"></div>
-
-                            <div class="jpk-collapsible-actions">
-                                <button is="emby-button" type="button" id="btnSaveUsers" class="raised jpk-button-submit jpk-button-small">
-                                    <span>Save</span>
-                                </button>
-                                <button is="emby-button" type="button" id="btnAddUserMapping" class="raised jpk-secondary jpk-button-small">
-                                    <span>Add User Mapping</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                    <div class="fieldDescription mb-md">How each module behaves when this server pulls from the servers on the Servers tab, which categories it carries, and how much work runs at once. Each section saves on its own.</div>
 
                     <!-- COLLAPSIBLE SECTION: Processing -->
 
@@ -179,9 +49,6 @@
 
                     <!-- SECTION: Sync Settings Header -->
 
-                    <div class="sectionTitleContainer flex align-items-center">
-                        <h1 class="sectionTitle">Sync Settings</h1>
-                    </div>
 
                     <!-- COLLAPSIBLE SECTION: Content Sync Settings -->
 
@@ -466,6 +333,17 @@
                                         <div class="fieldDescription checkboxFieldDescription">Sync favorite status for items.</div>
                                     </div>
                                 </div>
+
+                                <h3 class="jpk-subsection-title">Two Way</h3>
+                                <div class="settingsGroup">
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkHistorySyncNegotiate" />
+                                            <span class="checkboxLabel">Negotiate With Source Server</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Write the merged history back to the Source Server as well, so a play or favorite on either server reaches the other. The Source Server must also run Server Sync. Each write is accepted only if the Source Server's state has not changed since it was read, and a change made on one server alone always wins over an unchanged server.</div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="jpk-collapsible-actions">
@@ -669,6 +547,7 @@
                     <div class="sectionTitleContainer flex align-items-center">
                         <h1 class="sectionTitle">Troubleshooting</h1>
                     </div>
+                    <div class="fieldDescription mb-md">Resets for the tracking tables. A reset forgets what has been compared and synced, not the media, and the next run rebuilds the table from the servers.</div>
 
                     <!-- COLLAPSIBLE SECTION: Database -->
 

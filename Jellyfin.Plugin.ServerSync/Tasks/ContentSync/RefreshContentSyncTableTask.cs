@@ -27,7 +27,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// straight to <see cref="SyncStatus.Ignored"/> in
 /// <see cref="UpdateSyncTablesTask.BuildRecordAsync"/>.
 /// </summary>
-public sealed record ContentRefreshWork(LibraryMapping Mapping, BaseItemDto SourceItem, bool WatchedByAll);
+public sealed record ContentRefreshWork(ScanSource Source, LibraryMapping Mapping, BaseItemDto SourceItem, bool WatchedByAll);
 
 /// <summary>
 /// Refresh phase for Content sync. Walks every enabled library mapping,
@@ -139,7 +139,7 @@ public class UpdateSyncTablesTask
     {
         var config = ConfigManager.Configuration;
         if (!config.EnableContentSync) return false;
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey)) return false;
+        if (config.GetPullServers().Count == 0) return false;
         return config.GetEnabledLibraryMappings().Count > 0;
     }
 
@@ -155,24 +155,28 @@ public class UpdateSyncTablesTask
     //   blacklisted items via <see cref="PathUtilities.IsItemFiltered"/>.
     //   This is the existing behavior.</item>
     //   </list>
+    // Per run state is reset once per run, not per server, since the list phase now runs once for
+    // every connected server and the counts have to accumulate across them.
     /// <inheritdoc />
-    protected override async Task<IList<ContentRefreshWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override void OnRunStarting()
     {
-        ArgumentNullException.ThrowIfNull(progress);
-        if (Client == null)
-        {
-            return Array.Empty<ContentRefreshWork>();
-        }
-
-
-        var config = ConfigManager.Configuration;
-        var enabledMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
         _seenPerMapping.Clear();
         _blacklistExcludedByMapping.Clear();
+    }
+
+    /// <inheritdoc />
+    protected override async Task<IList<ContentRefreshWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(progress);
+
+        var config = ConfigManager.Configuration;
+        var client = source.Client;
+        var enabledMappings = source.Server.GetEnabledLibraryMappings();
 
         // Playlist expansion is user-scoped on the source; the token-generation
         // flow stores the authenticating user's id for exactly this.
-        Guid? playlistUserId = Guid.TryParse(config.SourceServerAuthenticatedUserId, out var authUserId) ? authUserId : null;
+        Guid? playlistUserId = Guid.TryParse(source.Server.AuthenticatedUserId, out var authUserId) ? authUserId : null;
 
         // Pre-fetch per-library counts so per-item progress reporting has a
         // denominator. For whitelist mappings we know the count up front
@@ -203,7 +207,7 @@ public class UpdateSyncTablesTask
 
             try
             {
-                var count = await Client.GetLibraryItemCountAsync(sourceLibraryId, cancellationToken).ConfigureAwait(false);
+                var count = await client.GetLibraryItemCountAsync(sourceLibraryId, cancellationToken).ConfigureAwait(false);
                 libraryCounts[mapping.SourceLibraryId] = count;
                 totalExpected += count;
             }
@@ -229,6 +233,7 @@ public class UpdateSyncTablesTask
             }
 
             var watchedByAll = await BuildWatchedByAllSetAsync(
+                client,
                 sourceLibraryId,
                 config.SkipWatchedByAllUsers,
                 config.WatchedFilterUserIds,
@@ -286,7 +291,7 @@ public class UpdateSyncTablesTask
                     List<BaseItemDto> leaves;
                     try
                     {
-                        leaves = await Client.GetWhitelistedItemLeavesAsync(whitelistedId, playlistUserId, cancellationToken).ConfigureAwait(false);
+                        leaves = await client.GetWhitelistedItemLeavesAsync(whitelistedId, playlistUserId, cancellationToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -335,7 +340,7 @@ public class UpdateSyncTablesTask
                         }
 
                         var hitWatched = watchedByAll != null && watchedByAll.Contains(item.Id.Value);
-                        work.Add(new ContentRefreshWork(mapping, item, hitWatched));
+                        work.Add(new ContentRefreshWork(source, mapping, item, hitWatched));
                         collected++;
                         fetched++;
                         if (totalExpected > 0)
@@ -397,7 +402,7 @@ public class UpdateSyncTablesTask
 
                     try
                     {
-                        var members = await Client.GetWhitelistedItemLeavesAsync(blacklistedCollectionId, playlistUserId, cancellationToken).ConfigureAwait(false);
+                        var members = await client.GetWhitelistedItemLeavesAsync(blacklistedCollectionId, playlistUserId, cancellationToken).ConfigureAwait(false);
                         foreach (var member in members)
                         {
                             if (member.Id.HasValue
@@ -437,7 +442,7 @@ public class UpdateSyncTablesTask
 
             var workBefore = work.Count;
             var outcome = await PaginatedFetchUtility.FetchAllPagesAsync(
-                fetchPage: (startIndex, batchSize, ct) => Client.GetLibraryItemsAsync(sourceLibraryId, startIndex, batchSize, ct),
+                fetchPage: (startIndex, batchSize, ct) => client.GetLibraryItemsAsync(sourceLibraryId, startIndex, batchSize, ct),
                 processItem: (item, _) =>
                 {
                     if (item.Id.HasValue
@@ -447,7 +452,7 @@ public class UpdateSyncTablesTask
                     }
 
                     var hitWatched = watchedByAll != null && item.Id.HasValue && watchedByAll.Contains(item.Id.Value);
-                    work.Add(new ContentRefreshWork(mapping, item, hitWatched));
+                    work.Add(new ContentRefreshWork(source, mapping, item, hitWatched));
                     return Task.FromResult(true);
                 },
                 libraryName: mapping.SourceLibraryName,
@@ -500,7 +505,7 @@ public class UpdateSyncTablesTask
         // Watched-by-all takes precedence: mark Ignored regardless of approval mode.
         if (source.WatchedByAll)
         {
-            return Task.FromResult<SyncItem?>(BuildWatchedFiltered(source.Mapping, source.SourceItem, sourceItemId, sourceSize, sourceCreateDate, localPath, existingItem));
+            return Task.FromResult(Stamp(BuildWatchedFiltered(source.Mapping, source.SourceItem, sourceItemId, sourceSize, sourceCreateDate, localPath, existingItem), source));
         }
 
         var config = ConfigManager.Configuration;
@@ -535,7 +540,7 @@ public class UpdateSyncTablesTask
                 config.DetectUpdatedFiles,
                 config.SizeMatchToleranceBytes,
                 Logger);
-            return Task.FromResult<SyncItem?>(updated);
+            return Task.FromResult(Stamp(updated, source));
         }
 
         var fresh = SyncStateService.ProcessNewItem(
@@ -547,7 +552,18 @@ public class UpdateSyncTablesTask
             localPath,
             config.DownloadNewContentMode,
             config.SizeMatchToleranceBytes);
-        return Task.FromResult<SyncItem?>(fresh);
+        return Task.FromResult(Stamp(fresh, source));
+    }
+
+    // Every row remembers which server built it, so the apply phase downloads from the right peer.
+    private static SyncItem? Stamp(SyncItem? item, ContentRefreshWork source)
+    {
+        if (item != null)
+        {
+            item.ServerKey = source.Source.Key;
+        }
+
+        return item;
     }
 
     /// <inheritdoc />
@@ -555,6 +571,24 @@ public class UpdateSyncTablesTask
     {
         ArgumentNullException.ThrowIfNull(record);
         return record.SourceItemId;
+    }
+
+    // Two servers collide when they would land the same local file. The higher priority server's
+    // offer wins, and a row from the other server for that file is retired rather than treated as
+    // a removal, so a priority change never schedules a local file for deletion.
+    /// <inheritdoc />
+    protected override string? PriorityKeyOf(ContentRefreshWork source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        var path = source.SourceItem.Path;
+        return string.IsNullOrEmpty(path) ? null : PathUtilities.TranslatePath(path, source.Mapping.SourceRootPath, source.Mapping.LocalRootPath);
+    }
+
+    /// <inheritdoc />
+    protected override string? PriorityKeyOf(SyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return string.IsNullOrEmpty(record.LocalPath) ? null : record.LocalPath;
     }
 
     // A row is in scope when its <see cref="SyncItem.SourceLibraryId"/> is
@@ -732,12 +766,13 @@ public class UpdateSyncTablesTask
     /// no users are selected.
     /// </summary>
     private async Task<HashSet<Guid>?> BuildWatchedByAllSetAsync(
+        SourceServerClient client,
         Guid libraryId,
         bool skipWatchedByAllUsers,
         List<string> watchedFilterUserIds,
         CancellationToken cancellationToken)
     {
-        if (!skipWatchedByAllUsers || watchedFilterUserIds == null || watchedFilterUserIds.Count == 0 || Client == null)
+        if (!skipWatchedByAllUsers || watchedFilterUserIds == null || watchedFilterUserIds.Count == 0)
         {
             return null;
         }
@@ -758,7 +793,7 @@ public class UpdateSyncTablesTask
                 return null;
             }
 
-            var played = await Client.GetUserPlayedItemIdsAsync(userId, libraryId, cancellationToken).ConfigureAwait(false);
+            var played = await client.GetUserPlayedItemIdsAsync(userId, libraryId, cancellationToken).ConfigureAwait(false);
 
             if (intersection == null)
             {

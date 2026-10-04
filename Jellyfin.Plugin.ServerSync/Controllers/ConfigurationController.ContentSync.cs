@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
@@ -61,7 +62,7 @@ public partial class ConfigurationController
 
         var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take);
 
-        var libraryMappings = config.LibraryMappings ?? new List<LibraryMapping>();
+        var libraryMappings = config.GetAllLibraryMappings();
         var libraryNameLookup = libraryMappings
             .GroupBy(m => m.SourceLibraryId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
@@ -73,6 +74,7 @@ public partial class ConfigurationController
             items.Select(i =>
             {
                 libraryNameLookup.TryGetValue(i.SourceLibraryId, out var libraryNames);
+                var rowServer = config.ResolveServer(i.ServerKey);
                 return new SyncItemDto
                 {
                     Id = i.Id,
@@ -93,8 +95,10 @@ public partial class ConfigurationController
                     LastSyncTime = i.LastSyncTime,
                     ErrorMessage = i.Reason,
                     RetryCount = i.RetryCount,
-                    SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
-                    SourceServerId = config.SourceServerId,
+                    SourceServerUrl = rowServer?.BrowserUrl,
+                    SourceServerId = rowServer?.ServerId,
+                    ServerKey = i.ServerKey,
+                    ServerName = rowServer?.DisplayName,
                     CompanionFiles = i.CompanionFiles
                 };
             }).ToList(),

@@ -100,6 +100,9 @@ public class UserSyncItemDto
     /// </summary>
     public string? SourceServerUrl { get; set; }
 
+    /// <summary>Gets or sets the configured server entry the row came from.</summary>
+    public string? ServerKey { get; set; }
+
     // ===== Sync Status =====
 
     /// <summary>

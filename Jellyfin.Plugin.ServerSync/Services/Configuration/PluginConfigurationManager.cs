@@ -34,7 +34,13 @@ public class PluginConfigurationManager : IPluginConfigurationManager
         Plugin.Instance?.Configuration ?? throw new InvalidOperationException("Plugin is not initialized");
 
     /// <inheritdoc />
-    public string DecryptedSourceServerApiKey => _secrets.Unprotect(Configuration.SourceServerApiKey);
+    public string DecryptApiKey(string protectedKey) => _secrets.Unprotect(protectedKey);
+
+    /// <inheritdoc />
+    public string ResolveRequestApiKey(string? requestApiKey, string? serverKey)
+        => string.Equals(requestApiKey, JPKribs.Jellyfin.Base.SecretProtector.KeptSentinel, StringComparison.Ordinal)
+            ? DecryptApiKey(Configuration.FindServer(serverKey)?.ApiKey ?? string.Empty)
+            : requestApiKey ?? string.Empty;
 
     /// <inheritdoc />
     public void SaveConfiguration()
@@ -50,9 +56,12 @@ public class PluginConfigurationManager : IPluginConfigurationManager
             // Sanitize values before saving to prevent invalid configuration from persisting
             plugin.Configuration.SanitizeValues();
 
-            // Encrypt the source-server API key at rest. Protect() no-ops on already-encrypted or empty,
+            // Encrypt every server's API key at rest. Protect() no-ops on already-encrypted or empty,
             // so this is idempotent across saves.
-            plugin.Configuration.SourceServerApiKey = _secrets.Protect(plugin.Configuration.SourceServerApiKey);
+            foreach (var server in plugin.Configuration.Servers)
+            {
+                server.ApiKey = _secrets.Protect(server.ApiKey);
+            }
 
             plugin.SaveConfiguration();
         }

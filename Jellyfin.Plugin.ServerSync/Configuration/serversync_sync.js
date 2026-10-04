@@ -12,6 +12,7 @@ export default function (view) {
     function getTabs() {
         return [
             { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
+            { href: 'configurationpage?name=serversync_servers', name: 'Servers' },
             { href: 'configurationpage?name=serversync_settings', name: 'Settings' }
         ];
     }
@@ -43,6 +44,7 @@ export default function (view) {
 
         // Disconnect IntersectionObservers on all PaginatedTable instances
         var modules = [SyncTableModule, HistorySyncTableModule, MetadataSyncTableModule, UserSyncTableModule, PeopleSyncTableModule];
+        QueueModule.stopAutoRefresh();
         modules.forEach(function(mod) {
             if (mod.table && mod.table.disconnectObserver) {
                 mod.table.disconnectObserver();
@@ -87,6 +89,7 @@ export default function (view) {
             // Always re-fetch config to pick up changes from Settings tab
             _sharedPromise.then(function() {
                 ServerSyncShared.getConfig().then(function(config) {
+                    QueueModule._config = config;
                     self._applyEnabledTypes(config);
                 }).catch(function() {
                     // Config fetch failed — show all options as fallback
@@ -216,7 +219,14 @@ export default function (view) {
             }
             var titleEl = view.querySelector('#syncPageTitle');
             if (titleEl) {
-                titleEl.textContent = displayName + ' Sync';
+                titleEl.textContent = viewName === 'queue' ? 'Change Queue' : displayName + ' Sync';
+            }
+
+            // The queue view refreshes itself while it is showing.
+            if (viewName === 'queue') {
+                QueueModule.startAutoRefresh();
+            } else {
+                QueueModule.stopAutoRefresh();
             }
 
             var descEl = view.querySelector('#syncTypeDescription');
@@ -226,7 +236,8 @@ export default function (view) {
                     history: 'History sync copies watch state to your mapped users. It syncs played status, play counts, resume positions, last played dates, and favorites, keeping the highest play count and the most recent activity from either server.',
                     metadata: 'Metadata sync copies item metadata onto matching items, matched by file path. It updates titles, overviews, ratings, genres, tags, studios, people, and images, and you enable each category on the Settings tab.',
                     people: 'People sync copies person metadata onto matching people, matched by name. It updates biographies, provider IDs, and profile images.',
-                    users: 'User sync copies user settings to your mapped users. It covers permissions, playback and display preferences, and profile images, and translates library permissions through your library mappings.'
+                    users: 'User sync copies user settings to your mapped users. It covers permissions, playback and display preferences, and profile images, and translates library permissions through your library mappings.',
+                    queue: 'Changes travelling between servers as they happen. Outbound rows are owed to a peer in Push or Sync mode until it reports them done. Inbound rows came from a peer and wait to be applied here. A paused peer shows why, and the scheduled tasks still catch anything the queue misses.'
                 };
                 descEl.textContent = descriptions[viewName] || '';
             }
@@ -259,6 +270,9 @@ export default function (view) {
                             break;
                         case 'people':
                             PeoplePageController.init();
+                            break;
+                        case 'queue':
+                            QueueModule.init();
                             break;
                     }
                 });
@@ -308,7 +322,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
 
-                            return ServerSyncShared.renderItemThumb(item.SourceItemId) +
+                            return ServerSyncShared.renderItemThumb(item.SourceItemId, item.ServerKey) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName" title="' +
                                     ServerSyncShared.escapeHtml(sourcePath) + '">' +
@@ -475,7 +489,7 @@ export default function (view) {
                 }
 
                 var libraryCountEl = view.querySelector('#healthLibraryCount');
-                var libraryMappings = config.LibraryMappings || [];
+                var libraryMappings = ServerSyncShared.allLibraryMappings(config);
                 libraryCountEl.textContent = libraryMappings.length;
                 libraryCountEl.className = libraryMappings.length > 0 ? 'healthValue success' : 'healthValue warning';
 
@@ -733,7 +747,7 @@ export default function (view) {
             statusBadge.textContent = displayStatus;
             statusBadge.className = 'itemModal-statusBadge ' + statusClass;
 
-            var sourceServerName = (self.currentConfig && self.currentConfig.SourceServerName) || 'Source';
+            var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item && item.ServerKey);
             var localServerName = ServerSyncShared.localServerName || 'Local';
             view.querySelector('#modalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
 
@@ -1019,7 +1033,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
 
-                            return ServerSyncShared.renderItemThumb(item.SourceItemId) +
+                            return ServerSyncShared.renderItemThumb(item.SourceItemId, item.ServerKey) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName" title="' + ServerSyncShared.escapeHtml(itemName) + '">' +
                                 ServerSyncShared.escapeHtml(itemName) + '</div>' +
@@ -1165,12 +1179,12 @@ export default function (view) {
                 }
 
                 var userCountEl = view.querySelector('#historyHealthUserCount');
-                var enabledUsers = (config.UserMappings || []).filter(function(m) { return m.IsEnabled; }).length;
+                var enabledUsers = ServerSyncShared.allUserMappings(config).filter(function(m) { return m.IsEnabled; }).length;
                 userCountEl.textContent = enabledUsers;
                 userCountEl.className = enabledUsers > 0 ? 'healthValue success' : 'healthValue warning';
 
                 var libraryCountEl = view.querySelector('#historyHealthLibraryCount');
-                var libraryMappings = config.LibraryMappings || [];
+                var libraryMappings = ServerSyncShared.allLibraryMappings(config);
                 libraryCountEl.textContent = libraryMappings.length;
                 libraryCountEl.className = libraryMappings.length > 0 ? 'healthValue success' : 'healthValue warning';
             }).catch(function() {
@@ -1287,7 +1301,7 @@ export default function (view) {
             statusBadge.textContent = item.Status;
             statusBadge.className = 'itemModal-statusBadge ' + item.Status;
 
-            var sourceServerName = (self.currentConfig && self.currentConfig.SourceServerName) || 'Source';
+            var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item && item.ServerKey);
             var localServerName = ServerSyncShared.localServerName || 'Local';
             view.querySelector('#historyModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
 
@@ -1297,6 +1311,7 @@ export default function (view) {
             } else {
                 view.querySelector('#historyModalLastSync').textContent = '-';
             }
+            showObjectVersion('historyModalVersion', { kind: 'History', localItemId: item.LocalItemId, localUserId: item.LocalUserId });
 
             var errorSection = view.querySelector('#historyModalErrorSection');
             if (item.Status === 'Errored' && item.ErrorMessage) {
@@ -1414,8 +1429,8 @@ export default function (view) {
         },
 
         findUserMapping: function(sourceUserId, localUserId) {
-            if (!this.currentConfig || !this.currentConfig.UserMappings) return null;
-            return this.currentConfig.UserMappings.find(function(m) {
+            if (!this.currentConfig) return null;
+            return ServerSyncShared.allUserMappings(this.currentConfig).find(function(m) {
                 return m.SourceUserId === sourceUserId || m.LocalUserId === localUserId;
             });
         },
@@ -1531,7 +1546,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
 
-                            return ServerSyncShared.renderItemThumb(item.SourceItemId) +
+                            return ServerSyncShared.renderItemThumb(item.SourceItemId, item.ServerKey) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName" title="' + ServerSyncShared.escapeHtml(itemName) + '">' +
                                 ServerSyncShared.escapeHtml(itemName) + '</div>' +
@@ -1682,7 +1697,7 @@ export default function (view) {
                 }
 
                 var libraryCountEl = view.querySelector('#metadataHealthLibraryCount');
-                var libraryMappings = config.LibraryMappings || [];
+                var libraryMappings = ServerSyncShared.allLibraryMappings(config);
                 libraryCountEl.textContent = libraryMappings.length;
                 libraryCountEl.className = libraryMappings.length > 0 ? 'healthValue success' : 'healthValue warning';
             }).catch(function() {
@@ -1801,7 +1816,7 @@ export default function (view) {
                 statusBadge.textContent = item.Status;
                 statusBadge.className = 'itemModal-statusBadge ' + item.Status;
 
-                var sourceServerName = (self.currentConfig && self.currentConfig.SourceServerName) || 'Source';
+                var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item && item.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';
                 view.querySelector('#metadataSyncModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
 
@@ -1811,6 +1826,7 @@ export default function (view) {
                 } else {
                     view.querySelector('#metadataSyncModalLastSync').textContent = '-';
                 }
+                showObjectVersion('metadataSyncModalVersion', { kind: 'Metadata', localItemId: item.LocalItemId });
 
                 var sourceLib = item.SourceLibraryName || 'Unknown';
                 var localLib = item.LocalLibraryName || 'Unknown';
@@ -2398,7 +2414,7 @@ export default function (view) {
                         render: function(item) {
                             var sourceUserName = item.SourceUserName || 'Unknown';
                             var localUserName = item.LocalUserName || 'Unknown';
-                            var sourceServerName = (self.currentConfig && self.currentConfig.SourceServerName) || 'Unknown';
+                            var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                             var localServerName = ServerSyncShared.localServerName || 'Unknown';
 
                             var errorPreview = '';
@@ -2408,7 +2424,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
 
-                            return ServerSyncShared.renderUserThumb(item.SourceUserId) +
+                            return ServerSyncShared.renderUserThumb(item.SourceUserId, item.ServerKey) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName">' + ServerSyncShared.escapeHtml(sourceUserName) + ' \u2192 ' + ServerSyncShared.escapeHtml(localUserName) + '</div>' +
                                 '<div class="syncItemPath">' + ServerSyncShared.escapeHtml(sourceServerName) + ' \u2192 ' + ServerSyncShared.escapeHtml(localServerName) + '</div>' +
@@ -2687,19 +2703,17 @@ export default function (view) {
                 statusBadge.textContent = detail.OverallStatus || 'Unknown';
                 statusBadge.className = 'itemModal-statusBadge ' + (detail.OverallStatus || 'unknown');
 
-                var sourceServerName = (self.currentConfig && self.currentConfig.SourceServerName) || 'Source';
+                var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail && detail.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';
                 view.querySelector('#userSyncModalServerMapping').textContent =
                     sourceServerName + ' \u2192 ' + localServerName;
 
                 var infoGrid = view.querySelector('#userSyncModalInfoGrid');
-                if (detail.LastSyncTime) {
-                    infoGrid.classList.remove('hidden');
-                    view.querySelector('#userSyncModalLastSync').textContent =
-                        ServerSyncShared.formatRelativeTime(new Date(detail.LastSyncTime));
-                } else {
-                    infoGrid.classList.add('hidden');
-                }
+                infoGrid.classList.remove('hidden');
+                view.querySelector('#userSyncModalLastSync').textContent = detail.LastSyncTime
+                    ? ServerSyncShared.formatRelativeTime(new Date(detail.LastSyncTime))
+                    : '-';
+                showObjectVersion('userSyncModalVersion', { kind: 'Users', localUserId: detail.LocalUserId });
 
                 var errorSection = view.querySelector('#userSyncModalErrorSection');
                 if (detail.OverallStatus === 'Errored' && detail.ErrorMessage) {
@@ -3060,7 +3074,7 @@ export default function (view) {
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '">' +
                                     ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
                             }
-                            return ServerSyncShared.renderPersonThumb(item.SourcePersonId) +
+                            return ServerSyncShared.renderPersonThumb(item.SourcePersonId, item.ServerKey) +
                                 '<div class="syncItemInfo">' +
                                 '<div class="syncItemName">' + ServerSyncShared.escapeHtml(item.PersonName || 'Unknown') + '</div>' +
                                 errorPreview +
@@ -3320,6 +3334,7 @@ export default function (view) {
                 } else {
                     view.querySelector('#peopleSyncModalLastSync').textContent = '-';
                 }
+                showObjectVersion('peopleSyncModalVersion', { kind: 'People', name: detail.PersonName });
 
                 var errorSection = view.querySelector('#peopleSyncModalErrorSection');
                 if (detail.Status === 'Errored' && detail.ErrorMessage) {
@@ -3329,7 +3344,7 @@ export default function (view) {
                     errorSection.classList.add('hidden');
                 }
 
-                var sourceServerName = (self.currentConfig && self.currentConfig.SourceServerName) || 'Source';
+                var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail && detail.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';
                 view.querySelector('#peopleSyncModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
                 view.querySelector('#peopleSyncModalSourceHeader').textContent = sourceServerName;
@@ -3598,6 +3613,231 @@ export default function (view) {
                 PeopleSyncTableModule.loadPeopleStatus();
                 PeopleSyncTableModule.loadPeopleItems();
                 PeopleSyncTableModule.loadHealthStats();
+            });
+        }
+    };
+
+    // ============================================
+    // OBJECT VERSION (shared by the detail modals)
+    // ============================================
+    // Which server last edited an object and when, from ServerSync/Hints/Version. An object no one
+    // has edited since versions began shows as not recorded.
+
+    function showObjectVersion(elementId, params) {
+        var el = view.querySelector('#' + elementId);
+        if (!el) return;
+        el.textContent = '\u2026';
+        var query = Object.keys(params).filter(function (k) { return params[k]; }).map(function (k) {
+            return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+        }).join('&');
+        ServerSyncShared.apiRequest('Hints/Version?' + query, 'GET').then(function (version) {
+            if (!version || !version.Timestamp) {
+                el.textContent = 'Not recorded';
+                return;
+            }
+            var where = version.IsThisServer ? 'here' : 'on ' + (version.ServerName || version.ServerId);
+            el.textContent = ServerSyncShared.formatRelativeTime(new Date(version.Timestamp)) + ' ' + where;
+            el.title = new Date(version.Timestamp).toLocaleString();
+        }).catch(function () {
+            el.textContent = 'Not recorded';
+        });
+    }
+
+    // ============================================
+    // CHANGE QUEUE MODULE
+    // ============================================
+    // Both hint queues and every peer's delivery state, read from
+    // ServerSync/Hints. Rows are few and short lived, so a plain table that
+    // reloads itself every few seconds fits better than the paginated table.
+
+    var QueueModule = {
+        _timer: null,
+        _bound: false,
+
+        init: function() {
+            var self = this;
+            if (!this._bound) {
+                this._bound = true;
+                view.querySelector('#btnQueueRefresh').addEventListener('click', function() { self.load(); });
+                view.querySelector('#btnQueueRun').addEventListener('click', function() { self.runNow(); });
+                view.querySelector('#queueOutboundBody').addEventListener('click', function(e) { self._onDiscard(e, 'Outbound'); });
+                view.querySelector('#queueInboundBody').addEventListener('click', function(e) { self._onDiscard(e, 'Inbound'); });
+            }
+            this.load();
+        },
+
+        startAutoRefresh: function() {
+            var self = this;
+            this.stopAutoRefresh();
+            this._timer = setInterval(function() { self.load(); }, 8000);
+        },
+
+        stopAutoRefresh: function() {
+            if (this._timer) {
+                clearInterval(this._timer);
+                this._timer = null;
+            }
+        },
+
+        load: function() {
+            var self = this;
+            if (!ServerSyncShared) return Promise.resolve();
+            return ServerSyncShared.apiRequest('Hints', 'GET').then(function(data) {
+                self.render(data || {});
+            }).catch(function() {
+                // Leave the last picture in place; the next tick tries again.
+            });
+        },
+
+        runNow: function() {
+            var self = this;
+            var btn = view.querySelector('#btnQueueRun');
+            btn.disabled = true;
+            ServerSyncShared.apiRequest('Hints/Run', 'POST').then(function() {
+                return self.load();
+            }).then(function() {
+                ServerSyncShared.showAlert('Delivered and applied what was due');
+            }).catch(function() {
+                ServerSyncShared.showAlert('The run failed; see the server log');
+            }).then(function() {
+                btn.disabled = false;
+            });
+        },
+
+        render: function(data) {
+            var outbound = data.Outbound || [];
+            var inbound = data.Inbound || [];
+            var peers = data.Peers || [];
+            // The lists are capped by the server; the counts cover the whole table.
+            var counts = data.OutboundCounts || {};
+            var count = function(state) {
+                if (counts[state] !== undefined) return counts[state];
+                return outbound.filter(function(r) { return r.State === state || r.State === QueueModule._stateNumber(state); }).length;
+            };
+
+            view.querySelector('#queuePendingCount').textContent = count('Pending');
+            view.querySelector('#queueSentCount').textContent = count('Sent');
+            view.querySelector('#queueFailedCount').textContent = count('Failed');
+            view.querySelector('#queueInboundCount').textContent = data.InboundCount !== undefined ? data.InboundCount : inbound.length;
+            view.querySelector('#queueGatheringCount').textContent = data.Pending || 0;
+
+            var peerRow = view.querySelector('#queuePeerRow');
+            peerRow.innerHTML = peers.map(function(p) {
+                var paused = p.PausedUntil && new Date(p.PausedUntil) > new Date();
+                var state = paused ? 'Paused until ' + QueueModule._time(p.PausedUntil)
+                    : p.LastAttempt ? 'Delivered ' + QueueModule._ago(p.LastAttempt) : 'Nothing sent yet';
+                return '<div class="healthCard queuePeerCard">' +
+                    '<span class="healthLabel">' + ServerSyncShared.escapeHtml(p.Name || p.Key) + '</span>' +
+                    '<span class="healthValue' + (paused ? ' paused' : '') + '">' + ServerSyncShared.escapeHtml(state) + '</span>' +
+                    (p.Reason ? '<div class="queuePeerReason">' + ServerSyncShared.escapeHtml(p.Reason) + '</div>' : '') +
+                    '</div>';
+            }).join('');
+            view.querySelector('#queuePeers').classList.toggle('hidden', peers.length === 0);
+            view.querySelector('#queueNoPeers').classList.toggle('hidden', peers.length > 0);
+
+            var outBody = view.querySelector('#queueOutboundBody');
+            outBody.innerHTML = outbound.map(function(r) {
+                var state = QueueModule._stateName(r.State);
+                var detail;
+                if (state === 'Sent') detail = 'accepted ' + QueueModule._ago(r.SentAt) + ', waiting for the peer to finish';
+                else if (state === 'Failed') detail = r.LastError || 'rejected';
+                else if (r.Attempts > 0) detail = (r.LastError || 'retrying') + '; next try ' + QueueModule._time(r.NextAttempt);
+                else detail = 'waiting for delivery';
+                return '<tr>' +
+                    '<td>' + ServerSyncShared.escapeHtml(r.PeerName || r.PeerKey) + '</td>' +
+                    '<td>' + QueueModule._change(r.Kind, r.ItemPath, r.UserName, r.Key) + '</td>' +
+                    '<td><span class="jpk-badge ' + (state === 'Sent' ? 'blue' : state === 'Failed' ? 'red' : 'orange') + '">' + state + '</span></td>' +
+                    '<td><span class="queueDetail' + (state === 'Failed' || r.Attempts > 0 ? ' queueDetail-error' : '') + '">' + ServerSyncShared.escapeHtml(detail) + '</span></td>' +
+                    '<td class="queueTable-actions"><button type="button" class="jpk-row-btn" data-discard="' + r.Id + '" title="Discard this hint. The scheduled task still covers the change."><span class="material-icons">delete</span></button></td>' +
+                    '</tr>';
+            }).join('');
+            view.querySelector('#queueOutboundEmpty').classList.toggle('hidden', outbound.length > 0);
+            view.querySelector('#queueOutboundTable').classList.toggle('hidden', outbound.length === 0);
+
+            var inBody = view.querySelector('#queueInboundBody');
+            inBody.innerHTML = inbound.map(function(r) {
+                var detail = r.Attempts > 0 ? (r.LastError || 'retrying') : 'waiting to be applied';
+                return '<tr>' +
+                    '<td>' + ServerSyncShared.escapeHtml(QueueModule._originName(r.OriginServerId)) + '</td>' +
+                    '<td>' + QueueModule._change(r.Kind, r.ItemPath, r.UserName, r.Key) + '</td>' +
+                    '<td>' + ServerSyncShared.escapeHtml(QueueModule._ago(r.ReceivedAt)) + '</td>' +
+                    '<td><span class="queueDetail' + (r.Attempts > 0 ? ' queueDetail-error' : '') + '">' + ServerSyncShared.escapeHtml(detail) + (r.Attempts > 0 ? ' (' + r.Attempts + ' attempt' + (r.Attempts === 1 ? '' : 's') + ')' : '') + '</span></td>' +
+                    '<td class="queueTable-actions"><button type="button" class="jpk-row-btn" data-discard="' + r.Id + '" title="Discard this hint. The scheduled task still covers the change."><span class="material-icons">delete</span></button></td>' +
+                    '</tr>';
+            }).join('');
+            view.querySelector('#queueInboundEmpty').classList.toggle('hidden', inbound.length > 0);
+            view.querySelector('#queueInboundTable').classList.toggle('hidden', inbound.length === 0);
+        },
+
+        _config: null,
+
+        _originName: function(serverId) {
+            var servers = (this._config && this._config.Servers) || [];
+            var match = servers.find(function(s) { return s.ServerId === serverId; });
+            return match ? (match.Name || match.ServerName || match.Url) : (serverId || 'unknown server');
+        },
+
+        _change: function(kind, path, userName, key) {
+            var what;
+            if (kind === 'History' || kind === 0) what = (userName ? userName + ' on ' : '') + QueueModule._fileName(path);
+            else if (kind === 'Users' || kind === 4) what = userName || key;
+            else if (kind === 'People' || kind === 2) what = userName || key;
+            else what = QueueModule._fileName(path) || key;
+            return '<span class="queueChangeKind">' + ServerSyncShared.escapeHtml(QueueModule._kindName(kind)) + '</span>' +
+                '<span class="queueChangeWhat" title="' + ServerSyncShared.escapeHtml(path || '') + '">' + ServerSyncShared.escapeHtml(what || '') + '</span>';
+        },
+
+        _kindName: function(kind) {
+            var names = { 0: 'History', 1: 'Metadata', 2: 'Person', 3: 'File', 4: 'User', History: 'History', Metadata: 'Metadata', People: 'Person', Content: 'File', Users: 'User' };
+            return names[kind] || String(kind);
+        },
+
+        _stateName: function(state) {
+            var names = { 0: 'Pending', 1: 'Sent', 2: 'Failed' };
+            return names[state] || String(state);
+        },
+
+        _stateNumber: function(name) {
+            return { Pending: 0, Sent: 1, Failed: 2 }[name];
+        },
+
+        _fileName: function(path) {
+            if (!path) return '';
+            var parts = path.split(/[\\/]/);
+            return parts[parts.length - 1] || path;
+        },
+
+        _ago: function(iso) {
+            if (!iso) return '';
+            var seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+            if (seconds < 60) return seconds + 's ago';
+            if (seconds < 3600) return Math.round(seconds / 60) + 'm ago';
+            if (seconds < 86400) return Math.round(seconds / 3600) + 'h ago';
+            return Math.round(seconds / 86400) + 'd ago';
+        },
+
+        _time: function(iso) {
+            if (!iso) return '';
+            var d = new Date(iso);
+            var diff = d.getTime() - Date.now();
+            if (diff > 0 && diff < 86400000) {
+                var minutes = Math.round(diff / 60000);
+                return minutes < 1 ? 'in under a minute' : minutes < 60 ? 'in ' + minutes + 'm' : 'in ' + Math.round(minutes / 60) + 'h';
+            }
+            return d.toLocaleString();
+        },
+
+        _onDiscard: function(e, lane) {
+            var btn = e.target.closest('[data-discard]');
+            if (!btn) return;
+            var self = this;
+            btn.disabled = true;
+            ServerSyncShared.apiRequest('Hints/' + lane + '/' + btn.getAttribute('data-discard'), 'DELETE').then(function() {
+                ServerSyncShared.showAlert('Hint discarded');
+                return self.load();
+            }).catch(function() {
+                ServerSyncShared.showAlert('Could not discard the hint');
+                btn.disabled = false;
             });
         }
     };

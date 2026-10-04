@@ -1,0 +1,228 @@
+using System;
+using Jellyfin.Plugin.ServerSync.Models.Queue;
+using MediaBrowser.Controller;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace Jellyfin.Plugin.ServerSync.Services.Queue;
+
+/// <summary>
+/// Turns one local change into outbound rows, one per peer this server sends to that maps the object,
+/// records the version the change carries, and wakes the delivery worker. Used by the change observer
+/// for edits made here and by the inbound handlers for merges that moved past what the origin had.
+/// </summary>
+[PluginService(ServiceLifetime.Singleton)]
+public sealed class LocalHintPublisher
+{
+    private readonly IPluginConfigurationManager _configManager;
+    private readonly OutboundHintStore _outbound;
+    private readonly VersionStore _versions;
+    private readonly OutboundHintWorker _worker;
+    private readonly IServerApplicationHost _applicationHost;
+    private readonly ILogger<LocalHintPublisher> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LocalHintPublisher"/> class.
+    /// </summary>
+    /// <param name="configManager">Plugin configuration.</param>
+    /// <param name="outbound">The outbound store.</param>
+    /// <param name="versions">The version store.</param>
+    /// <param name="worker">The delivery worker to wake.</param>
+    /// <param name="applicationHost">The server host, for this server's id.</param>
+    /// <param name="logger">Logger.</param>
+    public LocalHintPublisher(
+        IPluginConfigurationManager configManager,
+        OutboundHintStore outbound,
+        VersionStore versions,
+        OutboundHintWorker worker,
+        IServerApplicationHost applicationHost,
+        ILogger<LocalHintPublisher> logger)
+    {
+        _configManager = configManager;
+        _outbound = outbound;
+        _versions = versions;
+        _worker = worker;
+        _applicationHost = applicationHost;
+        _logger = logger;
+    }
+
+    /// <summary>Publishes a metadata change for a library item.</summary>
+    /// <param name="localItemId">The local item.</param>
+    /// <param name="itemPath">The local path of the item.</param>
+    /// <param name="version">The version the change carries.</param>
+    /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
+    /// <returns>How many peers were queued a hint.</returns>
+    public int PublishMetadata(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        var key = HintProtocol.MetadataKey(localItemId);
+        return Publish(
+            HintKind.Metadata,
+            key,
+            version,
+            excludePeerKey,
+            peer => HintMapping.FindByLocalPath(peer, itemPath) is not null,
+            () => new OutboundHint { Kind = HintKind.Metadata, Key = key, ItemPath = itemPath, ItemId = key });
+    }
+
+    /// <summary>Publishes a change to a person's own metadata or images.</summary>
+    /// <param name="name">The person's name.</param>
+    /// <param name="localPersonId">The local person item.</param>
+    /// <param name="version">The version the change carries.</param>
+    /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
+    /// <returns>How many peers were queued a hint.</returns>
+    public int PublishPeople(string name, Guid localPersonId, ObjectVersion version, string? excludePeerKey)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var localKey = HintProtocol.PeopleKey(name);
+        return Publish(
+            HintKind.People,
+            localKey,
+            version,
+            excludePeerKey,
+            _ => true,
+            () => new OutboundHint { Kind = HintKind.People, Key = name, ItemId = localPersonId.ToString("N", System.Globalization.CultureInfo.InvariantCulture), UserName = name });
+    }
+
+    /// <summary>Publishes a media file that appeared here.</summary>
+    /// <param name="localItemId">The local item.</param>
+    /// <param name="itemPath">The local path of the file.</param>
+    /// <param name="version">The version the change carries.</param>
+    /// <param name="excludePeerKey">A peer that already holds the file, or null.</param>
+    /// <returns>How many peers were queued a hint.</returns>
+    public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        var key = HintProtocol.MetadataKey(localItemId);
+        return Publish(
+            HintKind.Content,
+            key,
+            version,
+            excludePeerKey,
+            peer => HintMapping.FindByLocalPath(peer, itemPath) is not null,
+            () => new OutboundHint { Kind = HintKind.Content, Key = key, ItemPath = itemPath, ItemId = key });
+    }
+
+    /// <summary>Publishes a change to a user's policy, configuration, or profile image.</summary>
+    /// <param name="localUserId">The local user.</param>
+    /// <param name="userName">The local username.</param>
+    /// <param name="version">The version the change carries.</param>
+    /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
+    /// <returns>How many peers were queued a hint.</returns>
+    public int PublishUsers(Guid localUserId, string? userName, ObjectVersion version, string? excludePeerKey)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        var key = HintProtocol.UsersKey(localUserId);
+        return Publish(
+            HintKind.Users,
+            key,
+            version,
+            excludePeerKey,
+            peer => HintMapping.FindByLocalUser(peer, localUserId) is not null,
+            () => new OutboundHint { Kind = HintKind.Users, Key = key, UserId = key, UserName = userName });
+    }
+
+    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor)
+    {
+        version.Kind = kind;
+        version.Key = localKey;
+        _versions.Set(version);
+
+        var queued = 0;
+        foreach (var peer in _configManager.Configuration.Servers)
+        {
+            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase) || !mapped(peer))
+            {
+                continue;
+            }
+
+            var row = rowFor();
+            row.PeerKey = peer.Key;
+            row.VersionServerId = version.ServerId;
+            row.VersionTimestamp = version.Timestamp;
+            try
+            {
+                _outbound.Enqueue(row, _applicationHost.SystemId);
+                queued++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not queue a {Kind} hint for '{Peer}'", kind, peer.DisplayName);
+            }
+        }
+
+        if (queued > 0)
+        {
+            _logger.LogDebug("Queued a {Kind} hint for {Count} peer(s): {Key}", kind, queued, localKey);
+            _worker.Wake();
+        }
+
+        return queued;
+    }
+
+    /// <summary>
+    /// Publishes a history change. The version is recorded whether or not any peer is told.
+    /// </summary>
+    /// <param name="localUserId">The local user.</param>
+    /// <param name="userName">The local username.</param>
+    /// <param name="localItemId">The local item.</param>
+    /// <param name="itemPath">The local path of the item.</param>
+    /// <param name="version">The version the change carries.</param>
+    /// <param name="excludePeerKey">A peer that already holds the change and needs no hint, or null.</param>
+    /// <returns>How many peers were queued a hint.</returns>
+    public int PublishHistory(Guid localUserId, string? userName, Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        var key = HintProtocol.HistoryKey(localUserId, localItemId);
+        version.Kind = HintKind.History;
+        version.Key = key;
+        _versions.Set(version);
+
+        var queued = 0;
+        foreach (var peer in _configManager.Configuration.Servers)
+        {
+            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (HintMapping.FindByLocalUser(peer, localUserId) is null || HintMapping.FindByLocalPath(peer, itemPath) is null)
+            {
+                continue;
+            }
+
+            var row = new OutboundHint
+            {
+                PeerKey = peer.Key,
+                Kind = HintKind.History,
+                Key = key,
+                ItemPath = itemPath,
+                ItemId = localItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
+                UserId = localUserId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
+                UserName = userName,
+                VersionServerId = version.ServerId,
+                VersionTimestamp = version.Timestamp
+            };
+
+            try
+            {
+                _outbound.Enqueue(row, _applicationHost.SystemId);
+                queued++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not queue a history hint for '{Peer}'", peer.DisplayName);
+            }
+        }
+
+        if (queued > 0)
+        {
+            _logger.LogDebug("Queued a history hint for {Count} peer(s): {Key}", queued, key);
+            _worker.Wake();
+        }
+
+        return queued;
+    }
+}

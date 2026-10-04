@@ -64,9 +64,9 @@ public class DatabaseMigrationServiceTests
     /// False: a future bump forgot to update this test, hiding the need to think through migration paths.
     /// </summary>
     [Fact]
-    public void CurrentSchemaVersion_IsTwentyTwo()
+    public void CurrentSchemaVersion_IsTwentyFive()
     {
-        Assert.Equal(22, DatabaseMigrationService.CurrentSchemaVersion);
+        Assert.Equal(25, DatabaseMigrationService.CurrentSchemaVersion);
     }
 
     /// <summary>
@@ -175,7 +175,7 @@ public class DatabaseMigrationServiceTests
         Assert.DoesNotContain("OldColumn", cols);
         Assert.Contains("SourceItemId", cols);
         Assert.Contains("PendingType", cols);
-        Assert.Equal(22, GetVersion(conn));
+        Assert.Equal(25, GetVersion(conn));
     }
 
     /// <summary>
@@ -277,7 +277,7 @@ public class DatabaseMigrationServiceTests
             Assert.True(reader.IsDBNull(0));
         }
 
-        Assert.Equal(22, GetVersion(conn));
+        Assert.Equal(25, GetVersion(conn));
     }
 
     /// <summary>
@@ -331,7 +331,7 @@ public class DatabaseMigrationServiceTests
 
         var historyCols = GetColumnNames(conn, "HistorySyncItems");
         Assert.Contains("SourceStateHash", historyCols);
-        Assert.Equal(22, GetVersion(conn));
+        Assert.Equal(25, GetVersion(conn));
     }
 
     /// <summary>
@@ -397,7 +397,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 20, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(22, GetVersion(conn));
+        Assert.Equal(25, GetVersion(conn));
     }
 
     /// <summary>
@@ -410,12 +410,12 @@ public class DatabaseMigrationServiceTests
     {
         using var conn = OpenConnection();
         DatabaseMigrationService.CreateInitialSchema(conn);
-        SetVersion(conn, 22);
+        SetVersion(conn, 25);
 
-        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 22, NullLogger.Instance);
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 25, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(22, GetVersion(conn));
+        Assert.Equal(25, GetVersion(conn));
     }
 
     /// <summary>
@@ -441,7 +441,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 21, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(22, GetVersion(conn));
+        Assert.Equal(25, GetVersion(conn));
         foreach (var table in new[] { "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
         {
             Assert.Contains("RetryCount", GetColumnNames(conn, table));
@@ -464,6 +464,129 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 21, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(22, GetVersion(conn));
+        Assert.Equal(25, GetVersion(conn));
+    }
+
+    /// <summary>
+    /// v22 to v23 adds the negotiated base columns to HistorySyncItems.
+    /// True: a two way history sync can merge against what both servers last agreed on.
+    /// False: the merge keeps treating the source as always right and a local unfavorite never lands.
+    /// </summary>
+    [Fact]
+    public void MigrateSchema_FromV22_AddsNegotiatedBaseToHistory()
+    {
+        using var conn = OpenConnection();
+        DatabaseMigrationService.CreateInitialSchema(conn);
+        foreach (var col in new[] { "NegotiatedIsPlayed", "NegotiatedPlayCount", "NegotiatedPlaybackPositionTicks", "NegotiatedLastPlayedDate", "NegotiatedIsFavorite", "NegotiatedAt" })
+        {
+            using var drop = conn.CreateCommand();
+            drop.CommandText = $"ALTER TABLE HistorySyncItems DROP COLUMN {col}";
+            drop.ExecuteNonQuery();
+        }
+
+        SetVersion(conn, 22);
+
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 22, NullLogger.Instance);
+
+        Assert.True(ok);
+        Assert.Equal(25, GetVersion(conn));
+        var columns = GetColumnNames(conn, "HistorySyncItems");
+        foreach (var col in new[] { "NegotiatedIsPlayed", "NegotiatedPlayCount", "NegotiatedPlaybackPositionTicks", "NegotiatedLastPlayedDate", "NegotiatedIsFavorite", "NegotiatedAt" })
+        {
+            Assert.Contains(col, columns);
+        }
+    }
+
+    /// <summary>
+    /// v23 to v24 adds ServerKey to every sync table.
+    /// True: rows from several scan servers can share a table and the apply tasks know which peer each row belongs to.
+    /// False: every row looks like it came from the first server and a second server's rows are applied against the wrong peer.
+    /// </summary>
+    [Fact]
+    public void MigrateSchema_FromV23_AddsServerKeyToEveryTable()
+    {
+        using var conn = OpenConnection();
+        DatabaseMigrationService.CreateInitialSchema(conn);
+        foreach (var table in new[] { "SyncItems", "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
+        {
+            using var drop = conn.CreateCommand();
+            drop.CommandText = $"ALTER TABLE {table} DROP COLUMN ServerKey";
+            drop.ExecuteNonQuery();
+        }
+
+        SetVersion(conn, 23);
+
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 23, NullLogger.Instance);
+
+        Assert.True(ok);
+        Assert.Equal(25, GetVersion(conn));
+        foreach (var table in new[] { "SyncItems", "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
+        {
+            Assert.Contains("ServerKey", GetColumnNames(conn, table));
+        }
+    }
+}
+
+public class QueueSchemaMigrationTests
+{
+    private static SqliteConnection OpenConnection()
+    {
+        var conn = new SqliteConnection("Data Source=:memory:");
+        conn.Open();
+        return conn;
+    }
+
+    private static bool HasTable(SqliteConnection conn, string table)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=@n";
+        cmd.Parameters.AddWithValue("@n", table);
+        return Convert.ToInt32(cmd.ExecuteScalar()) == 1;
+    }
+
+    /// <summary>
+    /// A v24 database gains the three queue tables and nothing else changes.
+    /// True: an upgrade keeps every sync row and adds the hint pipeline's storage.
+    /// False: hints have nowhere to live after an upgrade and the workers fail on every pass.
+    /// </summary>
+    [Fact]
+    public void MigrateSchema_FromV24_AddsQueueTables()
+    {
+        using var conn = OpenConnection();
+        DatabaseMigrationService.CreateInitialSchema(conn);
+        foreach (var table in new[] { "OutboundHints", "InboundHints", "ObjectVersions" })
+        {
+            using var drop = conn.CreateCommand();
+            drop.CommandText = $"DROP TABLE {table}";
+            drop.ExecuteNonQuery();
+        }
+
+        using (var v = conn.CreateCommand())
+        {
+            v.CommandText = "PRAGMA user_version = 24";
+            v.ExecuteNonQuery();
+        }
+
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 24, NullLogger.Instance);
+
+        Assert.True(ok);
+        Assert.True(HasTable(conn, "OutboundHints"));
+        Assert.True(HasTable(conn, "InboundHints"));
+        Assert.True(HasTable(conn, "ObjectVersions"));
+        Assert.True(HasTable(conn, "HistorySyncItems"));
+    }
+
+    /// <summary>
+    /// Creating the queue tables twice is harmless.
+    /// True: a partially applied upgrade recovers on the next start.
+    /// False: a crash between the tables and the version stamp would brick the plugin on restart.
+    /// </summary>
+    [Fact]
+    public void CreateQueueTables_IsIdempotent()
+    {
+        using var conn = OpenConnection();
+        DatabaseMigrationService.CreateQueueTables(conn);
+        DatabaseMigrationService.CreateQueueTables(conn);
+        Assert.True(HasTable(conn, "OutboundHints"));
     }
 }

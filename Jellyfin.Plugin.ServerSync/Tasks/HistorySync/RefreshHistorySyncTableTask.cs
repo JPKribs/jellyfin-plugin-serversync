@@ -27,7 +27,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// <see cref="RefreshHistorySyncTableTask.BuildRecordAsync"/> turns into a
 /// <see cref="HistorySyncItem"/>.
 /// </summary>
-public sealed record HistoryWork(UserMapping UserMapping, LibraryMapping LibraryMapping, BaseItemDto SourceItem);
+public sealed record HistoryWork(ScanSource Source, UserMapping UserMapping, LibraryMapping LibraryMapping, BaseItemDto SourceItem);
 
 /// <summary>
 /// Refresh phase for History sync. Local-first discovery: enumerate the
@@ -80,7 +80,7 @@ public class RefreshHistorySyncTableTask
     {
         var config = ConfigManager.Configuration;
         if (!config.EnableHistorySync) return false;
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey)) return false;
+        if (config.GetPullServers().Count == 0) return false;
         return config.GetEnabledUserMappings().Count > 0 && config.GetEnabledLibraryMappings().Count > 0;
     }
 
@@ -96,17 +96,14 @@ public class RefreshHistorySyncTableTask
     //   and the source user's UserId.</item>
     //   </list>
     /// <inheritdoc />
-    protected override async Task<IList<HistoryWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override async Task<IList<HistoryWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(progress);
-        if (Client == null)
-        {
-            return Array.Empty<HistoryWork>();
-        }
 
-        var config = ConfigManager.Configuration;
-        var userMappings = config.UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
-        var libraryMappings = config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
+        var client = source.Client;
+        var userMappings = source.Server.GetEnabledUserMappings();
+        var libraryMappings = source.Server.GetEnabledLibraryMappings();
 
         if (userMappings.Count == 0 || libraryMappings.Count == 0)
         {
@@ -185,7 +182,7 @@ public class RefreshHistorySyncTableTask
                     BaseItemDtoQueryResult? page;
                     try
                     {
-                        page = await Client.GetLibraryItemPathsAsync(sourceLibraryId, leafTypes, startIndex, pageSize, ct).ConfigureAwait(false);
+                        page = await client.GetLibraryItemPathsAsync(sourceLibraryId, leafTypes, startIndex, pageSize, ct).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -286,7 +283,7 @@ public class RefreshHistorySyncTableTask
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
-                    var page = await Client.GetItemsWithUserDataByIdsAsync(sourceUserId, chunk, cancellationToken).ConfigureAwait(false);
+                    var page = await client.GetItemsWithUserDataByIdsAsync(sourceUserId, chunk, cancellationToken).ConfigureAwait(false);
 
                     // Sub-pair reporting: a pair covering a large library runs
                     // many 50-item batches, and per-pair ticks left the bar
@@ -305,7 +302,7 @@ public class RefreshHistorySyncTableTask
 
                     foreach (var item in page.Items)
                     {
-                        work.Add(new HistoryWork(userMapping, libraryMapping, item));
+                        work.Add(new HistoryWork(source, userMapping, libraryMapping, item));
                     }
                 }
 
@@ -325,13 +322,23 @@ public class RefreshHistorySyncTableTask
         CancellationToken cancellationToken)
     {
         var sourceItemId = source.SourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
-        var record = _historyService.BuildRecord(source.UserMapping, source.LibraryMapping, source.SourceItem, sourceItemId);
+        var record = _historyService.BuildRecord(
+            source.UserMapping,
+            source.LibraryMapping,
+            source.SourceItem,
+            sourceItemId,
+            negotiateWithSource: ConfigManager.Configuration.HistorySyncNegotiate);
 
         // Carry forward the Synced baseline from the existing row, same as
         // the Metadata refresh: the service builds a fresh record with a
         // null SyncedHash, and without this the SourceHash == SyncedHash
         // short-circuit in HasChanges can never fire and every refresh
         // destroys the baseline the Sync task recorded via MarkSynced.
+        if (record != null)
+        {
+            record.ServerKey = source.Source.Key;
+        }
+
         if (record != null && existing.TryGetValue((record.SourceUserId, record.SourceItemId), out var prev))
         {
             record.Id = prev.Id;
@@ -343,6 +350,15 @@ public class RefreshHistorySyncTableTask
             record.RetryCount = prev.RetryCount;
             record.SourceState.Synced = prev.SourceState.Synced;
             record.SourceState.SyncedHash = prev.SourceState.SyncedHash;
+
+            // The service merged without knowing what the two servers last agreed on. With the base
+            // restored the merge becomes three way, which is what lets a change made only on this
+            // server survive instead of being overwritten by an unchanged source.
+            record.CarryNegotiatedBaseFrom(prev);
+            if (record.HasNegotiatedBase)
+            {
+                HistorySyncMergeService.MergeHistoryData(record);
+            }
         }
 
         return Task.FromResult(record);
@@ -351,6 +367,28 @@ public class RefreshHistorySyncTableTask
     /// <inheritdoc />
     protected override (string SourceUserId, string SourceItemId) ExtractKey(HistorySyncItem record)
         => (record.SourceUserId, record.SourceItemId);
+
+    // Two servers collide when they hold history for the same local user and local file.
+    /// <inheritdoc />
+    protected override string? PriorityKeyOf(HistoryWork source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        var path = source.SourceItem.Path;
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        var localPath = PathUtilities.TranslatePath(path, source.LibraryMapping.SourceRootPath, source.LibraryMapping.LocalRootPath);
+        return source.UserMapping.LocalUserId + "|" + localPath;
+    }
+
+    /// <inheritdoc />
+    protected override string? PriorityKeyOf(HistorySyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return string.IsNullOrEmpty(record.LocalPath) ? null : record.LocalUserId + "|" + record.LocalPath;
+    }
 
     // In scope when both the row's library mapping AND its user mapping are
     // currently enabled. Disabling either preserves history rows instead of

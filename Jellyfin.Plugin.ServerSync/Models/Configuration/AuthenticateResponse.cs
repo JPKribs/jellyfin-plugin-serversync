@@ -22,6 +22,9 @@ public class AuthenticateResponse
     /// </summary>
     public string? UserId { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the signed in user is an administrator there.</summary>
+    public bool? IsAdministrator { get; set; }
+
     /// <summary>
     /// Server name returned from the authentication.
     /// </summary>

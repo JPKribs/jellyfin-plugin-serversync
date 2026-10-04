@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
@@ -62,15 +63,15 @@ public partial class ConfigurationController
 
         // Refresh builds tag-only manifests for speed; the modal needs real
         // sizes/dimensions to render "623.4 KB" instead of "1 (0 B)".
-        if (config.MetadataSyncImages
-            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
-            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey)
-            && !string.IsNullOrEmpty(item.Images.Source))
+        if (config.MetadataSyncImages && !string.IsNullOrEmpty(item.Images.Source))
         {
             try
             {
-                using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-                await metadataService.EnrichSourceImageSizesAsync(item, client, cancellationToken).ConfigureAwait(false);
+                using var client = ClientForRow(item.ServerKey);
+                if (client != null)
+                {
+                    await metadataService.EnrichSourceImageSizesAsync(item, client, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -82,7 +83,7 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(item.ToDto(config.LibraryMappings, !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl));
+        return Ok(item.ToDto(config.GetAllLibraryMappings(), BrowserUrlFor(item.ServerKey)));
     }
 
     /// <summary>
@@ -106,15 +107,13 @@ public partial class ConfigurationController
             return NotFound();
         }
 
-        var config = _configManager.Configuration;
-        if (string.IsNullOrEmpty(config.SourceServerUrl) || string.IsNullOrEmpty(config.SourceServerApiKey))
-        {
-            return NotFound("Source server not configured");
-        }
-
         try
         {
-            using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
+            using var client = ClientForRow(item.ServerKey);
+            if (client == null)
+            {
+                return NotFound("Source server not configured");
+            }
 
             if (!Guid.TryParse(item.SourceItemId, out var sourceItemGuid))
             {
@@ -183,12 +182,12 @@ public partial class ConfigurationController
         var (items, totalCount) = manager.SearchMetadataSyncItemsPaginated(
             search, statusFilter, sourceLibraryId, skip, take);
 
-        var config = _configManager.Configuration;
+        var libraryMappings = _configManager.Configuration.GetAllLibraryMappings();
 
         return Ok(new PagedResult<MetadataSyncItemDto>(
             items.Select(i => i.ToDto(
-                config.LibraryMappings,
-                !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
+                libraryMappings,
+                BrowserUrlFor(i.ServerKey),
                 includeBlobs: false)).ToList(),
             totalCount,
             skip,
@@ -205,7 +204,7 @@ public partial class ConfigurationController
     {
         ArgumentNullException.ThrowIfNull(manager);
         var counts = manager.GetStatusCounts();
-        var libraryMappings = _configManager.Configuration.LibraryMappings ?? new List<LibraryMapping>();
+        var libraryMappings = _configManager.Configuration.GetAllLibraryMappings();
 
         var response = new MetadataSyncStatusResponse
         {

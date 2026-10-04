@@ -2,14 +2,17 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.0.0.1"
-targetAbi: "12.0.0.0"
+version: "12.2.1.0"
+targetAbi: "12.1.0.0"
 framework: "net10.0"
-overview: "Sync media content from a source Jellyfin server to this server."
+overview: "Keep several Jellyfin servers in step: content, metadata, people, users, and watch history."
 description: >
-  Server Sync enables one-way content synchronization from a source Jellyfin server to a local server.
-  The plugin periodically scans the source server for media items (Movies, Episodes, Audio, Video)
-  and downloads missing or updated content.
+  Server Sync keeps a pool of Jellyfin servers in step. Each server scans the others it is told to in
+  priority order and pulls missing or updated content, metadata, people, user settings, and watch
+  history. Servers that both run the plugin also tell each other about changes as they happen, so an
+  edit or a play made on one shows up on the others within seconds, and the scheduled scan remains
+  the safety net. Watch history merges three way against what the servers last agreed on, and other
+  values resolve on where and when they were last edited, so the newest edit always wins.
 category: "Administration"
 owner: "JPKribs"
 artifacts:
@@ -25,8 +28,21 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Items with several backdrops no longer queue on every refresh. Jellyfin stores images without an order, so the same set can come back shuffled on either server. Image sizes are now matched as a set within each image type instead of by position
-  - Metadata Sync people no longer queue again right after a successful sync. Credits are compared the way Jellyfin stores them, ignoring case and padding on names and roles and collapsing duplicate credits, and the post apply check uses the same comparison as the refresh
-  - Cast order now carries across. People were being written in alphabetical order, and they are now written in the source billing order. Expect one round of people syncs while existing items pick up the correct order
-  - People Sync no longer syncs the person name. The name is the match key, so the two sides can only differ by casing, and rewriting it made Jellyfin recreate the person blank. The local person is now found by its id first
-  - User Sync no longer copies EnableAllFolders, EnableAllChannels, or EnableAllDevices. The id lists they depend on stay local, so copying the switch alone could lock a user out of every library or lift a local restriction
+  - Targets Jellyfin 12.1
+  - Several servers, scanned in priority order. The single source migrates into the list
+  - Server modes Pull, Push, and Sync. Push and Sync send change hints to peers running Server Sync, which pull each change within seconds
+  - Hints cover watch history, metadata, people, users, and new files. Stored on both ends, retried with backoff, recovered when lost
+  - Watch history merges three way against the state both servers last agreed on
+  - Metadata, people, and users resolve on where and when a value was last edited, so the newest edit wins
+  - Two scheduled tasks, Sync Content and Sync Information, replace the ten. The per module tasks are hidden but still run from the dashboard
+  - Peer endpoints under /ServerSync/Peer and operator endpoints under /ServerSync/Hints, all behind Jellyfin's RequiresElevation policy
+  - Servers tab rebuilt: numbered priority list with reorder, Connection, Authentication, Libraries, and Users steps, API key or sign in, and Check Link judged by direction with a clock skew warning
+  - A standard user's key is recognised and pulls what that user can see, one way
+  - Queue view on the Sync page, and an activity log line for every concluded hint
+  - A full REST API section in the README
+  - Each detail dialog shows which server last edited the item and when
+  - Removing a server removes the rows tracked from it
+  - Pending hints capped at ten thousand per peer
+  - Server names with emoji work in peer requests
+  - Sync database schema v25
+  - Docker integration harness under integration/

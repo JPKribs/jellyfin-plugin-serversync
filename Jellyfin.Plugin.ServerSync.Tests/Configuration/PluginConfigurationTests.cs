@@ -39,7 +39,8 @@ public class PluginConfigurationTests
         Assert.Null(exception);
         Assert.True(string.IsNullOrEmpty(config.TempDownloadPath));
         Assert.True(string.IsNullOrEmpty(config.RecyclingBinPath));
-        Assert.Equal(string.Empty, config.LibraryMappings[0].LocalRootPath);
+        // The sanitizer also moves a legacy mapping list into the first server entry.
+        Assert.Equal(string.Empty, config.Servers[0].LibraryMappings[0].LocalRootPath);
     }
 
     /// <summary>
@@ -184,7 +185,9 @@ public class PluginConfigurationTests
     public void FilteredItemType_RoundTripsAndToleratesLegacyXml()
     {
         var config = new PluginConfiguration();
-        config.LibraryMappings.Add(new LibraryMapping
+        var server = new SourceServer { Url = "http://source:8096", ApiKey = "k" };
+        config.Servers.Add(server);
+        server.LibraryMappings.Add(new LibraryMapping
         {
             IsEnabled = true,
             SourceLibraryId = "s",
@@ -204,7 +207,7 @@ public class PluginConfigurationTests
         using var reader = new StringReader(writer.ToString());
         var roundTripped = (PluginConfiguration)serializer.Deserialize(reader)!;
 
-        var items = roundTripped.LibraryMappings[0].FilteredItems!;
+        var items = roundTripped.Servers[0].LibraryMappings[0].FilteredItems!;
         Assert.Equal("BoxSet", items[0].Type);
         Assert.Equal("Playlist", items[1].Type);
         Assert.Null(items[2].Type);

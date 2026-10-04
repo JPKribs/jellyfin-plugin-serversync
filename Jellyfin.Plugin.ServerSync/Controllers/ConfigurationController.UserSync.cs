@@ -35,9 +35,7 @@ public partial class ConfigurationController
             return NotFound("User sync item not found");
         }
 
-        var config = _configManager.Configuration;
-        var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
-        return Ok(item.ToDto(url));
+        return Ok(item.ToDto(BrowserUrlFor(item.ServerKey)));
     }
 
     /// <summary>
@@ -86,10 +84,8 @@ public partial class ConfigurationController
             filtered = filtered.Where(i => string.Equals(i.PropertyCategory, propertyCategory, StringComparison.OrdinalIgnoreCase));
         }
 
-        var config = _configManager.Configuration;
-        var url = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl;
         return Ok(new PagedResult<UserSyncItemDto>(
-            filtered.Select(i => i.ToDto(url)).ToList(),
+            filtered.Select(i => i.ToDto(BrowserUrlFor(i.ServerKey))).ToList(),
             result.TotalCount,
             skip,
             take));
@@ -352,7 +348,8 @@ public partial class ConfigurationController
             LocalUserId = localUserId,
             SourceUserName = sourceUserName ?? items.FirstOrDefault()?.SourceUserName,
             LocalUserName = localUserName ?? items.FirstOrDefault()?.LocalUserName,
-            SourceServerUrl = !string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl,
+            SourceServerUrl = config.ResolveServer(items.FirstOrDefault()?.ServerKey)?.BrowserUrl,
+            ServerKey = items.FirstOrDefault()?.ServerKey,
             PolicyId = policyItem?.Id,
             ConfigurationId = configItem?.Id,
             ProfileImageId = imageItem?.Id,

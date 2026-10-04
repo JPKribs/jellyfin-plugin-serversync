@@ -47,6 +47,12 @@ public abstract class SyncRecord
     public int RetryCount { get; set; }
 
     /// <summary>
+    /// Gets or sets the key of the configured server entry this row was built from. Null on rows written
+    /// before servers became a list, which belong to the first scan server.
+    /// </summary>
+    public string? ServerKey { get; set; }
+
+    /// <summary>
     /// Gets a value indicating whether this record has differences that should
     /// be synced. Implementations typically OR together the
     /// <see cref="SyncableValue{T}.HasChanges"/> of their constituent fields.

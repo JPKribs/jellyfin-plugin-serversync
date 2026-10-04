@@ -29,7 +29,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// collection's ID; membership of tagged collections tracks the source
 /// (items the source dropped are removed locally).
 /// </summary>
-public class SyncCollectionsTask : IScheduledTask
+public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
 {
     /// <summary>
     /// Provider-id key marking a local collection as a mirror of a source
@@ -72,6 +72,16 @@ public class SyncCollectionsTask : IScheduledTask
     /// <inheritdoc />
     public string Category => "Content Sync";
 
+    // Runs as the last step of Sync Content, so it leaves the task list like the other module steps.
+    /// <inheritdoc />
+    public bool IsHidden => true;
+
+    /// <inheritdoc />
+    public bool IsEnabled => true;
+
+    /// <inheritdoc />
+    public bool IsLogged => true;
+
     /// <inheritdoc />
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
     {
@@ -92,33 +102,44 @@ public class SyncCollectionsTask : IScheduledTask
             return;
         }
 
-        // (collection id -> (mappings that whitelist it)). A collection can be
-        // whitelisted under several mappings (movies + shows split across
-        // libraries); its local members are gathered across all of them.
-        var collectionsByIdN = new Dictionary<string, List<Models.Configuration.LibraryMapping>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var mapping in config.GetEnabledLibraryMappings())
+        // Per server: (collection id -> (mappings that whitelist it)). A collection can be
+        // whitelisted under several mappings of one server (movies + shows split across
+        // libraries); its local members are gathered across all of them. Collection ids are
+        // the peer's own, so the grouping never crosses servers.
+        var work = new List<(Models.Configuration.SourceServer Server, Dictionary<string, List<Models.Configuration.LibraryMapping>> Collections)>();
+        foreach (var server in config.GetPullServers())
         {
-            if (mapping.FilterMode != Models.Configuration.LibraryFilterMode.Whitelist || mapping.FilteredItems == null)
+            var collectionsByIdN = new Dictionary<string, List<Models.Configuration.LibraryMapping>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mapping in server.GetEnabledLibraryMappings())
             {
-                continue;
+                if (mapping.FilterMode != Models.Configuration.LibraryFilterMode.Whitelist || mapping.FilteredItems == null)
+                {
+                    continue;
+                }
+
+                foreach (var fi in mapping.FilteredItems)
+                {
+                    if (string.Equals(fi.Type, "BoxSet", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(fi.ItemId, out _))
+                    {
+                        if (!collectionsByIdN.TryGetValue(fi.ItemId, out var list))
+                        {
+                            list = new List<Models.Configuration.LibraryMapping>();
+                            collectionsByIdN[fi.ItemId] = list;
+                        }
+
+                        list.Add(mapping);
+                    }
+                }
             }
 
-            foreach (var fi in mapping.FilteredItems)
+            if (collectionsByIdN.Count > 0)
             {
-                if (string.Equals(fi.Type, "BoxSet", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(fi.ItemId, out _))
-                {
-                    if (!collectionsByIdN.TryGetValue(fi.ItemId, out var list))
-                    {
-                        list = new List<Models.Configuration.LibraryMapping>();
-                        collectionsByIdN[fi.ItemId] = list;
-                    }
-
-                    list.Add(mapping);
-                }
+                work.Add((server, collectionsByIdN));
             }
         }
 
-        if (collectionsByIdN.Count == 0)
+        var total = work.Sum(w => w.Collections.Count);
+        if (total == 0)
         {
             _logger.LogDebug("No whitelisted collections configured; nothing to mirror");
             return;
@@ -130,14 +151,6 @@ public class SyncCollectionsTask : IScheduledTask
         await moduleMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-            var connection = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-            if (!connection.Success)
-            {
-                _logger.LogError("Sync Collections: source connection failed — {Error}", connection.ErrorMessage ?? "unknown");
-                return;
-            }
-
             var localBoxSets = _libraryManager.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = new[] { BaseItemKind.BoxSet },
@@ -145,27 +158,41 @@ public class SyncCollectionsTask : IScheduledTask
             }) ?? new List<BaseItem>();
 
             var processed = 0;
-            foreach (var (sourceIdN, mappings) in collectionsByIdN)
+            foreach (var (server, collectionsByIdN) in work)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                try
+                using var client = _clientFactory.Create(server);
+                var connection = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+                if (!connection.Success)
                 {
-                    await MirrorOneAsync(client, Guid.Parse(sourceIdN), sourceIdN, mappings, localBoxSets, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    // One dead collection (deleted on source, transport fault)
-                    // must not stop the rest. Membership is never REMOVED on a
-                    // failed read — MirrorOneAsync throws before any diff.
-                    _logger.LogWarning(ex, "Sync Collections: failed to mirror collection {Id}; leaving the local mirror untouched", sourceIdN);
+                    _logger.LogError("Sync Collections: connection to '{Server}' failed: {Error}", server.DisplayName, connection.ErrorMessage ?? "unknown");
+                    processed += collectionsByIdN.Count;
+                    progress.Report(100.0 * processed / total);
+                    continue;
                 }
 
-                processed++;
-                progress.Report(100.0 * processed / collectionsByIdN.Count);
+                foreach (var (sourceIdN, mappings) in collectionsByIdN)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        await MirrorOneAsync(client, Guid.Parse(sourceIdN), sourceIdN, mappings, localBoxSets, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // One dead collection (deleted on source, transport fault)
+                        // must not stop the rest. Membership is never REMOVED on a
+                        // failed read — MirrorOneAsync throws before any diff.
+                        _logger.LogWarning(ex, "Sync Collections: failed to mirror collection {Id} from '{Server}'; leaving the local mirror untouched", sourceIdN, server.DisplayName);
+                    }
+
+                    processed++;
+                    progress.Report(100.0 * processed / total);
+                }
             }
         }
         finally

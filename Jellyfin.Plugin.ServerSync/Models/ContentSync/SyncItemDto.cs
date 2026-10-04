@@ -47,5 +47,11 @@ public class SyncItemDto
 
     public string? SourceServerId { get; set; }
 
+    /// <summary>Gets or sets the configured server entry the row came from.</summary>
+    public string? ServerKey { get; set; }
+
+    /// <summary>Gets or sets that entry's display name.</summary>
+    public string? ServerName { get; set; }
+
     public string? CompanionFiles { get; set; }
 }

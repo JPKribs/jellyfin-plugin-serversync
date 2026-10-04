@@ -40,7 +40,7 @@ public class SyncMissingContentTask
     private readonly ILibraryManager _libraryManager;
     private readonly DownloadService _downloadService;
 
-    private CircuitBreaker? _circuitBreaker;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, byte> _skippedByBreaker = new();
     private string? _tempPath;
     private long _speedLimit;
     private int _successCount;
@@ -124,23 +124,84 @@ public class SyncMissingContentTask
             return false;
         }
 
-        _circuitBreaker = GetOrCreateCircuitBreaker(config.SourceServerUrl);
-        if (!_circuitBreaker.AllowOperation(out var circuitReason))
-        {
-            Logger.LogWarning("Sync skipped: {Reason}", circuitReason);
-            return false;
-        }
-
-        // Delegate connection test to the base — it sets Client and logs on
-        // failure. Wrap with circuit-breaker recording.
+        // The base connects every scan server. A server that did not connect feeds its circuit
+        // breaker, and a server whose breaker is open is left out of this run: its rows stay Queued
+        // untouched, so a pause never costs them retries, while the other servers' downloads go on.
         if (!await base.BeforeRunAsync(cancellationToken).ConfigureAwait(false))
         {
-            _circuitBreaker.RecordFailure("connection test failed");
             return false;
         }
 
-        _circuitBreaker.RecordSuccess();
+        var allowed = new List<ScanSource>();
+        foreach (var server in config.GetPullServers())
+        {
+            var breaker = GetOrCreateCircuitBreaker(server.Url);
+            var source = Sources.FirstOrDefault(s => string.Equals(s.Key, server.Key, StringComparison.OrdinalIgnoreCase));
+            if (source is null)
+            {
+                breaker.RecordFailure("connection test failed");
+                continue;
+            }
 
+            if (!breaker.AllowOperation(out var circuitReason))
+            {
+                Logger.LogWarning("{Task}: leaving '{Server}' out of this run: {Reason}", Name, source.Name, circuitReason);
+                source.Dispose();
+                continue;
+            }
+
+            breaker.RecordSuccess();
+            allowed.Add(source);
+        }
+
+        Sources = allowed;
+        if (allowed.Count == 0)
+        {
+            FailPreflight("the circuit breaker is open for every reachable server");
+            return false;
+        }
+
+        PrepareDownloads(config);
+
+        config.LastSyncStartTime = DateTime.UtcNow;
+        ConfigManager.SaveConfiguration();
+
+        return true;
+    }
+
+    // A single row from a hint: the same disk check and download setup as a run, without connecting
+    // every server, since the hint already names the one to pull from.
+    /// <inheritdoc />
+    protected override Task<bool> BeforeRowAsync(CancellationToken cancellationToken)
+    {
+        var config = ConfigManager.Configuration;
+        if (!DiskSpaceService.HasSufficientSpace(config, out var insufficientPath))
+        {
+            FailPreflight($"insufficient disk space on {insufficientPath}");
+            return Task.FromResult(false);
+        }
+
+        PrepareDownloads(config);
+        return Task.FromResult(true);
+    }
+
+    // A file that arrived through a hint is handed to the library through Jellyfin's own queued scan,
+    // which runs once however many files arrive close together, rather than a blocking full
+    // validation per file.
+    /// <inheritdoc />
+    protected override Task AfterRowAsync(bool applied, CancellationToken cancellationToken)
+    {
+        if (applied && _successCount > 0)
+        {
+            _libraryManager.QueueLibraryScan();
+        }
+
+        _tempPath = null;
+        return Task.CompletedTask;
+    }
+
+    private void PrepareDownloads(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    {
         var staleCount = ActiveDownloadTracker.CleanupStaleEntries();
         if (staleCount > 0)
         {
@@ -152,11 +213,6 @@ public class SyncMissingContentTask
         _speedLimit = config.GetEffectiveDownloadSpeedBytes();
         _successCount = 0;
         _deletedCount = 0;
-
-        config.LastSyncStartTime = DateTime.UtcNow;
-        ConfigManager.SaveConfiguration();
-
-        return true;
     }
 
     // Weight items by file size so the run's percentage tracks bytes moved,
@@ -178,9 +234,18 @@ public class SyncMissingContentTask
     {
         ArgumentNullException.ThrowIfNull(record);
 
-        if (Client == null || _circuitBreaker == null || _tempPath == null)
+        if (_tempPath == null)
         {
             throw new InvalidOperationException("BeforeRunAsync did not complete; aborting apply.");
+        }
+
+        // The breaker may open during the run. A row skipped for that reason is not a failed attempt.
+        var source = RequireSource(record);
+        var breaker = GetOrCreateCircuitBreaker(source.Server.Url);
+        if (!breaker.AllowOperation(out var circuitReason))
+        {
+            _skippedByBreaker[record.Id] = 0;
+            throw new InvalidOperationException($"Skipped: {circuitReason}");
         }
 
         if (string.IsNullOrEmpty(record.LocalPath))
@@ -229,19 +294,19 @@ public class SyncMissingContentTask
         try
         {
             var result = await _downloadService.DownloadItemAsync(
-                Client, record, _tempPath, _speedLimit,
+                source.Client, record, _tempPath, _speedLimit,
                 config.IncludeCompanionFiles, config, itemProgress, cancellationToken).ConfigureAwait(false);
 
             if (result.Success)
             {
-                _circuitBreaker.RecordSuccess();
+                breaker.RecordSuccess();
                 record.CompanionFiles = result.CompanionFiles;
                 Interlocked.Increment(ref _successCount);
                 Logger.LogInformation("DOWNLOADED: {FileName} ({Size}) -> {LocalPath}", fileName, fileSize, record.LocalPath);
             }
             else
             {
-                _circuitBreaker.RecordFailure(result.ErrorMessage);
+                breaker.RecordFailure(result.ErrorMessage);
                 Logger.LogError("FAILED: {FileName} ({Size}) - {Error}. Source: {SourcePath}",
                     fileName, fileSize, result.ErrorMessage, record.SourcePath);
                 // Include filename + size + source path in the message so the
@@ -270,11 +335,17 @@ public class SyncMissingContentTask
     }
 
     // Increments <see cref="SyncItem.RetryCount"/> so the
-    // <c>MaxRetryCount</c> cap in <see cref="GetItemsToApply"/> is honored.
+    // <c>MaxRetryCount</c> cap in <see cref="GetItemsToApply"/> is honored. A row the circuit
+    // breaker skipped was never tried, so it keeps its count.
     /// <inheritdoc />
     protected override void OnApplyFailed(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
+        if (_skippedByBreaker.TryRemove(record.Id, out _))
+        {
+            return;
+        }
+
         record.RetryCount++;
     }
 
@@ -324,7 +395,6 @@ public class SyncMissingContentTask
 
         progress.Report(95);
 
-        _circuitBreaker = null;
         _tempPath = null;
     }
 

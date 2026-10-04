@@ -26,6 +26,7 @@
                             <option value="metadata" data-config-key="EnableMetadataSync">Metadata</option>
                             <option value="people" data-config-key="EnablePeopleSync">People</option>
                             <option value="users" data-config-key="EnableUserSync">Users</option>
+                            <option value="queue">Queue</option>
                         </select>
                     </div>
 
@@ -283,6 +284,10 @@
                                             <div class="historyModal-infoLabel">Last Sync</div>
                                             <div id="historyModalLastSync" class="historyModal-infoValue">-</div>
                                         </div>
+                                        <div class="historyModal-infoItem">
+                                            <div class="historyModal-infoLabel">Last Edited</div>
+                                            <div id="historyModalVersion" class="historyModal-infoValue">-</div>
+                                        </div>
                                     </div>
                                     <div id="historyModalErrorSection" class="jpk-modal-field hidden">
                                         <div class="jpk-modal-field-label">Error</div>
@@ -435,6 +440,10 @@
                                             <div id="metadataSyncModalLastSync" class="metadataSyncModal-infoValue">-</div>
                                         </div>
                                         <div class="metadataSyncModal-infoItem">
+                                            <div class="metadataSyncModal-infoLabel">Last Edited</div>
+                                            <div id="metadataSyncModalVersion" class="metadataSyncModal-infoValue">-</div>
+                                        </div>
+                                        <div class="metadataSyncModal-infoItem">
                                             <div class="metadataSyncModal-infoLabel">Library</div>
                                             <div id="metadataSyncModalLibrary" class="metadataSyncModal-infoValue">-</div>
                                         </div>
@@ -559,6 +568,10 @@
                                             <div class="userSyncModal-infoLabel">Last Sync</div>
                                             <div id="userSyncModalLastSync" class="userSyncModal-infoValue"></div>
                                         </div>
+                                        <div class="userSyncModal-infoItem">
+                                            <div class="userSyncModal-infoLabel">Last Edited</div>
+                                            <div id="userSyncModalVersion" class="userSyncModal-infoValue">-</div>
+                                        </div>
                                     </div>
                                     <div id="userSyncModalErrorSection" class="jpk-modal-field hidden">
                                         <div class="jpk-modal-field-label">Error</div>
@@ -679,6 +692,10 @@
                                             <div class="peopleSyncModal-infoLabel">Last Sync</div>
                                             <div id="peopleSyncModalLastSync" class="peopleSyncModal-infoValue">-</div>
                                         </div>
+                                        <div class="peopleSyncModal-infoItem">
+                                            <div class="peopleSyncModal-infoLabel">Last Edited</div>
+                                            <div id="peopleSyncModalVersion" class="peopleSyncModal-infoValue">-</div>
+                                        </div>
                                     </div>
                                     <div id="peopleSyncModalErrorSection" class="jpk-modal-field hidden">
                                         <div class="jpk-modal-field-label">Error</div>
@@ -712,6 +729,91 @@
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- ============================================
+                         VIEW: Change Queue
+                         ============================================ -->
+
+                    <div id="syncView-queue" class="syncView hidden">
+
+                        <!-- Status Summary Cards -->
+                        <div class="jpk-cards">
+                            <div class="jpk-card orange" id="queueCardPending" title="Hints waiting to be delivered to a peer">
+                                <span class="jpk-card-count" id="queuePendingCount">0</span>
+                                <span class="jpk-card-label">To Send</span>
+                            </div>
+                            <div class="jpk-card blue" id="queueCardSent" title="Hints a peer has accepted and is working on">
+                                <span class="jpk-card-count" id="queueSentCount">0</span>
+                                <span class="jpk-card-label">Sent</span>
+                            </div>
+                            <div class="jpk-card red" id="queueCardFailed" title="Hints a peer rejected as malformed">
+                                <span class="jpk-card-count" id="queueFailedCount">0</span>
+                                <span class="jpk-card-label">Failed</span>
+                            </div>
+                            <div class="jpk-card purple" id="queueCardInbound" title="Hints received from peers and not yet applied">
+                                <span class="jpk-card-count" id="queueInboundCount">0</span>
+                                <span class="jpk-card-label">Received</span>
+                            </div>
+                            <div class="jpk-card gray" id="queueCardGathering" title="Local edits still gathering before they become hints">
+                                <span class="jpk-card-count" id="queueGatheringCount">0</span>
+                                <span class="jpk-card-label">Gathering</span>
+                            </div>
+                        </div>
+
+                        <!-- Peers -->
+                        <div id="queuePeers" class="healthDashboard">
+                            <div class="healthRow" id="queuePeerRow"></div>
+                        </div>
+                        <div id="queueNoPeers" class="jpk-info hidden">No server is in Push or Sync mode, so this server sends no hints. Hints it receives from peers still appear below.</div>
+
+                        <!-- Action Buttons -->
+                        <div class="syncActionButtonRow">
+                            <button is="emby-button" type="button" id="btnQueueRefresh" class="raised syncActionButton">
+                                <span>Refresh</span>
+                            </button>
+                            <button is="emby-button" type="button" id="btnQueueRun" class="raised jpk-button-submit syncActionButton" title="Raise every gathering edit, deliver, and apply now instead of waiting for the workers">
+                                <span>Run Now</span>
+                            </button>
+                        </div>
+
+                        <div class="syncSectionSeparator"></div>
+
+                        <!-- Outbound -->
+                        <div class="jpk-subsection-title">Outbound</div>
+                        <div id="queueOutboundEmpty" class="jpk-empty hidden">Nothing is owed to any peer.</div>
+                        <div class="queueTableContainer">
+                            <table class="historyCompareTable queueTable" id="queueOutboundTable">
+                                <thead>
+                                    <tr>
+                                        <th>Peer</th>
+                                        <th>Change</th>
+                                        <th>State</th>
+                                        <th>Detail</th>
+                                        <th class="queueTable-actions"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="queueOutboundBody"></tbody>
+                            </table>
+                        </div>
+
+                        <!-- Inbound -->
+                        <div class="jpk-subsection-title">Inbound</div>
+                        <div id="queueInboundEmpty" class="jpk-empty hidden">Nothing is waiting to be applied.</div>
+                        <div class="queueTableContainer">
+                            <table class="historyCompareTable queueTable" id="queueInboundTable">
+                                <thead>
+                                    <tr>
+                                        <th>From</th>
+                                        <th>Change</th>
+                                        <th>Received</th>
+                                        <th>Detail</th>
+                                        <th class="queueTable-actions"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="queueInboundBody"></tbody>
+                            </table>
                         </div>
                     </div>
 
@@ -887,5 +989,18 @@
             font-family: var(--font-mono);
             font-size: 0.8em; opacity: 0.5;
         }
+
+        /* ===== Change Queue ===== */
+        .queueTableContainer { overflow-x: auto; margin-bottom: 1.5em; }
+        .queueTable { width: 100%; }
+        .queueTable th, .queueTable td { text-align: left; vertical-align: top; }
+        .queueTable th.queueTable-actions, .queueTable td.queueTable-actions { width: 44px; text-align: right; }
+        .queueTable .queueChangeKind { font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.65; display: block; margin-bottom: 2px; }
+        .queueTable .queueChangeWhat { word-break: break-all; }
+        .queueTable .queueDetail { font-size: 0.85em; opacity: 0.8; }
+        .queueTable .queueDetail.queueDetail-error { color: var(--jpk-error); opacity: 1; }
+        .queuePeerCard .healthValue { font-size: 0.95em; }
+        .queuePeerCard .healthValue.paused { color: var(--jpk-error); }
+        .queuePeerCard .queuePeerReason { font-size: 0.8em; opacity: 0.75; margin-top: 4px; }
     </style>
 </div>

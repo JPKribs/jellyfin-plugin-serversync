@@ -73,6 +73,7 @@ public static class MetadataSyncItemExtensions
             HasChanges = hasMetadataChanges || hasImagesChanges || hasPeopleChanges || hasStudiosChanges,
             ChangesSummary = changesSummary,
             SourceServerUrl = sourceServerUrl,
+            ServerKey = item.ServerKey,
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,

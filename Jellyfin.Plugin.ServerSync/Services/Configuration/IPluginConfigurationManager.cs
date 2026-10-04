@@ -13,9 +13,20 @@ public interface IPluginConfigurationManager
     PluginConfiguration Configuration { get; }
 
     /// <summary>
-    /// Gets the source-server API key decrypted for use (server-side calls or browser image URLs).
+    /// Decrypts a stored API key for use. A key written before encryption existed passes through unchanged.
     /// </summary>
-    string DecryptedSourceServerApiKey { get; }
+    /// <param name="protectedKey">The key as stored on a server entry.</param>
+    /// <returns>The usable key.</returns>
+    string DecryptApiKey(string protectedKey);
+
+    /// <summary>
+    /// Resolves the API key a dashboard request carries. The page never sees a stored key, only the kept
+    /// sentinel, so the sentinel means the key stored on the named server entry.
+    /// </summary>
+    /// <param name="requestApiKey">The key as posted, or the sentinel.</param>
+    /// <param name="serverKey">The server entry the request is about.</param>
+    /// <returns>The usable key, or empty when there is none.</returns>
+    string ResolveRequestApiKey(string? requestApiKey, string? serverKey);
 
     /// <summary>
     /// Saves the current configuration to disk.

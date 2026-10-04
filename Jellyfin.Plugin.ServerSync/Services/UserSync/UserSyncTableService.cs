@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,16 +48,18 @@ public class UserSyncTableService
         SourceServerClient sourceClient,
         PluginConfiguration config,
         UserSyncItem? existingItem,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        List<LibraryMapping>? libraryMappings = null)
     {
         ArgumentNullException.ThrowIfNull(mapping);
         ArgumentNullException.ThrowIfNull(sourceUser);
         ArgumentNullException.ThrowIfNull(sourceClient);
         ArgumentNullException.ThrowIfNull(config);
+        libraryMappings ??= config.GetEnabledLibraryMappings();
 
         return category switch
         {
-            UserPropertyCategory.Policy => BuildPolicyItem(mapping, sourceUser, localUserDto, config, existingItem),
+            UserPropertyCategory.Policy => BuildPolicyItem(mapping, sourceUser, localUserDto, libraryMappings, existingItem),
             UserPropertyCategory.Configuration => BuildConfigurationItem(mapping, sourceUser, localUserDto, existingItem),
             UserPropertyCategory.ProfileImage => await BuildProfileImageItemAsync(mapping, sourceUser, localUser, sourceClient, existingItem, cancellationToken).ConfigureAwait(false),
             _ => null
@@ -67,12 +70,12 @@ public class UserSyncTableService
         UserMapping mapping,
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
         MediaBrowser.Model.Dto.UserDto localUserDto,
-        PluginConfiguration config,
+        List<LibraryMapping> libraryMappings,
         UserSyncItem? existingItem)
     {
         var sourcePolicy = UserSyncMergeService.ExtractPolicyJson(sourceUser.Policy);
         var localPolicy = UserSyncMergeService.ExtractPolicyJson(localUserDto.Policy);
-        var mergedPolicy = UserSyncMergeService.ComputeMergedPolicy(sourcePolicy, config.LibraryMappings);
+        var mergedPolicy = UserSyncMergeService.ComputeMergedPolicy(sourcePolicy, libraryMappings);
 
         var item = existingItem ?? new UserSyncItem
         {

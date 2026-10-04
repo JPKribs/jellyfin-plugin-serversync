@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 22;
+    public const int CurrentSchemaVersion = 25;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -50,6 +50,7 @@ public static class DatabaseMigrationService
                 Reason TEXT,
                 PendingType INTEGER,
                 RetryCount INTEGER DEFAULT 0,
+                ServerKey TEXT,
                 CompanionFiles TEXT,
                 UNIQUE(SourceItemId)
             );
@@ -94,11 +95,18 @@ public static class DatabaseMigrationService
                 MergedPlaybackPositionTicks INTEGER,
                 MergedLastPlayedDate TEXT,
                 MergedIsFavorite INTEGER,
+                NegotiatedIsPlayed INTEGER,
+                NegotiatedPlayCount INTEGER,
+                NegotiatedPlaybackPositionTicks INTEGER,
+                NegotiatedLastPlayedDate TEXT,
+                NegotiatedIsFavorite INTEGER,
+                NegotiatedAt TEXT,
                 Status INTEGER NOT NULL,
                 StatusDate TEXT NOT NULL,
                 LastSyncTime TEXT,
                 Reason TEXT,
                 RetryCount INTEGER NOT NULL DEFAULT 0,
+                ServerKey TEXT,
                 SourceStateHash TEXT,
                 SyncedStateHash TEXT,
                 UNIQUE(SourceUserId, SourceItemId)
@@ -139,6 +147,7 @@ public static class DatabaseMigrationService
                 LastSyncTime TEXT,
                 Reason TEXT,
                 RetryCount INTEGER NOT NULL DEFAULT 0,
+                ServerKey TEXT,
                 UNIQUE(SourceUserId, LocalUserId, PropertyCategory)
             );
             CREATE INDEX IF NOT EXISTS idx_user_sync_mapping ON UserSyncItems(SourceUserId, LocalUserId);
@@ -171,6 +180,7 @@ public static class DatabaseMigrationService
                 LastSyncTime TEXT,
                 Reason TEXT,
                 RetryCount INTEGER NOT NULL DEFAULT 0,
+                ServerKey TEXT,
                 UNIQUE(PersonName)
             );
             CREATE INDEX IF NOT EXISTS idx_people_sync_name ON PeopleSyncItems(PersonName);
@@ -217,6 +227,7 @@ public static class DatabaseMigrationService
                 LastSyncTime TEXT,
                 Reason TEXT,
                 RetryCount INTEGER NOT NULL DEFAULT 0,
+                ServerKey TEXT,
                 UNIQUE(SourceLibraryId, SourceItemId)
             );
             CREATE INDEX IF NOT EXISTS idx_metadata_sync_item ON MetadataSyncItems(SourceItemId);
@@ -224,6 +235,71 @@ public static class DatabaseMigrationService
             CREATE INDEX IF NOT EXISTS idx_metadata_sync_library ON MetadataSyncItems(SourceLibraryId);
         ";
         metadataCmd.ExecuteNonQuery();
+
+        CreateQueueTables(connection);
+    }
+
+    /// <summary>
+    /// Creates the tables behind change hints: what this server has told its peers, what its peers
+    /// have told it, and the version each tracked object carries. Idempotent.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void CreateQueueTables(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS OutboundHints (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                HintId TEXT NOT NULL,
+                PeerKey TEXT NOT NULL,
+                Kind INTEGER NOT NULL,
+                Key TEXT NOT NULL,
+                ItemPath TEXT,
+                ItemId TEXT,
+                UserId TEXT,
+                UserName TEXT,
+                VersionServerId TEXT NOT NULL,
+                VersionTimestamp TEXT NOT NULL,
+                State INTEGER NOT NULL,
+                Attempts INTEGER NOT NULL DEFAULT 0,
+                NextAttempt TEXT NOT NULL,
+                SentAt TEXT,
+                LastError TEXT,
+                CreatedAt TEXT NOT NULL,
+                UNIQUE(PeerKey, Kind, Key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_outbound_state ON OutboundHints(State, NextAttempt);
+            CREATE INDEX IF NOT EXISTS idx_outbound_hint ON OutboundHints(HintId);
+
+            CREATE TABLE IF NOT EXISTS InboundHints (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                HintId TEXT NOT NULL,
+                OriginServerId TEXT NOT NULL,
+                Kind INTEGER NOT NULL,
+                Key TEXT NOT NULL,
+                ItemPath TEXT,
+                ItemId TEXT,
+                UserId TEXT,
+                UserName TEXT,
+                VersionServerId TEXT NOT NULL,
+                VersionTimestamp TEXT NOT NULL,
+                ReceivedAt TEXT NOT NULL,
+                Attempts INTEGER NOT NULL DEFAULT 0,
+                NextAttempt TEXT NOT NULL,
+                LastError TEXT,
+                UNIQUE(OriginServerId, Kind, Key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_inbound_next ON InboundHints(NextAttempt);
+
+            CREATE TABLE IF NOT EXISTS ObjectVersions (
+                Kind INTEGER NOT NULL,
+                Key TEXT NOT NULL,
+                ServerId TEXT NOT NULL,
+                Timestamp TEXT NOT NULL,
+                PRIMARY KEY(Kind, Key)
+            );";
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>
@@ -414,6 +490,82 @@ public static class DatabaseMigrationService
                 }
 
                 v22Transaction.Commit();
+            }
+
+            // v23: history rows remember the state both servers last agreed on, so a sync that
+            // negotiates with the source can merge three ways instead of letting the source always win.
+            if (fromVersion >= 19 && fromVersion < 23)
+            {
+                logger.LogWarning(
+                    "Schema upgrade to v23: adding the negotiated base columns to HistorySyncItems for two way history sync.");
+
+                using var v23Transaction = connection.BeginTransaction();
+
+                foreach (var (col, type) in new[]
+                {
+                    ("NegotiatedIsPlayed", "INTEGER"),
+                    ("NegotiatedPlayCount", "INTEGER"),
+                    ("NegotiatedPlaybackPositionTicks", "INTEGER"),
+                    ("NegotiatedLastPlayedDate", "TEXT"),
+                    ("NegotiatedIsFavorite", "INTEGER"),
+                    ("NegotiatedAt", "TEXT")
+                })
+                {
+                    using var addCol = connection.CreateCommand();
+                    addCol.Transaction = v23Transaction;
+                    addCol.CommandText = $"ALTER TABLE HistorySyncItems ADD COLUMN {col} {type}";
+                    try
+                    {
+                        addCol.ExecuteNonQuery();
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Idempotent, so a partially applied upgrade recovers on the next start.
+                    }
+                }
+
+                v23Transaction.Commit();
+            }
+
+            // v24: every row remembers which configured server it came from, so several scan servers can
+            // share one table and the apply tasks know which peer to talk to for each row.
+            if (fromVersion >= 19 && fromVersion < 24)
+            {
+                logger.LogWarning("Schema upgrade to v24: adding ServerKey to every sync table for multi server scanning.");
+
+                using var v24Transaction = connection.BeginTransaction();
+
+                foreach (var table in new[]
+                {
+                    "SyncItems",
+                    "HistorySyncItems",
+                    "UserSyncItems",
+                    "PeopleSyncItems",
+                    "MetadataSyncItems"
+                })
+                {
+                    using var addCol = connection.CreateCommand();
+                    addCol.Transaction = v24Transaction;
+                    addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN ServerKey TEXT";
+                    try
+                    {
+                        addCol.ExecuteNonQuery();
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Idempotent, so a partially applied upgrade recovers on the next start.
+                    }
+                }
+
+                v24Transaction.Commit();
+            }
+
+            // v25: queues for change hints between peers and the version each object carries. New
+            // tables only, so every older schema simply gains them.
+            if (fromVersion < 25)
+            {
+                logger.LogInformation("Schema upgrade to v25: adding hint queues and object versions.");
+                CreateQueueTables(connection);
             }
 
             SetSchemaVersion(connection, CurrentSchemaVersion);

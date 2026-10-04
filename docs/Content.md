@@ -91,3 +91,7 @@ Safety notes: a collection (or any whitelist entry) that no longer exists on
 the source fails the refresh loudly instead of being treated as empty — remove
 the dead entry from the whitelist to resume pruning. An intentionally emptied
 whitelist still reconciles normally.
+
+## Live changes between servers
+
+When a server entry is in Push or Sync mode, a file that appears here is announced to that server as soon as this server's library has picked it up, and that server downloads it through the same code Sync Content uses, respecting its own approval mode and library mappings. When several servers offer the same file, the earliest entry in that server's list provides it. Downloads run in their own lane so a large file never delays a history or metadata change arriving at the same time, and the receiving library is asked to scan once the file is in place. Replacements and removals are not announced. Sync Content handles those on its schedule.

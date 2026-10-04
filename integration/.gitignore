@@ -1,0 +1,4 @@
+.state/
+.plugin/
+__pycache__/
+.publish/

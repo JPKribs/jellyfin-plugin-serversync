@@ -38,9 +38,10 @@ public sealed class FileValidationServiceTests : IDisposable
     private PluginConfiguration ConfigWithRoots(params string[] roots)
     {
         var config = new PluginConfiguration();
+        var server = new SourceServer { Url = "http://source:8096", ApiKey = "k" };
         foreach (var root in roots)
         {
-            config.LibraryMappings.Add(new LibraryMapping
+            server.LibraryMappings.Add(new LibraryMapping
             {
                 IsEnabled = true,
                 SourceLibraryId = Guid.NewGuid().ToString(),
@@ -49,6 +50,7 @@ public sealed class FileValidationServiceTests : IDisposable
             });
         }
 
+        config.Servers.Add(server);
         return config;
     }
 
@@ -76,7 +78,7 @@ public sealed class FileValidationServiceTests : IDisposable
     {
         var lib = Path.Combine(_root, "videos");
         var config = ConfigWithRoots(lib);
-        config.LibraryMappings[0].IsEnabled = false;
+        config.Servers[0].LibraryMappings[0].IsEnabled = false;
 
         Assert.False(FileValidationService.IsPathWithinLibrary(Path.Combine(lib, "movie.mkv"), config));
     }

@@ -1,0 +1,464 @@
+<!-- SERVERS - PAGE -->
+
+<div id="ServerSyncServersPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs"
+     data-require="emby-input,emby-button,emby-select,emby-checkbox"
+     data-controller="__plugin/serversync_servers.js">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="ServerSyncServersForm">
+                <div class="verticalSection verticalSection-extrabottompadding">
+
+                    <!-- SECTION: Configuration Header -->
+
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h1 class="sectionTitle">Servers</h1>
+                    </div>
+
+                    <!-- SECTION: Servers -->
+
+                    <div class="jpk-section">
+                        <div id="serversConfigContent" class="jpk-section-content">
+                            <div class="fieldDescription mb-md">The servers this one syncs with. The order is the priority: when two servers offer the same item, the one nearer the top provides it and the others only add what it lacks. Drag a server, or use its arrows, to change the order.</div>
+
+                            <!-- Server list, in priority order -->
+                            <div id="serverList" class="jpk-card-list"></div>
+                            <div id="serverEmpty" class="jpk-empty-section hidden">No servers yet. Add one below.</div>
+                            <div class="jpk-card-list-actions">
+                                <button is="emby-button" type="button" id="btnAddServer" class="raised jpk-icon-btn jpk-button-submit" title="Add a server">
+                                    <span class="material-icons" aria-hidden="true">add</span>
+                                    <span>Add Server</span>
+                                </button>
+                            </div>
+
+                            <!-- The editor lives inside whichever card is open. It parks here while the list re-renders. -->
+                            <div id="serverEditorHolder" class="hidden">
+                            <div id="serverEditor">
+
+                                <!-- Step 1: Connection -->
+                                <div class="jpk-collapsible-section">
+                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepConnection">
+                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">1</span> Connection</span>
+                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                    </button>
+                                    <div id="serverStepConnection" class="jpk-collapsible-content collapsed">
+
+                                        <div class="inputContainer">
+                                            <label for="txtServerName">Name:</label>
+                                            <input is="emby-input" type="text" id="txtServerName" placeholder="Living room server" />
+                                            <div class="fieldDescription">How this server is shown in tables and logs. Leave empty to use the name the server reports.</div>
+                                        </div>
+
+                                        <div class="checkboxContainer checkboxContainer-withDescription">
+                                            <label class="emby-checkbox-label">
+                                                <input type="checkbox" is="emby-checkbox" id="chkServerEnabled" />
+                                                <span class="checkboxLabel">Enabled</span>
+                                            </label>
+                                            <div class="fieldDescription checkboxFieldDescription">A disabled server keeps its settings and mappings but takes no part in any sync.</div>
+                                        </div>
+
+                                        <div class="inputContainer">
+                                            <label for="txtSourceServerUrl">Server URL:</label>
+                                            <input is="emby-input" type="text" id="txtSourceServerUrl" placeholder="http://server:8096" />
+                                            <div class="fieldDescription">URL this server connects to.</div>
+                                        </div>
+
+                                        <div class="inputContainer">
+                                            <label for="txtSourceServerExternalUrl">External URL (optional):</label>
+                                            <input is="emby-input" type="text" id="txtSourceServerExternalUrl" placeholder="https://media.example.com" />
+                                            <div class="fieldDescription">Public URL used for loading image thumbnails in the browser. If empty, the Server URL above is used. Useful when syncing over a VPN or internal address your browser cannot reach.</div>
+                                        </div>
+
+                                        <div class="checkboxContainer checkboxContainer-withDescription">
+                                            <label class="emby-checkbox-label">
+                                                <input type="checkbox" is="emby-checkbox" id="chkAllowPrivateNetwork" checked />
+                                                <span class="checkboxLabel">Allow Private Network Address</span>
+                                            </label>
+                                            <div class="fieldDescription checkboxFieldDescription">Accept a loopback or private LAN address for this server. Turn off to require a public address.</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Step 2: Authentication -->
+                                <div class="jpk-collapsible-section">
+                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepAuthentication">
+                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">2</span> Authentication</span>
+                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                    </button>
+                                    <div id="serverStepAuthentication" class="jpk-collapsible-content collapsed">
+
+                                        <div id="serverInfoContainer" class="jpk-record-card hidden mb-md">
+                                            <div class="jpk-record-row">
+                                                <span class="jpk-record-label">Server</span>
+                                                <span id="txtSourceServerName" class="jpk-mono"></span>
+                                            </div>
+                                            <div class="jpk-record-row">
+                                                <span class="jpk-record-label">ID</span>
+                                                <span id="txtSourceServerId" class="jpk-mono"></span>
+                                            </div>
+                                            <div id="authenticatedUserRow" class="jpk-record-row hidden">
+                                                <span class="jpk-record-label">User</span>
+                                                <span id="txtAuthenticatedUser" class="jpk-mono"></span>
+                                            </div>
+                                        </div>
+
+                                        <div class="jpk-choice-group" id="authChoices" role="radiogroup" aria-label="Authentication">
+                                            <label class="jpk-choice" data-auth="key">
+                                                <input type="radio" name="serverAuth" value="key" />
+                                                <span class="jpk-choice-name">API Key</span>
+                                                <span class="jpk-choice-text">Paste a key made in that server's Dashboard under API Keys.</span>
+                                            </label>
+                                            <label class="jpk-choice" data-auth="user">
+                                                <input type="radio" name="serverAuth" value="user" />
+                                                <span class="jpk-choice-name">Sign In</span>
+                                                <span class="jpk-choice-text">Enter a username and password there once. The access token is kept, the password is not.</span>
+                                            </label>
+                                        </div>
+
+                                        <div id="authKeyPanel">
+                                            <div class="inputContainer">
+                                                <label for="txtSourceServerApiKey">API Key:</label>
+                                                <input is="emby-input" type="password" id="txtSourceServerApiKey" />
+                                                <div class="fieldDescription">The key is stored encrypted and never shown again.</div>
+                                            </div>
+                                        </div>
+
+                                        <div id="authUserPanel" class="jpk-bulk-edit-bar hidden" style="padding: 14px; border: 1px solid var(--jpk-border); border-radius: 6px; background: rgba(255, 255, 255, 0.04);">
+                                            <div id="authSignedIn" class="jpk-info hidden">Signed in as <strong id="authSignedInUser"></strong>. Sign in again to replace the token.</div>
+                                            <div class="jpk-edit-line">
+                                                <div class="jpk-field">
+                                                    <label for="txtAuthUsername">Username</label>
+                                                    <input is="emby-input" type="text" id="txtAuthUsername" placeholder="Enter username" />
+                                                </div>
+                                                <div class="jpk-field">
+                                                    <label for="txtAuthPassword">Password</label>
+                                                    <input is="emby-input" type="password" id="txtAuthPassword" placeholder="Enter password" />
+                                                </div>
+                                            </div>
+                                            <div class="flex align-items-center gap-sm">
+                                                <button is="emby-button" type="button" id="btnGenerateToken" class="raised jpk-button-submit jpk-button-small">
+                                                    <span>Generate Token</span>
+                                                </button>
+                                                <span id="tokenGeneratorStatus" class="jpk-status-text"></span>
+                                            </div>
+                                        </div>
+
+                                        <div class="jpk-collapsible-actions">
+                                            <button is="emby-button" type="button" id="btnTestConnection" class="raised jpk-button-small">
+                                                <span>Test Connection</span>
+                                            </button>
+                                            <span id="connectionStatus" class="jpk-status-text"></span>
+                                        </div>
+
+                                        <div id="accessAdmin" class="jpk-success hidden" style="margin-top: 12px;">Administrator access. Every module works, and this server can be put in Push or Sync mode.</div>
+                                        <div id="accessUser" class="jpk-warn hidden" style="margin-top: 12px;">Standard user access. This server can be pulled from for the content, metadata, and people that user can see, and for that one user's watch history. Library paths are not reported to a standard user, so type the source root paths in by hand. Two way history, user sync, and Push or Sync need an administrator, because Server Sync's own endpoints there require elevation.</div>
+
+                                        <h3 class="jpk-subsection-title">Direction</h3>
+                                        <div class="jpk-choice-group" id="modeChoices" role="radiogroup" aria-label="Mode">
+                                            <label class="jpk-choice" data-mode="Pull">
+                                                <input type="radio" name="serverMode" value="Pull" />
+                                                <span class="jpk-choice-name">Pull</span>
+                                                <span class="jpk-choice-text">Read from this server on a schedule. If it runs Server Sync and lists this server as Push or Sync, changes also arrive as they happen.</span>
+                                            </label>
+                                            <label class="jpk-choice" data-mode="Push">
+                                                <input type="radio" name="serverMode" value="Push" />
+                                                <span class="jpk-choice-name">Push</span>
+                                                <span class="jpk-choice-text">Send changes made here to this server as they happen. It must run Server Sync and list this server as Pull or Sync.</span>
+                                            </label>
+                                            <label class="jpk-choice" data-mode="Sync">
+                                                <input type="radio" name="serverMode" value="Sync" />
+                                                <span class="jpk-choice-name">Sync</span>
+                                                <span class="jpk-choice-text">Pull and Push together, for a pool of equals. It must run Server Sync and list this server as Sync too.</span>
+                                            </label>
+                                        </div>
+                                        <div id="peerCheckArea" class="hidden">
+                                            <div class="jpk-collapsible-actions" style="margin-top: 8px;">
+                                                <button is="emby-button" type="button" id="btnCheckPeer" class="raised jpk-button-small">
+                                                    <span>Check Link</span>
+                                                </button>
+                                                <span id="peerCheckStatus" class="jpk-status-text"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Step 3: Libraries -->
+                                <div class="jpk-collapsible-section">
+                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepLibraries">
+                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">3</span> Libraries</span>
+                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                    </button>
+                                    <div id="serverStepLibraries" class="jpk-collapsible-content collapsed">
+                                        <div id="librariesLocked" class="jpk-neutral mb-md">Libraries appear once the connection has been tested in step 2, since they are read from the server.</div>
+                                        <div id="librariesSection" class="hidden">
+                                            <div class="fieldDescription mb-md">Map this server's libraries to local libraries. Used for content, metadata, and watch history sync, and for deciding which changes are announced to it.</div>
+                                            <div id="libraryMappingsContainer"></div>
+                                            <div class="jpk-collapsible-actions">
+                                                <button is="emby-button" type="button" id="btnAddMapping" class="raised jpk-secondary jpk-button-small">
+                                                    <span>Add Library Mapping</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Step 4: Users -->
+                                <div class="jpk-collapsible-section">
+                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepUsers">
+                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">4</span> Users</span>
+                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                    </button>
+                                    <div id="serverStepUsers" class="jpk-collapsible-content collapsed">
+                                        <div id="usersLocked" class="jpk-neutral mb-md">Users appear once the connection has been tested in step 2, since they are read from the server.</div>
+                                        <div id="usersSection" class="hidden">
+                                            <div class="fieldDescription mb-md">Map this server's users to local users. Used for watch history and user sync.</div>
+                                            <div id="userMappingsContainer"></div>
+                                            <div class="jpk-collapsible-actions">
+                                                <button is="emby-button" type="button" id="btnAddUserMapping" class="raised jpk-secondary jpk-button-small">
+                                                    <span>Add User Mapping</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Editor footer -->
+                                <div class="ssEditorFooter">
+                                    <button is="emby-button" type="button" id="btnSaveServer" class="raised jpk-button-submit jpk-button-small">
+                                        <span>Save Server</span>
+                                    </button>
+                                    <button is="emby-button" type="button" id="btnDeleteServer" class="raised jpk-button-destructive jpk-button-small" title="Remove this server">
+                                        <span>Remove Server</span>
+                                    </button>
+                                </div>
+                            </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- STYLES: Shared -->
+    <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
+    <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
+
+    <!-- STYLES: Settings-specific -->
+    <style>
+        /* ===== Servers page ===== */
+        .text-warn { color: var(--jpk-warning, #f0ad4e); }
+        #authChoices { grid-template-columns: repeat(2, 1fr); }
+        #btnCheckPeer, #btnTestConnection { white-space: nowrap; flex: 0 0 auto; }
+        .ssEditorFooter { display: flex; gap: 8px; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+        @media (max-width: 768px) { #authChoices { grid-template-columns: 1fr; } }
+
+        /* ===== Utility Classes ===== */
+        .text-success { color: var(--status-synced-color, #5cb85c); }
+        .text-error { color: var(--status-errored-color, #d9534f); }
+        .flex { display: flex; }
+        .mt-sm { margin-top: 8px; }
+        .mb-md { margin-bottom: 12px; }
+        .w-auto { width: auto !important; }
+        .w-80 { width: 80px; }
+
+
+        /* ===== Mapping Styles ===== */
+        .mapping {
+            margin-bottom: 2em;
+            padding-bottom: 1em;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .mapping:last-child {
+            border-bottom: none;
+            margin-bottom: 1em;
+        }
+        .mappingGrid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0 24px;
+        }
+        .mappingHeader {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1em;
+        }
+        .mappingColumn {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== Library Filter ===== */
+        .filterSection {
+            margin-top: 1em;
+            padding-top: 0.75em;
+        }
+        .filterSection .filterHeader {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 0.5em;
+        }
+        .filterSection .filterHeader label {
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .filterSection .filterModeSelect {
+            max-width: 200px;
+        }
+        .filterItemsList {
+            padding: 0;
+            transition: opacity 0.15s;
+        }
+        .filterItem {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(85, 85, 85, 0.15);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .filterItem:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .filterItem.selected {
+            background: rgba(82, 181, 219, 0.12);
+        }
+        /* In the base paginated table the row already provides padding/border/hover,
+           so flatten the inner item (no nested box) and tint the whole row when selected. */
+        .jpk-table-cell .filterItem { padding: 0; border-bottom: none; }
+        .jpk-table-cell .filterItem:hover,
+        .jpk-table-cell .filterItem.selected { background: transparent; }
+        .jpk-table-row:has(.filterItem.selected) { background: rgba(82, 181, 219, 0.12); }
+        .filterItemThumb {
+            flex: 0 0 40px;
+            width: 40px;
+            height: 60px;
+            border-radius: 3px;
+            object-fit: cover;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .filterItemThumbPlaceholder {
+            flex: 0 0 40px;
+            width: 40px;
+            height: 60px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.2);
+            font-size: 18px;
+        }
+        .filterItemInfo {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .filterItemName {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .filterItemMeta {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.5);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .filterItemOverview {
+            font-size: 0.75em;
+            color: rgba(255, 255, 255, 0.35);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+        }
+        .filterItemCheck {
+            flex: 0 0 auto;
+        }
+        .filterItemThumb.filterItemThumbSquare,
+        .filterItemThumbPlaceholder.filterItemThumbSquare {
+            width: 50px;
+            height: 50px;
+            flex: 0 0 50px;
+            border-radius: 50%;
+        }
+        .filterBrowserStatus {
+            padding: 12px;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.85em;
+        }
+
+        /* ===== Nested Settings ===== */
+
+
+        /* ===== Settings Groups ===== */
+        .settingsGroup {
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .settingsGroup:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        /* ===== Input Row (Horizontal Layout) ===== */
+        .inputRow {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .inputRow input[type="number"] {
+            flex: 1;
+        }
+
+        /* ===== Inline Inputs ===== */
+        .inline-inputs {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+
+        /* ===== Database Reset Buttons ===== */
+        .resetButtonGroup {
+            margin-bottom: 16px;
+        }
+        .resetButtonRow {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .resetButtonRow:last-child {
+            border-bottom: none;
+        }
+        .resetButtonRow-nuclear {
+            background: rgba(217, 83, 79, 0.08);
+            border-radius: 4px;
+            border-bottom: none;
+        }
+        .resetButtonInfo {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            margin-right: 16px;
+        }
+        .resetButtonInfo .fieldDescription {
+            margin-top: 2px;
+        }
+
+        /* ===== Additional Utility Classes ===== */
+        .gap-sm { gap: 8px; }
+    </style>
+</div>

@@ -146,6 +146,68 @@ public class HistorySyncItem : SyncRecord
     /// </summary>
     public bool? MergedIsFavorite { get; set; }
 
+    // ===== Negotiated base =====
+
+    /// <summary>
+    /// Gets or sets the played state both servers last agreed on. Only recorded when history sync
+    /// negotiates with the source, so one way installs keep their existing merge behavior.
+    /// </summary>
+    public bool? NegotiatedIsPlayed { get; set; }
+
+    /// <summary>Gets or sets the play count both servers last agreed on.</summary>
+    public int? NegotiatedPlayCount { get; set; }
+
+    /// <summary>Gets or sets the resume position both servers last agreed on.</summary>
+    public long? NegotiatedPlaybackPositionTicks { get; set; }
+
+    /// <summary>Gets or sets the last played date both servers last agreed on.</summary>
+    public DateTime? NegotiatedLastPlayedDate { get; set; }
+
+    /// <summary>Gets or sets the favorite state both servers last agreed on.</summary>
+    public bool? NegotiatedIsFavorite { get; set; }
+
+    /// <summary>Gets or sets when the two servers last agreed, or null when they never have.</summary>
+    public DateTime? NegotiatedAt { get; set; }
+
+    /// <summary>Gets a value indicating whether a negotiated base exists for three way merging.</summary>
+    public bool HasNegotiatedBase => NegotiatedAt.HasValue;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this row will be offered to the source as well as
+    /// written locally. Set by the refresh from the configuration and not stored, since it only
+    /// changes which differences count as work: in one way mode only the local side can be out of
+    /// date, in two way mode the source can be too.
+    /// </summary>
+    public bool NegotiateWithSource { get; set; }
+
+    /// <summary>
+    /// Records the current merged values as the state both servers now hold. Called once the source has
+    /// accepted the merged state and the local write has been verified.
+    /// </summary>
+    /// <param name="utcNow">The time of agreement.</param>
+    public void RecordNegotiatedBase(DateTime utcNow)
+    {
+        NegotiatedIsPlayed = MergedIsPlayed;
+        NegotiatedPlayCount = MergedPlayCount;
+        NegotiatedPlaybackPositionTicks = MergedPlaybackPositionTicks;
+        NegotiatedLastPlayedDate = MergedLastPlayedDate;
+        NegotiatedIsFavorite = MergedIsFavorite;
+        NegotiatedAt = utcNow;
+    }
+
+    /// <summary>Copies the negotiated base from a previously stored row.</summary>
+    /// <param name="previous">The stored row.</param>
+    public void CarryNegotiatedBaseFrom(HistorySyncItem previous)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+        NegotiatedIsPlayed = previous.NegotiatedIsPlayed;
+        NegotiatedPlayCount = previous.NegotiatedPlayCount;
+        NegotiatedPlaybackPositionTicks = previous.NegotiatedPlaybackPositionTicks;
+        NegotiatedLastPlayedDate = previous.NegotiatedLastPlayedDate;
+        NegotiatedIsFavorite = previous.NegotiatedIsFavorite;
+        NegotiatedAt = previous.NegotiatedAt;
+    }
+
     // ===== Source-state bundle (drives the SourceHash short-circuit) =====
 
     /// <summary>

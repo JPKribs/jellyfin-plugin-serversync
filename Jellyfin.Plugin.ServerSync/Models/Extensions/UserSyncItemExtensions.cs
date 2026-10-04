@@ -33,6 +33,7 @@ public static class UserSyncItemExtensions
             HasChanges = item.HasChanges,
             ChangesSummary = item.ChangesSummary,
             SourceServerUrl = sourceServerUrl,
+            ServerKey = item.ServerKey,
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,

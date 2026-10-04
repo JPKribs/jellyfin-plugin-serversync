@@ -32,16 +32,23 @@ public class SourceServerClientFactory : ISourceServerClientFactory
     }
 
     /// <inheritdoc />
-    public SourceServerClient Create(string serverUrl, string apiKey)
+    public SourceServerClient Create(Models.Configuration.SourceServer server)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        return Create(server.Url, server.ApiKey, server.AllowPrivateNetwork);
+    }
+
+    /// <inheritdoc />
+    public SourceServerClient Create(string serverUrl, string apiKey) => Create(serverUrl, apiKey, allowPrivateNetwork: true);
+
+    private SourceServerClient Create(string serverUrl, string apiKey, bool allowPrivateNetwork)
     {
         // The stored key may be encrypted at rest; decrypt for use. Plaintext (pre-migration) passes through.
         apiKey = _secrets.Unprotect(apiKey);
 
-        // Validate URL for SSRF protection (same checks as the controller endpoint).
-        // Allow private networks per the plugin configuration — typical home
-        // installs run their source Jellyfin on the same LAN.
-        var allowPrivate = _configManager.Configuration.AllowSourceServerOnPrivateNetwork;
-        var ssrfError = ConfigurationUtilities.ValidateServerUrlForSsrf(serverUrl, allowPrivate);
+        // Validate URL for SSRF protection (same checks as the controller endpoint). Private
+        // networks are allowed per server entry, since home installs run peers on the same LAN.
+        var ssrfError = ConfigurationUtilities.ValidateServerUrlForSsrf(serverUrl, allowPrivateNetwork);
         if (ssrfError != null)
         {
             throw new ArgumentException($"Invalid source server URL: {ssrfError}", nameof(serverUrl));

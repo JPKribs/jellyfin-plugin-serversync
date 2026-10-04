@@ -17,13 +17,15 @@ public class RecyclingBinServiceTests
     private static PluginConfiguration ConfigWithRoot(string root, bool enabled = true)
     {
         var config = new PluginConfiguration();
-        config.LibraryMappings.Add(new LibraryMapping
+        var server = new SourceServer { Url = "http://source:8096", ApiKey = "k" };
+        server.LibraryMappings.Add(new LibraryMapping
         {
             IsEnabled = enabled,
             SourceLibraryId = "src",
             LocalLibraryId = "loc",
             LocalRootPath = root
         });
+        config.Servers.Add(server);
         return config;
     }
 

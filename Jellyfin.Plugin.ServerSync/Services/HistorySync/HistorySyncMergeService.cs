@@ -22,12 +22,27 @@ public static class HistorySyncMergeService
     /// <param name="item">History sync item to update with merged values.</param>
     public static void MergeHistoryData(HistorySyncItem item)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
+        if (item.HasNegotiatedBase)
+        {
+            MergeAgainstBase(item);
+            return;
+        }
+
         // IsFavorite: take source when it has an opinion, otherwise keep
         // local. The previous unconditional `?? false` conflated two cases
         // for a null source value — "explicitly unfavorited" and "UserData
         // not available in the response" — silently wiping local favorites
         // on the latter.
-        if (item.SourceIsFavorite.HasValue)
+        if (item.NegotiateWithSource && (item.SourceIsFavorite.HasValue || item.LocalIsFavorite.HasValue))
+        {
+            // Before the servers have agreed once there is no way to tell which side changed, and
+            // letting the source win would wipe every favorite that exists only here on the first
+            // two way run. Keeping both sides' favorites is the only safe first merge.
+            item.MergedIsFavorite = (item.SourceIsFavorite ?? false) || (item.LocalIsFavorite ?? false);
+        }
+        else if (item.SourceIsFavorite.HasValue)
         {
             item.MergedIsFavorite = item.SourceIsFavorite.Value;
         }
@@ -41,6 +56,117 @@ public static class HistorySyncMergeService
 
         // Played, Position, and LastPlayedDate: Negotiated based on most recent LastPlayedDate
         MergeNegotiatedHistory(item);
+    }
+
+    /// <summary>
+    /// Three way merge used once the two servers have agreed on a state at least once. Each field, or
+    /// the played group as a whole, is compared against that agreed base. A side that still matches
+    /// the base has not moved and loses to a side that has, which is what lets a favorite removed or an
+    /// item marked unplayed on either server reach the other. When both sides moved the old rules
+    /// break the tie. A null on a side is treated as "no reading" rather than a change.
+    /// </summary>
+    private static void MergeAgainstBase(HistorySyncItem item)
+    {
+        var sourceFavoriteMoved = item.SourceIsFavorite.HasValue && item.SourceIsFavorite != item.NegotiatedIsFavorite;
+        var localFavoriteMoved = item.LocalIsFavorite.HasValue && item.LocalIsFavorite != item.NegotiatedIsFavorite;
+        if (sourceFavoriteMoved && localFavoriteMoved)
+        {
+            item.MergedIsFavorite = item.SourceIsFavorite!.Value || item.LocalIsFavorite!.Value;
+        }
+        else if (sourceFavoriteMoved)
+        {
+            item.MergedIsFavorite = item.SourceIsFavorite;
+        }
+        else if (localFavoriteMoved)
+        {
+            item.MergedIsFavorite = item.LocalIsFavorite;
+        }
+        else
+        {
+            item.MergedIsFavorite = item.NegotiatedIsFavorite ?? item.SourceIsFavorite ?? item.LocalIsFavorite;
+        }
+
+        var sourceCountMoved = item.SourcePlayCount.HasValue && item.SourcePlayCount != item.NegotiatedPlayCount;
+        var localCountMoved = item.LocalPlayCount.HasValue && item.LocalPlayCount != item.NegotiatedPlayCount;
+        if (sourceCountMoved && localCountMoved)
+        {
+            item.MergedPlayCount = Math.Max(item.SourcePlayCount!.Value, item.LocalPlayCount!.Value);
+        }
+        else if (sourceCountMoved)
+        {
+            item.MergedPlayCount = item.SourcePlayCount;
+        }
+        else if (localCountMoved)
+        {
+            item.MergedPlayCount = item.LocalPlayCount;
+        }
+        else
+        {
+            item.MergedPlayCount = item.NegotiatedPlayCount ?? Math.Max(item.SourcePlayCount ?? 0, item.LocalPlayCount ?? 0);
+        }
+
+        var sourcePlayMoved = PlayGroupMoved(
+            item.SourceIsPlayed, item.SourcePlaybackPositionTicks, item.SourceLastPlayedDate,
+            item.NegotiatedIsPlayed, item.NegotiatedPlaybackPositionTicks, item.NegotiatedLastPlayedDate);
+        var localPlayMoved = PlayGroupMoved(
+            item.LocalIsPlayed, item.LocalPlaybackPositionTicks, item.LocalLastPlayedDate,
+            item.NegotiatedIsPlayed, item.NegotiatedPlaybackPositionTicks, item.NegotiatedLastPlayedDate);
+
+        if (sourcePlayMoved && localPlayMoved)
+        {
+            MergeNegotiatedHistory(item);
+        }
+        else if (sourcePlayMoved)
+        {
+            item.MergedIsPlayed = item.SourceIsPlayed;
+            item.MergedPlaybackPositionTicks = item.SourcePlaybackPositionTicks;
+            item.MergedLastPlayedDate = item.SourceLastPlayedDate;
+        }
+        else if (localPlayMoved)
+        {
+            item.MergedIsPlayed = item.LocalIsPlayed;
+            item.MergedPlaybackPositionTicks = item.LocalPlaybackPositionTicks;
+            item.MergedLastPlayedDate = item.LocalLastPlayedDate;
+        }
+        else
+        {
+            item.MergedIsPlayed = item.NegotiatedIsPlayed ?? item.SourceIsPlayed ?? item.LocalIsPlayed;
+            item.MergedPlaybackPositionTicks = item.NegotiatedPlaybackPositionTicks ?? item.SourcePlaybackPositionTicks ?? item.LocalPlaybackPositionTicks;
+            item.MergedLastPlayedDate = item.NegotiatedLastPlayedDate ?? item.SourceLastPlayedDate ?? item.LocalLastPlayedDate;
+        }
+    }
+
+    /// <summary>
+    /// Whether one side's played group differs from the agreed base. A side with no readings at all
+    /// has not moved. A side with readings is compared field by field, with dates at second resolution.
+    /// </summary>
+    private static bool PlayGroupMoved(
+        bool? played, long? position, DateTime? lastPlayed,
+        bool? basePlayed, long? basePosition, DateTime? baseLastPlayed)
+    {
+        if (!played.HasValue && !position.HasValue && !lastPlayed.HasValue)
+        {
+            return false;
+        }
+
+        if (played.HasValue && played != basePlayed)
+        {
+            return true;
+        }
+
+        if (position.HasValue && position != basePosition)
+        {
+            return true;
+        }
+
+        // A side that has a date differing from the base moved. A side whose date is null while the
+        // base has one also moved, since clearing the date is how Jellyfin marks an item unplayed.
+        if (lastPlayed.HasValue)
+        {
+            return !SameInstantToSecond(lastPlayed, baseLastPlayed);
+        }
+
+        return baseLastPlayed.HasValue && played.HasValue;
     }
 
     /// <summary>
@@ -131,7 +257,53 @@ public static class HistorySyncMergeService
             return true;
         }
 
-        return false;
+        // An item merged to unplayed with no date must lose a lingering local date, since that is
+        // how Jellyfin itself records a mark as unplayed.
+        if (item.MergedIsPlayed == false && !item.MergedLastPlayedDate.HasValue && item.LocalLastPlayedDate.HasValue)
+        {
+            return true;
+        }
+
+        // In two way mode the source can be the side that is behind. Without this, a change made
+        // only on this server merges to the local value, looks like "nothing to do" here, and never
+        // reaches the source.
+        return item.NegotiateWithSource && SourceDiffersFromMerged(item);
+    }
+
+    /// <summary>
+    /// Whether the source's last read state differs from the merged state in any field the source has
+    /// a reading for.
+    /// </summary>
+    /// <param name="item">History sync item to check.</param>
+    /// <returns>True when the source would need a write to hold the merged state.</returns>
+    public static bool SourceDiffersFromMerged(HistorySyncItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+
+        if (item.MergedIsPlayed.HasValue && item.SourceIsPlayed.HasValue && item.MergedIsPlayed != item.SourceIsPlayed)
+        {
+            return true;
+        }
+
+        if (item.MergedPlayCount.HasValue && item.SourcePlayCount.HasValue && item.MergedPlayCount != item.SourcePlayCount)
+        {
+            return true;
+        }
+
+        if (item.MergedPlaybackPositionTicks.HasValue && item.SourcePlaybackPositionTicks.HasValue
+            && item.MergedPlaybackPositionTicks != item.SourcePlaybackPositionTicks)
+        {
+            return true;
+        }
+
+        if (item.MergedIsFavorite.HasValue && item.SourceIsFavorite.HasValue && item.MergedIsFavorite != item.SourceIsFavorite)
+        {
+            return true;
+        }
+
+        // Only compare dates when the source has a reading of the item at all. A source with a
+        // played flag but no date really has no date, so a merged date counts as a difference.
+        return item.SourceIsPlayed.HasValue && !SameInstantToSecond(item.MergedLastPlayedDate, item.SourceLastPlayedDate);
     }
 
     /// <summary>

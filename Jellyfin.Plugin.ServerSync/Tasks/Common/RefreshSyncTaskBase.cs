@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -23,7 +24,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 /// <typeparam name="TRecord">Record type.</typeparam>
 /// <typeparam name="TSource">Type of items returned by the source list.</typeparam>
 /// <typeparam name="TKey">Natural-key type used to correlate source and local.</typeparam>
-public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTask
+public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTask, IConfigurableScheduledTask
     where TRecord : SyncRecord
     where TKey : notnull
 {
@@ -69,12 +70,49 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected IPluginConfigurationManager ConfigManager => _configManager;
 
     /// <summary>
-    /// Gets or sets the source-server client for the current run. Created
-    /// by the default <see cref="TestConnectionAsync"/>; disposed at the
-    /// end of <c>ExecuteAsync</c>; null outside a run. Setter is exposed
-    /// for subclasses that override <see cref="TestConnectionAsync"/>.
+    /// Gets or sets the scan servers connected for the current run, in priority order. Populated by the
+    /// default <see cref="TestConnectionAsync"/>, disposed at the end of <c>ExecuteAsync</c>, empty
+    /// outside a run. The setter exists for subclasses and tests that provide their own sources.
     /// </summary>
-    protected SourceServerClient? Client { get; set; }
+    protected IReadOnlyList<ScanSource> Sources { get; set; } = Array.Empty<ScanSource>();
+
+    /// <summary>
+    /// Finds the connected source for a server entry key. A null key is a row written before servers
+    /// became a list and resolves to the first source.
+    /// </summary>
+    /// <param name="serverKey">The entry key carried on a row, or null.</param>
+    /// <returns>The source, or null when that server did not connect this run.</returns>
+    protected ScanSource? SourceFor(string? serverKey)
+    {
+        if (string.IsNullOrEmpty(serverKey))
+        {
+            return Sources.Count > 0 ? Sources[0] : null;
+        }
+
+        foreach (var source in Sources)
+        {
+            if (string.Equals(source.Key, serverKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return source;
+            }
+        }
+
+        return null;
+    }
+
+    // The per module tasks run inside Sync Content and Sync Information and from the dashboard, so
+    // they stay registered but leave the scheduled task list.
+    /// <inheritdoc />
+    public bool IsHidden => true;
+
+    /// <inheritdoc />
+    public bool IsLogged => true;
+
+    // Explicit because the module tasks already have an IsEnabled method with a different meaning.
+#pragma warning disable CA1033
+    /// <inheritdoc />
+    bool IConfigurableScheduledTask.IsEnabled => true;
+#pragma warning restore CA1033
 
     /// <inheritdoc />
     public abstract string Name { get; }
@@ -110,31 +148,130 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected virtual int BuildRecordParallelism => 1;
 
     /// <summary>
-    /// Verifies the source server is reachable. Default implementation
-    /// creates <see cref="Client"/> from the configured source URL/API key
-    /// and runs the connection test; subclasses can override to add custom
-    /// pre-flight checks but should call <c>base.TestConnectionAsync</c>
-    /// to populate <see cref="Client"/>.
+    /// Connects every scan server and keeps the ones that answer, in priority order. A server that
+    /// does not answer is logged and skipped for this run, and the run skips pruning, because rows
+    /// that came from it cannot be re-confirmed. Returns false only when no server connects.
+    /// Subclasses that override this should populate <see cref="Sources"/> themselves.
     /// </summary>
     protected virtual async Task<bool> TestConnectionAsync(CancellationToken cancellationToken)
     {
-        var config = _configManager.Configuration;
-        Client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-        var result = await Client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-        if (!result.Success)
+        var connected = new List<ScanSource>();
+        var servers = _configManager.Configuration.GetPullServers();
+        for (var i = 0; i < servers.Count; i++)
         {
-            Logger.LogError("{Task}: source connection failed — {Error}", Name, result.ErrorMessage ?? "unknown");
+            var server = servers[i];
+            SourceServerClient client;
+            try
+            {
+                client = _clientFactory.Create(server);
+            }
+            catch (ArgumentException ex)
+            {
+                Logger.LogError("{Task}: server '{Server}' rejected: {Error}", Name, server.DisplayName, ex.Message);
+                MarkSourceUnavailable($"server '{server.DisplayName}' has an invalid URL");
+                continue;
+            }
+
+            var result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            if (!result.Success)
+            {
+                Logger.LogError("{Task}: connection to '{Server}' failed: {Error}", Name, server.DisplayName, result.ErrorMessage ?? "unknown");
+                MarkSourceUnavailable($"server '{server.DisplayName}' is unreachable");
+                client.Dispose();
+                continue;
+            }
+
+            connected.Add(new ScanSource(server, client, i));
         }
 
-        return result.Success;
+        Sources = connected;
+        return connected.Count > 0;
     }
 
     /// <summary>
-    /// Fetches the list of source items to consider this run.
-    /// <paramref name="progress"/> reports 0–100 for the fetch phase only;
-    /// the base class scales it into the run's overall allocation.
+    /// Runs once per run after the servers have connected and before any list is fetched. Default is a
+    /// no-op. A module that keeps per run state should reset it here rather than in
+    /// <see cref="GetListAsync"/>, which now runs once per server.
     /// </summary>
-    protected abstract Task<IList<TSource>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken);
+    protected virtual void OnRunStarting()
+    {
+    }
+
+    /// <summary>
+    /// Fetches the items one scan server offers this run. Called once per connected server, highest
+    /// priority first. <paramref name="progress"/> reports 0 to 100 for this server only.
+    /// </summary>
+    /// <param name="source">The server to list from.</param>
+    /// <param name="progress">Progress for this server's fetch.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The work items this server contributes.</returns>
+    protected abstract Task<IList<TSource>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The key two servers collide on when they offer the same thing: a local path, a person name, a
+    /// local user. Null means the item never collides. When several servers produce the same key the
+    /// first in priority order keeps it and the rest are dropped before any record is built.
+    /// </summary>
+    /// <param name="source">A work item.</param>
+    /// <returns>The collision key, or null.</returns>
+    protected virtual string? PriorityKeyOf(TSource source) => null;
+
+    /// <summary>
+    /// The same collision key read from a stored row, so a row that lost its priority to another
+    /// server can be recognized and retired instead of treated as a removal.
+    /// </summary>
+    /// <param name="record">A stored row.</param>
+    /// <returns>The collision key, or null.</returns>
+    protected virtual string? PriorityKeyOf(TRecord record) => null;
+
+    /// <summary>
+    /// Lists every connected server in priority order and keeps the first offer for each collision
+    /// key. Progress is split evenly across the servers.
+    /// </summary>
+    private async Task<IList<TSource>> CollectAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        var all = new List<TSource>();
+        var count = Math.Max(Sources.Count, 1);
+        for (var i = 0; i < Sources.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = Sources[i];
+            var offset = 100.0 * i / count;
+            var sourceProgress = new Progress<double>(p => progress.Report(offset + (Math.Clamp(p, 0, 100) / count)));
+            var items = await GetListAsync(source, sourceProgress, cancellationToken).ConfigureAwait(false);
+            all.AddRange(items);
+            Logger.LogInformation("{Task}: '{Server}' offered {Count} item(s)", Name, source.Name, items.Count);
+        }
+
+        progress.Report(100);
+
+        if (Sources.Count < 2)
+        {
+            return all;
+        }
+
+        var kept = new List<TSource>(all.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var dropped = 0;
+        foreach (var item in all)
+        {
+            var key = PriorityKeyOf(item);
+            if (key is not null && !seen.Add(key))
+            {
+                dropped++;
+                continue;
+            }
+
+            kept.Add(item);
+        }
+
+        if (dropped > 0)
+        {
+            Logger.LogInformation("{Task}: {Dropped} item(s) offered by a lower priority server were already covered by a higher one", Name, dropped);
+        }
+
+        return kept;
+    }
 
     /// <summary>
     /// Applies user/library filters to <paramref name="items"/>. Default
@@ -142,6 +279,59 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </summary>
     protected virtual Task<IList<TSource>> FilterAsync(IList<TSource> items, CancellationToken cancellationToken)
         => Task.FromResult(items);
+
+    /// <summary>
+    /// Builds and stores the row for one source item outside a scheduled run, for a change hint. The
+    /// same build and status decision as the full refresh, under the module's mutex so a run in
+    /// progress and a hint never write the same row at once. The stored rows are read on demand, since
+    /// loading the whole table for one item would defeat the point of a hint.
+    /// </summary>
+    /// <param name="work">The source item and the server it came from.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The stored row, or null when the item has no local counterpart.</returns>
+    public async Task<TRecord?> RefreshOneAsync(TSource work, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+
+        var moduleMutex = SyncModuleMutex.ForModule(ModuleMutexKey);
+        await moduleMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            PrepareForOne(work);
+            var record = await BuildRecordAsync(work, new StoredRows(this), cancellationToken).ConfigureAwait(false);
+            if (record is null)
+            {
+                return null;
+            }
+
+            DecideStatus(record);
+            Manager.Upsert(record);
+            return record;
+        }
+        finally
+        {
+            moduleMutex.Release();
+        }
+    }
+
+    /// <summary>
+    /// Readies any per run state <see cref="BuildRecordAsync"/> relies on for a single item, since
+    /// <see cref="RefreshOneAsync"/> never runs <see cref="GetListAsync"/>. Default does nothing.
+    /// </summary>
+    /// <param name="work">The single item about to be built.</param>
+    protected virtual void PrepareForOne(TSource work)
+    {
+    }
+
+    /// <summary>
+    /// Called once per run with the rows this run queued, before the prune, so a module can settle
+    /// conflicts against peers that carry versions and un-queue rows this server's own edit should win.
+    /// Default does nothing. Rows changed here must be stored again by the override.
+    /// </summary>
+    /// <param name="queued">The rows that ended the build queued.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    protected virtual Task ResolveConflictsAsync(IList<TRecord> queued, CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
     /// Builds (or updates) a record from a single source item. Implementations
@@ -426,8 +616,12 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
         finally
         {
-            Client?.Dispose();
-            Client = null;
+            foreach (var source in Sources)
+            {
+                source.Dispose();
+            }
+
+            Sources = Array.Empty<ScanSource>();
         }
     }
 
@@ -440,9 +634,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             // user assuming everything's fine because the row count didn't
             // change.
             Logger.LogError("{Task}: connection check failed; aborting refresh", Name);
-            RecordRunFailure("Refresh", "Connection check failed — source server unreachable or credentials invalid");
+            RecordRunFailure("Refresh", "Connection check failed: no scan server is reachable or every configured key is invalid");
             return;
         }
+
+        OnRunStarting();
 
         // Progress allocation:
         //   0–  3 %  existing-row snapshot
@@ -475,7 +671,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         // fetch phase) is mapped into the SnapshotEnd–FetchEnd band.
         var fetchProgress = new Progress<double>(p =>
             progress.Report(SnapshotEnd + ((FetchEnd - SnapshotEnd) * Math.Clamp(p, 0, 100) / 100.0)));
-        var sourceItems = await GetListAsync(fetchProgress, cancellationToken).ConfigureAwait(false);
+        var sourceItems = await CollectAsync(fetchProgress, cancellationToken).ConfigureAwait(false);
         sourceItems = await FilterAsync(sourceItems, cancellationToken).ConfigureAwait(false);
 
         progress.Report(FetchEnd);
@@ -487,6 +683,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         // the manager's WriteLock, so concurrent builds queue cleanly at
         // persist time.
         var seenKeys = new System.Collections.Concurrent.ConcurrentDictionary<TKey, byte>();
+        var seenPriorityKeys = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        var queuedThisRun = new System.Collections.Concurrent.ConcurrentBag<TRecord>();
         var processed = 0;
         var total = Math.Max(sourceItems.Count, 1);
         var parallelism = Math.Max(1, BuildRecordParallelism);
@@ -543,12 +741,21 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
                 var key = ExtractKey(record);
                 seenKeys.TryAdd(key, 0);
+                var priorityKey = PriorityKeyOf(record);
+                if (priorityKey is not null)
+                {
+                    seenPriorityKeys.TryAdd(priorityKey, 0);
+                }
 
                 // Refresh + Compare in one pass: snapshot data is fresh, so
                 // decide status immediately. Subclasses can override
                 // DecideStatus to implement workflows like Content's approval
                 // gate.
                 DecideStatus(record);
+                if (record.Status == SyncStatus.Queued)
+                {
+                    queuedThisRun.Add(record);
+                }
 
                 try
                 {
@@ -593,6 +800,34 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
 
         var seenKeySet = new HashSet<TKey>(seenKeys.Keys);
+
+        if (!queuedThisRun.IsEmpty)
+        {
+            await ResolveConflictsAsync(queuedThisRun.ToList(), cancellationToken).ConfigureAwait(false);
+        }
+
+        // 3b. Retire rows another server now covers. When priorities change or a higher priority
+        // server gains an item, the row that previously tracked it under a lower priority server is
+        // not a removal: the thing is still here, tracked by the new winner's row. Delete it quietly
+        // and count it as seen so neither the module prune nor the circuit breaker treats it as stale.
+        // Never while a server did not answer this run: its items were never offered, so a lower
+        // priority server's rows would claim them and the unanswered server's rows, negotiated bases
+        // included, would be deleted over an outage rather than a real change of ownership.
+        if (_sourceUnavailable)
+        {
+            if (!seenPriorityKeys.IsEmpty)
+            {
+                Logger.LogInformation("{Task}: a server did not answer this run, so no rows are retired to another server", Name);
+            }
+        }
+        else
+        {
+            var superseded = RetireSupersededRows(existing, seenKeySet, seenPriorityKeys);
+            if (superseded > 0)
+            {
+                Logger.LogInformation("{Task}: retired {Count} row(s) now covered by a higher priority server", Name, superseded);
+            }
+        }
 
         // 4. Prune rows no longer present on the source — but ONLY when the whole
         // discovery completed cleanly. If the source returned any error this run
@@ -708,6 +943,49 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     }
 
     /// <summary>
+    /// Deletes rows that were not seen this run but whose collision key was claimed by a row that
+    /// was, and marks them seen. Returns how many were retired.
+    /// </summary>
+    private int RetireSupersededRows(
+        IReadOnlyDictionary<TKey, TRecord> existing,
+        HashSet<TKey> seenKeySet,
+        System.Collections.Concurrent.ConcurrentDictionary<string, byte> seenPriorityKeys)
+    {
+        if (seenPriorityKeys.IsEmpty)
+        {
+            return 0;
+        }
+
+        var retired = 0;
+        foreach (var kvp in existing)
+        {
+            if (seenKeySet.Contains(kvp.Key))
+            {
+                continue;
+            }
+
+            var priorityKey = PriorityKeyOf(kvp.Value);
+            if (priorityKey is null || !seenPriorityKeys.ContainsKey(priorityKey))
+            {
+                continue;
+            }
+
+            try
+            {
+                Manager.DeleteById(kvp.Value.Id);
+                seenKeySet.Add(kvp.Key);
+                retired++;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "{Task}: failed to retire superseded row id {Id}", Name, kvp.Value.Id);
+            }
+        }
+
+        return retired;
+    }
+
+    /// <summary>
     /// Lets the subclass stamp its module's last-run timestamp, then saves
     /// the configuration. Failures here are logged but never propagate — a
     /// failed save mustn't mask the actual run result.
@@ -734,4 +1012,32 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
     private void ClearRunFailure()
         => RunFailureLog.Clear(_configManager, ModuleMutexKey, Logger, Name);
+
+    // Reads stored rows on demand for RefreshOneAsync. Only TryGetValue is used by the record builders.
+    private sealed class StoredRows : IReadOnlyDictionary<TKey, TRecord>
+    {
+        private readonly RefreshSyncTaskBase<TRecord, TSource, TKey> _owner;
+
+        public StoredRows(RefreshSyncTaskBase<TRecord, TSource, TKey> owner) => _owner = owner;
+
+        public IEnumerable<TKey> Keys => Array.Empty<TKey>();
+
+        public IEnumerable<TRecord> Values => Array.Empty<TRecord>();
+
+        public int Count => 0;
+
+        public TRecord this[TKey key] => _owner.Manager.GetByKey(key) ?? throw new KeyNotFoundException();
+
+        public bool ContainsKey(TKey key) => _owner.Manager.GetByKey(key) is not null;
+
+        public bool TryGetValue(TKey key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out TRecord value)
+        {
+            value = _owner.Manager.GetByKey(key);
+            return value is not null;
+        }
+
+        public IEnumerator<KeyValuePair<TKey, TRecord>> GetEnumerator() => System.Linq.Enumerable.Empty<KeyValuePair<TKey, TRecord>>().GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 }

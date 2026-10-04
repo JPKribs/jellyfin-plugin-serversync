@@ -39,6 +39,7 @@ public static class PeopleSyncItemExtensions
             LastSyncTime = item.LastSyncTime,
             ErrorMessage = item.Reason,
             SourceServerUrl = sourceServerUrl,
+            ServerKey = item.ServerKey,
         };
     }
 }

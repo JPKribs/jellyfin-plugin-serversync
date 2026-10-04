@@ -51,7 +51,8 @@ public class HistorySyncTableService
         UserMapping userMapping,
         LibraryMapping libraryMapping,
         BaseItemDto sourceItem,
-        string sourceItemId)
+        string sourceItemId,
+        bool negotiateWithSource = false)
     {
         ArgumentNullException.ThrowIfNull(userMapping);
         ArgumentNullException.ThrowIfNull(libraryMapping);
@@ -118,7 +119,8 @@ public class HistorySyncTableService
             LocalPlayCount = localUserData?.PlayCount,
             LocalPlaybackPositionTicks = localUserData?.PlaybackPositionTicks,
             LocalLastPlayedDate = localUserData?.LastPlayedDate,
-            LocalIsFavorite = localUserData?.IsFavorite
+            LocalIsFavorite = localUserData?.IsFavorite,
+            NegotiateWithSource = negotiateWithSource
         };
 
         HistorySyncMergeService.MergeHistoryData(item);

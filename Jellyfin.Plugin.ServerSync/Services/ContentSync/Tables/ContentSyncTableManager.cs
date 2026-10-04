@@ -83,6 +83,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
         item.RetryCount = ReadNullableInt32(reader, "RetryCount") ?? 0;
+        item.ServerKey = ReadNullableString(reader, "ServerKey");
         item.CompanionFiles = ReadNullableString(reader, "CompanionFiles");
         return item;
     }
@@ -119,11 +120,11 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
                 INSERT INTO SyncItems (
                     SourceLibraryId, LocalLibraryId, SourceItemId, SourcePath, SourceSize,
                     SourceCreateDate, LocalItemId, LocalPath, StatusDate, Status,
-                    PendingType, LastSyncTime, Reason, RetryCount, CompanionFiles
+                    PendingType, LastSyncTime, Reason, RetryCount, CompanionFiles, ServerKey
                 ) VALUES (
                     @sourceLibraryId, @localLibraryId, @sourceItemId, @sourcePath, @sourceSize,
                     @sourceCreateDate, @localItemId, @localPath, @statusDate, @status,
-                    @pendingType, @lastSyncTime, @reason, @retryCount, @companionFiles
+                    @pendingType, @lastSyncTime, @reason, @retryCount, @companionFiles, @serverKey
                 )
                 ON CONFLICT(SourceItemId) DO UPDATE SET
                     SourceLibraryId = @sourceLibraryId,
@@ -139,7 +140,8 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
                     LastSyncTime = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.LastSyncTime ELSE @lastSyncTime END,
                     Reason = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.Reason ELSE @reason END,
                     RetryCount = @retryCount,
-                    CompanionFiles = @companionFiles";
+                    CompanionFiles = @companionFiles,
+                    ServerKey = @serverKey";
 
             cmd.Parameters.AddWithValue("@sourceLibraryId", record.SourceLibraryId);
             cmd.Parameters.AddWithValue("@localLibraryId", record.LocalLibraryId);
@@ -156,6 +158,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             AddNullable(cmd, "@reason", record.Reason);
             cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
             AddNullable(cmd, "@companionFiles", record.CompanionFiles);
+            AddNullable(cmd, "@serverKey", record.ServerKey);
             cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
             cmd.ExecuteNonQuery();
         });

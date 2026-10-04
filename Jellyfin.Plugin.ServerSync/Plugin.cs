@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Model.Plugins;
@@ -49,23 +50,41 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         // unavailable, so this can't loop or throw the plugin out of load.
         try
         {
-            if (!string.IsNullOrEmpty(Configuration.SourceServerApiKey)
-                && !SecretProtector.IsProtected(Configuration.SourceServerApiKey))
+            // A configuration written before servers became a list carries one source in the legacy
+            // fields. Move it into the list so every code path sees one shape.
+            var migrated = Configuration.MigrateLegacyServer();
+            if (migrated)
             {
-                var protectedKey = _secrets.Value.Protect(Configuration.SourceServerApiKey);
-                if (!string.Equals(protectedKey, Configuration.SourceServerApiKey, StringComparison.Ordinal))
+                _logger.LogInformation("Moved the single source server into the server list");
+            }
+
+            var encrypted = false;
+            foreach (var server in Configuration.Servers)
+            {
+                if (string.IsNullOrEmpty(server.ApiKey) || SecretProtector.IsProtected(server.ApiKey))
                 {
-                    Configuration.SourceServerApiKey = protectedKey;
-                    lock (Services.Configuration.ConfigurationSaveLock.Sync)
-                    {
-                        SaveConfiguration();
-                    }
+                    continue;
+                }
+
+                var protectedKey = _secrets.Value.Protect(server.ApiKey);
+                if (!string.Equals(protectedKey, server.ApiKey, StringComparison.Ordinal))
+                {
+                    server.ApiKey = protectedKey;
+                    encrypted = true;
+                }
+            }
+
+            if (migrated || encrypted)
+            {
+                lock (Services.Configuration.ConfigurationSaveLock.Sync)
+                {
+                    SaveConfiguration();
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to encrypt the stored API key at startup; it will be encrypted on the next save");
+            _logger.LogWarning(ex, "Failed to prepare the stored server list at startup; it will be fixed on the next save");
         }
 
         _logger.LogInformation("Server Sync plugin initialized");
@@ -83,8 +102,15 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         if (configuration is PluginConfiguration incoming)
         {
             incoming.SanitizeValues();
-            incoming.SourceServerApiKey = _secrets.Value.ResolveIncoming(
-                incoming.SourceServerApiKey, Configuration.SourceServerApiKey);
+
+            // The page posts the kept sentinel in place of a key it never saw. Resolve each entry
+            // against the stored entry with the same key, so a server can be renamed or reordered
+            // without the operator retyping its API key.
+            foreach (var server in incoming.Servers)
+            {
+                var stored = Configuration.FindServer(server.Key);
+                server.ApiKey = _secrets.Value.ResolveIncoming(server.ApiKey, stored?.ApiKey ?? string.Empty);
+            }
         }
 
         lock (Services.Configuration.ConfigurationSaveLock.Sync)
@@ -121,6 +147,18 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         {
             Name = "serversync_sync.js",
             EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync.js"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_servers",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_servers.html"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_servers.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_servers.js"
         };
 
         yield return new PluginPageInfo

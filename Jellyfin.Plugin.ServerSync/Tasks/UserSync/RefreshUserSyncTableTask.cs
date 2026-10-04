@@ -22,6 +22,8 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// </summary>
 public sealed class UserCategoryWork
 {
+    public required ScanSource Source { get; init; }
+
     public required UserMapping Mapping { get; init; }
 
     public required string Category { get; init; }
@@ -81,22 +83,19 @@ public class RefreshUserSyncTableTask
     {
         var config = ConfigManager.Configuration;
         return config.EnableUserSync
-            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
-            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey)
+            && config.GetPullServers().Count > 0
             && config.GetEnabledUserMappings().Count > 0;
     }
 
     /// <inheritdoc />
-    protected override async Task<IList<UserCategoryWork>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override async Task<IList<UserCategoryWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(progress);
-        if (Client == null)
-        {
-            return Array.Empty<UserCategoryWork>();
-        }
 
         var config = ConfigManager.Configuration;
-        var enabledMappings = config.GetEnabledUserMappings();
+        var client = source.Client;
+        var enabledMappings = source.Server.GetEnabledUserMappings();
         var work = new List<UserCategoryWork>();
         var processedMappings = 0;
         var totalMappings = Math.Max(enabledMappings.Count, 1);
@@ -111,7 +110,7 @@ public class RefreshUserSyncTableTask
                 var sourceUserId = Guid.Parse(mapping.SourceUserId);
                 var localUserId = Guid.Parse(mapping.LocalUserId);
 
-                var sourceUser = await Client.GetUserAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
+                var sourceUser = await client.GetUserAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
                 if (sourceUser == null)
                 {
                     // Source user fetch returned null (transient API failure or
@@ -140,6 +139,7 @@ public class RefreshUserSyncTableTask
                 {
                     work.Add(new UserCategoryWork
                     {
+                        Source = source,
                         Mapping = mapping,
                         Category = UserPropertyCategory.Policy,
                         SourceUser = sourceUser,
@@ -152,6 +152,7 @@ public class RefreshUserSyncTableTask
                 {
                     work.Add(new UserCategoryWork
                     {
+                        Source = source,
                         Mapping = mapping,
                         Category = UserPropertyCategory.Configuration,
                         SourceUser = sourceUser,
@@ -164,6 +165,7 @@ public class RefreshUserSyncTableTask
                 {
                     work.Add(new UserCategoryWork
                     {
+                        Source = source,
                         Mapping = mapping,
                         Category = UserPropertyCategory.ProfileImage,
                         SourceUser = sourceUser,
@@ -199,25 +201,38 @@ public class RefreshUserSyncTableTask
         IReadOnlyDictionary<(string SourceUserId, string LocalUserId, string PropertyCategory), UserSyncItem> existing,
         CancellationToken cancellationToken)
     {
-        if (Client == null)
-        {
-            return null;
-        }
-
         var key = (source.Mapping.SourceUserId, source.Mapping.LocalUserId, source.Category);
         existing.TryGetValue(key, out var existingItem);
 
-        return await _builder.BuildRecordAsync(
+        var record = await _builder.BuildRecordAsync(
             source.Mapping,
             source.Category,
             source.SourceUser,
             source.LocalUserDto,
             source.LocalUser,
-            Client,
+            source.Source.Client,
             ConfigManager.Configuration,
             existingItem,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            source.Source.Server.GetEnabledLibraryMappings()).ConfigureAwait(false);
+
+        if (record != null)
+        {
+            record.ServerKey = source.Source.Key;
+        }
+
+        return record;
     }
+
+    // Two servers collide when both map a user onto the same local user. The higher priority
+    // server's user supplies that local user's settings.
+    /// <inheritdoc />
+    protected override string? PriorityKeyOf(UserCategoryWork source)
+        => source is null ? null : source.Mapping.LocalUserId + "|" + source.Category;
+
+    /// <inheritdoc />
+    protected override string? PriorityKeyOf(UserSyncItem record)
+        => record is null ? null : record.LocalUserId + "|" + record.PropertyCategory;
 
     /// <inheritdoc />
     protected override (string SourceUserId, string LocalUserId, string PropertyCategory) ExtractKey(UserSyncItem record)

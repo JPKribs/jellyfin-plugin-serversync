@@ -12,15 +12,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="12.0.0">
+    <PackageReference Include="Jellyfin.Controller" Version="12.1.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Database.Implementations" Version="12.0.0">
+    <PackageReference Include="Jellyfin.Database.Implementations" Version="12.1.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Model" Version="12.0.0">
+    <PackageReference Include="Jellyfin.Model" Version="12.1.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
@@ -29,13 +29,16 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.7.31" />
+    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.10.5" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Sync page (main entry, default tab) -->
     <EmbeddedResource Include="Configuration\serversync_sync.html" />
     <EmbeddedResource Include="Configuration\serversync_sync.js" />
+    <!-- Servers page -->
+    <EmbeddedResource Include="Configuration\serversync_servers.html" />
+    <EmbeddedResource Include="Configuration\serversync_servers.js" />
     <!-- Settings page -->
     <EmbeddedResource Include="Configuration\serversync_settings.html" />
     <EmbeddedResource Include="Configuration\serversync_settings.js" />

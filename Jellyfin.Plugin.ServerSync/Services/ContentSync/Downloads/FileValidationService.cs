@@ -90,7 +90,7 @@ public static class FileValidationService
         }
 
         var normalizedPath = Path.GetFullPath(path);
-        foreach (var mapping in config.LibraryMappings.Where(m => m.IsEnabled && !string.IsNullOrEmpty(m.LocalRootPath)))
+        foreach (var mapping in config.GetEnabledLibraryMappings().Where(m => !string.IsNullOrEmpty(m.LocalRootPath)))
         {
             var normalizedLibraryPath = Path.GetFullPath(mapping.LocalRootPath);
             var relativePath = Path.GetRelativePath(normalizedLibraryPath, normalizedPath);
@@ -155,7 +155,7 @@ public static class FileValidationService
 
         var normalizedPath = Path.GetFullPath(path);
 
-        foreach (var mapping in config.LibraryMappings.Where(m => m.IsEnabled && !string.IsNullOrEmpty(m.LocalRootPath)))
+        foreach (var mapping in config.GetEnabledLibraryMappings().Where(m => !string.IsNullOrEmpty(m.LocalRootPath)))
         {
             var normalizedLibraryPath = Path.GetFullPath(mapping.LocalRootPath);
 

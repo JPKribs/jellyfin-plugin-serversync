@@ -6,9 +6,11 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Entities;
@@ -31,6 +33,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
+    private readonly AppliedVersionRecorder _applied;
 
     /// <summary>
     /// Initializes a new instance.
@@ -41,12 +44,22 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         IProviderManager providerManager,
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
-        PeopleSyncTableManager manager)
+        PeopleSyncTableManager manager,
+        AppliedVersionRecorder applied)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
         _providerManager = providerManager;
+        _applied = applied;
     }
+
+    /// <inheritdoc />
+    protected override IDisposable? EnterApplyGuard(PeopleSyncItem record)
+        => _applied.Enter(Models.Queue.HintKind.People, Services.Queue.HintProtocol.PeopleKey(record?.PersonName ?? string.Empty));
+
+    /// <inheritdoc />
+    protected override Task AfterApplySucceededAsync(PeopleSyncItem record, CancellationToken cancellationToken)
+        => _applied.RecordAsync(Models.Queue.HintKind.People, Services.Queue.HintProtocol.PeopleKey(record?.PersonName ?? string.Empty), Services.Queue.HintProtocol.PeopleKey(record?.PersonName ?? string.Empty), SourceFor(record!), cancellationToken);
 
     /// <inheritdoc />
     public override string Name => "Sync People";
@@ -67,9 +80,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
     protected override bool IsEnabled()
     {
         var config = ConfigManager.Configuration;
-        return config.EnablePeopleSync
-            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
-            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey);
+        return config.EnablePeopleSync && config.GetPullServers().Count > 0;
     }
 
     /// <inheritdoc />
@@ -124,15 +135,15 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             {
                 failures.Add($"Images: invalid source person ID {record.SourcePersonId}");
             }
-            else if (Client == null)
+            else if (SourceFor(record) is not { } imageSource)
             {
-                failures.Add("Images: source server client unavailable");
+                failures.Add("Images: source server is not available this run");
             }
             else
             {
                 try
                 {
-                    await ApplyPersonImagesAsync(localPerson, sourceGuid, record, Client, cancellationToken).ConfigureAwait(false);
+                    await ApplyPersonImagesAsync(localPerson, sourceGuid, record, imageSource.Client, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -746,7 +757,8 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         // source sizes as indeterminate rather than as a difference, so the
         // row settles instead of re-pulling every image each run.
         string? enrichedSource = record.Images.Source;
-        if (Client != null
+        var verifySource = SourceFor(record);
+        if (verifySource != null
             && !string.IsNullOrEmpty(record.SourcePersonId)
             && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
         {
@@ -755,7 +767,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                 enrichedSource = await Utilities.ImageManifestEnricher.EnrichAsync(
                     record.Images.Source,
                     sourcePersonGuid,
-                    Client,
+                    verifySource.Client,
                     Logger,
                     record.PersonName ?? record.SourcePersonId,
                     cancellationToken).ConfigureAwait(false);

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Mime;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
@@ -69,10 +70,38 @@ public partial class ConfigurationController : ControllerBase
     /// kept-sentinel instead of the stored secret, so a request carrying the
     /// sentinel means "use the configured key".
     /// </summary>
-    private string ResolveRequestApiKey(string? requestApiKey)
-        => string.Equals(requestApiKey, JPKribs.Jellyfin.Base.SecretProtector.KeptSentinel, StringComparison.Ordinal)
-            ? _configManager.DecryptedSourceServerApiKey
-            : requestApiKey ?? string.Empty;
+    private string ResolveRequestApiKey(string? requestApiKey, string? serverKey)
+        => _configManager.ResolveRequestApiKey(requestApiKey, serverKey);
+
+    /// <summary>
+    /// The URL the browser should load images from for a row that came from the given server entry.
+    /// A row with no key belongs to the first scan server.
+    /// </summary>
+    private string? BrowserUrlFor(string? serverKey)
+        => _configManager.Configuration.ResolveServer(serverKey)?.BrowserUrl;
+
+    /// <summary>
+    /// A connected client for the server a row came from, or null when that entry is gone or not
+    /// configured. Callers dispose it.
+    /// </summary>
+    private SourceServerClient? ClientForRow(string? serverKey)
+    {
+        var server = _configManager.Configuration.ResolveServer(serverKey);
+        if (server is null || !server.IsConfigured)
+        {
+            return null;
+        }
+
+        try
+        {
+            return _clientFactory.Create(server);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("Server '{Server}' rejected: {Error}", server.DisplayName, ex.Message);
+            return null;
+        }
+    }
 
     /// <summary>
     /// Builds a <see cref="BulkOperationResult"/> from a manager's

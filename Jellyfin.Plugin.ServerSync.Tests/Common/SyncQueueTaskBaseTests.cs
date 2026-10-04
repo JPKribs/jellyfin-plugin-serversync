@@ -99,7 +99,9 @@ public class SyncQueueTaskBaseTests
     {
         public PluginConfiguration Configuration { get; } = new();
 
-        public string DecryptedSourceServerApiKey => Configuration.SourceServerApiKey;
+        public string DecryptApiKey(string protectedKey) => protectedKey;
+
+        public string ResolveRequestApiKey(string? requestApiKey, string? serverKey) => requestApiKey ?? string.Empty;
 
         public void SaveConfiguration()
         {
@@ -115,6 +117,9 @@ public class SyncQueueTaskBaseTests
     private sealed class FakeClientFactory : ISourceServerClientFactory
     {
         public SourceServerClient Create(string serverUrl, string apiKey)
+            => throw new NotSupportedException("Client creation isn't exercised by these tests.");
+
+        public SourceServerClient Create(Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer server)
             => throw new NotSupportedException("Client creation isn't exercised by these tests.");
     }
 

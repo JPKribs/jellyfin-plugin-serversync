@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
@@ -60,9 +61,9 @@ public class RefreshSyncTaskBaseTests
 
         public int CountByStatus(SyncStatus status) => 0;
 
-        public void Upsert(TestRecord record)
-        {
-        }
+        public List<TestRecord> Upserted { get; } = new();
+
+        public void Upsert(TestRecord record) => Upserted.Add(record);
 
         public void DeleteById(long id) => Deleted.Add(id);
 
@@ -92,7 +93,9 @@ public class RefreshSyncTaskBaseTests
     {
         public PluginConfiguration Configuration { get; } = new();
 
-        public string DecryptedSourceServerApiKey => Configuration.SourceServerApiKey;
+        public string DecryptApiKey(string protectedKey) => protectedKey;
+
+        public string ResolveRequestApiKey(string? requestApiKey, string? serverKey) => requestApiKey ?? string.Empty;
 
         public void SaveConfiguration()
         {
@@ -108,6 +111,9 @@ public class RefreshSyncTaskBaseTests
     private sealed class FakeClientFactory : ISourceServerClientFactory
     {
         public SourceServerClient Create(string serverUrl, string apiKey)
+            => throw new NotSupportedException("Client creation isn't exercised by the prune-path tests.");
+
+        public SourceServerClient Create(Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer server)
             => throw new NotSupportedException("Client creation isn't exercised by the prune-path tests.");
     }
 
@@ -147,18 +153,57 @@ public class RefreshSyncTaskBaseTests
 
         protected override bool IsEnabled() => true;
 
-        protected override Task<bool> TestConnectionAsync(CancellationToken cancellationToken)
-            => Task.FromResult(true);
+        /// <summary>
+        /// Items each fake server offers, in priority order. Defaults to one server offering
+        /// <see cref="Sources"/>, so the prune tests read as before.
+        /// </summary>
+        public List<IList<string>> PerServer { get; set; } = new();
 
-        protected override Task<IList<string>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
+        /// <summary>Priority key for a work item, when a test wants servers to collide.</summary>
+        public Func<string, string?>? PriorityKey { get; set; }
+
+        /// <summary>Priority key for a stored row.</summary>
+        public Func<TestRecord, string?>? RecordPriorityKey { get; set; }
+
+        /// <summary>Records built from work items, keyed by work item.</summary>
+        public Func<string, TestRecord?>? Builder { get; set; }
+
+        public List<string> Listed { get; } = new();
+
+        protected override Task<bool> TestConnectionAsync(CancellationToken cancellationToken)
+        {
+            var count = Math.Max(1, PerServer.Count);
+            var sources = new List<ScanSource>();
+            for (var i = 0; i < count; i++)
+            {
+                var server = new Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer { Name = "server-" + i, Url = "http://localhost:1", ApiKey = "k" };
+                var client = new SourceServerClient(NullLogger<SourceServerClient>.Instance, new System.Net.Http.HttpClient(), server.Url, server.ApiKey, "test", "0");
+                sources.Add(new ScanSource(server, client, i));
+            }
+
+            base.Sources = sources;
+            return Task.FromResult(true);
+        }
+
+        protected override Task<IList<string>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
         {
             if (MarkUnavailableDuringDiscovery)
             {
                 MarkSourceUnavailable("test: source server unavailable");
             }
 
-            return Task.FromResult(Sources);
+            var offered = PerServer.Count > 0 ? PerServer[source.Priority] : Sources;
+            foreach (var item in offered)
+            {
+                Listed.Add(source.Server.Name + ":" + item);
+            }
+
+            return Task.FromResult(offered);
         }
+
+        protected override string? PriorityKeyOf(string source) => PriorityKey?.Invoke(source);
+
+        protected override string? PriorityKeyOf(TestRecord record) => RecordPriorityKey?.Invoke(record);
 
         public bool ThrowDuringBuild { get; set; }
 
@@ -169,7 +214,7 @@ public class RefreshSyncTaskBaseTests
                 throw new InvalidOperationException("test: build failed");
             }
 
-            return Task.FromResult<TestRecord?>(null);
+            return Task.FromResult(Builder?.Invoke(source));
         }
 
         public void InvokeDecideStatus(TestRecord record) => DecideStatus(record);
@@ -589,5 +634,75 @@ public class RefreshSyncTaskBaseTests
         var config = new FakeConfigManager();
         var task = new TestableRefreshTask(new FakeManager(), config, new FakeClientFactory());
         return (task, config);
+    }
+
+    // -----------------------------------------------------------------------
+    // Several scan servers. Index zero wins a collision and later servers
+    // only add what earlier ones lack.
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Every connected server is listed, highest priority first, and an item two servers both offer
+    /// is built once, from the first.
+    /// True: the operator's order on the page is the order that decides.
+    /// False: whichever server answered last would win and the same file could be tracked twice.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_TwoServers_FirstWinsCollisionAndSecondAddsUnique()
+    {
+        var task = CreateTask(out var manager);
+        task.PerServer = new List<IList<string>>
+        {
+            new List<string> { "shared", "only-a" },
+            new List<string> { "shared", "only-b" }
+        };
+        task.PriorityKey = item => item;
+        task.Builder = item => new TestRecord { Key = item, Changed = true };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(new[] { "server-0:shared", "server-0:only-a", "server-1:shared", "server-1:only-b" }, task.Listed);
+        Assert.Equal(new[] { "shared", "only-a", "only-b" }, manager.Upserted.Select(r => r.Key));
+    }
+
+    /// <summary>
+    /// A stored row that lost its collision key to another server's row is retired quietly and is not
+    /// counted as stale, so a priority change never looks like a removal.
+    /// True: reordering servers re-homes the tracking row instead of scheduling the local file for deletion.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_SupersededRow_RetiredNotPruned()
+    {
+        var task = CreateTask(out var manager);
+        // The old row tracked "shared" under a different source item id.
+        manager.All = new List<TestRecord> { new() { Id = 7, Key = "old-id", ScopeId = "shared-path" } };
+        task.PerServer = new List<IList<string>> { new List<string> { "new-id" } };
+        task.PriorityKey = _ => "shared-path";
+        task.RecordPriorityKey = r => r.ScopeId;
+        task.Builder = item => new TestRecord { Key = item, ScopeId = "shared-path", Changed = true };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(new[] { 7L }, manager.Deleted);
+        Assert.Equal(new[] { "new-id" }, manager.Upserted.Select(r => r.Key));
+    }
+
+    /// <summary>
+    /// Without a collision key nothing is deduplicated, so modules that do not opt in behave as before.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_NoPriorityKey_KeepsEveryOffer()
+    {
+        var task = CreateTask(out var manager);
+        task.PerServer = new List<IList<string>>
+        {
+            new List<string> { "x" },
+            new List<string> { "x" }
+        };
+        task.Builder = item => new TestRecord { Key = item + manager.Upserted.Count, Changed = true };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(2, manager.Upserted.Count);
     }
 }

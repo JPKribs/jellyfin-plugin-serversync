@@ -37,7 +37,7 @@ public class CleanupTempFilesTask : IScheduledTask
 
     public string Description => "Removes orphaned temporary files from failed sync downloads.";
 
-    public string Category => "Content Sync";
+    public string Category => "Server Sync";
 
     public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {

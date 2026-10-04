@@ -149,6 +149,10 @@ public class LocalServerClient
     /// <param name="playbackPositionTicks">Playback position in ticks.</param>
     /// <param name="lastPlayedDate">Last played date.</param>
     /// <param name="isFavorite">Favorite status.</param>
+    /// <param name="clearLastPlayedDate">
+    /// When true and <paramref name="lastPlayedDate"/> is null, the stored date is removed instead
+    /// of left alone. Used when the target state is "unplayed", which Jellyfin records with no date.
+    /// </param>
     /// <returns>True if update succeeded.</returns>
     public bool UpdateUserItemData(
         Guid userId,
@@ -157,7 +161,8 @@ public class LocalServerClient
         int? playCount,
         long? playbackPositionTicks,
         DateTime? lastPlayedDate,
-        bool? isFavorite)
+        bool? isFavorite,
+        bool clearLastPlayedDate = false)
     {
         try
         {
@@ -201,6 +206,10 @@ public class LocalServerClient
             if (lastPlayedDate.HasValue)
             {
                 userData.LastPlayedDate = lastPlayedDate.Value;
+            }
+            else if (clearLastPlayedDate)
+            {
+                userData.LastPlayedDate = null;
             }
 
             if (isFavorite.HasValue)

@@ -50,6 +50,14 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             return new SecretProtector("Jellyfin.Plugin.ServerSync.Secrets.v1", logger, provider);
         });
 
+        // The hint pipeline runs for the life of the server. Each worker is registered once as itself,
+        // by the attribute scan above, and once more as a hosted service that resolves that same
+        // instance, so the controllers and the publisher talk to the running worker.
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.OutboundHintWorker>());
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.InboundHintWorker>());
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.LocalChangeObserver>());
+        serviceCollection.AddHostedService<Tasks.HiddenTaskScheduleCleaner>();
+
         // Named HttpClient for source server communication. 
         // HandlerLifetime caps DNS staleness for the long-lived plugin process.
         serviceCollection

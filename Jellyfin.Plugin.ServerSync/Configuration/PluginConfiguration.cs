@@ -12,7 +12,18 @@ namespace Jellyfin.Plugin.ServerSync.Configuration;
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
-    // ===== Source Server Configuration =====
+    // ===== Servers =====
+
+    /// <summary>
+    /// Gets or sets the configured peer servers in priority order. Index zero wins whenever two servers
+    /// offer the same item, and each later entry only adds what every earlier entry lacks.
+    /// </summary>
+    public List<SourceServer> Servers { get; set; } = new();
+
+    // ===== Legacy single source =====
+    // The fields below carried the single source before servers became a list. They are still read so an
+    // older configuration file loads, then MigrateLegacyServer moves them into the first entry of Servers
+    // and they are never written again.
 
     public string SourceServerUrl { get; set; } = string.Empty;
 
@@ -68,6 +79,88 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Used by HistorySync and UserSync features.
     /// </summary>
     public List<UserMapping> UserMappings { get; set; } = new();
+
+    /// <summary>Suppresses the legacy element. See <see cref="MigrateLegacyServer"/>.</summary>
+    public bool ShouldSerializeSourceServerUrl() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeAllowSourceServerOnPrivateNetwork() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeSourceServerExternalUrl() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeSourceServerApiKey() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeSourceServerAuthenticatedUser() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeSourceServerAuthenticatedUserId() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeSourceServerName() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeSourceServerId() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeLibraryMappings() => false;
+
+    /// <summary>Suppresses the legacy element.</summary>
+    public bool ShouldSerializeUserMappings() => false;
+
+    /// <summary>
+    /// Moves a single source written by an older version into the first entry of <see cref="Servers"/>.
+    /// Runs on every load and save and does nothing once the list has an entry or the legacy fields are
+    /// empty, so it is safe to call repeatedly.
+    /// </summary>
+    /// <returns><c>true</c> when an entry was created.</returns>
+    public bool MigrateLegacyServer()
+    {
+        var hasLegacyData = !string.IsNullOrWhiteSpace(SourceServerUrl)
+            || !string.IsNullOrWhiteSpace(SourceServerApiKey)
+            || (LibraryMappings?.Count ?? 0) > 0
+            || (UserMappings?.Count ?? 0) > 0;
+        if (Servers.Count > 0 || !hasLegacyData)
+        {
+            ClearLegacyServer();
+            return false;
+        }
+
+        Servers.Add(new SourceServer
+        {
+            Name = SourceServerName,
+            Url = SourceServerUrl,
+            ExternalUrl = SourceServerExternalUrl,
+            AllowPrivateNetwork = AllowSourceServerOnPrivateNetwork,
+            ApiKey = SourceServerApiKey,
+            AuthenticatedUser = SourceServerAuthenticatedUser,
+            AuthenticatedUserId = SourceServerAuthenticatedUserId,
+            ServerName = SourceServerName,
+            ServerId = SourceServerId,
+            Mode = ServerMode.Pull,
+            IsEnabled = true,
+            LibraryMappings = LibraryMappings ?? new List<LibraryMapping>(),
+            UserMappings = UserMappings ?? new List<UserMapping>()
+        });
+
+        ClearLegacyServer();
+        return true;
+    }
+
+    private void ClearLegacyServer()
+    {
+        SourceServerUrl = string.Empty;
+        SourceServerExternalUrl = string.Empty;
+        SourceServerApiKey = string.Empty;
+        SourceServerAuthenticatedUser = string.Empty;
+        SourceServerAuthenticatedUserId = string.Empty;
+        SourceServerName = string.Empty;
+        SourceServerId = string.Empty;
+        LibraryMappings = new List<LibraryMapping>();
+        UserMappings = new List<UserMapping>();
+    }
 
     // ===== Content Sync Configuration =====
 
@@ -302,6 +395,13 @@ public class PluginConfiguration : BasePluginConfiguration
     // ===== User Sync Configuration =====
 
     /// <summary>
+    /// Negotiate watch history with the source server instead of only pulling it. The merged state is
+    /// written to both servers through the Server Sync plugin on the source, which must be installed
+    /// there. Requires an API key the source accepts, the same one the other modules use.
+    /// </summary>
+    public bool HistorySyncNegotiate { get; set; }
+
+    /// <summary>
     /// Enable user settings synchronization between servers.
     /// </summary>
     public bool EnableUserSync { get; set; }
@@ -468,28 +568,37 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         var errors = new List<string>();
 
-        // Validate URL
-        if (!string.IsNullOrWhiteSpace(SourceServerUrl))
+        // Validate each server entry
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var server in Servers)
         {
-            if (!Uri.TryCreate(SourceServerUrl, UriKind.Absolute, out var uri) ||
-                (uri.Scheme != "http" && uri.Scheme != "https"))
+            var label = server.DisplayName;
+            if (string.IsNullOrWhiteSpace(server.Key) || !seenKeys.Add(server.Key))
             {
-                errors.Add("Source server URL must be a valid HTTP or HTTPS URL");
+                errors.Add($"Server '{label}' has a missing or duplicate key");
+            }
+
+            if (!string.IsNullOrWhiteSpace(server.Url)
+                && (!Uri.TryCreate(server.Url, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https")))
+            {
+                errors.Add($"Server '{label}' URL must be a valid HTTP or HTTPS URL");
+            }
+
+            if (server.IsEnabled && string.IsNullOrWhiteSpace(server.Url))
+            {
+                errors.Add($"Server '{label}' is enabled but has no URL");
+            }
+
+            if (server.IsEnabled && string.IsNullOrWhiteSpace(server.ApiKey))
+            {
+                errors.Add($"Server '{label}' is enabled but has no API key");
             }
         }
 
-        // Validate authentication
-        if (EnableContentSync)
+        var scanServers = this.GetPullServers();
+        if (EnableContentSync && scanServers.Count == 0)
         {
-            if (string.IsNullOrWhiteSpace(SourceServerUrl))
-            {
-                errors.Add("Source server URL is required when content sync is enabled");
-            }
-
-            if (string.IsNullOrWhiteSpace(SourceServerApiKey))
-            {
-                errors.Add("API key is required for authentication");
-            }
+            errors.Add("At least one enabled server in Pull or Sync mode is required when content sync is enabled");
         }
 
         // Validate numeric ranges
@@ -547,7 +656,7 @@ public class PluginConfiguration : BasePluginConfiguration
         }
 
         // Validate library mappings
-        foreach (var mapping in LibraryMappings.Where(m => m.IsEnabled))
+        foreach (var mapping in this.GetEnabledLibraryMappings())
         {
             if (string.IsNullOrWhiteSpace(mapping.SourceLibraryId))
             {
@@ -565,7 +674,7 @@ public class PluginConfiguration : BasePluginConfiguration
         }
 
         // Validate user mappings
-        foreach (var mapping in UserMappings.Where(m => m.IsEnabled))
+        foreach (var mapping in this.GetEnabledUserMappings())
         {
             if (string.IsNullOrWhiteSpace(mapping.SourceUserId))
             {
@@ -610,27 +719,22 @@ public class PluginConfiguration : BasePluginConfiguration
             }
         }
 
-        // Validate history sync settings
+        // Validate history sync settings. History is the one module that also travels as hints, so a
+        // server that only sends is a valid setup for it.
         if (EnableHistorySync)
         {
-            if (string.IsNullOrWhiteSpace(SourceServerUrl))
+            var activeServers = this.GetActiveServers();
+            if (activeServers.Count == 0)
             {
-                errors.Add("Source server URL is required when history sync is enabled");
+                errors.Add("At least one enabled server in Pull, Push, or Sync mode is required when history sync is enabled");
             }
 
-            if (string.IsNullOrWhiteSpace(SourceServerApiKey))
-            {
-                errors.Add("API key is required when history sync is enabled");
-            }
-
-            var enabledUserMappings = UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
-            if (enabledUserMappings.Count == 0)
+            if (activeServers.All(s => s.GetEnabledUserMappings().Count == 0))
             {
                 errors.Add("At least one user mapping must be enabled for history sync");
             }
 
-            var enabledLibraryMappings = LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
-            if (enabledLibraryMappings.Count == 0)
+            if (activeServers.All(s => s.GetEnabledLibraryMappings().Count == 0))
             {
                 errors.Add("At least one library mapping must be enabled for history sync");
             }
@@ -639,17 +743,12 @@ public class PluginConfiguration : BasePluginConfiguration
         // Validate user sync settings
         if (EnableUserSync)
         {
-            if (string.IsNullOrWhiteSpace(SourceServerUrl))
+            if (scanServers.Count == 0)
             {
-                errors.Add("Source server URL is required when user sync is enabled");
+                errors.Add("At least one enabled server in Pull or Sync mode is required when user sync is enabled");
             }
 
-            if (string.IsNullOrWhiteSpace(SourceServerApiKey))
-            {
-                errors.Add("API key is required when user sync is enabled");
-            }
-
-            var enabledUserMappings = UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
+            var enabledUserMappings = this.GetEnabledUserMappings();
             if (enabledUserMappings.Count == 0)
             {
                 errors.Add("At least one user mapping must be enabled for user sync");
@@ -664,17 +763,12 @@ public class PluginConfiguration : BasePluginConfiguration
         // Validate metadata sync settings
         if (EnableMetadataSync)
         {
-            if (string.IsNullOrWhiteSpace(SourceServerUrl))
+            if (scanServers.Count == 0)
             {
-                errors.Add("Source server URL is required when metadata sync is enabled");
+                errors.Add("At least one enabled server in Pull or Sync mode is required when metadata sync is enabled");
             }
 
-            if (string.IsNullOrWhiteSpace(SourceServerApiKey))
-            {
-                errors.Add("API key is required when metadata sync is enabled");
-            }
-
-            var enabledLibraryMappings = LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
+            var enabledLibraryMappings = this.GetEnabledLibraryMappings();
             if (enabledLibraryMappings.Count == 0)
             {
                 errors.Add("At least one library mapping must be enabled for metadata sync");
@@ -714,15 +808,24 @@ public class PluginConfiguration : BasePluginConfiguration
         SizeMatchToleranceBytes = Math.Max(0, SizeMatchToleranceBytes);
         RefreshParallelism = Math.Clamp(RefreshParallelism, 1, 16);
 
-        // Normalize URLs
-        if (!string.IsNullOrWhiteSpace(SourceServerUrl))
-        {
-            SourceServerUrl = SourceServerUrl.TrimEnd('/');
-        }
+        MigrateLegacyServer();
 
-        if (!string.IsNullOrWhiteSpace(SourceServerExternalUrl))
+        foreach (var server in Servers)
         {
-            SourceServerExternalUrl = SourceServerExternalUrl.TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(server.Key))
+            {
+                server.Key = SourceServer.NewKey();
+            }
+
+            server.Name = server.Name?.Trim() ?? string.Empty;
+            server.Url = (server.Url ?? string.Empty).Trim().TrimEnd('/');
+            server.ExternalUrl = (server.ExternalUrl ?? string.Empty).Trim().TrimEnd('/');
+            server.LibraryMappings ??= new List<LibraryMapping>();
+            server.UserMappings ??= new List<UserMapping>();
+            foreach (var mapping in server.LibraryMappings)
+            {
+                mapping.LocalRootPath = NormalizePathOrNull(mapping.LocalRootPath) ?? string.Empty;
+            }
         }
 
         // Normalize and validate speed units
@@ -803,28 +906,101 @@ public sealed class SyncRunFailure
 }
 
 /// <summary>
-/// Convenience helpers over <see cref="PluginConfiguration"/>'s mapping
-/// collections. Centralizes the
-/// <c>(config.LibraryMappings ?? new()).Where(m =&gt; m.IsEnabled).ToList()</c>
-/// pattern so refresh tasks share one enabled-mappings accessor.
+/// Helpers over the server list: which servers scan, which entry a row belongs to, and the mappings
+/// across every scan server in priority order.
 /// </summary>
 public static class PluginConfigurationExtensions
 {
     /// <summary>
-    /// Returns enabled library mappings as a fresh list. Never returns null.
+    /// Returns the servers this installation scans, in priority order: enabled, with a URL and key, and in
+    /// Pull or Sync mode. Never returns null.
     /// </summary>
-    public static List<LibraryMapping> GetEnabledLibraryMappings(this PluginConfiguration config)
+    /// <param name="config">The configuration.</param>
+    /// <returns>The scan servers, highest priority first.</returns>
+    public static List<SourceServer> GetPullServers(this PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return config.LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
+        return config.Servers?.Where(s => s.Pulls).ToList() ?? new List<SourceServer>();
     }
 
     /// <summary>
-    /// Returns enabled user mappings as a fresh list. Never returns null.
+    /// Returns the servers this installation sends hints to: enabled, with a URL and key, and in Send or
+    /// Both mode. Never returns null.
     /// </summary>
+    /// <param name="config">The configuration.</param>
+    /// <returns>The send servers, in list order.</returns>
+    public static List<SourceServer> GetPushServers(this PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.Servers?.Where(s => s.Pushes).ToList() ?? new List<SourceServer>();
+    }
+
+    /// <summary>Returns every server that takes part in sync in any direction. Never returns null.</summary>
+    /// <param name="config">The configuration.</param>
+    /// <returns>The active servers, in list order.</returns>
+    public static List<SourceServer> GetActiveServers(this PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.Servers?.Where(s => s.Pulls || s.Pushes).ToList() ?? new List<SourceServer>();
+    }
+
+    /// <summary>Finds a server entry by key, or null.</summary>
+    /// <param name="config">The configuration.</param>
+    /// <param name="key">The entry key carried on a sync row.</param>
+    /// <returns>The entry, or null when no entry has that key.</returns>
+    public static SourceServer? FindServer(this PluginConfiguration config, string? key)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (string.IsNullOrEmpty(key))
+        {
+            return null;
+        }
+
+        return config.Servers?.FirstOrDefault(s => string.Equals(s.Key, key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Resolves the server a sync row came from. Rows written before servers became a list carry no key
+    /// and belong to the first scan server, which is where the single source migrated to.
+    /// </summary>
+    /// <param name="config">The configuration.</param>
+    /// <param name="key">The entry key carried on the row, or null.</param>
+    /// <returns>The entry, or null when none applies.</returns>
+    public static SourceServer? ResolveServer(this PluginConfiguration config, string? key)
+        => config.FindServer(key) ?? config.GetPullServers().FirstOrDefault();
+
+    /// <summary>
+    /// Returns the enabled library mappings of every scan server, in priority order. Never returns null.
+    /// </summary>
+    /// <param name="config">The configuration.</param>
+    /// <returns>The enabled mappings across all scan servers.</returns>
+    public static List<LibraryMapping> GetEnabledLibraryMappings(this PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.GetPullServers().SelectMany(s => s.GetEnabledLibraryMappings()).ToList();
+    }
+
+    /// <summary>
+    /// Returns the enabled user mappings of every scan server, in priority order. Never returns null.
+    /// </summary>
+    /// <param name="config">The configuration.</param>
+    /// <returns>The enabled mappings across all scan servers.</returns>
     public static List<UserMapping> GetEnabledUserMappings(this PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return config.UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
+        return config.GetPullServers().SelectMany(s => s.GetEnabledUserMappings()).ToList();
+    }
+
+    /// <summary>
+    /// Returns every library mapping of every server, enabled or not, in priority order. For code that
+    /// only cares about local folders, such as disk space and recycling, where a disabled mapping's
+    /// folder still exists.
+    /// </summary>
+    /// <param name="config">The configuration.</param>
+    /// <returns>All library mappings.</returns>
+    public static List<LibraryMapping> GetAllLibraryMappings(this PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.Servers?.SelectMany(s => s.LibraryMappings ?? new List<LibraryMapping>()).ToList() ?? new List<LibraryMapping>();
     }
 }

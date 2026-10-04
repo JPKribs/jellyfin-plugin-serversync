@@ -22,13 +22,24 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 public sealed class HistorySyncTableManager
     : SyncTableManagerBase<HistorySyncItem, (string SourceUserId, string SourceItemId)>
 {
+    private readonly IPluginConfigurationManager? _configManager;
+
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
-    public HistorySyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<HistorySyncTableManager> logger)
+    public HistorySyncTableManager(
+        ISyncDatabaseProvider databaseProvider,
+        ILogger<HistorySyncTableManager> logger,
+        IPluginConfigurationManager? configManager = null)
         : base(GetDatabase(databaseProvider), logger)
     {
+        _configManager = configManager;
     }
+
+    // Whether rows should count a source that is behind as work. Not stored on the row, since it is
+    // a property of the current configuration, so every row read from the database is stamped with
+    // the live setting. The dashboard and the sync task then see the same answer the refresh did.
+    private bool Negotiating => _configManager is not null && Plugin.Instance is not null && _configManager.Configuration.HistorySyncNegotiate;
 
     private static SyncDatabase GetDatabase(ISyncDatabaseProvider provider)
     {
@@ -95,9 +106,18 @@ public sealed class HistorySyncTableManager
         item.MergedLastPlayedDate = ReadNullableDateTime(reader, "MergedLastPlayedDate");
         item.MergedIsFavorite = ReadNullableBool(reader, "MergedIsFavorite");
 
+        item.NegotiatedIsPlayed = ReadNullableBool(reader, "NegotiatedIsPlayed");
+        item.NegotiatedPlayCount = ReadNullableInt32(reader, "NegotiatedPlayCount");
+        item.NegotiatedPlaybackPositionTicks = ReadNullableInt64(reader, "NegotiatedPlaybackPositionTicks");
+        item.NegotiatedLastPlayedDate = ReadNullableDateTime(reader, "NegotiatedLastPlayedDate");
+        item.NegotiatedIsFavorite = ReadNullableBool(reader, "NegotiatedIsFavorite");
+        item.NegotiatedAt = ReadNullableDateTime(reader, "NegotiatedAt");
+        item.NegotiateWithSource = Negotiating;
+
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
         item.RetryCount = ReadNullableInt32(reader, "RetryCount") ?? 0;
+        item.ServerKey = ReadNullableString(reader, "ServerKey");
         item.SourceState.SourceHash = ReadNullableString(reader, "SourceStateHash");
         item.SourceState.SyncedHash = ReadNullableString(reader, "SyncedStateHash");
         return item;
@@ -157,16 +177,18 @@ public sealed class HistorySyncTableManager
                     SourceIsPlayed, SourcePlayCount, SourcePlaybackPositionTicks, SourceLastPlayedDate, SourceIsFavorite,
                     LocalIsPlayed, LocalPlayCount, LocalPlaybackPositionTicks, LocalLastPlayedDate, LocalIsFavorite,
                     MergedIsPlayed, MergedPlayCount, MergedPlaybackPositionTicks, MergedLastPlayedDate, MergedIsFavorite,
+                    NegotiatedIsPlayed, NegotiatedPlayCount, NegotiatedPlaybackPositionTicks, NegotiatedLastPlayedDate, NegotiatedIsFavorite, NegotiatedAt,
                     Status, StatusDate, LastSyncTime, Reason, RetryCount,
-                    SourceStateHash, SyncedStateHash
+                    SourceStateHash, SyncedStateHash, ServerKey
                 ) VALUES (
                     @sourceUserId, @localUserId, @sourceLibraryId, @localLibraryId,
                     @sourceItemId, @localItemId, @itemName, @sourcePath, @localPath,
                     @srcPlayed, @srcCount, @srcPos, @srcLast, @srcFav,
                     @locPlayed, @locCount, @locPos, @locLast, @locFav,
                     @mrgPlayed, @mrgCount, @mrgPos, @mrgLast, @mrgFav,
+                    @negPlayed, @negCount, @negPos, @negLast, @negFav, @negAt,
                     @status, @statusDate, @lastSync, @reason, @retryCount,
-                    @srcStateHash, @syncedStateHash
+                    @srcStateHash, @syncedStateHash, @serverKey
                 )
                 ON CONFLICT(SourceUserId, SourceItemId) DO UPDATE SET
                     LocalUserId = @localUserId,
@@ -191,12 +213,19 @@ public sealed class HistorySyncTableManager
                     MergedPlaybackPositionTicks = @mrgPos,
                     MergedLastPlayedDate = @mrgLast,
                     MergedIsFavorite = @mrgFav,
+                    NegotiatedIsPlayed = @negPlayed,
+                    NegotiatedPlayCount = @negCount,
+                    NegotiatedPlaybackPositionTicks = @negPos,
+                    NegotiatedLastPlayedDate = @negLast,
+                    NegotiatedIsFavorite = @negFav,
+                    NegotiatedAt = @negAt,
                     Status = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
                     StatusDate = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.StatusDate ELSE @statusDate END,
                     LastSyncTime = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.LastSyncTime ELSE @lastSync END,
                     Reason = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.Reason ELSE @reason END,
                     RetryCount = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.RetryCount ELSE @retryCount END,
                     SourceStateHash = @srcStateHash,
+                    ServerKey = @serverKey,
                     SyncedStateHash = CASE
                         WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.SyncedStateHash
                         WHEN @syncedStateHash IS NOT NULL THEN @syncedStateHash
@@ -227,16 +256,41 @@ public sealed class HistorySyncTableManager
             AddNullable(cmd, "@mrgPos", record.MergedPlaybackPositionTicks);
             AddNullableTimestamp(cmd, "@mrgLast", record.MergedLastPlayedDate);
             AddNullableBool(cmd, "@mrgFav", record.MergedIsFavorite);
+            AddNullableBool(cmd, "@negPlayed", record.NegotiatedIsPlayed);
+            AddNullable(cmd, "@negCount", record.NegotiatedPlayCount);
+            AddNullable(cmd, "@negPos", record.NegotiatedPlaybackPositionTicks);
+            AddNullableTimestamp(cmd, "@negLast", record.NegotiatedLastPlayedDate);
+            AddNullableBool(cmd, "@negFav", record.NegotiatedIsFavorite);
+            AddNullableTimestamp(cmd, "@negAt", record.NegotiatedAt);
             cmd.Parameters.AddWithValue("@status", (int)record.Status);
             AddTimestamp(cmd, "@statusDate", record.StatusDate);
             AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
             AddNullable(cmd, "@reason", record.Reason);
             AddNullable(cmd, "@srcStateHash", record.SourceState.SourceHash);
             AddNullable(cmd, "@syncedStateHash", record.SourceState.SyncedHash);
+            AddNullable(cmd, "@serverKey", record.ServerKey);
             cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
             cmd.ExecuteNonQuery();
         });
     }
+
+    /// <summary>
+    /// Returns the rows one peer holds for a local item, across local users. Used when that peer
+    /// reports agreement on an item so this server's own row for it can record the agreed base.
+    /// </summary>
+    /// <param name="serverKey">The peer's entry key.</param>
+    /// <param name="localItemId">The local item id as stored, without dashes.</param>
+    /// <returns>The rows.</returns>
+    public IList<HistorySyncItem> GetByLocalItem(string serverKey, string localItemId) => ExecuteRead(
+        conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM HistorySyncItems WHERE ServerKey = @key AND LocalItemId = @item";
+            cmd.Parameters.AddWithValue("@key", serverKey);
+            cmd.Parameters.AddWithValue("@item", localItemId);
+            return ReadAll(cmd);
+        },
+        Array.Empty<HistorySyncItem>());
 
     /// <summary>
     /// Returns all history rows for a given user mapping, regardless of

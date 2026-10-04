@@ -214,6 +214,23 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         cmd.ExecuteNonQuery();
     });
 
+    /// <summary>Removes every row that came from one configured server, used when the entry is removed.</summary>
+    /// <param name="serverKey">The entry key the rows carry.</param>
+    /// <returns>How many rows were removed.</returns>
+    public int DeleteByServerKey(string serverKey)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(serverKey);
+        var deleted = 0;
+        ExecuteWrite(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"DELETE FROM {TableName} WHERE ServerKey = @ServerKey";
+            cmd.Parameters.AddWithValue("@ServerKey", serverKey);
+            deleted = cmd.ExecuteNonQuery();
+        });
+        return deleted;
+    }
+
     /// <inheritdoc />
     public int DeleteByStatus(SyncStatus status)
     {

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Services;
 using MediaBrowser.Model.Tasks;
@@ -18,7 +20,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 /// </summary>
 /// <typeparam name="TRecord">Record type.</typeparam>
 /// <typeparam name="TKey">Natural-key type.</typeparam>
-public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
+public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfigurableScheduledTask
     where TRecord : SyncRecord
     where TKey : notnull
 {
@@ -60,15 +62,70 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     protected IPluginConfigurationManager ConfigManager => _configManager;
 
     /// <summary>
-    /// Gets or sets the source-server client for the current run. Created
-    /// by the default <see cref="BeforeRunAsync"/> from the configured
-    /// source URL/API key; disposed automatically at the end of
-    /// <c>ExecuteAsync</c>; null outside a run. Subclasses that override
-    /// <see cref="BeforeRunAsync"/> entirely (e.g. Content needs a
-    /// circuit-breaker wrapped connection test) can assign this directly —
-    /// the base's finally-disposal still kicks in.
+    /// Gets or sets the scan servers connected for the current run, in priority order. Populated by the
+    /// default <see cref="BeforeRunAsync"/>, disposed at the end of <c>ExecuteAsync</c>, empty outside a
+    /// run. Rows carry the key of the server they came from, and <see cref="SourceFor"/> turns that
+    /// back into the connected source to talk to.
     /// </summary>
-    protected SourceServerClient? Client { get; set; }
+    protected IReadOnlyList<ScanSource> Sources { get; set; } = Array.Empty<ScanSource>();
+
+    /// <summary>
+    /// Finds the connected source a row belongs to. A row with no key was written before servers
+    /// became a list and belongs to the first source.
+    /// </summary>
+    /// <param name="record">The row.</param>
+    /// <returns>The source, or null when that server did not connect this run.</returns>
+    protected ScanSource? SourceFor(TRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (string.IsNullOrEmpty(record.ServerKey))
+        {
+            return Sources.Count > 0 ? Sources[0] : null;
+        }
+
+        foreach (var source in Sources)
+        {
+            if (string.Equals(source.Key, record.ServerKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return source;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The connected source a row belongs to, or an exception naming the server when it did not
+    /// connect this run, so the row errors with a reason an operator can act on.
+    /// </summary>
+    /// <param name="record">The row.</param>
+    /// <returns>The source.</returns>
+    protected ScanSource RequireSource(TRecord record)
+    {
+        var source = SourceFor(record);
+        if (source is not null)
+        {
+            return source;
+        }
+
+        var server = _configManager.Configuration.FindServer(record.ServerKey);
+        var name = server?.DisplayName ?? (string.IsNullOrEmpty(record.ServerKey) ? "the first scan server" : record.ServerKey);
+        throw new InvalidOperationException($"Source server '{name}' is not available this run");
+    }
+
+    // The per module tasks run inside Sync Content and Sync Information and from the dashboard, so
+    // they stay registered but leave the scheduled task list.
+    /// <inheritdoc />
+    public bool IsHidden => true;
+
+    /// <inheritdoc />
+    public bool IsLogged => true;
+
+    // Explicit because the module tasks already have an IsEnabled method with a different meaning.
+#pragma warning disable CA1033
+    /// <inheritdoc />
+    bool IConfigurableScheduledTask.IsEnabled => true;
+#pragma warning restore CA1033
 
     /// <inheritdoc />
     public abstract string Name { get; }
@@ -113,17 +170,63 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     /// </summary>
     protected virtual async Task<bool> BeforeRunAsync(CancellationToken cancellationToken)
     {
-        var config = _configManager.Configuration;
-        Client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-        var result = await Client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-        if (!result.Success)
+        var connected = new List<ScanSource>();
+        var servers = _configManager.Configuration.GetPullServers();
+        for (var i = 0; i < servers.Count; i++)
         {
-            Logger.LogError("{Task}: source connection failed — {Error}", Name, result.ErrorMessage ?? "unknown");
+            var server = servers[i];
+            SourceServerClient client;
+            try
+            {
+                client = _clientFactory.Create(server);
+            }
+            catch (ArgumentException ex)
+            {
+                Logger.LogError("{Task}: server '{Server}' rejected: {Error}", Name, server.DisplayName, ex.Message);
+                continue;
+            }
+
+            var result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            if (!result.Success)
+            {
+                Logger.LogError("{Task}: connection to '{Server}' failed: {Error}", Name, server.DisplayName, result.ErrorMessage ?? "unknown");
+                client.Dispose();
+                continue;
+            }
+
+            connected.Add(new ScanSource(server, client, i));
+        }
+
+        Sources = connected;
+        if (connected.Count == 0)
+        {
+            FailPreflight("no scan server is reachable or every configured key is invalid");
             return false;
         }
 
         return true;
     }
+
+    /// <summary>
+    /// Records why the pre-flight is aborting, so the dashboard shows the real cause instead of the
+    /// generic abort message. Call before returning false from <see cref="BeforeRunAsync"/>.
+    /// </summary>
+    /// <param name="reason">The cause, in words an operator can act on.</param>
+    protected void FailPreflight(string reason)
+    {
+        Logger.LogError("{Task}: {Reason}", Name, reason);
+        _preflightFailureReason = reason;
+    }
+
+    /// <summary>
+    /// Runs once per apply group before any of its records are applied. Default is a no-op. A
+    /// module that can settle a whole group with the source in one call does that work here and
+    /// lets <see cref="ApplyAsync(TRecord, CancellationToken)"/> consume the result per record.
+    /// </summary>
+    /// <param name="group">The records about to be applied.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    protected virtual Task PrepareGroupAsync(IList<TRecord> group, CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
     /// Applies the queued change to the local server. Throwing transitions
@@ -163,6 +266,81 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     /// so partial success persists alongside the Errored row.
     /// </summary>
     protected virtual Task VerifyAfterApplyAsync(TRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Applies one stored row outside a scheduled run, for a change hint, against the server it came
+    /// from. The same apply, verify, and bookkeeping as the full run, under the module's mutex.
+    /// </summary>
+    /// <param name="record">The queued row.</param>
+    /// <param name="source">The connected server the row came from.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> when the row is now synced. On failure the row holds the reason.</returns>
+    public async Task<bool> ApplyRowAsync(TRecord record, ScanSource source, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(source);
+
+        var moduleMutex = SyncModuleMutex.ForModule(ModuleMutexKey);
+        await moduleMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Sources = new[] { source };
+            if (!await BeforeRowAsync(cancellationToken).ConfigureAwait(false))
+            {
+                record.Status = SyncStatus.Errored;
+                record.StatusDate = DateTime.UtcNow;
+                record.Reason = _preflightFailureReason ?? "pre-flight failed";
+                Manager.Upsert(record);
+                return false;
+            }
+
+            await PrepareGroupAsync(new List<TRecord> { record }, cancellationToken).ConfigureAwait(false);
+            var ok = await ApplyOneAsync(record, null, cancellationToken).ConfigureAwait(false);
+            await AfterRowAsync(ok, cancellationToken).ConfigureAwait(false);
+            return ok;
+        }
+        finally
+        {
+            Sources = Array.Empty<ScanSource>();
+            moduleMutex.Release();
+        }
+    }
+
+    /// <summary>
+    /// Pre-flight for a single row apply, without connecting servers, since the caller provides the
+    /// source. Modules with checks beyond the connection, such as disk space, override. Call
+    /// <see cref="FailPreflight"/> with the reason before returning false.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> to go ahead.</returns>
+    protected virtual Task<bool> BeforeRowAsync(CancellationToken cancellationToken)
+    {
+        _preflightFailureReason = null;
+        return Task.FromResult(true);
+    }
+
+    /// <summary>Follow up after a single row apply, such as asking the library to notice a new file. Default does nothing.</summary>
+    /// <param name="applied">Whether the row applied.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    protected virtual Task AfterRowAsync(bool applied, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Registers the write about to happen with the apply guard, so the change observer treats the
+    /// events it raises as the echo of a sync rather than a local edit. Default registers nothing.
+    /// </summary>
+    /// <param name="record">The row about to be applied.</param>
+    /// <returns>A handle to dispose when the write is done, or null.</returns>
+    protected virtual IDisposable? EnterApplyGuard(TRecord record) => null;
+
+    /// <summary>
+    /// Called after <see cref="OnApplySucceeded"/> and before the row is stored, for work that needs
+    /// the source, such as recording the version the applied value carries. Default does nothing.
+    /// </summary>
+    /// <param name="record">The applied row.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    protected virtual Task AfterApplySucceededAsync(TRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
     /// Called after a successful apply, before the record is marked Synced.
@@ -277,13 +455,20 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         }
         finally
         {
-            Client?.Dispose();
-            Client = null;
+            foreach (var source in Sources)
+            {
+                source.Dispose();
+            }
+
+            Sources = Array.Empty<ScanSource>();
         }
     }
 
+    private string? _preflightFailureReason;
+
     private async Task RunAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
+        _preflightFailureReason = null;
         if (!await BeforeRunAsync(cancellationToken).ConfigureAwait(false))
         {
             // Bumped to LogError + recorded to config so the dashboard can
@@ -293,7 +478,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
             // circuit breaker, connection); this captures the high-level
             // fact of the abort.
             Logger.LogError("{Task}: pre-flight aborted run — see prior log entries for the specific check that failed", Name);
-            RecordRunFailure("Sync", "Pre-flight aborted (see log for cause: connection / disk space / circuit breaker)");
+            RecordRunFailure("Sync", _preflightFailureReason ?? "Pre-flight aborted (see log for cause: connection / disk space / circuit breaker)");
             return;
         }
 
@@ -305,7 +490,16 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
         //  90–100 %  FinalizeAsync (Content's library-refresh phase fits here
         //            so the bar moves while ValidateMediaLibrary runs)
         const double ApplyEnd = 90.0;
-        var queued = GetItemsToApply();
+
+        // Rows from a server that is no longer configured, or that did not connect this run, have
+        // nothing to pull from. They are left as they are rather than errored on every run.
+        var all = GetItemsToApply();
+        var queued = all.Where(r => string.IsNullOrEmpty(r.ServerKey) || SourceFor(r) is not null).ToList();
+        if (queued.Count < all.Count)
+        {
+            Logger.LogInformation("{Task}: leaving {Count} queued row(s) whose server is not configured or did not connect this run", Name, all.Count - queued.Count);
+        }
+
         var successes = 0;
         var failures = 0;
 
@@ -378,6 +572,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
             {
                 break;
             }
+
+            await PrepareGroupAsync(group, cancellationToken).ConfigureAwait(false);
 
             if (maxParallel == 1 || group.Count <= 1)
             {
@@ -513,10 +709,14 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask
     {
         try
         {
-            await ApplyAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
-            await VerifyAfterApplyAsync(record, cancellationToken).ConfigureAwait(false);
+            using (EnterApplyGuard(record))
+            {
+                await ApplyAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
+                await VerifyAfterApplyAsync(record, cancellationToken).ConfigureAwait(false);
+            }
 
             OnApplySucceeded(record);
+            await AfterApplySucceededAsync(record, cancellationToken).ConfigureAwait(false);
             record.Status = SyncStatus.Synced;
             record.StatusDate = DateTime.UtcNow;
             record.LastSyncTime = DateTime.UtcNow;

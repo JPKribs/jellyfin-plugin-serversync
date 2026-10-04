@@ -10,6 +10,7 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Library;
@@ -37,6 +38,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
     private readonly MetadataSyncTableService _metadataService;
+    private readonly AppliedVersionRecorder _applied;
 
     /// <summary>
     /// Initializes a new instance.
@@ -48,12 +50,14 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
         MetadataSyncTableService metadataService,
-        MetadataSyncTableManager manager)
+        MetadataSyncTableManager manager,
+        AppliedVersionRecorder applied)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
         _providerManager = providerManager;
         _metadataService = metadataService;
+        _applied = applied;
     }
 
     /// <inheritdoc />
@@ -86,7 +90,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     {
         var config = ConfigManager.Configuration;
         if (!config.EnableMetadataSync) return false;
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey)) return false;
+        if (config.GetPullServers().Count == 0) return false;
         if (config.GetEnabledLibraryMappings().Count == 0) return false;
         return config.MetadataSyncMetadata || config.MetadataSyncImages
             || config.MetadataSyncPeople || config.MetadataSyncStudios;
@@ -125,6 +129,16 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             .Select(g => (IList<MetadataSyncItem>)g.ToList());
     }
 
+    // Writing an item's cast touches its Person items too, so every people hint is held back for the
+    // duration of the write.
+    /// <inheritdoc />
+    protected override IDisposable? EnterApplyGuard(MetadataSyncItem record)
+        => _applied.Enter(Models.Queue.HintKind.Metadata, record?.LocalItemId ?? string.Empty, alsoAll: Models.Queue.HintKind.People);
+
+    /// <inheritdoc />
+    protected override Task AfterApplySucceededAsync(MetadataSyncItem record, CancellationToken cancellationToken)
+        => _applied.RecordAsync(Models.Queue.HintKind.Metadata, record?.LocalItemId ?? string.Empty, record?.SourceItemId ?? string.Empty, SourceFor(record!), cancellationToken);
+
     /// <inheritdoc />
     protected override async Task ApplyAsync(MetadataSyncItem record, CancellationToken cancellationToken)
     {
@@ -162,7 +176,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             anyApplyAttempted = true;
             try
             {
-                imagesChanged = await ApplyImagesAsync(localItem, record, Client, cancellationToken).ConfigureAwait(false);
+                imagesChanged = await ApplyImagesAsync(localItem, record, RequireSource(record).Client, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -925,14 +939,15 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         // refreshes' SourceHash short-circuit (which is computed over the
         // tag-only manifest) keeps working.
         string? enrichedSource = record.Images.Source;
-        if (Client != null && Guid.TryParse(record.SourceItemId, out var sourceItemGuid))
+        var imageSource = SourceFor(record);
+        if (imageSource != null && Guid.TryParse(record.SourceItemId, out var sourceItemGuid))
         {
             try
             {
                 enrichedSource = await Utilities.ImageManifestEnricher.EnrichAsync(
                     record.Images.Source,
                     sourceItemGuid,
-                    Client,
+                    imageSource.Client,
                     Logger,
                     record.ItemName ?? record.SourceItemId,
                     cancellationToken).ConfigureAwait(false);

@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
@@ -18,13 +20,19 @@ using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
+/// Source side work item for the People refresh task: one source person and the server it came from.
+/// </summary>
+public sealed record PersonWork(ScanSource Source, SdkBaseItemDto Person);
+
+/// <summary>
 /// Refresh phase for People sync. Fetches all source persons, looks up each
 /// by name on the local server, and writes a snapshot row for the matched
 /// ones. Persons without a local match are skipped (no row written).
 /// </summary>
-public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, BaseItemDto, string>
+public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, PersonWork, string>
 {
     private readonly ILibraryManager _libraryManager;
+    private readonly ScanConflictSettler _conflicts;
 
     /// <summary>
     /// Per-run cache of local Person items keyed by Name. Built by
@@ -43,11 +51,50 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         ILibraryManager libraryManager,
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
-        PeopleSyncTableManager manager)
+        PeopleSyncTableManager manager,
+        ScanConflictSettler conflicts)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
+        _conflicts = conflicts;
     }
+
+    // A single person from a hint: the cache holds just that one local person, found by name.
+    /// <inheritdoc />
+    protected override void PrepareForOne(PersonWork work)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+        // Looked up by query rather than GetPerson, which creates a person that does not exist yet.
+        var byName = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(work.Person.Name))
+        {
+            var found = _libraryManager.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = new[] { Jellyfin.Data.Enums.BaseItemKind.Person },
+                Name = work.Person.Name,
+                Limit = 1
+            });
+            if (found is { Count: > 0 } && string.Equals(found[0].Name, work.Person.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                byName[work.Person.Name] = found[0];
+            }
+        }
+
+        _localPersonsByName = byName;
+    }
+
+    /// <inheritdoc />
+    protected override Task ResolveConflictsAsync(IList<PeopleSyncItem> queued, CancellationToken cancellationToken)
+        => _conflicts.SettleAsync(
+            queued,
+            Sources,
+            Models.Queue.HintKind.People,
+            record => Services.Queue.HintProtocol.PeopleKey(record.PersonName),
+            record => Services.Queue.HintProtocol.PeopleKey(record.PersonName),
+            record => (record.LocalPersonId, record.PersonName),
+            record => Manager.Upsert(record),
+            Logger,
+            cancellationToken);
 
     /// <inheritdoc />
     public override string Name => "Refresh People Sync Table";
@@ -76,9 +123,14 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     protected override bool IsEnabled()
     {
         var config = ConfigManager.Configuration;
-        return config.EnablePeopleSync
-            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
-            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey);
+        return config.EnablePeopleSync && config.GetPullServers().Count > 0;
+    }
+
+    // The local person cache is built once per run, by the first server's list pass.
+    /// <inheritdoc />
+    protected override void OnRunStarting()
+    {
+        _localPersonsByName = null;
     }
 
     // Bulk fetch + in-memory join: enumerate local Person items, then pull
@@ -90,39 +142,39 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
     // one HTTP round-trip per local person (130k+ requests on a real
     // library, 2.5 hours wall-clock).
     /// <inheritdoc />
-    protected override async Task<IList<SdkBaseItemDto>> GetListAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    protected override async Task<IList<PersonWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(progress);
-        if (Client == null)
-        {
-            MarkSourceUnavailable("no source client available for this run");
-            return Array.Empty<SdkBaseItemDto>();
-        }
 
         progress.Report(2);
 
-        // Step 1: enumerate local Person items once and cache them for
+        // Step 1: enumerate local Person items once per run and cache them for
         // BuildRecordAsync. Doing this once up front (rather than per-item)
         // avoids hammering Jellyfin's library SQLite during the parallel
         // build phase — that was producing "database is locked" errors.
-        var localPersons = _libraryManager.GetItemList(new InternalItemsQuery
+        if (_localPersonsByName == null)
         {
-            IncludeItemTypes = new[] { Jellyfin.Data.Enums.BaseItemKind.Person }
-        }) ?? new List<BaseItem>();
-
-        _localPersonsByName = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in localPersons)
-        {
-            if (!string.IsNullOrEmpty(p.Name) && !_localPersonsByName.ContainsKey(p.Name))
+            var localPersons = _libraryManager.GetItemList(new InternalItemsQuery
             {
-                _localPersonsByName[p.Name] = p;
-            }
-        }
+                IncludeItemTypes = new[] { Jellyfin.Data.Enums.BaseItemKind.Person }
+            }) ?? new List<BaseItem>();
 
-        Logger.LogInformation(
-            "{Task}: enumerated {Count} local persons; bulk-fetching source persons",
-            Name,
-            _localPersonsByName.Count);
+            var byName = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in localPersons)
+            {
+                if (!string.IsNullOrEmpty(p.Name) && !byName.ContainsKey(p.Name))
+                {
+                    byName[p.Name] = p;
+                }
+            }
+
+            _localPersonsByName = byName;
+            Logger.LogInformation(
+                "{Task}: enumerated {Count} local persons; bulk-fetching source persons",
+                Name,
+                _localPersonsByName.Count);
+        }
 
         // Local enumeration is the long pole of this phase on large
         // libraries (single blocking GetItemList call), so it owns the
@@ -143,7 +195,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
                     "no Person items found on this server while tracking rows exist — local catalog is likely mid rescan, so pruning is skipped");
             }
 
-            return Array.Empty<SdkBaseItemDto>();
+            return Array.Empty<PersonWork>();
         }
 
         // Step 2: bulk-fetch the entire source Person catalog via /Persons.
@@ -152,7 +204,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         IReadOnlyList<SdkBaseItemDto> sourcePersons;
         try
         {
-            sourcePersons = await Client.GetAllPersonsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+            sourcePersons = await source.Client.GetAllPersonsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -162,9 +214,9 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         {
             // Source returned an error (or no real answer). Skip pruning this run
             // so persons that still exist aren't deleted, and enumerate nothing.
-            MarkSourceUnavailable("source server unavailable bulk-fetching persons");
-            Logger.LogWarning(ex, "Failed to bulk-fetch persons from source; skipping prune this run");
-            return Array.Empty<SdkBaseItemDto>();
+            MarkSourceUnavailable($"server '{source.Name}' unavailable bulk-fetching persons");
+            Logger.LogWarning(ex, "Failed to bulk-fetch persons from {Server}; skipping prune this run", source.Name);
+            return Array.Empty<PersonWork>();
         }
 
         if (sourcePersons.Count == 0)
@@ -174,8 +226,8 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
             // startup, migrating, or an endpoint/auth regression). Treating
             // it as truth is what wiped the tracking table on 10.11.64.0.
             MarkSourceUnavailable(
-                $"source returned 0 persons while {_localPersonsByName.Count} exist locally — treating as an unreliable answer");
-            return Array.Empty<SdkBaseItemDto>();
+                $"server '{source.Name}' returned 0 persons while {_localPersonsByName.Count} exist locally — treating as an unreliable answer");
+            return Array.Empty<PersonWork>();
         }
 
         progress.Report(85);
@@ -183,14 +235,14 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
         // Step 3: intersect by name in memory. Source duplicates (same name
         // appearing twice on source) keep the first occurrence — the local
         // dictionary uses the same first-wins rule above.
-        var matched = new List<SdkBaseItemDto>(_localPersonsByName.Count);
+        var matched = new List<PersonWork>(_localPersonsByName.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var person in sourcePersons)
         {
             if (string.IsNullOrEmpty(person.Name)) continue;
             if (!_localPersonsByName.ContainsKey(person.Name)) continue;
             if (!seen.Add(person.Name)) continue;
-            matched.Add(person);
+            matched.Add(new PersonWork(source, person));
         }
 
         Logger.LogInformation(
@@ -206,10 +258,12 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
 
     /// <inheritdoc />
     protected override async Task<PeopleSyncItem?> BuildRecordAsync(
-        BaseItemDto source,
+        PersonWork work,
         IReadOnlyDictionary<string, PeopleSyncItem> existing,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(work);
+        var source = work.Person;
         if (string.IsNullOrEmpty(source.Name))
         {
             return null;
@@ -231,6 +285,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
 
         record.SourcePersonId = source.Id?.ToString("N", CultureInfo.InvariantCulture);
         record.LocalPersonId = localPerson.Id.ToString("N", CultureInfo.InvariantCulture);
+        record.ServerKey = work.Source.Key;
 
         // Build metadata blobs for both sides; SyncableValue.RecomputeSourceHash
         // ensures the SourceHash field is populated for the Compare fast-path.
@@ -251,8 +306,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
             // BaseItemDto.ImageTags; without sizing, the comparator's
             // tag-only-vs-sized fallback fires on every row, every refresh —
             // every row queues and re-downloads images that already match.
-            if (Client != null
-                && !string.IsNullOrEmpty(record.SourcePersonId)
+            if (!string.IsNullOrEmpty(record.SourcePersonId)
                 && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
             {
                 try
@@ -261,7 +315,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
                         sourceImg,
                         record.Images.Source,
                         sourcePersonGuid,
-                        Client,
+                        work.Source.Client,
                         Logger,
                         source.Name,
                         config.DeepImageVerification,
@@ -295,6 +349,14 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Ba
 
     /// <inheritdoc />
     protected override string ExtractKey(PeopleSyncItem record) => record.PersonName;
+
+    // Two servers collide on the person's name, which is also the row key, so the first server in
+    // priority order supplies the person and the rest are dropped before any row is built.
+    /// <inheritdoc />
+    protected override string? PriorityKeyOf(PersonWork source) => source?.Person.Name;
+
+    /// <inheritdoc />
+    protected override string? PriorityKeyOf(PeopleSyncItem record) => record?.PersonName;
 
     /// <inheritdoc />
     protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)

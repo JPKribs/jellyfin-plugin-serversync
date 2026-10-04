@@ -103,6 +103,9 @@ public class UserSyncUserDto
     /// </summary>
     public string? SourceServerUrl { get; set; }
 
+    /// <summary>Gets or sets the configured server entry the row came from.</summary>
+    public string? ServerKey { get; set; }
+
     // ===== Computed Aggregate Fields =====
 
     /// <summary>

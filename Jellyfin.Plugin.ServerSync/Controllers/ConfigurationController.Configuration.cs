@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -29,7 +30,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<ConnectionTestResult>> TestConnection([FromBody] TestConnectionRequest request, CancellationToken cancellationToken)
     {
-        var urlValidation = ValidateServerUrl(request.ServerUrl);
+        var urlValidation = ValidateServerUrl(request.ServerUrl, request.AllowPrivateNetwork);
         if (!urlValidation.IsValid)
         {
             return Ok(new ConnectionTestResult
@@ -53,7 +54,12 @@ public partial class ConfigurationController
         SourceServerClient client;
         try
         {
-            client = _clientFactory.Create(urlValidation.NormalizedUrl!, ResolveRequestApiKey(request.ApiKey));
+            client = _clientFactory.Create(new SourceServer
+            {
+                Url = urlValidation.NormalizedUrl!,
+                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey),
+                AllowPrivateNetwork = request.AllowPrivateNetwork
+            });
         }
         catch (ArgumentException ex)
         {
@@ -80,7 +86,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<ValidateUrlResponse> ValidateUrl([FromBody] ValidateUrlRequest request)
     {
-        return Ok(ValidateServerUrl(request.Url));
+        return Ok(ValidateServerUrl(request.Url, request.AllowPrivateNetwork));
     }
 
     /// <summary>
@@ -93,7 +99,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<AuthenticateResponse>> Authenticate([FromBody] AuthenticateRequest request, CancellationToken cancellationToken)
     {
-        var urlValidation = ValidateServerUrl(request.ServerUrl);
+        var urlValidation = ValidateServerUrl(request.ServerUrl, request.AllowPrivateNetwork);
         if (!urlValidation.IsValid)
         {
             return Ok(new AuthenticateResponse
@@ -139,7 +145,12 @@ public partial class ConfigurationController
         SourceServerClient client;
         try
         {
-            client = _clientFactory.Create(urlValidation.NormalizedUrl!, result.AccessToken!);
+            client = _clientFactory.Create(new SourceServer
+            {
+                Url = urlValidation.NormalizedUrl!,
+                ApiKey = result.AccessToken!,
+                AllowPrivateNetwork = request.AllowPrivateNetwork
+            });
         }
         catch (ArgumentException ex)
         {
@@ -173,7 +184,7 @@ public partial class ConfigurationController
         [FromBody] TestConnectionRequest request,
         CancellationToken cancellationToken)
     {
-        var urlValidation = ValidateServerUrl(request.ServerUrl);
+        var urlValidation = ValidateServerUrl(request.ServerUrl, request.AllowPrivateNetwork);
         if (!urlValidation.IsValid)
         {
             return BadRequest(urlValidation.Message);
@@ -186,11 +197,16 @@ public partial class ConfigurationController
 
         try
         {
-            using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, ResolveRequestApiKey(request.ApiKey));
+            using var client = _clientFactory.Create(new SourceServer
+            {
+                Url = urlValidation.NormalizedUrl!,
+                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey),
+                AllowPrivateNetwork = request.AllowPrivateNetwork
+            });
 
-            // Pass authenticated user ID for non-admin fallback
-            var config = Plugin.Instance?.Configuration;
-            var authenticatedUserId = config?.SourceServerAuthenticatedUserId;
+            // The authenticated user id, when the key is a user token, enables the non admin fallback.
+            var authenticatedUserId = request.AuthenticatedUserId
+                ?? _configManager.Configuration.FindServer(request.ServerKey)?.AuthenticatedUserId;
 
             var libraries = await client.GetLibrariesAsync(authenticatedUserId, cancellationToken).ConfigureAwait(false);
 
@@ -230,7 +246,7 @@ public partial class ConfigurationController
         [FromBody] TestConnectionRequest request,
         CancellationToken cancellationToken)
     {
-        var urlValidation = ValidateServerUrl(request.ServerUrl);
+        var urlValidation = ValidateServerUrl(request.ServerUrl, request.AllowPrivateNetwork);
         if (!urlValidation.IsValid)
         {
             return BadRequest(urlValidation.Message);
@@ -243,11 +259,15 @@ public partial class ConfigurationController
 
         try
         {
-            using var client = _clientFactory.Create(urlValidation.NormalizedUrl!, ResolveRequestApiKey(request.ApiKey));
+            using var client = _clientFactory.Create(new SourceServer
+            {
+                Url = urlValidation.NormalizedUrl!,
+                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey),
+                AllowPrivateNetwork = request.AllowPrivateNetwork
+            });
 
-            // Pass authenticated user ID for non-admin fallback
-            var config = Plugin.Instance?.Configuration;
-            var authenticatedUserId = config?.SourceServerAuthenticatedUserId;
+            var authenticatedUserId = request.AuthenticatedUserId
+                ?? _configManager.Configuration.FindServer(request.ServerKey)?.AuthenticatedUserId;
 
             var users = await client.GetUsersAsync(authenticatedUserId, cancellationToken).ConfigureAwait(false);
 
@@ -277,6 +297,7 @@ public partial class ConfigurationController
     /// Gets top-level items from a source server library for browsing/filtering.
     /// </summary>
     /// <param name="libraryId">Source library ID.</param>
+    /// <param name="serverKey">The configured server entry to browse. Defaults to the first scan server.</param>
     /// <param name="search">Optional search term.</param>
     /// <param name="startIndex">Starting index for pagination.</param>
     /// <param name="limit">Maximum items to return.</param>
@@ -287,6 +308,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<SourceLibraryItemsResponse>> GetSourceLibraryItems(
         [FromQuery] string libraryId,
+        [FromQuery] string? serverKey = null,
         [FromQuery] string? search = null,
         [FromQuery] int startIndex = 0,
         [FromQuery] int limit = 50,
@@ -315,8 +337,8 @@ public partial class ConfigurationController
             take = Math.Clamp(take.Value, 1, 200);
         }
 
-        var config = _configManager.Configuration;
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey))
+        var server = _configManager.Configuration.ResolveServer(serverKey);
+        if (server is null || !server.IsConfigured)
         {
             return BadRequest("Source server is not configured");
         }
@@ -328,7 +350,7 @@ public partial class ConfigurationController
 
         try
         {
-            using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
+            using var client = _clientFactory.Create(server);
 
             // Collections and playlists live outside libraries (server-wide
             // meta-folders), so the picker browses them without a parent
@@ -394,12 +416,11 @@ public partial class ConfigurationController
     /// surfacing the reason the code had already written.
     /// </summary>
     /// <param name="url">URL to validate.</param>
+    /// <param name="allowPrivateNetwork">Whether a private network address is acceptable for this entry.</param>
     /// <returns>Validation response with normalized URL.</returns>
-    private ValidateUrlResponse ValidateServerUrl(string url)
+    private static ValidateUrlResponse ValidateServerUrl(string url, bool allowPrivateNetwork)
     {
-        var ssrfError = ConfigurationUtilities.ValidateServerUrlForSsrf(
-            url,
-            _configManager.Configuration.AllowSourceServerOnPrivateNetwork);
+        var ssrfError = ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork);
         if (ssrfError != null)
         {
             return new ValidateUrlResponse

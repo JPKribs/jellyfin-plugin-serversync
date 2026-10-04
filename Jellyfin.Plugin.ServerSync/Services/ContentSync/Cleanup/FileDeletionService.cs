@@ -299,7 +299,7 @@ public static class FileDeletionService
         logger.LogInformation("Processing {Count} items marked for deletion", itemsToDelete.Count);
 
         // Build lookup for library root paths to bound empty folder cleanup
-        var libraryRootLookup = config.LibraryMappings
+        var libraryRootLookup = config.GetAllLibraryMappings()
             .Where(m => !string.IsNullOrEmpty(m.SourceLibraryId) && !string.IsNullOrEmpty(m.LocalRootPath))
             .GroupBy(m => m.SourceLibraryId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().LocalRootPath, StringComparer.OrdinalIgnoreCase);

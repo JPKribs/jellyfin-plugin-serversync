@@ -19,6 +19,8 @@
 import {
     createShared as baseCreateShared,
     createPaginatedTable,
+    createSortableCardList,
+    createChoiceGroup,
     generateGuid,
     SECRET_KEPT
 // Relative specifier, not '/web/...': it resolves against this module's own
@@ -28,7 +30,7 @@ import {
 // categories silently refused to expand.
 } from './configurationpage?name=serversync_jpkribs_shared.js';
 
-export { createPaginatedTable, generateGuid, SECRET_KEPT };
+export { createPaginatedTable, createSortableCardList, createChoiceGroup, generateGuid, SECRET_KEPT };
 
 var PLUGIN_ID = 'ebd650b5-6f4c-4ccb-b10d-23dffb3a7286';
 
@@ -47,7 +49,9 @@ export function createServerSyncShared(view) {
     // a blob object-URL after the row is in the DOM.
     var thumbSeq = 0;
 
-    shared.scheduleProxyImage = function (imgId, id, isUser, maxHeight) {
+    // Which configured server a row came from decides which peer the proxy
+    // asks for the image. A row with no key belongs to the first scan server.
+    shared.scheduleProxyImage = function (imgId, id, isUser, maxHeight, serverKey) {
         var attempts = 0;
         function tryLoad() {
             var img = document.getElementById(imgId);
@@ -57,11 +61,13 @@ export function createServerSyncShared(view) {
                 if (++attempts <= 3) setTimeout(tryLoad, 100 * attempts);
                 return;
             }
-            var url = ApiClient.getUrl('ServerSync/ImageProxy', {
+            var params = {
                 itemId: id,
                 user: isUser ? 'true' : 'false',
                 maxHeight: maxHeight || 80
-            });
+            };
+            if (serverKey) params.serverKey = serverKey;
+            var url = ApiClient.getUrl('ServerSync/ImageProxy', params);
             ApiClient.fetch({ url: url, type: 'GET' }).then(function (response) {
                 if (!response || !response.ok) throw new Error('image fetch failed');
                 return response.blob();
@@ -77,36 +83,77 @@ export function createServerSyncShared(view) {
         setTimeout(tryLoad, 0);
     };
 
-    function renderProxyThumb(id, isUser, imgClass, extraAttrs, placeholderHtml) {
+    function renderProxyThumb(id, isUser, imgClass, extraAttrs, placeholderHtml, serverKey) {
         if (!id) return placeholderHtml;
         var imgId = 'ss-thumb-' + (++thumbSeq);
-        shared.scheduleProxyImage(imgId, id, isUser, 80);
+        shared.scheduleProxyImage(imgId, id, isUser, 80, serverKey);
         return '<img id="' + imgId + '" class="' + imgClass + '"' + extraAttrs + ' />' +
             placeholderHtml.replace('class="', 'style="display:none" class="');
     }
 
     // Item thumbnail. Starts as portrait (40×60); on load, if the image is
     // landscape (width > height), it swaps to the landscape class (106×60).
-    shared.renderItemThumb = function (itemId) {
+    shared.renderItemThumb = function (itemId, serverKey) {
         return renderProxyThumb(itemId, false,
             'jpk-table-row-thumb jpk-table-row-thumb-portrait',
             ' onload="if(this.naturalWidth>this.naturalHeight){this.classList.remove(\'jpk-table-row-thumb-portrait\');this.classList.add(\'jpk-table-row-thumb-landscape\')}"',
-            '<div class="jpk-table-row-thumb-placeholder"><span class="material-icons">movie</span></div>');
+            '<div class="jpk-table-row-thumb-placeholder"><span class="material-icons">movie</span></div>',
+            serverKey);
     };
 
-    shared.renderUserThumb = function (userId) {
+    shared.renderUserThumb = function (userId, serverKey) {
         return renderProxyThumb(userId, true,
             'jpk-table-row-thumb-user',
             '',
-            '<div class="jpk-table-row-thumb-user-placeholder"><span class="material-icons">person</span></div>');
+            '<div class="jpk-table-row-thumb-user-placeholder"><span class="material-icons">person</span></div>',
+            serverKey);
     };
 
     // Always portrait (no landscape auto-detection) since person images are headshots.
-    shared.renderPersonThumb = function (personId) {
+    shared.renderPersonThumb = function (personId, serverKey) {
         return renderProxyThumb(personId, false,
             'jpk-table-row-thumb jpk-table-row-thumb-portrait',
             '',
-            '<div class="jpk-table-row-thumb-placeholder"><span class="material-icons">person</span></div>');
+            '<div class="jpk-table-row-thumb-placeholder"><span class="material-icons">person</span></div>',
+            serverKey);
+    };
+
+    // The configured servers in priority order, and the mappings across the ones that scan.
+    // Rows carry a ServerKey; a row with none belongs to the first scan server.
+    shared.scanServers = function (config) {
+        return ((config && config.Servers) || []).filter(function (s) {
+            return s.IsEnabled !== false && s.Url && s.ApiKey && (s.Mode === 'Pull' || s.Mode === 'Sync' || s.Mode === 0 || s.Mode === 2);
+        });
+    };
+
+    shared.allLibraryMappings = function (config) {
+        var out = [];
+        shared.scanServers(config).forEach(function (s) { out = out.concat(s.LibraryMappings || []); });
+        return out;
+    };
+
+    shared.allUserMappings = function (config) {
+        var out = [];
+        shared.scanServers(config).forEach(function (s) { out = out.concat(s.UserMappings || []); });
+        return out;
+    };
+
+    shared.serverFor = function (config, serverKey) {
+        var servers = (config && config.Servers) || [];
+        if (serverKey) {
+            var match = servers.find(function (s) { return s.Key === serverKey; });
+            if (match) return match;
+        }
+        return shared.scanServers(config)[0] || null;
+    };
+
+    shared.serverDisplayName = function (server) {
+        if (!server) return 'Source';
+        return server.Name || server.ServerName || server.Url || 'Source';
+    };
+
+    shared.serverNameFor = function (config, serverKey) {
+        return shared.serverDisplayName(shared.serverFor(config, serverKey));
     };
 
     shared.fetchLocalServerName = function () {

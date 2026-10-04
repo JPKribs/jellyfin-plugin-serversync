@@ -31,7 +31,7 @@ public static class DiskSpaceService
         var requiredBytes = GigabytesToBytes(config.MinimumFreeDiskSpaceGb);
         var results = new List<DiskSpaceInfo>();
 
-        foreach (var mapping in config.LibraryMappings.Where(m => m.IsEnabled && !string.IsNullOrEmpty(m.LocalRootPath)))
+        foreach (var mapping in config.GetEnabledLibraryMappings().Where(m => !string.IsNullOrEmpty(m.LocalRootPath)))
         {
             try
             {
@@ -83,7 +83,7 @@ public static class DiskSpaceService
         insufficientPath = null;
         var requiredBytes = GigabytesToBytes(config.MinimumFreeDiskSpaceGb);
 
-        foreach (var mapping in config.LibraryMappings.Where(m => m.IsEnabled && !string.IsNullOrEmpty(m.LocalRootPath)))
+        foreach (var mapping in config.GetEnabledLibraryMappings().Where(m => !string.IsNullOrEmpty(m.LocalRootPath)))
         {
             try
             {

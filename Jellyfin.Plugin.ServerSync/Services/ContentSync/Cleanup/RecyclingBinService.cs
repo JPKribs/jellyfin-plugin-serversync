@@ -1,4 +1,5 @@
 using System;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using System.IO;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
@@ -176,7 +177,7 @@ public static class RecyclingBinService
         }
 
         var bin = Path.GetFullPath(recyclingBinPath);
-        foreach (var mapping in config.LibraryMappings)
+        foreach (var mapping in config.GetAllLibraryMappings())
         {
             if (string.IsNullOrEmpty(mapping.LocalRootPath))
             {

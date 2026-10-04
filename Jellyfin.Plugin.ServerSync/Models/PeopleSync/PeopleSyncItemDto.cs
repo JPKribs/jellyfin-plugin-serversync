@@ -98,4 +98,7 @@ public class PeopleSyncItemDto
     /// Gets or sets the source server URL for image rendering.
     /// </summary>
     public string? SourceServerUrl { get; set; }
+
+    /// <summary>Gets or sets the configured server entry the row came from.</summary>
+    public string? ServerKey { get; set; }
 }

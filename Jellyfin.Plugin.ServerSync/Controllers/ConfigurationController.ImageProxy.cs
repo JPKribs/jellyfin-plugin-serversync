@@ -1,4 +1,5 @@
 using System;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
@@ -24,29 +25,31 @@ public partial class ConfigurationController
     /// <param name="itemId">Source item (or user) ID.</param>
     /// <param name="user">True to fetch a user profile image instead of an item image.</param>
     /// <param name="maxHeight">Maximum image height in pixels.</param>
+    /// <param name="serverKey">The server entry the image lives on. Defaults to the first scan server.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [HttpGet("ImageProxy")]
     public async Task<ActionResult> GetSourceImage(
         [FromQuery] Guid itemId,
         [FromQuery] bool user = false,
         [FromQuery] int maxHeight = 80,
+        [FromQuery] string? serverKey = null,
         CancellationToken cancellationToken = default)
     {
-        var config = _configManager.Configuration;
-        if (string.IsNullOrWhiteSpace(config.SourceServerUrl) || string.IsNullOrWhiteSpace(config.SourceServerApiKey))
+        var server = _configManager.Configuration.ResolveServer(serverKey);
+        if (server is null || !server.IsConfigured)
         {
             return NotFound();
         }
 
         // Same SSRF gate every other source-server call path goes through
         // (the factory validates too, but this endpoint bypasses the factory).
-        if (Utilities.ConfigurationUtilities.ValidateServerUrlForSsrf(config.SourceServerUrl) != null)
+        if (Utilities.ConfigurationUtilities.ValidateServerUrlForSsrf(server.Url, server.AllowPrivateNetwork) != null)
         {
             return NotFound();
         }
 
         maxHeight = Math.Clamp(maxHeight, 1, 600);
-        var baseUrl = config.SourceServerUrl.TrimEnd('/');
+        var baseUrl = server.Url.TrimEnd('/');
         var url = user
             ? $"{baseUrl}/Users/{itemId}/Images/Primary?maxHeight={maxHeight}"
             : $"{baseUrl}/Items/{itemId}/Images/Primary?maxHeight={maxHeight}";
@@ -56,7 +59,7 @@ public partial class ConfigurationController
             var client = _httpClientFactory.CreateClient(SourceServerClient.HttpClientName);
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue(
-                "MediaBrowser", $"Token=\"{_configManager.DecryptedSourceServerApiKey}\"");
+                "MediaBrowser", $"Token=\"{_configManager.DecryptApiKey(server.ApiKey)}\"");
 
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)

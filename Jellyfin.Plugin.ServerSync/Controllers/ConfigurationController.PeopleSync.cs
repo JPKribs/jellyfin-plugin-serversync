@@ -53,15 +53,15 @@ public partial class ConfigurationController
         // The refresh builds source manifests from ImageTags only (no per-
         // person HTTP call) for performance; this is the per-modal-open
         // compensation.
-        if (config.PeopleSyncImages
-            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
-            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey)
-            && !string.IsNullOrEmpty(item.Images.Source))
+        if (config.PeopleSyncImages && !string.IsNullOrEmpty(item.Images.Source))
         {
             try
             {
-                using var client = _clientFactory.Create(config.SourceServerUrl, config.SourceServerApiKey);
-                await peopleService.EnrichSourceImageSizesAsync(item, client, cancellationToken).ConfigureAwait(false);
+                using var client = ClientForRow(item.ServerKey);
+                if (client != null)
+                {
+                    await peopleService.EnrichSourceImageSizesAsync(item, client, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -73,9 +73,7 @@ public partial class ConfigurationController
             }
         }
 
-        var peopleConfig = _configManager.Configuration;
-        var peopleUrl = !string.IsNullOrEmpty(peopleConfig.SourceServerExternalUrl) ? peopleConfig.SourceServerExternalUrl : peopleConfig.SourceServerUrl;
-        return Ok(item.ToDto(peopleUrl));
+        return Ok(item.ToDto(BrowserUrlFor(item.ServerKey)));
     }
 
     /// <summary>
@@ -109,10 +107,8 @@ public partial class ConfigurationController
             StatusFilter = statusFilter
         });
 
-        var peopleConfig = _configManager.Configuration;
-        var peopleUrl = !string.IsNullOrEmpty(peopleConfig.SourceServerExternalUrl) ? peopleConfig.SourceServerExternalUrl : peopleConfig.SourceServerUrl;
         return Ok(new PagedResult<PeopleSyncItemDto>(
-            result.Items.Select(i => i.ToDto(peopleUrl)).ToList(),
+            result.Items.Select(i => i.ToDto(BrowserUrlFor(i.ServerKey))).ToList(),
             result.TotalCount,
             skip,
             take));

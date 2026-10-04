@@ -15,8 +15,7 @@ public static class ConfigurationUtilities
     /// </summary>
     public static bool HasValidAuthConfiguration(PluginConfiguration config)
     {
-        return !string.IsNullOrWhiteSpace(config.SourceServerUrl) &&
-               !string.IsNullOrWhiteSpace(config.SourceServerApiKey);
+        return config.GetPullServers().Count > 0;
     }
 
     /// <summary>

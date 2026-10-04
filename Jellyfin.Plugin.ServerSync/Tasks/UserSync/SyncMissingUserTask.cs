@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Entities;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
@@ -31,6 +32,8 @@ public class SyncMissingUserTask
     private readonly IUserManager _userManager;
     private readonly IProviderManager _providerManager;
     private readonly IServerConfigurationManager _serverConfigurationManager;
+    private readonly Services.Queue.AppliedVersionRecorder? _applied;
+    private readonly Services.Queue.LocalChangeObserver? _observer;
 
     /// <summary>
     /// Initializes a new instance.
@@ -42,12 +45,38 @@ public class SyncMissingUserTask
         IUserManager userManager,
         IProviderManager providerManager,
         IServerConfigurationManager serverConfigurationManager,
-        UserSyncTableManager manager)
+        UserSyncTableManager manager,
+        Services.Queue.AppliedVersionRecorder? applied = null,
+        Services.Queue.LocalChangeObserver? observer = null)
         : base(logger, manager, clientFactory, configManager)
     {
         _userManager = userManager;
         _providerManager = providerManager;
         _serverConfigurationManager = serverConfigurationManager;
+        _applied = applied;
+        _observer = observer;
+    }
+
+    /// <inheritdoc />
+    protected override IDisposable? EnterApplyGuard(UserSyncItem record)
+        => _applied?.Enter(Models.Queue.HintKind.Users, Guid.TryParse(record?.LocalUserId, out var id) ? Services.Queue.HintProtocol.UsersKey(id) : string.Empty);
+
+    // The version is recorded once per user, and the change observer's picture of the user is
+    // refreshed so the write just made here is not reported back as a local edit.
+    /// <inheritdoc />
+    protected override async Task AfterApplySucceededAsync(UserSyncItem record, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(record?.LocalUserId, out var localId) || !Guid.TryParse(record.SourceUserId, out var sourceId))
+        {
+            return;
+        }
+
+        if (_applied is not null)
+        {
+            await _applied.RecordAsync(Models.Queue.HintKind.Users, Services.Queue.HintProtocol.UsersKey(localId), Services.Queue.HintProtocol.UsersKey(sourceId), SourceFor(record), cancellationToken).ConfigureAwait(false);
+        }
+
+        _observer?.ResetUserSnapshot(localId);
     }
 
     /// <inheritdoc />
@@ -69,9 +98,7 @@ public class SyncMissingUserTask
     protected override bool IsEnabled()
     {
         var config = ConfigManager.Configuration;
-        return config.EnableUserSync
-            && !string.IsNullOrWhiteSpace(config.SourceServerUrl)
-            && !string.IsNullOrWhiteSpace(config.SourceServerApiKey);
+        return config.EnableUserSync && config.GetPullServers().Count > 0;
     }
 
     /// <inheritdoc />
@@ -90,15 +117,10 @@ public class SyncMissingUserTask
                 break;
 
             case UserPropertyCategory.ProfileImage:
-                if (Client == null)
-                {
-                    throw new InvalidOperationException("Source client unavailable for profile-image sync");
-                }
-
                 // ApplyProfileImageAsync already updates Local* fields with the
                 // hash of the bytes it just wrote so VerifyAfterApplyAsync can
                 // compare Local* against Source* in the standard way.
-                await ApplyProfileImageAsync(localUser, record, Client, cancellationToken).ConfigureAwait(false);
+                await ApplyProfileImageAsync(localUser, record, RequireSource(record).Client, cancellationToken).ConfigureAwait(false);
                 break;
 
             default:

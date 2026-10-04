@@ -51,10 +51,9 @@ public partial class ConfigurationController
         }
 
         var (items, totalCount) = manager.SearchHistoryItemsPaginated(search, statusFilter, sourceUserId, skip, take);
-        var config = _configManager.Configuration;
 
         return Ok(new PagedResult<HistorySyncItemDto>(
-            items.Select(i => i.ToDto(!string.IsNullOrEmpty(config.SourceServerExternalUrl) ? config.SourceServerExternalUrl : config.SourceServerUrl)).ToList(),
+            items.Select(i => i.ToDto(BrowserUrlFor(i.ServerKey))).ToList(),
             totalCount,
             skip,
             take));

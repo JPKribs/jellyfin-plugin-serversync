@@ -69,6 +69,7 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
         item.RetryCount = ReadNullableInt32(reader, "RetryCount") ?? 0;
+        item.ServerKey = ReadNullableString(reader, "ServerKey");
         return item;
     }
 
@@ -111,14 +112,14 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
                     SourceMetadataHash, SyncedMetadataHash,
                     SourceImagesValue, LocalImagesValue,
                     SourceImagesHash, SyncedImagesHash,
-                    Status, StatusDate, LastSyncTime, Reason, RetryCount
+                    Status, StatusDate, LastSyncTime, Reason, RetryCount, ServerKey
                 ) VALUES (
                     @name, @sourceId, @localId,
                     @srcMeta, @localMeta,
                     @srcMetaHash, @syncedMetaHash,
                     @srcImg, @localImg,
                     @srcImgHash, @syncedImgHash,
-                    @status, @statusDate, @lastSync, @reason, @retryCount
+                    @status, @statusDate, @lastSync, @reason, @retryCount, @serverKey
                 )
                 ON CONFLICT(PersonName) DO UPDATE SET
                     SourcePersonId = @sourceId,
@@ -135,7 +136,8 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
                     StatusDate = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.StatusDate ELSE @statusDate END,
                     LastSyncTime = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.LastSyncTime ELSE @lastSync END,
                     Reason = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.Reason ELSE @reason END,
-                    RetryCount = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.RetryCount ELSE @retryCount END";
+                    RetryCount = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.RetryCount ELSE @retryCount END,
+                    ServerKey = @serverKey";
 
             cmd.Parameters.AddWithValue("@name", record.PersonName);
             AddNullable(cmd, "@sourceId", record.SourcePersonId);
@@ -153,6 +155,7 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
             AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
             AddNullable(cmd, "@reason", record.Reason);
             cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
+            AddNullable(cmd, "@serverKey", record.ServerKey);
             cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
             cmd.ExecuteNonQuery();
         });

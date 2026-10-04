@@ -41,6 +41,7 @@ public static class HistorySyncItemExtensions
             MergedLastPlayedDate = item.MergedLastPlayedDate,
             MergedIsFavorite = item.MergedIsFavorite,
             SourceServerUrl = sourceServerUrl,
+            ServerKey = item.ServerKey,
             Status = item.Status.ToString(),
             StatusDate = item.StatusDate,
             LastSyncTime = item.LastSyncTime,

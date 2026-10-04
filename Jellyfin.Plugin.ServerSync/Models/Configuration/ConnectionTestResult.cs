@@ -11,6 +11,12 @@ public class ConnectionTestResult
 
     public string? ServerId { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the key belongs to an administrator. Decided by whether the
+    /// elevated system info call succeeded. Null when the test did not get that far.
+    /// </summary>
+    public bool? IsAdministrator { get; set; }
+
     public string? ErrorMessage { get; set; }
 
     /// <summary>

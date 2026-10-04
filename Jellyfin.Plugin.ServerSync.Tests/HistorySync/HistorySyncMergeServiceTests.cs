@@ -498,4 +498,203 @@ public class HistorySyncMergeServiceTests
         Assert.True(HistorySyncMergeService.SameInstantToSecond(baseTime, baseTime.AddTicks(9999999)));
         Assert.False(HistorySyncMergeService.SameInstantToSecond(baseTime, baseTime.AddSeconds(1)));
     }
+
+    private static HistorySyncItem MakeAgreedItem()
+    {
+        var item = MakeItem();
+        item.MergedIsPlayed = true;
+        item.MergedPlayCount = 1;
+        item.MergedPlaybackPositionTicks = 0;
+        item.MergedLastPlayedDate = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        item.MergedIsFavorite = true;
+        item.RecordNegotiatedBase(new DateTime(2026, 1, 1, 12, 5, 0, DateTimeKind.Utc));
+
+        item.SourceIsPlayed = item.LocalIsPlayed = true;
+        item.SourcePlayCount = item.LocalPlayCount = 1;
+        item.SourcePlaybackPositionTicks = item.LocalPlaybackPositionTicks = 0;
+        item.SourceLastPlayedDate = item.LocalLastPlayedDate = item.MergedLastPlayedDate;
+        item.SourceIsFavorite = item.LocalIsFavorite = true;
+        return item;
+    }
+
+    /// <summary>
+    /// With an agreed base, a favorite removed only on the local server wins over an unchanged source.
+    /// True: an unfavorite on either server reaches the other.
+    /// False: the source keeps restoring a favorite the user removed.
+    /// </summary>
+    [Fact]
+    public void MergeAgainstBase_LocalUnfavorite_WinsOverUnchangedSource()
+    {
+        var item = MakeAgreedItem();
+        item.LocalIsFavorite = false;
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.False(item.MergedIsFavorite);
+    }
+
+    /// <summary>
+    /// With an agreed base, a favorite changed only on the source still flows to local.
+    /// </summary>
+    [Fact]
+    public void MergeAgainstBase_SourceUnfavorite_WinsOverUnchangedLocal()
+    {
+        var item = MakeAgreedItem();
+        item.SourceIsFavorite = false;
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.False(item.MergedIsFavorite);
+    }
+
+    /// <summary>
+    /// When both servers changed the favorite since the base, favorite wins.
+    /// </summary>
+    [Fact]
+    public void MergeAgainstBase_BothChangedFavorite_FavoriteWins()
+    {
+        var item = MakeAgreedItem();
+        item.NegotiatedIsFavorite = false;
+        item.SourceIsFavorite = true;
+        item.LocalIsFavorite = false;
+        item.LocalPlayCount = 1;
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.True(item.MergedIsFavorite);
+    }
+
+    /// <summary>
+    /// Marking an item unplayed on the local server alone wins even though the source still carries
+    /// the more recent play date. Without the base, the date rule would resurrect the play forever.
+    /// </summary>
+    [Fact]
+    public void MergeAgainstBase_LocalMarkedUnplayed_WinsOverUnchangedSource()
+    {
+        var item = MakeAgreedItem();
+        item.LocalIsPlayed = false;
+        item.LocalLastPlayedDate = null;
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.False(item.MergedIsPlayed);
+        Assert.Null(item.MergedLastPlayedDate);
+    }
+
+    /// <summary>
+    /// When both servers played since the base, the more recent play wins as before.
+    /// </summary>
+    [Fact]
+    public void MergeAgainstBase_BothPlayed_MostRecentWins()
+    {
+        var item = MakeAgreedItem();
+        item.SourceLastPlayedDate = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc);
+        item.SourcePlaybackPositionTicks = 100;
+        item.LocalLastPlayedDate = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        item.LocalPlaybackPositionTicks = 200;
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.Equal(200, item.MergedPlaybackPositionTicks);
+        Assert.Equal(item.LocalLastPlayedDate, item.MergedLastPlayedDate);
+    }
+
+    /// <summary>
+    /// A play count lowered on one server alone propagates, which the plain max rule can never do.
+    /// </summary>
+    [Fact]
+    public void MergeAgainstBase_PlayCountResetOnOneSide_Propagates()
+    {
+        var item = MakeAgreedItem();
+        item.NegotiatedPlayCount = 5;
+        item.SourcePlayCount = 5;
+        item.LocalPlayCount = 0;
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.Equal(0, item.MergedPlayCount);
+    }
+
+    /// <summary>
+    /// Nothing moved on either side, so the merge equals the base and nothing is queued.
+    /// </summary>
+    [Fact]
+    public void MergeAgainstBase_NothingMoved_NoChanges()
+    {
+        var item = MakeAgreedItem();
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.False(HistorySyncMergeService.HasChangesToSync(item));
+    }
+
+    /// <summary>
+    /// Without a base the old rules still apply, so one way installs behave exactly as before.
+    /// </summary>
+    [Fact]
+    public void MergeHistoryData_WithoutBase_SourceFavoriteStillWins()
+    {
+        var item = MakeItem();
+        item.SourceIsFavorite = true;
+        item.LocalIsFavorite = false;
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.False(item.HasNegotiatedBase);
+        Assert.True(item.MergedIsFavorite);
+    }
+
+    /// <summary>
+    /// In two way mode a row whose local side already matches the merge still queues when the source
+    /// is behind, otherwise a change made only here never reaches the source.
+    /// </summary>
+    [Fact]
+    public void HasChangesToSync_SourceBehind_QueuesOnlyWhenNegotiating()
+    {
+        var item = MakeAgreedItem();
+        item.LocalIsFavorite = false;
+        HistorySyncMergeService.MergeHistoryData(item);
+        Assert.False(item.MergedIsFavorite);
+
+        item.NegotiateWithSource = false;
+        Assert.False(HistorySyncMergeService.HasChangesToSync(item));
+
+        item.NegotiateWithSource = true;
+        Assert.True(HistorySyncMergeService.HasChangesToSync(item));
+    }
+
+    /// <summary>
+    /// A merge to unplayed with no date counts as a change while the local row still carries a date.
+    /// </summary>
+    [Fact]
+    public void HasChangesToSync_UnplayedMergeWithLingeringLocalDate_IsChange()
+    {
+        var item = MakeAgreedItem();
+        item.SourceIsPlayed = false;
+        item.SourcePlayCount = 0;
+        item.SourceLastPlayedDate = null;
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.False(item.MergedIsPlayed);
+        Assert.Null(item.MergedLastPlayedDate);
+        Assert.True(HistorySyncMergeService.HasChangesToSync(item));
+    }
+
+    /// <summary>
+    /// Before the servers have agreed once, two way mode keeps favorites from both sides, so enabling
+    /// negotiation never wipes a favorite that exists only locally.
+    /// </summary>
+    [Fact]
+    public void MergeHistoryData_NegotiatingWithoutBase_FavoritesAreUnion()
+    {
+        var item = MakeItem();
+        item.NegotiateWithSource = true;
+        item.SourceIsFavorite = false;
+        item.LocalIsFavorite = true;
+
+        HistorySyncMergeService.MergeHistoryData(item);
+
+        Assert.True(item.MergedIsFavorite);
+        Assert.True(HistorySyncMergeService.HasChangesToSync(item));
+    }
 }

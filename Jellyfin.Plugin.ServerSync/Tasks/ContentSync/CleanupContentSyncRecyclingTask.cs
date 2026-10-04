@@ -28,7 +28,7 @@ public class EmptyRecyclingBinTask : IScheduledTask
 
     public string Description => "Permanently deletes files that have been in the recycling bin longer than the configured retention period.";
 
-    public string Category => "Content Sync";
+    public string Category => "Server Sync";
 
     public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
