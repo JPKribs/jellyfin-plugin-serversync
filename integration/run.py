@@ -867,7 +867,8 @@ def scenario_content_and_user_hints(creds, apis):
 def activity(api, needle, limit=40):
     """Server Sync activity log entries whose name contains the needle, newest first."""
     items = api.get(f"/System/ActivityLog/Entries?limit={limit}")["Items"]
-    return [e for e in items if (e.get("Type") or "").startswith("ServerSync") and needle.lower() in e["Name"].lower()]
+    return [e for e in items if (e.get("Type") or "").startswith("ServerSync")
+            and needle.lower() in (e["Name"] + " " + (e.get("ShortOverview") or "")).lower()]
 
 
 def restart_container(name, api):

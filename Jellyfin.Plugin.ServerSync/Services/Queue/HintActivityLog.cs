@@ -72,9 +72,25 @@ public sealed class HintActivityLog
         };
     }
 
+    /// <summary>The bare name of what a hint concerns: the file, the person, or the user.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <param name="itemPath">The item's path, when the kind concerns an item.</param>
+    /// <param name="userName">The username, when the kind concerns a user.</param>
+    /// <param name="key">The key, as a fallback.</param>
+    /// <returns>The name.</returns>
+    public static string NameOf(HintKind kind, string? itemPath, string? userName, string key)
+    {
+        var file = string.IsNullOrEmpty(itemPath) ? null : Path.GetFileNameWithoutExtension(itemPath);
+        return kind switch
+        {
+            HintKind.People or HintKind.Users => userName ?? key,
+            _ => file ?? key
+        };
+    }
+
     /// <summary>
-    /// Records that a hint from a peer was applied here: "[type] [name] was updated", with the peer it
-    /// came from in the detail.
+    /// Records that a hint from a peer was applied here. The entry reads "Synced [name]." and its
+    /// detail "[type] [name] was updated from [peer]."
     /// </summary>
     /// <param name="hint">The hint.</param>
     /// <param name="originName">The peer's display name.</param>
@@ -82,11 +98,10 @@ public sealed class HintActivityLog
     public Task AppliedAsync(InboundHint hint, string originName)
     {
         ArgumentNullException.ThrowIfNull(hint);
-        var subject = Subject(hint.Kind, hint.ItemPath, hint.UserName, hint.Key);
         return WriteAsync(
-            $"{subject} was updated",
+            $"Synced {NameOf(hint.Kind, hint.ItemPath, hint.UserName, hint.Key)}.",
             "ServerSync.HintApplied",
-            $"{subject} was triggered from {originName}.",
+            $"{Subject(hint.Kind, hint.ItemPath, hint.UserName, hint.Key)} was updated from {originName}.",
             LogLevel.Information);
     }
 
