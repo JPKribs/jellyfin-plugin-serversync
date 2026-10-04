@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.3.1",
+        "changelog": "## Developer\r\n- Built on base 2026.10.6, which now owns the database's schema version, its oldest reader marker, and setting an unreadable database aside\r\n- A database set aside because a newer version wrote it is kept as a .newer backup instead of a .corrupt one, and the three newest of each are kept\r\n- Activity log entries are written through the base package's logger",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.3.1/jellyfin-plugin-serversync-12.2.3.1.zip",
+        "checksum": "a112abef974dfaacc6f707098aa2530c",
+        "timestamp": "2026-10-04T16:21:49Z"
+      },
+      {
         "version": "12.2.3.0",
         "changelog": "## Developer\r\n- The five Sync tables are built from one shared module, so a fix to the table, its buttons, or its modals reaches every view at once\r\n- The refresh run is split into named steps, with the prune's safety checks gathered in one place\r\n- Every Sync view reloads its counts and health figures when a detail dialog closes, and alerts and empty states read the same across views",
         "targetAbi": "12.1.0.0",
