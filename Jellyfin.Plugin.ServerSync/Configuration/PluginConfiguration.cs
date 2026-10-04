@@ -505,6 +505,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public int RefreshParallelism { get; set; } = 8;
 
     /// <summary>
+    /// How long, in seconds, an object must go untouched after its last change before that change is
+    /// sent to the servers in Push or Sync mode. Every edit to the same object restarts the wait, and
+    /// one hint goes out at the end of it, so a poster changed twice a minute apart is sent once.
+    /// Default 60. Clamped 1 to 3600.
+    /// </summary>
+    public int HintDebounceSeconds { get; set; } = 60;
+
+    /// <summary>
     /// Verify source image sizes with live HTTP calls on every refresh, even
     /// for images whose tag hasn't changed. Applies to all sync modules.
     /// Catches the rare case of an image file replaced on the source's disk
@@ -807,6 +815,7 @@ public class PluginConfiguration : BasePluginConfiguration
         MaxRetryCount = Math.Clamp(MaxRetryCount, 1, 10);
         SizeMatchToleranceBytes = Math.Max(0, SizeMatchToleranceBytes);
         RefreshParallelism = Math.Clamp(RefreshParallelism, 1, 16);
+        HintDebounceSeconds = Math.Clamp(HintDebounceSeconds, 1, 3600);
 
         MigrateLegacyServer();
 

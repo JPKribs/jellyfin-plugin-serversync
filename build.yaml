@@ -29,7 +29,8 @@ artifacts:
 changelog:
   developer:
   - A server only announces the kinds of change its peer applies, read from the peer's enabled modules every minute; Check Link and each peer's card on the Queue view name them
-  - A change whose edits never stop, such as playback progress, is announced after a minute instead of only when they end
+  - Send Changes After, under Settings > Processing, sets how long an item must go untouched before a change is sent to peers, sixty seconds by default; every further edit restarts the wait and one update goes out at the end of it
   - History hints honour the receiver's History switch like every other kind
   - New library mapping rows start enabled
   - The Queue view says when a local change matched no library or user mapping on any Push or Sync server, and names the last one
+  - A poster or other image uploaded or picked by hand travels as a metadata hint; images a provider fetches during a scan or a refresh are still left to the scheduled task

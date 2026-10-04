@@ -385,12 +385,14 @@ export default function (view) {
     // --- Processing Settings ---
 
     function loadProcessingSettings(config) {
+        setValue('txtHintDebounceSeconds', config.HintDebounceSeconds || 60);
         setValue('txtRefreshParallelism', config.RefreshParallelism || 8);
         setChecked('chkDeepImageVerification', config.DeepImageVerification === true);
     }
 
     function saveProcessingSettings() {
         saveSection(function (config) {
+            config.HintDebounceSeconds = Math.min(3600, Math.max(1, getIntValue('txtHintDebounceSeconds', 60)));
             config.RefreshParallelism = Math.min(16, Math.max(1, getIntValue('txtRefreshParallelism', 8)));
             config.DeepImageVerification = getChecked('chkDeepImageVerification');
 

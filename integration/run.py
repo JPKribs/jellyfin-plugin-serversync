@@ -476,6 +476,8 @@ def configure_server(creds, api, local, order, modes=None, **flags):
     config.update({
         "EnableContentSync": False, "EnableMetadataSync": False, "EnableHistorySync": False,
         "EnablePeopleSync": False, "EnableUserSync": False,
+        # Changes are sent once an object has gone untouched this long. The pool keeps it short.
+        "HintDebounceSeconds": 5,
     })
     config.update(flags)
     save_plugin_config(api, config)

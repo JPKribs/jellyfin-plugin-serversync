@@ -23,7 +23,13 @@
                             <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
                         <div id="processingConfigContent" class="jpk-collapsible-content collapsed">
-                            <div class="fieldDescription mb-md">Controls how much work sync tasks perform at once. Applies to all sync modules.</div>
+                            <div class="fieldDescription mb-md">Controls how much work sync tasks perform at once, and how quickly changes made here are sent. Applies to all sync modules.</div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtHintDebounceSeconds">Send Changes After (seconds)</label>
+                                <input is="emby-input" type="number" id="txtHintDebounceSeconds" min="1" max="3600" />
+                                <div class="fieldDescription">How long an item must go untouched after its last change before that change is sent to the servers in Push or Sync mode. Every further edit restarts the wait, and one update goes out at the end of it, so a poster changed twice a minute apart is sent once. Default: 60.</div>
+                            </div>
 
                             <div class="inputContainer">
                                 <label class="inputLabel inputLabelUnfocused" for="txtRefreshParallelism">Refresh Parallelism</label>

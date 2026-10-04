@@ -8,6 +8,7 @@ using Jellyfin.Plugin.ServerSync.Models.Queue;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,8 +24,8 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// downloads and image refreshes are left to the scheduled scan, since a server that fetches its own
 /// metadata after receiving a file would otherwise push that over the other server's curated values
 /// the moment it arrived. Each object's edits are
-/// gathered for a few seconds so a playback that reports progress every few seconds becomes one hint
-/// per pause, not one per tick. An event raised while a peer's hint is being applied to the same
+/// gathered until it has gone untouched for the configured wait, so a poster changed twice or a
+/// playback that reports progress every few seconds becomes one hint, not one per edit. An event raised while a peer's hint is being applied to the same
 /// object is the echo of that apply and raises nothing. See <see cref="ApplyGuard"/>.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
@@ -33,6 +34,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly IUserDataManager _userDataManager;
     private readonly IUserManager _userManager;
     private readonly ILibraryManager _libraryManager;
+    private readonly IProviderManager _providerManager;
     private readonly IPluginConfigurationManager _configManager;
     private readonly LocalHintPublisher _publisher;
     private readonly OutboundHintWorker _worker;
@@ -41,6 +43,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly ILogger<LocalChangeObserver> _logger;
     private readonly ConcurrentDictionary<string, PendingChange> _pending = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, string> _userPrints = new();
+    private readonly ConcurrentDictionary<Guid, byte> _refreshing = new();
     private CancellationTokenSource? _stopping;
     private Task? _flushLoop;
     private int _unmatched;
@@ -52,6 +55,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <param name="userDataManager">User data manager, for the save event.</param>
     /// <param name="userManager">User manager.</param>
     /// <param name="libraryManager">Library manager.</param>
+    /// <param name="providerManager">Provider manager, for the refresh events that tell a provider's image from a hand picked one.</param>
     /// <param name="configManager">Plugin configuration.</param>
     /// <param name="publisher">The publisher that writes the outbound rows.</param>
     /// <param name="worker">The delivery worker, which knows what each peer accepts.</param>
@@ -62,6 +66,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         IUserDataManager userDataManager,
         IUserManager userManager,
         ILibraryManager libraryManager,
+        IProviderManager providerManager,
         IPluginConfigurationManager configManager,
         LocalHintPublisher publisher,
         OutboundHintWorker worker,
@@ -73,6 +78,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager = userDataManager;
         _userManager = userManager;
         _libraryManager = libraryManager;
+        _providerManager = providerManager;
         _configManager = configManager;
         _publisher = publisher;
         _guard = guard;
@@ -101,6 +107,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _libraryManager.ItemUpdated += OnItemUpdated;
         _libraryManager.ItemAdded += OnItemAdded;
         _userManager.OnUserUpdated += OnUserUpdated;
+        _providerManager.RefreshStarted += OnRefreshStarted;
+        _providerManager.RefreshCompleted += OnRefreshCompleted;
         _flushLoop = Task.Run(() => FlushLoopAsync(_stopping.Token), CancellationToken.None);
         _logger.LogInformation("Server Sync is watching for local history changes");
         return Task.CompletedTask;
@@ -113,6 +121,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _libraryManager.ItemUpdated -= OnItemUpdated;
         _libraryManager.ItemAdded -= OnItemAdded;
         _userManager.OnUserUpdated -= OnUserUpdated;
+        _providerManager.RefreshStarted -= OnRefreshStarted;
+        _providerManager.RefreshCompleted -= OnRefreshCompleted;
         if (_stopping is not null)
         {
             await _stopping.CancelAsync().ConfigureAwait(false);
@@ -142,9 +152,9 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         var raised = 0;
         foreach (var entry in _pending.ToArray())
         {
-            // Due moves with every edit; a stream of progress reports would hold the change forever,
-            // so a change is also raised once it has gathered for the longest allowed.
-            if (entry.Value.Due > utcNow && utcNow - entry.Value.FirstSeen < HintProtocol.MaxGather)
+            // Due moves with every edit, so the change is raised once the object has gone untouched for
+            // the configured wait, and only then.
+            if (entry.Value.Due > utcNow)
             {
                 continue;
             }
@@ -193,16 +203,72 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
-    /// <summary>Whether an item update is the kind of change hints carry. Public for tests.</summary>
+    /// <summary>Whether an item update is a metadata edit, which hints always carry. Public for tests.</summary>
     /// <param name="reason">Why Jellyfin saved the item.</param>
     /// <returns><c>true</c> for a metadata edit.</returns>
     public static bool IsHintedUpdate(ItemUpdateType reason) => (reason & ItemUpdateType.MetadataEdit) != 0;
+
+    /// <summary>
+    /// Whether an item update is the kind of change hints carry. A metadata edit always is. An image
+    /// change is when it was made by hand: Jellyfin reports a poster someone uploaded or picked and a
+    /// poster a provider fetched with the same reason, so a provider's work is told apart by what else
+    /// is going on, a library scan or a metadata refresh of the item. Those images are left to the
+    /// scheduled scan, as a server that fetches its own images after receiving a file would otherwise
+    /// push them over the other server's chosen ones the moment they arrived. Public for tests.
+    /// </summary>
+    /// <param name="reason">Why Jellyfin saved the item.</param>
+    /// <param name="beingRefreshed">Whether the item, an ancestor, or for a person any item, is in a metadata refresh.</param>
+    /// <param name="scanRunning">Whether a library scan is running.</param>
+    /// <returns><c>true</c> when the change should travel.</returns>
+    public static bool IsHintedUpdate(ItemUpdateType reason, bool beingRefreshed, bool scanRunning)
+        => IsHintedUpdate(reason) || ((reason & ItemUpdateType.ImageUpdate) != 0 && !beingRefreshed && !scanRunning);
+
+    private void OnRefreshStarted(object? sender, Jellyfin.Data.Events.GenericEventArgs<BaseItem> e)
+    {
+        if (e?.Argument is not null)
+        {
+            _refreshing[e.Argument.Id] = 0;
+        }
+    }
+
+    private void OnRefreshCompleted(object? sender, Jellyfin.Data.Events.GenericEventArgs<BaseItem> e)
+    {
+        if (e?.Argument is not null)
+        {
+            _refreshing.TryRemove(e.Argument.Id, out _);
+        }
+    }
+
+    // A refresh of a series or a movie also refreshes what belongs to it, children and cast alike, so
+    // an item counts as being refreshed when it or an ancestor is, and a person whenever any item is.
+    private bool IsBeingRefreshed(BaseItem item)
+    {
+        if (_refreshing.IsEmpty)
+        {
+            return false;
+        }
+
+        if (item is Person)
+        {
+            return true;
+        }
+
+        for (var current = item; current is not null; current = current.GetParent())
+        {
+            if (_refreshing.ContainsKey(current.Id))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private void OnItemUpdated(object? sender, ItemChangeEventArgs e)
     {
         try
         {
-            if (e?.Item is null || !IsHintedUpdate(e.UpdateReason))
+            if (e?.Item is null || !IsHintedUpdate(e.UpdateReason, IsBeingRefreshed(e.Item), _libraryManager.IsScanRunning))
             {
                 return;
             }
@@ -370,10 +436,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
 
         var now = DateTime.UtcNow;
+        var due = now + HintProtocol.Debounce(_configManager.Configuration);
         _pending.AddOrUpdate(
             HintProtocol.GuardKey(kind, localKey),
-            _ => new PendingChange(kind, userId, itemId, now, now + HintProtocol.Debounce, now),
-            (_, existing) => existing with { EditedAt = now, Due = now + HintProtocol.Debounce });
+            _ => new PendingChange(kind, userId, itemId, now, due),
+            (_, existing) => existing with { EditedAt = now, Due = due });
     }
 
     private async Task FlushLoopAsync(CancellationToken cancellationToken)
@@ -460,5 +527,5 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", _lastUnmatched);
     }
 
-    private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, DateTime FirstSeen);
+    private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due);
 }

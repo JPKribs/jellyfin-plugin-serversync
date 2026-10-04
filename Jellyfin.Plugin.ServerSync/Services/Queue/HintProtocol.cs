@@ -39,14 +39,17 @@ public static class HintProtocol
     /// </summary>
     public const int MaxPendingPerPeer = 10000;
 
-    /// <summary>How long local edits to one object are gathered before one hint is raised.</summary>
-    public static readonly TimeSpan Debounce = TimeSpan.FromSeconds(5);
-
     /// <summary>
-    /// The longest an object's edits are gathered when they never stop coming, as playback progress
-    /// does, so a peer hears about a play while it is still going rather than only when it ends.
+    /// How long local edits to one object are gathered after the last one before one hint is raised.
+    /// Every further edit restarts the wait, so a stream of edits becomes one hint once it stops.
     /// </summary>
-    public static readonly TimeSpan MaxGather = TimeSpan.FromSeconds(60);
+    /// <param name="config">The configuration, which holds the seconds.</param>
+    /// <returns>The wait.</returns>
+    public static TimeSpan Debounce(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return TimeSpan.FromSeconds(Math.Clamp(config.HintDebounceSeconds, 1, 3600));
+    }
 
     /// <summary>How often a sender re-reads what each peer accepts, so a module switched on there is noticed within a minute.</summary>
     public static readonly TimeSpan CapabilityRefresh = TimeSpan.FromSeconds(60);

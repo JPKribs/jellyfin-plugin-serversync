@@ -84,6 +84,23 @@ public class HintProtocolTests
     }
 
     /// <summary>
+    /// An image change travels when it was made by hand: outside a library scan and outside a refresh of
+    /// the item. The same reason during a scan or a refresh is a provider's fetch and is left to the scan.
+    /// True: a poster someone picks reaches the peers; a poster a provider fetched after a download does not.
+    /// False: either hand picked posters never travel, or every scan floods the pool with provider images.
+    /// </summary>
+    [Theory]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, false, true)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, true, false, false)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, true, false)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, true, true, true)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataDownload, false, false, false)]
+    public void IsHintedUpdate_ImagesOnlyByHand(MediaBrowser.Controller.Library.ItemUpdateType reason, bool refreshing, bool scanning, bool expected)
+    {
+        Assert.Equal(expected, LocalChangeObserver.IsHintedUpdate(reason, refreshing, scanning));
+    }
+
+    /// <summary>
     /// A server name with emoji or quotes cannot travel in an HTTP header.
     /// True: a server named with emoji can still negotiate, queue, and complete with its peers.
     /// False: every hand built peer request from such a server fails before it is sent.
