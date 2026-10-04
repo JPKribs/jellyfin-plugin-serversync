@@ -301,6 +301,11 @@ public class HintsController : ControllerBase
             return (episode.SeriesName ?? item.Name, code + item.Name);
         }
 
+        if (item is MediaBrowser.Controller.Entities.TV.Season season && !string.IsNullOrEmpty(season.SeriesName))
+        {
+            return (season.SeriesName, item.Name);
+        }
+
         if (kind == HintKind.People)
         {
             return (item.Name, null);

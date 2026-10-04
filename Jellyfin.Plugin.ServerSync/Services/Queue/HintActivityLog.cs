@@ -77,8 +77,8 @@ public sealed class HintActivityLog
     };
 
     /// <summary>
-    /// Jellyfin's own title for an item: an episode as its series and episode number, anything else by
-    /// its name.
+    /// Jellyfin's own title for an item: an episode as its series and episode number, a season as its
+    /// series and season, anything else by its name. "Season 1" alone names nothing.
     /// </summary>
     /// <param name="item">The item.</param>
     /// <returns>The title.</returns>
@@ -90,6 +90,11 @@ public sealed class HintActivityLog
             var series = string.IsNullOrEmpty(episode.SeriesName) ? null : episode.SeriesName;
             var code = EpisodeCode(episode);
             return series is null ? (code is null ? item.Name : $"{code} {item.Name}") : (code is null ? $"{series} {item.Name}" : $"{series} {code}");
+        }
+
+        if (item is MediaBrowser.Controller.Entities.TV.Season season && !string.IsNullOrEmpty(season.SeriesName))
+        {
+            return $"{season.SeriesName} {item.Name}";
         }
 
         return item.Name;
