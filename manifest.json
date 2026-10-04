@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.1.1",
+        "changelog": "## Developer\r\n- A server only announces the kinds of change its peer applies, read from the peer's enabled modules every minute; Check Link and each peer's card on the Queue view name them\r\n- Send Changes After, under Settings > Processing, sets how long an item must go untouched before a change is sent to peers, sixty seconds by default; every further edit restarts the wait and one update goes out at the end of it\r\n- History hints honour the receiver's History switch like every other kind\r\n- New library mapping rows start enabled\r\n- The Queue view says when a local change matched no library or user mapping on any Push or Sync server, and names the last one\r\n- A poster or other image uploaded or picked by hand travels as a metadata hint; images a provider fetches during a scan or a refresh are still left to the scheduled task",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.1.1/jellyfin-plugin-serversync-12.2.1.1.zip",
+        "checksum": "d8235e3f0a98fc9709f4d9ef1db8bfc9",
+        "timestamp": "2026-10-04T05:27:36Z"
+      },
+      {
         "version": "12.2.1.0",
         "changelog": "## Developer\r\n- Targets Jellyfin 12.1\r\n- Several servers, scanned in priority order. The single source migrates into the list\r\n- Server modes Pull, Push, and Sync. Push and Sync send change hints to peers running Server Sync, which pull each change within seconds\r\n- Hints cover watch history, metadata, people, users, and new files. Stored on both ends, retried with backoff, recovered when lost\r\n- Watch history merges three way against the state both servers last agreed on\r\n- Metadata, people, and users resolve on where and when a value was last edited, so the newest edit wins\r\n- Two scheduled tasks, Sync Content and Sync Information, replace the ten. The per module tasks are hidden but still run from the dashboard\r\n- Peer endpoints under /ServerSync/Peer and operator endpoints under /ServerSync/Hints, all behind Jellyfin's RequiresElevation policy\r\n- {'Servers tab rebuilt': 'numbered priority list with reorder, Connection, Authentication, Libraries, and Users steps, API key or sign in, and Check Link judged by direction with a clock skew warning'}\r\n- A standard user's key is recognised and pulls what that user can see, one way\r\n- Queue view on the Sync page, and an activity log line for every concluded hint\r\n- A full REST API section in the README\r\n- Each detail dialog shows which server last edited the item and when\r\n- Removing a server removes the rows tracked from it\r\n- Pending hints capped at ten thousand per peer\r\n- Server names with emoji work in peer requests\r\n- Sync database schema v25\r\n- Docker integration harness under integration/",
         "targetAbi": "12.1.0.0",
