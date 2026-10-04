@@ -42,6 +42,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly ConcurrentDictionary<Guid, string> _userPrints = new();
     private CancellationTokenSource? _stopping;
     private Task? _flushLoop;
+    private int _unmatched;
+    private string? _lastUnmatched;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalChangeObserver"/> class.
@@ -76,6 +78,16 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     /// <summary>Gets how many objects are waiting for their debounce to end.</summary>
     public int PendingCount => _pending.Count;
+
+    /// <summary>
+    /// Gets how many local changes were raised since start that no Push or Sync server mapped, so
+    /// nothing was sent. The usual reason is a server entry whose Libraries or Users step does not
+    /// cover the changed item or user.
+    /// </summary>
+    public int UnmatchedCount => _unmatched;
+
+    /// <summary>Gets a description of the last change that matched no mapping, or null.</summary>
+    public string? LastUnmatched => _lastUnmatched;
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -392,7 +404,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             var changedUser = _userManager.GetUserById(change.UserId);
             if (changedUser is not null)
             {
-                _publisher.PublishUsers(change.UserId, changedUser.Username, version, excludePeerKey: null);
+                NoteUnmatched(_publisher.PublishUsers(change.UserId, changedUser.Username, version, excludePeerKey: null), HintKind.Users, null, changedUser.Username);
             }
 
             return;
@@ -408,24 +420,38 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         {
             case HintKind.History when !string.IsNullOrEmpty(item.Path):
                 var user = _userManager.GetUserById(change.UserId);
-                _publisher.PublishHistory(change.UserId, user?.Username, change.ItemId, item.Path, version, excludePeerKey: null);
+                NoteUnmatched(_publisher.PublishHistory(change.UserId, user?.Username, change.ItemId, item.Path, version, excludePeerKey: null), HintKind.History, item.Path, user?.Username);
                 break;
 
             case HintKind.Metadata when !string.IsNullOrEmpty(item.Path):
-                _publisher.PublishMetadata(change.ItemId, item.Path, version, excludePeerKey: null);
+                NoteUnmatched(_publisher.PublishMetadata(change.ItemId, item.Path, version, excludePeerKey: null), HintKind.Metadata, item.Path, null);
                 break;
 
             case HintKind.People when !string.IsNullOrWhiteSpace(item.Name):
-                _publisher.PublishPeople(item.Name, change.ItemId, version, excludePeerKey: null);
+                NoteUnmatched(_publisher.PublishPeople(item.Name, change.ItemId, version, excludePeerKey: null), HintKind.People, null, item.Name);
                 break;
 
             case HintKind.Content when !string.IsNullOrEmpty(item.Path):
-                _publisher.PublishContent(change.ItemId, item.Path, version, excludePeerKey: null);
+                NoteUnmatched(_publisher.PublishContent(change.ItemId, item.Path, version, excludePeerKey: null), HintKind.Content, item.Path, null);
                 break;
 
             default:
                 break;
         }
+    }
+
+    // A change raised to no peer is only worth counting when there is a peer to send to; a server
+    // with no Push or Sync entry is not misconfigured, it just does not send.
+    private void NoteUnmatched(int queued, HintKind kind, string? itemPath, string? userName)
+    {
+        if (queued > 0 || !_configManager.Configuration.Servers.Any(s => s.Pushes))
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _unmatched);
+        _lastUnmatched = HintActivityLog.Describe(kind, itemPath, userName, itemPath ?? userName ?? string.Empty);
+        _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", _lastUnmatched);
     }
 
     private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due);

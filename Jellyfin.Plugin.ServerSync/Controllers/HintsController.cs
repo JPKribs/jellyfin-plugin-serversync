@@ -262,6 +262,8 @@ public class HintsController : ControllerBase
         var overview = new HintsOverview
         {
             Pending = _observer.PendingCount,
+            Unmatched = _observer.UnmatchedCount,
+            LastUnmatched = _observer.LastUnmatched,
             Inbound = _inbound.GetOldest(OverviewRows).Select(InboundHintDto.From).ToList(),
             InboundCount = _inbound.Count()
         };
@@ -401,6 +403,12 @@ public class HintsOverview
 {
     /// <summary>Gets or sets how many local changes are still gathering before they become hints.</summary>
     public int Pending { get; set; }
+
+    /// <summary>Gets or sets how many local changes since start matched no mapping on any Push or Sync server.</summary>
+    public int Unmatched { get; set; }
+
+    /// <summary>Gets or sets the last such change, described.</summary>
+    public string? LastUnmatched { get; set; }
 
     /// <summary>Gets or sets the newest outbound rows, at most a few hundred.</summary>
     public List<OutboundHintDto> Outbound { get; set; } = new();

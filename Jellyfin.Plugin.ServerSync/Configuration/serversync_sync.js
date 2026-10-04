@@ -3735,6 +3735,15 @@ export default function (view) {
             view.querySelector('#queuePeers').classList.toggle('hidden', peers.length === 0);
             view.querySelector('#queueNoPeers').classList.toggle('hidden', peers.length > 0);
 
+            // Changes that matched no mapping are the usual answer to "why is nothing being sent".
+            var unmatchedEl = view.querySelector('#queueUnmatched');
+            var unmatched = data.Unmatched || 0;
+            unmatchedEl.classList.toggle('hidden', unmatched === 0);
+            if (unmatched > 0) {
+                unmatchedEl.textContent = unmatched + ' local change' + (unmatched === 1 ? '' : 's') + ' since start matched no library or user mapping on any Push or Sync server, so nothing was sent for ' + (unmatched === 1 ? 'it' : 'them') +
+                    (data.LastUnmatched ? '. Last: ' + data.LastUnmatched : '') + '. Check the Libraries and Users steps of those servers.';
+            }
+
             var outBody = view.querySelector('#queueOutboundBody');
             outBody.innerHTML = outbound.map(function(r) {
                 var state = QueueModule._stateName(r.State);

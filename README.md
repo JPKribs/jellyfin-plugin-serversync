@@ -121,7 +121,7 @@ When two servers disagree, watch history merges three way against what the serve
 | :--- |
 | ![Change Queue](docs/screenshots/Queue.png) |
 
-The **Queue** view on the Sync page shows what is owed to each peer, what peers have sent that is not yet applied, and each peer's delivery state with the reason when it is paused. Every hint that reaches a conclusion also writes a line to Jellyfin's activity log. A paused peer keeps at most ten thousand pending hints; beyond that the oldest are dropped and the scheduled tasks carry the change instead. Each item's detail dialog shows which server last edited it and when.
+The **Queue** view on the Sync page shows what is owed to each peer, what peers have sent that is not yet applied, and each peer's delivery state with the reason when it is paused. When a change here matched no library or user mapping on any Push or Sync server, the view says so and names the last one, since that is the usual reason nothing is sent. Every hint that reaches a conclusion also writes a line to Jellyfin's activity log. A paused peer keeps at most ten thousand pending hints; beyond that the oldest are dropped and the scheduled tasks carry the change instead. Each item's detail dialog shows which server last edited it and when.
 
 | Item Detail |
 | :--- |
@@ -434,7 +434,7 @@ Both queues on this server and the delivery state of every peer it sends to.
 }
 ```
 
-`Pending` counts local edits still gathering before they become hints. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. The lists hold at most five hundred rows each; `OutboundCounts` by state name and `InboundCount` cover the whole table.
+`Pending` counts local edits still gathering before they become hints. `Unmatched` counts local changes since start that no Push or Sync server mapped, with the last one described in `LastUnmatched`, which is the first thing to check when nothing is being sent. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. The lists hold at most five hundred rows each; `OutboundCounts` by state name and `InboundCount` cover the whole table.
 
 ### POST /ServerSync/Hints/Run
 
