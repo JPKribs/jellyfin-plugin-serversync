@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.1.2",
+        "changelog": "## Developer\r\n- Every metadata and image change travels, posters included. Provider work from a scan or a refresh is marked, fills in where the other server has recorded no edit, and never replaces a poster or field set by hand. Sync database schema v26\r\n- The Queue view lists the changes still gathering, named, with when each goes out, and its To Send card is now Pending\r\n- An applied change writes [type] [name] was updated to the activity log, with the peer it was triggered from in the detail\r\n- User settings are no longer announced live, since Jellyfin raises no event for policy and configuration changes. The scheduled Sync Information task carries them, and the Users settings say so\r\n- Check Link reads as plain sentences",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.1.2/jellyfin-plugin-serversync-12.2.1.2.zip",
+        "checksum": "a6eeb6e0f8201446e1a5c6e23c9489d6",
+        "timestamp": "2026-10-04T05:59:03Z"
+      },
+      {
         "version": "12.2.1.1",
         "changelog": "## Developer\r\n- A server only announces the kinds of change its peer applies, read from the peer's enabled modules every minute; Check Link and each peer's card on the Queue view name them\r\n- Send Changes After, under Settings > Processing, sets how long an item must go untouched before a change is sent to peers, sixty seconds by default; every further edit restarts the wait and one update goes out at the end of it\r\n- History hints honour the receiver's History switch like every other kind\r\n- New library mapping rows start enabled\r\n- The Queue view says when a local change matched no library or user mapping on any Push or Sync server, and names the last one\r\n- A poster or other image uploaded or picked by hand travels as a metadata hint; images a provider fetches during a scan or a refresh are still left to the scheduled task",
         "targetAbi": "12.1.0.0",
