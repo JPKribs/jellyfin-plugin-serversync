@@ -84,6 +84,9 @@ public class InboundHintDto
     /// <summary>Gets or sets the origin's item id, for a poster through the image proxy.</summary>
     public string? ItemId { get; set; }
 
+    /// <summary>Gets or sets the item's Jellyfin type.</summary>
+    public string? ItemType { get; set; }
+
     /// <summary>Gets or sets the username on the origin.</summary>
     public string? UserName { get; set; }
 
@@ -114,6 +117,7 @@ public class InboundHintDto
             Key = row.Key,
             ItemPath = row.ItemPath,
             ItemId = row.ItemId,
+            ItemType = row.ItemType,
             UserName = row.UserName,
             ReceivedAt = row.ReceivedAt,
             Attempts = row.Attempts,

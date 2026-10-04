@@ -102,6 +102,22 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
+    // Finished ids are kept for a day and never more than the cap; past it the oldest go first, and an
+    // origin that then asks sends the hint again, which applies as unchanged.
+    private void Remember(string hintId, DateTime version)
+    {
+        _completed[hintId] = (DateTime.UtcNow, version);
+        if (_completed.Count <= HintProtocol.MaxRememberedCompletions)
+        {
+            return;
+        }
+
+        foreach (var pair in _completed.OrderBy(p => p.Value.At).Take(_completed.Count - HintProtocol.MaxRememberedCompletions))
+        {
+            _completed.TryRemove(pair.Key, out _);
+        }
+    }
+
     /// <summary>Asks the worker to apply now rather than at its next idle tick.</summary>
     public void Wake()
     {
@@ -171,7 +187,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         var completions = new Dictionary<string, (SourceServer Origin, List<CompletedHint> Done)>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            foreach (var row in _inbound.GetDue(DateTime.UtcNow, BatchSize, content))
+            var due = _inbound.GetDue(DateTime.UtcNow, BatchSize, content);
+            var prefetched = content ? new Dictionary<string, Jellyfin.Sdk.Generated.Models.BaseItemDto>(StringComparer.Ordinal) : await PrefetchItemsAsync(due, config, clients, cancellationToken).ConfigureAwait(false);
+            foreach (var row in due)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -200,7 +218,8 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 HintApplyResult result;
                 try
                 {
-                    result = await ApplyOneAsync(row, origin, client, cancellationToken).ConfigureAwait(false);
+                    prefetched.TryGetValue(PrefetchKey(row.OriginServerId, row.Key), out var item);
+                    result = await ApplyOneAsync(row, origin, client, item, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -224,16 +243,19 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                     _logger.LogInformation("Hint {Hint} from '{Origin}' dropped: {Reason}", row.HintId, origin.DisplayName, result.Reason);
                     await _activity.DroppedAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
                 }
-                else if (result.Outcome == HintApplyOutcome.Applied)
+                else if (result.Outcome == HintApplyOutcome.Applied && row.Recorded)
                 {
-                    await _activity.AppliedAsync(row, origin.DisplayName).ConfigureAwait(false);
+                    // A hand made edit is worth a line on the Activity page. Provider work is not: a
+                    // scan on the peer would otherwise write one entry here per item it refreshed, and
+                    // the server log already says what was applied.
+                    await _activity.AppliedAsync(row, origin.DisplayName, result).ConfigureAwait(false);
                 }
 
                 // A row refreshed with a newer version during the apply stays and is applied again.
                 if (_inbound.Remove(row.Id, row.VersionTimestamp))
                 {
                     finished++;
-                    _completed[row.HintId] = (DateTime.UtcNow, row.VersionTimestamp);
+                    Remember(row.HintId, row.VersionTimestamp);
                     if (!completions.TryGetValue(origin.Key, out var batch))
                     {
                         batch = (origin, new List<CompletedHint>());
@@ -288,12 +310,76 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
-    private async Task<HintApplyResult> ApplyOneAsync(InboundHint row, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken)
+    private static string PrefetchKey(string originServerId, string key) => originServerId.ToUpperInvariant() + ":" + key.ToUpperInvariant();
+
+    // The scheduled scan reads items in pages; a pass of hints reads them the same way, one request per
+    // page per origin, instead of one request per hint. A bulk provider refresh on a peer then costs the
+    // receiver no more fetches than its own scan would. A page that cannot be read falls back to the
+    // per hint fetch, which says why.
+    private async Task<Dictionary<string, Jellyfin.Sdk.Generated.Models.BaseItemDto>> PrefetchItemsAsync(
+        IList<InboundHint> due,
+        Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config,
+        Dictionary<string, SourceServerClient> clients,
+        CancellationToken cancellationToken)
+    {
+        var items = new Dictionary<string, Jellyfin.Sdk.Generated.Models.BaseItemDto>(StringComparer.Ordinal);
+        var byOrigin = due
+            .Where(r => r.Kind == HintKind.Metadata && Guid.TryParse(r.Key, out _))
+            .GroupBy(r => r.OriginServerId, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1);
+        foreach (var group in byOrigin)
+        {
+            var origin = config.Servers.FirstOrDefault(s => s.Pulls && string.Equals(s.ServerId, group.Key, StringComparison.OrdinalIgnoreCase));
+            if (origin is null)
+            {
+                continue;
+            }
+
+            if (!clients.TryGetValue(origin.Key, out var client))
+            {
+                try
+                {
+                    client = _clientFactory.Create(origin);
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+
+                clients[origin.Key] = client;
+            }
+
+            var ids = group.Select(r => Guid.Parse(r.Key)).Distinct().ToList();
+            try
+            {
+                var fields = Tasks.RefreshMetadataSyncTableTask.BuildRequestedFields(config);
+                foreach (var dto in await client.GetItemsByIdsAsync(ids, fields, cancellationToken: cancellationToken).ConfigureAwait(false))
+                {
+                    if (dto.Id.HasValue)
+                    {
+                        items[PrefetchKey(origin.ServerId, dto.Id.Value.ToString("N"))] = dto;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not read {Count} item(s) from '{Origin}' in one page, each hint will read its own", ids.Count, origin.DisplayName);
+            }
+        }
+
+        return items;
+    }
+
+    private async Task<HintApplyResult> ApplyOneAsync(InboundHint row, SourceServer origin, SourceServerClient client, Jellyfin.Sdk.Generated.Models.BaseItemDto? prefetched, CancellationToken cancellationToken)
     {
         return row.Kind switch
         {
             HintKind.History => await _history.ApplyAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
-            HintKind.Metadata => await _items.ApplyMetadataAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
+            HintKind.Metadata => await _items.ApplyMetadataAsync(row, origin, client, cancellationToken, prefetched).ConfigureAwait(false),
             HintKind.People => await _items.ApplyPeopleAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
             HintKind.Content => await _content.ApplyAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
             HintKind.Users => await _users.ApplyAsync(row, origin, client, cancellationToken).ConfigureAwait(false),

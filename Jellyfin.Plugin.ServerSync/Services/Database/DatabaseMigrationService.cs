@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 26;
+    public const int CurrentSchemaVersion = 27;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -259,6 +259,7 @@ public static class DatabaseMigrationService
                 ItemId TEXT,
                 UserId TEXT,
                 UserName TEXT,
+                ItemType TEXT,
                 VersionServerId TEXT NOT NULL,
                 VersionTimestamp TEXT NOT NULL,
                 Recorded INTEGER NOT NULL DEFAULT 1,
@@ -283,6 +284,7 @@ public static class DatabaseMigrationService
                 ItemId TEXT,
                 UserId TEXT,
                 UserName TEXT,
+                ItemType TEXT,
                 VersionServerId TEXT NOT NULL,
                 VersionTimestamp TEXT NOT NULL,
                 Recorded INTEGER NOT NULL DEFAULT 1,
@@ -300,6 +302,14 @@ public static class DatabaseMigrationService
                 ServerId TEXT NOT NULL,
                 Timestamp TEXT NOT NULL,
                 PRIMARY KEY(Kind, Key)
+            );
+
+            CREATE TABLE IF NOT EXISTS PeerPairings (
+                PeerKey TEXT NOT NULL PRIMARY KEY,
+                InboundSecret TEXT,
+                OutboundSecret TEXT,
+                InboundRefusedAt TEXT,
+                UpdatedAt TEXT NOT NULL
             );";
         cmd.ExecuteNonQuery();
     }
@@ -591,6 +601,44 @@ public static class DatabaseMigrationService
                 }
 
                 v26Transaction.Commit();
+            }
+
+            // v27: pairing secrets that tie a peer's requests to its server entry, and the item type a
+            // hint concerns so the queue view can show it in the right shape.
+            if (fromVersion < 27)
+            {
+                logger.LogInformation("Schema upgrade to v27: adding peer pairings and hint item types.");
+                using var v27Transaction = connection.BeginTransaction();
+                using (var pairings = connection.CreateCommand())
+                {
+                    pairings.Transaction = v27Transaction;
+                    pairings.CommandText = @"
+                        CREATE TABLE IF NOT EXISTS PeerPairings (
+                            PeerKey TEXT NOT NULL PRIMARY KEY,
+                            InboundSecret TEXT,
+                            OutboundSecret TEXT,
+                            InboundRefusedAt TEXT,
+                            UpdatedAt TEXT NOT NULL
+                        )";
+                    pairings.ExecuteNonQuery();
+                }
+
+                foreach (var table in new[] { "OutboundHints", "InboundHints" })
+                {
+                    using var addCol = connection.CreateCommand();
+                    addCol.Transaction = v27Transaction;
+                    addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN ItemType TEXT";
+                    try
+                    {
+                        addCol.ExecuteNonQuery();
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // A fresh database already has it.
+                    }
+                }
+
+                v27Transaction.Commit();
             }
 
             SetSchemaVersion(connection, CurrentSchemaVersion);

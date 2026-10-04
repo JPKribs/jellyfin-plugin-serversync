@@ -40,16 +40,17 @@ public sealed class OutboundHintStore : QueueStoreBase
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 INSERT INTO OutboundHints (
-                    HintId, PeerKey, Kind, Key, ItemPath, ItemId, UserId, UserName,
+                    HintId, PeerKey, Kind, Key, ItemPath, ItemId, ItemType, UserId, UserName,
                     VersionServerId, VersionTimestamp, Recorded, State, Attempts, NextAttempt, SentAt, LastError, CreatedAt
                 ) VALUES (
-                    '', @peer, @kind, @key, @itemPath, @itemId, @userId, @userName,
+                    '', @peer, @kind, @key, @itemPath, @itemId, @itemType, @userId, @userName,
                     @versionServer, @versionAt, @recorded, 0, 0, @now, NULL, NULL, @now
                 )
                 ON CONFLICT(PeerKey, Kind, Key) DO UPDATE SET
                     Recorded = MAX(Recorded, @recorded),
                     ItemPath = @itemPath,
                     ItemId = @itemId,
+                    ItemType = @itemType,
                     UserId = @userId,
                     UserName = @userName,
                     VersionServerId = CASE WHEN @versionAt >= VersionTimestamp THEN @versionServer ELSE VersionServerId END,
@@ -65,6 +66,7 @@ public sealed class OutboundHintStore : QueueStoreBase
             Add(cmd, "@key", row.Key);
             Add(cmd, "@itemPath", row.ItemPath);
             Add(cmd, "@itemId", row.ItemId);
+            Add(cmd, "@itemType", row.ItemType);
             Add(cmd, "@userId", row.UserId);
             Add(cmd, "@userName", row.UserName);
             Add(cmd, "@versionServer", row.VersionServerId);
@@ -223,10 +225,12 @@ public sealed class OutboundHintStore : QueueStoreBase
     /// </summary>
     /// <param name="completed">The peer's report.</param>
     /// <returns>How many rows were removed.</returns>
-    public int Complete(IEnumerable<CompletedHint> completed)
+    public int Complete(string peerKey, IEnumerable<CompletedHint> completed)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(peerKey);
         ArgumentNullException.ThrowIfNull(completed);
         var removed = 0;
+        var now = DateTime.UtcNow;
         Write(conn =>
         {
             using var transaction = conn.BeginTransaction();
@@ -234,9 +238,10 @@ public sealed class OutboundHintStore : QueueStoreBase
             {
                 using var cmd = conn.CreateCommand();
                 cmd.Transaction = transaction;
-                cmd.CommandText = "DELETE FROM OutboundHints WHERE HintId = @hint AND VersionTimestamp <= @version";
+                cmd.CommandText = "DELETE FROM OutboundHints WHERE PeerKey = @peer AND HintId = @hint AND VersionTimestamp <= @version";
+                Add(cmd, "@peer", peerKey);
                 Add(cmd, "@hint", done.HintId);
-                Add(cmd, "@version", Stamp(done.VersionTimestamp));
+                Add(cmd, "@version", Stamp(HintProtocol.BoundVersion(done.VersionTimestamp, now)));
                 removed += cmd.ExecuteNonQuery();
             }
 
@@ -339,6 +344,7 @@ public sealed class OutboundHintStore : QueueStoreBase
         Kind = (HintKind)reader.GetInt32(reader.GetOrdinal("Kind")),
         Key = reader.GetString(reader.GetOrdinal("Key")),
         ItemPath = Text(reader, "ItemPath"),
+        ItemType = Text(reader, "ItemType"),
         ItemId = Text(reader, "ItemId"),
         UserId = Text(reader, "UserId"),
         UserName = Text(reader, "UserName"),

@@ -30,6 +30,9 @@ public class InboundHint
     /// <summary>Gets or sets the origin's item id.</summary>
     public string? ItemId { get; set; }
 
+    /// <summary>Gets or sets the item's Jellyfin type, such as Movie or Episode, so a queue view can show it in the right shape.</summary>
+    public string? ItemType { get; set; }
+
     /// <summary>Gets or sets the origin's user id.</summary>
     public string? UserId { get; set; }
 
@@ -72,10 +75,11 @@ public class InboundHint
             Key = hint.Key,
             ItemPath = hint.ItemPath,
             ItemId = hint.ItemId,
+            ItemType = hint.ItemType,
             UserId = hint.UserId,
             UserName = hint.UserName,
             VersionServerId = hint.VersionServerId,
-            VersionTimestamp = hint.VersionTimestamp,
+            VersionTimestamp = Services.Queue.HintProtocol.BoundVersion(hint.VersionTimestamp, utcNow),
             Recorded = hint.Recorded,
             ReceivedAt = utcNow,
             NextAttempt = utcNow

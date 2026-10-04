@@ -54,6 +54,48 @@ public static class HintProtocol
     /// <summary>How often a sender re-reads what each peer accepts, so a module switched on there is noticed within a minute.</summary>
     public static readonly TimeSpan CapabilityRefresh = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// How far ahead of this server's clock a peer's version may be before the hint is declined. A
+    /// version that is older than that is still honest skew and is clamped to now, so it can never
+    /// lock an object out of every later real edit.
+    /// </summary>
+    public static readonly TimeSpan MaxVersionLead = TimeSpan.FromMinutes(5);
+
+    /// <summary>The most completed hint ids a receiver remembers for peers that read them from its status.</summary>
+    public const int MaxRememberedCompletions = 10000;
+
+    /// <summary>The most bytes a peer's answer to a hint request may carry.</summary>
+    public const long MaxPeerResponseBytes = 32L * 1024 * 1024;
+
+    /// <summary>The header a server presents on requests that name it as the sender, holding the secret the receiver issued to it.</summary>
+    public const string PairingHeader = "X-ServerSync-Pairing";
+
+    /// <summary>The status a receiver answers when the sender is not paired with it, so the sender pairs and tries again.</summary>
+    public const int UnpairedStatus = 428;
+
+    /// <summary>
+    /// Bounds a version from elsewhere to this server's clock. A timestamp in the future would beat every
+    /// later real edit here, so it is read as now.
+    /// </summary>
+    /// <param name="timestamp">The version's timestamp.</param>
+    /// <param name="utcNow">This server's clock.</param>
+    /// <returns>The timestamp, or now when it lay ahead.</returns>
+    public static DateTime BoundVersion(DateTime timestamp, DateTime utcNow)
+    {
+        var at = timestamp.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(timestamp, DateTimeKind.Utc) : timestamp.ToUniversalTime();
+        return at > utcNow ? utcNow : at;
+    }
+
+    /// <summary>Whether a version lies too far ahead of this server's clock to be trusted at all.</summary>
+    /// <param name="timestamp">The version's timestamp.</param>
+    /// <param name="utcNow">This server's clock.</param>
+    /// <returns>True when it is beyond the allowed lead.</returns>
+    public static bool IsFutureVersion(DateTime timestamp, DateTime utcNow)
+    {
+        var at = timestamp.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(timestamp, DateTimeKind.Utc) : timestamp.ToUniversalTime();
+        return at - utcNow > MaxVersionLead;
+    }
+
     /// <summary>The kinds a server applies from hints, by its module switches. Users are never among them.</summary>
     /// <param name="config">The configuration.</param>
     /// <returns>The kinds whose module is on.</returns>

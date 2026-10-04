@@ -30,7 +30,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<ConnectionTestResult>> TestConnection([FromBody] TestConnectionRequest request, CancellationToken cancellationToken)
     {
-        var urlValidation = ValidateServerUrl(request.ServerUrl, request.AllowPrivateNetwork);
+        var urlValidation = await ValidateServerUrlAsync(request.ServerUrl, request.AllowPrivateNetwork, cancellationToken).ConfigureAwait(false);
         if (!urlValidation.IsValid)
         {
             return Ok(new ConnectionTestResult
@@ -84,9 +84,9 @@ public partial class ConfigurationController
     /// <returns>URL validation response.</returns>
     [HttpPost("ValidateUrl")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<ValidateUrlResponse> ValidateUrl([FromBody] ValidateUrlRequest request)
+    public async Task<ActionResult<ValidateUrlResponse>> ValidateUrl([FromBody] ValidateUrlRequest request, CancellationToken cancellationToken)
     {
-        return Ok(ValidateServerUrl(request.Url, request.AllowPrivateNetwork));
+        return Ok(await ValidateServerUrlAsync(request.Url, request.AllowPrivateNetwork, cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -99,7 +99,7 @@ public partial class ConfigurationController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<AuthenticateResponse>> Authenticate([FromBody] AuthenticateRequest request, CancellationToken cancellationToken)
     {
-        var urlValidation = ValidateServerUrl(request.ServerUrl, request.AllowPrivateNetwork);
+        var urlValidation = await ValidateServerUrlAsync(request.ServerUrl, request.AllowPrivateNetwork, cancellationToken).ConfigureAwait(false);
         if (!urlValidation.IsValid)
         {
             return Ok(new AuthenticateResponse
@@ -184,7 +184,7 @@ public partial class ConfigurationController
         [FromBody] TestConnectionRequest request,
         CancellationToken cancellationToken)
     {
-        var urlValidation = ValidateServerUrl(request.ServerUrl, request.AllowPrivateNetwork);
+        var urlValidation = await ValidateServerUrlAsync(request.ServerUrl, request.AllowPrivateNetwork, cancellationToken).ConfigureAwait(false);
         if (!urlValidation.IsValid)
         {
             return BadRequest(urlValidation.Message);
@@ -246,7 +246,7 @@ public partial class ConfigurationController
         [FromBody] TestConnectionRequest request,
         CancellationToken cancellationToken)
     {
-        var urlValidation = ValidateServerUrl(request.ServerUrl, request.AllowPrivateNetwork);
+        var urlValidation = await ValidateServerUrlAsync(request.ServerUrl, request.AllowPrivateNetwork, cancellationToken).ConfigureAwait(false);
         if (!urlValidation.IsValid)
         {
             return BadRequest(urlValidation.Message);
@@ -418,9 +418,11 @@ public partial class ConfigurationController
     /// <param name="url">URL to validate.</param>
     /// <param name="allowPrivateNetwork">Whether a private network address is acceptable for this entry.</param>
     /// <returns>Validation response with normalized URL.</returns>
-    private static ValidateUrlResponse ValidateServerUrl(string url, bool allowPrivateNetwork)
+    private static async Task<ValidateUrlResponse> ValidateServerUrlAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken)
     {
-        var ssrfError = ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork);
+        // A name is resolved here when private networks are disallowed, so the operator hears at save
+        // time that "localhost" or a LAN name is refused rather than at the first failed call.
+        var ssrfError = await ConfigurationUtilities.ValidateServerUrlForSsrfAsync(url, allowPrivateNetwork, cancellationToken).ConfigureAwait(false);
         if (ssrfError != null)
         {
             return new ValidateUrlResponse

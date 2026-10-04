@@ -26,6 +26,7 @@ public sealed class ContentHintHandler
     private readonly IServiceProvider _services;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ContentSyncTableManager _table;
+    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly ILogger<ContentHintHandler> _logger;
 
     /// <summary>
@@ -34,12 +35,14 @@ public sealed class ContentHintHandler
     /// <param name="services">The service provider the module tasks are built from.</param>
     /// <param name="configManager">Plugin configuration.</param>
     /// <param name="table">The content table.</param>
+    /// <param name="libraryManager">The library, which names the item the activity log mentions.</param>
     /// <param name="logger">Logger.</param>
-    public ContentHintHandler(IServiceProvider services, IPluginConfigurationManager configManager, ContentSyncTableManager table, ILogger<ContentHintHandler> logger)
+    public ContentHintHandler(IServiceProvider services, IPluginConfigurationManager configManager, ContentSyncTableManager table, MediaBrowser.Controller.Library.ILibraryManager libraryManager, ILogger<ContentHintHandler> logger)
     {
         _services = services;
         _configManager = configManager;
         _table = table;
+        _libraryManager = libraryManager;
         _logger = logger;
     }
 
@@ -119,6 +122,8 @@ public sealed class ContentHintHandler
         }
 
         _logger.LogInformation("Downloaded {Path} on a hint from '{Origin}'", record.LocalPath, origin.DisplayName);
-        return HintApplyResult.Applied;
+
+        // The file is new, so the library may not have it yet; then the file's name stands in.
+        return HintApplyResult.AppliedTo(string.IsNullOrEmpty(record.LocalPath) ? null : _libraryManager.FindByPath(record.LocalPath, false));
     }
 }

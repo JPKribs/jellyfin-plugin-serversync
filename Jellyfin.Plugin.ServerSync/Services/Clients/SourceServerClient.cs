@@ -32,6 +32,12 @@ public class SourceServerClient : IDisposable
     /// </summary>
     public const string HttpClientName = "ServerSyncSource";
 
+    /// <summary>
+    /// Named HttpClient for entries that disallow private networks. Its handler classifies every address a
+    /// name resolves to at connect time, so a name cannot reach what an address could not.
+    /// </summary>
+    public const string PublicHttpClientName = "ServerSyncSourcePublic";
+
     private readonly ILogger<SourceServerClient> _logger;
     private readonly string _serverUrl;
     private readonly string _apiKey;
@@ -42,6 +48,13 @@ public class SourceServerClient : IDisposable
     private readonly object _apiClientLock = new();
     private JellyfinApiClient? _apiClient;
     private volatile bool _disposed;
+
+    /// <summary>
+    /// Gets or sets the pairing with this peer, when the peer is a configured server entry. It supplies
+    /// the secret presented on requests that name this server as the sender, and pairs again when the
+    /// peer answers that the pairing is missing.
+    /// </summary>
+    public PeerPairing? Pairing { get; set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SourceServerClient"/> class.
@@ -2361,8 +2374,19 @@ public class SourceServerClient : IDisposable
     /// <returns>The listing, or null when the peer has no Server Sync that can answer.</returns>
     public async Task<Models.Peer.PeerLinkResponse?> GetPeerLinkAsync(string thisServerId, CancellationToken cancellationToken = default)
     {
-        var (_, parsed, _) = await PeerRequestAsync<Models.Peer.PeerLinkResponse>(HttpMethod.Get, "/ServerSync/Peer/Link?serverId=" + Uri.EscapeDataString(thisServerId ?? string.Empty), null, cancellationToken).ConfigureAwait(false);
+        var (_, parsed, _) = await PeerRequestAsync<Models.Peer.PeerLinkResponse>(HttpMethod.Get, "/ServerSync/Peer/Link?serverId=" + Uri.EscapeDataString(thisServerId ?? string.Empty), null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         return parsed;
+    }
+
+    /// <summary>Hands the peer the secret it must present on requests that name it as the sender to this server.</summary>
+    /// <param name="pairRequest">This server's id and the secret.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The status the peer answered and its body when it refused.</returns>
+    public async Task<(int StatusCode, string? Body)> PairAsync(Models.Peer.PairRequest pairRequest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pairRequest);
+        var (status, _, body) = await PeerRequestAsync<object>(HttpMethod.Post, "/ServerSync/Peer/Pair", pairRequest, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        return (status, body);
     }
 
     /// <summary>Reads one person by name with the fields the people module compares.</summary>
@@ -2440,11 +2464,41 @@ public class SourceServerClient : IDisposable
     /// <param name="body">The request body to send as JSON, or null for none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The status, the parsed answer on success, and the body text on failure.</returns>
-    private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
+    // A peer that answers "not paired" is asked to pair, which lands the new secret here before the
+    // link call returns, and the request goes once more. Reads are capped so a peer cannot hand back
+    // more than the plugin is prepared to hold.
+    private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken, bool pairOnRefusal = true)
+        where TResponse : class
+    {
+        var answer = await PeerRequestOnceAsync<TResponse>(method, pathAndQuery, body, cancellationToken).ConfigureAwait(false);
+        if (answer.Status != Services.Queue.HintProtocol.UnpairedStatus || !pairOnRefusal || Pairing is null)
+        {
+            return answer;
+        }
+
+        // The link call makes the peer issue a secret, or note that it cannot, and either way it
+        // decides afresh on the next request.
+        _logger.LogInformation("The peer at {Url} does not hold a pairing for this server, pairing now", _serverUrl);
+        var link = await GetPeerLinkAsync(Pairing.ThisServerId, cancellationToken).ConfigureAwait(false);
+        if (link is null)
+        {
+            return answer;
+        }
+
+        return await PeerRequestOnceAsync<TResponse>(method, pathAndQuery, body, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestOnceAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
         where TResponse : class
     {
         using var request = new HttpRequestMessage(method, _serverUrl + pathAndQuery);
         AddAuthorizationHeader(request);
+        var secret = Pairing?.CurrentSecret();
+        if (!string.IsNullOrEmpty(secret))
+        {
+            request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.PairingHeader, secret);
+        }
+
         if (body is not null)
         {
             request.Content = new StringContent(
@@ -2453,17 +2507,46 @@ public class SourceServerClient : IDisposable
                 "application/json");
         }
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         var status = (int)response.StatusCode;
+        var content = await ReadCappedAsync(response, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            return (status, null, await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            return (status, null, System.Text.Encoding.UTF8.GetString(content));
+        }
+
+        if (content.Length == 0)
+        {
+            return (status, null, null);
+        }
+
+        return (status, System.Text.Json.JsonSerializer.Deserialize<TResponse>(content, PeerJsonOptions), null);
+    }
+
+    private static async Task<byte[]> ReadCappedAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var cap = Services.Queue.HintProtocol.MaxPeerResponseBytes;
+        if (response.Content.Headers.ContentLength > cap)
+        {
+            throw new HttpRequestException($"The peer's answer is {response.Content.Headers.ContentLength} bytes, more than the {cap} this plugin reads");
         }
 
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using (stream.ConfigureAwait(false))
         {
-            return (status, await System.Text.Json.JsonSerializer.DeserializeAsync<TResponse>(stream, PeerJsonOptions, cancellationToken).ConfigureAwait(false), null);
+            using var buffer = new System.IO.MemoryStream();
+            var chunk = new byte[64 * 1024];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                if (buffer.Length > cap)
+                {
+                    throw new HttpRequestException($"The peer's answer passed {cap} bytes, more than this plugin reads");
+                }
+            }
+
+            return buffer.ToArray();
         }
     }
 

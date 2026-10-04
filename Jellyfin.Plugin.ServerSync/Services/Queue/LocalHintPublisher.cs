@@ -53,7 +53,7 @@ public sealed class LocalHintPublisher
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
     /// <param name="recorded">Whether the change was made by hand. Provider work is sent marked and records no version here.</param>
     /// <returns>How many peers were queued a hint.</returns>
-    public int PublishMetadata(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, bool recorded = true)
+    public int PublishMetadata(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, bool recorded = true, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
         var key = HintProtocol.MetadataKey(localItemId);
@@ -63,7 +63,7 @@ public sealed class LocalHintPublisher
             version,
             excludePeerKey,
             peer => HintMapping.FindByLocalPath(peer, itemPath) is not null,
-            () => new OutboundHint { Kind = HintKind.Metadata, Key = key, ItemPath = itemPath, ItemId = key, Recorded = recorded },
+            () => new OutboundHint { Kind = HintKind.Metadata, Key = key, ItemPath = itemPath, ItemId = key, ItemType = itemType, Recorded = recorded },
             recorded);
     }
 
@@ -95,7 +95,7 @@ public sealed class LocalHintPublisher
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the file, or null.</param>
     /// <returns>How many peers were queued a hint.</returns>
-    public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey)
+    public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
         var key = HintProtocol.MetadataKey(localItemId);
@@ -105,7 +105,7 @@ public sealed class LocalHintPublisher
             version,
             excludePeerKey,
             peer => HintMapping.FindByLocalPath(peer, itemPath) is not null,
-            () => new OutboundHint { Kind = HintKind.Content, Key = key, ItemPath = itemPath, ItemId = key });
+            () => new OutboundHint { Kind = HintKind.Content, Key = key, ItemPath = itemPath, ItemId = key, ItemType = itemType });
     }
 
     /// <summary>Publishes a change to a user's policy, configuration, or profile image.</summary>
@@ -180,7 +180,7 @@ public sealed class LocalHintPublisher
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change and needs no hint, or null.</param>
     /// <returns>How many peers were queued a hint.</returns>
-    public int PublishHistory(Guid localUserId, string? userName, Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey)
+    public int PublishHistory(Guid localUserId, string? userName, Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
 
@@ -209,6 +209,7 @@ public sealed class LocalHintPublisher
                 Key = key,
                 ItemPath = itemPath,
                 ItemId = localItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
+                ItemType = itemType,
                 UserId = localUserId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
                 UserName = userName,
                 VersionServerId = version.ServerId,

@@ -29,6 +29,9 @@ public class SyncHint
     /// <summary>Gets or sets the origin's item id, when the kind concerns an item.</summary>
     public string? ItemId { get; set; }
 
+    /// <summary>Gets or sets the item's Jellyfin type, such as Movie or Episode, so a queue view can show it in the right shape.</summary>
+    public string? ItemType { get; set; }
+
     /// <summary>Gets or sets the origin's user id, when the kind concerns a user.</summary>
     public string? UserId { get; set; }
 

@@ -87,7 +87,7 @@ public sealed class HintStoreTests : IDisposable
         Assert.Empty(_outbound.GetDue("peer-a", now, 10));
         Assert.Equal(OutboundState.Sent, _outbound.GetAll()[0].State);
 
-        var removed = _outbound.Complete(new[] { new CompletedHint { HintId = row.HintId, VersionTimestamp = row.VersionTimestamp } });
+        var removed = _outbound.Complete(row.PeerKey, new[] { new CompletedHint { HintId = row.HintId, VersionTimestamp = row.VersionTimestamp } });
         Assert.Equal(1, removed);
         Assert.Empty(_outbound.GetAll());
     }
@@ -110,7 +110,7 @@ public sealed class HintStoreTests : IDisposable
         Assert.Equal(OutboundState.Pending, again.State);
         Assert.Null(again.SentAt);
 
-        var removed = _outbound.Complete(new[] { new CompletedHint { HintId = row.HintId, VersionTimestamp = row.VersionTimestamp } });
+        var removed = _outbound.Complete(row.PeerKey, new[] { new CompletedHint { HintId = row.HintId, VersionTimestamp = row.VersionTimestamp } });
         Assert.Equal(0, removed);
         Assert.Single(_outbound.GetAll());
     }
@@ -171,21 +171,24 @@ public sealed class HintStoreTests : IDisposable
     [Fact]
     public void Inbound_CoalescesAndRemovesByVersion()
     {
-        // The origin reuses one hint id per object, so both notices carry "a:1" and only the version tells them apart.
+        // The origin reuses one hint id per object, so both notices carry "a:1" and only the version tells
+        // them apart. Both versions lie in the past, since a version ahead of the receipt is read as then.
         var now = DateTime.UtcNow;
-        var first = InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.History, Key = "u|i", VersionTimestamp = now }, now);
+        var older = now.AddMinutes(-2);
+        var newer = now.AddMinutes(-1);
+        var first = InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.History, Key = "u|i", VersionTimestamp = older }, now);
         _inbound.Enqueue(first);
-        var second = InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.History, Key = "u|i", VersionTimestamp = now.AddMinutes(1) }, now);
+        var second = InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.History, Key = "u|i", VersionTimestamp = newer }, now);
         _inbound.Enqueue(second);
 
         Assert.Equal(1, _inbound.Count());
         Assert.Equal(first.Id, second.Id);
-        Assert.Equal(now.AddMinutes(1), _inbound.GetAll()[0].VersionTimestamp);
+        Assert.Equal(newer, _inbound.GetAll()[0].VersionTimestamp);
 
         // An apply that worked from the older version leaves the refreshed row for another pass.
-        Assert.False(_inbound.Remove(first.Id, now));
+        Assert.False(_inbound.Remove(first.Id, older));
         Assert.Equal(1, _inbound.Count());
-        Assert.True(_inbound.Remove(first.Id, now.AddMinutes(1)));
+        Assert.True(_inbound.Remove(first.Id, newer));
         Assert.Equal(0, _inbound.Count());
     }
 
@@ -253,6 +256,98 @@ public sealed class HintStoreTests : IDisposable
         Assert.Equal("b", stored?.ServerId);
         Assert.Equal(2, stored?.Timestamp.Day);
         Assert.Single(_versions.GetMany(HintKind.History, new[] { "k", "missing" }));
+    }
+
+    /// <summary>
+    /// A stored version never lies ahead of this server's clock.
+    /// True: nothing in the store can beat every later real edit.
+    /// False: a forged stamp, once stored, wins every conflict forever.
+    /// </summary>
+    [Fact]
+    public void Versions_NeverStoreTheFuture()
+    {
+        _versions.Set(new ObjectVersion { Kind = HintKind.Metadata, Key = "k", ServerId = "peer", Timestamp = new DateTime(2999, 1, 1, 0, 0, 0, DateTimeKind.Utc) });
+        var stored = _versions.Get(HintKind.Metadata, "k");
+        Assert.NotNull(stored);
+        Assert.True(stored!.Timestamp <= DateTime.UtcNow.AddSeconds(5));
+        Assert.True(stored.Timestamp >= DateTime.UtcNow.AddMinutes(-1));
+    }
+
+    /// <summary>
+    /// A completion only removes rows queued for the peer that reports it.
+    /// True: a peer can finish its own work and nothing else, whatever ids it names.
+    /// False: any peer could clear another peer's pending hints by guessing ids.
+    /// </summary>
+    [Fact]
+    public void Complete_OnlyTouchesTheReportingPeersRows()
+    {
+        var mine = Row("peer-a");
+        var theirs = Row("peer-b");
+        _outbound.Enqueue(mine, "me");
+        _outbound.Enqueue(theirs, "me");
+
+        var removed = _outbound.Complete("peer-b", new[] { new CompletedHint { HintId = mine.HintId, VersionTimestamp = new DateTime(2999, 1, 1, 0, 0, 0, DateTimeKind.Utc) } });
+        Assert.Equal(0, removed);
+        Assert.Equal(2, _outbound.GetRecent(10).Count);
+
+        removed = _outbound.Complete("peer-a", new[] { new CompletedHint { HintId = mine.HintId, VersionTimestamp = mine.VersionTimestamp } });
+        Assert.Equal(1, removed);
+        Assert.Single(_outbound.GetRecent(10));
+    }
+
+    /// <summary>
+    /// The item's type rides along on both ends.
+    /// True: the queue view can show an episode wide and a film tall.
+    /// False: every row is a poster.
+    /// </summary>
+    [Fact]
+    public void ItemType_RoundTrips()
+    {
+        var row = Row();
+        row.ItemType = "Episode";
+        _outbound.Enqueue(row, "me");
+        Assert.Equal("Episode", _outbound.GetRecent(1)[0].ItemType);
+
+        var hint = row.ToHint("me");
+        Assert.Equal("Episode", hint.ItemType);
+        _inbound.Enqueue(InboundHint.FromHint(hint, DateTime.UtcNow));
+        Assert.Equal("Episode", _inbound.GetAll()[0].ItemType);
+    }
+
+    /// <summary>
+    /// A received hint never carries a version ahead of this server's clock.
+    /// True: the row the handlers decide on is already bounded.
+    /// False: the far future reaches the conflict decision and the version store.
+    /// </summary>
+    [Fact]
+    public void Inbound_FromHint_BoundsTheVersion()
+    {
+        var now = new DateTime(2026, 10, 4, 12, 0, 0, DateTimeKind.Utc);
+        var hint = Row().ToHint("me");
+        hint.VersionTimestamp = new DateTime(2999, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        Assert.Equal(now, InboundHint.FromHint(hint, now).VersionTimestamp);
+    }
+
+    /// <summary>
+    /// One origin cannot fill the inbound queue without bound.
+    /// True: past the cap its oldest rows go and the newest stay.
+    /// False: a hostile or runaway peer grows the database forever.
+    /// </summary>
+    [Fact]
+    public void Inbound_CapsRowsPerOrigin()
+    {
+        var now = DateTime.UtcNow;
+        for (var i = 0; i < HintProtocol.MaxPendingPerPeer + 5; i++)
+        {
+            var hint = Row(key: "k" + i).ToHint("origin");
+            hint.HintId = "origin:" + i;
+            _inbound.Enqueue(InboundHint.FromHint(hint, now));
+        }
+
+        var rows = _inbound.GetAll();
+        Assert.Equal(HintProtocol.MaxPendingPerPeer, rows.Count);
+        Assert.DoesNotContain(rows, r => r.Key == "k0");
+        Assert.Contains(rows, r => r.Key == "k" + (HintProtocol.MaxPendingPerPeer + 4));
     }
 
     /// <summary>

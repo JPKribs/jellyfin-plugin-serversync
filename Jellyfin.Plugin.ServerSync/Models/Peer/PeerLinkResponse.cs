@@ -26,4 +26,10 @@ public class PeerLinkResponse
 
     /// <summary>Gets or sets a value indicating whether this server sends hints to the asking server.</summary>
     public bool SendsToYou { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the answering server issued the caller a pairing secret during this call.</summary>
+    public bool Paired { get; set; }
+
+    /// <summary>Gets or sets why pairing did not happen, when it did not.</summary>
+    public string? PairingError { get; set; }
 }

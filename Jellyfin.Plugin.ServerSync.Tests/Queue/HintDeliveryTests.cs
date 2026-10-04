@@ -22,6 +22,7 @@ public class HintDeliveryTests
     [InlineData(503, DeliveryOutcome.Retry)]
     [InlineData(0, DeliveryOutcome.Retry)]
     [InlineData(429, DeliveryOutcome.Retry)]
+    [InlineData(428, DeliveryOutcome.PausePeer)]
     public void Classify_MapsStatusToOutcome(int status, DeliveryOutcome expected)
     {
         Assert.Equal(expected, HintDelivery.Classify(status));
@@ -38,6 +39,7 @@ public class HintDeliveryTests
         Assert.Contains("administrator", HintDelivery.PauseReason(403, ""), System.StringComparison.Ordinal);
         Assert.Contains("not installed", HintDelivery.PauseReason(404, ""), System.StringComparison.Ordinal);
         Assert.Contains("does not list this server", HintDelivery.PauseReason(409, "server x is not configured"), System.StringComparison.Ordinal);
+        Assert.Contains("could not pair", HintDelivery.PauseReason(428, "server x is not paired"), System.StringComparison.Ordinal);
         Assert.Contains("server x is not configured", HintDelivery.PauseReason(409, "server x is not configured"), System.StringComparison.Ordinal);
     }
 

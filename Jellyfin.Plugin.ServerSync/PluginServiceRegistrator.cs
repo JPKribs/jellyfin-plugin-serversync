@@ -66,6 +66,19 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 c.Timeout = TimeSpan.FromMinutes(5);
             })
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
+
+        // The same client for entries that disallow private networks, with the rule enforced on every
+        // address a name resolves to, so a name cannot stand in for an address the URL check refuses.
+        serviceCollection
+            .AddHttpClient(SourceServerClient.PublicHttpClientName, c =>
+            {
+                c.Timeout = TimeSpan.FromMinutes(5);
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                ConnectCallback = Utilities.ConfigurationUtilities.ConnectPublicOnlyAsync
+            })
+            .SetHandlerLifetime(TimeSpan.FromMinutes(5));
     }
 
     private static IEnumerable<(Type Impl, PluginServiceAttribute Attr)> DiscoverAnnotatedServices(Assembly assembly)

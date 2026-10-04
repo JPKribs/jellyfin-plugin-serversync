@@ -43,7 +43,7 @@ public partial class ConfigurationController
 
         // Same SSRF gate every other source-server call path goes through
         // (the factory validates too, but this endpoint bypasses the factory).
-        if (Utilities.ConfigurationUtilities.ValidateServerUrlForSsrf(server.Url, server.AllowPrivateNetwork) != null)
+        if (await Utilities.ConfigurationUtilities.ValidateServerUrlForSsrfAsync(server.Url, server.AllowPrivateNetwork, cancellationToken).ConfigureAwait(false) != null)
         {
             return NotFound();
         }
@@ -56,7 +56,7 @@ public partial class ConfigurationController
 
         try
         {
-            var client = _httpClientFactory.CreateClient(SourceServerClient.HttpClientName);
+            var client = _httpClientFactory.CreateClient(server.AllowPrivateNetwork ? SourceServerClient.HttpClientName : SourceServerClient.PublicHttpClientName);
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue(
                 "MediaBrowser", $"Token=\"{_configManager.DecryptApiKey(server.ApiKey)}\"");

@@ -984,6 +984,9 @@
         .qThumb.round { width: 44px; height: 44px; border-radius: 50%; }
         .qThumbHolder { width: 44px; height: 64px; border-radius: 4px; background: rgba(255,255,255,.06); display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.3); }
         .qThumbHolder.round { height: 44px; border-radius: 50%; }
+        /* Episodes and home videos carry a landscape primary image, so their frame is wide. */
+        .qThumb.wide, .qThumbHolder.wide { width: 80px; height: 45px; }
+        .qRow:has(.wide) { grid-template-columns: 80px 1fr auto; }
         .qInfo { min-width: 0; }
         .qTitle { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .qTitle .qEp { color: rgba(255,255,255,.6); font-weight: 400; }
@@ -1016,8 +1019,10 @@
             .qTitle .qEp { display: block; font-size: .9em; }
             .qTitle .qEp .qSep { display: none; }
             .qSub { flex-wrap: wrap; line-height: 18px; } .qSub > * { white-space: normal; }
-            .pluginConfigurationPage .jpk-cards.qCards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-            .pluginConfigurationPage .jpk-cards.qCards .jpk-card { min-width: 0; padding: 10px 6px; }
+            /* Three to a row, and the two left over grow to fill the second row. */
+            .pluginConfigurationPage .jpk-cards.qCards { gap: 8px; }
+            .pluginConfigurationPage .jpk-cards.qCards .jpk-card { flex: 1 1 25%; box-sizing: border-box; min-width: 0; padding: 10px 6px; }
+            .qThumb.wide, .qThumbHolder.wide { width: 72px; height: 40px; }
         }
     </style>
 </div>

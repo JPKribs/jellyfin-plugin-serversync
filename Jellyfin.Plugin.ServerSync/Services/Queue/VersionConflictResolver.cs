@@ -133,8 +133,11 @@ public sealed class VersionConflictResolver
                 return null;
             }
 
+            var now = DateTime.UtcNow;
             foreach (var pair in page)
             {
+                // A peer's clock is not trusted past this server's own.
+                pair.Value.Timestamp = HintProtocol.BoundVersion(pair.Value.Timestamp, now);
                 all[pair.Key] = pair.Value;
             }
         }

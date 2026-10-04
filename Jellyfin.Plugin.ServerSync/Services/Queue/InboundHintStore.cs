@@ -38,10 +38,10 @@ public sealed class InboundHintStore : QueueStoreBase
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 INSERT INTO InboundHints (
-                    HintId, OriginServerId, Kind, Key, ItemPath, ItemId, UserId, UserName,
+                    HintId, OriginServerId, Kind, Key, ItemPath, ItemId, ItemType, UserId, UserName,
                     VersionServerId, VersionTimestamp, Recorded, ReceivedAt, Attempts, NextAttempt, LastError
                 ) VALUES (
-                    @hint, @origin, @kind, @key, @itemPath, @itemId, @userId, @userName,
+                    @hint, @origin, @kind, @key, @itemPath, @itemId, @itemType, @userId, @userName,
                     @versionServer, @versionAt, @recorded, @received, 0, @received, NULL
                 )
                 ON CONFLICT(OriginServerId, Kind, Key) DO UPDATE SET
@@ -49,6 +49,7 @@ public sealed class InboundHintStore : QueueStoreBase
                     Recorded = MAX(Recorded, @recorded),
                     ItemPath = @itemPath,
                     ItemId = @itemId,
+                    ItemType = @itemType,
                     UserId = @userId,
                     UserName = @userName,
                     VersionServerId = CASE WHEN @versionAt >= VersionTimestamp THEN @versionServer ELSE VersionServerId END,
@@ -64,6 +65,7 @@ public sealed class InboundHintStore : QueueStoreBase
             Add(cmd, "@key", row.Key);
             Add(cmd, "@itemPath", row.ItemPath);
             Add(cmd, "@itemId", row.ItemId);
+            Add(cmd, "@itemType", row.ItemType);
             Add(cmd, "@userId", row.UserId);
             Add(cmd, "@userName", row.UserName);
             Add(cmd, "@versionServer", row.VersionServerId);
@@ -71,6 +73,29 @@ public sealed class InboundHintStore : QueueStoreBase
             Add(cmd, "@recorded", row.Recorded ? 1 : 0);
             Add(cmd, "@received", Stamp(row.ReceivedAt));
             row.Id = Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+
+            // One origin cannot fill the queue without bound. Beyond the cap its oldest rows go; the
+            // scheduled tasks carry whatever they would have.
+            using var count = conn.CreateCommand();
+            count.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE OriginServerId = @origin";
+            Add(count, "@origin", row.OriginServerId);
+            if (Convert.ToInt32(count.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) <= HintProtocol.MaxPendingPerPeer)
+            {
+                return;
+            }
+
+            using var trim = conn.CreateCommand();
+            trim.CommandText = @"
+                DELETE FROM InboundHints
+                WHERE OriginServerId = @origin AND Id NOT IN (
+                    SELECT Id FROM InboundHints WHERE OriginServerId = @origin ORDER BY Id DESC LIMIT @cap)";
+            Add(trim, "@origin", row.OriginServerId);
+            Add(trim, "@cap", HintProtocol.MaxPendingPerPeer);
+            var trimmed = trim.ExecuteNonQuery();
+            if (trimmed > 0)
+            {
+                Logger.LogWarning("Dropped {Count} of the oldest inbound hint(s) from {Origin}: more than {Cap} were waiting", trimmed, row.OriginServerId, HintProtocol.MaxPendingPerPeer);
+            }
         });
     }
 
@@ -189,6 +214,7 @@ public sealed class InboundHintStore : QueueStoreBase
         Kind = (HintKind)reader.GetInt32(reader.GetOrdinal("Kind")),
         Key = reader.GetString(reader.GetOrdinal("Key")),
         ItemPath = Text(reader, "ItemPath"),
+        ItemType = Text(reader, "ItemType"),
         ItemId = Text(reader, "ItemId"),
         UserId = Text(reader, "UserId"),
         UserName = Text(reader, "UserName"),

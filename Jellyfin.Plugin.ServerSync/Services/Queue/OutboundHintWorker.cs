@@ -435,7 +435,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         {
             // The peer finished these but could not say so, which happens when it holds a standard
             // user's key for this server. Its status says it, so the rows are complete.
-            _outbound.Complete(finished.Select(id => new CompletedHint { HintId = id, VersionTimestamp = byId[id].VersionTimestamp }));
+            _outbound.Complete(peer.Key, finished.Select(id => new CompletedHint { HintId = id, VersionTimestamp = byId[id].VersionTimestamp }));
             _logger.LogInformation("'{Peer}' finished {Count} hint(s) it could not report; completed from its status", peer.DisplayName, finished.Count);
         }
 

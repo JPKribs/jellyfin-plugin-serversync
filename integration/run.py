@@ -918,6 +918,32 @@ def scenario_peer_endpoint_auth(creds, apis):
     status, removed = admin.call("DELETE", "/ServerSync/Servers/no-such-key/Rows")
     expect(status == 200 and removed and all(v == 0 for v in removed.values()), "forgetting an unknown server removes nothing and answers with the counts")
 
+    # An administrator's key alone does not make a caller a peer. A request that names a configured
+    # server as its sender must carry the secret that server was issued, so a forged batch, a forged
+    # completion, and a forged history negotiation are refused with 428 until the real server pairs.
+    configure_server(creds, local, "local", ["source-a"], {"source-a": "Sync"})
+    a_id = creds["servers"]["source-a"]["serverId"]
+    status, body = admin.call("POST", "/ServerSync/Peer/Queue", {"SenderServerId": a_id, "Items": []})
+    expect(status == 428, f"a batch naming source-a as sender without its pairing secret is refused with 428 ({status})")
+    status, body = admin.call("POST", "/ServerSync/Peer/Complete", {"SenderServerId": a_id, "Items": [{"HintId": f"{a_id}:1", "VersionTimestamp": "2999-01-01T00:00:00Z"}]})
+    expect(status == 428, f"a completion naming source-a as sender without its pairing secret is refused with 428 ({status})")
+    status, body = admin.call("POST", "/ServerSync/Peer/Complete", {"Items": []})
+    expect(status == 400, f"a completion with no sender is malformed ({status})")
+    status, body = admin.call("POST", "/ServerSync/Peer/History", {"SenderServerId": a_id, "Items": []})
+    expect(status == 428, f"a history negotiation naming source-a as sender without its pairing secret is refused with 428 ({status})")
+    status, body = admin.call("POST", "/ServerSync/Peer/History", {"SenderServerId": "not-a-configured-server", "Items": []})
+    expect(status == 200, f"a history negotiation from a server this one does not list still negotiates, with nothing recorded ({status})")
+    status, body = admin.call("POST", "/ServerSync/Peer/Pair", {"ServerId": "not-a-configured-server", "Secret": "x"})
+    expect(status == 409, f"a pairing from a server this one does not list is refused ({status})")
+
+    # A name is held to the same rule as an address when private networks are disallowed.
+    status, v = admin.call("POST", "/ServerSync/ValidateUrl", {"Url": "http://localhost:8096", "AllowPrivateNetwork": False})
+    expect(status == 200 and not v["IsValid"] and "resolves" in v["Message"], "a name that resolves to loopback is refused when private networks are disallowed")
+    status, v = admin.call("POST", "/ServerSync/ValidateUrl", {"Url": "http://source-a:8096", "AllowPrivateNetwork": False})
+    expect(status == 200 and not v["IsValid"], "a pool name that resolves to a private address is refused when private networks are disallowed")
+    status, v = admin.call("POST", "/ServerSync/ValidateUrl", {"Url": "http://source-a:8096", "AllowPrivateNetwork": True})
+    expect(status == 200 and v["IsValid"], "the same name passes when private networks are allowed")
+
 
 def scenario_push_responses(creds, apis):
     """Every answer a peer can give to a push is handled: a peer that does not list the sender pauses
@@ -1002,6 +1028,7 @@ def scenario_check_link_by_direction(creds, apis):
     _, full = local.post("/ServerSync/Hints/CheckPeer", {"ServerUrl": entry_a["Url"], "ApiKey": "__JPK_SECRET_KEPT__",
                                                       "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True, "Mode": "Pull"}, expect=200)
     expect(abs(full.get("ClockSkewSeconds", 999)) < 30 and "clock" not in full["Message"], "Check Link reads the peer's clock and finds it in step")
+    expect(full.get("Paired") is True and "could not pair" not in full["Message"], "Check Link pairs the two servers, since the peer lists this one and holds an administrator's key for it")
     configure_server(creds, apis["source-a"], "source-a", [])
     configure_local(creds, local, ["source-a", "source-b"])
 

@@ -62,6 +62,91 @@ public static class ConfigurationUtilities
         return null;
     }
 
+    /// <summary>
+    /// Like <see cref="ValidateServerUrlForSsrf"/>, and when private networks are disallowed also resolves
+    /// a host name and classifies every address it points at, so "localhost" or a LAN name is refused
+    /// the same way its address would be. Used when an entry is saved or tested, not on every call.
+    /// </summary>
+    /// <param name="url">The URL.</param>
+    /// <param name="allowPrivateNetwork">Whether private and loopback addresses are allowed.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Null when acceptable, else why not.</returns>
+    public static async System.Threading.Tasks.Task<string?> ValidateServerUrlForSsrfAsync(string url, bool allowPrivateNetwork, System.Threading.CancellationToken cancellationToken = default)
+    {
+        var error = ValidateServerUrlForSsrf(url, allowPrivateNetwork);
+        if (error is not null || allowPrivateNetwork || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || IPAddress.TryParse(uri.Host.Trim('[', ']'), out _))
+        {
+            return error;
+        }
+
+        IPAddress[] addresses;
+        try
+        {
+            addresses = await Dns.GetHostAddressesAsync(uri.Host, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SocketException)
+        {
+            return $"The name '{uri.Host}' does not resolve";
+        }
+
+        foreach (var address in addresses)
+        {
+            var rejection = ClassifyIpAddress(address, allowPrivateNetwork: false);
+            if (rejection is not null)
+            {
+                return $"The name '{uri.Host}' resolves to {address}: {rejection}";
+            }
+        }
+
+        return addresses.Length == 0 ? $"The name '{uri.Host}' does not resolve" : null;
+    }
+
+    /// <summary>
+    /// Connects for the client whose entries disallow private networks: every address the name resolves
+    /// to is classified first, and the connection goes to the first allowed one. A name that resolves
+    /// to a loopback or private address fails here the way the address itself fails the URL check.
+    /// </summary>
+    /// <param name="context">The connection the handler wants.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The connected stream.</returns>
+    public static async System.Threading.Tasks.ValueTask<System.IO.Stream> ConnectPublicOnlyAsync(System.Net.Http.SocketsHttpConnectionContext context, System.Threading.CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var endPoint = context.DnsEndPoint;
+        IPAddress[] addresses = IPAddress.TryParse(endPoint.Host.Trim('[', ']'), out var literal)
+            ? new[] { literal }
+            : await Dns.GetHostAddressesAsync(endPoint.Host, cancellationToken).ConfigureAwait(false);
+
+        string? rejection = null;
+        foreach (var address in addresses)
+        {
+            rejection = ClassifyIpAddress(address, allowPrivateNetwork: false);
+            if (rejection is not null)
+            {
+                // One private answer refuses the whole name. Mixed answers are how a rebinding attack
+                // looks, so no address of such a name is used.
+                throw new System.Net.Http.HttpRequestException($"'{endPoint.Host}' resolves to {address}: {rejection}");
+            }
+        }
+
+        if (addresses.Length == 0)
+        {
+            throw new System.Net.Http.HttpRequestException($"'{endPoint.Host}' does not resolve");
+        }
+
+        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(addresses, endPoint.Port, cancellationToken).ConfigureAwait(false);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
     private static string? ClassifyIpAddress(IPAddress ipAddress, bool allowPrivateNetwork)
     {
         // Always-blocked: no legitimate use as a remote source server target.

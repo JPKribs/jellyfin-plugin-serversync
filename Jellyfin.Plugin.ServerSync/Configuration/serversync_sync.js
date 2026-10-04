@@ -3792,18 +3792,18 @@ export default function (view) {
             var rows = [];
             (data.Gathering || []).forEach(function(g) {
                 rows.push({ lane: 'gathering', state: 'Gathering', dir: 'out', at: g.EditedAt, kind: g.Kind, recorded: g.Recorded,
-                    title: g.Title || g.Change, subtitle: g.Subtitle, itemId: g.ItemId, userId: g.UserId, userName: g.UserName, dueAt: g.DueAt, what: QueueModule._what(g.Kind) });
+                    title: g.Title || g.Change, subtitle: g.Subtitle, itemType: g.ItemType, itemId: g.ItemId, userId: g.UserId, userName: g.UserName, dueAt: g.DueAt, what: QueueModule._what(g.Kind) });
             });
             (data.Outbound || []).forEach(function(r) {
                 var state = QueueModule._stateName(r.State);
                 rows.push({ lane: 'out', state: state, dir: 'out', at: r.SentAt || r.CreatedAt, kind: r.Kind, recorded: r.Recorded, id: r.Id, peerKey: r.PeerKey, peerName: r.PeerName || r.PeerKey,
-                    title: r.Title || QueueModule._fileName(r.ItemPath) || r.UserName || r.Key, subtitle: r.Subtitle, itemId: r.ItemId, userId: r.UserId, userName: r.UserName,
+                    title: r.Title || QueueModule._fileName(r.ItemPath) || r.UserName || r.Key, subtitle: r.Subtitle, itemType: r.ItemType, itemId: r.ItemId, userId: r.UserId, userName: r.UserName,
                     attempts: r.Attempts, lastError: r.LastError, nextAttempt: r.NextAttempt, sentAt: r.SentAt, what: QueueModule._what(r.Kind) });
             });
             (data.Inbound || []).forEach(function(r) {
                 var origin = QueueModule._origin(r.OriginServerId);
                 rows.push({ lane: 'in', state: 'Received', dir: 'in', at: r.ReceivedAt, kind: r.Kind, recorded: r.Recorded, id: r.Id, peerKey: origin ? origin.Key : null, peerName: origin ? (origin.Name || origin.ServerName || origin.Url) : r.OriginServerId,
-                    title: QueueModule._fileName(r.ItemPath) || r.UserName || r.Key, subtitle: null, originItemId: r.ItemId, userName: r.UserName,
+                    title: QueueModule._fileName(r.ItemPath) || r.UserName || r.Key, subtitle: null, itemType: r.ItemType, originItemId: r.ItemId, userName: r.UserName,
                     attempts: r.Attempts, lastError: r.LastError, receivedAt: r.ReceivedAt, what: QueueModule._what(r.Kind) });
             });
             rows.sort(function(a, b) { return new Date(b.at || 0) - new Date(a.at || 0); });
@@ -3827,18 +3827,21 @@ export default function (view) {
             var esc = ServerSyncShared.escapeHtml;
             var isPerson = r.kind === 'People' || r.kind === 2;
             var isUser = r.kind === 'Users' || r.kind === 4;
+            // Jellyfin's own shapes: a person is round, an episode or a home video is wide, the rest are posters.
+            var shape = isPerson || isUser ? ' round' : QueueModule._isWide(r.itemType) ? ' wide' : '';
+            var icon = isUser || isPerson ? 'person' : QueueModule._isWide(r.itemType) ? 'tv' : 'movie';
+            var holder = '<div class="qThumbHolder' + shape + '"><span class="material-icons">' + icon + '</span></div>';
             var thumb;
             if (r.itemId && !isUser) {
                 var url = ApiClient.getImageUrl(r.itemId, { type: 'Primary', maxHeight: 128 });
-                thumb = '<img class="qThumb' + (isPerson ? ' round' : '') + '" src="' + esc(url) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" />' +
-                    '<div class="qThumbHolder' + (isPerson ? ' round' : '') + '" style="display:none"><span class="material-icons">' + (isPerson ? 'person' : 'movie') + '</span></div>';
+                thumb = '<img class="qThumb' + shape + '" src="' + esc(url) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" />' +
+                    holder.replace('<div ', '<div style="display:none" ');
             } else if (r.originItemId && r.peerKey && !isUser) {
                 var id = 'ss-q-thumb-' + Math.random().toString(36).slice(2);
                 ServerSyncShared.scheduleProxyImage(id, r.originItemId, false, 128, r.peerKey);
-                thumb = '<img id="' + id + '" class="qThumb' + (isPerson ? ' round' : '') + '" alt="" />' +
-                    '<div class="qThumbHolder' + (isPerson ? ' round' : '') + '" style="display:none"><span class="material-icons">' + (isPerson ? 'person' : 'movie') + '</span></div>';
+                thumb = '<img id="' + id + '" class="qThumb' + shape + '" alt="" />' + holder.replace('<div ', '<div style="display:none" ');
             } else {
-                thumb = '<div class="qThumbHolder' + (isPerson || isUser ? ' round' : '') + '"><span class="material-icons">' + (isUser ? 'person' : isPerson ? 'person' : 'movie') + '</span></div>';
+                thumb = holder;
             }
 
             var who = '';
@@ -3879,6 +3882,11 @@ export default function (view) {
                 '<div class="qInfo"><div class="qTitle">' + title + '</div><div class="qSub">' + sub + '</div><div class="qBadges">' + badges + '</div></div>' +
                 '<div class="qRight">' + chip + '<span class="qMeta' + (err ? ' err' : '') + '">' + esc(meta) + '</span>' + act + '</div>' +
                 '</div>';
+        },
+
+        // Episodes, home videos, trailers, and recordings carry a landscape primary image in Jellyfin.
+        _isWide: function(itemType) {
+            return itemType === 'Episode' || itemType === 'Video' || itemType === 'Trailer' || itemType === 'Recording' || itemType === 'MusicVideo';
         },
 
         // The gathering countdown moves every second without a round trip.

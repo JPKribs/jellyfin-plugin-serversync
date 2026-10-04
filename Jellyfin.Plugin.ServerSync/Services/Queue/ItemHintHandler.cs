@@ -30,6 +30,7 @@ public sealed class ItemHintHandler
     private readonly IServiceProvider _services;
     private readonly IPluginConfigurationManager _configManager;
     private readonly VersionConflictResolver _resolver;
+    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly LocalHintPublisher _publisher;
     private readonly ILogger<ItemHintHandler> _logger;
 
@@ -40,17 +41,20 @@ public sealed class ItemHintHandler
     /// <param name="configManager">Plugin configuration.</param>
     /// <param name="resolver">The version resolver.</param>
     /// <param name="publisher">Publishes this server's winning values.</param>
+    /// <param name="libraryManager">The library, which names the item the activity log mentions.</param>
     /// <param name="logger">Logger.</param>
     public ItemHintHandler(
         IServiceProvider services,
         IPluginConfigurationManager configManager,
         VersionConflictResolver resolver,
         LocalHintPublisher publisher,
+        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
         ILogger<ItemHintHandler> logger)
     {
         _services = services;
         _configManager = configManager;
         _resolver = resolver;
+        _libraryManager = libraryManager;
         _publisher = publisher;
         _logger = logger;
     }
@@ -60,8 +64,9 @@ public sealed class ItemHintHandler
     /// <param name="origin">The configured entry for the origin.</param>
     /// <param name="client">A client bound to the origin.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="prefetched">The origin's item when the worker already read it in a page, else null.</param>
     /// <returns>The outcome.</returns>
-    public async Task<HintApplyResult> ApplyMetadataAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken)
+    public async Task<HintApplyResult> ApplyMetadataAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken, Jellyfin.Sdk.Generated.Models.BaseItemDto? prefetched = null)
     {
         ArgumentNullException.ThrowIfNull(hint);
         ArgumentNullException.ThrowIfNull(origin);
@@ -84,21 +89,27 @@ public sealed class ItemHintHandler
             return HintApplyResult.Dropped($"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
         }
 
-        List<Jellyfin.Sdk.Generated.Models.BaseItemDto> fetched;
-        try
+        // The worker reads a pass's items in pages; a row it did not cover reads its own.
+        var dto = prefetched;
+        if (dto is null)
         {
-            fetched = await client.GetItemsByIdsAsync(new[] { originItemId }, RefreshMetadataSyncTableTask.BuildRequestedFields(config), cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return HintApplyResult.RetryLater($"could not read the item from '{origin.DisplayName}': {ex.Message}");
+            List<Jellyfin.Sdk.Generated.Models.BaseItemDto> fetched;
+            try
+            {
+                fetched = await client.GetItemsByIdsAsync(new[] { originItemId }, RefreshMetadataSyncTableTask.BuildRequestedFields(config), cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return HintApplyResult.RetryLater($"could not read the item from '{origin.DisplayName}': {ex.Message}");
+            }
+
+            dto = fetched.FirstOrDefault();
         }
 
-        var dto = fetched.FirstOrDefault();
         if (dto is null || !dto.Id.HasValue)
         {
             return HintApplyResult.Dropped($"the item no longer exists on '{origin.DisplayName}'");
@@ -119,9 +130,10 @@ public sealed class ItemHintHandler
             hint,
             origin,
             source,
-            version => _publisher.PublishMetadata(Guid.Parse(record.LocalItemId!), record.LocalPath ?? string.Empty, version, excludePeerKey: null),
+            version => _publisher.PublishMetadata(Guid.Parse(record.LocalItemId!), record.LocalPath ?? string.Empty, version, excludePeerKey: null, itemType: hint.ItemType),
             () => ActivatorUtilities.CreateInstance<SyncMissingMetadataTask>(_services).ApplyRowAsync(record, source, cancellationToken),
             record.ItemName,
+            () => _libraryManager.GetItemById(Guid.Parse(record.LocalItemId!)),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -184,6 +196,7 @@ public sealed class ItemHintHandler
             version => _publisher.PublishPeople(record.PersonName, Guid.Parse(record.LocalPersonId), version, excludePeerKey: null),
             () => ActivatorUtilities.CreateInstance<SyncMissingPeopleTask>(_services).ApplyRowAsync(record, source, cancellationToken),
             record.PersonName,
+            () => _libraryManager.GetItemById(Guid.Parse(record.LocalPersonId)),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -197,6 +210,7 @@ public sealed class ItemHintHandler
         Action<ObjectVersion> publishLocal,
         Func<Task<bool>> apply,
         string? name,
+        Func<MediaBrowser.Controller.Entities.BaseItem?> localItem,
         CancellationToken cancellationToken)
         where TRecord : SyncRecord
     {
@@ -246,7 +260,7 @@ public sealed class ItemHintHandler
         }
 
         _logger.LogInformation("Applied a {Kind} hint from '{Origin}' for {Name}{Provider}", kind, origin.DisplayName, name, hint.Recorded ? string.Empty : " (provider work)");
-        return HintApplyResult.Applied;
+        return HintApplyResult.AppliedTo(localItem());
     }
 
     private void StoreKept<TRecord>(TRecord record, HintKind kind)

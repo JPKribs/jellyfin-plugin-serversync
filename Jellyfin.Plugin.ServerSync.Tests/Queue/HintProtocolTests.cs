@@ -119,4 +119,34 @@ public class HintProtocolTests
     {
         Assert.Equal(expected, Jellyfin.Plugin.ServerSync.Services.SourceServerClient.HeaderSafe(name));
     }
+
+    /// <summary>
+    /// A version ahead of this server's clock reads as now; one behind it is kept as is.
+    /// True: a peer's far future stamp can never outrank every later real edit here.
+    /// False: one hint dated 2999 locks an object out of ever being edited again.
+    /// </summary>
+    [Fact]
+    public void BoundVersion_ClampsTheFutureToNow()
+    {
+        var now = new DateTime(2026, 10, 4, 12, 0, 0, DateTimeKind.Utc);
+        Assert.Equal(now, HintProtocol.BoundVersion(new DateTime(2999, 1, 1, 0, 0, 0, DateTimeKind.Utc), now));
+        Assert.Equal(now, HintProtocol.BoundVersion(now.AddSeconds(1), now));
+        Assert.Equal(now.AddMinutes(-1), HintProtocol.BoundVersion(now.AddMinutes(-1), now));
+        Assert.Equal(now.AddMinutes(-1), HintProtocol.BoundVersion(DateTime.SpecifyKind(now.AddMinutes(-1), DateTimeKind.Unspecified), now));
+    }
+
+    /// <summary>
+    /// Honest skew is within the lead; anything past it is a bad clock or a lie and is declined outright.
+    /// True: a peer a minute ahead still works, a peer years ahead is told to fix its clock.
+    /// False: either every skewed peer is refused, or a forged stamp is accepted and merely clamped.
+    /// </summary>
+    [Fact]
+    public void IsFutureVersion_AllowsSkewAndRefusesTheFarFuture()
+    {
+        var now = new DateTime(2026, 10, 4, 12, 0, 0, DateTimeKind.Utc);
+        Assert.False(HintProtocol.IsFutureVersion(now.AddMinutes(1), now));
+        Assert.False(HintProtocol.IsFutureVersion(now.AddMinutes(-10), now));
+        Assert.True(HintProtocol.IsFutureVersion(now.AddMinutes(6), now));
+        Assert.True(HintProtocol.IsFutureVersion(new DateTime(2999, 1, 1, 0, 0, 0, DateTimeKind.Utc), now));
+    }
 }

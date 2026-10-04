@@ -114,7 +114,7 @@ public class HintsController : ControllerBase
         SourceServerClient client;
         try
         {
-            client = _clientFactory.Create(new SourceServer { Url = request.ServerUrl.Trim(), ApiKey = apiKey, AllowPrivateNetwork = request.AllowPrivateNetwork });
+            client = _clientFactory.Create(new SourceServer { Key = request.ServerKey ?? SourceServer.NewKey(), Url = request.ServerUrl.Trim(), ApiKey = apiKey, AllowPrivateNetwork = request.AllowPrivateNetwork });
         }
         catch (ArgumentException ex)
         {
@@ -197,6 +197,8 @@ public class HintsController : ControllerBase
                 : $" It applies {JoinWords(capabilities.Accepts.Select(DescribeKind).ToList())} from this server. Other kinds are off there.";
 
             var link = await client.GetPeerLinkAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
+            result.Paired = link is { Paired: true };
+            result.PairingError = link?.PairingError;
             result.ListsThisServer = link is { Listed: true, Enabled: true, PullsFromYou: true };
             result.PeerMode = link?.Mode;
             result.SendsToThisServer = link is { Enabled: true, SendsToYou: true };
@@ -258,6 +260,20 @@ public class HintsController : ControllerBase
             if (skewNote.Length > 0)
             {
                 result.Message += skewNote;
+                if (result.Severity == "ok")
+                {
+                    result.Severity = "warn";
+                }
+            }
+
+            // A listed server pairs on every check. One that could not reach this server back cannot
+            // prove itself on later requests, so nothing it sends as this server would be accepted.
+            if (link is { Listed: true } && !result.Paired)
+            {
+                var refused = link.PairingError?.Contains("standard user", StringComparison.Ordinal) == true;
+                result.Message += refused
+                    ? $" It could not pair with this server: {link.PairingError}."
+                    : $" It could not pair with this server: {link.PairingError ?? "no reason was given"}. Until it can, hints between the two are refused.";
                 if (result.Severity == "ok")
                 {
                     result.Severity = "warn";
@@ -348,6 +364,7 @@ public class HintsController : ControllerBase
                 Change = HintActivityLog.Subject(change.Kind, item?.Path, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N")),
                 Title = title,
                 Subtitle = subtitle,
+                ItemType = item?.GetType().Name,
                 ItemId = change.ItemId == Guid.Empty ? null : change.ItemId.ToString("N"),
                 UserId = change.UserId == Guid.Empty ? null : change.UserId.ToString("N"),
                 UserName = userName,
@@ -365,6 +382,7 @@ public class HintsController : ControllerBase
             {
                 Title = title,
                 Subtitle = subtitle,
+                ItemType = row.ItemType ?? item?.GetType().Name,
                 ItemId = row.ItemId,
                 UserId = row.UserId,
                 Id = row.Id,
@@ -537,6 +555,9 @@ public class GatheringDto
     /// <summary>Gets or sets the second line: the episode, the year, or null.</summary>
     public string? Subtitle { get; set; }
 
+    /// <summary>Gets or sets the item's Jellyfin type, so the view can pick the poster's shape.</summary>
+    public string? ItemType { get; set; }
+
     /// <summary>Gets or sets the local item id, for its poster.</summary>
     public string? ItemId { get; set; }
 
@@ -567,6 +588,9 @@ public class OutboundHintDto
 
     /// <summary>Gets or sets the second line: the episode, the year, or null.</summary>
     public string? Subtitle { get; set; }
+
+    /// <summary>Gets or sets the item's Jellyfin type, so the view can pick the poster's shape.</summary>
+    public string? ItemType { get; set; }
 
     /// <summary>Gets or sets the local item id, for its poster.</summary>
     public string? ItemId { get; set; }

@@ -30,6 +30,7 @@ public sealed class HistoryHintHandler
     private readonly LocalServerClient _localClient;
     private readonly ApplyGuard _guard;
     private readonly VersionStore _versions;
+    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly LocalHintPublisher _publisher;
     private readonly IServerApplicationHost _applicationHost;
     private readonly IPluginConfigurationManager _configManager;
@@ -46,6 +47,7 @@ public sealed class HistoryHintHandler
     /// <param name="publisher">Publishes changes of this server's own to the other peers.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="configManager">Plugin configuration, for the history switch.</param>
+    /// <param name="libraryManager">The library, which names the item the activity log mentions.</param>
     /// <param name="logger">Logger.</param>
     public HistoryHintHandler(
         HistorySyncTableService tableService,
@@ -56,9 +58,11 @@ public sealed class HistoryHintHandler
         LocalHintPublisher publisher,
         IServerApplicationHost applicationHost,
         IPluginConfigurationManager configManager,
+        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
         ILogger<HistoryHintHandler> logger)
     {
         _configManager = configManager;
+        _libraryManager = libraryManager;
         _tableService = tableService;
         _table = table;
         _localClient = localClient;
@@ -229,7 +233,7 @@ public sealed class HistoryHintHandler
             // This server contributed to the merged state, so the other peers hear about it from here.
             // The origin already holds it through the negotiation above.
             var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = now };
-            _publisher.PublishHistory(localUserId, userMapping.LocalUserName, localItemId, record.LocalPath ?? string.Empty, version, excludePeerKey: origin.Key);
+            _publisher.PublishHistory(localUserId, userMapping.LocalUserName, localItemId, record.LocalPath ?? string.Empty, version, excludePeerKey: origin.Key, itemType: hint.ItemType);
         }
         else
         {
@@ -237,7 +241,7 @@ public sealed class HistoryHintHandler
         }
 
         _logger.LogInformation("Applied a history hint from '{Origin}' for {Item}: {Changes}", origin.DisplayName, record.ItemName, HistorySyncMergeService.GetChangeSummary(record));
-        return HintApplyResult.Applied;
+        return HintApplyResult.AppliedTo(_libraryManager.GetItemById(localItemId));
     }
 
     /// <summary>

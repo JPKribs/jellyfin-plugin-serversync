@@ -87,11 +87,15 @@ public sealed class VersionStore : QueueStoreBase
         return found;
     }
 
-    /// <summary>Records the version of one object, replacing any previous one.</summary>
+    /// <summary>
+    /// Records the version of one object, replacing any previous one. A timestamp ahead of this server's
+    /// clock is stored as now, so no stored version can outrank every later edit made here.
+    /// </summary>
     /// <param name="version">The version.</param>
     public void Set(ObjectVersion version)
     {
         ArgumentNullException.ThrowIfNull(version);
+        var at = HintProtocol.BoundVersion(version.Timestamp, DateTime.UtcNow);
         Write(conn =>
         {
             using var cmd = conn.CreateCommand();
@@ -101,7 +105,7 @@ public sealed class VersionStore : QueueStoreBase
             Add(cmd, "@kind", (int)version.Kind);
             Add(cmd, "@key", version.Key);
             Add(cmd, "@server", version.ServerId);
-            Add(cmd, "@at", Stamp(version.Timestamp));
+            Add(cmd, "@at", Stamp(at));
             cmd.ExecuteNonQuery();
         });
     }

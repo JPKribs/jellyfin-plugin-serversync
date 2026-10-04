@@ -39,6 +39,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly IPluginConfigurationManager _configManager;
     private readonly LocalHintPublisher _publisher;
     private readonly OutboundHintWorker _worker;
+    private readonly VersionStore _versions;
     private readonly ApplyGuard _guard;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalChangeObserver> _logger;
@@ -60,6 +61,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <param name="publisher">The publisher that writes the outbound rows.</param>
     /// <param name="worker">The delivery worker, which knows what each peer accepts.</param>
     /// <param name="guard">The apply guard.</param>
+    /// <param name="versions">The version store, for edits no peer is told about.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="logger">Logger.</param>
     public LocalChangeObserver(
@@ -71,10 +73,12 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         LocalHintPublisher publisher,
         OutboundHintWorker worker,
         ApplyGuard guard,
+        VersionStore versions,
         IServerApplicationHost applicationHost,
         ILogger<LocalChangeObserver> logger)
     {
         _worker = worker;
+        _versions = versions;
         _userDataManager = userDataManager;
         _userManager = userManager;
         _libraryManager = libraryManager;
@@ -87,7 +91,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     }
 
     /// <summary>Gets how many objects are waiting for their debounce to end.</summary>
-    public int PendingCount => _pending.Count;
+    public int PendingCount => _pending.Values.Count(c => c.Publish);
 
     /// <summary>
     /// Gets how many local changes were raised since start that no Push or Sync server mapped, so
@@ -102,7 +106,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <summary>Gets the changes still gathering, newest edit first, for the dashboard.</summary>
     /// <returns>A snapshot.</returns>
     public IReadOnlyList<GatheringChange> Gathering()
-        => _pending.Values.Select(c => new GatheringChange(c.Kind, c.UserId, c.ItemId, c.EditedAt, c.Due, c.Recorded)).OrderByDescending(c => c.EditedAt).ToList();
+        => _pending.Values.Where(c => c.Publish).Select(c => new GatheringChange(c.Kind, c.UserId, c.ItemId, c.EditedAt, c.Due, c.Recorded)).OrderByDescending(c => c.EditedAt).ToList();
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -287,7 +291,12 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
-            var origin = Classify(e.UpdateReason, IsBeingRefreshed(e.Item), _libraryManager.IsScanRunning);
+            // The ancestor walk only decides an image change outside a scan, so it runs only then. A
+            // library scan raises this event for every item it touches, and each walk is a lookup per
+            // level of the tree.
+            var scanRunning = _libraryManager.IsScanRunning;
+            var needsRefreshCheck = !IsHintedUpdate(e.UpdateReason) && (e.UpdateReason & ItemUpdateType.ImageUpdate) != 0 && !scanRunning;
+            var origin = Classify(e.UpdateReason, needsRefreshCheck && IsBeingRefreshed(e.Item), scanRunning);
             if (origin == ChangeOrigin.None)
             {
                 return;
@@ -347,12 +356,22 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             return;
         }
 
+        // Nothing is sent for a kind no peer will take, and the queue does not show it. A hand made edit
+        // still has its version recorded when the wait ends, so a server that only receives knows when
+        // its own values were edited the day a conflict has to be decided. The server entries are few, so
+        // this is a short scan on every event rather than a row that waits for nothing.
+        var publish = AnyPeerAccepts(kind);
+        if (!publish && !recorded)
+        {
+            return;
+        }
+
         var now = DateTime.UtcNow;
         var due = now + HintProtocol.Debounce(_configManager.Configuration);
         _pending.AddOrUpdate(
             HintProtocol.GuardKey(kind, localKey),
-            _ => new PendingChange(kind, userId, itemId, now, due, recorded),
-            (_, existing) => existing with { EditedAt = now, Due = due, Recorded = existing.Recorded || recorded });
+            _ => new PendingChange(kind, localKey, userId, itemId, now, due, recorded, publish),
+            (_, existing) => existing with { EditedAt = now, Due = due, Recorded = existing.Recorded || recorded, Publish = existing.Publish || publish });
     }
 
     private async Task FlushLoopAsync(CancellationToken cancellationToken)
@@ -370,6 +389,14 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private void Raise(PendingChange change)
     {
         var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = change.EditedAt };
+        if (!change.Publish)
+        {
+            version.Kind = change.Kind;
+            version.Key = change.LocalKey;
+            _versions.Set(version);
+            return;
+        }
+
         var item = _libraryManager.GetItemById(change.ItemId);
         if (item is null)
         {
@@ -380,11 +407,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         {
             case HintKind.History when !string.IsNullOrEmpty(item.Path):
                 var user = _userManager.GetUserById(change.UserId);
-                NoteUnmatched(_publisher.PublishHistory(change.UserId, user?.Username, change.ItemId, item.Path, version, excludePeerKey: null), HintKind.History, item.Path, user?.Username);
+                NoteUnmatched(_publisher.PublishHistory(change.UserId, user?.Username, change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), HintKind.History, item.Path, user?.Username);
                 break;
 
             case HintKind.Metadata when !string.IsNullOrEmpty(item.Path):
-                NoteUnmatched(_publisher.PublishMetadata(change.ItemId, item.Path, version, excludePeerKey: null, recorded: change.Recorded), HintKind.Metadata, item.Path, null);
+                NoteUnmatched(_publisher.PublishMetadata(change.ItemId, item.Path, version, excludePeerKey: null, recorded: change.Recorded, itemType: item.GetType().Name), HintKind.Metadata, item.Path, null);
                 break;
 
             case HintKind.People when !string.IsNullOrWhiteSpace(item.Name):
@@ -392,7 +419,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 break;
 
             case HintKind.Content when !string.IsNullOrEmpty(item.Path):
-                NoteUnmatched(_publisher.PublishContent(change.ItemId, item.Path, version, excludePeerKey: null), HintKind.Content, item.Path, null);
+                NoteUnmatched(_publisher.PublishContent(change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), HintKind.Content, item.Path, null);
                 break;
 
             default:
@@ -402,9 +429,22 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     // A change raised to no peer is only worth counting when there is a peer to send to; a server
     // with no Push or Sync entry is not misconfigured, it just does not send.
+    private bool AnyPeerAccepts(HintKind kind)
+    {
+        foreach (var server in _configManager.Configuration.Servers)
+        {
+            if (server.Pushes && _worker.PeerAccepts(server.Key, kind))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void NoteUnmatched(int queued, HintKind kind, string? itemPath, string? userName)
     {
-        if (queued > 0 || !_configManager.Configuration.Servers.Any(s => s.Pushes && _worker.PeerAccepts(s.Key, kind)))
+        if (queued > 0 || !AnyPeerAccepts(kind))
         {
             return;
         }
@@ -414,7 +454,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", _lastUnmatched);
     }
 
-    private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded);
+    private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, bool Publish);
 }
 
 /// <summary>One change still gathering before it becomes a hint.</summary>

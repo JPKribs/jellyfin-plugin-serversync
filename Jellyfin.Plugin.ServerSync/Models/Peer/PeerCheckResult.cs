@@ -38,6 +38,12 @@ public class PeerCheckResult
     /// <summary>Gets or sets how many seconds the peer's clock differs from this server's, when it could be read.</summary>
     public int ClockSkewSeconds { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the peer issued this server a pairing secret during the check.</summary>
+    public bool Paired { get; set; }
+
+    /// <summary>Gets or sets why the peer could not pair, when it could not.</summary>
+    public string? PairingError { get; set; }
+
     /// <summary>Gets or sets a sentence for the page.</summary>
     public string Message { get; set; } = string.Empty;
 
