@@ -8,14 +8,12 @@ using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// One unit of refresh work for User Sync — a single (mapping, category)
+/// One unit of refresh work for User Sync, a single (mapping, category)
 /// pairing carrying the source-fetched data needed to build that record.
 /// Pre-fetching at the mapping level (rather than per-category) keeps the
 /// network calls down to one per source user.
@@ -114,10 +112,10 @@ public class RefreshUserSyncTableTask
                 if (sourceUser == null)
                 {
                     // Source user fetch returned null (transient API failure or
-                    // genuinely missing user — we can't tell). Skip pruning this
+                    // genuinely missing user, we can't tell). Skip pruning this
                     // run so a network blip doesn't delete the mapping's rows.
-                    MarkSourceUnavailable($"source server unavailable — source user '{mapping.SourceUserName}' not returned");
-                    Logger.LogWarning("Source user {Id} not found; skipping mapping {Source} -> {Local}",
+                    MarkSourceUnavailable($"source server unavailable, source user '{mapping.SourceUserName}' not returned");
+                    Logger.LogWarning("Source user {Id} not found. Skipping mapping {Source} -> {Local}",
                         mapping.SourceUserId, mapping.SourceUserName, mapping.LocalUserName);
                     continue;
                 }
@@ -127,8 +125,8 @@ public class RefreshUserSyncTableTask
                 {
                     // Local target gone: we can't enumerate this mapping, so skip
                     // pruning this run rather than treat its rows as deleted.
-                    MarkSourceUnavailable($"local user '{mapping.LocalUserName}' not found; mapping rows cannot be re-confirmed");
-                    Logger.LogWarning("Local user {Id} not found; skipping mapping {Source} -> {Local}",
+                    MarkSourceUnavailable($"local user '{mapping.LocalUserName}' not found. Mapping rows cannot be re-confirmed");
+                    Logger.LogWarning("Local user {Id} not found. Skipping mapping {Source} -> {Local}",
                         mapping.LocalUserId, mapping.SourceUserName, mapping.LocalUserName);
                     continue;
                 }
@@ -174,7 +172,7 @@ public class RefreshUserSyncTableTask
                     });
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -265,13 +263,4 @@ public class RefreshUserSyncTableTask
         config.LastUserSyncTime = utcNow;
     }
 
-    /// <inheritdoc />
-    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
-    {
-        new TaskTriggerInfo
-        {
-            Type = MediaBrowser.Model.Tasks.TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(22).Ticks
-        }
-    };
 }

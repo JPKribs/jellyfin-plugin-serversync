@@ -29,9 +29,9 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// When true (default), the source-server URL is allowed to point at
-    /// loopback, RFC1918, or IPv6 ULA addresses — typical for home Jellyfin
+    /// loopback, RFC1918, or IPv6 ULA addresses, typical for home Jellyfin
     /// installs where the source server runs on the same LAN. When false, the
-    /// URL must resolve to a public address; loopback/private ranges are
+    /// URL must resolve to a public address. Loopback/private ranges are
     /// rejected. Cloud-metadata endpoints (169.254.0.0/16, IPv6 link-local,
     /// IPv6 site-local, 0.0.0.0) are always blocked regardless of this flag.
     /// </summary>
@@ -118,6 +118,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <returns><c>true</c> when an entry was created.</returns>
     public bool MigrateLegacyServer()
     {
+        // The plugin also calls this on load, before any save has sanitized the file, so a list read
+        // back as null is replaced here rather than throwing on the count below.
+        Servers ??= new List<SourceServer>();
+
         var hasLegacyData = !string.IsNullOrWhiteSpace(SourceServerUrl)
             || !string.IsNullOrWhiteSpace(SourceServerApiKey)
             || (LibraryMappings?.Count ?? 0) > 0
@@ -498,9 +502,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// Concurrent items processed during the Metadata and People refresh
     /// build phases. Higher values finish refreshes faster but use more CPU
-    /// for the duration; the build work is mostly CPU-bound (blob
+    /// for the duration. The build work is mostly CPU-bound (blob
     /// serialization, hashing, comparison) now that image sizes carry
-    /// forward. Default 8 — the historical behavior. Clamped 1–16.
+    /// forward. Default 8, the historical behavior. Clamped 1 to 16.
     /// </summary>
     public int RefreshParallelism { get; set; } = 8;
 
@@ -517,7 +521,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// for images whose tag hasn't changed. Applies to all sync modules.
     /// Catches the rare case of an image file replaced on the source's disk
     /// without a metadata rescan, at the cost of one GET plus one HEAD per
-    /// image per item per refresh. Off by default — unchanged tags reuse the
+    /// image per item per refresh. Off by default, unchanged tags reuse the
     /// previously measured sizes. Replaces the per-module
     /// MetadataSyncDeepImageVerification / PeopleSyncDeepImageVerification
     /// settings from 10.11.64.0.
@@ -528,7 +532,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// When enabled, whitelisted source collections are mirrored locally by
     /// the Sync Collections task: a matching local collection is created and
     /// its membership tracks the synced counterparts of the source
-    /// collection's items. Defaults to on — the whole point of whitelisting
+    /// collection's items. Defaults to on, the whole point of whitelisting
     /// a collection is seeing it on this server.
     /// </summary>
     public bool MirrorSyncedCollections { get; set; } = true;
@@ -537,7 +541,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Legacy 10.11.64.0 element. XML deserialization drops unknown elements,
     /// so without this shim a user who enabled per-module deep verification
     /// would have the feature silently reset to off on upgrade. Reads map onto
-    /// <see cref="DeepImageVerification"/>; never serialized back out.
+    /// <see cref="DeepImageVerification"/>. Never serialized back out.
     /// </summary>
     [System.Xml.Serialization.XmlElement("MetadataSyncDeepImageVerification")]
     [System.ComponentModel.Browsable(false)]
@@ -548,7 +552,7 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// Legacy 10.11.64.0 element; see <see cref="LegacyMetadataSyncDeepImageVerification"/>.
+    /// Legacy 10.11.64.0 element. See <see cref="LegacyMetadataSyncDeepImageVerification"/>.
     /// </summary>
     [System.Xml.Serialization.XmlElement("PeopleSyncDeepImageVerification")]
     [System.ComponentModel.Browsable(false)]
@@ -731,20 +735,24 @@ public class PluginConfiguration : BasePluginConfiguration
         // server that only sends is a valid setup for it.
         if (EnableHistorySync)
         {
+            // All() is true for an empty list, so with no active server the two mapping checks would add
+            // errors that only restate the first one. They run only when there is a server to check.
             var activeServers = this.GetActiveServers();
             if (activeServers.Count == 0)
             {
                 errors.Add("At least one enabled server in Pull, Push, or Sync mode is required when history sync is enabled");
             }
-
-            if (activeServers.All(s => s.GetEnabledUserMappings().Count == 0))
+            else
             {
-                errors.Add("At least one user mapping must be enabled for history sync");
-            }
+                if (activeServers.All(s => s.GetEnabledUserMappings().Count == 0))
+                {
+                    errors.Add("At least one user mapping must be enabled for history sync");
+                }
 
-            if (activeServers.All(s => s.GetEnabledLibraryMappings().Count == 0))
-            {
-                errors.Add("At least one library mapping must be enabled for history sync");
+                if (activeServers.All(s => s.GetEnabledLibraryMappings().Count == 0))
+                {
+                    errors.Add("At least one library mapping must be enabled for history sync");
+                }
             }
         }
 
@@ -817,6 +825,13 @@ public class PluginConfiguration : BasePluginConfiguration
         RefreshParallelism = Math.Clamp(RefreshParallelism, 1, 16);
         HintDebounceSeconds = Math.Clamp(HintDebounceSeconds, 1, 3600);
 
+        // A hand edited or truncated XML file can deserialize a list as null or with null entries. Every
+        // reader walks these lists without checking, so they are repaired here before anything else runs.
+        Servers ??= new List<SourceServer>();
+        Servers.RemoveAll(entry => entry is null);
+        LastRunFailures ??= new List<SyncRunFailure>();
+        WatchedFilterUserIds ??= new List<string>();
+
         MigrateLegacyServer();
 
         foreach (var server in Servers)
@@ -831,6 +846,8 @@ public class PluginConfiguration : BasePluginConfiguration
             server.ExternalUrl = (server.ExternalUrl ?? string.Empty).Trim().TrimEnd('/');
             server.LibraryMappings ??= new List<LibraryMapping>();
             server.UserMappings ??= new List<UserMapping>();
+            server.LibraryMappings.RemoveAll(entry => entry is null);
+            server.UserMappings.RemoveAll(entry => entry is null);
             foreach (var mapping in server.LibraryMappings)
             {
                 mapping.LocalRootPath = NormalizePathOrNull(mapping.LocalRootPath) ?? string.Empty;
@@ -843,15 +860,10 @@ public class PluginConfiguration : BasePluginConfiguration
 
         // Normalize filesystem paths to remove traversal sequences. An
         // unparseable path (embedded NUL, absurd length) is dropped rather
-        // than allowed to throw — SanitizeValues runs inside every save,
+        // than allowed to throw, SanitizeValues runs inside every save,
         // including the settings page's, and a throw would 500 the save.
         TempDownloadPath = NormalizePathOrNull(TempDownloadPath);
         RecyclingBinPath = NormalizePathOrNull(RecyclingBinPath);
-
-        foreach (var mapping in LibraryMappings)
-        {
-            mapping.LocalRootPath = NormalizePathOrNull(mapping.LocalRootPath) ?? string.Empty;
-        }
     }
 
     private static string? NormalizePathOrNull(string? path)
@@ -863,6 +875,13 @@ public class PluginConfiguration : BasePluginConfiguration
 
         try
         {
+            // A relative path would resolve against the server's working directory, which is not a place
+            // anyone chose, so it is treated as invalid rather than turned into a surprise location.
+            if (!System.IO.Path.IsPathFullyQualified(path))
+            {
+                return null;
+            }
+
             return System.IO.Path.GetFullPath(path);
         }
         catch (Exception ex) when (ex is ArgumentException or System.IO.PathTooLongException or NotSupportedException or System.Security.SecurityException)
@@ -900,14 +919,14 @@ public class PluginConfiguration : BasePluginConfiguration
 public sealed class SyncRunFailure
 {
     /// <summary>
-    /// Module mutex key — "Content", "History", "Metadata", "People", or "User".
+    /// Module mutex key, "Content", "History", "Metadata", "People", or "User".
     /// </summary>
     public string ModuleKey { get; set; } = string.Empty;
 
     /// <summary>"Refresh" or "Sync".</summary>
     public string Phase { get; set; } = string.Empty;
 
-    /// <summary>One-line human-readable reason; surfaced in the UI.</summary>
+    /// <summary>One-line human-readable reason. Surfaced in the UI.</summary>
     public string Reason { get; set; } = string.Empty;
 
     /// <summary>UTC timestamp when the failure was recorded.</summary>
@@ -933,8 +952,8 @@ public static class PluginConfigurationExtensions
     }
 
     /// <summary>
-    /// Returns the servers this installation sends hints to: enabled, with a URL and key, and in Send or
-    /// Both mode. Never returns null.
+    /// Returns the servers this installation sends hints to: enabled, with a URL and key, and in Push or
+    /// Sync mode. Never returns null.
     /// </summary>
     /// <param name="config">The configuration.</param>
     /// <returns>The send servers, in list order.</returns>
@@ -966,6 +985,21 @@ public static class PluginConfigurationExtensions
         }
 
         return config.Servers?.FirstOrDefault(s => string.Equals(s.Key, key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Finds a server entry by the server's own id, or null.</summary>
+    /// <param name="config">The configuration.</param>
+    /// <param name="serverId">The Jellyfin server id, as a peer names itself.</param>
+    /// <returns>The entry, or null when no entry has that id.</returns>
+    public static SourceServer? FindServerById(this PluginConfiguration config, string? serverId)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (string.IsNullOrEmpty(serverId))
+        {
+            return null;
+        }
+
+        return config.Servers?.FirstOrDefault(s => string.Equals(s.ServerId, serverId, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

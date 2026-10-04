@@ -44,9 +44,9 @@ public class SourceServerClientFactory : ISourceServerClientFactory
         ArgumentNullException.ThrowIfNull(server);
         var client = Create(server.Url, server.ApiKey, server.AllowPrivateNetwork);
 
-        // Only a saved entry can hold a pairing. A transient entry built for a one off check has no key
-        // the peer could pair against.
-        if (_configManager.Configuration.FindServer(server.Key) is not null)
+        // Only a saved entry can hold a pairing, and its secret only goes to the address saved on it. A
+        // check of an edited address is a new server as far as pairing goes.
+        if (_configManager.Configuration.FindServer(server.Key) is { } saved && Utilities.ConfigurationUtilities.SameServerUrl(saved.Url, server.Url))
         {
             client.Pairing = new PeerPairing(_pairings, server.Key, _applicationHost.SystemId);
         }
@@ -54,12 +54,9 @@ public class SourceServerClientFactory : ISourceServerClientFactory
         return client;
     }
 
-    /// <inheritdoc />
-    public SourceServerClient Create(string serverUrl, string apiKey) => Create(serverUrl, apiKey, allowPrivateNetwork: true);
-
     private SourceServerClient Create(string serverUrl, string apiKey, bool allowPrivateNetwork)
     {
-        // The stored key may be encrypted at rest; decrypt for use. Plaintext (pre-migration) passes through.
+        // The stored key may be encrypted at rest. Decrypt for use. Plaintext (pre-migration) passes through.
         apiKey = _secrets.Unprotect(apiKey);
 
         // Validate URL for SSRF protection (same checks as the controller endpoint). Private
@@ -70,7 +67,7 @@ public class SourceServerClientFactory : ISourceServerClientFactory
             throw new ArgumentException($"Invalid source server URL: {ssrfError}", nameof(serverUrl));
         }
 
-        // Names resolve at connect time, so the private network rule is enforced there too; the
+        // Names resolve at connect time, so the private network rule is enforced there too. The
         // validator above only classifies an address written into the URL.
         var httpClient = _httpClientFactory.CreateClient(allowPrivateNetwork ? SourceServerClient.HttpClientName : SourceServerClient.PublicHttpClientName);
         var logger = _loggerFactory.CreateLogger<SourceServerClient>();

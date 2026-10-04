@@ -149,7 +149,7 @@
                                             <option value="RequireApproval">Require Approval</option>
                                             <option value="Disabled" selected>Disabled</option>
                                         </select>
-                                        <div class="fieldDescription">Delete local content that no longer exists on the source server.</div>
+                                        <div class="fieldDescription">Delete local content that no longer exists on the source server. Even when Enabled, a deletion waits for approval whenever the plugin cannot be sure the file should go.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -643,59 +643,12 @@
     <!-- STYLES: Settings-specific -->
     <style>
         /* ===== Utility Classes ===== */
-        .text-success { color: var(--status-synced-color, #5cb85c); }
-        .text-error { color: var(--status-errored-color, #d9534f); }
         .flex { display: flex; }
-        .mt-sm { margin-top: 8px; }
         .mb-md { margin-bottom: 12px; }
         .w-auto { width: auto !important; }
         .w-80 { width: 80px; }
 
-
-        /* ===== Mapping Styles ===== */
-        .mapping {
-            margin-bottom: 2em;
-            padding-bottom: 1em;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-        .mapping:last-child {
-            border-bottom: none;
-            margin-bottom: 1em;
-        }
-        .mappingGrid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0 24px;
-        }
-        .mappingHeader {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1em;
-        }
-        .mappingColumn {
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* ===== Library Filter ===== */
-        .filterSection {
-            margin-top: 1em;
-            padding-top: 0.75em;
-        }
-        .filterSection .filterHeader {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 0.5em;
-        }
-        .filterSection .filterHeader label {
-            font-weight: bold;
-            white-space: nowrap;
-        }
-        .filterSection .filterModeSelect {
-            max-width: 200px;
-        }
+        /* ===== Watched Filter User List ===== */
         .filterItemsList {
             padding: 0;
             transition: opacity 0.15s;
@@ -758,14 +711,6 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-        }
-        .filterItemOverview {
-            font-size: 0.75em;
-            color: rgba(255, 255, 255, 0.35);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            margin-top: 2px;
         }
         .filterItemCheck {
             flex: 0 0 auto;
@@ -846,8 +791,5 @@
         .resetButtonInfo .fieldDescription {
             margin-top: 2px;
         }
-
-        /* ===== Additional Utility Classes ===== */
-        .gap-sm { gap: 8px; }
     </style>
 </div>

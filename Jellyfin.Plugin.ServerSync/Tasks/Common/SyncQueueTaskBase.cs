@@ -14,7 +14,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 /// <summary>
 /// Sync phase: read <see cref="SyncStatus.Queued"/> rows and apply each one
 /// to the local server. Successful applies transition to
-/// <see cref="SyncStatus.Synced"/> and update the synced hashes; failures
+/// <see cref="SyncStatus.Synced"/> and update the synced hashes. Failures
 /// transition to <see cref="SyncStatus.Errored"/> with the exception message
 /// captured in <see cref="SyncRecord.Reason"/>.
 /// </summary>
@@ -71,21 +71,29 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>
     /// Finds the connected source a row belongs to. A row with no key was written before servers
-    /// became a list and belongs to the first source.
+    /// became a list and belongs to the first configured scan server, which is where the single source
+    /// migrated to, not to whichever server happened to connect first.
     /// </summary>
     /// <param name="record">The row.</param>
     /// <returns>The source, or null when that server did not connect this run.</returns>
     protected ScanSource? SourceFor(TRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        if (string.IsNullOrEmpty(record.ServerKey))
+        var serverKey = record.ServerKey;
+        if (string.IsNullOrEmpty(serverKey))
         {
-            return Sources.Count > 0 ? Sources[0] : null;
+            var pullServers = _configManager.Configuration.GetPullServers();
+            if (pullServers.Count == 0)
+            {
+                return null;
+            }
+
+            serverKey = pullServers[0].Key;
         }
 
         foreach (var source in Sources)
         {
-            if (string.Equals(source.Key, record.ServerKey, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(source.Key, serverKey, StringComparison.OrdinalIgnoreCase))
             {
                 return source;
             }
@@ -108,7 +116,10 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
             return source;
         }
 
-        var server = _configManager.Configuration.FindServer(record.ServerKey);
+        var config = _configManager.Configuration;
+        var server = string.IsNullOrEmpty(record.ServerKey)
+            ? config.GetPullServers().FirstOrDefault()
+            : config.FindServer(record.ServerKey);
         var name = server?.DisplayName ?? (string.IsNullOrEmpty(record.ServerKey) ? "the first scan server" : record.ServerKey);
         throw new InvalidOperationException($"Source server '{name}' is not available this run");
     }
@@ -154,7 +165,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>
     /// Maximum parallelism for <see cref="ApplyAsync"/>. Default <c>1</c>
-    /// (serial). Override to enable concurrent applies — Content uses this
+    /// (serial). Override to enable concurrent applies, Content uses this
     /// to download multiple items at once while still benefiting from the
     /// base's status-transition + persistence boilerplate.
     /// </summary>
@@ -162,11 +173,11 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>
     /// Pre-flight hook run after <see cref="IsEnabled"/> and before the
-    /// queued items are processed. Default creates <see cref="Client"/>
-    /// from the configured source URL/API key and runs a connection test;
-    /// returns false (aborting the run) if the connection check fails.
-    /// Subclasses with custom pre-flight (disk space, circuit breaker, etc.)
-    /// should override and call <c>base.BeforeRunAsync</c> first.
+    /// queued items are processed. Default creates a client for every scan
+    /// server, keeps the ones whose connection test passes in
+    /// <see cref="Sources"/>, and returns false (aborting the run) when none
+    /// connects. Subclasses with custom pre-flight (disk space, circuit
+    /// breaker, etc.) should override and call <c>base.BeforeRunAsync</c>.
     /// </summary>
     protected virtual async Task<bool> BeforeRunAsync(CancellationToken cancellationToken)
     {
@@ -186,7 +197,24 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
                 continue;
             }
 
-            var result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            Models.Configuration.ConnectionTestResult result;
+            try
+            {
+                result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Sources is assigned only after the loop, so the run's cleanup cannot see these
+                // clients yet. Dispose them here before the failure or cancellation propagates.
+                client.Dispose();
+                foreach (var source in connected)
+                {
+                    source.Dispose();
+                }
+
+                throw;
+            }
+
             if (!result.Success)
             {
                 Logger.LogError("{Task}: connection to '{Server}' failed: {Error}", Name, server.DisplayName, result.ErrorMessage ?? "unknown");
@@ -230,7 +258,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>
     /// Applies the queued change to the local server. Throwing transitions
-    /// the record to <see cref="SyncStatus.Errored"/>;
+    /// the record to <see cref="SyncStatus.Errored"/>.
     /// <see cref="OperationCanceledException"/> always propagates.
     /// </summary>
     protected abstract Task ApplyAsync(TRecord record, CancellationToken cancellationToken);
@@ -238,16 +266,16 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <summary>
     /// Progress-aware apply. The default forwards to
     /// <see cref="ApplyAsync(TRecord, CancellationToken)"/> and ignores
-    /// <paramref name="itemProgress"/> — right for modules whose per-item work
+    /// <paramref name="itemProgress"/>, right for modules whose per-item work
     /// is near-instant. Content overrides this to stream download progress
-    /// (fraction 0–1 of the item) so a multi-hour file moves the bar instead
+    /// (fraction 0 to 1 of the item) so a multi-hour file moves the bar instead
     /// of freezing it.
     /// </summary>
     protected virtual Task ApplyAsync(TRecord record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
         => ApplyAsync(record, cancellationToken);
 
     /// <summary>
-    /// Relative progress weight of one record. Default 1 — every item counts
+    /// Relative progress weight of one record. Default 1, every item counts
     /// equally, which is honest when per-item cost is uniform (a history
     /// write, a policy update). Content overrides with the file size in
     /// bytes: a 50 GB movie is not the same amount of work as a 5 MB episode,
@@ -258,7 +286,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>
     /// Called after a successful <see cref="ApplyAsync"/> to confirm the write
-    /// landed. Default is a no-op; modules that mutate live Jellyfin state
+    /// landed. Default is a no-op. Modules that mutate live Jellyfin state
     /// override to re-read and compare. Throwing transitions the record to
     /// <see cref="SyncStatus.Errored"/> exactly like a failed
     /// <see cref="ApplyAsync"/>. Records with per-category state may call
@@ -281,7 +309,11 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         ArgumentNullException.ThrowIfNull(source);
 
         var moduleMutex = SyncModuleMutex.ForModule(ModuleMutexKey);
-        await moduleMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (!await moduleMutex.WaitAsync(SyncModuleMutex.SingleRowWait, cancellationToken).ConfigureAwait(false))
+        {
+            throw new ModuleBusyException($"{Name} is running");
+        }
+
         try
         {
             Sources = new[] { source };
@@ -353,13 +385,12 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>
     /// Called after an apply throws, before the record is persisted as Errored.
-    /// Retry-extension point — Content overrides to increment
-    /// <c>RetryCount</c>, which feeds its <c>GetErroredItemsForRetry</c>
-    /// query so failed downloads get another attempt on the next run.
-    /// History / Metadata / User / People inherit the no-op because their
-    /// apply failures are deterministic (mismatched IDs, refused writes,
-    /// verification mismatches) and a retry without operator intervention
-    /// would just rerun the same failure.
+    /// Default increments <see cref="SyncRecord.RetryCount"/>, which the
+    /// refresh's retry ceiling reads: an Errored row that has used its
+    /// allowance stays Errored instead of being queued again every run.
+    /// Content overrides to also feed its <c>GetErroredItemsForRetry</c>
+    /// query, and to leave the count alone for a row its circuit breaker
+    /// skipped without trying.
     /// </summary>
     protected virtual void OnApplyFailed(TRecord record)
     {
@@ -368,20 +399,20 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     }
 
     /// <summary>
-    /// Hook for post-run bookkeeping beyond timestamp updates — Content uses
+    /// Hook for post-run bookkeeping beyond timestamp updates, Content uses
     /// this to process pending deletions and trigger a library refresh on
     /// every Sync run. Default is a no-op. For the per-module "last sync
     /// time" bump, override <see cref="RecordRunCompleted"/> instead.
-    /// <paramref name="progress"/> reports 0–100 for the finalize phase only;
-    /// the base scales it into the run's overall 90–100% band.
+    /// <paramref name="progress"/> reports 0 to 100 for the finalize phase only.
+    /// the base scales it into the run's overall 90 to 100% band.
     /// </summary>
     protected virtual Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
-    /// Per-module timestamp bump. Default is a no-op; each module overrides
+    /// Per-module timestamp bump. Default is a no-op. Each module overrides
     /// to set its <c>LastXSyncTime</c> field on the configuration. The base
     /// calls this after <see cref="FinalizeAsync"/> and then persists the
-    /// configuration with a single try/catch — modules don't repeat that
+    /// configuration with a single try/catch, modules don't repeat that
     /// save plumbing.
     /// </summary>
     protected virtual void RecordRunCompleted(Configuration.PluginConfiguration config, DateTime utcNow)
@@ -389,8 +420,12 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         // Default: nothing to record.
     }
 
-    /// <inheritdoc />
-    public abstract IEnumerable<TaskTriggerInfo> GetDefaultTriggers();
+    /// <summary>
+    /// None. The per module tasks are hidden and run only as steps of Sync Content and Sync Information,
+    /// so a schedule of their own would run each module twice as often as intended.
+    /// </summary>
+    /// <returns>No triggers.</returns>
+    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
     /// <summary>
     /// Returns the items to apply this run. Default is rows in
@@ -407,7 +442,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// order with a full barrier between them, while items inside a group
     /// may apply in parallel (per <see cref="MaxDegreeOfParallelism"/>).
     /// Default is a single group. Metadata overrides so parent folders
-    /// (Series/Season/…) are fully applied before their leaves — a sorted
+    /// (Series/Season/…) are fully applied before their leaves, a sorted
     /// flat list alone doesn't guarantee that once the loop is parallel.
     /// </summary>
     protected virtual IEnumerable<IList<TRecord>> GetApplyGroups(IList<TRecord> items)
@@ -445,10 +480,12 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         Logger.LogInformation("Starting {Task}", Name);
         progress.Report(0);
 
-        // Client is created inside BeforeRunAsync; the finally covers every
-        // exit path — pre-flight abort (Client may already exist when the
-        // connection test fails), exceptions from the apply loop, and
-        // cancellation — so the API client wrapper never leaks past the run.
+        // BeforeRunAsync fills Sources with one connected client per server.
+        // The finally disposes them on every exit path, including a pre-flight
+        // abort after some servers connected, exceptions from the apply loop,
+        // and cancellation, so no client outlives the run. A failure inside the
+        // connection loop itself disposes its own clients, since Sources is
+        // not assigned yet.
         try
         {
             await RunAsync(progress, cancellationToken).ConfigureAwait(false);
@@ -475,26 +512,30 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
             // surface "last sync aborted: pre-flight failure" instead of
             // the user wondering why queued rows aren't draining. Subclass
             // BeforeRunAsync overrides log specific reasons (disk space,
-            // circuit breaker, connection); this captures the high-level
+            // circuit breaker, connection). This captures the high-level
             // fact of the abort.
-            Logger.LogError("{Task}: pre-flight aborted run — see prior log entries for the specific check that failed", Name);
+            Logger.LogError("{Task}: pre-flight aborted run, see prior log entries for the specific check that failed", Name);
             RecordRunFailure("Sync", _preflightFailureReason ?? "Pre-flight aborted (see log for cause: connection / disk space / circuit breaker)");
             return;
         }
 
         // Progress allocation:
-        //   0– 90 %  per-item ApplyAsync loop, weighted by GetApplyWeight and
-        //            fed by per-item in-flight fractions — a run downloading
+        //   0 to 90 %  per-item ApplyAsync loop, weighted by GetApplyWeight and
+        //            fed by per-item in-flight fractions, a run downloading
         //            one huge file and nine small ones reports bytes moved,
         //            not "1 of 10 items"
-        //  90–100 %  FinalizeAsync (Content's library-refresh phase fits here
+        //  90 to 100 %  FinalizeAsync (Content's library-refresh phase fits here
         //            so the bar moves while ValidateMediaLibrary runs)
         const double ApplyEnd = 90.0;
 
         // Rows from a server that is no longer configured, or that did not connect this run, have
         // nothing to pull from. They are left as they are rather than errored on every run.
+        // A row with no key belongs to the first configured server and is left the same way when
+        // that server did not connect. With no configured servers at all (a subclass that supplies its
+        // own sources) such a row has no server to wait for and is applied.
         var all = GetItemsToApply();
-        var queued = all.Where(r => string.IsNullOrEmpty(r.ServerKey) || SourceFor(r) is not null).ToList();
+        var hasPullServers = _configManager.Configuration.GetPullServers().Count > 0;
+        var queued = all.Where(r => SourceFor(r) is not null || (string.IsNullOrEmpty(r.ServerKey) && !hasPullServers)).ToList();
         if (queued.Count < all.Count)
         {
             Logger.LogInformation("{Task}: leaving {Count} queued row(s) whose server is not configured or did not connect this run", Name, all.Count - queued.Count);
@@ -511,8 +552,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
         totalWeight = Math.Max(1, totalWeight);
 
-        // completedWeight counts finished items (success or failure — either
-        // way their share of the run is spent); inflight carries each running
+        // completedWeight counts finished items (success or failure, either
+        // way their share of the run is spent). Inflight carries each running
         // item's partial contribution. Guarded by one gate because byte
         // callbacks arrive from parallel download workers.
         var progressGate = new object();
@@ -655,7 +696,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         // We treat any errored item as a non-clean run.
         if (failures > 0)
         {
-            RecordRunFailure("Sync", $"{failures} of {queued.Count} item(s) errored — open the table to see per-row reasons");
+            RecordRunFailure("Sync", $"{failures} of {queued.Count} item(s) errored, open the table to see per-row reasons");
         }
         else
         {
@@ -665,7 +706,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>
     /// Lets the subclass stamp its module's last-run timestamp, then saves
-    /// the configuration. Failures here are logged but never propagate — a
+    /// the configuration. Failures here are logged but never propagate, a
     /// failed save mustn't mask the actual run result.
     /// </summary>
     private void RecordRunCompletedAndSave()
@@ -689,11 +730,11 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         => RunFailureLog.Record(_configManager, ModuleMutexKey, phase, reason, Logger, Name);
 
     private void ClearRunFailure()
-        => RunFailureLog.Clear(_configManager, ModuleMutexKey, Logger, Name);
+        => RunFailureLog.Clear(_configManager, ModuleMutexKey, "Sync", Logger, Name);
 
     /// <summary>
     /// Plain-lambda IProgress. <see cref="Progress{T}"/> posts through the
-    /// captured SynchronizationContext, which reorders and defers reports;
+    /// captured SynchronizationContext, which reorders and defers reports.
     /// progress math here is already thread-safe, so report inline.
     /// </summary>
     private sealed class DelegateProgress : IProgress<double>
@@ -724,12 +765,14 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
             Manager.Upsert(record);
             return true;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
+            // An HTTP timeout surfaces as a cancellation while the run's token is not cancelled, so it
+            // lands here and errors this row instead of aborting the whole run.
             Logger.LogError(ex, "{Task}: apply failed for record id {Id}", Name, record.Id);
             OnApplyFailed(record);
             record.Status = SyncStatus.Errored;

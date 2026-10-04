@@ -133,7 +133,7 @@ public class HistorySyncMergeServiceTests
     }
 
     /// <summary>
-    /// Only source has a LastPlayed — its values are used.
+    /// Only source has a LastPlayed, its values are used.
     /// True: a brand-new local item gets seeded with the existing source watch state.
     /// False: source state would be ignored and local stays empty.
     /// </summary>
@@ -153,7 +153,7 @@ public class HistorySyncMergeServiceTests
     }
 
     /// <summary>
-    /// Only local has a LastPlayed — its values are used.
+    /// Only local has a LastPlayed, its values are used.
     /// True: existing local watch state survives a re-add on the source side.
     /// False: local watch state would be wiped when the source has no opinion.
     /// </summary>
@@ -173,7 +173,7 @@ public class HistorySyncMergeServiceTests
     }
 
     /// <summary>
-    /// Neither side has a date — fall back to source values.
+    /// Neither side has a date, fall back to source values.
     /// True: the merge service is deterministic even when both sides are date-less.
     /// False: a no-date row would have undefined merge results.
     /// </summary>
@@ -291,7 +291,7 @@ public class HistorySyncMergeServiceTests
     }
 
     /// <summary>
-    /// All merged fields equal their local counterparts — no change to sync.
+    /// All merged fields equal their local counterparts, no change to sync.
     /// True: synced rows stay Synced rather than being re-queued.
     /// False: idempotent refreshes would queue every row every run.
     /// </summary>
@@ -317,7 +317,7 @@ public class HistorySyncMergeServiceTests
     /// <summary>
     /// LocalItemId being absent does not suppress a real merge diff.
     /// True: BuildRecord never persists a row without a LocalItemId, so this is
-    /// belt-and-suspenders — but if a future code path ever does, a real diff
+    /// belt-and-suspenders, but if a future code path ever does, a real diff
     /// is still surfaced.
     /// False: silent suppression would mask actual divergences for orphan rows.
     /// </summary>
@@ -414,7 +414,7 @@ public class HistorySyncMergeServiceTests
     /// <summary>
     /// A LastPlayedDate differing only below the second is not a change.
     /// True: a synced row settles and stays out of the queue.
-    /// False: the row requeues on every refresh forever — the change detector
+    /// False: the row requeues on every refresh forever, the change detector
     /// insists it differs while the verifier insists the write landed.
     /// </summary>
     [Fact]
@@ -461,7 +461,7 @@ public class HistorySyncMergeServiceTests
     }
 
     /// <summary>
-    /// Merged has a date and local has none — a real change.
+    /// Merged has a date and local has none, a real change.
     /// True: first-time history for an item is pushed to local.
     /// False: never-played local items stay unsynced.
     /// </summary>

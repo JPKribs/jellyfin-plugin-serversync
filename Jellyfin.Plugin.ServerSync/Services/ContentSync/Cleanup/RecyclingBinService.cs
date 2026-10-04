@@ -140,8 +140,12 @@ public static class RecyclingBinService
             return false;
         }
 
-        // Move the main file first
-        var mainSuccess = MoveToRecyclingBin(filePath, recyclingBinPath, logger);
+        // Move the main file first. When it stays put, its companions stay with it, since recycling
+        // them alone would strip the nfo, artwork and subtitles from a file that is still in use.
+        if (!MoveToRecyclingBin(filePath, recyclingBinPath, logger))
+        {
+            return false;
+        }
 
         // Move companion files (using the same strict matcher as
         // FileOperationUtilities.GetCompanionFiles so we don't accidentally
@@ -158,7 +162,7 @@ public static class RecyclingBinService
             logger.LogDebug(ex, "Error processing companion files for {FilePath}", filePath);
         }
 
-        return mainSuccess;
+        return true;
     }
 
     /// <summary>

@@ -16,8 +16,8 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Database;
 
 /// <summary>
 /// End-to-end guard for the 66.0 regression: a populated v21 database is
-/// upgraded in place (v22 adds RetryCount), then every module's list path —
-/// the exact queries the UI tabs hit — must return rows.
+/// upgraded in place (v22 adds RetryCount), then every module's list path , 
+/// the exact queries the UI tabs hit, must return rows.
 /// <para>
 /// The original failure was NOT the migration: Metadata's paginated query
 /// carried a hand-written column list that predated RetryCount, so
@@ -125,8 +125,8 @@ public sealed class PostUpgradePaginationTests : IDisposable
             });
         }
 
-        // Phase 2: shape the file back to a v21 install — no RetryCount
-        // columns, user_version 21 — exactly what a 65.x database looks like.
+        // Phase 2: shape the file back to a v21 install, no RetryCount
+        // columns, user_version 21, exactly what a 65.x database looks like.
         var dbPath = Path.Combine(_tempDir, "serversync", "sync.db");
         using (var conn = new SqliteConnection($"Data Source={dbPath};Pooling=False"))
         {

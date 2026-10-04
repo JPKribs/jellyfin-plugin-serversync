@@ -17,7 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Common;
 /// <summary>
 /// Focused tests for <see cref="RefreshSyncTaskBase{TRecord, TSource, TKey}"/>'s
 /// pruning contract. The base owns the "any row not seen this run gets
-/// deleted" sweep — its scoping and the source-unavailable guard must hold or
+/// deleted" sweep, its scoping and the source-unavailable guard must hold or
 /// every module silently loses tracking rows on a transient source-side error.
 /// </summary>
 public class RefreshSyncTaskBaseTests
@@ -71,8 +71,6 @@ public class RefreshSyncTaskBaseTests
         {
         }
 
-        public int DeleteByStatus(SyncStatus status) => 0;
-
         public int ResetTable() => 0;
 
         public void UpdateStatus(long id, SyncStatus status, string? reason = null)
@@ -82,8 +80,6 @@ public class RefreshSyncTaskBaseTests
         public void UpdateStatusByKey(string key, SyncStatus status, string? reason = null)
         {
         }
-
-        public int BulkUpdateStatus(IReadOnlyList<long> ids, SyncStatus status, string? reason = null) => 0;
 
         public PagedResult<TestRecord> Paginate(PaginationRequest request)
             => new(Array.Empty<TestRecord>(), 0, 0, 50);
@@ -95,7 +91,7 @@ public class RefreshSyncTaskBaseTests
 
         public string DecryptApiKey(string protectedKey) => protectedKey;
 
-        public string ResolveRequestApiKey(string? requestApiKey, string? serverKey) => requestApiKey ?? string.Empty;
+        public string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl) => requestApiKey ?? string.Empty;
 
         public void SaveConfiguration()
         {
@@ -121,7 +117,7 @@ public class RefreshSyncTaskBaseTests
     /// Bare-bones concrete subclass that lets tests invoke the otherwise-
     /// protected <see cref="RefreshSyncTaskBase{TRecord, TSource, TKey}.PruneStaleAsync"/>
     /// and flip <see cref="IsInScope"/> / <see cref="ShouldSkipPruning"/> per
-    /// scenario. Discovery is stubbed to return nothing — these tests focus on
+    /// scenario. Discovery is stubbed to return nothing, these tests focus on
     /// the prune sweep only.
     /// </summary>
     private sealed class TestableRefreshTask : RefreshSyncTaskBase<TestRecord, string, string>
@@ -139,7 +135,7 @@ public class RefreshSyncTaskBaseTests
 
         public bool MarkUnavailableDuringDiscovery { get; set; }
 
-        public IList<string> Sources { get; set; } = Array.Empty<string>();
+        public IList<string> Offered { get; set; } = Array.Empty<string>();
 
         public override string Name => "Test Refresh";
 
@@ -155,7 +151,7 @@ public class RefreshSyncTaskBaseTests
 
         /// <summary>
         /// Items each fake server offers, in priority order. Defaults to one server offering
-        /// <see cref="Sources"/>, so the prune tests read as before.
+        /// <see cref="Offered"/>, so the prune tests read as before.
         /// </summary>
         public List<IList<string>> PerServer { get; set; } = new();
 
@@ -170,18 +166,33 @@ public class RefreshSyncTaskBaseTests
 
         public List<string> Listed { get; } = new();
 
+        /// <summary>Gets the configuration the task reads, so tests can seed servers and failures.</summary>
+        public PluginConfiguration Config => ConfigManager.Configuration;
+
+        /// <summary>Priority of a server whose listing throws, or null for none.</summary>
+        public int? ThrowListingForServer { get; set; }
+
+        /// <summary>Work items whose build throws the way an HTTP timeout does.</summary>
+        public Func<string, bool>? TimeoutOnBuild { get; set; }
+
+        public bool ThrowInResolveConflicts { get; set; }
+
         protected override Task<bool> TestConnectionAsync(CancellationToken cancellationToken)
         {
-            var count = Math.Max(1, PerServer.Count);
+            // Configured servers are used when a test seeds them, so rows can name a real server key.
+            var configured = ConfigManager.Configuration.GetPullServers();
+            var count = configured.Count > 0 ? configured.Count : Math.Max(1, PerServer.Count);
             var sources = new List<ScanSource>();
             for (var i = 0; i < count; i++)
             {
-                var server = new Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer { Name = "server-" + i, Url = "http://localhost:1", ApiKey = "k" };
+                var server = configured.Count > 0
+                    ? configured[i]
+                    : new Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer { Name = "server-" + i, Url = "http://localhost:1", ApiKey = "k" };
                 var client = new SourceServerClient(NullLogger<SourceServerClient>.Instance, new System.Net.Http.HttpClient(), server.Url, server.ApiKey, "test", "0");
                 sources.Add(new ScanSource(server, client, i));
             }
 
-            base.Sources = sources;
+            Sources = sources;
             return Task.FromResult(true);
         }
 
@@ -192,7 +203,12 @@ public class RefreshSyncTaskBaseTests
                 MarkSourceUnavailable("test: source server unavailable");
             }
 
-            var offered = PerServer.Count > 0 ? PerServer[source.Priority] : Sources;
+            if (ThrowListingForServer == source.Priority)
+            {
+                throw new InvalidOperationException("test: listing failed");
+            }
+
+            var offered = PerServer.Count > 0 ? PerServer[source.Priority] : Offered;
             foreach (var item in offered)
             {
                 Listed.Add(source.Server.Name + ":" + item);
@@ -214,10 +230,21 @@ public class RefreshSyncTaskBaseTests
                 throw new InvalidOperationException("test: build failed");
             }
 
+            if (TimeoutOnBuild?.Invoke(source) == true)
+            {
+                // HttpClient reports a timeout as a cancellation while the caller's token is untouched.
+                throw new TaskCanceledException("test: request timed out");
+            }
+
             return Task.FromResult(Builder?.Invoke(source));
         }
 
         public void InvokeDecideStatus(TestRecord record) => DecideStatus(record);
+
+        protected override Task ResolveConflictsAsync(IList<TestRecord> queued, CancellationToken cancellationToken)
+            => ThrowInResolveConflicts
+                ? throw new InvalidOperationException("test: conflict pass failed")
+                : Task.CompletedTask;
 
         protected override string ExtractKey(TestRecord record) => record.Key;
 
@@ -226,8 +253,6 @@ public class RefreshSyncTaskBaseTests
         protected override bool IsPruneCandidate(TestRecord record) => PruneCandidateFilter?.Invoke(record) ?? true;
 
         protected override bool PruneGuardApplies => GuardApplies;
-
-        public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
         public Task<int> InvokePruneStaleAsync(IReadOnlyDictionary<string, TestRecord> existing, HashSet<string> seenKeys, CancellationToken cancellationToken)
             => PruneStaleAsync(existing, seenKeys, new Progress<double>(), cancellationToken);
@@ -336,7 +361,7 @@ public class RefreshSyncTaskBaseTests
     }
 
     /// <summary>
-    /// A clean discovery (no source error) prunes the rows it didn't see — the
+    /// A clean discovery (no source error) prunes the rows it didn't see, the
     /// "source answered cleanly with fewer/no items, remove the stale rows" path.
     /// True: genuinely-removed items get reconciled.
     /// False: dead rows survive forever and the table grows unbounded.
@@ -357,7 +382,7 @@ public class RefreshSyncTaskBaseTests
 
     /// <summary>
     /// A per-item build failure (e.g. a 4xx/5xx fetching that item's detail)
-    /// also skips pruning for the whole run — the failed item is still on the
+    /// also skips pruning for the whole run, the failed item is still on the
     /// source, just not in the seen set.
     /// True: a per-item source error never deletes that item's row.
     /// False: a transient detail-fetch error deletes rows for items that exist.
@@ -367,7 +392,7 @@ public class RefreshSyncTaskBaseTests
     {
         var task = CreateTask(out var manager);
         manager.All = new List<TestRecord> { Record(1, "a") };
-        task.Sources = new List<string> { "x" };
+        task.Offered = new List<string> { "x" };
         task.ThrowDuringBuild = true;
 
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
@@ -410,7 +435,7 @@ public class RefreshSyncTaskBaseTests
     /// <summary>
     /// A clean-looking discovery that would prune more than half of a large
     /// table is refused. An empty-but-200 catalog answer passes every error
-    /// guard (no exception, no 4xx/5xx, no build failures) — this breaker is
+    /// guard (no exception, no 4xx/5xx, no build failures), this breaker is
     /// what stands between that answer and the table being wiped.
     /// True: a source-side truncation can destroy at most half the table.
     /// False: one bad-but-clean answer deletes every tracking row (and, for
@@ -421,7 +446,7 @@ public class RefreshSyncTaskBaseTests
     {
         var task = CreateTask(out var manager);
         manager.All = ManyRecords(100);
-        task.Sources = Array.Empty<string>();
+        task.Offered = Array.Empty<string>();
 
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
@@ -429,7 +454,7 @@ public class RefreshSyncTaskBaseTests
     }
 
     /// <summary>
-    /// The breaker only guards large tables — a small table (below the
+    /// The breaker only guards large tables, a small table (below the
     /// minimum-row threshold) can legitimately turn over completely.
     /// True: small tables still reconcile fully.
     /// False: a user with a handful of rows can never prune them all.
@@ -439,7 +464,7 @@ public class RefreshSyncTaskBaseTests
     {
         var task = CreateTask(out var manager);
         manager.All = ManyRecords(10);
-        task.Sources = Array.Empty<string>();
+        task.Offered = Array.Empty<string>();
 
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
@@ -447,7 +472,7 @@ public class RefreshSyncTaskBaseTests
     }
 
     /// <summary>
-    /// Out-of-scope rows don't count toward the breaker's stale fraction —
+    /// Out-of-scope rows don't count toward the breaker's stale fraction , 
     /// they are never pruned, so a disabled mapping covering most of the
     /// table must not block reconciliation of the enabled remainder.
     /// True: the breaker measures only rows actually up for deletion.
@@ -464,7 +489,7 @@ public class RefreshSyncTaskBaseTests
         }
 
         manager.All = records;
-        task.Sources = Array.Empty<string>();
+        task.Offered = Array.Empty<string>();
         task.ScopeFilter = r => r.ScopeId != "disabled";
 
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
@@ -492,7 +517,7 @@ public class RefreshSyncTaskBaseTests
         }
 
         manager.All = records;
-        task.Sources = Array.Empty<string>();
+        task.Offered = Array.Empty<string>();
         task.ScopeFilter = r => r.ScopeId != "disabled";
 
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
@@ -521,14 +546,14 @@ public class RefreshSyncTaskBaseTests
         }
 
         manager.All = records;
-        task.Sources = Array.Empty<string>();
+        task.Offered = Array.Empty<string>();
         task.PruneCandidateFilter = r => r.ScopeId != "already-pending";
 
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
         // 40 candidates of 100 in-scope = 40% stale → under the 50% limit,
         // prune proceeds (the base prune itself still deletes all 100 stale
-        // rows; candidacy only shapes the breaker's math).
+        // rows. Candidacy only shapes the breaker's math).
         Assert.Equal(100, manager.Deleted.Count);
     }
 
@@ -543,7 +568,7 @@ public class RefreshSyncTaskBaseTests
     {
         var task = CreateTask(out var manager);
         manager.All = ManyRecords(100);
-        task.Sources = Array.Empty<string>();
+        task.Offered = Array.Empty<string>();
         task.GuardApplies = false;
 
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
@@ -554,7 +579,7 @@ public class RefreshSyncTaskBaseTests
     // -----------------------------------------------------------------------
     // Retry ceiling. Without it the refresh re-queues an Errored row on every
     // run and the sync re-applies it on every run, so a row that can never
-    // converge churns forever — re-downloading images, rewriting policies —
+    // converge churns forever, re-downloading images, rewriting policies , 
     // with the failure reason overwritten each cycle.
     // -----------------------------------------------------------------------
 
@@ -704,5 +729,176 @@ public class RefreshSyncTaskBaseTests
         await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
 
         Assert.Equal(2, manager.Upserted.Count);
+    }
+
+    /// <summary>
+    /// A row the operator ignored is kept when another server's row covers its item.
+    /// True: an ignore survives a change of server priority.
+    /// False: reordering servers silently undoes the operator's choice.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_SupersededIgnoredRow_IsKept()
+    {
+        var task = CreateTask(out var manager);
+        manager.All = new List<TestRecord> { new() { Id = 7, Key = "old-id", ScopeId = "shared-path", Status = SyncStatus.Ignored } };
+        task.PerServer = new List<IList<string>> { new List<string> { "new-id" } };
+        task.PriorityKey = _ => "shared-path";
+        task.RecordPriorityKey = r => r.ScopeId;
+        task.Builder = item => new TestRecord { Key = item, ScopeId = "shared-path", Changed = true };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Empty(manager.Deleted);
+    }
+
+    // -----------------------------------------------------------------------
+    // Per item and per server failures. One slow item or one failing server
+    // must cost only its own work, never the whole run, and never a prune.
+    // -----------------------------------------------------------------------
+
+    private static Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer PullServer(string name) => new()
+    {
+        Name = name,
+        Url = "http://localhost:1",
+        ApiKey = "k"
+    };
+
+    /// <summary>
+    /// A build that times out (a cancellation while the run's token is not cancelled) counts as one
+    /// failed item and the other items still build.
+    /// True: one slow source item costs only its own row.
+    /// False: a single HTTP timeout aborts the whole refresh.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_BuildTimeout_CountsAsItemFailureAndRunContinues()
+    {
+        var task = CreateTask(out var manager);
+        manager.All = new List<TestRecord> { Record(1, "stale") };
+        task.Offered = new List<string> { "slow", "ok" };
+        task.TimeoutOnBuild = item => item == "slow";
+        task.Builder = item => new TestRecord { Key = item, Changed = true };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(new[] { "ok" }, manager.Upserted.Select(r => r.Key));
+        Assert.Empty(manager.Deleted);
+    }
+
+    /// <summary>
+    /// A server whose listing throws is left out of the run while the other servers are still listed,
+    /// and the run skips pruning.
+    /// True: one broken server never blocks the others.
+    /// False: one server's exception aborts the refresh for every server.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_OneServerListingThrows_OtherServersStillListed()
+    {
+        var task = CreateTask(out var manager);
+        manager.All = new List<TestRecord> { Record(1, "gone") };
+        task.PerServer = new List<IList<string>>
+        {
+            new List<string> { "from-a" },
+            new List<string> { "from-b" }
+        };
+        task.ThrowListingForServer = 0;
+        task.Builder = item => new TestRecord { Key = item, Changed = true };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(new[] { "from-b" }, manager.Upserted.Select(r => r.Key));
+        Assert.Empty(manager.Deleted);
+    }
+
+    /// <summary>
+    /// A row held by a higher priority server that connected but failed its listing stays with that
+    /// server, even when the module builds by updating the stored row in place, the way People does.
+    /// True: a lower server never takes over a row for the length of an outage.
+    /// False: the in place build stamps the lower server onto the stored row, the guard reads the
+    /// stamped value, and the row is overwritten twice.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_RowHeldByHigherServerWhoseListingFailed_IsLeftAlone()
+    {
+        var task = CreateTask(out var manager);
+        var high = PullServer("high");
+        var low = PullServer("low");
+        task.Config.Servers = new List<Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer> { high, low };
+
+        var stored = new TestRecord { Id = 5, Key = "x", ServerKey = high.Key };
+        manager.All = new List<TestRecord> { stored };
+        task.PerServer = new List<IList<string>>
+        {
+            new List<string> { "x" },
+            new List<string> { "x" }
+        };
+        task.ThrowListingForServer = 0;
+        task.Builder = item =>
+        {
+            stored.ServerKey = low.Key;
+            stored.Changed = true;
+            return stored;
+        };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Empty(manager.Upserted);
+        Assert.Empty(manager.Deleted);
+    }
+
+    /// <summary>
+    /// A failing conflict pass is recorded and treated as a failed run, so the prune is skipped.
+    /// True: the queued rows still land and nothing is removed on a run that did not finish cleanly.
+    /// False: the exception aborts the run after the build, or the prune runs anyway.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_ConflictResolutionThrows_RecordsFailureAndSkipsPrune()
+    {
+        var task = CreateTask(out var manager);
+        manager.All = new List<TestRecord> { Record(1, "a"), Record(2, "stale") };
+        task.Offered = new List<string> { "a" };
+        task.Builder = item => new TestRecord { Id = 1, Key = item, Changed = true };
+        task.ThrowInResolveConflicts = true;
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(new[] { "a" }, manager.Upserted.Select(r => r.Key));
+        Assert.Empty(manager.Deleted);
+        var failure = Assert.Single(task.Config.LastRunFailures);
+        Assert.Equal("Refresh", failure.Phase);
+        Assert.Contains("conflict", failure.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Run failures are kept per phase. A clean refresh clears only the refresh entry and leaves the
+    /// module's sync failure in place.
+    /// True: the dashboard keeps showing a failed sync after a clean refresh.
+    /// False: a clean run of one phase hides the other phase's failure.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_CleanRun_ClearsOnlyItsOwnPhase()
+    {
+        var task = CreateTask(out _);
+        task.Config.LastRunFailures.Add(new SyncRunFailure { ModuleKey = "Test", Phase = "Sync", Reason = "sync failed" });
+        task.Config.LastRunFailures.Add(new SyncRunFailure { ModuleKey = "Test", Phase = "Refresh", Reason = "old refresh failure" });
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        var remaining = Assert.Single(task.Config.LastRunFailures);
+        Assert.Equal("Sync", remaining.Phase);
+    }
+
+    /// <summary>
+    /// A refresh failure is recorded next to an existing sync failure instead of replacing it.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_RefreshFailure_KeepsSyncFailure()
+    {
+        var task = CreateTask(out _);
+        task.Config.LastRunFailures.Add(new SyncRunFailure { ModuleKey = "Test", Phase = "Sync", Reason = "sync failed" });
+        task.MarkUnavailableDuringDiscovery = true;
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(new[] { "Refresh", "Sync" }, task.Config.LastRunFailures.Select(f => f.Phase).OrderBy(p => p, StringComparer.Ordinal));
     }
 }

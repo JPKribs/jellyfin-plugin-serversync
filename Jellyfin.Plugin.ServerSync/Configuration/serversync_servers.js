@@ -1,5 +1,5 @@
 // ============================================
-// SETTINGS - PAGE CONTROLLER
+// SERVERS - PAGE CONTROLLER
 // ============================================
 
 export default function (view) {
@@ -25,14 +25,20 @@ export default function (view) {
     var createPaginatedTable = null;
     var _filterTableSeq = 0;
     var _filterThumbSeq = 0;
-    // Relative specifier so a server hosted under a base URL still resolves it.
     var createSortableCardList = null;
     var createChoiceGroup = null;
+
+    // Helpers called by bare name, taken from the shared module once it loads. Every call happens after
+    // the load, from a viewshow handler that waits for it.
+    var escapeHtml, apiRequest, setVisible, bindClick, getEl, setChecked, getChecked, setValue, getValue, requestFor;
+
+    // Relative specifier so a server hosted under a base URL still resolves it.
     var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
         createPaginatedTable = shared.createPaginatedTable;
         createSortableCardList = shared.createSortableCardList;
         createChoiceGroup = shared.createChoiceGroup;
+        ({ escapeHtml, apiRequest, setVisible, bindClick, getEl, setChecked, getChecked, setValue, getValue, requestFor } = ServerSyncShared.pageHelpers());
     });
 
     // ============================================
@@ -46,66 +52,12 @@ export default function (view) {
     var sourceUsers = [];
     var localUsers = [];
 
-    // ============================================
-    // UTILITY ALIASES (delegate to shared module)
-    // ============================================
-
-    function escapeHtml(str) {
-        return ServerSyncShared.escapeHtml(str);
-    }
-
-    function apiRequest(endpoint, method, data) {
-        return ServerSyncShared.apiRequest(endpoint, method, data);
-    }
-
-    function setVisible(elementId, visible) {
-        ServerSyncShared.setVisible(elementId, visible);
-    }
-
-    function bindClick(id, handler) {
-        return ServerSyncShared.bindClick(id, handler);
-    }
-
-    function getEl(id) {
-        return view.querySelector('#' + id);
-    }
-
-    function setChecked(id, value) {
-        ServerSyncShared.setChecked(id, value);
-    }
-
-    function getChecked(id) {
-        return ServerSyncShared.getChecked(id);
-    }
-
-    function setValue(id, value) {
-        var el = getEl(id);
-        if (el) el.value = value;
-    }
-
-    function getValue(id, fallback) {
-        var el = getEl(id);
-        return el ? el.value : (fallback || '');
-    }
-
-    function getIntValue(id, fallback) {
-        var v = parseInt(getValue(id, ''), 10);
-        return isNaN(v) ? fallback : v;
-    }
-
-    // Section saves re-fetch the config and apply only this section's
-    // fields: a page-load snapshot posted whole would clobber values other
-    // writers changed since — task-written timestamps/failure records and
-    // the other dashboard tab's sections.
+    // Resolves true once the save landed and false when it did not, so a caller never acts on a change
+    // the server never kept. The config is replaced only from a save that landed.
     function saveSection(mutator, successMessage, failureMessage) {
-        return ServerSyncShared.getConfig().then(function (config) {
-            mutator(config);
-            currentConfig = config;
-            return ServerSyncShared.saveConfig(config);
-        }).then(function () {
-            Dashboard.alert(successMessage);
-        }).catch(function () {
-            Dashboard.alert(failureMessage);
+        return ServerSyncShared.saveSection(mutator, successMessage, failureMessage).then(function (saved) {
+            if (saved) currentConfig = saved;
+            return !!saved;
         });
     }
 
@@ -131,6 +83,33 @@ export default function (view) {
 
     function selectedServer() {
         return selectedIndex >= 0 && selectedIndex < servers.length ? servers[selectedIndex] : null;
+    }
+
+    // The entry with this key in the current list. A save replaces every entry with a fresh copy, so an
+    // answer that arrives after one looks its server up again by key. Writing into the object it started
+    // with would change a copy the page no longer shows or saves.
+    function serverByKey(key) {
+        return servers.find(function (s) { return s.Key === key; }) || null;
+    }
+
+    // Whether the server an answer belongs to is still the one open in the editor. A slow answer for a
+    // server the operator has since moved away from must not be written into another server's editor,
+    // where the next save would store it under that server.
+    function stillSelected(key) {
+        var open = selectedServer();
+        return !!open && open.Key === key;
+    }
+
+    // The value a mapping select stands for: what is picked, or the saved id when the list it chooses
+    // from could not be loaded, so a failed fetch never saves an empty id over a working mapping.
+    function pickedValue(select) {
+        return (select && (select.value || select.dataset.savedValue)) || '';
+    }
+
+    function pickedName(select) {
+        if (!select) return '';
+        if (select.value && select.options[select.selectedIndex]) return select.options[select.selectedIndex].textContent;
+        return select.dataset.savedName || '';
     }
 
     // Last known reachability per entry key, for the dot on each card.
@@ -173,7 +152,7 @@ export default function (view) {
             editor: getEl('serverEditor'),
             render: cardSpec,
             escapeHtml: escapeHtml,
-            // The open card stays open; another card's head switches to it.
+            // The open card stays open. Another card's head switches to it.
             collapsible: false,
             onBeforeLeave: function () { collectServerEditor(); },
             onSelect: function (index) {
@@ -193,8 +172,18 @@ export default function (view) {
         setVisible('serverEmpty', servers.length === 0);
     }
 
-    // The old name is still used by the connection and token flows.
-    var renderServerSelector = renderServerList;
+    // Updates each card's dot in place. A full render rebuilds the cards and moves the open editor,
+    // which takes the cursor out of whatever field the operator is typing in.
+    function updateHealthDots() {
+        view.querySelectorAll('#serverList .jpk-card-item').forEach(function (card) {
+            var server = servers[parseInt(card.getAttribute('data-index'), 10)];
+            var dot = card.querySelector('.jpk-card-item-dot');
+            if (!server || !dot) return;
+            var spec = cardSpec(server);
+            dot.className = 'jpk-card-item-dot ' + spec.dot;
+            dot.title = spec.dotTitle || '';
+        });
+    }
 
     // Tests every configured entry in the background so the dots mean something. Entries with the
     // kept sentinel resolve to their stored key on the server.
@@ -207,7 +196,7 @@ export default function (view) {
             }).catch(function () {
                 serverHealth[server.Key] = 'bad';
             }).then(function () {
-                renderServerList();
+                updateHealthDots();
             });
         });
         renderServerList();
@@ -248,7 +237,7 @@ export default function (view) {
         if (userEl) userEl.textContent = signedIn ? server.AuthenticatedUser : '';
     }
 
-    // A token the page never saw round trips as the sentinel; anything stored comes back encrypted.
+    // A token the page never saw round trips as the sentinel. Anything stored comes back encrypted.
     function SecretLooksStored(value) {
         return typeof value === 'string' && value.indexOf('enc:') === 0;
     }
@@ -265,7 +254,6 @@ export default function (view) {
     }
 
     function reflectMode() {
-        var mode = getMode();
         setVisible('peerCheckArea', true);
         var statusEl = getEl('peerCheckStatus');
         if (statusEl) statusEl.textContent = '';
@@ -282,24 +270,34 @@ export default function (view) {
             return;
         }
         if (statusEl) statusEl.textContent = 'Checking...';
+        var key = server.Key;
         var request = requestFor(server);
         request.Mode = getMode();
         ServerSyncShared.apiRequest('Hints/CheckPeer', 'POST', request).then(function (result) {
-            if (!statusEl) return;
-            var severity = (result && result.Severity) || 'error';
-            statusEl.innerHTML = '<span class="' + (severity === 'ok' ? 'text-success' : severity === 'warn' ? 'text-warn' : 'text-error') + '">' + escapeHtml((result && result.Message) || 'No answer') + '</span>';
             if (result && result.Reachable) {
-                serverHealth[server.Key] = 'ok';
-                if (result.ServerName) server.ServerName = result.ServerName;
-                if (result.ServerId) server.ServerId = result.ServerId;
-                renderServerList();
+                serverHealth[key] = 'ok';
+                var current = serverByKey(key);
+                if (current && result.ServerName) current.ServerName = result.ServerName;
+                if (current && result.ServerId) current.ServerId = result.ServerId;
             }
+            // The status line belongs to whichever server is open, so an answer for one the operator has
+            // left only updates that server's dot.
+            if (!stillSelected(key)) {
+                updateHealthDots();
+                return;
+            }
+            if (statusEl) {
+                var severity = (result && result.Severity) || 'error';
+                statusEl.innerHTML = '<span class="' + (severity === 'ok' ? 'text-success' : severity === 'warn' ? 'text-warn' : 'text-error') + '">' + escapeHtml((result && result.Message) || 'No answer') + '</span>';
+            }
+            if (result && result.Reachable) renderServerList();
         }).catch(function () {
+            if (!stillSelected(key)) return;
             if (statusEl) statusEl.innerHTML = '<span class="text-error">The check failed; see the server log</span>';
         });
     }
 
-    // Fills the editor from the selected entry. The stored key is never shown;
+    // Fills the editor from the selected entry. The stored key is never shown.
     // the sentinel round-trips and the server keeps the existing secret.
     function loadServerEditor() {
         var server = selectedServer();
@@ -335,20 +333,59 @@ export default function (view) {
 
         sourceLibraries = [];
         sourceUsers = [];
-        mappingsLoaded = false;
         var configured = !!(server.Url && server.ApiKey);
         setMappingSectionsVisible(configured);
         if (configured) {
-            Promise.all([fetchSourceLibraries(server), fetchSourceUsers(server)]).then(function () {
-                if (selectedServer() !== server) return;
-                renderLibraryMappings(server.LibraryMappings || []);
-                renderUserMappings(server.UserMappings || []);
-                mappingsLoaded = true;
-            });
+            loadMappings(server.Key);
         } else {
             renderLibraryMappings([]);
             renderUserMappings([]);
-            mappingsLoaded = true;
+            setMappingsLoaded(true);
+        }
+    }
+
+    // Marks whether the open server's mapping rows are ready, and enables the add buttons only then. A
+    // row added before the lists arrive would be wiped when the fetched mappings are rendered.
+    function setMappingsLoaded(loaded) {
+        mappingsLoaded = loaded;
+        ['btnAddMapping', 'btnAddUserMapping'].forEach(function (id) {
+            var btn = getEl(id);
+            if (btn) btn.disabled = !loaded;
+        });
+    }
+
+    // Fetches the libraries and users of the server with this key, then renders its mapping rows from
+    // them. The rows on screen are replaced by a loading note at once, so rows left over from the server
+    // shown before, or from before a reconnect, can never be edited and then silently dropped.
+    function loadMappings(key) {
+        setMappingsLoaded(false);
+        clearMappingContainer('libraryMappingsContainer', 'Loading library mappings...');
+        clearMappingContainer('userMappingsContainer', 'Loading user mappings...');
+        var server = serverByKey(key);
+        if (!server) return Promise.resolve();
+        return Promise.all([fetchSourceLibraries(server), fetchSourceUsers(server)]).then(function () {
+            if (!stillSelected(key)) return;
+            var current = serverByKey(key);
+            renderLibraryMappings((current && current.LibraryMappings) || []);
+            renderUserMappings((current && current.UserMappings) || []);
+            setMappingsLoaded(true);
+        });
+    }
+
+    // Empties a mapping container, stopping any filter table observers its rows hold, and shows a note
+    // in their place when one is given.
+    function clearMappingContainer(containerId, note) {
+        var container = getEl(containerId);
+        if (!container) return;
+        container.querySelectorAll('.libraryMapping').forEach(function (row) {
+            if (row._disconnectFilterTable) row._disconnectFilterTable();
+        });
+        container.innerHTML = '';
+        if (note) {
+            var noteEl = document.createElement('div');
+            noteEl.className = 'fieldDescription';
+            noteEl.textContent = note;
+            container.appendChild(noteEl);
         }
     }
 
@@ -370,7 +407,11 @@ export default function (view) {
         server.ExternalUrl = getValue('txtSourceServerExternalUrl', '').trim();
         server.AllowPrivateNetwork = getChecked('chkAllowPrivateNetwork');
         if (getAuthMethod() === 'key') {
-            var apiKey = getValue('txtSourceServerApiKey', '');
+            var apiKey = getValue('txtSourceServerApiKey', '').trim();
+            // Text typed after the kept placeholder is a new key, never the placeholder plus a suffix.
+            if (apiKey.length > ServerSyncShared.SECRET_KEPT.length && apiKey.indexOf(ServerSyncShared.SECRET_KEPT) === 0) {
+                apiKey = apiKey.substring(ServerSyncShared.SECRET_KEPT.length);
+            }
             // An empty field on an entry that has a stored key means "keep it", the same as the sentinel.
             server.ApiKey = apiKey || (server.ApiKey ? ServerSyncShared.SECRET_KEPT : '');
             // A pasted key belongs to no signed in user.
@@ -448,44 +489,48 @@ export default function (view) {
             return;
         }
         var removedKey = server.Key;
-        servers.splice(selectedIndex, 1);
-        saveServers('Server removed', 'Failed to remove server').then(function () {
-            selectServer(servers.length > 0 ? Math.min(selectedIndex, servers.length - 1) : -1);
-            // The rows it tracked have nothing to pull from now. Failing to clear them is not fatal; the
-            // tables simply keep inert rows until a reset.
+        var removedId = server.ServerId || '';
+        var removedIndex = selectedIndex;
+
+        // The list on the page changes only once the save lands. Removing it first would leave the page
+        // showing a list the server never kept, and the rows would be forgotten for a server still in use.
+        var remaining = servers.filter(function (s, i) { return i !== removedIndex; });
+        saveServers('Server removed', 'Failed to remove server', remaining).then(function (saved) {
+            if (!saved) {
+                return;
+            }
+
+            selectServer(servers.length > 0 ? Math.min(removedIndex, servers.length - 1) : -1);
+            // The rows it tracked and the hints it sent have nothing to pull from now. Failing to clear
+            // them is not fatal. The tables simply keep inert rows until a reset.
             if (removedKey) {
-                apiRequest('Servers/' + encodeURIComponent(removedKey) + '/Rows', 'DELETE').catch(function () {});
+                apiRequest('Servers/' + encodeURIComponent(removedKey) + '/Rows' + (removedId ? '?serverId=' + encodeURIComponent(removedId) : ''), 'DELETE').catch(function () {});
             }
         });
     }
 
     // Posts the in memory list. The server resolves kept sentinels against the
     // stored entry with the same key, so keys are never retyped.
-    function saveServers(successMessage, failureMessage) {
-        var snapshot = JSON.parse(JSON.stringify(servers));
+    // Resolves true when the save landed. A list other than the page's own, such as the list without a
+    // server being removed, can be saved, and becomes the page's list only on success.
+    function saveServers(successMessage, failureMessage, list) {
+        var snapshot = JSON.parse(JSON.stringify(list || servers));
         return saveSection(function (config) {
             config.Servers = snapshot;
-        }, successMessage || 'Servers saved', failureMessage || 'Failed to save servers').then(function () {
-            if (currentConfig && currentConfig.Servers) {
+        }, successMessage || 'Servers saved', failureMessage || 'Failed to save servers').then(function (saved) {
+            // The saved list becomes the page's list. Its entries are fresh copies, which is why answers
+            // that arrive later look their server up again with serverByKey.
+            if (saved && currentConfig && currentConfig.Servers) {
                 servers = currentConfig.Servers;
-                renderServerSelector();
+                renderServerList();
             }
+            return saved;
         });
     }
 
     function saveServerConfig() {
         if (!collectServerEditor()) return;
         saveServers('Server saved', 'Failed to save server');
-    }
-
-    function requestFor(server, apiKeyOverride) {
-        return {
-            ServerUrl: server.Url,
-            ApiKey: apiKeyOverride || (server.ApiKey ? server.ApiKey : ''),
-            ServerKey: server.Key,
-            AllowPrivateNetwork: server.AllowPrivateNetwork !== false,
-            AuthenticatedUserId: server.AuthenticatedUserId || null
-        };
     }
 
     function testConnection() {
@@ -500,38 +545,47 @@ export default function (view) {
 
         if (statusEl) statusEl.textContent = 'Testing...';
 
+        var key = server.Key;
         apiRequest('TestConnection', 'POST', requestFor(server)).then(function(response) {
+            if (!stillSelected(key)) {
+                serverHealth[key] = response && response.Success ? 'ok' : 'bad';
+                updateHealthDots();
+                return;
+            }
+
             if (response && response.Success) {
+                // The editor is read back into the entry that holds this key now. A save while the test
+                // ran replaced the entry it started with, and the operator may have edited fields since.
+                var current = collectServerEditor();
                 if (statusEl) statusEl.innerHTML = '<span class="text-success">Connected to ' + escapeHtml(response.ServerName) + '</span>';
-                server.ServerName = response.ServerName || '';
-                server.ServerId = response.ServerId || '';
-                if (response.IsAdministrator === true) server.AccessLevel = 'Administrator';
-                else if (response.IsAdministrator === false) server.AccessLevel = 'User';
-                reflectAccess(server);
+                current.ServerName = response.ServerName || '';
+                current.ServerId = response.ServerId || '';
+                if (response.IsAdministrator === true) current.AccessLevel = 'Administrator';
+                else if (response.IsAdministrator === false) current.AccessLevel = 'User';
+                reflectAccess(current);
                 var nameEl = getEl('txtSourceServerName');
                 var idEl = getEl('txtSourceServerId');
-                if (nameEl) nameEl.textContent = server.ServerName || 'Unknown';
-                if (idEl) idEl.textContent = server.ServerId || 'Unknown';
+                if (nameEl) nameEl.textContent = current.ServerName || 'Unknown';
+                if (idEl) idEl.textContent = current.ServerId || 'Unknown';
                 setVisible('serverInfoContainer', true);
-                serverHealth[server.Key] = 'ok';
-                renderServerSelector();
+                serverHealth[key] = 'ok';
+                renderServerList();
 
                 setMappingSectionsVisible(true);
-                mappingsLoaded = false;
-                Promise.all([fetchSourceLibraries(server), fetchSourceUsers(server)]).then(function () {
-                    renderLibraryMappings(server.LibraryMappings || []);
-                    renderUserMappings(server.UserMappings || []);
-                    mappingsLoaded = true;
-                });
+                loadMappings(key);
             } else {
                 if (statusEl) statusEl.innerHTML = '<span class="text-error">' + escapeHtml((response && response.Message) || 'Connection failed') + '</span>';
-                serverHealth[server.Key] = 'bad';
-                renderServerSelector();
+                serverHealth[key] = 'bad';
+                renderServerList();
             }
         }).catch(function() {
+            serverHealth[key] = 'bad';
+            if (!stillSelected(key)) {
+                updateHealthDots();
+                return;
+            }
             if (statusEl) statusEl.innerHTML = '<span class="text-error">Connection failed</span>';
-            serverHealth[server.Key] = 'bad';
-            renderServerSelector();
+            renderServerList();
         });
     }
 
@@ -559,56 +613,79 @@ export default function (view) {
 
         if (statusEl) statusEl.textContent = 'Authenticating...';
 
+        var key = server.Key;
         apiRequest('Authenticate', 'POST', {
             ServerUrl: server.Url,
             Username: username,
             Password: password,
             AllowPrivateNetwork: server.AllowPrivateNetwork !== false
         }).then(function(response) {
-            if (response && response.Success) {
-                // Clear the password field for security
-                if (passwordEl) passwordEl.value = '';
-
-                server.ApiKey = response.AccessToken;
-                server.AuthenticatedUser = response.Username || username;
-                server.AuthenticatedUserId = response.UserId || '';
-                if (response.IsAdministrator === true) server.AccessLevel = 'Administrator';
-                else if (response.IsAdministrator === false) server.AccessLevel = 'User';
-                reflectAccess(server);
-                server.ServerName = response.ServerName || '';
-                server.ServerId = response.ServerId || '';
-                setValue('txtSourceServerApiKey', response.AccessToken);
-
-                var authUserEl = getEl('txtAuthenticatedUser');
-                if (authUserEl) authUserEl.textContent = server.AuthenticatedUser;
-                setVisible('authenticatedUserRow', true);
-                reflectSignedIn(server);
-
-                var nameEl = getEl('txtSourceServerName');
-                var idEl = getEl('txtSourceServerId');
-                if (nameEl) nameEl.textContent = server.ServerName || 'Unknown';
-                if (idEl) idEl.textContent = server.ServerId || 'Unknown';
-                setVisible('serverInfoContainer', true);
-
-                saveServers('Token generated and saved', 'Token generated, but saving failed').then(function() {
-                    if (statusEl) statusEl.innerHTML = '<span class="text-success">Token generated and saved!</span>';
-                    var saved = selectedServer() || server;
-                    serverHealth[saved.Key] = 'ok';
-                    renderServerSelector();
-                    setMappingSectionsVisible(true);
-                    mappingsLoaded = false;
-                    Promise.all([fetchSourceLibraries(saved), fetchSourceUsers(saved)]).then(function () {
-                        renderLibraryMappings(saved.LibraryMappings || []);
-                        renderUserMappings(saved.UserMappings || []);
-                        mappingsLoaded = true;
-                    });
-                });
-            } else {
-                if (statusEl) statusEl.innerHTML = '<span class="text-error">' + escapeHtml((response && response.Message) || 'Authentication failed') + '</span>';
+            if (!response || !response.Success) {
+                // The status line belongs to whichever server is open, so a failure for one the operator
+                // has left is not written over the other server's editor.
+                if (stillSelected(key) && statusEl) statusEl.innerHTML = '<span class="text-error">' + escapeHtml((response && response.Message) || 'Authentication failed') + '</span>';
+                return;
             }
+
+            var selected = stillSelected(key);
+            // A save while the sign in ran replaced every entry with a fresh copy, so the token goes into
+            // the entry that holds this key now, which is the one the next save sends. When the server is
+            // still open, the editor is read back first so edits made meanwhile are saved with the token.
+            var current = selected ? collectServerEditor() : serverByKey(key);
+            if (!current) {
+                Dashboard.alert('Signed in, but the server was removed meanwhile, so the token was not kept');
+                return;
+            }
+
+            current.ApiKey = response.AccessToken;
+            current.AuthenticatedUser = response.Username || username;
+            current.AuthenticatedUserId = response.UserId || '';
+            current.ServerName = response.ServerName || current.ServerName || '';
+            current.ServerId = response.ServerId || current.ServerId || '';
+            if (response.IsAdministrator === true) current.AccessLevel = 'Administrator';
+            else if (response.IsAdministrator === false) current.AccessLevel = 'User';
+
+            if (!selected) {
+                // The operator moved to another server meanwhile. The key still belongs to this one, so it
+                // is stored on it and saved, without touching the editor that now shows the other.
+                saveServers('Token generated and saved', 'Token generated, but saving failed');
+                return;
+            }
+
+            // Clear the password field for security
+            if (passwordEl) passwordEl.value = '';
+
+            reflectAccess(current);
+            setValue('txtSourceServerApiKey', response.AccessToken);
+
+            var authUserEl = getEl('txtAuthenticatedUser');
+            if (authUserEl) authUserEl.textContent = current.AuthenticatedUser;
+            setVisible('authenticatedUserRow', true);
+            reflectSignedIn(current);
+
+            var nameEl = getEl('txtSourceServerName');
+            var idEl = getEl('txtSourceServerId');
+            if (nameEl) nameEl.textContent = current.ServerName || 'Unknown';
+            if (idEl) idEl.textContent = current.ServerId || 'Unknown';
+            setVisible('serverInfoContainer', true);
+
+            // The success line shows only once the save landed, since a token the server never stored
+            // would be lost on the next page load.
+            saveServers('Token generated and saved', 'Token generated, but saving failed').then(function(ok) {
+                if (!stillSelected(key)) return;
+                if (!ok) {
+                    if (statusEl) statusEl.innerHTML = '<span class="text-error">Token generated, but saving failed</span>';
+                    return;
+                }
+                if (statusEl) statusEl.innerHTML = '<span class="text-success">Token generated and saved!</span>';
+                serverHealth[key] = 'ok';
+                renderServerList();
+                setMappingSectionsVisible(true);
+                loadMappings(key);
+            });
         }).catch(function(error) {
-            if (statusEl) statusEl.innerHTML = '<span class="text-error">Authentication failed</span>';
             console.error('Token generation error:', error);
+            if (stillSelected(key) && statusEl) statusEl.innerHTML = '<span class="text-error">Authentication failed</span>';
         });
     }
 
@@ -633,10 +710,11 @@ export default function (view) {
 
     function fetchSourceLibraries(server) {
         return apiRequest('GetSourceLibraries', 'POST', requestFor(server)).then(function(libraries) {
+            if (!stillSelected(server.Key)) return;
             sourceLibraries = libraries || [];
             updateLibrarySelects();
         }).catch(function() {
-            sourceLibraries = [];
+            if (stillSelected(server.Key)) sourceLibraries = [];
         });
     }
 
@@ -684,17 +762,16 @@ export default function (view) {
     function renderLibraryMappings(mappings) {
         var container = view.querySelector('#libraryMappingsContainer');
         if (!container) return;
-        container.innerHTML = '';
-        (mappings || []).forEach(function(mapping, index) {
-            addLibraryMappingRow(mapping, index);
+        clearMappingContainer('libraryMappingsContainer');
+        (mappings || []).forEach(function(mapping) {
+            addLibraryMappingRow(mapping);
         });
     }
 
-    function addLibraryMappingRow(mapping, index) {
+    function addLibraryMappingRow(mapping) {
         mapping = mapping || { IsEnabled: true };
         var container = view.querySelector('#libraryMappingsContainer');
         if (!container) return;
-        if (index === undefined) index = container.children.length;
 
         var div = document.createElement('div');
         div.className = 'mapping libraryMapping';
@@ -836,7 +913,7 @@ export default function (view) {
         // and playlists are sync selectors: whitelisting one syncs its
         // members (membership re-resolved every refresh), blacklisting one
         // excludes them. button-submit is Jellyfin's accent (primary) button
-        // style; unselected sides stay plain raised (secondary) buttons.
+        // style. Unselected sides stay plain raised (secondary) buttons.
         var browseButtons = div.querySelectorAll('.filterBrowseToggle > button');
         function setBrowseMode(mode) {
             filterBrowseMode = mode;
@@ -862,6 +939,7 @@ export default function (view) {
 
         var sourceSelect = div.querySelector('.sourceLibrarySelect');
         if (mapping.SourceLibraryId) sourceSelect.dataset.savedValue = mapping.SourceLibraryId;
+        if (mapping.SourceLibraryName) sourceSelect.dataset.savedName = mapping.SourceLibraryName;
         sourceSelect.innerHTML = '<option value="">Select source library...</option>';
         sourceLibraries.forEach(function(lib) {
             var option = document.createElement('option');
@@ -887,6 +965,7 @@ export default function (view) {
 
         var localSelect = div.querySelector('.localLibrarySelect');
         if (mapping.LocalLibraryId) localSelect.dataset.savedValue = mapping.LocalLibraryId;
+        if (mapping.LocalLibraryName) localSelect.dataset.savedName = mapping.LocalLibraryName;
         localSelect.innerHTML = '<option value="">Select local library...</option>';
         localLibraries.forEach(function(lib) {
             var option = document.createElement('option');
@@ -932,11 +1011,11 @@ export default function (view) {
 
             mappings.push({
                 IsEnabled: row.querySelector('.mappingEnabled').checked,
-                SourceLibraryId: sourceSelect.value,
-                SourceLibraryName: sourceSelect.options[sourceSelect.selectedIndex] ? sourceSelect.options[sourceSelect.selectedIndex].textContent : '',
+                SourceLibraryId: pickedValue(sourceSelect),
+                SourceLibraryName: pickedName(sourceSelect),
                 SourceRootPath: row.querySelector('.sourceRootPath').value,
-                LocalLibraryId: localSelect.value,
-                LocalLibraryName: localSelect.options[localSelect.selectedIndex] ? localSelect.options[localSelect.selectedIndex].textContent : '',
+                LocalLibraryId: pickedValue(localSelect),
+                LocalLibraryName: pickedName(localSelect),
                 LocalRootPath: row.querySelector('.localRootPath').value,
                 FilterMode: filterMode,
                 FilteredItems: filteredItems
@@ -951,10 +1030,11 @@ export default function (view) {
 
     function fetchSourceUsers(server) {
         return apiRequest('GetSourceUsers', 'POST', requestFor(server)).then(function(users) {
+            if (!stillSelected(server.Key)) return;
             sourceUsers = users || [];
             updateUserSelects();
         }).catch(function() {
-            sourceUsers = [];
+            if (stillSelected(server.Key)) sourceUsers = [];
         });
     }
 
@@ -1000,17 +1080,16 @@ export default function (view) {
     function renderUserMappings(mappings) {
         var container = view.querySelector('#userMappingsContainer');
         if (!container) return;
-        container.innerHTML = '';
-        (mappings || []).forEach(function(mapping, index) {
-            addUserMappingRow(mapping, index);
+        clearMappingContainer('userMappingsContainer');
+        (mappings || []).forEach(function(mapping) {
+            addUserMappingRow(mapping);
         });
     }
 
-    function addUserMappingRow(mapping, index) {
+    function addUserMappingRow(mapping) {
         mapping = mapping || { IsEnabled: true };
         var container = view.querySelector('#userMappingsContainer');
         if (!container) return;
-        if (index === undefined) index = container.children.length;
 
         var div = document.createElement('div');
         div.className = 'mapping userMapping';
@@ -1028,6 +1107,7 @@ export default function (view) {
 
         var sourceSelect = div.querySelector('.sourceUserSelect');
         if (mapping.SourceUserId) sourceSelect.dataset.savedValue = mapping.SourceUserId;
+        if (mapping.SourceUserName) sourceSelect.dataset.savedName = mapping.SourceUserName;
         sourceSelect.innerHTML = '<option value="">Select source user...</option>';
         sourceUsers.forEach(function(user) {
             var option = document.createElement('option');
@@ -1039,6 +1119,7 @@ export default function (view) {
 
         var localSelect = div.querySelector('.localUserSelect');
         if (mapping.LocalUserId) localSelect.dataset.savedValue = mapping.LocalUserId;
+        if (mapping.LocalUserName) localSelect.dataset.savedName = mapping.LocalUserName;
         localSelect.innerHTML = '<option value="">Select local user...</option>';
         localUsers.forEach(function(user) {
             var option = document.createElement('option');
@@ -1058,10 +1139,10 @@ export default function (view) {
             var localSelect = row.querySelector('.localUserSelect');
             mappings.push({
                 IsEnabled: row.querySelector('.userMappingEnabled').checked,
-                SourceUserId: sourceSelect.value,
-                SourceUserName: sourceSelect.options[sourceSelect.selectedIndex] ? sourceSelect.options[sourceSelect.selectedIndex].textContent : '',
-                LocalUserId: localSelect.value,
-                LocalUserName: localSelect.options[localSelect.selectedIndex] ? localSelect.options[localSelect.selectedIndex].textContent : ''
+                SourceUserId: pickedValue(sourceSelect),
+                SourceUserName: pickedName(sourceSelect),
+                LocalUserId: pickedValue(localSelect),
+                LocalUserName: pickedName(localSelect)
             });
         });
         return mappings;
@@ -1103,11 +1184,26 @@ export default function (view) {
                 bindClick('btnAddServer', addServer);
                 bindClick('btnDeleteServer', deleteServer);
                 bindClick('btnCheckPeer', checkPeer);
+
+                // The stored key shows as a placeholder. Focusing the field clears it, so typing enters a
+                // new key rather than adding to the placeholder. Leaving it empty keeps the stored key.
+                var keyField = getEl('txtSourceServerApiKey');
+                if (keyField) {
+                    keyField.addEventListener('focus', function () {
+                        if (keyField.value === ServerSyncShared.SECRET_KEPT) keyField.value = '';
+                    });
+                    keyField.addEventListener('blur', function () {
+                        var open = selectedServer();
+                        if (!keyField.value && open && open.ApiKey) keyField.value = ServerSyncShared.SECRET_KEPT;
+                    });
+                }
                 modeGroup = createChoiceGroup(getEl('modeChoices'), { onChange: reflectMode });
                 authGroup = createChoiceGroup(getEl('authChoices'), { onChange: reflectAuthMethod });
 
-                bindClick('btnAddMapping', function() { addLibraryMappingRow(); });
-                bindClick('btnAddUserMapping', function() { addUserMappingRow(); });
+                // The buttons are disabled while the open server's lists load. The check here covers a
+                // click that lands before the disabled state does.
+                bindClick('btnAddMapping', function() { if (mappingsLoaded) addLibraryMappingRow(); });
+                bindClick('btnAddUserMapping', function() { if (mappingsLoaded) addUserMappingRow(); });
             }
 
             loadConfig();

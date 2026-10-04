@@ -8,7 +8,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
 /// Handles database schema migrations for the sync database. Upgrades from
-/// pre-v19 versions drop all tracking tables and recreate them; the next
+/// pre-v19 versions drop all tracking tables and recreate them. The next
 /// refresh re-populates everything from source/local state.
 /// </summary>
 public static class DatabaseMigrationService
@@ -16,7 +16,17 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 27;
+    public const int CurrentSchemaVersion = 28;
+
+    /// <summary>
+    /// The oldest schema version whose code can still work with a database at
+    /// <see cref="CurrentSchemaVersion"/>. It is written into the database, so an older build that finds a
+    /// newer database can tell whether it may use it as is. Raise it only when a migration changes or
+    /// removes something older code relies on. A migration that only adds tables, nullable or defaulted
+    /// columns, or indexes leaves it alone. Builds before v28 do not read it and still set a newer
+    /// database aside.
+    /// </summary>
+    public const int MinReaderVersion = 28;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -26,9 +36,9 @@ public static class DatabaseMigrationService
     {
         // ===== Content Sync (SyncItems) =====
         // Tracks files to be downloaded/replaced/deleted on the local server.
-        // Change detection uses Size only (ETag was removed in v18 — it was
-        // unstable because Jellyfin's ETag changes when UserData changes;
-        // SourceModifyDate was dropped in v19 — it was never read by the
+        // Change detection uses Size only (ETag was removed in v18, it was
+        // unstable because Jellyfin's ETag changes when UserData changes.
+        // SourceModifyDate was dropped in v19, it was never read by the
         // model and was only written as a placeholder).
         // PendingType describes the operation (download/replacement/deletion)
         // which is orthogonal to Status (Pending/Queued/Synced/Errored/Ignored).
@@ -120,7 +130,7 @@ public static class DatabaseMigrationService
         // ===== User Sync (UserSyncItems) =====
         // One row per (user mapping, property category). Categories are Policy,
         // Configuration, ProfileImage. SourceValueHash/SyncedValueHash provide
-        // the fast-path skip; SourceImageHash/LocalImageHash/SyncedImageHash
+        // the fast-path skip. SourceImageHash/LocalImageHash/SyncedImageHash
         // remain for ProfileImage-specific comparison.
         using var userCmd = connection.CreateCommand();
         userCmd.CommandText = @"
@@ -191,7 +201,7 @@ public static class DatabaseMigrationService
         // ===== Metadata Sync (MetadataSyncItems) =====
         // One row per item, four SyncableValue fields (Metadata, Images,
         // People, Studios). Hashes per category enable per-field
-        // short-circuiting. SourceETag removed — we use SourceMetadataHash
+        // short-circuiting. SourceETag removed, we use SourceMetadataHash
         // for the same purpose with a stable signal.
         using var metadataCmd = connection.CreateCommand();
         metadataCmd.CommandText = @"
@@ -312,6 +322,40 @@ public static class DatabaseMigrationService
                 UpdatedAt TEXT NOT NULL
             );";
         cmd.ExecuteNonQuery();
+        CreateV28Additions(connection);
+    }
+
+    /// <summary>
+    /// The pending versions a scan read alongside the values it queued, and the indexes the hint queues
+    /// and the history negotiation look rows up by. Idempotent, so a fresh database and an upgrade share it.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void CreateV28Additions(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS PendingVersions (
+                Kind INTEGER NOT NULL,
+                Key TEXT NOT NULL,
+                ServerId TEXT NOT NULL,
+                Timestamp TEXT NOT NULL,
+                ReadAt TEXT NOT NULL,
+                PRIMARY KEY(Kind, Key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_outbound_peer_state ON OutboundHints(PeerKey, State, Id);
+            CREATE INDEX IF NOT EXISTS idx_inbound_origin ON InboundHints(OriginServerId);";
+        cmd.ExecuteNonQuery();
+
+        // The history table is created with the rest of the schema. The queue tables can be created on
+        // their own, so its index is added only when the table and its server column exist.
+        using var probe = connection.CreateCommand();
+        probe.CommandText = "SELECT COUNT(*) FROM pragma_table_info('HistorySyncItems') WHERE name IN ('ServerKey', 'LocalItemId')";
+        if (Convert.ToInt32(probe.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 2)
+        {
+            using var index = connection.CreateCommand();
+            index.CommandText = "CREATE INDEX IF NOT EXISTS idx_history_server_local ON HistorySyncItems(ServerKey, LocalItemId)";
+            index.ExecuteNonQuery();
+        }
     }
 
     /// <summary>
@@ -328,6 +372,46 @@ public static class DatabaseMigrationService
     }
 
     /// <summary>
+    /// Marks the database as this build's schema: the version, and the oldest version that can still read
+    /// it. Called whenever this build creates or upgrades the database.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void StampSchema(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            CREATE TABLE IF NOT EXISTS SchemaInfo (Key TEXT NOT NULL PRIMARY KEY, Value INTEGER NOT NULL);
+            INSERT INTO SchemaInfo (Key, Value) VALUES ('MinReaderVersion', @min)
+            ON CONFLICT(Key) DO UPDATE SET Value = @min;";
+        command.Parameters.AddWithValue("@min", MinReaderVersion);
+        command.ExecuteNonQuery();
+        SetSchemaVersion(connection, CurrentSchemaVersion);
+    }
+
+    /// <summary>
+    /// Reads the oldest schema version the database says can still read it, or null when the database
+    /// was written by a build that did not record one.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    /// <returns>The version, or null.</returns>
+    public static int? GetMinReaderVersion(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        using var probe = connection.CreateCommand();
+        probe.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SchemaInfo'";
+        if (Convert.ToInt32(probe.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
+        {
+            return null;
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM SchemaInfo WHERE Key = 'MinReaderVersion'";
+        var value = command.ExecuteScalar();
+        return value is null or DBNull ? null : Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// Sets the schema version in the database.
     /// </summary>
     /// <param name="connection">Database connection.</param>
@@ -341,7 +425,7 @@ public static class DatabaseMigrationService
 
     /// <summary>
     /// Migrates the database schema from an older version to the current version.
-    /// v18 is a hard reset — any older version is dropped and recreated.
+    /// Any version below 19 is a hard reset. Its tables are dropped and recreated.
     /// </summary>
     /// <param name="connection">Database connection.</param>
     /// <param name="fromVersion">Version to migrate from.</param>
@@ -356,12 +440,12 @@ public static class DatabaseMigrationService
             // Pre-v19 schemas all need a hard reset: v19 dropped the
             // SourceModifyDate/SourceETag NOT NULL columns from SyncItems and
             // re-shaped several other tables. Trying to ALTER in place is
-            // riskier than rebuilding from source — the next refresh
+            // riskier than rebuilding from source, the next refresh
             // repopulates everything cleanly.
             if (fromVersion < 19)
             {
                 logger.LogWarning(
-                    "Schema upgrade to v{Target}: dropping all sync tracking tables (was v{From}). Sync tracking data will be lost; the next refresh will repopulate everything from source/local state.",
+                    "Schema upgrade to v{Target}: dropping all sync tracking tables (was v{From}). Sync tracking data will be lost. The next refresh will repopulate everything from source/local state.",
                     CurrentSchemaVersion,
                     fromVersion);
 
@@ -391,12 +475,12 @@ public static class DatabaseMigrationService
             // v20: Clear poisoned SyncedHash columns left over from a 10.11.54
             // bug that set SyncedHash = SourceHash on un-applied categories.
             // Nulls force the next Refresh through the comparator for every
-            // row; matching rows get re-MarkSynced, diverging rows requeue.
+            // row. Matching rows get re-MarkSynced, diverging rows requeue.
             // Status is left alone so Ignored overrides survive.
             if (fromVersion >= 19 && fromVersion < 20)
             {
                 logger.LogWarning(
-                    "Schema upgrade to v20: clearing poisoned SyncedHash columns left over from 10.11.54. The next Refresh will re-evaluate every row against the source via comparator (no data loss; Ignored overrides preserved).");
+                    "Schema upgrade to v20: clearing poisoned SyncedHash columns left over from 10.11.54. The next Refresh will re-evaluate every row against the source via comparator (no data loss. Ignored overrides preserved).");
 
                 using var clearTransaction = connection.BeginTransaction();
 
@@ -432,7 +516,7 @@ public static class DatabaseMigrationService
             // HistorySyncItems carry the source-state bundle's fingerprint.
             // Also clear any UserSyncItems SyncedValueHash values because the
             // hash format changed from truncated-SHA256 (32 hex) to full
-            // JsonBlobComparator SHA256 (64 hex) — the next Refresh re-seeds
+            // JsonBlobComparator SHA256 (64 hex), the next Refresh re-seeds
             // them via the comparator path.
             if (fromVersion >= 19 && fromVersion < 21)
             {
@@ -443,19 +527,7 @@ public static class DatabaseMigrationService
 
                 foreach (var col in new[] { "SourceStateHash", "SyncedStateHash" })
                 {
-                    using var addCol = connection.CreateCommand();
-                    addCol.Transaction = v21Transaction;
-                    addCol.CommandText = $"ALTER TABLE HistorySyncItems ADD COLUMN {col} TEXT";
-                    try
-                    {
-                        addCol.ExecuteNonQuery();
-                    }
-                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Idempotent — running against a partially-migrated
-                        // schema (rare but possible from a crashed upgrade)
-                        // shouldn't fail.
-                    }
+                    AddColumnIfMissing(connection, v21Transaction, "HistorySyncItems", $"{col} TEXT");
                 }
 
                 using (var clearUser = connection.CreateCommand())
@@ -488,17 +560,7 @@ public static class DatabaseMigrationService
                     "MetadataSyncItems"
                 })
                 {
-                    using var addCol = connection.CreateCommand();
-                    addCol.Transaction = v22Transaction;
-                    addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN RetryCount INTEGER NOT NULL DEFAULT 0";
-                    try
-                    {
-                        addCol.ExecuteNonQuery();
-                    }
-                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Idempotent — tolerate a partially applied upgrade.
-                    }
+                    AddColumnIfMissing(connection, v22Transaction, table, "RetryCount INTEGER NOT NULL DEFAULT 0");
                 }
 
                 v22Transaction.Commit();
@@ -523,17 +585,7 @@ public static class DatabaseMigrationService
                     ("NegotiatedAt", "TEXT")
                 })
                 {
-                    using var addCol = connection.CreateCommand();
-                    addCol.Transaction = v23Transaction;
-                    addCol.CommandText = $"ALTER TABLE HistorySyncItems ADD COLUMN {col} {type}";
-                    try
-                    {
-                        addCol.ExecuteNonQuery();
-                    }
-                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Idempotent, so a partially applied upgrade recovers on the next start.
-                    }
+                    AddColumnIfMissing(connection, v23Transaction, "HistorySyncItems", $"{col} {type}");
                 }
 
                 v23Transaction.Commit();
@@ -556,17 +608,7 @@ public static class DatabaseMigrationService
                     "MetadataSyncItems"
                 })
                 {
-                    using var addCol = connection.CreateCommand();
-                    addCol.Transaction = v24Transaction;
-                    addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN ServerKey TEXT";
-                    try
-                    {
-                        addCol.ExecuteNonQuery();
-                    }
-                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Idempotent, so a partially applied upgrade recovers on the next start.
-                    }
+                    AddColumnIfMissing(connection, v24Transaction, table, "ServerKey TEXT");
                 }
 
                 v24Transaction.Commit();
@@ -587,17 +629,7 @@ public static class DatabaseMigrationService
                 using var v26Transaction = connection.BeginTransaction();
                 foreach (var table in new[] { "OutboundHints", "InboundHints" })
                 {
-                    using var addCol = connection.CreateCommand();
-                    addCol.Transaction = v26Transaction;
-                    addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN Recorded INTEGER NOT NULL DEFAULT 1";
-                    try
-                    {
-                        addCol.ExecuteNonQuery();
-                    }
-                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Idempotent, so a partially applied upgrade recovers on the next start.
-                    }
+                    AddColumnIfMissing(connection, v26Transaction, table, "Recorded INTEGER NOT NULL DEFAULT 1");
                 }
 
                 v26Transaction.Commit();
@@ -625,23 +657,21 @@ public static class DatabaseMigrationService
 
                 foreach (var table in new[] { "OutboundHints", "InboundHints" })
                 {
-                    using var addCol = connection.CreateCommand();
-                    addCol.Transaction = v27Transaction;
-                    addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN ItemType TEXT";
-                    try
-                    {
-                        addCol.ExecuteNonQuery();
-                    }
-                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // A fresh database already has it.
-                    }
+                    AddColumnIfMissing(connection, v27Transaction, table, "ItemType TEXT");
                 }
 
                 v27Transaction.Commit();
             }
 
-            SetSchemaVersion(connection, CurrentSchemaVersion);
+            // v28: pending versions read by the scan, and indexes for the per peer queue counts and the
+            // history negotiation's lookups by local item.
+            if (fromVersion < 28)
+            {
+                logger.LogInformation("Schema upgrade to v28: adding pending versions and queue indexes.");
+                CreateV28Additions(connection);
+            }
+
+            StampSchema(connection);
             logger.LogInformation("Database migration completed successfully");
             return true;
         }
@@ -650,6 +680,30 @@ public static class DatabaseMigrationService
             // Corrupt database: signal the caller to recreate.
             logger.LogError(ex, "Database migration failed on a corrupt database");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Adds a column inside a migration transaction, doing nothing when the column is already there.
+    /// A crashed upgrade can leave some columns applied, and a fresh database already has them, so a
+    /// duplicate column is not a failure.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    /// <param name="transaction">The migration step's transaction.</param>
+    /// <param name="table">The table, an internal constant.</param>
+    /// <param name="columnDefinition">The column name and type, an internal constant.</param>
+    private static void AddColumnIfMissing(SqliteConnection connection, SqliteTransaction transaction, string table, string columnDefinition)
+    {
+        using var addCol = connection.CreateCommand();
+        addCol.Transaction = transaction;
+        addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN {columnDefinition}";
+        try
+        {
+            addCol.ExecuteNonQuery();
+        }
+        catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+        {
+            // Already applied, nothing to do.
         }
     }
 }

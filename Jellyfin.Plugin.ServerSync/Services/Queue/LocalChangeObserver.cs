@@ -8,7 +8,6 @@ using Jellyfin.Plugin.ServerSync.Models.Queue;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Controller.Providers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -16,18 +15,22 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Listens for changes made on this server and raises hints for them: user data saves for history,
-/// item updates for metadata and people, and items added for content. User settings are not
-/// announced: Jellyfin raises no event for policy and configuration changes, so the scheduled Sync
-/// Information task carries them. The module switches are the receiver's business: a server raises a hint for
-/// anything a peer it sends to has mapped, and the peer decides. A metadata edit or an image change
-/// raises an item hint. Provider work during a scan or a refresh is marked as such, since a server
-/// that fetches its own metadata after receiving a file would otherwise push that over the other
-/// server's curated values
-/// the moment it arrived; it still travels, marked as a provider's, and never replaces a recorded edit. Each object's edits are
-/// gathered until it has gone untouched for the configured wait, so a poster changed twice or a
-/// playback that reports progress every few seconds becomes one hint, not one per edit. An event raised while a peer's hint is being applied to the same
-/// object is the echo of that apply and raises nothing. See <see cref="ApplyGuard"/>.
+/// Listens for changes made on this server and raises hints for them. User data saves raise history
+/// hints, item updates raise metadata and people hints, and items added raise content hints. User
+/// settings are not announced, since Jellyfin raises no event for policy and configuration changes,
+/// and the scheduled Sync Information task carries them.
+/// <para>
+/// A hint goes only to peers that apply its kind and have the object mapped. An edit someone makes in
+/// Jellyfin's editor or image dialog is recorded with its time the moment it is made. Anything else,
+/// a refresh, a scan, Jellyfin's own housekeeping, travels marked as a provider's work, which fills in
+/// where nothing was edited by hand and never replaces a recorded edit.
+/// </para>
+/// <para>
+/// Each object's changes gather until it has gone untouched for the configured wait, so a poster
+/// changed twice or a playback that reports progress every few seconds becomes one hint. An event
+/// raised while a peer's hint is being applied, or for a file a sync downloaded, is the sync's own
+/// write and raises nothing. See <see cref="ApplyGuard"/> and <see cref="WrittenFiles"/>.
+/// </para>
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LocalChangeObserver : IHostedService, IDisposable
@@ -35,7 +38,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly IUserDataManager _userDataManager;
     private readonly IUserManager _userManager;
     private readonly ILibraryManager _libraryManager;
-    private readonly IProviderManager _providerManager;
+    private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor _httpContext;
     private readonly IPluginConfigurationManager _configManager;
     private readonly LocalHintPublisher _publisher;
     private readonly OutboundHintWorker _worker;
@@ -44,7 +47,6 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalChangeObserver> _logger;
     private readonly ConcurrentDictionary<string, PendingChange> _pending = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<Guid, byte> _refreshing = new();
     private CancellationTokenSource? _stopping;
     private Task? _flushLoop;
     private int _unmatched;
@@ -56,7 +58,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <param name="userDataManager">User data manager, for the save event.</param>
     /// <param name="userManager">User manager.</param>
     /// <param name="libraryManager">Library manager.</param>
-    /// <param name="providerManager">Provider manager, for the refresh events that tell a provider's image from a hand picked one.</param>
+    /// <param name="httpContext">The request in progress, which tells an edit someone made from Jellyfin's own background work.</param>
     /// <param name="configManager">Plugin configuration.</param>
     /// <param name="publisher">The publisher that writes the outbound rows.</param>
     /// <param name="worker">The delivery worker, which knows what each peer accepts.</param>
@@ -68,7 +70,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         IUserDataManager userDataManager,
         IUserManager userManager,
         ILibraryManager libraryManager,
-        IProviderManager providerManager,
+        Microsoft.AspNetCore.Http.IHttpContextAccessor httpContext,
         IPluginConfigurationManager configManager,
         LocalHintPublisher publisher,
         OutboundHintWorker worker,
@@ -82,7 +84,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager = userDataManager;
         _userManager = userManager;
         _libraryManager = libraryManager;
-        _providerManager = providerManager;
+        _httpContext = httpContext;
         _configManager = configManager;
         _publisher = publisher;
         _guard = guard;
@@ -91,7 +93,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     }
 
     /// <summary>Gets how many objects are waiting for their debounce to end.</summary>
-    public int PendingCount => _pending.Values.Count(c => c.Publish);
+    public int PendingCount => _pending.Count;
 
     /// <summary>
     /// Gets how many local changes were raised since start that no Push or Sync server mapped, so
@@ -106,7 +108,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <summary>Gets the changes still gathering, newest edit first, for the dashboard.</summary>
     /// <returns>A snapshot.</returns>
     public IReadOnlyList<GatheringChange> Gathering()
-        => _pending.Values.Where(c => c.Publish).Select(c => new GatheringChange(c.Kind, c.UserId, c.ItemId, c.EditedAt, c.Due, c.Recorded)).OrderByDescending(c => c.EditedAt).ToList();
+        => _pending.Values.Select(c => new GatheringChange(c.Kind, c.UserId, c.ItemId, c.EditedAt, c.Due, c.Recorded)).OrderByDescending(c => c.EditedAt).ToList();
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -115,10 +117,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager.UserDataSaved += OnUserDataSaved;
         _libraryManager.ItemUpdated += OnItemUpdated;
         _libraryManager.ItemAdded += OnItemAdded;
-        _providerManager.RefreshStarted += OnRefreshStarted;
-        _providerManager.RefreshCompleted += OnRefreshCompleted;
         _flushLoop = Task.Run(() => FlushLoopAsync(_stopping.Token), CancellationToken.None);
-        _logger.LogInformation("Server Sync is watching for local changes to watch history, metadata, people, and files. User settings are not announced live, since Jellyfin raises no event for policy and configuration changes; the scheduled Sync Information task carries them");
+        _logger.LogInformation("Server Sync is watching for local changes to watch history, metadata, people, and files. User settings are not announced live, since Jellyfin raises no event for policy and configuration changes. The scheduled Sync Information task carries them");
         return Task.CompletedTask;
     }
 
@@ -128,8 +128,6 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager.UserDataSaved -= OnUserDataSaved;
         _libraryManager.ItemUpdated -= OnItemUpdated;
         _libraryManager.ItemAdded -= OnItemAdded;
-        _providerManager.RefreshStarted -= OnRefreshStarted;
-        _providerManager.RefreshCompleted -= OnRefreshCompleted;
         if (_stopping is not null)
         {
             await _stopping.CancelAsync().ConfigureAwait(false);
@@ -178,7 +176,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Could not raise a history hint for {Key}", entry.Key);
+                _logger.LogError(ex, "Could not raise a {Kind} hint for {Key}", entry.Value.Kind, entry.Key);
             }
         }
 
@@ -210,76 +208,27 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
-    /// <summary>Whether an item update is a metadata edit, which hints always carry. Public for tests.</summary>
-    /// <param name="reason">Why Jellyfin saved the item.</param>
-    /// <returns><c>true</c> for a metadata edit.</returns>
-    public static bool IsHintedUpdate(ItemUpdateType reason) => (reason & ItemUpdateType.MetadataEdit) != 0;
-
     /// <summary>
-    /// Sorts an item update into what travels and how. A metadata edit is a hand made change. An image
-    /// change is a hand made change too, unless a library scan or a refresh of the item is running, when
-    /// it is a provider's; Jellyfin reports both with the same reason. A metadata download is always a
-    /// provider's. Provider work travels as well, marked so a hand made edit on the other side still
-    /// wins and so it only fills in where the other side has recorded nothing. Public for tests.
+    /// Sorts an item update into a hand made edit, a provider's work, or nothing to announce. Jellyfin's
+    /// item editor and image endpoints save with one flag alone, metadata edit or image update, and
+    /// raise the event on the request's own thread. Such a save made inside a request is someone's edit.
+    /// The same save outside one is Jellyfin's own work, linking versions, dating extras, aligning
+    /// seasons, or a provider's download during a scan. Any save carrying more than one flag comes from a
+    /// refresh, which starts from <see cref="ItemUpdateType.None"/> and adds flags, roll ups included.
     /// </summary>
-    /// <param name="reason">Why Jellyfin saved the item.</param>
-    /// <param name="beingRefreshed">Whether the item, an ancestor, or for a person any item, is in a metadata refresh.</param>
-    /// <param name="scanRunning">Whether a library scan is running.</param>
-    /// <returns>What the update is.</returns>
-    public static ChangeOrigin Classify(ItemUpdateType reason, bool beingRefreshed, bool scanRunning)
+    /// <param name="reason">The update reason.</param>
+    /// <param name="inRequest">Whether the save was made while handling an HTTP request.</param>
+    /// <returns>Where the change came from.</returns>
+    public static ChangeOrigin Classify(ItemUpdateType reason, bool inRequest)
     {
-        if (IsHintedUpdate(reason))
+        if (reason is ItemUpdateType.MetadataEdit or ItemUpdateType.ImageUpdate)
         {
-            return ChangeOrigin.Edit;
+            return inRequest ? ChangeOrigin.Edit : ChangeOrigin.Provider;
         }
 
-        if ((reason & ItemUpdateType.ImageUpdate) != 0)
-        {
-            return beingRefreshed || scanRunning ? ChangeOrigin.Provider : ChangeOrigin.Edit;
-        }
-
-        return (reason & ItemUpdateType.MetadataDownload) != 0 ? ChangeOrigin.Provider : ChangeOrigin.None;
-    }
-
-    private void OnRefreshStarted(object? sender, Jellyfin.Data.Events.GenericEventArgs<BaseItem> e)
-    {
-        if (e?.Argument is not null)
-        {
-            _refreshing[e.Argument.Id] = 0;
-        }
-    }
-
-    private void OnRefreshCompleted(object? sender, Jellyfin.Data.Events.GenericEventArgs<BaseItem> e)
-    {
-        if (e?.Argument is not null)
-        {
-            _refreshing.TryRemove(e.Argument.Id, out _);
-        }
-    }
-
-    // A refresh of a series or a movie also refreshes what belongs to it, children and cast alike, so
-    // an item counts as being refreshed when it or an ancestor is, and a person whenever any item is.
-    private bool IsBeingRefreshed(BaseItem item)
-    {
-        if (_refreshing.IsEmpty)
-        {
-            return false;
-        }
-
-        if (item is Person)
-        {
-            return true;
-        }
-
-        for (var current = item; current is not null; current = current.GetParent())
-        {
-            if (_refreshing.ContainsKey(current.Id))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return (reason & (ItemUpdateType.MetadataEdit | ItemUpdateType.ImageUpdate | ItemUpdateType.MetadataDownload)) != 0
+            ? ChangeOrigin.Provider
+            : ChangeOrigin.None;
     }
 
     private void OnItemUpdated(object? sender, ItemChangeEventArgs e)
@@ -291,12 +240,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
-            // The ancestor walk only decides an image change outside a scan, so it runs only then. A
-            // library scan raises this event for every item it touches, and each walk is a lookup per
-            // level of the tree.
-            var scanRunning = _libraryManager.IsScanRunning;
-            var needsRefreshCheck = !IsHintedUpdate(e.UpdateReason) && (e.UpdateReason & ItemUpdateType.ImageUpdate) != 0 && !scanRunning;
-            var origin = Classify(e.UpdateReason, needsRefreshCheck && IsBeingRefreshed(e.Item), scanRunning);
+            var origin = Classify(e.UpdateReason, _httpContext.HttpContext is not null);
             if (origin == ChangeOrigin.None)
             {
                 return;
@@ -334,6 +278,13 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
+            // A file this server downloaded while syncing is the sync's own write, like any apply, and is
+            // not announced back to the peers.
+            if (WrittenFiles.WasWritten(e.Item.Path))
+            {
+                return;
+            }
+
             if (e.Item is not (MediaBrowser.Controller.Entities.Movies.Movie or MediaBrowser.Controller.Entities.TV.Episode or MediaBrowser.Controller.Entities.Audio.Audio or MediaBrowser.Controller.Entities.Video))
             {
                 return;
@@ -348,7 +299,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     }
 
     // A change gathers with the others to the same object. One hand made edit in the window makes the
-    // whole hint a recorded edit; a window of nothing but provider work travels as provider work.
+    // whole hint a recorded edit. A window of nothing but provider work travels as provider work.
     private void Note(HintKind kind, string localKey, Guid userId, Guid itemId, bool recorded = true)
     {
         if (_guard.IsApplying(HintProtocol.GuardKey(kind, localKey)))
@@ -356,22 +307,36 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             return;
         }
 
-        // Nothing is sent for a kind no peer will take, and the queue does not show it. A hand made edit
-        // still has its version recorded when the wait ends, so a server that only receives knows when
-        // its own values were edited the day a conflict has to be decided. The server entries are few, so
-        // this is a short scan on every event rather than a row that waits for nothing.
-        var publish = AnyPeerAccepts(kind);
-        if (!publish && !recorded)
+        // A hand made edit's version is written now, not when the wait ends. A peer's older edit arriving
+        // in the meantime then loses to it, and a restart or crash during the wait cannot lose when it was
+        // made. Only the hint to the peers waits.
+        var now = DateTime.UtcNow;
+        if (recorded)
+        {
+            _versions.Set(new ObjectVersion { Kind = kind, Key = localKey, ServerId = _applicationHost.SystemId, Timestamp = now });
+        }
+
+        // Nothing gathers for a kind no peer will take, and the queue does not show it. The server entries
+        // are few, so this is a short scan on every event rather than a row that waits for nothing.
+        if (!AnyPeerAccepts(kind))
         {
             return;
         }
 
-        var now = DateTime.UtcNow;
+        // The hint carries the time of the last hand made edit in the window. Provider work that lands
+        // after a hand made edit restarts the wait but does not move that time, so it cannot pass itself
+        // off as the edit.
         var due = now + HintProtocol.Debounce(_configManager.Configuration);
         _pending.AddOrUpdate(
             HintProtocol.GuardKey(kind, localKey),
-            _ => new PendingChange(kind, localKey, userId, itemId, now, due, recorded, publish),
-            (_, existing) => existing with { EditedAt = now, Due = due, Recorded = existing.Recorded || recorded, Publish = existing.Publish || publish });
+            _ => new PendingChange(kind, localKey, userId, itemId, now, due, recorded, now),
+            (_, existing) => existing with
+            {
+                EditedAt = now,
+                Due = due,
+                Recorded = existing.Recorded || recorded,
+                VersionAt = recorded || !existing.Recorded ? now : existing.VersionAt
+            });
     }
 
     private async Task FlushLoopAsync(CancellationToken cancellationToken)
@@ -388,12 +353,15 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     private void Raise(PendingChange change)
     {
-        var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = change.EditedAt };
-        if (!change.Publish)
+        var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = change.VersionAt };
+
+        // A peer's newer edit that applied during the wait supersedes this one, and this server now holds
+        // that peer's value. Announcing the older edit would only send peers to fetch it again.
+        if (change.Recorded
+            && _versions.Get(change.Kind, change.LocalKey) is { } current
+            && !string.Equals(current.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase)
+            && VersionDecider.IsNewer(current, new ObjectVersion { Kind = change.Kind, Key = change.LocalKey, ServerId = version.ServerId, Timestamp = version.Timestamp }))
         {
-            version.Kind = change.Kind;
-            version.Key = change.LocalKey;
-            _versions.Set(version);
             return;
         }
 
@@ -427,7 +395,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
-    // A change raised to no peer is only worth counting when there is a peer to send to; a server
+    // A change raised to no peer is only worth counting when there is a peer to send to. A server
     // with no Push or Sync entry is not misconfigured, it just does not send.
     private bool AnyPeerAccepts(HintKind kind)
     {
@@ -454,7 +422,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", _lastUnmatched);
     }
 
-    private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, bool Publish);
+    private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, DateTime VersionAt);
 }
 
 /// <summary>One change still gathering before it becomes a hint.</summary>

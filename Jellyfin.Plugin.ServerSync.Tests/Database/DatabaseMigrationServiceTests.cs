@@ -66,7 +66,7 @@ public class DatabaseMigrationServiceTests
     [Fact]
     public void CurrentSchemaVersion_IsTwentySix()
     {
-        Assert.Equal(27, DatabaseMigrationService.CurrentSchemaVersion);
+        Assert.Equal(28, DatabaseMigrationService.CurrentSchemaVersion);
     }
 
     /// <summary>
@@ -175,7 +175,7 @@ public class DatabaseMigrationServiceTests
         Assert.DoesNotContain("OldColumn", cols);
         Assert.Contains("SourceItemId", cols);
         Assert.Contains("PendingType", cols);
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
     }
 
     /// <summary>
@@ -277,12 +277,12 @@ public class DatabaseMigrationServiceTests
             Assert.True(reader.IsDBNull(0));
         }
 
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
     }
 
     /// <summary>
     /// fromVersion=20 preserves Metadata SyncedHashes (v20 already cleared them) but still ALTERs History.
-    /// True: v20→v21 only runs the v21 step; previously-cleared and re-seeded Metadata hashes survive.
+    /// True: v20→v21 only runs the v21 step. Previously-cleared and re-seeded Metadata hashes survive.
     /// False: re-clearing Metadata hashes on every minor migration would invalidate the fast path.
     /// </summary>
     [Fact]
@@ -331,7 +331,7 @@ public class DatabaseMigrationServiceTests
 
         var historyCols = GetColumnNames(conn, "HistorySyncItems");
         Assert.Contains("SourceStateHash", historyCols);
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
     }
 
     /// <summary>
@@ -397,7 +397,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 20, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
     }
 
     /// <summary>
@@ -410,12 +410,12 @@ public class DatabaseMigrationServiceTests
     {
         using var conn = OpenConnection();
         DatabaseMigrationService.CreateInitialSchema(conn);
-        SetVersion(conn, 27);
+        SetVersion(conn, 28);
 
-        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 27, NullLogger.Instance);
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 28, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
     }
 
     /// <summary>
@@ -441,7 +441,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 21, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
         foreach (var table in new[] { "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
         {
             Assert.Contains("RetryCount", GetColumnNames(conn, table));
@@ -464,7 +464,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 21, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
     }
 
     /// <summary>
@@ -489,7 +489,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 22, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
         var columns = GetColumnNames(conn, "HistorySyncItems");
         foreach (var col in new[] { "NegotiatedIsPlayed", "NegotiatedPlayCount", "NegotiatedPlaybackPositionTicks", "NegotiatedLastPlayedDate", "NegotiatedIsFavorite", "NegotiatedAt" })
         {
@@ -507,6 +507,14 @@ public class DatabaseMigrationServiceTests
     {
         using var conn = OpenConnection();
         DatabaseMigrationService.CreateInitialSchema(conn);
+
+        // A v23 database had no index on the server column. The current one does, and it would block the drop.
+        using (var dropIndex = conn.CreateCommand())
+        {
+            dropIndex.CommandText = "DROP INDEX IF EXISTS idx_history_server_local";
+            dropIndex.ExecuteNonQuery();
+        }
+
         foreach (var table in new[] { "SyncItems", "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
         {
             using var drop = conn.CreateCommand();
@@ -519,7 +527,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 23, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(27, GetVersion(conn));
+        Assert.Equal(28, GetVersion(conn));
         foreach (var table in new[] { "SyncItems", "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
         {
             Assert.Contains("ServerKey", GetColumnNames(conn, table));

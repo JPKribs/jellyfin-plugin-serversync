@@ -32,8 +32,8 @@ public static class HistorySyncMergeService
 
         // IsFavorite: take source when it has an opinion, otherwise keep
         // local. The previous unconditional `?? false` conflated two cases
-        // for a null source value — "explicitly unfavorited" and "UserData
-        // not available in the response" — silently wiping local favorites
+        // for a null source value, "explicitly unfavorited" and "UserData
+        // not available in the response", silently wiping local favorites
         // on the latter.
         if (item.NegotiateWithSource && (item.SourceIsFavorite.HasValue || item.LocalIsFavorite.HasValue))
         {
@@ -247,7 +247,7 @@ public static class HistorySyncMergeService
         // sub-second precision through its user-data store, so an exact
         // comparison reports a difference on the very value we just wrote and
         // the row requeues on every run forever. The post-apply verifier has
-        // always truncated to seconds for this reason; the change detector has
+        // always truncated to seconds for this reason. The change detector has
         // to agree with it, or "changed" and "applied correctly" contradict.
         // Previously masked by the SourceHash short-circuit, which stopped this
         // check from running at all once a row had been synced.
@@ -308,7 +308,7 @@ public static class HistorySyncMergeService
 
     /// <summary>
     /// Compares two nullable timestamps at second resolution. The single
-    /// definition of "the same instant" for history sync — used by both the
+    /// definition of "the same instant" for history sync, used by both the
     /// change detector and the post-apply verifier so they can never disagree.
     /// </summary>
     /// <param name="a">First timestamp.</param>

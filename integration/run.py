@@ -624,8 +624,20 @@ def scenario_history_negotiation(creds, apis):
     configure_local(creds, local, ["source-a", "source-b"])
 
 
+def restamp_seeds(apis):
+    """Saves the seeded values again on the sources, so each carries an edit newer than any local edit
+    an earlier run left behind. The pool keeps its databases between runs, and a scenario that expects a
+    source's value to arrive needs the source to hold the newest edit, not merely the same text."""
+    a, b = apis["source-a"], apis["source-b"]
+    for api, kind, needle, values in ((a, "Movie", "Only A", ONLY_A_METADATA), (a, "Person", "Alice Actor", {"Overview": ALICE_BIO}), (b, "Episode", "Pilot", PILOT_METADATA)):
+        item = find_item(api, kind, needle)
+        if item:
+            update_item(api, item, values)
+
+
 def scenario_metadata_by_type(creds, apis):
     local = apis["local"]
+    restamp_seeds(apis)
     configure_local(creds, local, ["source-a", "source-b"], EnableMetadataSync=True, MetadataSyncMetadata=True, MetadataSyncGenres=True,
                     MetadataSyncTags=True, MetadataSyncStudios=True, MetadataSyncPeople=True, MetadataSyncImages=True)
     run_task(local, "ServerSyncRefreshMetadataTable")
@@ -644,6 +656,7 @@ def scenario_metadata_by_type(creds, apis):
 
 def scenario_people_sync(creds, apis):
     local = apis["local"]
+    restamp_seeds(apis)
     configure_local(creds, local, ["source-a", "source-b"], EnablePeopleSync=True, PeopleSyncImages=True)
     run_task(local, "ServerSyncRefreshPeopleTable")
     run_task(local, "ServerSyncMissingPeople")
@@ -735,6 +748,49 @@ def scenario_hints_three_servers(creds, apis):
     wait_until(lambda: not played("local") and not played("source-a"), 60, "unmarking on source-b reversed the play on both other servers")
     expect(all(favorite(n) for n in names), "the favorite survived the reversal")
     wait_until(queues_empty, 60, "every queue drained after the reversal")
+
+    for n in ("source-a", "source-b"):
+        configure_server(creds, apis[n], n, [])
+    configure_local(creds, apis["local"], ["source-a", "source-b"])
+
+
+def scenario_history_stale_base(creds, apis):
+    """A base two servers agreed on goes stale when one of them takes a change from a third. Source-b and
+    source-a first agree through a favorite from source-b, then local plays the title, which both take
+    from local. When source-b unmarks it, source-a's base with source-b still says unplayed, and a three
+    way merge would read source-a's play as its own and push it back. The versions say the unmark is the
+    newer edit, so it wins everywhere and stays."""
+    names = ["source-a", "source-b", "local"]
+    mesh = {n: "Sync" for n in names}
+    for n in names:
+        configure_server(creds, apis[n], n, [p for p in names if p != n], mesh, EnableHistorySync=True, HistorySyncNegotiate=True)
+    ids = {n: (creds["servers"][n]["userId"], movie_id(apis[n], "Shared Movie")) for n in names}
+
+    def state(n):
+        data = user_data(apis[n], *ids[n])
+        return bool(data["Played"]), bool(data["IsFavorite"])
+
+    def queues_empty():
+        return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
+
+    for n in names:
+        apis[n].call("DELETE", f"/UserPlayedItems/{ids[n][1]}?userId={ids[n][0]}", expect=200)
+        apis[n].call("DELETE", f"/UserFavoriteItems/{ids[n][1]}?userId={ids[n][0]}", expect=200)
+    wait_until(queues_empty, 90, "the pool is quiet before the test")
+
+    apis["source-b"].post(f"/UserFavoriteItems/{ids['source-b'][1]}?userId={ids['source-b'][0]}", expect=200)
+    wait_until(lambda: all(state(n) == (False, True) for n in names), 90, "a favorite on source-b reached both others, so source-a and source-b agree on unplayed")
+    wait_until(queues_empty, 90, "every queue drained after the favorite")
+
+    apis["local"].post(f"/UserPlayedItems/{ids['local'][1]}?userId={ids['local'][0]}&datePlayed=2026-10-02T10:00:00Z", expect=200)
+    wait_until(lambda: all(state(n) == (True, True) for n in names), 90, "a play on local reached both sources")
+    wait_until(queues_empty, 90, "every queue drained after the play")
+
+    apis["source-b"].call("DELETE", f"/UserPlayedItems/{ids['source-b'][1]}?userId={ids['source-b'][0]}", expect=200)
+    wait_until(lambda: all(state(n) == (False, True) for n in names), 90, "the unmark on source-b won on every server, the stale base notwithstanding")
+    wait_until(queues_empty, 90, "every queue drained after the unmark")
+    time.sleep(12)
+    expect(all(state(n) == (False, True) for n in names), "nothing pushed the play back: all three still hold unplayed with the favorite")
 
     for n in ("source-a", "source-b"):
         configure_server(creds, apis[n], n, [])
@@ -1029,6 +1085,11 @@ def scenario_check_link_by_direction(creds, apis):
                                                       "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True, "Mode": "Pull"}, expect=200)
     expect(abs(full.get("ClockSkewSeconds", 999)) < 30 and "clock" not in full["Message"], "Check Link reads the peer's clock and finds it in step")
     expect(full.get("Paired") is True and "could not pair" not in full["Message"], "Check Link pairs the two servers, since the peer lists this one and holds an administrator's key for it")
+    _, moved = local.post("/ServerSync/Hints/CheckPeer", {"ServerUrl": "http://source-b:8096", "ApiKey": "__JPK_SECRET_KEPT__",
+                                                       "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True, "Mode": "Pull"}, expect=200)
+    expect(not moved.get("Reachable") and "only sent to the address saved" in moved["Message"], "the stored key is never sent to an address other than the one saved on the entry")
+    status, t = local.post("/ServerSync/TestConnection", {"ServerUrl": "http://source-b:8096", "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True}, expect=200)
+    expect(not t["Success"] and "only sent to the address saved" in (t.get("Message") or ""), "the connection test refuses the stored key for an edited address too")
     configure_server(creds, apis["source-a"], "source-a", [])
     configure_local(creds, local, ["source-a", "source-b"])
 
@@ -1108,6 +1169,22 @@ def scenario_non_admin_peer_key(creds, apis):
     configure_local(creds, local, ["source-a", "source-b"])
 
 
+def scenario_dashboard_endpoints(creds, apis):
+    """The dashboard's bulk and status endpoints answer as the pages expect: every module's Retry errors
+    queues errored rows without listing them, an unknown status is refused, a peer reads only its own
+    queue, and the queue overview answers with its parts."""
+    local = apis["local"]
+    for route in ("HistoryItems/Queue", "MetadataItems/Queue", "PeopleItems/Queue", "UserItems/Queue"):
+        status, body = local.call("POST", f"/ServerSync/{route}", {"Ids": [], "Status": "Errored"})
+        expect(status == 200 and isinstance((body or {}).get("Updated"), int), f"{route} queues every errored row from a status alone ({status})")
+        status, _ = local.call("POST", f"/ServerSync/{route}", {"Ids": [], "Status": "NotAStatus"})
+        expect(status == 400, f"{route} refuses a status it does not know ({status})")
+    status, st = local.call("GET", "/ServerSync/Peer/Status?serverId=no-such-server")
+    expect(status == 200 and st["Inbound"] == [] and st["CompletedHints"] == [], "a peer's status read shows only that peer's own hints")
+    overview = hints(local)
+    expect(all(k in overview for k in ("Gathering", "Outbound", "Inbound", "Peers", "OutboundCounts")), "the queue overview answers with gathering, both queues, peers, and counts")
+
+
 SCENARIOS = [
     ("content priority across two sources, movies and a show", scenario_content_priority),
     ("reordering re-homes a shared item without deleting", scenario_reorder_rehomes),
@@ -1116,12 +1193,14 @@ SCENARIOS = [
     ("people sync carries bios and images", scenario_people_sync),
     ("user sync carries policy, configuration, and avatar", scenario_user_sync),
     ("history hints travel across three servers without loops", scenario_hints_three_servers),
+    ("history: a base made stale by a third server does not revert a newer edit", scenario_history_stale_base),
     ("metadata and people hints, newest edit wins, scan keeps newer local", scenario_item_hints),
     ("content hints across the pool, user settings by task", scenario_content_and_user_hints),
     ("peer and operator endpoints require Jellyfin authentication", scenario_peer_endpoint_auth),
     ("check link judges the pairing by direction", scenario_check_link_by_direction),
     ("push responses: paused peers, declined hints, activity entries", scenario_push_responses),
     ("a standard user's key still receives every category", scenario_non_admin_peer_key),
+    ("dashboard bulk and status endpoints", scenario_dashboard_endpoints),
 ]
 
 _failures = []

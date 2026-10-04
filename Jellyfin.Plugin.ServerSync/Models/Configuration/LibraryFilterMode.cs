@@ -5,7 +5,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 /// </summary>
 public enum LibraryFilterMode
 {
-    /// <summary>Default — no filtering, all items synced.</summary>
+    /// <summary>Default, no filtering, all items synced.</summary>
     AllowAll = 0,
 
     /// <summary>Only items in FilteredItems are synced. Everything else is blocked.</summary>

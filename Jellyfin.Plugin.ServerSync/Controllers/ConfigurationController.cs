@@ -21,7 +21,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
 /// API controller for Server Sync plugin operations. Operates only on the
-/// local server — never modifies the source server.
+/// local server, never modifies the source server.
 /// </summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
@@ -70,8 +70,8 @@ public partial class ConfigurationController : ControllerBase
     /// kept-sentinel instead of the stored secret, so a request carrying the
     /// sentinel means "use the configured key".
     /// </summary>
-    private string ResolveRequestApiKey(string? requestApiKey, string? serverKey)
-        => _configManager.ResolveRequestApiKey(requestApiKey, serverKey);
+    private string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl)
+        => _configManager.ResolveRequestApiKey(requestApiKey, serverKey, requestUrl);
 
     /// <summary>
     /// The URL the browser should load images from for a row that came from the given server entry.
@@ -118,7 +118,7 @@ public partial class ConfigurationController : ControllerBase
         if (notFoundIds.Count > 0)
         {
             _logger.LogWarning(
-                "{Operation}: {Updated}/{Requested} rows updated; {NotFound} ID(s) not found in table",
+                "{Operation}: {Updated}/{Requested} rows updated. {NotFound} ID(s) not found in table",
                 operation, updated, requested, notFoundIds.Count);
         }
 
@@ -133,6 +133,34 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
+    /// Queues every row of a module that is in the posted status, for the "Retry errors" actions,
+    /// which post an empty id list and a status. The update is one statement with no row cap, so it
+    /// reaches every matching row and not only those on the loaded page, and the Queued transition
+    /// resets each row's RetryCount.
+    /// </summary>
+    private ActionResult QueueAllWithStatus<TRecord, TKey>(SyncTableManagerBase<TRecord, TKey> manager, string status, string operation)
+        where TRecord : SyncRecord
+        where TKey : notnull
+    {
+        if (!Enum.TryParse<SyncStatus>(status, ignoreCase: true, out var fromStatus) || !Enum.IsDefined(fromStatus))
+        {
+            return BadRequest("Invalid status value");
+        }
+
+        try
+        {
+            var updated = manager.QueueAllWithStatus(fromStatus);
+            _logger.LogInformation("{Operation}: queued {Count} row(s) that were {Status}", operation, updated, fromStatus);
+            return Ok(new BulkOperationResult { Updated = updated, Requested = updated });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Operation}: failed to queue rows that were {Status}", operation, fromStatus);
+            return StatusCode(500, new { Error = "Bulk queue failed, see the server log" });
+        }
+    }
+
+    /// <summary>
     /// Populates the LastFailure* fields on a status response from the
     /// per-module run-failure list on the plugin config. No-op when the
     /// module's last run completed cleanly (no entry for this module).
@@ -143,7 +171,11 @@ public partial class ConfigurationController : ControllerBase
         var failures = _configManager.Configuration.LastRunFailures;
         if (failures == null) return;
 
-        var failure = failures.FirstOrDefault(f => string.Equals(f.ModuleKey, moduleKey, StringComparison.OrdinalIgnoreCase));
+        // A module can hold a Refresh and a Sync failure at once. The latest is the one worth showing.
+        var failure = failures
+            .Where(f => string.Equals(f.ModuleKey, moduleKey, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(f => f.Timestamp)
+            .FirstOrDefault();
         if (failure != null)
         {
             response.LastFailurePhase = failure.Phase;
@@ -242,27 +274,13 @@ public partial class ConfigurationController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<CapabilitiesResponse> GetCapabilities()
     {
-        try
+        // The library manager is injected and never null, so deletion is always available.
+        return Ok(new CapabilitiesResponse
         {
-            var canDelete = _libraryManager != null;
-
-            return Ok(new CapabilitiesResponse
-            {
-                CanDeleteItems = canDelete,
-                SupportsCompanionFiles = true,
-                SupportsBandwidthScheduling = true
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error retrieving capabilities, returning safe defaults");
-            return Ok(new CapabilitiesResponse
-            {
-                CanDeleteItems = false,
-                SupportsCompanionFiles = true,
-                SupportsBandwidthScheduling = true
-            });
-        }
+            CanDeleteItems = true,
+            SupportsCompanionFiles = true,
+            SupportsBandwidthScheduling = true
+        });
     }
 
     /// <summary>
@@ -313,11 +331,9 @@ public partial class ConfigurationController : ControllerBase
                     var localItem = _libraryManager.FindByPath(item.LocalPath, isFolder: false);
                     if (localItem != null)
                     {
-                        manager.UpdateStatus(
-                            item.SourceItemId,
-                            item.Status,
-                            localPath: item.LocalPath,
-                            localItemId: localItem.Id.ToString());
+                        // Only the id changes. A status update would stamp LastSyncTime with now and
+                        // make every resolved row look freshly synced.
+                        manager.UpdateLocalItemId(item.SourceItemId, localItem.Id.ToString());
                         resolvedCount++;
                         _logger.LogDebug("Resolved LocalItemId for {FileName}", sanitizedFileName);
                     }

@@ -36,6 +36,10 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     private readonly HintActivityLog _activity;
     private readonly ILogger<OutboundHintWorker> _logger;
     private readonly SemaphoreSlim _wake = new(0, 1);
+
+    // One delivery pass at a time, whether the loop or the dashboard's Run starts it, so two passes never
+    // send the same rows or race on their state.
+    private readonly SemaphoreSlim _pass = new(1, 1);
     private readonly ConcurrentDictionary<string, PeerDeliveryState> _peers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTime> _lastStatusCheck = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _stopping;
@@ -125,15 +129,28 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="refreshCapabilities">Re-read what every peer accepts now, rather than only when the last answer is old.</param>
     /// <returns>A task.</returns>
-    public async Task DeliverAsync(CancellationToken cancellationToken, bool refreshCapabilities = false)
+    public async Task<bool> DeliverAsync(CancellationToken cancellationToken, bool refreshCapabilities = false)
+    {
+        await _pass.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await DeliverPassAsync(refreshCapabilities, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _pass.Release();
+        }
+    }
+
+    private async Task<bool> DeliverPassAsync(bool refreshCapabilities, CancellationToken cancellationToken)
     {
         var config = _configManager.Configuration;
-        foreach (var peer in config.GetPushServers())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await RefreshAcceptsAsync(peer, _peers.GetOrAdd(peer.Key, _ => new PeerDeliveryState()), refreshCapabilities, cancellationToken).ConfigureAwait(false);
-        }
 
+        // Every peer is asked at once, so one that does not answer costs the others nothing.
+        await Task.WhenAll(config.GetPushServers().Select(peer =>
+            RefreshAcceptsAsync(peer, _peers.GetOrAdd(peer.Key, _ => new PeerDeliveryState()), refreshCapabilities, cancellationToken))).ConfigureAwait(false);
+
+        var deliveries = new List<Task<bool>>();
         foreach (var peerKey in _outbound.GetPeerKeys())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -142,6 +159,8 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             if (peer is null)
             {
                 var removed = _outbound.DeleteForPeer(peerKey);
+                _peers.TryRemove(peerKey, out _);
+                _lastStatusCheck.TryRemove(peerKey, out _);
                 _logger.LogInformation("Dropped {Count} queued hint(s) for a server that is no longer configured", removed);
                 continue;
             }
@@ -156,44 +175,45 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                 continue;
             }
 
+            _outbound.TrimPending(peerKey);
             var state = _peers.GetOrAdd(peerKey, _ => new PeerDeliveryState());
             if (state.PausedUntil > DateTime.UtcNow)
             {
                 continue;
             }
 
-            try
-            {
-                await DeliverToPeerAsync(peer, state, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Hint delivery to '{Peer}' failed unexpectedly", peer.DisplayName);
-            }
+            deliveries.Add(DeliverToPeerSafelyAsync(peer, state, cancellationToken));
         }
+
+        var more = await Task.WhenAll(deliveries).ConfigureAwait(false);
+        return more.Any(m => m);
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
         _wake.Dispose();
+        _pass.Dispose();
         _stopping?.Dispose();
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        // A pass that filled a batch goes again straight away, so a backlog drains at the pace the peers
+        // answer rather than one batch every idle wait.
+        var more = false;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await _wake.WaitAsync(IdleWait, cancellationToken).ConfigureAwait(false);
-                await DeliverAsync(cancellationToken).ConfigureAwait(false);
+                if (!more)
+                {
+                    await _wake.WaitAsync(IdleWait, cancellationToken).ConfigureAwait(false);
+                }
+
+                more = await DeliverAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
             }
@@ -204,18 +224,54 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         }
     }
 
-    private async Task DeliverToPeerAsync(SourceServer peer, PeerDeliveryState state, CancellationToken cancellationToken)
+    private async Task<bool> DeliverToPeerSafelyAsync(SourceServer peer, PeerDeliveryState state, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await DeliverToPeerAsync(peer, state, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Hint delivery to '{Peer}' failed unexpectedly", peer.DisplayName);
+            return false;
+        }
+    }
+
+    // Returns whether a full batch was sent, so the caller goes again at once.
+    private async Task<bool> DeliverToPeerAsync(SourceServer peer, PeerDeliveryState state, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
         var due = _outbound.GetDue(peer.Key, now, BatchSize);
-        var sent = _outbound.GetSentBefore(peer.Key, now - HintProtocol.CompletionGrace);
+
+        // Sent rows are only looked at when recovery is due, every few minutes, not on every pass.
+        var sent = CheckDue(peer.Key, now) ? _outbound.GetSentBefore(peer.Key, now - HintProtocol.CompletionGrace) : Array.Empty<OutboundHint>();
         if (due.Count == 0 && sent.Count == 0)
         {
-            return;
+            return false;
         }
 
-        using var client = _clientFactory.Create(peer);
+        SourceServerClient client;
+        try
+        {
+            client = _clientFactory.Create(peer);
+        }
+        catch (ArgumentException ex)
+        {
+            // An address the private network rule refuses, or one that is not a URL. Nothing can be sent
+            // until the entry is fixed, so the peer pauses with the reason rather than failing every pass.
+            if (due.Count > 0)
+            {
+                await PauseAsync(peer, state, due, "its address cannot be used: " + ex.Message).ConfigureAwait(false);
+            }
 
+            return false;
+        }
+
+        using var owned = client;
         if (due.Count > 0)
         {
             var request = new QueueRequest { SenderServerId = _applicationHost.SystemId };
@@ -231,7 +287,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             {
                 (status, response, body) = await client.SendHintsAsync(request, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -245,10 +301,12 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             await RecordAsync(peer, state, due, status, response, body).ConfigureAwait(false);
         }
 
-        if (sent.Count > 0 && CheckDue(peer.Key, now))
+        if (sent.Count > 0)
         {
             await RecoverLostAsync(peer, client, sent, cancellationToken).ConfigureAwait(false);
         }
+
+        return due.Count >= BatchSize && state.PausedUntil is null;
     }
 
     private async Task RecordAsync(SourceServer peer, PeerDeliveryState state, IList<OutboundHint> due, int status, QueueResponse? response, string? body)
@@ -261,19 +319,19 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             case DeliveryOutcome.Accepted:
                 state.PausedUntil = null;
                 state.Reason = null;
-                var accepted = new List<long>();
+                var accepted = new List<OutboundHint>();
                 foreach (var row in due)
                 {
                     var answer = response?.Items.FirstOrDefault(r => string.Equals(r.HintId, row.HintId, StringComparison.Ordinal));
                     if (answer is { Accepted: false })
                     {
                         // The peer has no mapping for it. That is the peer's business, so the hint is done.
-                        _outbound.Delete(row.Id);
+                        _outbound.DeleteSent(row);
                         _logger.LogDebug("'{Peer}' declined hint {Hint}: {Reason}", peer.DisplayName, row.HintId, answer.Reason);
                     }
                     else
                     {
-                        accepted.Add(row.Id);
+                        accepted.Add(row);
                     }
                 }
 
@@ -282,11 +340,14 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                 break;
 
             case DeliveryOutcome.Malformed:
+                // The receiver declines a bad hint on its own and answers 400 only for the request as a
+                // whole, so this is a problem with the batch, written once rather than once per row.
                 foreach (var row in due)
                 {
-                    _outbound.MarkFailed(row.Id, "peer rejected the hint as malformed: " + Trim(body));
-                    await _activity.RejectedAsync(row, peer.DisplayName, Trim(body)).ConfigureAwait(false);
+                    _outbound.MarkFailed(row, "peer rejected the request as malformed: " + Trim(body));
                 }
+
+                await _activity.RejectedBatchAsync(peer.DisplayName, due.Count, Trim(body)).ConfigureAwait(false);
 
                 _logger.LogError("'{Peer}' rejected {Count} hint(s) as malformed: {Body}", peer.DisplayName, due.Count, Trim(body));
                 break;
@@ -297,9 +358,10 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
             default:
                 var error = status == 0 ? "no answer: " + Trim(body) : $"peer answered {status}: {Trim(body)}";
-                foreach (var row in due)
+                // Rows that failed as often share a backoff, so each group is put off in one transaction.
+                foreach (var group in due.GroupBy(r => r.Attempts))
                 {
-                    _outbound.Defer(new[] { row.Id }, now + HintProtocol.NextDelay(row.Attempts + 1), error);
+                    _outbound.Defer(group, now + HintProtocol.NextDelay(group.Key + 1), error);
                 }
 
                 state.Reason = error;
@@ -314,7 +376,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         var alreadyPaused = state.PausedUntil.HasValue && string.Equals(state.Reason, reason, StringComparison.Ordinal);
         state.PausedUntil = until;
         state.Reason = reason;
-        _outbound.Defer(due.Select(r => r.Id), until, reason);
+        _outbound.Defer(due, until, reason);
         _logger.LogError("Hints to '{Peer}' are paused until {Until:u}: {Reason}", peer.DisplayName, until, reason);
         if (!alreadyPaused)
         {
@@ -323,7 +385,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     }
 
     // Reads the peer's capabilities every few minutes so the publisher skips kinds the peer has off. A
-    // failed read keeps the last answer; a peer that never answered is sent everything.
+    // failed read keeps the last answer. A peer that never answered is sent everything.
     private async Task RefreshAcceptsAsync(SourceServer peer, PeerDeliveryState state, bool force, CancellationToken cancellationToken)
     {
         if (!force && (state.PausedUntil > DateTime.UtcNow || DateTime.UtcNow - state.AcceptsReadAt < HintProtocol.CapabilityRefresh))
@@ -358,7 +420,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
             state.Accepts = accepts;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -367,11 +429,11 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             // The key is refused, so nothing is known about the peer any more. Everything is sent so the
             // refusal surfaces as a pause with its reason rather than a silent skip.
             state.Accepts = null;
-            _logger.LogDebug("'{Peer}' refused the key when asked what it accepts; sending everything until it answers", peer.DisplayName);
+            _logger.LogDebug("'{Peer}' refused the key when asked what it accepts. Sending everything until it answers", peer.DisplayName);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not read what '{Peer}' accepts; keeping the last answer", peer.DisplayName);
+            _logger.LogDebug(ex, "Could not read what '{Peer}' accepts. Keeping the last answer", peer.DisplayName);
         }
     }
 
@@ -391,9 +453,9 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         QueueStatusResponse? status;
         try
         {
-            status = await client.GetPeerQueueStatusAsync(cancellationToken).ConfigureAwait(false);
+            status = await client.GetPeerQueueStatusAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -412,22 +474,16 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         var held = new HashSet<string>(status.Inbound.Select(i => i.HintId), StringComparer.Ordinal);
 
         // A hint id is reused for every edit of the same object, so a completion only counts when the
-        // peer finished at least the version the row now carries. A peer that reports no versions is
-        // taken at its word on the ids alone.
+        // peer finished at least the version the row now carries. An id alone says nothing about which
+        // edit was finished, so a completion without a version never removes a row. Every peer that
+        // speaks hints reports versions.
         var completed = new HashSet<string>(StringComparer.Ordinal);
-        if (status.CompletedHints is { Count: > 0 })
+        foreach (var done in status.CompletedHints ?? new List<CompletedHint>())
         {
-            foreach (var done in status.CompletedHints)
+            if (byId.TryGetValue(done.HintId, out var row) && Utilities.UtcTime.AsUtc(done.VersionTimestamp) >= Utilities.UtcTime.AsUtc(row.VersionTimestamp))
             {
-                if (byId.TryGetValue(done.HintId, out var row) && done.VersionTimestamp.ToUniversalTime() >= row.VersionTimestamp.ToUniversalTime())
-                {
-                    completed.Add(done.HintId);
-                }
+                completed.Add(done.HintId);
             }
-        }
-        else
-        {
-            completed.UnionWith(status.Completed ?? new List<string>());
         }
 
         var (finished, lostIds) = HintDelivery.Reconcile(sent.Select(r => r.HintId), held, completed);
@@ -436,7 +492,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             // The peer finished these but could not say so, which happens when it holds a standard
             // user's key for this server. Its status says it, so the rows are complete.
             _outbound.Complete(peer.Key, finished.Select(id => new CompletedHint { HintId = id, VersionTimestamp = byId[id].VersionTimestamp }));
-            _logger.LogInformation("'{Peer}' finished {Count} hint(s) it could not report; completed from its status", peer.DisplayName, finished.Count);
+            _logger.LogInformation("'{Peer}' finished {Count} hint(s) it could not report. Completed from its status", peer.DisplayName, finished.Count);
         }
 
         var lost = sent.Where(row => lostIds.Contains(row.HintId)).Select(row => row.Id).ToList();

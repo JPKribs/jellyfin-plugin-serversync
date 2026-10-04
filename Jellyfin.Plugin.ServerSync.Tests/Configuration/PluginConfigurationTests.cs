@@ -7,8 +7,8 @@ using Xunit;
 namespace Jellyfin.Plugin.ServerSync.Tests.Configuration;
 
 /// <summary>
-/// SanitizeValues runs inside every configuration save — including the
-/// settings page's — so it must never throw, and the XML surface must
+/// SanitizeValues runs inside every configuration save, including the
+/// settings page's, so it must never throw, and the XML surface must
 /// round-trip legacy elements without silently resetting user choices.
 /// </summary>
 public class PluginConfigurationTests
@@ -44,7 +44,7 @@ public class PluginConfigurationTests
     }
 
     /// <summary>
-    /// Valid paths still normalize (traversal sequences resolved) — the
+    /// Valid paths still normalize (traversal sequences resolved), the
     /// robustness fix must not disable the normalization it wraps.
     /// </summary>
     [Fact]
@@ -62,7 +62,7 @@ public class PluginConfigurationTests
     }
 
     /// <summary>
-    /// A bandwidth schedule ending at midnight is a real configuration; the
+    /// A bandwidth schedule ending at midnight is a real configuration. The
     /// sanitizer must keep hour 0 rather than treating it as unset.
     /// </summary>
     [Fact]
@@ -82,7 +82,7 @@ public class PluginConfigurationTests
     /// <summary>
     /// Equal start and end hours mean the scheduled speed applies all day.
     /// True: the schedule the user configured actually takes effect.
-    /// False: the same-day comparison reduces to "hour >= X && hour &lt; X",
+    /// False: the same-day comparison reduces to "hour >= X && hour &lt. X",
     /// which is never true, so the window silently never applies.
     /// </summary>
     [Fact]
@@ -176,9 +176,9 @@ public class PluginConfigurationTests
     }
 
     /// <summary>
-    /// Collection whitelist entries carry Type="BoxSet"; the marker decides
+    /// Collection whitelist entries carry Type="BoxSet". The marker decides
     /// whether the Sync Collections task mirrors them, so it must survive the
-    /// XML round-trip — and configs written before the field existed must
+    /// XML round-trip, and configs written before the field existed must
     /// deserialize with a null Type, not fail.
     /// </summary>
     [Fact]

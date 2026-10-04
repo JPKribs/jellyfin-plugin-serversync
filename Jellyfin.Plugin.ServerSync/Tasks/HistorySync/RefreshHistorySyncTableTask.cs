@@ -6,7 +6,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -15,9 +14,7 @@ using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
@@ -34,7 +31,7 @@ public sealed record HistoryWork(ScanSource Source, UserMapping UserMapping, Lib
 /// items in each mapped local library, then for each (enabled user mapping
 /// × enabled library mapping) batch-fetch user-data for the source items
 /// whose translated path exists locally. We never fetch user-data for items
-/// that aren't in the local library — the previous bulk per-(user × library)
+/// that aren't in the local library, the previous bulk per-(user × library)
 /// approach pulled tens of thousands of records over the wire just to
 /// throw most of them away on path mismatch.
 /// </summary>
@@ -135,10 +132,10 @@ public class RefreshHistorySyncTableTask
 
         progress.Report(8);
 
-        // Phase 2: light source discovery — find source IDs of items whose
+        // Phase 2: light source discovery, find source IDs of items whose
         // translated path exists locally. One pass per library, regardless
         // of how many users we sync.
-        // Per-page reporting into the 8–30 band; without it the bar froze at
+        // Per-page reporting into the 8 to 30 band. Without it the bar froze at
         // 8% for the entire discovery pagination.
         var discoveryProgress = new ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
         void ReportDiscovery(string key, long fetched, long total)
@@ -180,17 +177,26 @@ public class RefreshHistorySyncTableTask
                     ct.ThrowIfCancellationRequested();
 
                     BaseItemDtoQueryResult? page;
+                    Exception? pageError = null;
                     try
                     {
                         page = await client.GetLibraryItemPathsAsync(sourceLibraryId, leafTypes, startIndex, pageSize, ct).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
                         throw;
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogWarning(ex, "Discovery page failed for library {Library} at index {Index}", mapping.SourceLibraryName, startIndex);
+                        page = null;
+                        pageError = ex;
+                    }
+
+                    // A missing page is a failed page, not the end of the
+                    // library. Only an answer with no items ends the walk.
+                    if (page is null)
+                    {
+                        Logger.LogWarning(pageError, "Discovery page failed for library {Library} at index {Index}", mapping.SourceLibraryName, startIndex);
 
                         // Any source error means this run can't be sure it
                         // enumerated every item, so the whole run skips pruning.
@@ -205,7 +211,7 @@ public class RefreshHistorySyncTableTask
                     }
 
                     consecutiveErrors = 0;
-                    if (page?.Items == null || page.Items.Count == 0) break;
+                    if (page.Items == null || page.Items.Count == 0) break;
 
                     fetchedSoFar += page.Items.Count;
                     ReportDiscovery(mapping.SourceLibraryId, fetchedSoFar, page.TotalRecordCount ?? fetchedSoFar);
@@ -238,7 +244,7 @@ public class RefreshHistorySyncTableTask
 
         var totalMatched = matchedIdsByLibrary.Values.Sum(s => s.Count);
         Logger.LogInformation(
-            "{Task}: discovery matched {Total} items across {Libraries} libraries; will fetch user-data for {Pairs} (user × library) pairs",
+            "{Task}: discovery matched {Total} items across {Libraries} libraries. Will fetch user-data for {Pairs} (user × library) pairs",
             Name,
             totalMatched,
             libraryMappings.Count,
@@ -341,13 +347,7 @@ public class RefreshHistorySyncTableTask
 
         if (record != null && existing.TryGetValue((record.SourceUserId, record.SourceItemId), out var prev))
         {
-            record.Id = prev.Id;
-            record.Status = prev.Status;
-            record.LastSyncTime = prev.LastSyncTime;
-            record.Reason = prev.Reason;
-            // Without this the freshly built record resets to 0 every refresh
-            // and the retry ceiling in DecideStatus can never trip.
-            record.RetryCount = prev.RetryCount;
+            CarryForwardRowState(record, prev);
             record.SourceState.Synced = prev.SourceState.Synced;
             record.SourceState.SyncedHash = prev.SourceState.SyncedHash;
 
@@ -390,6 +390,15 @@ public class RefreshHistorySyncTableTask
         return string.IsNullOrEmpty(record.LocalPath) ? null : record.LocalUserId + "|" + record.LocalPath;
     }
 
+    /// <summary>
+    /// A history row that holds a negotiated base is kept when another server covers its item. The base
+    /// belongs to this server and that row's server, and every hint between the two merges against it. A
+    /// full mesh creates such rows for lower priority servers on purpose.
+    /// </summary>
+    /// <param name="record">The row.</param>
+    /// <returns>True when it may be retired.</returns>
+    protected override bool CanRetire(HistorySyncItem record) => base.CanRetire(record) && !record.HasNegotiatedBase;
+
     // In scope when both the row's library mapping AND its user mapping are
     // currently enabled. Disabling either preserves history rows instead of
     // pruning them, so the user's Ignored overrides survive a toggle.
@@ -397,24 +406,12 @@ public class RefreshHistorySyncTableTask
     protected override bool IsInScope(HistorySyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        var config = ConfigManager.Configuration;
-
-        var libraryEnabled = false;
-        foreach (var mapping in config.GetEnabledLibraryMappings())
-        {
-            if (string.Equals(mapping.SourceLibraryId, record.SourceLibraryId, StringComparison.OrdinalIgnoreCase))
-            {
-                libraryEnabled = true;
-                break;
-            }
-        }
-
-        if (!libraryEnabled)
+        if (!IsEnabledSourceLibrary(record.SourceLibraryId))
         {
             return false;
         }
 
-        foreach (var mapping in config.GetEnabledUserMappings())
+        foreach (var mapping in ConfigManager.Configuration.GetEnabledUserMappings())
         {
             if (string.Equals(mapping.SourceUserId, record.SourceUserId, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(mapping.LocalUserId, record.LocalUserId, StringComparison.OrdinalIgnoreCase))
@@ -428,9 +425,9 @@ public class RefreshHistorySyncTableTask
 
 
     // DecideStatus intentionally NOT overridden. An override here used to
-    // duplicate the base minus MarkSynced; with comparator-based change
+    // duplicate the base minus MarkSynced. With comparator-based change
     // detection MarkSynced is harmless bookkeeping, and the override was
-    // silently bypassing the base's retry ceiling — an Errored history row
+    // silently bypassing the base's retry ceiling, an Errored history row
     // at MaxRetryCount was re-queued on every refresh anyway.
 
     /// <inheritdoc />
@@ -440,13 +437,4 @@ public class RefreshHistorySyncTableTask
         config.LastHistorySyncTime = utcNow;
     }
 
-    /// <inheritdoc />
-    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
-    {
-        new TaskTriggerInfo
-        {
-            Type = TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(4).Ticks
-        }
-    };
 }

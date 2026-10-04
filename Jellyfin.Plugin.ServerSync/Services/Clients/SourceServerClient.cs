@@ -102,7 +102,7 @@ public class SourceServerClient : IDisposable
             var client = GetApiClient();
 
             // Try the authenticated /System/Info endpoint first (validates token and gets full info).
-            // If the token belongs to a non-admin user, this may return 403 — fall back to /System/Info/Public.
+            // If the token belongs to a non-admin user, this may return 403, fall back to /System/Info/Public.
             try
             {
                 var info = await client.System.Info.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -121,7 +121,7 @@ public class SourceServerClient : IDisposable
                 // 403 is the only legitimate fallback case (valid token, non-
                 // admin user). /System/Info/Public is anonymous, so falling
                 // back on 401 or transport errors would report "connection
-                // successful" for a revoked/expired API key — the user sees a
+                // successful" for a revoked/expired API key, the user sees a
                 // green check while every sync silently fails.
                 _logger.LogDebug(ex, "Authenticated /System/Info returned 403 (non-admin token), falling back to /System/Info/Public");
             }
@@ -154,7 +154,7 @@ public class SourceServerClient : IDisposable
             // Propagate rather than reporting a failed connection. Both task
             // bases treat a false result as "unreachable or credentials
             // invalid" and pin that on the dashboard until a clean run clears
-            // it — so cancelling a task from Scheduled Tasks used to tell the
+            // it, so cancelling a task from Scheduled Tasks used to tell the
             // user their API key was bad. The genuine-timeout case is caught
             // by the TaskCanceledException/TimeoutException clause above.
             throw;
@@ -194,6 +194,7 @@ public class SourceServerClient : IDisposable
     /// <param name="password">Password.</param>
     /// <param name="localServerName">Local server name for client identification.</param>
     /// <param name="pluginVersion">Plugin version string for client identification.</param>
+    /// <param name="allowPrivateNetwork">Whether the server may sit on a private network. When it may not, the request goes through the client that checks every resolved address at connect time.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Authentication result with access token if successful.</returns>
     public static async Task<AuthenticateResponse> AuthenticateAsync(
@@ -203,11 +204,15 @@ public class SourceServerClient : IDisposable
         string password,
         string localServerName,
         string pluginVersion,
+        bool allowPrivateNetwork,
         CancellationToken cancellationToken = default)
     {
         serverUrl = serverUrl.TrimEnd('/');
 
-        var httpClient = httpClientFactory.CreateClient(HttpClientName);
+        // The URL check only classifies an address written into the URL. A name resolves at connect
+        // time, so an entry that disallows private networks needs the client whose handler checks the
+        // resolved address too, the same choice the client factory makes.
+        var httpClient = httpClientFactory.CreateClient(allowPrivateNetwork ? HttpClientName : PublicHttpClientName);
 
         // Build the authentication request
         var authRequest = new
@@ -220,7 +225,7 @@ public class SourceServerClient : IDisposable
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
         // Per Jellyfin auth spec, AuthenticateByName requires client
-        // identification via the Authorization header (no Token yet — we're
+        // identification via the Authorization header (no Token yet, we're
         // about to obtain it). Format must be the canonical
         // `MediaBrowser key="value", ...` scheme. The previous code used
         // `X-Emby-Authorization` which is deprecated and rejected when
@@ -230,7 +235,8 @@ public class SourceServerClient : IDisposable
         {
             Content = content
         };
-        var authHeader = $"Client=\"{DefaultClientName}\", Device=\"{localServerName}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{pluginVersion}\"";
+        // The device name is this server's name, which may hold characters a header cannot carry.
+        var authHeader = $"Client=\"{DefaultClientName}\", Device=\"{HeaderSafe(localServerName)}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{pluginVersion}\"";
         request.Headers.Authorization = new AuthenticationHeaderValue("MediaBrowser", authHeader);
 
         try
@@ -355,7 +361,7 @@ public class SourceServerClient : IDisposable
                 return await GetUserViewsAsLibrariesAsync(authenticatedUserId, cancellationToken).ConfigureAwait(false);
             }
 
-            _logger.LogWarning("Cannot fall back to user views — no authenticated user ID available");
+            _logger.LogWarning("Cannot fall back to user views, no authenticated user ID available");
             return new List<VirtualFolderInfo>();
         }
         catch (OperationCanceledException)
@@ -452,7 +458,7 @@ public class SourceServerClient : IDisposable
                 return await GetSingleUserAsync(authenticatedUserId, cancellationToken).ConfigureAwait(false);
             }
 
-            _logger.LogWarning("Cannot fall back to single user — no authenticated user ID available");
+            _logger.LogWarning("Cannot fall back to single user, no authenticated user ID available");
             return new List<UserDto>();
         }
         catch (OperationCanceledException)
@@ -548,13 +554,13 @@ public class SourceServerClient : IDisposable
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
             // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
-            _logger.LogWarning(ex, "Source server {Status} on whitelist root {Id}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, whitelistedId);
+            _logger.LogWarning(ex, "Source server {Status} on whitelist root {Id}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, whitelistedId);
             throw;
         }
         catch (Exception ex)
         {
             // Transport faults (connection reset, DNS, TLS) and deserialization
-            // errors land here — Kiota only wraps HTTP status errors as
+            // errors land here, Kiota only wraps HTTP status errors as
             // ApiException. Returning an empty list would make every leaf under
             // this entry look "missing from source" and schedule its files for
             // deletion, so bubble up instead.
@@ -565,14 +571,14 @@ public class SourceServerClient : IDisposable
         if (rootItem == null || !rootItem.Id.HasValue)
         {
             // An entry that no longer exists on the source (deleted
-            // collection, deleted item) returns 200-with-nothing — treating
+            // collection, deleted item) returns 200-with-nothing, treating
             // that as an empty expansion would mark every leaf under it as
             // removed and schedule the files for deletion. Fail the entry
-            // instead; the refresh marks the source unavailable, keeps
+            // instead. The refresh marks the source unavailable, keeps
             // syncing the other entries, and skips pruning until the user
             // removes the dead entry from the whitelist.
             throw new InvalidOperationException(
-                $"Whitelist entry {whitelistedId} no longer exists on the source server — remove it from the mapping's whitelist to resume pruning");
+                $"Whitelist entry {whitelistedId} no longer exists on the source server, remove it from the mapping's whitelist to resume pruning");
         }
 
         if (leafTypes.Contains(rootItem.Type))
@@ -586,7 +592,7 @@ public class SourceServerClient : IDisposable
         // children breadth-first one folder at a time, collecting leaves.
         // Playlists are user-scoped and don't answer ParentId child queries,
         // so their members come from the playlist endpoint and seed the same
-        // walk (members are usually leaves already; folders still expand).
+        // walk (members are usually leaves already. Folders still expand).
         var queue = new Queue<Guid>();
         if (rootItem.Type == BaseItemDto_Type.Playlist)
         {
@@ -652,17 +658,17 @@ public class SourceServerClient : IDisposable
                 {
                     // Any 4xx/5xx: bubble up. `break` here would silently
                     // truncate the leaf list, which the caller can't tell
-                    // apart from "this folder really has no more children" —
+                    // apart from "this folder really has no more children" , 
                     // exactly the kind of silent partial result that drives
                     // the prune massacre.
-                    _logger.LogWarning(ex, "Source server {Status} listing whitelist children of {ParentId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, parentId);
+                    _logger.LogWarning(ex, "Source server {Status} listing whitelist children of {ParentId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, parentId);
                     throw;
                 }
                 catch (Exception ex)
                 {
                     // Transport faults reach here as HttpRequestException, not
                     // ApiException. A `break` would truncate the leaf list the
-                    // same way a swallowed 5xx would — bubble up instead.
+                    // same way a swallowed 5xx would, bubble up instead.
                     _logger.LogWarning(ex, "Whitelist: failed to fetch children of {ParentId}; aborting to protect tracking rows", parentId);
                     throw;
                 }
@@ -683,7 +689,7 @@ public class SourceServerClient : IDisposable
                     }
 
                     // A repeated ID within one parent means page boundaries
-                    // shifted mid-scan; the matching skip on the other side is
+                    // shifted mid-scan. The matching skip on the other side is
                     // invisible and would be pruned as "removed". Throwing
                     // marks the source unavailable, which skips pruning.
                     if (!parentSeen.Add(child.Id.Value))
@@ -705,7 +711,7 @@ public class SourceServerClient : IDisposable
                     }
                     else
                     {
-                        // Folder — descend.
+                        // Folder, descend.
                         queue.Enqueue(child.Id.Value);
                     }
                 }
@@ -758,7 +764,7 @@ public class SourceServerClient : IDisposable
                     config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
                     config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
                     // The API has no by-Id sort, so a fully stable order isn't
-                    // possible; the multi-key sort makes tie order deterministic
+                    // possible. The multi-key sort makes tie order deterministic
                     // and PaginatedFetchUtility's TotalRecordCount check catches
                     // mid-enumeration catalog changes so they can't turn into
                     // silent skips that the prune would read as removals.
@@ -775,7 +781,7 @@ public class SourceServerClient : IDisposable
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
             // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
-            _logger.LogWarning(ex, "Source server {Status} getting items from library {LibraryId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
+            _logger.LogWarning(ex, "Source server {Status} getting items from library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
             throw;
         }
         catch (Exception ex)
@@ -834,7 +840,7 @@ public class SourceServerClient : IDisposable
 
     /// <summary>
     /// Fetches a playlist's members, paged, failing loud on any error or
-    /// mid-scan inconsistency — a truncated member list would mark the
+    /// mid-scan inconsistency, a truncated member list would mark the
     /// missing items as removed and schedule their files for deletion.
     /// </summary>
     private async Task<List<BaseItemDto>> GetPlaylistItemsAsync(Guid playlistId, Guid? userId, CancellationToken cancellationToken)
@@ -869,7 +875,7 @@ public class SourceServerClient : IDisposable
             }
             catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
             {
-                _logger.LogWarning(ex, "Source server {Status} listing playlist {Id} members; aborting refresh to protect tracking rows", ex.ResponseStatusCode, playlistId);
+                _logger.LogWarning(ex, "Source server {Status} listing playlist {Id} members. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, playlistId);
                 throw;
             }
             catch (Exception ex)
@@ -1007,7 +1013,7 @@ public class SourceServerClient : IDisposable
                     }
                     else
                     {
-                        // Non-recursive browse — include standalone files too (Audio, Video)
+                        // Non-recursive browse, include standalone files too (Audio, Video)
                         // since they appear at the top level in some library types
                         config.QueryParameters.Recursive = false;
                         config.QueryParameters.IncludeItemTypes = new[]
@@ -1027,68 +1033,6 @@ public class SourceServerClient : IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get top-level items from library {LibraryId}", libraryId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Gets items from a library with extended metadata fields for metadata sync.
-    /// </summary>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with items including metadata.</returns>
-    public async Task<BaseItemDtoQueryResult?> GetLibraryItemsWithMetadataAsync(
-        Guid libraryId,
-        int startIndex = 0,
-        int limit = 100,
-        ItemFields[]? fields = null,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var client = GetApiClient();
-            return await client.Items.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.ParentId = libraryId;
-                    config.QueryParameters.Recursive = true;
-                    config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
-                    // Caller decides which fields to request based on what
-                    // metadata categories are actually enabled. Sending
-                    // ItemFields.People for a library where the user has
-                    // MetadataSyncPeople=false bloats every page response.
-                    config.QueryParameters.Fields = fields ?? new[]
-                    {
-                        ItemFields.Path,
-                        ItemFields.DateCreated,
-                        ItemFields.Overview,
-                        ItemFields.Genres,
-                        ItemFields.Tags,
-                        ItemFields.Studios,
-                        ItemFields.People,
-                        ItemFields.ProviderIds,
-                        ItemFields.OriginalTitle,
-                        ItemFields.SortName,
-                        ItemFields.ProductionLocations,
-                        ItemFields.Taglines,
-                        ItemFields.Settings,     // For LockedFields, PreferredMetadataLanguage, PreferredMetadataCountryCode
-                        ItemFields.CustomRating  // For CustomRating field
-                    };
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
-                    config.QueryParameters.StartIndex = startIndex;
-                    config.QueryParameters.Limit = limit;
-                },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get items with metadata from library {LibraryId}", libraryId);
             return null;
         }
     }
@@ -1124,7 +1068,7 @@ public class SourceServerClient : IDisposable
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
             // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
-            _logger.LogWarning(ex, "Source server {Status} getting item count for library {LibraryId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
+            _logger.LogWarning(ex, "Source server {Status} getting item count for library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
             throw;
         }
         catch (Exception ex)
@@ -1135,133 +1079,36 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets folder-type items (Series, Season, MusicAlbum, MusicArtist, BoxSet) with full metadata fields.
-    /// Used for syncing metadata on container/parent items.
-    /// </summary>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="startIndex">Pagination start index.</param>
-    /// <param name="limit">Page size.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with folder items.</returns>
-    public async Task<BaseItemDtoQueryResult?> GetLibraryFolderItemsWithMetadataAsync(
-        Guid libraryId,
-        int startIndex = 0,
-        int limit = 100,
-        ItemFields[]? fields = null,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var client = GetApiClient();
-            return await client.Items.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.ParentId = libraryId;
-                    config.QueryParameters.Recursive = true;
-                    config.QueryParameters.IncludeItemTypes = new[]
-                    {
-                        BaseItemKind.Series,
-                        BaseItemKind.Season,
-                        BaseItemKind.MusicAlbum,
-                        BaseItemKind.MusicArtist,
-                        BaseItemKind.BoxSet
-                    };
-                    config.QueryParameters.Fields = fields ?? new[]
-                    {
-                        ItemFields.Path,
-                        ItemFields.DateCreated,
-                        ItemFields.Overview,
-                        ItemFields.Genres,
-                        ItemFields.Tags,
-                        ItemFields.Studios,
-                        ItemFields.People,
-                        ItemFields.ProviderIds,
-                        ItemFields.OriginalTitle,
-                        ItemFields.SortName,
-                        ItemFields.ProductionLocations,
-                        ItemFields.Taglines,
-                        ItemFields.Settings,
-                        ItemFields.CustomRating
-                    };
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
-                    config.QueryParameters.StartIndex = startIndex;
-                    config.QueryParameters.Limit = limit;
-                },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get folder items with metadata from library {LibraryId}", libraryId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Gets the total count of folder-type items in a library.
-    /// </summary>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Total folder item count or 0 if failed.</returns>
-    public async Task<int> GetLibraryFolderItemCountAsync(Guid libraryId, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var client = GetApiClient();
-            var result = await client.Items.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.ParentId = libraryId;
-                    config.QueryParameters.Recursive = true;
-                    config.QueryParameters.IncludeItemTypes = new[]
-                    {
-                        BaseItemKind.Series,
-                        BaseItemKind.Season,
-                        BaseItemKind.MusicAlbum,
-                        BaseItemKind.MusicArtist,
-                        BaseItemKind.BoxSet
-                    };
-                    config.QueryParameters.StartIndex = 0;
-                    config.QueryParameters.Limit = 0;
-                },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-
-            return result?.TotalRecordCount ?? 0;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get folder item count for library {LibraryId}", libraryId);
-            return 0;
-        }
-    }
-
-    /// <summary>
-    /// Lightweight discovery fetch — returns only Id and Path for items in a
+    /// Lightweight discovery fetch, returns only Id and Path for items in a
     /// library. Used by Metadata refresh to determine which source items have
     /// a local correlate before paying for the full metadata payload. The
-    /// per-page response is dramatically smaller than the full
-    /// <c>GetLibraryItemsWithMetadataAsync</c> response (no Genres/Studios/
+    /// per-page response is dramatically smaller than a full metadata page
+    /// (no Genres/Studios/
     /// Tags/People/Overview/etc.), so the discovery scan is cheap even on
     /// huge libraries.
+    /// Every failure throws rather than answering null. Callers page until a short or empty page, so
+    /// a null read as the end of the library would make every item past a failed page look removed
+    /// from the source and be pruned.
     /// </summary>
-    public async Task<BaseItemDtoQueryResult?> GetLibraryItemPathsAsync(
+    /// <param name="libraryId">Library ID.</param>
+    /// <param name="includeTypes">Item kinds to list.</param>
+    /// <param name="startIndex">Starting index for pagination.</param>
+    /// <param name="limit">Maximum items to return.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The page the server answered with.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the server could not be asked or gave no answer.</exception>
+    public async Task<BaseItemDtoQueryResult> GetLibraryItemPathsAsync(
         Guid libraryId,
         BaseItemKind[] includeTypes,
         int startIndex = 0,
         int limit = 1000,
         CancellationToken cancellationToken = default)
     {
+        BaseItemDtoQueryResult? page;
         try
         {
             var client = GetApiClient();
-            return await client.Items.GetAsync(
+            page = await client.Items.GetAsync(
                 config =>
                 {
                     config.QueryParameters.ParentId = libraryId;
@@ -1281,14 +1128,18 @@ public class SourceServerClient : IDisposable
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
             // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
-            _logger.LogWarning(ex, "Source server {Status} getting item paths from library {LibraryId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
+            _logger.LogWarning(ex, "Source server {Status} getting item paths from library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get item paths from library {LibraryId}", libraryId);
-            return null;
+            // A transport fault is no answer at all, the same as a 5xx. Swallowing it handed callers a
+            // null they read as the end of the library.
+            _logger.LogWarning(ex, "Failed to get item paths from library {LibraryId} at index {Index}. Aborting refresh to protect tracking rows", libraryId, startIndex);
+            throw new InvalidOperationException($"Failed to get item paths from library {libraryId} at index {startIndex}: {ex.Message}", ex);
         }
+
+        return page ?? throw new InvalidOperationException($"Source server returned no page for library {libraryId} at index {startIndex}");
     }
 
     /// <summary>
@@ -1336,20 +1187,20 @@ public class SourceServerClient : IDisposable
             }
             catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
             {
-                // Any 4xx/5xx means the source didn't give us a real answer —
+                // Any 4xx/5xx means the source didn't give us a real answer , 
                 // not that the requested items don't exist. Letting this
                 // swallow returns a partial result and downstream pruning
                 // then deletes every local row that "wasn't seen this run."
                 // Bubble up so the refresh aborts before the prune step.
-                _logger.LogWarning(ex, "Source server {Status} fetching items batch at index {Index}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, i);
+                _logger.LogWarning(ex, "Source server {Status} fetching items batch at index {Index}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, i);
                 throw;
             }
             catch (Exception ex)
             {
                 // Transport faults (HttpRequestException, deserialization) are
-                // "no real answer" just like a 5xx — a swallowed chunk here
+                // "no real answer" just like a 5xx, a swallowed chunk here
                 // gets its rows pruned and loses the user's Ignored overrides.
-                _logger.LogWarning(ex, "Failed to fetch items batch starting at index {Index}; aborting refresh to protect tracking rows", i);
+                _logger.LogWarning(ex, "Failed to fetch items batch starting at index {Index}. Aborting refresh to protect tracking rows", i);
                 throw;
             }
         }
@@ -1358,41 +1209,24 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets detailed item info including media sources and streams.
+    /// Reads one item's details, failing when the server cannot be asked and answering null only when it
+    /// answers that it holds no such item. A caller can then tell an item that is gone, which needs
+    /// nothing more, from one it could not reach, which is worth asking again.
     /// </summary>
-    /// <param name="itemId">Item ID.</param>
+    /// <param name="itemId">The item id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Item details or null if not found.</returns>
-    public async Task<BaseItemDto?> GetItemDetailsAsync(Guid itemId, CancellationToken cancellationToken = default)
+    /// <returns>The item, or null when the server holds none by that id.</returns>
+    public async Task<BaseItemDto?> FindItemDetailsAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var client = GetApiClient();
-            var result = await client.Items.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.Ids = new Guid?[] { itemId };
-                    config.QueryParameters.Fields = new[]
-                    {
-                        ItemFields.Path,
-                        ItemFields.DateCreated,
-                        ItemFields.MediaSources,
-                        ItemFields.MediaStreams
-                    };
-                },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-
-            return result?.Items?.FirstOrDefault();
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get item details for {ItemId}", itemId);
-            return null;
-        }
+        var client = GetApiClient();
+        var result = await client.Items.GetAsync(
+            config =>
+            {
+                config.QueryParameters.Ids = new Guid?[] { itemId };
+                config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources, ItemFields.MediaStreams };
+            },
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return result?.Items?.FirstOrDefault();
     }
 
     /// <summary>
@@ -1400,16 +1234,17 @@ public class SourceServerClient : IDisposable
     /// </summary>
     /// <param name="itemId">Item ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Stream of file content and the response Content-Length when the server provided one, or null on failure.</returns>
-    public async Task<(Stream Stream, long? ContentLength)?> DownloadFileAsync(Guid itemId, CancellationToken cancellationToken = default)
+    /// <returns>Stream of file content and the response Content-Length when the server provided one.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the download could not start, with the cause in the message.</exception>
+    public async Task<(Stream Stream, long? ContentLength)> DownloadFileAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
         HttpResponseMessage? response = null;
         HttpRequestMessage? request = null;
         var ownershipTransferred = false;
         try
         {
-            // /Items/{id}/Download — direct-download URL. Authentication is
-            // via the Authorization header only; do NOT mix in api_key /
+            // /Items/{id}/Download, direct-download URL. Authentication is
+            // via the Authorization header only. Do NOT mix in api_key /
             // ApiKey query parameters or X-Emby-Token headers. Per the
             // Jellyfin auth spec (10.11+), sending multiple tokens in one
             // request has undefined precedence and may be rejected outright
@@ -1460,71 +1295,63 @@ public class SourceServerClient : IDisposable
     /// subtitle streams: they are the only external stream type Jellyfin
     /// exposes a download route for
     /// (<c>/Videos/{item}/{mediaSource}/Subtitles/{index}/Stream.{format}</c>).
-    /// External audio tracks are skipped with a log — the previous
+    /// External audio tracks are skipped with a log, the previous
     /// path-parameter approach silently served the item's main video file in
     /// their place, corrupting the companion on disk.
+    /// A failure to read the item throws instead of answering an empty list. An empty list means the
+    /// source has no external subtitles, and a caller replacing a file needs to tell that apart from
+    /// a source it could not ask.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of companion file info.</returns>
+    /// <returns>List of companion file info, empty when the item has none or the source holds no such item.</returns>
     public async Task<List<CompanionFileInfo>> GetCompanionFilesAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
         var companions = new List<CompanionFileInfo>();
 
-        try
+        var item = await FindItemDetailsAsync(itemId, cancellationToken).ConfigureAwait(false);
+        if (item?.MediaSources == null || item.MediaSources.Count == 0)
         {
-            var item = await GetItemDetailsAsync(itemId, cancellationToken).ConfigureAwait(false);
-            if (item?.MediaSources == null || item.MediaSources.Count == 0)
-            {
-                return companions;
-            }
-
-            var mediaSource = item.MediaSources.FirstOrDefault();
-            if (mediaSource?.MediaStreams == null)
-            {
-                return companions;
-            }
-
-            var skippedNonSubtitle = 0;
-            foreach (var stream in mediaSource.MediaStreams)
-            {
-                if (stream.IsExternal != true || string.IsNullOrEmpty(stream.Path))
-                {
-                    continue;
-                }
-
-                if (stream.Type != MediaStream_Type.Subtitle)
-                {
-                    skippedNonSubtitle++;
-                    continue;
-                }
-
-                companions.Add(new CompanionFileInfo
-                {
-                    SourcePath = stream.Path!,
-                    FileName = Path.GetFileName(stream.Path)!,
-                    Language = stream.Language,
-                    Codec = stream.Codec,
-                    IsExternal = true,
-                    StreamIndex = stream.Index ?? 0,
-                    MediaSourceId = mediaSource.Id ?? itemId.ToString("N")
-                });
-            }
-
-            if (skippedNonSubtitle > 0)
-            {
-                _logger.LogInformation(
-                    "Item {ItemId} has {Count} external non-subtitle stream(s) (e.g. audio) that cannot be downloaded via the API; skipping",
-                    itemId, skippedNonSubtitle);
-            }
+            return companions;
         }
-        catch (OperationCanceledException)
+
+        var mediaSource = item.MediaSources.FirstOrDefault();
+        if (mediaSource?.MediaStreams == null)
         {
-            throw;
+            return companions;
         }
-        catch (Exception ex)
+
+        var skippedNonSubtitle = 0;
+        foreach (var stream in mediaSource.MediaStreams)
         {
-            _logger.LogError(ex, "Failed to get companion files for {ItemId}", itemId);
+            if (stream.IsExternal != true || string.IsNullOrEmpty(stream.Path))
+            {
+                continue;
+            }
+
+            if (stream.Type != MediaStream_Type.Subtitle)
+            {
+                skippedNonSubtitle++;
+                continue;
+            }
+
+            companions.Add(new CompanionFileInfo
+            {
+                SourcePath = stream.Path!,
+                FileName = Path.GetFileName(stream.Path)!,
+                Language = stream.Language,
+                Codec = stream.Codec,
+                IsExternal = true,
+                StreamIndex = stream.Index ?? 0,
+                MediaSourceId = mediaSource.Id ?? itemId.ToString("N")
+            });
+        }
+
+        if (skippedNonSubtitle > 0)
+        {
+            _logger.LogInformation(
+                "Item {ItemId} has {Count} external non-subtitle stream(s) (e.g. audio) that cannot be downloaded via the API. Skipping",
+                itemId, skippedNonSubtitle);
         }
 
         return companions;
@@ -1536,8 +1363,8 @@ public class SourceServerClient : IDisposable
     /// route. The previously used
     /// <c>/Videos/{id}/Subtitles/Stream?path=…</c> shape returns 405 on
     /// Jellyfin 10.11, and its <c>/Items/{id}/File?path=…</c> fallback
-    /// ignores the path parameter and serves the item's main media file —
-    /// verified against a live 10.11 server — which wrote video bytes into
+    /// ignores the path parameter and serves the item's main media file , 
+    /// verified against a live 10.11 server, which wrote video bytes into
     /// <c>.srt</c> companions.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
@@ -1620,7 +1447,7 @@ public class SourceServerClient : IDisposable
             // Any 4xx/5xx: bubble up so the User Refresh treats it as source-
             // unavailable and skips pruning, rather than deleting rows for a
             // user it merely couldn't fetch.
-            _logger.LogWarning(ex, "Source server {Status} getting user details for {UserId}; refresh will skip pruning to protect tracking rows", ex.ResponseStatusCode, userId);
+            _logger.LogWarning(ex, "Source server {Status} getting user details for {UserId}. Refresh will skip pruning to protect tracking rows", ex.ResponseStatusCode, userId);
             throw;
         }
         catch (Exception ex)
@@ -1631,11 +1458,14 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets a user's profile image as a stream.
+    /// Gets a user's profile image as a stream. Only a 404 answers null. Every other failure throws,
+    /// because callers read null as "the source removed this image" and clear the local one, so a
+    /// passing 503 would otherwise delete a profile picture.
     /// </summary>
     /// <param name="userId">User ID on the source server.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Image stream or null if not found.</returns>
+    /// <returns>Image stream, or null when the source answers that the user has no image.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the image could not be read.</exception>
     public async Task<Stream?> GetUserImageAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         HttpResponseMessage? response = null;
@@ -1670,8 +1500,8 @@ public class SourceServerClient : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get profile image for user {UserId}", userId);
-            return null;
+            _logger.LogWarning(ex, "Failed to get profile image for user {UserId}", userId);
+            throw new InvalidOperationException($"Failed to get profile image for user {userId}: {ex.Message}", ex);
         }
         finally
         {
@@ -1688,7 +1518,8 @@ public class SourceServerClient : IDisposable
     /// </summary>
     /// <param name="userId">User ID on the source server.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A tuple of (hash, size), or (null, null) if no image or on error.</returns>
+    /// <returns>A tuple of (hash, size), or (null, null) when the source answers that the user has no image.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the image could not be read, so a failure is never taken for a removed image.</exception>
     public async Task<(string? Hash, long? Size)> GetUserImageHashAndSizeAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         try
@@ -1719,10 +1550,15 @@ public class SourceServerClient : IDisposable
         {
             throw;
         }
+        catch (InvalidOperationException)
+        {
+            // GetUserImageAsync already logged and wrapped the cause.
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to get profile image hash and size for user {UserId}", userId);
-            return (null, null);
+            _logger.LogWarning(ex, "Failed to get profile image hash and size for user {UserId}", userId);
+            throw new InvalidOperationException($"Failed to read profile image for user {userId}: {ex.Message}", ex);
         }
     }
 
@@ -1749,7 +1585,7 @@ public class SourceServerClient : IDisposable
             // image comparison degrades to count-only, and genuine image
             // changes stop being detected. A 403 here (non-admin token) is
             // silent otherwise.
-            _logger.LogWarning(ex, "Failed to get image info for item {ItemId}; image sizes will be unavailable and image changes may go undetected", itemId);
+            _logger.LogWarning(ex, "Failed to get image info for item {ItemId}. Image sizes will be unavailable and image changes may go undetected", itemId);
             return null;
         }
     }
@@ -1813,7 +1649,7 @@ public class SourceServerClient : IDisposable
         HttpRequestMessage? request = null;
 
         // Ownership flips to the returned stream wrapper only on the success
-        // path; the finally cleans up every other exit. The previous
+        // path. The finally cleans up every other exit. The previous
         // per-branch `response.Dispose(); request.Dispose();` pairs leaked the
         // request whenever the first disposal (or the log call before it)
         // threw.
@@ -1849,7 +1685,7 @@ public class SourceServerClient : IDisposable
         }
         catch (Exception ex)
         {
-            // Bumped from LogDebug — failures here were invisible at the
+            // Bumped from LogDebug, failures here were invisible at the
             // default Jellyfin log level and made "verify says local empty,
             // source non-empty" failures impossible to root-cause without
             // turning on plugin debug logs.
@@ -1878,7 +1714,7 @@ public class SourceServerClient : IDisposable
         }
         catch (Exception)
         {
-            // Already disposed or shutting down — nothing useful to do.
+            // Already disposed or shutting down, nothing useful to do.
         }
     }
 
@@ -1890,7 +1726,7 @@ public class SourceServerClient : IDisposable
     /// join instead of one HTTP call per person. <c>/Persons</c> ignores
     /// <c>StartIndex</c> so the catalog cannot be paginated, but unlike
     /// <c>/Items?recursive=true</c> it is not scoped to the requesting
-    /// user's libraries — Person items live outside library folders, so the
+    /// user's libraries, Person items live outside library folders, so the
     /// Items route returns an empty 200 for non-admin tokens (which is how
     /// 10.11.64.0 wiped the People tracking table). Response can be tens of
     /// MB on libraries with 100k+ persons, but it is the only route that
@@ -1908,7 +1744,7 @@ public class SourceServerClient : IDisposable
             var result = await client.Persons.GetAsync(
                 config =>
                 {
-                    // No searchTerm and no Limit — request the entire catalog.
+                    // No searchTerm and no Limit, request the entire catalog.
                     config.QueryParameters.Fields = new[]
                     {
                         ItemFields.Overview,
@@ -1918,7 +1754,7 @@ public class SourceServerClient : IDisposable
                         ItemFields.SortName,
                         ItemFields.DateCreated,
                         ItemFields.ProductionLocations,
-                        // Settings populates LockData + LockedFields;
+                        // Settings populates LockData + LockedFields.
                         // without it those come back null while local has
                         // them populated, producing a perpetual false diff.
                         ItemFields.Settings
@@ -1928,7 +1764,7 @@ public class SourceServerClient : IDisposable
 
             if (result?.Items == null)
             {
-                // A null response is a failure, not an empty catalog —
+                // A null response is a failure, not an empty catalog , 
                 // treating it as empty would prune every tracking row.
                 throw new InvalidOperationException(
                     "Source server returned no response fetching the Persons catalog");
@@ -1942,11 +1778,11 @@ public class SourceServerClient : IDisposable
         }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx isn't "source has no persons" — it's "source didn't
+            // Any 4xx/5xx isn't "source has no persons", it's "source didn't
             // give us a real answer." Returning empty here makes the People
             // refresh prune every local tracking row. Bubble up so the refresh
             // aborts before prune.
-            _logger.LogWarning(ex, "Source server {Status} bulk-fetching Persons; aborting refresh to protect tracking rows", ex.ResponseStatusCode);
+            _logger.LogWarning(ex, "Source server {Status} bulk-fetching Persons. Aborting refresh to protect tracking rows", ex.ResponseStatusCode);
             throw;
         }
         catch (Exception ex)
@@ -1956,17 +1792,16 @@ public class SourceServerClient : IDisposable
             // persons." The People refresh has no incomplete-discovery prune
             // guard, so returning empty here would prune every tracking row.
             // Bubble up so the refresh aborts before prune.
-            _logger.LogWarning(ex, "Failed to bulk-fetch Persons from source server; aborting refresh to protect tracking rows");
+            _logger.LogWarning(ex, "Failed to bulk-fetch Persons from source server. Aborting refresh to protect tracking rows");
             throw;
         }
     }
-
 
     // ===== History Sync Methods =====
 
     /// <summary>
     /// Batch-fetches items by ID with the specified user's UserData populated.
-    /// Used by the History refresh task after the local-first discovery pass —
+    /// Used by the History refresh task after the local-first discovery pass , 
     /// only items whose translated path exists locally get user-data fetched,
     /// rather than the prior approach of pulling every user-played item per
     /// (user × library) and discarding most on path mismatch.
@@ -2006,7 +1841,7 @@ public class SourceServerClient : IDisposable
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
             // Any 4xx/5xx: bubble up so the History Refresh aborts before prune.
-            _logger.LogWarning(ex, "Source server {Status} fetching user-data items for user {UserId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId);
+            _logger.LogWarning(ex, "Source server {Status} fetching user-data items for user {UserId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId);
             throw;
         }
         catch (Exception ex)
@@ -2017,60 +1852,9 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets items with user playback data for a specific user in a library.
-    /// Uses the Items endpoint with UserId parameter to get user-specific data.
-    /// </summary>
-    /// <param name="userId">User ID on the source server.</param>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with items including user data.</returns>
-    public async Task<BaseItemDtoQueryResult?> GetUserLibraryItemsAsync(
-        Guid userId,
-        Guid libraryId,
-        int startIndex = 0,
-        int limit = 100,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var client = GetApiClient();
-            return await client.Items.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.UserId = userId;
-                    config.QueryParameters.ParentId = libraryId;
-                    config.QueryParameters.Recursive = true;
-                    config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
-                    config.QueryParameters.Fields = new[]
-                    {
-                        ItemFields.Path,
-                        ItemFields.DateCreated,
-                        ItemFields.MediaSources
-                    };
-                    config.QueryParameters.EnableUserData = true;
-                    config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
-                    config.QueryParameters.StartIndex = startIndex;
-                    config.QueryParameters.Limit = limit;
-                },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get user items for user {UserId} in library {LibraryId}", userId, libraryId);
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Fetches every item ID a user has played within a library, paginated.
     /// Throws on transient failure so callers don't conflate "error" with
-    /// "user played nothing" — a silent empty return would let downstream
+    /// "user played nothing", a silent empty return would let downstream
     /// filters skip items they shouldn't.
     /// </summary>
     /// <exception cref="InvalidOperationException">
@@ -2095,7 +1879,7 @@ public class SourceServerClient : IDisposable
             {
                 // GetUserPlayedItemsAsync returns null on a logged transient
                 // failure. Treating that as end-of-list would silently classify
-                // every item as "user did not play this" — wrong answer.
+                // every item as "user did not play this", wrong answer.
                 throw new InvalidOperationException(
                     $"Failed to fetch played items page for user {userId} in library {libraryId} at index {startIndex}");
             }
@@ -2181,7 +1965,7 @@ public class SourceServerClient : IDisposable
             // Any 4xx/5xx: bubble up so the History Refresh aborts before prune.
             // GetUserPlayedItemIdsAsync already throws on null page, so a rethrow
             // here propagates the same way.
-            _logger.LogWarning(ex, "Source server {Status} getting played items for user {UserId} in library {LibraryId}; aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId, libraryId);
+            _logger.LogWarning(ex, "Source server {Status} getting played items for user {UserId} in library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId, libraryId);
             throw;
         }
         catch (Exception ex)
@@ -2192,52 +1976,11 @@ public class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets count of items with history data for a user in a library.
-    /// </summary>
-    /// <param name="userId">User ID on the source server.</param>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Total count of items with history.</returns>
-    public async Task<int> GetUserLibraryItemCountAsync(
-        Guid userId,
-        Guid libraryId,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var client = GetApiClient();
-            var result = await client.Items.GetAsync(
-                config =>
-                {
-                    config.QueryParameters.UserId = userId;
-                    config.QueryParameters.ParentId = libraryId;
-                    config.QueryParameters.Recursive = true;
-                    config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
-                    config.QueryParameters.StartIndex = 0;
-                    config.QueryParameters.Limit = 0;
-                },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-
-            return result?.TotalRecordCount ?? 0;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get item count for user {UserId} in library {LibraryId}", userId, libraryId);
-            return 0;
-        }
-    }
-
-    /// <summary>
-    /// <summary>
     /// Adds the canonical Jellyfin <c>Authorization: MediaBrowser ...</c>
     /// header to a request. Format per Jellyfin's auth spec:
     /// <c>MediaBrowser key="value", key2="value2"</c>. Per Jellyfin docs,
     /// the Authorization header is the only non-deprecated method for
-    /// transmitting credentials; <c>X-Emby-Token</c>, <c>X-MediaBrowser-Token</c>,
+    /// transmitting credentials. <c>X-Emby-Token</c>, <c>X-MediaBrowser-Token</c>,
     /// <c>X-Emby-Authorization</c>, and the <c>api_key</c> query parameter
     /// are all deprecated and may be rejected by Jellyfin servers with
     /// <c>EnableLegacyAuthorization=false</c>.
@@ -2285,8 +2028,11 @@ public class SourceServerClient : IDisposable
 
     // Any signed in user may read the system info, so that call says nothing about elevation. The
     // current user's own policy does. An API key has no user behind it and the call fails, and an API
-    // key is always elevated, so a failure there means administrator.
-    private static async Task<bool> IsAdministratorAsync(JellyfinApiClient client, CancellationToken cancellationToken)
+    // key is always elevated, so a failure there means administrator. Callers use the answer for the
+    // access label and to explain a limited link, while the peer's own endpoints still enforce
+    // elevation, so guessing administrator on failure grants nothing. A failure that is not the
+    // expected API key answer is logged so a wrong label can be traced.
+    private async Task<bool> IsAdministratorAsync(JellyfinApiClient client, CancellationToken cancellationToken)
     {
         try
         {
@@ -2297,8 +2043,16 @@ public class SourceServerClient : IDisposable
         {
             throw;
         }
-        catch (Exception)
+        catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode is >= 400 and < 500)
         {
+            // An API key has no user, so the server refuses this call. That is the expected answer for
+            // an API key and says the token is elevated.
+            _logger.LogDebug(ex, "Reading the current user returned {Status}, treating the token as an API key with administrator rights", ex.ResponseStatusCode);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read the current user's policy, reporting administrator access without confirming it: {Reason}", ex.Message);
             return true;
         }
     }
@@ -2444,12 +2198,14 @@ public class SourceServerClient : IDisposable
         return status is >= 200 and < 300;
     }
 
-    /// <summary>Reads the peer's inbound hint queue, to find out whether hints sent earlier are still held.</summary>
+    /// <summary>Reads the peer's inbound queue and completions, only those that came from one server when it is named.</summary>
+    /// <param name="fromServerId">This server's id, so the peer answers with this server's rows only, or null for all.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The queue, or null when the peer did not answer with one.</returns>
-    public async Task<Models.Queue.QueueStatusResponse?> GetPeerQueueStatusAsync(CancellationToken cancellationToken = default)
+    /// <returns>The status, or null when it could not be read.</returns>
+    public async Task<Models.Queue.QueueStatusResponse?> GetPeerQueueStatusAsync(string? fromServerId, CancellationToken cancellationToken)
     {
-        var (_, parsed, _) = await PeerRequestAsync<Models.Queue.QueueStatusResponse>(HttpMethod.Get, "/ServerSync/Peer/Status", null, cancellationToken).ConfigureAwait(false);
+        var path = string.IsNullOrEmpty(fromServerId) ? "/ServerSync/Peer/Status" : "/ServerSync/Peer/Status?serverId=" + Uri.EscapeDataString(fromServerId);
+        var (_, parsed, _) = await PeerRequestAsync<Models.Queue.QueueStatusResponse>(HttpMethod.Get, path, null, cancellationToken).ConfigureAwait(false);
         return parsed;
     }
 
@@ -2488,7 +2244,25 @@ public class SourceServerClient : IDisposable
         return await PeerRequestOnceAsync<TResponse>(method, pathAndQuery, body, cancellationToken).ConfigureAwait(false);
     }
 
+    // One call with its own deadline over sending and reading. A deadline that passes is reported as a
+    // failed request rather than a cancellation, since only the caller's own token means "stop": the
+    // hint workers treat a cancellation as shutdown, and one slow peer must never stop them.
     private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestOnceAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
+        where TResponse : class
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(Services.Queue.HintProtocol.PeerCallTimeout);
+        try
+        {
+            return await PeerRequestCoreAsync<TResponse>(method, pathAndQuery, body, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new HttpRequestException($"The peer at {_serverUrl} did not finish answering {pathAndQuery.Split('?')[0]} within {Services.Queue.HintProtocol.PeerCallTimeout.TotalMinutes:0} minutes", ex);
+        }
+    }
+
+    private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestCoreAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
         where TResponse : class
     {
         using var request = new HttpRequestMessage(method, _serverUrl + pathAndQuery);
@@ -2596,7 +2370,7 @@ public class SourceServerClient : IDisposable
                 {
                     _disposed = true;
 
-                    // Do NOT dispose _httpClient — it is externally owned (from IHttpClientFactory).
+                    // Do NOT dispose _httpClient, it is externally owned (from IHttpClientFactory).
                     // Dispose the API client wrapper if it was created.
                     (_apiClient as IDisposable)?.Dispose();
                     _apiClient = null;
@@ -2671,7 +2445,7 @@ public class SourceServerClient : IDisposable
         {
             // Wrap the inner read with a cancellation registration that
             // forcibly disposes the response. Without this, a hung server can
-            // keep an inner HttpConnection read blocked past cancellation —
+            // keep an inner HttpConnection read blocked past cancellation , 
             // HttpClient.Timeout doesn't apply once response headers are in.
             using var registration = cancellationToken.Register(static state => DisposeQuiet((HttpResponseMessage)state!), _response);
             return await _inner.ReadAsync(buffer.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
@@ -2691,7 +2465,7 @@ public class SourceServerClient : IDisposable
             }
             catch
             {
-                // Already disposed or in shutdown — nothing useful to do here.
+                // Already disposed or in shutdown, nothing useful to do here.
             }
         }
     }

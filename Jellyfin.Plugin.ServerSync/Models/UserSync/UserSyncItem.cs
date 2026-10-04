@@ -30,7 +30,7 @@ public static class UserPropertyCategory
 /// <summary>
 /// One property sync record per (user mapping, category). Policy and
 /// Configuration use an internal <see cref="SyncableValue{T}"/> for change
-/// detection; ProfileImage uses its own hash-pair since its "value" is the
+/// detection. ProfileImage uses its own hash-pair since its "value" is the
 /// image bytes' fingerprint.
 /// </summary>
 public class UserSyncItem : SyncRecord
@@ -68,7 +68,7 @@ public class UserSyncItem : SyncRecord
 
     /// <summary>
     /// Raw source value (JSON for Policy/Config, display string for ProfileImage).
-    /// Display-only — change detection uses <see cref="Value"/> for
+    /// Display-only, change detection uses <see cref="Value"/> for
     /// Policy/Config and the image-hash fields for ProfileImage.
     /// </summary>
     public string? SourceValue { get; set; }
@@ -87,7 +87,7 @@ public class UserSyncItem : SyncRecord
 
     /// <summary>
     /// Computed apply target (source-wins with library-ID translation for
-    /// Policy; identical to source for Configuration). Delegated to
+    /// Policy. Identical to source for Configuration). Delegated to
     /// <see cref="Value"/>'s <see cref="SyncableValue{T}.Source"/>. Use
     /// <see cref="UpdateMergedValue"/> in the refresh build path so the
     /// source-hash gets recomputed via the comparator.

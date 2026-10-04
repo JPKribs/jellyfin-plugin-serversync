@@ -26,6 +26,7 @@ public class ServersController : ControllerBase
     private readonly PeopleSyncTableManager _people;
     private readonly UserSyncTableManager _users;
     private readonly OutboundHintStore _outbound;
+    private readonly InboundHintStore _inbound;
     private readonly Services.Peer.PeerPairingStore _pairings;
     private readonly ILogger<ServersController> _logger;
 
@@ -38,6 +39,7 @@ public class ServersController : ControllerBase
     /// <param name="people">The people table.</param>
     /// <param name="users">The user table.</param>
     /// <param name="outbound">The outbound hint store.</param>
+    /// <param name="inbound">The inbound hint store.</param>
     /// <param name="pairings">The pairing secrets.</param>
     /// <param name="logger">Logger.</param>
     public ServersController(
@@ -47,10 +49,12 @@ public class ServersController : ControllerBase
         PeopleSyncTableManager people,
         UserSyncTableManager users,
         OutboundHintStore outbound,
+        InboundHintStore inbound,
         Services.Peer.PeerPairingStore pairings,
         ILogger<ServersController> logger)
     {
         _pairings = pairings;
+        _inbound = inbound;
         _content = content;
         _history = history;
         _metadata = metadata;
@@ -62,11 +66,12 @@ public class ServersController : ControllerBase
 
     /// <summary>Removes every sync row and queued hint that came from one server entry.</summary>
     /// <param name="key">The entry key.</param>
+    /// <param name="serverId">The removed server's id, so hints it sent and that wait here go too.</param>
     /// <returns>How many rows were removed per table.</returns>
     [HttpDelete("{key}/Rows")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult<ServerRowsRemoved> ForgetRows([FromRoute] string key)
+    public ActionResult<ServerRowsRemoved> ForgetRows([FromRoute] string key, [FromQuery] string? serverId)
     {
         if (string.IsNullOrWhiteSpace(key))
         {
@@ -80,7 +85,7 @@ public class ServersController : ControllerBase
             Metadata = _metadata.DeleteByServerKey(key),
             People = _people.DeleteByServerKey(key),
             Users = _users.DeleteByServerKey(key),
-            Hints = _outbound.DeleteForPeer(key)
+            Hints = _outbound.DeleteForPeer(key) + (string.IsNullOrWhiteSpace(serverId) ? 0 : _inbound.DeleteForOrigin(serverId))
         };
         _pairings.Remove(key);
         _logger.LogInformation(

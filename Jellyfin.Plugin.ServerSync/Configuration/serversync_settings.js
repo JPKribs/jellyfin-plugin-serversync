@@ -22,13 +22,15 @@ export default function (view) {
     // ============================================
 
     var ServerSyncShared = null;
-    var createPaginatedTable = null;
-    var _filterTableSeq = 0;
-    var _filterThumbSeq = 0;
+
+    // Helpers called by bare name, taken from the shared module once it loads. Every call happens after
+    // the load, from a viewshow handler that waits for it.
+    var escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor;
+
     // Relative specifier so a server hosted under a base URL still resolves it.
     var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
-        createPaginatedTable = shared.createPaginatedTable;
+        ({ escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor } = ServerSyncShared.pageHelpers());
     });
 
     // ============================================
@@ -37,88 +39,14 @@ export default function (view) {
     var _initialized = false;
 
     var currentConfig = null;
-    var sourceLibraries = [];
-    var localLibraries = [];
-    var sourceUsers = [];
-    var localUsers = [];
 
-    // ============================================
-    // UTILITY ALIASES (delegate to shared module)
-    // ============================================
-
-    function escapeHtml(str) {
-        return ServerSyncShared.escapeHtml(str);
-    }
-
-    function apiRequest(endpoint, method, data) {
-        return ServerSyncShared.apiRequest(endpoint, method, data);
-    }
-
-    function setVisible(elementId, visible) {
-        ServerSyncShared.setVisible(elementId, visible);
-    }
-
-    function bindClick(id, handler) {
-        return ServerSyncShared.bindClick(id, handler);
-    }
-
-    function getEl(id) {
-        return view.querySelector('#' + id);
-    }
-
-    function setChecked(id, value) {
-        ServerSyncShared.setChecked(id, value);
-    }
-
-    function getChecked(id) {
-        return ServerSyncShared.getChecked(id);
-    }
-
-    function setValue(id, value) {
-        var el = getEl(id);
-        if (el) el.value = value;
-    }
-
-    function getValue(id, fallback) {
-        var el = getEl(id);
-        return el ? el.value : (fallback || '');
-    }
-
-    function getIntValue(id, fallback) {
-        var v = parseInt(getValue(id, ''), 10);
-        return isNaN(v) ? fallback : v;
-    }
-
-    // Section saves re-fetch the config and apply only this section's
-    // fields: a page-load snapshot posted whole would clobber values other
-    // writers changed since — task-written timestamps/failure records and
-    // the other dashboard tab's sections.
+    // The config is replaced only once a save has landed, so the page never holds a change the server
+    // did not keep.
     function saveSection(mutator, successMessage, failureMessage) {
-        return ServerSyncShared.getConfig().then(function (config) {
-            mutator(config);
-            currentConfig = config;
-            return ServerSyncShared.saveConfig(config);
-        }).then(function () {
-            Dashboard.alert(successMessage);
-        }).catch(function () {
-            Dashboard.alert(failureMessage);
+        return ServerSyncShared.saveSection(mutator, successMessage, failureMessage).then(function (saved) {
+            if (saved) currentConfig = saved;
+            return !!saved;
         });
-    }
-
-    // ============================================
-    // SERVER LOOKUPS (the Servers tab owns the list; the content filter only reads it)
-    // ============================================
-
-    var servers = [];
-
-    function requestFor(server, apiKeyOverride) {
-        return {
-            ServerUrl: server.Url,
-            ApiKey: apiKeyOverride || (server.ApiKey ? server.ApiKey : ''),
-            ServerKey: server.Key,
-            AllowPrivateNetwork: server.AllowPrivateNetwork !== false,
-            AuthenticatedUserId: server.AuthenticatedUserId || null
-        };
     }
 
     // ============================================
@@ -129,10 +57,9 @@ export default function (view) {
     // tagged with its server, since user ids are only meaningful per server.
     var watchedFilterUsers = [];
 
+    // The Servers page owns the server list. This page only reads it from the config.
     function fetchWatchedFilterUsers() {
-        var scanServers = servers.filter(function (s) {
-            return s.IsEnabled !== false && s.Url && s.ApiKey && (s.Mode === 'Pull' || s.Mode === 'Sync' || !s.Mode);
-        });
+        var scanServers = ServerSyncShared.scanServers(currentConfig);
         return Promise.all(scanServers.map(function (server) {
             return apiRequest('GetSourceUsers', 'POST', requestFor(server)).then(function (users) {
                 return (users || []).map(function (u) {
@@ -272,7 +199,12 @@ export default function (view) {
             config.MirrorSyncedCollections = getChecked('chkMirrorSyncedCollections');
             config.IncludeCompanionFiles = getChecked('chkIncludeCompanionFiles');
             config.SkipWatchedByAllUsers = getChecked('chkSkipWatchedByAllUsers');
-            config.WatchedFilterUserIds = collectWatchedFilterUsers();
+            // Only the users on screen can be judged. A saved id whose server did not answer this time is
+            // kept as it was, so a failed user list never clears the filter and lets watched files back in.
+            var shown = {};
+            (watchedFilterUsers || []).forEach(function (u) { shown[u.Id] = true; });
+            var unseen = (config.WatchedFilterUserIds || []).filter(function (id) { return !shown[id]; });
+            config.WatchedFilterUserIds = collectWatchedFilterUsers().concat(unseen);
             config.DownloadNewContentMode = getValue('selDownloadNewContentMode', 'Enabled');
             config.ReplaceExistingContentMode = getValue('selReplaceExistingContentMode', 'Enabled');
             config.DeleteMissingContentMode = getValue('selDeleteMissingContentMode', 'Disabled');
@@ -406,7 +338,6 @@ export default function (view) {
     function loadConfig() {
         ServerSyncShared.getConfig().then(function(config) {
             currentConfig = config;
-            servers = config.Servers || [];
 
             loadContentSettings(config);
             loadHistorySettings(config);

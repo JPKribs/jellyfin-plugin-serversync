@@ -26,6 +26,10 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <!-- Microsoft.Data.Sqlite 10.0.10 pulls the native SQLite build 2.1.11, which carries a high severity
+         advisory (GHSA-2m69-gcr7-jv3q). The patched build is pinned here; the plugin itself uses the
+         SQLite that ships with Jellyfin. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
 
     <!--
       Tests touch types from the plugin's Jellyfin dependencies (BaseItemDto

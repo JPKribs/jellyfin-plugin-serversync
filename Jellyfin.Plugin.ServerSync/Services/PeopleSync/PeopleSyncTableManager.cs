@@ -55,7 +55,7 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
         item.LocalPersonId = ReadNullableString(reader, "LocalPersonId");
 
         // Bridge property setters are skipped to avoid recomputing hashes from
-        // stored values; we set the underlying SyncableValue fields directly.
+        // stored values. We set the underlying SyncableValue fields directly.
         item.Metadata.Source = ReadNullableString(reader, "SourceMetadataValue");
         item.Metadata.Local = ReadNullableString(reader, "LocalMetadataValue");
         item.Metadata.SourceHash = ReadNullableString(reader, "SourceMetadataHash");
@@ -167,7 +167,23 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
         ArgumentNullException.ThrowIfNull(request);
         var page = Math.Max(1, request.Page);
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
-        var skip = (page - 1) * pageSize;
+        return SearchPaginated(request.SearchTerm, request.StatusFilter, (page - 1) * pageSize, pageSize);
+    }
+
+    /// <summary>
+    /// Returns the rows starting at an offset. Paging by offset rather than page number keeps a skip
+    /// that is not a multiple of the page size on the rows the caller asked for.
+    /// </summary>
+    /// <param name="searchTerm">Optional person name search.</param>
+    /// <param name="status">Optional status filter.</param>
+    /// <param name="skip">Rows to skip.</param>
+    /// <param name="take">Rows to return, at most 200.</param>
+    /// <returns>The page of rows.</returns>
+    public PagedResult<PeopleSyncItem> SearchPaginated(string? searchTerm, SyncStatus? status, int skip, int take)
+    {
+        skip = Math.Max(0, skip);
+        var pageSize = Math.Clamp(take, 1, 200);
+        var request = new PaginationRequest { SearchTerm = searchTerm, StatusFilter = status };
 
         return ExecuteRead(
             conn =>

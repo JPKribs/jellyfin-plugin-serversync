@@ -17,7 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// <summary>
 /// Per-record build helpers for User Sync. Builds one
 /// <see cref="UserSyncItem"/> for one (mapping, category) tuple, preserving
-/// LastSyncTime and Ignored status from any existing record. No DB writes —
+/// LastSyncTime and Ignored status from any existing record. No DB writes , 
 /// the caller (the Refresh task base) upserts.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
@@ -36,7 +36,7 @@ public class UserSyncTableService
     /// <summary>
     /// Builds a <see cref="UserSyncItem"/> for one (mapping, category) tuple.
     /// Returns null for an unknown category. The category-specific helpers
-    /// are private — callers go through this single entry point so adding a
+    /// are private, callers go through this single entry point so adding a
     /// category is a switch-arm addition rather than a new public method.
     /// </summary>
     public async Task<UserSyncItem?> BuildRecordAsync(
@@ -139,7 +139,26 @@ public class UserSyncTableService
 
         if (!string.IsNullOrEmpty(sourceUser.PrimaryImageTag))
         {
-            (sourceImageHash, sourceImageSize) = await sourceClient.GetUserImageHashAndSizeAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                (sourceImageHash, sourceImageSize) = await sourceClient.GetUserImageHashAndSizeAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (!string.IsNullOrEmpty(existingItem?.SourceImageHash))
+            {
+                // The source says the user has an image but it could not be read. A null hash here
+                // would read as "the source removed its image" and the sync would clear the local
+                // one, so keep what the last good read recorded and let the next refresh try again.
+                _logger.LogWarning(ex, "ProfileImage: could not read the source image for {User}, keeping the last known hash", sourceUser.Name);
+                sourceImageHash = existingItem!.SourceImageHash;
+                sourceImageSize = existingItem.SourceImageSize;
+            }
+
+            // With no earlier hash there is nothing to keep, so the exception fails this row and the
+            // refresh skips its prune for the run.
         }
 
         if (localUser.ProfileImage != null && !string.IsNullOrEmpty(localUser.ProfileImage.Path))

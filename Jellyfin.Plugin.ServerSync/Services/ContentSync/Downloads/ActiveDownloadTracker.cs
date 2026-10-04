@@ -40,14 +40,6 @@ public static class ActiveDownloadTracker
     }
 
     /// <summary>
-    /// Checks if a source item is currently being downloaded.
-    /// </summary>
-    public static bool IsDownloading(string sourceItemId)
-    {
-        return ActiveDownloads.ContainsKey(sourceItemId);
-    }
-
-    /// <summary>
     /// Checks if a temp file path is currently in use by an active download.
     /// </summary>
     public static bool IsTempFileInUse(string tempFilePath)
@@ -86,11 +78,6 @@ public static class ActiveDownloadTracker
 
         return staleEntries.Count;
     }
-
-    /// <summary>
-    /// Gets the current count of active downloads.
-    /// </summary>
-    public static int Count => ActiveDownloads.Count;
 
     /// <summary>
     /// Information about an active download.

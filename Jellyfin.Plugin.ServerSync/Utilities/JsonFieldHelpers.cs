@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 public static class JsonFieldHelpers
 {
     /// <summary>
-    /// Reads a string field. Skips when the key is absent; otherwise passes the value
+    /// Reads a string field. Skips when the key is absent. Otherwise passes the value
     /// (which may be null) to <paramref name="assign"/>.
     /// </summary>
     public static bool AssignString(Dictionary<string, JsonElement> metadata, string key, Func<string?, bool> assign)
@@ -69,7 +69,7 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads a string array. Returns an empty array for missing or non-array input;
+    /// Reads a string array. Returns an empty array for missing or non-array input.
     /// drops non-string entries.
     /// </summary>
     public static string[] ReadStringArray(JsonElement v)
@@ -96,7 +96,7 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads an enum array. Returns an empty array for missing or non-array input;
+    /// Reads an enum array. Returns an empty array for missing or non-array input.
     /// drops unparseable entries.
     /// </summary>
     public static T[] ReadEnumArray<T>(JsonElement v) where T : struct, Enum

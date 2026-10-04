@@ -147,7 +147,7 @@ public class MetadataSyncMergeServiceTests
     /// <summary>
     /// Toggling syncGenres changes the SourceHash for the same DTO.
     /// True: flipping the config flag forces a re-queue on the next refresh.
-    /// False: config changes wouldn't trigger a re-sync; rows would stay Synced with stale state.
+    /// False: config changes wouldn't trigger a re-sync. Rows would stay Synced with stale state.
     /// </summary>
     [Fact]
     public void MergeMetadataFields_ProducesDifferentHash_ForDifferentGenreFlags()
@@ -274,52 +274,5 @@ public class MetadataSyncMergeServiceTests
         MetadataSyncMergeService.MergePeople(item, dto, localItem: null, libraryManager: null!);
 
         Assert.Null(item.People.Local);
-    }
-
-    /// <summary>
-    /// HasChangesToSync delegates to the record's HasChanges.
-    /// True: callers get one entry point matching the surface of the other merge services.
-    /// False: divergent behaviour between the helper and the record's HasChanges would confuse callers.
-    /// </summary>
-    [Fact]
-    public void HasChangesToSync_PassesThroughToItemHasChanges()
-    {
-        var item = MakeItem();
-
-        Assert.False(MetadataSyncMergeService.HasChangesToSync(item));
-
-        item.Metadata.UpdateSource("{\"a\":1}");
-        Assert.True(MetadataSyncMergeService.HasChangesToSync(item));
-    }
-
-    /// <summary>
-    /// Idempotent row returns the "No changes" sentinel.
-    /// True: synced rows display the canonical no-op message in summaries.
-    /// False: noisy summaries on idempotent rows mislead the operator.
-    /// </summary>
-    [Fact]
-    public void GetChangeSummary_NoChanges_ReturnsNoChanges()
-    {
-        var item = MakeItem();
-
-        Assert.Equal("No changes", MetadataSyncMergeService.GetChangeSummary(item));
-    }
-
-    /// <summary>
-    /// Summary lists each changed category by name.
-    /// True: operators see "Metadata, Images" rather than a generic "changes detected".
-    /// False: only the first category surfaces and others are silently swallowed.
-    /// </summary>
-    [Fact]
-    public void GetChangeSummary_ListsChangedCategories()
-    {
-        var item = MakeItem();
-        item.Metadata.UpdateSource("{\"a\":1}");
-        item.Images.UpdateSource("{\"Primary\":[{\"Size\":100,\"Tag\":\"t\"}]}");
-
-        var summary = MetadataSyncMergeService.GetChangeSummary(item);
-
-        Assert.Contains("Metadata", summary);
-        Assert.Contains("Images", summary);
     }
 }

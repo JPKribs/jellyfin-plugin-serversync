@@ -145,7 +145,7 @@ public class UserSyncMergeServiceTests
     }
 
     /// <summary>
-    /// Library-ID properties are flagged for translation; others are not.
+    /// Library-ID properties are flagged for translation. Others are not.
     /// True: only the two library-ID-bearing properties go through TranslateLibraryIds.
     /// False: incorrect property classification would either skip required translation or run it on the wrong fields.
     /// </summary>
@@ -249,7 +249,7 @@ public class UserSyncMergeServiceTests
 
     /// <summary>
     /// Malformed source JSON is passed through as-is rather than throwing.
-    /// True: defensive — bad inputs surface useful diagnostic info later instead of crashing here.
+    /// True: defensive, bad inputs surface useful diagnostic info later instead of crashing here.
     /// False: a JsonException would abort the entire refresh pass.
     /// </summary>
     [Fact]
@@ -258,18 +258,6 @@ public class UserSyncMergeServiceTests
         var result = UserSyncMergeService.ComputeMergedPolicy("not-json", MakeMappings());
 
         Assert.Equal("not-json", result);
-    }
-
-    /// <summary>
-    /// JsonEquals on the service delegates to JsonComparisonUtility.
-    /// True: callers can use a single import for both comparator and policy-equality needs.
-    /// False: divergent behaviour between the service's JsonEquals and the utility's would surprise callers.
-    /// </summary>
-    [Fact]
-    public void JsonEquals_DelegatesToJsonComparisonUtility()
-    {
-        Assert.True(UserSyncMergeService.JsonEquals("{\"a\":1,\"b\":2}", "{\"b\":2,\"a\":1}"));
-        Assert.False(UserSyncMergeService.JsonEquals("{\"a\":1}", "{\"a\":2}"));
     }
 
     // ===================================================================
@@ -301,7 +289,7 @@ public class UserSyncMergeServiceTests
     }
 
     /// <summary>
-    /// Guid-free types must still sync — the exclusion has to be surgical.
+    /// Guid-free types must still sync, the exclusion has to be surgical.
     /// True: booleans, strings, enums, and string collections pass through.
     /// False: over-broad exclusion silently stops syncing ordinary settings.
     /// </summary>
@@ -428,9 +416,9 @@ public class UserSyncMergeServiceTests
     // ===================================================================
     // Settling. With the SourceHash short-circuit removed, HasChanges runs
     // the comparator on every refresh. If the source-side and local-side
-    // blobs can never be made equal for an unchanged user — mismatched enum
+    // blobs can never be made equal for an unchanged user, mismatched enum
     // numbering, a differing key set between the SDK type and the local
-    // entity type — the row requeues forever instead of going quiet after
+    // entity type, the row requeues forever instead of going quiet after
     // one sync. These round-trip the REAL models to prove they converge.
     // ===================================================================
 
@@ -440,7 +428,7 @@ public class UserSyncMergeServiceTests
     /// mismatch is a diff no apply can ever close.
     /// True: enum-valued settings converge after a sync.
     /// False: the row requeues on every run forever, rewriting the local user
-    /// each time — the failure mode the removed hash short-circuit used to hide.
+    /// each time, the failure mode the removed hash short-circuit used to hide.
     /// </summary>
     [Fact]
     public void EnumsSerializedIntoBlobs_HaveMatchingNumericValues()
@@ -490,7 +478,7 @@ public class UserSyncMergeServiceTests
         var second = UserSyncMergeService.ExtractPolicyJson(policy);
 
         Assert.Equal(first, second);
-        Assert.True(UserSyncMergeService.JsonEquals(first, second));
+        Assert.True(Jellyfin.Plugin.ServerSync.Models.Common.JsonComparisonUtility.JsonEquals(first, second));
     }
 
     /// <summary>
@@ -513,8 +501,8 @@ public class UserSyncMergeServiceTests
         var once = UserSyncMergeService.ComputeMergedPolicy(extracted, MakeMappings());
         var twice = UserSyncMergeService.ComputeMergedPolicy(once, MakeMappings());
 
-        Assert.True(UserSyncMergeService.JsonEquals(once, twice));
-        Assert.True(UserSyncMergeService.JsonEquals(extracted, once));
+        Assert.True(Jellyfin.Plugin.ServerSync.Models.Common.JsonComparisonUtility.JsonEquals(once, twice));
+        Assert.True(Jellyfin.Plugin.ServerSync.Models.Common.JsonComparisonUtility.JsonEquals(extracted, once));
     }
 
     /// <summary>

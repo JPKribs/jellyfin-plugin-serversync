@@ -73,7 +73,7 @@ public static class FileDeletionService
     public static void TryRemoveEmptyFolders(string directoryPath, ILogger logger, string? libraryRootPath = null)
     {
         // Without a known root the walk-up has no boundary and could climb
-        // through the library root into mount-point parents — skip cleanup
+        // through the library root into mount-point parents, skip cleanup
         // rather than walk unbounded.
         if (string.IsNullOrEmpty(libraryRootPath))
         {
@@ -310,11 +310,11 @@ public static class FileDeletionService
 
         // Per-item atomicity: file delete → immediate DB row delete. The
         // previous design ran all file deletes first, then a single
-        // BatchDelete at the end — if BatchDelete threw (SQLite locked,
+        // BatchDelete at the end, if BatchDelete threw (SQLite locked,
         // disk full), the files were gone but the DB still referenced them.
         // A subsequent refresh would see "file missing" + Deleting status
         // and confuse the user with a fake error. Per-item ordering means
-        // a transient DB failure leaves the row in place; the next refresh
+        // a transient DB failure leaves the row in place. The next refresh
         // re-marks Deleting and we retry the whole pair on the next sync.
         foreach (var item in itemsToDelete)
         {
@@ -371,7 +371,7 @@ public static class FileDeletionService
             }
             else
             {
-                // File doesn't exist on disk — DB row should still be cleaned up.
+                // File doesn't exist on disk, DB row should still be cleaned up.
                 fileGone = true;
             }
 
@@ -389,11 +389,11 @@ public static class FileDeletionService
                 catch (Exception ex)
                 {
                     // File is gone but DB delete failed. Log loudly so the
-                    // user can see it; the next sync run will pick up the
+                    // user can see it. The next sync run will pick up the
                     // stale row and re-attempt cleanup. We don't add to
-                    // failedItems because the file IS deleted — re-marking
+                    // failedItems because the file IS deleted, re-marking
                     // Errored would be wrong.
-                    logger.LogError(ex, "DB cleanup failed for {FileName} ({SourceItemId}) — file already deleted; will retry on next sync", fileName, item.SourceItemId);
+                    logger.LogError(ex, "DB cleanup failed for {FileName} ({SourceItemId}), file already deleted. Will retry on next sync", fileName, item.SourceItemId);
                 }
             }
         }
@@ -402,11 +402,16 @@ public static class FileDeletionService
         {
             try
             {
-                var errorMessage = "Deletion failed";
-                failed = manager.BatchUpdateStatus(
-                    failedItems.Select(f => f.SourceItemId),
-                    SyncStatus.Errored,
-                    errorMessage);
+                // One batch per reason, so each row keeps the reason it failed for. A refusal (outside
+                // every library root, a symlinked folder) asks the user for a different fix than a
+                // file that could not be removed, and a single generic reason hid which was which.
+                foreach (var group in failedItems.GroupBy(f => f.Error, StringComparer.Ordinal))
+                {
+                    failed += manager.BatchUpdateStatus(
+                        group.Select(f => f.SourceItemId),
+                        SyncStatus.Errored,
+                        group.Key);
+                }
             }
             catch (Exception ex)
             {

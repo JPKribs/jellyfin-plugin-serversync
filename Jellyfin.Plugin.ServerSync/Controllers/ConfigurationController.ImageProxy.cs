@@ -13,7 +13,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 /// <summary>
 /// Proxies source-server images for the admin pages. The pages used to embed
 /// the decrypted source API key in every image URL, which leaked it into
-/// browser devtools, caches, and the source server's access logs; this keeps
+/// browser devtools, caches, and the source server's access logs. This keeps
 /// the key server-side and lets the browser authenticate with its own local
 /// session instead.
 /// </summary>

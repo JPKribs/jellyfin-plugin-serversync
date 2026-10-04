@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -40,6 +41,9 @@ public class PeerController : ControllerBase
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly Microsoft.Extensions.Logging.ILogger<PeerController> _logger;
 
+    // A pairing call is one small request, so a peer that cannot answer it promptly is treated as unreachable.
+    private static readonly TimeSpan PairTimeout = TimeSpan.FromSeconds(15);
+
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerController"/> class.
     /// </summary>
@@ -50,6 +54,9 @@ public class PeerController : ControllerBase
     /// <param name="outbound">The outbound hint store.</param>
     /// <param name="versions">The version store.</param>
     /// <param name="inboundWorker">The worker that applies inbound hints.</param>
+    /// <param name="pairings">The pairing secrets.</param>
+    /// <param name="clientFactory">Creates clients for the pairing calls.</param>
+    /// <param name="logger">Logger.</param>
     public PeerController(
         PeerHistoryService history,
         IPluginConfigurationManager configManager,
@@ -98,6 +105,7 @@ public class PeerController : ControllerBase
     /// listed as Pull or Sync, so a server about to turn on Send mode asks this first.
     /// </summary>
     /// <param name="serverId">The asking server's Jellyfin id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The listing.</returns>
     [HttpGet("Link")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -106,7 +114,7 @@ public class PeerController : ControllerBase
         var response = new PeerLinkResponse { ServerId = _applicationHost.SystemId, ServerName = _applicationHost.FriendlyName };
         var entry = string.IsNullOrWhiteSpace(serverId)
             ? null
-            : _configManager.Configuration.Servers.FirstOrDefault(s => string.Equals(s.ServerId, serverId, StringComparison.OrdinalIgnoreCase));
+            : _configManager.Configuration.FindServerById(serverId);
         if (entry is null)
         {
             return Ok(response);
@@ -152,7 +160,7 @@ public class PeerController : ControllerBase
             return BadRequest("A request body with ServerId and a Secret of at most 256 characters is required");
         }
 
-        var entry = _configManager.Configuration.Servers.FirstOrDefault(s => string.Equals(s.ServerId, request.ServerId, StringComparison.OrdinalIgnoreCase));
+        var entry = _configManager.Configuration.FindServerById(request.ServerId);
         if (entry is null)
         {
             return Conflict($"server {request.ServerId} is not configured on this server, so it cannot pair");
@@ -163,15 +171,33 @@ public class PeerController : ControllerBase
         return Ok(new { Paired = true });
     }
 
-    // Issues a fresh secret to an entry by calling the entry's own address. A new secret each time, so a
-    // peer that lost its copy is whole again the moment it checks the link.
+    // Hands an entry its secret by calling the entry's own address. The secret already issued is sent
+    // again when there is one, so a peer that lost its copy is whole again the moment it checks the link.
+    // Pairings with one entry run one at a time, so two checks at once send the same secret.
     private async Task<(bool Paired, string? Error)> PairAsync(Models.Configuration.SourceServer entry, CancellationToken cancellationToken)
     {
-        var secret = PeerPairingStore.NewSecret();
+        var gate = _pairings.PairingLock(entry.Key);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            return await PairOnceAsync(entry, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<(bool Paired, string? Error)> PairOnceAsync(Models.Configuration.SourceServer entry, CancellationToken cancellationToken)
+    {
+        string secret;
+        try
+        {
+            secret = _pairings.GetInbound(entry.Key) ?? PeerPairingStore.NewSecret();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(PairTimeout);
             using var client = _clientFactory.Create(entry);
-            var (status, body) = await client.PairAsync(new PairRequest { ServerId = _applicationHost.SystemId, Secret = secret }, cancellationToken).ConfigureAwait(false);
+            var (status, body) = await client.PairAsync(new PairRequest { ServerId = _applicationHost.SystemId, Secret = secret }, deadline.Token).ConfigureAwait(false);
             if (status is 401 or 403)
             {
                 // A standard user's key cannot reach the peer's endpoint, so no secret can be issued. The
@@ -194,7 +220,7 @@ public class PeerController : ControllerBase
                 return (false, why);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -204,22 +230,45 @@ public class PeerController : ControllerBase
             return (false, "this server could not reach it at " + entry.Url + ": " + ex.Message);
         }
 
-        _pairings.SetInbound(entry.Key, secret);
+        try
+        {
+            _pairings.SetInbound(entry.Key, secret);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Paired with '{Peer}' but could not store its secret", entry.DisplayName);
+            return (false, "the secret could not be stored on this server: " + ex.Message);
+        }
+
         _logger.LogInformation("Paired with '{Peer}': it now presents a secret this server issued", entry.DisplayName);
         return (true, null);
     }
 
+    // The background check of a refused pairing. It runs after the request that started it has ended, so
+    // it logs its own failures.
+    private async Task RecheckPairingAsync(Models.Configuration.SourceServer entry)
+    {
+        try
+        {
+            await PairAsync(entry, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not check the pairing with '{Peer}' again", entry.DisplayName);
+        }
+    }
+
     // The entry a request's sender claims to be, proven by the secret this server issued to that entry,
-    // or the answer to send back. An entry without a secret has never paired; the sender pairs on
+    // or the answer to send back. An entry without a secret has never paired, so the sender pairs on
     // hearing so and comes back.
-    private async Task<(Models.Configuration.SourceServer? Entry, ActionResult? Refusal)> SenderAsync(string? senderServerId, CancellationToken cancellationToken)
+    private (Models.Configuration.SourceServer? Entry, ActionResult? Refusal) Sender(string? senderServerId)
     {
         if (string.IsNullOrWhiteSpace(senderServerId))
         {
             return (null, BadRequest("A SenderServerId is required"));
         }
 
-        var entry = _configManager.Configuration.Servers.FirstOrDefault(s => string.Equals(s.ServerId, senderServerId, StringComparison.OrdinalIgnoreCase));
+        var entry = _configManager.Configuration.FindServerById(senderServerId);
         if (entry is null)
         {
             return (null, Conflict($"server {senderServerId} is not configured on this server"));
@@ -227,17 +276,17 @@ public class PeerController : ControllerBase
 
         var presented = Request.Headers[HintProtocol.PairingHeader].FirstOrDefault();
         var expected = _pairings.GetInbound(entry.Key);
-        if (expected is null && _pairings.InboundRefusedAt(entry.Key) is { } refusedAt)
+        if (expected is null && _pairings.InboundRefusedAt(entry.Key) is not null)
         {
-            // This server could not issue it a secret the last time. That is checked again, at most once
-            // a minute, so the moment the entry holds an administrator's key the exemption ends and the
-            // real server pairs on its next link.
-            if (DateTime.UtcNow - refusedAt < HintProtocol.CapabilityRefresh || !(await PairAsync(entry, cancellationToken).ConfigureAwait(false)).Paired)
+            // This server could not issue it a secret the last time, so it is taken on its word. Whether
+            // the entry now holds an administrator's key is checked again in the background, at most once
+            // a minute, so the exemption ends soon after it does without holding up this request.
+            if (_pairings.TryClaimRecheck(entry.Key, HintProtocol.CapabilityRefresh))
             {
-                return (entry, null);
+                _ = Task.Run(() => RecheckPairingAsync(entry), CancellationToken.None);
             }
 
-            expected = _pairings.GetInbound(entry.Key);
+            return (entry, null);
         }
 
         if (!PeerPairingStore.Matches(presented, expected))
@@ -261,7 +310,7 @@ public class PeerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<QueueResponse>> Queue([FromBody] QueueRequest request, CancellationToken cancellationToken)
+    public ActionResult<QueueResponse> Queue([FromBody] QueueRequest request)
     {
         if (request is null || request.Items is null || string.IsNullOrWhiteSpace(request.SenderServerId))
         {
@@ -273,7 +322,7 @@ public class PeerController : ControllerBase
             return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} hints per request");
         }
 
-        var (origin, refusal) = await SenderAsync(request.SenderServerId, cancellationToken).ConfigureAwait(false);
+        var (origin, refusal) = Sender(request.SenderServerId);
         if (origin is null)
         {
             return refusal!;
@@ -284,19 +333,19 @@ public class PeerController : ControllerBase
             return Conflict($"server {request.SenderServerId} is not configured on this server as a Pull or Sync server, so its changes cannot be pulled");
         }
 
-        // The whole batch is checked before any of it is stored, so a bad hint never leaves part of
-        // the batch applying here while the sender writes the whole batch off as malformed.
-        foreach (var hint in request.Items)
+        // A hint with no id cannot be answered, since the sender matches answers by id, so it fails the
+        // request. Every other problem with one hint is declined for that hint alone, so one bad row
+        // never takes the rest of the batch down with it.
+        if (request.Items.Any(h => string.IsNullOrWhiteSpace(h.HintId)))
         {
-            if (string.IsNullOrWhiteSpace(hint.HintId) || string.IsNullOrWhiteSpace(hint.Key))
-            {
-                return BadRequest("Every hint needs a HintId and a Key");
-            }
+            return BadRequest("Every hint needs a HintId");
+        }
 
-            if (!string.Equals(hint.OriginServerId, request.SenderServerId, StringComparison.OrdinalIgnoreCase))
-            {
-                return BadRequest("A hint's OriginServerId must be the sender; hints are never forwarded");
-            }
+        // One origin cannot fill the queue without bound. A full queue answers "busy" so the sender waits
+        // and sends again, rather than this server dropping the rows that are next to apply.
+        if (_inbound.CountForOrigin(request.SenderServerId) >= HintProtocol.MaxPendingPerPeer)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, $"this server already holds {HintProtocol.MaxPendingPerPeer} hints from {origin.DisplayName}. Send again later");
         }
 
         var response = new QueueResponse();
@@ -306,8 +355,9 @@ public class PeerController : ControllerBase
             var result = new QueueResult { HintId = hint.HintId };
             response.Items.Add(result);
 
-            var reason = HintProtocol.IsFutureVersion(hint.VersionTimestamp, now)
-                ? $"the hint's version is dated more than {HintProtocol.MaxVersionLead.TotalMinutes:0} minutes ahead of this server's clock; check the clock on the sender"
+            var reason = string.IsNullOrWhiteSpace(hint.Key) ? "the hint carries no key"
+                : !string.Equals(hint.OriginServerId, request.SenderServerId, StringComparison.OrdinalIgnoreCase) ? "a hint's origin must be the sender, since hints are never forwarded"
+                : HintProtocol.IsFutureVersion(hint.VersionTimestamp, now) ? $"the hint's version is dated more than {HintProtocol.MaxVersionLead.TotalMinutes:0} minutes ahead of this server's clock. Check the clock on the sender"
                 : Unmappable(origin, hint);
             if (reason is not null)
             {
@@ -334,14 +384,14 @@ public class PeerController : ControllerBase
     [HttpPost("Complete")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<object>> Complete([FromBody] CompleteRequest request, CancellationToken cancellationToken)
+    public ActionResult<object> Complete([FromBody] CompleteRequest request)
     {
         if (request is null || request.Items is null)
         {
             return BadRequest("A request body with SenderServerId and Items is required");
         }
 
-        var (peer, refusal) = await SenderAsync(request.SenderServerId, cancellationToken).ConfigureAwait(false);
+        var (peer, refusal) = Sender(request.SenderServerId);
         if (peer is null)
         {
             return refusal!;
@@ -359,18 +409,25 @@ public class PeerController : ControllerBase
     }
 
     /// <summary>Lists this server's inbound queue, so a peer can tell whether work it sent is still held.</summary>
+    /// <param name="serverId">The asking server's id, to list only its own hints, or null for all.</param>
     /// <returns>The inbound rows.</returns>
     [HttpGet("Status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<QueueStatusResponse> Status()
+    public ActionResult<QueueStatusResponse> Status([FromQuery] string? serverId)
     {
-        var completed = _inboundWorker.RecentlyCompleted;
+        // An origin asks about its own hints only. Hint ids start with the origin's server id, so both
+        // the queue and the completions can be narrowed to it.
+        var prefix = string.IsNullOrWhiteSpace(serverId) ? null : serverId + ":";
+        var completed = _inboundWorker.RecentlyCompleted
+            .Where(c => prefix is null || c.HintId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var inbound = prefix is null ? _inbound.GetAll() : _inbound.GetForOrigin(serverId!);
         return Ok(new QueueStatusResponse
         {
             ServerId = _applicationHost.SystemId,
-            Inbound = _inbound.GetAll().Select(InboundHintDto.From).ToList(),
+            Inbound = inbound.Select(InboundHintDto.From).ToList(),
             Completed = completed.Select(c => c.HintId).ToList(),
-            CompletedHints = completed.ToList()
+            CompletedHints = completed
         });
     }
 
@@ -479,7 +536,7 @@ public class PeerController : ControllerBase
     [HttpPost("History")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<PeerHistoryResponse>> NegotiateHistory([FromBody] PeerHistoryRequest request, CancellationToken cancellationToken)
+    public ActionResult<PeerHistoryResponse> NegotiateHistory([FromBody] PeerHistoryRequest request)
     {
         if (request is null || request.Items is null)
         {
@@ -495,9 +552,9 @@ public class PeerController : ControllerBase
         // entry. A sender this server does not list negotiates as any administrator may, and nothing is
         // recorded against anyone's row.
         if (!string.IsNullOrWhiteSpace(request.SenderServerId)
-            && _configManager.Configuration.Servers.Any(s => string.Equals(s.ServerId, request.SenderServerId, StringComparison.OrdinalIgnoreCase)))
+            && _configManager.Configuration.FindServerById(request.SenderServerId) is not null)
         {
-            var (sender, refusal) = await SenderAsync(request.SenderServerId, cancellationToken).ConfigureAwait(false);
+            var (sender, refusal) = Sender(request.SenderServerId);
             if (sender is null)
             {
                 return refusal!;

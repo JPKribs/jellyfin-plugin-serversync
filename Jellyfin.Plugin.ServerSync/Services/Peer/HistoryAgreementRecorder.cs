@@ -66,7 +66,7 @@ public sealed class HistoryAgreementRecorder
                 return;
             }
 
-            var peer = _configManager.Configuration.Servers.FirstOrDefault(s => string.Equals(s.ServerId, senderServerId, StringComparison.OrdinalIgnoreCase));
+            var peer = _configManager.Configuration.FindServerById(senderServerId);
             if (peer is null)
             {
                 return;
@@ -90,25 +90,12 @@ public sealed class HistoryAgreementRecorder
 
             var now = DateTime.UtcNow;
             PeerHistoryNegotiator.ApplySourceState(row, agreed);
-            row.LocalIsPlayed = agreed.Played;
-            row.LocalPlayCount = agreed.PlayCount;
-            row.LocalPlaybackPositionTicks = agreed.PlaybackPositionTicks;
-            row.LocalLastPlayedDate = agreed.LastPlayedDate;
-            row.LocalIsFavorite = agreed.IsFavorite;
-            row.MergedIsPlayed = agreed.Played;
-            row.MergedPlayCount = agreed.PlayCount;
-            row.MergedPlaybackPositionTicks = agreed.PlaybackPositionTicks;
-            row.MergedLastPlayedDate = agreed.LastPlayedDate;
-            row.MergedIsFavorite = agreed.IsFavorite;
+            PeerHistoryNegotiator.ApplyLocalState(row, agreed);
+            PeerHistoryNegotiator.ApplyMergedState(row, agreed);
             row.NegotiateWithSource = true;
             row.UpdateSourceStateBundle();
             row.RecordNegotiatedBase(now);
-            row.Status = SyncStatus.Synced;
-            row.StatusDate = now;
-            row.LastSyncTime = now;
-            row.Reason = null;
-            row.RetryCount = 0;
-            row.MarkSynced();
+            row.MarkApplied(now);
             _table.Upsert(row);
         }
         catch (Exception ex)

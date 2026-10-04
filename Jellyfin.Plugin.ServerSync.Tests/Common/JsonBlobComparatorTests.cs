@@ -37,7 +37,7 @@ public class JsonBlobComparatorTests
     /// <summary>
     /// Different JSON content yields different hashes.
     /// True: changed source content is detectable, so re-sync is triggered.
-    /// False: collisions mask real changes — rows stay Synced even after source diverges.
+    /// False: collisions mask real changes, rows stay Synced even after source diverges.
     /// </summary>
     [Fact]
     public void ComputeHash_DiffersForDifferentJson()
@@ -66,7 +66,7 @@ public class JsonBlobComparatorTests
     /// <summary>
     /// Same keys in different order are semantically equal.
     /// True: source and local can be serialised independently and still compare equal.
-    /// False: every row would diff forever — key ordering is not stable across serialisers.
+    /// False: every row would diff forever, key ordering is not stable across serialisers.
     /// </summary>
     [Fact]
     public void Equals_TreatsKeyOrderingAsSemanticallyEqual()

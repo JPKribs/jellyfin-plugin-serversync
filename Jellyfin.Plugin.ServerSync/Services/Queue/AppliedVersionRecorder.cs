@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
@@ -38,29 +37,26 @@ public sealed class AppliedVersionRecorder
     /// <summary>Registers a write with the guard.</summary>
     /// <param name="kind">The kind.</param>
     /// <param name="localKey">This server's key.</param>
-    /// <param name="alsoAll">A kind whose every object the write may touch as a side effect, or null.</param>
-    /// <returns>A handle to dispose when the write is done.</returns>
-    public IDisposable Enter(HintKind kind, string localKey, HintKind? alsoAll = null)
-    {
-        var scopes = new List<IDisposable>(2);
-        if (!string.IsNullOrEmpty(localKey))
-        {
-            scopes.Add(_guard.Enter(HintProtocol.GuardKey(kind, localKey)));
-        }
+    /// <returns>A handle to dispose when the write is done, or null when there is no key.</returns>
+    public IDisposable? Enter(HintKind kind, string localKey)
+        => string.IsNullOrEmpty(localKey) ? null : _guard.Enter(HintProtocol.GuardKey(kind, localKey));
 
-        if (alsoAll.HasValue)
-        {
-            scopes.Add(_guard.Enter(HintProtocol.GuardAllKey(alsoAll.Value)));
-        }
-
-        return new Scopes(scopes);
-    }
-
-    /// <summary>Records the version of a value just copied from a peer.</summary>
+    /// <summary>Registers a write that may touch any object of a kind as a side effect.</summary>
     /// <param name="kind">The kind.</param>
-    /// <param name="localKey">This server's key.</param>
-    /// <param name="peerKey">The peer's key for the same object.</param>
-    /// <param name="source">The connected peer, or null when unknown.</param>
+    /// <returns>A handle to dispose when the write is done.</returns>
+    public IDisposable EnterAll(HintKind kind) => _guard.Enter(HintProtocol.GuardAllKey(kind));
+
+    /// <summary>
+    /// Records the version that belongs to a value just copied from a peer. Metadata and people carry the
+    /// version the scan read together with the value, kept pending until now, so no request is made per
+    /// row and a peer edit made in between cannot stamp the older value with its newer version. User
+    /// settings never settle in the scan, so their version is still read from the peer here. There are
+    /// few of them.
+    /// </summary>
+    /// <param name="kind">The kind.</param>
+    /// <param name="localKey">This server's key for the object.</param>
+    /// <param name="peerKey">The peer's key for the object.</param>
+    /// <param name="source">The peer the value came from.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A task.</returns>
     public async Task RecordAsync(HintKind kind, string localKey, string peerKey, ScanSource? source, CancellationToken cancellationToken)
@@ -70,56 +66,37 @@ public sealed class AppliedVersionRecorder
             return;
         }
 
+        if (_resolver.PromotePending(kind, localKey) || kind != HintKind.Users)
+        {
+            return;
+        }
+
         try
         {
-            ObjectVersion? peerVersion = null;
-            if (await _resolver.PeerCarriesVersionsAsync(source, cancellationToken).ConfigureAwait(false))
-            {
-                var versions = await _resolver.PeerVersionsAsync(source, kind, new[] { peerKey }, cancellationToken).ConfigureAwait(false);
-                if (versions is not null)
-                {
-                    versions.TryGetValue(peerKey, out peerVersion);
-                }
-            }
-
-            // Only a version the peer recorded is carried over. A value the peer never edited by hand,
-            // provider work or a scan only source, leaves none here either, so the next scan or hint
-            // from that source still wins over it and a hand made edit anywhere beats it.
-            if (peerVersion is null)
+            if (await _resolver.PeerCarriesVersionsAsync(source, cancellationToken).ConfigureAwait(false) != true)
             {
                 return;
             }
 
-            _resolver.Record(new ObjectVersion
+            var versions = await _resolver.PeerVersionsAsync(source, kind, new[] { peerKey }, cancellationToken).ConfigureAwait(false);
+
+            // Only a version the peer recorded is carried over. A value the peer never edited by hand
+            // leaves none here either, so the next scan from that source still wins over it and a hand
+            // made edit anywhere beats it.
+            if (versions is null || !versions.TryGetValue(peerKey, out var peerVersion))
             {
-                Kind = kind,
-                Key = localKey,
-                ServerId = peerVersion.ServerId,
-                Timestamp = peerVersion.Timestamp
-            });
+                return;
+            }
+
+            _resolver.Record(new ObjectVersion { Kind = kind, Key = localKey, ServerId = peerVersion.ServerId, Timestamp = peerVersion.Timestamp });
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Could not record the version of a {Kind} value copied from '{Peer}'", kind, source.Name);
-        }
-    }
-
-    private sealed class Scopes : IDisposable
-    {
-        private readonly List<IDisposable> _scopes;
-
-        public Scopes(List<IDisposable> scopes) => _scopes = scopes;
-
-        public void Dispose()
-        {
-            foreach (var scope in _scopes)
-            {
-                scope.Dispose();
-            }
         }
     }
 }

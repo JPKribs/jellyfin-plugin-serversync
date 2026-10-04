@@ -68,40 +68,26 @@ public class HintProtocolTests
     }
 
     /// <summary>
-    /// Only a metadata edit raises an item hint. Provider downloads and image refreshes are left to the scan.
-    /// True: a server that fetches its own metadata after receiving a file does not push it over the peer's.
-    /// False: every library scan would flood the pool with hints.
+    /// A one flag save, Jellyfin's editor or an image upload, is a hand made edit when it happens inside a
+    /// request and Jellyfin's own work otherwise. A save carrying more than one flag is a refresh, roll ups
+    /// included, and is a provider's work either way. A metadata import alone is not announced.
+    /// True: an edit made during a scan keeps its version, and Jellyfin's housekeeping never poses as an edit.
+    /// False: a hand edit made while a scan runs loses to a peer's older scan, or a version link wins over real edits.
     /// </summary>
     [Theory]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, true)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit | MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, true)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataDownload, false)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.None, false)]
-    public void IsHintedUpdate_OnlyForEdits(MediaBrowser.Controller.Library.ItemUpdateType reason, bool expected)
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, true, ChangeOrigin.Edit)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, true, ChangeOrigin.Edit)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, false, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.None | MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, true, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit | MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, true, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.None | MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate | MediaBrowser.Controller.Library.ItemUpdateType.MetadataDownload, false, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataDownload, true, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataImport, true, ChangeOrigin.None)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.None, true, ChangeOrigin.None)]
+    public void Classify_SortsEditsFromProviderWork(MediaBrowser.Controller.Library.ItemUpdateType reason, bool inRequest, ChangeOrigin expected)
     {
-        Assert.Equal(expected, LocalChangeObserver.IsHintedUpdate(reason));
-    }
-
-    /// <summary>
-    /// Every item update that changes something travels. A metadata edit, or an image change outside a
-    /// scan and outside a refresh of the item, is a hand made edit. An image change during either, or a
-    /// metadata download, is a provider's work and travels marked, so it fills in on the other side
-    /// without replacing a hand made edit.
-    /// True: a poster someone picks and a poster a scan fetched both reach the peers, and the peers can tell them apart.
-    /// False: either posters never travel, or a scan's posters silently replace posters chosen by hand.
-    /// </summary>
-    [Theory]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, false, ChangeOrigin.Edit)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, true, false, ChangeOrigin.Provider)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, true, ChangeOrigin.Provider)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, true, true, ChangeOrigin.Edit)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataDownload, false, false, ChangeOrigin.Provider)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataImport, false, false, ChangeOrigin.None)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.None, false, false, ChangeOrigin.None)]
-    public void Classify_SortsEditsFromProviderWork(MediaBrowser.Controller.Library.ItemUpdateType reason, bool refreshing, bool scanning, ChangeOrigin expected)
-    {
-        Assert.Equal(expected, LocalChangeObserver.Classify(reason, refreshing, scanning));
+        Assert.Equal(expected, LocalChangeObserver.Classify(reason, inRequest));
     }
 
     /// <summary>
@@ -121,7 +107,7 @@ public class HintProtocolTests
     }
 
     /// <summary>
-    /// A version ahead of this server's clock reads as now; one behind it is kept as is.
+    /// A version ahead of this server's clock reads as now. One behind it is kept as is.
     /// True: a peer's far future stamp can never outrank every later real edit here.
     /// False: one hint dated 2999 locks an object out of ever being edited again.
     /// </summary>
@@ -136,7 +122,7 @@ public class HintProtocolTests
     }
 
     /// <summary>
-    /// Honest skew is within the lead; anything past it is a bad clock or a lie and is declined outright.
+    /// Honest skew is within the lead. Anything past it is a bad clock or a lie and is declined outright.
     /// True: a peer a minute ahead still works, a peer years ahead is told to fix its clock.
     /// False: either every skewed peer is refused, or a forged stamp is accepted and merely clamped.
     /// </summary>

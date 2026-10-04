@@ -8,10 +8,10 @@ namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 
 /// <summary>
 /// One sync record per (source library, source item). Carries four parallel
-/// JSON-blob fields — <see cref="Metadata"/>, <see cref="Images"/>,
-/// <see cref="People"/>, <see cref="Studios"/> — each with its own
+/// JSON-blob fields, <see cref="Metadata"/>, <see cref="Images"/>,
+/// <see cref="People"/>, <see cref="Studios"/>, each with its own
 /// Source/Local/Synced snapshots and content hashes for the change-detection
-/// short-circuit. Refresh populates the source side and recomputes hashes;
+/// short-circuit. Refresh populates the source side and recomputes hashes.
 /// Sync applies the source values to local and calls
 /// <see cref="SyncableValue{T}.MarkSynced"/> on each successfully-applied
 /// category.
@@ -21,7 +21,7 @@ public class MetadataSyncItem : SyncRecord
     // ===== Item Identification =====
 
     /// <summary>
-    /// Gets or sets the source library ID — first component of the natural key.
+    /// Gets or sets the source library ID, first component of the natural key.
     /// </summary>
     public string SourceLibraryId { get; set; } = string.Empty;
 
@@ -31,7 +31,7 @@ public class MetadataSyncItem : SyncRecord
     public string LocalLibraryId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the source server item ID — second component of the
+    /// Gets or sets the source server item ID, second component of the
     /// natural key.
     /// </summary>
     public string SourceItemId { get; set; } = string.Empty;
@@ -76,7 +76,7 @@ public class MetadataSyncItem : SyncRecord
     public SyncableValue<string> Metadata { get; } = new() { Comparator = new JsonBlobComparator() };
 
     /// <summary>
-    /// Gets the image manifest. Per-type counts and file sizes; uses the
+    /// Gets the image manifest. Per-type counts and file sizes. Uses the
     /// dedicated <see cref="ImageManifestComparator"/>.
     /// </summary>
     public SyncableValue<string> Images { get; } = new() { Comparator = new ImageManifestComparator() };

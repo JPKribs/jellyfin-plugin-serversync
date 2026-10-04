@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.Common;
 /// Standard response shape for bulk-status endpoints. Surfaces per-item
 /// outcomes so the UI can flag partial failures instead of treating any
 /// non-zero count as success. <see cref="Updated"/> rows in <see cref="Requested"/>
-/// total; <see cref="Failed"/> lists IDs that didn't update (typically:
+/// total. <see cref="Failed"/> lists IDs that didn't update (typically:
 /// row was deleted between the user's click and the request landing).
 /// </summary>
 public sealed class BulkOperationResult

@@ -171,19 +171,6 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     public SyncItem? GetBySourceItemId(string sourceItemId) => GetByKey(sourceItemId);
 
     /// <summary>
-    /// Returns all sync items for a source library.
-    /// </summary>
-    public IList<SyncItem> GetBySourceLibrary(string sourceLibraryId) => ExecuteRead(
-        conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT * FROM SyncItems WHERE SourceLibraryId = @lib";
-            cmd.Parameters.AddWithValue("@lib", sourceLibraryId);
-            return ReadAll(cmd);
-        },
-        fallback: (IList<SyncItem>)Array.Empty<SyncItem>());
-
-    /// <summary>
     /// Returns the sync item with the given local path, or null if none.
     /// </summary>
     public SyncItem? GetByLocalPath(string localPath) => ExecuteRead(
@@ -227,38 +214,20 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     public void Delete(string sourceItemId) => DeleteByKey(sourceItemId);
 
     /// <summary>
-    /// Searches sync items by filename with optional status and pending-type
-    /// filters.
+    /// Records the local library item a row's file became, leaving the status, its date and
+    /// LastSyncTime alone. Resolving an id is bookkeeping, not a sync, so it must not make the row
+    /// look freshly synced.
     /// </summary>
-    public IList<SyncItem> Search(string? searchTerm, SyncStatus? status = null, PendingType? pendingType = null) => ExecuteRead(
-        conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            var conditions = new List<string>();
-            if (!string.IsNullOrWhiteSpace(searchTerm))
-            {
-                conditions.Add("(SourcePath LIKE @search OR LocalPath LIKE @search)");
-                cmd.Parameters.AddWithValue("@search", $"%{searchTerm}%");
-            }
-
-            if (status.HasValue)
-            {
-                conditions.Add("Status = @status");
-                cmd.Parameters.AddWithValue("@status", (int)status.Value);
-            }
-
-            if (pendingType.HasValue)
-            {
-                conditions.Add("PendingType = @pendingType");
-                cmd.Parameters.AddWithValue("@pendingType", (int)pendingType.Value);
-            }
-
-            cmd.CommandText = conditions.Count > 0
-                ? $"SELECT * FROM SyncItems WHERE {string.Join(" AND ", conditions)}"
-                : "SELECT * FROM SyncItems";
-            return ReadAll(cmd);
-        },
-        fallback: (IList<SyncItem>)Array.Empty<SyncItem>());
+    /// <param name="sourceItemId">The row's source item id.</param>
+    /// <param name="localItemId">The local library item id.</param>
+    public void UpdateLocalItemId(string sourceItemId, string localItemId) => ExecuteWrite(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE SyncItems SET LocalItemId = @localItemId WHERE SourceItemId = @key";
+        cmd.Parameters.AddWithValue("@localItemId", localItemId);
+        cmd.Parameters.AddWithValue("@key", sourceItemId);
+        cmd.ExecuteNonQuery();
+    });
 
     /// <summary>
     /// Searches sync items with pagination. Used by the Content admin UI
@@ -324,22 +293,6 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     }
 
     /// <summary>
-    /// Returns all rows in <see cref="SyncStatus.Pending"/> with the given
-    /// pending type — the input set for download / replacement / deletion
-    /// queues.
-    /// </summary>
-    public IList<SyncItem> GetPendingByType(PendingType pendingType) => ExecuteRead(
-        conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT * FROM SyncItems WHERE Status = @status AND PendingType = @pendingType";
-            cmd.Parameters.AddWithValue("@status", (int)SyncStatus.Pending);
-            cmd.Parameters.AddWithValue("@pendingType", (int)pendingType);
-            return ReadAll(cmd);
-        },
-        fallback: (IList<SyncItem>)Array.Empty<SyncItem>());
-
-    /// <summary>
     /// Returns counts of Pending rows grouped by <see cref="PendingType"/>.
     /// </summary>
     public Dictionary<PendingType, int> GetPendingCounts() => ExecuteRead(
@@ -360,7 +313,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: new Dictionary<PendingType, int>());
 
     /// <summary>
-    /// Returns the byte-size breakdown for the items that affect storage —
+    /// Returns the byte-size breakdown for the items that affect storage , 
     /// pending downloads/replacements + queued, minus pending deletions.
     /// </summary>
     public Dictionary<string, long> GetPendingSizes() => ExecuteRead(
@@ -379,7 +332,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: new Dictionary<string, long>());
 
     /// <summary>
-    /// Returns errored items that haven't exceeded the retry threshold —
+    /// Returns errored items that haven't exceeded the retry threshold , 
     /// the candidates for the next sync run's retry pass.
     /// </summary>
     public IList<SyncItem> GetErroredItemsForRetry(int maxRetries) => ExecuteRead(
@@ -433,7 +386,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// rewriting Content-specific fields (PendingType, local-side file
     /// info, companion files). Uses
     /// <see cref="SyncTableManagerBase{TRecord, TKey}.BuildStatusTransitionClauses"/>
-    /// with <c>trackRetryCount: true</c> so retry semantics
+    /// with retry tracking, so retry semantics
     /// (zero on Synced, increment on Errored) match the rest of the
     /// universal transition logic.
     /// </summary>
@@ -449,7 +402,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     {
         using var cmd = conn.CreateCommand();
         // Queued through this path is an operator action (Queue / Retry), and
-        // the base transition clauses reset RetryCount for it — the explicit
+        // the base transition clauses reset RetryCount for it, the explicit
         // resetRetryCount parameter this method briefly had would have emitted
         // a second "RetryCount = 0" into the same SET list.
         var clauses = BuildStatusTransitionClauses(status);
@@ -506,35 +459,9 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     });
 
     /// <summary>
-    /// Deletes many items by source-item ID in a single transaction. Returns
-    /// the number of rows deleted.
-    /// </summary>
-    public int BatchDelete(IEnumerable<string> sourceItemIds)
-    {
-        ArgumentNullException.ThrowIfNull(sourceItemIds);
-        var count = 0;
-        ExecuteWrite(conn =>
-        {
-            using var transaction = conn.BeginTransaction();
-            using var cmd = conn.CreateCommand();
-            cmd.Transaction = transaction;
-            cmd.CommandText = "DELETE FROM SyncItems WHERE SourceItemId = @sourceItemId";
-            var idParam = cmd.Parameters.Add("@sourceItemId", SqliteType.Text);
-            foreach (var id in sourceItemIds)
-            {
-                idParam.Value = id;
-                count += cmd.ExecuteNonQuery();
-            }
-
-            transaction.Commit();
-        });
-        return count;
-    }
-
-    /// <summary>
     /// Updates status for many items by source-item ID in one transaction.
     /// Uses the same transition logic as <see cref="UpdateStatus"/> with
-    /// retry tracking — Synced clears RetryCount, Errored increments it.
+    /// retry tracking, Synced clears RetryCount, Errored increments it.
     /// Always clears PendingType (these batch transitions don't carry one).
     /// </summary>
     public int BatchUpdateStatus(IEnumerable<string> sourceItemIds, SyncStatus status, string? errorMessage = null)
@@ -546,7 +473,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             using var transaction = conn.BeginTransaction();
             using var cmd = conn.CreateCommand();
             cmd.Transaction = transaction;
-            var clauses = BuildStatusTransitionClauses(status, trackRetryCount: true);
+            var clauses = BuildStatusTransitionClauses(status);
             clauses.Add("PendingType = NULL");
             cmd.CommandText = $"UPDATE SyncItems SET {string.Join(", ", clauses)} WHERE SourceItemId = @sourceItemId";
             AddStatusTransitionParameters(cmd, status, errorMessage);

@@ -59,7 +59,7 @@ public class SyncableValueTests
     /// <summary>
     /// Source moved and Source still differs from Local, so HasChanges fires.
     /// True: a real divergence between current Source and Local is detected.
-    /// False: the fall-through comparator path isn't running — divergences silently ignored.
+    /// False: the fall-through comparator path isn't running, divergences silently ignored.
     /// </summary>
     [Fact]
     public void HasChanges_IsTrue_WhenSourceHashDiffersFromSyncedHash_AndSourceDiffersFromLocal()
@@ -142,7 +142,7 @@ public class SyncableValueTests
     /// <summary>
     /// Hashing the same JSON twice produces the same fingerprint.
     /// True: hashes are reproducible across refresh runs so SourceHash == SyncedHash actually fires.
-    /// False: non-deterministic hashing breaks the fast path entirely — every row re-evaluated.
+    /// False: non-deterministic hashing breaks the fast path entirely, every row re-evaluated.
     /// </summary>
     [Fact]
     public void RecomputeSourceHash_StableForSameInput()

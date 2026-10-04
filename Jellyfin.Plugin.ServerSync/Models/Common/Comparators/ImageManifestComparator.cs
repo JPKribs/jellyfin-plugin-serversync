@@ -1,4 +1,4 @@
-// CA5351 — SHA256 here is a content fingerprint, not a security primitive.
+// CA5351, SHA256 here is a content fingerprint, not a security primitive.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,7 +13,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 /// <c>Dictionary&lt;ImageType, List&lt;ImageInfoDto&gt;&gt;</c>. Equality compares
 /// per-type counts and the set of image file sizes within each type (a source
 /// size of zero is "unknown" and matches anything). Hashing produces a stable
-/// fingerprint over the tag/size/dimensions tuples — order-independent both
+/// fingerprint over the tag/size/dimensions tuples, order-independent both
 /// across types and within a type.
 /// </summary>
 public sealed class ImageManifestComparator : ISyncComparator<string>
@@ -31,7 +31,7 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
     {
         if (string.IsNullOrEmpty(source))
         {
-            // Empty source = nothing to sync; leave local alone rather than
+            // Empty source = nothing to sync. Leave local alone rather than
             // queue an apply that can't deliver and would fail verify.
             return null;
         }
@@ -78,7 +78,7 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
             // every backdrop, and the row never settles.
             //
             // A source size of 0 means enrichment could not measure the image
-            // (the /Items/{id}/Images call failed — a non-admin token gets
+            // (the /Items/{id}/Images call failed, a non-admin token gets
             // 403 here). That is indeterminate, NOT a difference: we cannot
             // assert the images differ, and an apply built on that guess
             // fails verification for the same reason, so queueing it only
@@ -112,8 +112,8 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
         {
             if (!sourceMap.ContainsKey(type))
             {
-                // Not a failure cause — Equals() above ignores local-only
-                // types — so don't report it as the diff. Continue.
+                // Not a failure cause, Equals() above ignores local-only
+                // types, so don't report it as the diff. Continue.
                 _ = localImages;
             }
         }
@@ -139,9 +139,9 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
 
             // Tag is included so source-only manifests (built from
             // BaseItemDto.ImageTags without a per-item HTTP call) still
-            // discriminate content changes — Jellyfin updates an image's
+            // discriminate content changes, Jellyfin updates an image's
             // Tag whenever the underlying file changes. Size/W/H are 0 in
-            // that path; Tag carries the signal.
+            // that path. Tag carries the signal.
             var fingerprint = string.Join(
                 ";",
                 map.OrderBy(k => k.Key, StringComparer.Ordinal)

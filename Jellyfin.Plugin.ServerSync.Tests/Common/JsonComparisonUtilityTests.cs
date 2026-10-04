@@ -124,7 +124,7 @@ public class JsonComparisonUtilityTests
     /// <summary>
     /// GetDifferingFields names the specific fields that diverge.
     /// True: callers can list per-field diffs in logs and modals.
-    /// False: only counts available — no actionable per-field info.
+    /// False: only counts available, no actionable per-field info.
     /// </summary>
     [Fact]
     public void GetDifferingFields_ReturnsFieldNames()
@@ -207,7 +207,7 @@ public class JsonComparisonUtilityTests
     /// Same calendar date with different times of day normalizes to the same
     /// string. This is the field-level regression from the 07:01-vs-07:00
     /// EndDate loop: the apply step (DateOnlyEquals) said "equal, nothing to
-    /// write" while the blob comparison said "divergent" — rows never
+    /// write" while the blob comparison said "divergent", rows never
     /// converged. Blobs storing this normalized form keep both in agreement.
     /// True: time-of-day jitter between servers can't diverge date fields.
     /// False: the verification loop comes back.
@@ -238,7 +238,7 @@ public class JsonComparisonUtilityTests
     }
 
     /// <summary>
-    /// Null in, null out — so absent dates stay absent in the blob instead of
+    /// Null in, null out, so absent dates stay absent in the blob instead of
     /// becoming a "null"/empty-string diff against the other side.
     /// </summary>
     [Fact]

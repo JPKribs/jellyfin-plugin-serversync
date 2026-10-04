@@ -30,7 +30,7 @@ public static class JsonComparisonUtility
             return false;
         }
 
-        // Byte-identical blobs are trivially equal — skip the parse + walk.
+        // Byte-identical blobs are trivially equal, skip the parse + walk.
         // This is the hot path on refresh: source/local blobs come from
         // hand-mirrored builders with identical key order, so in-sync rows
         // usually serialize identically, and this check runs for every
@@ -136,7 +136,7 @@ public static class JsonComparisonUtility
     {
         if (string.IsNullOrEmpty(json1) || string.IsNullOrEmpty(json2))
         {
-            // Mismatched presence — not a property-level diff, but report it
+            // Mismatched presence, not a property-level diff, but report it
             // distinctly so callers can still surface a useful message.
             return !string.IsNullOrEmpty(json1) || !string.IsNullOrEmpty(json2)
                 ? new[] { "(blob)" }
@@ -256,7 +256,7 @@ public static class JsonComparisonUtility
         => s.Length <= max ? s : string.Concat(s.AsSpan(0, max), "…");
 
     /// <summary>
-    /// Cheap shape check for ISO-8601 date strings (<c>yyyy-MM-dd…</c>) —
+    /// Cheap shape check for ISO-8601 date strings (<c>yyyy-MM-dd…</c>) , 
     /// every date this plugin serializes starts that way. Filters which
     /// string pairs are worth a <see cref="DateTimeOffset.TryParse(string, out DateTimeOffset)"/>
     /// attempt in <see cref="JsonElementEquals"/>.
@@ -311,16 +311,13 @@ public static class JsonComparisonUtility
     // DateTime.ToUniversalTime() on a Kind=Unspecified value silently interprets it
     // as local time and shifts. We treat Unspecified as already-UTC instead, which
     // matches how Jellyfin commonly stores date-only fields.
-    private static DateTime AsUtcSafe(DateTime dt) =>
-        dt.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(dt, DateTimeKind.Utc)
-            : dt.ToUniversalTime();
+    private static DateTime AsUtcSafe(DateTime dt) => Utilities.UtcTime.AsUtc(dt);
 
     /// <summary>
     /// Normalizes a date-only semantic field (premiere/end/birth/death dates)
     /// to its UTC calendar date as <c>yyyy-MM-dd</c>. Blob builders store
     /// this instead of the raw timestamp so the JSON comparison agrees with
-    /// the apply step's <see cref="DateOnlyEquals"/> — servers routinely hold
+    /// the apply step's <see cref="DateOnlyEquals"/>, servers routinely hold
     /// the same date with different times of day (TZ-shifted midnights,
     /// provider quirks like 07:01), and comparing timestamps left rows
     /// permanently diverged that the apply step correctly refused to touch.
@@ -437,7 +434,7 @@ public static class JsonComparisonUtility
 
                 // Compare as dates via DateTimeOffset to avoid the DateTime
                 // Unspecified-kind TZ shift. AssumeUniversal makes offset-less
-                // strings UTC. Gated on an ISO-date shape check first — blobs
+                // strings UTC. Gated on an ISO-date shape check first, blobs
                 // are full of long non-date strings (overviews, taglines) and
                 // attempting a culture-aware parse on every unequal pair was
                 // measurable CPU across 100k-row refreshes.

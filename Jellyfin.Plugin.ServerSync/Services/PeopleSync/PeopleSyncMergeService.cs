@@ -47,7 +47,7 @@ public static class PeopleSyncMergeService
     {
         ArgumentNullException.ThrowIfNull(sourcePerson);
 
-        // Unwrap Kiota's UntypedNode wrappers — calling .ToString() directly on
+        // Unwrap Kiota's UntypedNode wrappers, calling .ToString() directly on
         // an AdditionalData entry yields the type name, not the wrapped value,
         // which made every ProviderId look like "UntypedString" and produced a
         // permanent IMDB desync in the modal.
@@ -70,7 +70,7 @@ public static class PeopleSyncMergeService
         var metadata = new Dictionary<string, object?>
         {
             ["OriginalTitle"] = sourcePerson.OriginalTitle,
-            // SortName excluded — server-derived from Name, never matches
+            // SortName excluded, server-derived from Name, never matches
             // across servers. ForcedSortName is the user override and IS
             // synced.
             ["ForcedSortName"] = sourcePerson.ForcedSortName,
@@ -95,7 +95,7 @@ public static class PeopleSyncMergeService
 
     /// <summary>
     /// Builds a metadata JSON blob from a local <see cref="BaseItem"/>
-    /// (person). Symmetric with <see cref="BuildSourceMetadata"/> — same
+    /// (person). Symmetric with <see cref="BuildSourceMetadata"/>, same
     /// keys, same sort order, same normalization.
     /// </summary>
     public static string BuildLocalMetadata(BaseItem localPerson)
@@ -110,10 +110,10 @@ public static class PeopleSyncMergeService
         var metadata = new Dictionary<string, object?>
         {
             ["OriginalTitle"] = localPerson.OriginalTitle,
-            // SortName excluded — see source-side comment.
+            // SortName excluded, see source-side comment.
             ["ForcedSortName"] = localPerson.ForcedSortName,
             ["Overview"] = localPerson.Overview,
-            // Date-only — see source-side comment in BuildSourceMetadata.
+            // Date-only, see source-side comment in BuildSourceMetadata.
             ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(localPerson.PremiereDate),
             ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(localPerson.EndDate),
             ["ProductionYear"] = localPerson.ProductionYear,
@@ -239,34 +239,5 @@ public static class PeopleSyncMergeService
         }
 
         return (sourceImagesValue, localImagesValue);
-    }
-
-    // ===================================================================
-    // Parity helpers (match the other *SyncMergeService surfaces)
-    // ===================================================================
-
-    /// <summary>
-    /// True if any enabled category on the record has changes worth syncing.
-    /// Mirrors <see cref="HistorySyncMergeService.HasChangesToSync"/>.
-    /// </summary>
-    public static bool HasChangesToSync(PeopleSyncItem item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        return item.HasChanges;
-    }
-
-    /// <summary>
-    /// Human-readable summary of which categories changed, for logs / modals.
-    /// Mirrors <see cref="HistorySyncMergeService.GetChangeSummary"/>.
-    /// </summary>
-    public static string GetChangeSummary(PeopleSyncItem item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-
-        var changes = new List<string>();
-        if (item.HasMetadataChanges) changes.Add("Metadata");
-        if (item.HasImagesChanges) changes.Add("Images");
-
-        return changes.Count > 0 ? string.Join(", ", changes) : "No changes";
     }
 }

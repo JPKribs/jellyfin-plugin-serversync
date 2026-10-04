@@ -47,45 +47,6 @@ public static class UserSyncMergeService
     }
 
     /// <summary>
-    /// Serializes a value to JSON for storage.
-    /// </summary>
-    /// <typeparam name="T">Value type.</typeparam>
-    /// <param name="value">Value to serialize.</param>
-    /// <returns>JSON string or null.</returns>
-    public static string? SerializeValue<T>(T? value)
-    {
-        if (value == null)
-        {
-            return null;
-        }
-
-        return JsonSerializer.Serialize(value);
-    }
-
-    /// <summary>
-    /// Deserializes a JSON value.
-    /// </summary>
-    /// <typeparam name="T">Target type.</typeparam>
-    /// <param name="json">JSON string.</param>
-    /// <returns>Deserialized value or default.</returns>
-    public static T? DeserializeValue<T>(string? json)
-    {
-        if (string.IsNullOrEmpty(json))
-        {
-            return default;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<T>(json);
-        }
-        catch (JsonException)
-        {
-            return default;
-        }
-    }
-
-    /// <summary>
     /// Properties that require library ID translation.
     /// </summary>
     public static readonly HashSet<string> LibraryIdProperties = new(StringComparer.OrdinalIgnoreCase)
@@ -116,7 +77,7 @@ public static class UserSyncMergeService
         "EnableAllDevices",
         // Library IDs held as strings, so the type walker can't see them.
         // Untranslated they name libraries that don't exist locally, and
-        // translating them silently drops any library without a mapping —
+        // translating them silently drops any library without a mapping , 
         // which revokes local deletion rights the operator never touched.
         "EnableContentDeletionFromFolders",
         "InvalidLoginAttemptCount", // Runtime state
@@ -147,7 +108,7 @@ public static class UserSyncMergeService
     /// user's policy either silently grants no access or writes a dangling
     /// reference. <c>BlockedMediaFolders</c> and <c>BlockedChannels</c> are
     /// plain <c>Guid[]</c>, and <c>AccessSchedules</c> embeds the source user's
-    /// own <c>UserId</c> — none of which a name-based blocklist caught.
+    /// own <c>UserId</c>, none of which a name-based blocklist caught.
     /// </para>
     /// <para>
     /// Driven by type rather than by name so a future Jellyfin release that
@@ -203,7 +164,7 @@ public static class UserSyncMergeService
             return false;
         }
 
-        // Complex type — one Guid property anywhere makes the whole value unsafe
+        // Complex type, one Guid property anywhere makes the whole value unsafe
         // to copy across servers (AccessSchedule.UserId).
         foreach (var property in underlying.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
@@ -218,7 +179,7 @@ public static class UserSyncMergeService
 
     /// <summary>
     /// Checks if a policy property should be synced, by name only. Prefer the
-    /// <see cref="PropertyInfo"/> overload — it also rejects Guid-bearing types.
+    /// <see cref="PropertyInfo"/> overload, it also rejects Guid-bearing types.
     /// </summary>
     public static bool ShouldSyncPolicyProperty(string propertyName)
     {
@@ -266,7 +227,7 @@ public static class UserSyncMergeService
     /// <summary>
     /// Extracts syncable policy properties from a policy object and returns as JSON.
     /// </summary>
-    public static string? ExtractPolicyJson(object? policy, List<LibraryMapping>? libraryMappings = null)
+    public static string? ExtractPolicyJson(object? policy)
     {
         if (policy == null) return null;
 
@@ -279,19 +240,9 @@ public static class UserSyncMergeService
 
             try
             {
-                var value = prop.GetValue(policy);
-
-                // Retained seam: no property currently reaches this branch,
-                // because every library-ID field is Guid-typed and therefore
-                // excluded above. It stays wired so re-enabling translated
-                // library access is a one-line change to the exclusion rule
-                // rather than a rewrite.
-                if (libraryMappings != null && RequiresLibraryTranslation(prop.Name) && value is IEnumerable<string> ids)
-                {
-                    value = TranslateLibraryIds(ids.ToArray(), libraryMappings);
-                }
-
-                syncableProps[prop.Name] = value;
+                // Library id fields are Guid typed and excluded above, so nothing read here needs
+                // translating. ComputeMergedPolicy translates the merged value instead.
+                syncableProps[prop.Name] = prop.GetValue(policy);
             }
             catch (TargetInvocationException)
             {
@@ -366,17 +317,5 @@ public static class UserSyncMergeService
         {
             return sourcePolicy;
         }
-    }
-
-    /// <summary>
-    /// Compares two JSON strings for semantic equality.
-    /// Delegates to the shared JsonComparisonUtility.
-    /// </summary>
-    /// <param name="json1">First JSON string.</param>
-    /// <param name="json2">Second JSON string.</param>
-    /// <returns>True if semantically equal, false otherwise.</returns>
-    public static bool JsonEquals(string? json1, string? json2)
-    {
-        return Models.Common.JsonComparisonUtility.JsonEquals(json1, json2);
     }
 }

@@ -86,15 +86,15 @@ public sealed class PeerPairingStoreTests : IDisposable
     [Fact]
     public void Refusal_IsRememberedUntilPaired()
     {
-        Assert.False(_store.IsInboundRefused("peer"));
+        Assert.Null(_store.InboundRefusedAt("peer"));
         Assert.Null(_store.InboundRefusedAt("peer"));
         _store.MarkInboundRefused("peer");
-        Assert.True(_store.IsInboundRefused("peer"));
+        Assert.NotNull(_store.InboundRefusedAt("peer"));
         Assert.True(_store.InboundRefusedAt("peer") > DateTime.UtcNow.AddMinutes(-1));
         Assert.Null(_store.GetInbound("peer"));
 
         _store.SetInbound("peer", "in-1");
-        Assert.False(_store.IsInboundRefused("peer"));
+        Assert.Null(_store.InboundRefusedAt("peer"));
         Assert.Equal("in-1", _store.GetInbound("peer"));
     }
 

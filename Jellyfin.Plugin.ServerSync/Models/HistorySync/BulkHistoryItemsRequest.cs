@@ -18,6 +18,12 @@ public class BulkHistoryItemsRequest
     /// Use Ids instead when possible.
     /// </summary>
     public List<HistoryItemReference> Items { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets a status to select rows by when <see cref="Ids"/> is empty. The Queue endpoint
+    /// then queues every row in this status, which is how "Retry errors" reaches every errored row.
+    /// </summary>
+    public string? Status { get; set; }
 }
 
 /// <summary>

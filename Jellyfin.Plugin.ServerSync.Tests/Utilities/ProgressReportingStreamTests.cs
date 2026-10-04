@@ -74,7 +74,7 @@ public class ProgressReportingStreamTests
     }
 
     /// <summary>
-    /// Bytes pass through to the destination unchanged — the wrapper is
+    /// Bytes pass through to the destination unchanged, the wrapper is
     /// observability only.
     /// </summary>
     [Fact]

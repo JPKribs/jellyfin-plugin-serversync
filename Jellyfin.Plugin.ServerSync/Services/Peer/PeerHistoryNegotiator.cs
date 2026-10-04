@@ -70,6 +70,19 @@ public static class PeerHistoryNegotiator
     /// <param name="allowRetry">Whether a stale answer may lead to another offer.</param>
     /// <returns>The step to take and, for a failure, the reason.</returns>
     public static NegotiationStep ResolveOutcome(HistorySyncItem record, PeerHistoryResult result, bool allowRetry)
+        => ResolveOutcome(record, result, allowRetry, remerge: null);
+
+    /// <summary>
+    /// Like <see cref="ResolveOutcome(HistorySyncItem, PeerHistoryResult, bool)"/>, with a step that runs
+    /// after a stale answer is merged again, so a caller that decided the merge some other way, such as
+    /// by edit versions, keeps that decision on the retry.
+    /// </summary>
+    /// <param name="record">The row being negotiated.</param>
+    /// <param name="result">The peer's answer.</param>
+    /// <param name="allowRetry">Whether a stale answer may be retried once.</param>
+    /// <param name="remerge">Runs after the row is merged again against the peer's live state, or null.</param>
+    /// <returns>What to do next.</returns>
+    public static NegotiationStep ResolveOutcome(HistorySyncItem record, PeerHistoryResult result, bool allowRetry, Action<HistorySyncItem>? remerge)
     {
         ArgumentNullException.ThrowIfNull(record);
         ArgumentNullException.ThrowIfNull(result);
@@ -84,6 +97,7 @@ public static class PeerHistoryNegotiator
                 record.NegotiateWithSource = true;
                 ApplySourceState(record, result.Current);
                 HistorySyncMergeService.MergeHistoryData(record);
+                remerge?.Invoke(record);
                 record.UpdateSourceStateBundle();
                 return new NegotiationStep(NegotiationAction.Retry, null);
 
@@ -192,6 +206,66 @@ public static class PeerHistoryNegotiator
         item.SourcePlaybackPositionTicks = state.PlaybackPositionTicks;
         item.SourceLastPlayedDate = state.LastPlayedDate;
         item.SourceIsFavorite = state.IsFavorite;
+    }
+
+    /// <summary>Builds the state this server holds, as the history row records it.</summary>
+    /// <param name="item">The history row.</param>
+    /// <returns>The local state.</returns>
+    public static PeerHistoryState LocalStateOf(HistorySyncItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return new PeerHistoryState
+        {
+            Played = item.LocalIsPlayed,
+            PlayCount = item.LocalPlayCount,
+            PlaybackPositionTicks = item.LocalPlaybackPositionTicks,
+            LastPlayedDate = item.LocalLastPlayedDate,
+            IsFavorite = item.LocalIsFavorite
+        };
+    }
+
+    /// <summary>Builds the state the two servers last agreed on.</summary>
+    /// <param name="item">The history row.</param>
+    /// <returns>The negotiated state.</returns>
+    public static PeerHistoryState NegotiatedStateOf(HistorySyncItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return new PeerHistoryState
+        {
+            Played = item.NegotiatedIsPlayed,
+            PlayCount = item.NegotiatedPlayCount,
+            PlaybackPositionTicks = item.NegotiatedPlaybackPositionTicks,
+            LastPlayedDate = item.NegotiatedLastPlayedDate,
+            IsFavorite = item.NegotiatedIsFavorite
+        };
+    }
+
+    /// <summary>Writes a state onto the local side of a history row.</summary>
+    /// <param name="item">The history row to update.</param>
+    /// <param name="state">The state.</param>
+    public static void ApplyLocalState(HistorySyncItem item, PeerHistoryState state)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(state);
+        item.LocalIsPlayed = state.Played;
+        item.LocalPlayCount = state.PlayCount;
+        item.LocalPlaybackPositionTicks = state.PlaybackPositionTicks;
+        item.LocalLastPlayedDate = state.LastPlayedDate;
+        item.LocalIsFavorite = state.IsFavorite;
+    }
+
+    /// <summary>Writes a state as the merged result of a history row.</summary>
+    /// <param name="item">The history row to update.</param>
+    /// <param name="state">The state.</param>
+    public static void ApplyMergedState(HistorySyncItem item, PeerHistoryState state)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(state);
+        item.MergedIsPlayed = state.Played;
+        item.MergedPlayCount = state.PlayCount;
+        item.MergedPlaybackPositionTicks = state.PlaybackPositionTicks;
+        item.MergedLastPlayedDate = state.LastPlayedDate;
+        item.MergedIsFavorite = state.IsFavorite;
     }
 
     private static bool Same<T>(T? a, T? b)

@@ -48,7 +48,7 @@ public class JsonFieldHelpersTests
     /// <summary>
     /// AssignString invokes the callback with null when the key is present-and-null.
     /// True: explicit null on source flows through to clear local (e.g. clearing an Overview).
-    /// False: explicit null clears would be lost — operators couldn't sync a field deletion.
+    /// False: explicit null clears would be lost, operators couldn't sync a field deletion.
     /// </summary>
     [Fact]
     public void AssignString_NullValue_InvokesAssignWithNull()

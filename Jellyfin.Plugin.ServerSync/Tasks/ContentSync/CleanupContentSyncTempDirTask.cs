@@ -25,6 +25,13 @@ public class CleanupTempFilesTask : IScheduledTask
     /// </summary>
     private const int MaxTempFileAgeHours = 24;
 
+    /// <summary>
+    /// Subfolders of the temp directory where the Metadata and People sync
+    /// buffer image downloads. Those files are deleted after each apply, so
+    /// only a crash mid apply leaves one behind, and the same age rule clears it.
+    /// </summary>
+    private static readonly string[] ImageTempSubdirectories = { "metadata-images", "person-images" };
+
     public CleanupTempFilesTask(ILogger<CleanupTempFilesTask> logger, IPluginConfigurationManager configManager)
     {
         _logger = logger;
@@ -42,7 +49,8 @@ public class CleanupTempFilesTask : IScheduledTask
     public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         var config = _configManager.Configuration;
-        if (!config.EnableContentSync)
+        // Content downloads and the metadata and people image downloads all stage files here.
+        if (!config.EnableContentSync && !config.EnableMetadataSync && !config.EnablePeopleSync)
         {
             return Task.CompletedTask;
         }
@@ -56,12 +64,12 @@ public class CleanupTempFilesTask : IScheduledTask
         }
 
         // Same hazard class as the recycling bin: this task deletes every
-        // stale top-level file in the directory, so a temp path overlapping
-        // a library root would delete media.
+        // stale top-level file in the directory and in its image buffer
+        // folders, so a temp path overlapping a library root would delete media.
         if (RecyclingBinService.OverlapsLibraryRoot(tempPath, config))
         {
             _logger.LogError(
-                "Temp download path {Path} overlaps a configured library root — cleanup would delete media files. Skipping cleanup until the path is corrected.",
+                "Temp download path {Path} overlaps a configured library root, cleanup would delete media files. Skipping cleanup until the path is corrected.",
                 tempPath);
             return Task.CompletedTask;
         }
@@ -77,7 +85,17 @@ public class CleanupTempFilesTask : IScheduledTask
             string[] tempFiles;
             try
             {
-                tempFiles = Directory.GetFiles(tempPath);
+                var files = new List<string>(Directory.GetFiles(tempPath));
+                foreach (var subdirectory in ImageTempSubdirectories)
+                {
+                    var imageDir = Path.Combine(tempPath, subdirectory);
+                    if (Directory.Exists(imageDir))
+                    {
+                        files.AddRange(Directory.GetFiles(imageDir));
+                    }
+                }
+
+                tempFiles = files.ToArray();
             }
             catch (Exception ex)
             {
@@ -118,7 +136,7 @@ public class CleanupTempFilesTask : IScheduledTask
                     // writing to, regardless of age. A slow throttled download
                     // (e.g. 100 KB/s on a 50 GB file) can run for days, but
                     // its on-disk LastWriteTimeUtc only advances when bytes
-                    // are flushed — long throttle sleeps make a healthy file
+                    // are flushed, long throttle sleeps make a healthy file
                     // look stale. On Linux/macOS, deleting an open file
                     // succeeds (unlink while open) and silently strands the
                     // writer with a handle pointing to nothing visible.
@@ -132,7 +150,7 @@ public class CleanupTempFilesTask : IScheduledTask
 
                     if (fileInfo.LastWriteTimeUtc < cutoffTime)
                     {
-                        // The snapshot above can be minutes old on big dirs; a
+                        // The snapshot above can be minutes old on big dirs. A
                         // download that started mid-scan reuses deterministic
                         // temp names, so re-check right before the unlink.
                         if (ActiveDownloadTracker.IsTempFileInUse(file))

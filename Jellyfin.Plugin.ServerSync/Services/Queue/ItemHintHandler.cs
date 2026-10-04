@@ -89,7 +89,7 @@ public sealed class ItemHintHandler
             return HintApplyResult.Dropped($"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
         }
 
-        // The worker reads a pass's items in pages; a row it did not cover reads its own.
+        // The worker reads a pass's items in pages. A row it did not cover reads its own.
         var dto = prefetched;
         if (dto is null)
         {
@@ -98,7 +98,7 @@ public sealed class ItemHintHandler
             {
                 fetched = await client.GetItemsByIdsAsync(new[] { originItemId }, RefreshMetadataSyncTableTask.BuildRequestedFields(config), cancellationToken: cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -120,7 +120,7 @@ public sealed class ItemHintHandler
         var record = await refresh.RefreshOneAsync(new MetadataWork(source, mapping, dto, RefreshMetadataSyncTableTask.IsFolderType(dto.Type)), cancellationToken).ConfigureAwait(false);
         if (record is null)
         {
-            return HintApplyResult.Dropped("no local item at the mapped path yet; the next content sync or scan will pick it up");
+            return HintApplyResult.Dropped("no local item at the mapped path yet. The next content sync or scan will pick it up");
         }
 
         return await SettleAndApplyAsync(
@@ -133,8 +133,7 @@ public sealed class ItemHintHandler
             version => _publisher.PublishMetadata(Guid.Parse(record.LocalItemId!), record.LocalPath ?? string.Empty, version, excludePeerKey: null, itemType: hint.ItemType),
             () => ActivatorUtilities.CreateInstance<SyncMissingMetadataTask>(_services).ApplyRowAsync(record, source, cancellationToken),
             record.ItemName,
-            () => _libraryManager.GetItemById(Guid.Parse(record.LocalItemId!)),
-            cancellationToken).ConfigureAwait(false);
+            () => _libraryManager.GetItemById(Guid.Parse(record.LocalItemId!))).ConfigureAwait(false);
     }
 
     /// <summary>Applies a people hint.</summary>
@@ -164,7 +163,7 @@ public sealed class ItemHintHandler
         {
             dto = await client.GetPersonByNameAsync(hint.Key, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -175,7 +174,7 @@ public sealed class ItemHintHandler
 
         if (dto is null || string.IsNullOrEmpty(dto.Name))
         {
-            return HintApplyResult.Dropped($"'{hint.Key}' no longer exists on '{origin.DisplayName}'");
+            return HintApplyResult.Dropped($"it no longer exists on '{origin.DisplayName}'");
         }
 
         var source = Connect(origin, client);
@@ -183,7 +182,7 @@ public sealed class ItemHintHandler
         var record = await refresh.RefreshOneAsync(new PersonWork(source, dto), cancellationToken).ConfigureAwait(false);
         if (record is null || string.IsNullOrEmpty(record.LocalPersonId))
         {
-            return HintApplyResult.Dropped($"no person named '{hint.Key}' on this server");
+            return HintApplyResult.Dropped($"Person {hint.Key} does not exist on this server so it could not be updated from {origin.DisplayName}");
         }
 
         return await SettleAndApplyAsync(
@@ -196,8 +195,7 @@ public sealed class ItemHintHandler
             version => _publisher.PublishPeople(record.PersonName, Guid.Parse(record.LocalPersonId), version, excludePeerKey: null),
             () => ActivatorUtilities.CreateInstance<SyncMissingPeopleTask>(_services).ApplyRowAsync(record, source, cancellationToken),
             record.PersonName,
-            () => _libraryManager.GetItemById(Guid.Parse(record.LocalPersonId)),
-            cancellationToken).ConfigureAwait(false);
+            () => _libraryManager.GetItemById(Guid.Parse(record.LocalPersonId))).ConfigureAwait(false);
     }
 
     private async Task<HintApplyResult> SettleAndApplyAsync<TRecord>(
@@ -210,15 +208,23 @@ public sealed class ItemHintHandler
         Action<ObjectVersion> publishLocal,
         Func<Task<bool>> apply,
         string? name,
-        Func<MediaBrowser.Controller.Entities.BaseItem?> localItem,
-        CancellationToken cancellationToken)
+        Func<MediaBrowser.Controller.Entities.BaseItem?> localItem)
         where TRecord : SyncRecord
     {
-        var incoming = new ObjectVersion { Kind = kind, Key = localKey, ServerId = hint.VersionServerId, Timestamp = hint.VersionTimestamp };
+        var incoming = HintProtocol.IncomingVersion(hint, kind, localKey);
 
         if (record.Status == SyncStatus.Ignored)
         {
             return HintApplyResult.Dropped("the row is ignored on this server");
+        }
+
+        // A row whose retries ran out still differs. Taking it for "the values match" would record a
+        // version for a value this server does not hold.
+        record.RetryIfErrored();
+
+        if (record.Status == SyncStatus.Pending)
+        {
+            return new HintApplyResult(HintApplyOutcome.Unchanged, "waiting for approval on this server");
         }
 
         if (record.Status != SyncStatus.Queued)
@@ -232,18 +238,33 @@ public sealed class ItemHintHandler
             return HintApplyResult.Unchanged;
         }
 
+        // Provider work never touches an item locked here, the same as Jellyfin's own refresh. A lock is
+        // the one sign of curation that predates versions, so it protects edits no version records.
+        if (!hint.Recorded && localItem() is { IsLocked: true })
+        {
+            record.MarkKept($"kept: the item is locked here, so a provider's work on '{origin.DisplayName}' does not replace it");
+            StoreKept(record, kind);
+            _logger.LogInformation("Kept {Kind} for {Name}: the item is locked here and the change from '{Origin}' is a provider's work", kind, name, origin.DisplayName);
+            return new HintApplyResult(HintApplyOutcome.Unchanged, "the item is locked here");
+        }
+
         // A recorded edit here beats a newer provider's work there, and beats an older edit there.
         var local = _resolver.Recorded(kind, localKey);
         if (local is not null && (!hint.Recorded || VersionDecider.Decide(local, incoming, valuesEqual: false) == VersionDecision.Keep))
         {
-            record.Status = SyncStatus.Synced;
-            record.StatusDate = DateTime.UtcNow;
-            record.Reason = hint.Recorded
-                ? $"kept: this server's edit is newer than the one on '{origin.DisplayName}', which will pull it"
-                : $"kept: this server's edit beats a provider's work on '{origin.DisplayName}', which will pull it";
+            record.MarkKept(hint.Recorded
+                ? $"kept: this server's edit is newer than the one on '{origin.DisplayName}'"
+                : $"kept: this server's edit beats a provider's work on '{origin.DisplayName}'");
             StoreKept(record, kind);
-            publishLocal(local);
-            _logger.LogInformation("Kept this server's {Kind} for {Name}, newer than '{Origin}', and told the peers to pull it", kind, name, origin.DisplayName);
+
+            // Only an edit made here is announced from here, so a value this server took from a third
+            // server never bounces between peers.
+            if (_resolver.IsThisServer(local))
+            {
+                publishLocal(local);
+            }
+
+            _logger.LogInformation("Kept this server's {Kind} for {Name}, newer than '{Origin}'", kind, name, origin.DisplayName);
             return new HintApplyResult(HintApplyOutcome.Unchanged, "this server's edit is newer");
         }
 
@@ -252,7 +273,7 @@ public sealed class ItemHintHandler
             return HintApplyResult.RetryLater(record.Reason ?? "the apply failed");
         }
 
-        // The apply task recorded the version it read from the peer; the hint's is at least as exact.
+        // The apply task recorded the version it read from the peer. The hint's is at least as exact.
         // Provider work leaves no version, so a later edit anywhere still wins over it.
         if (hint.Recorded)
         {

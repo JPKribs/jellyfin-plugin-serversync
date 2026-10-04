@@ -11,7 +11,7 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 public static class ConfigurationUtilities
 {
     /// <summary>
-    /// True when both SourceServerUrl and SourceServerApiKey are populated.
+    /// True when at least one configured server entry is one this server pulls from.
     /// </summary>
     public static bool HasValidAuthConfiguration(PluginConfiguration config)
     {
@@ -45,9 +45,9 @@ public static class ConfigurationUtilities
             return "Only HTTP and HTTPS URLs are allowed";
         }
 
-        // IP-literal hosts are validated here; DNS names go through the HTTP stack.
+        // IP-literal hosts are validated here. DNS names go through the HTTP stack.
         // Uri.Host keeps the brackets on an IPv6 literal ("[::1]"), which
-        // IPAddress.TryParse rejects — every IPv6 literal skipped classification
+        // IPAddress.TryParse rejects, every IPv6 literal skipped classification
         // entirely until the brackets were trimmed.
         var host = uri.Host.Trim('[', ']');
         if (IPAddress.TryParse(host, out var ipAddress))
@@ -147,9 +147,44 @@ public static class ConfigurationUtilities
         }
     }
 
+    /// <summary>Whether two server addresses name the same server, ignoring case and a trailing slash.</summary>
+    /// <param name="a">One address.</param>
+    /// <param name="b">The other.</param>
+    /// <returns>True when they are the same.</returns>
+    public static bool SameServerUrl(string? a, string? b)
+    {
+        if (Uri.TryCreate((a ?? string.Empty).Trim(), UriKind.Absolute, out var ua) && Uri.TryCreate((b ?? string.Empty).Trim(), UriKind.Absolute, out var ub))
+        {
+            return string.Equals(ua.Scheme, ub.Scheme, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(ua.Host, ub.Host, StringComparison.OrdinalIgnoreCase)
+                && ua.Port == ub.Port
+                && string.Equals(ua.AbsolutePath.TrimEnd('/'), ub.AbsolutePath.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals((a ?? string.Empty).Trim().TrimEnd('/'), (b ?? string.Empty).Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string? ClassifyIpAddress(IPAddress ipAddress, bool allowPrivateNetwork)
     {
+        // An IPv4 address written as IPv6 (::ffff:127.0.0.1) is judged as the IPv4 address it is.
+        if (ipAddress.IsIPv4MappedToIPv6)
+        {
+            ipAddress = ipAddress.MapToIPv4();
+        }
+
         // Always-blocked: no legitimate use as a remote source server target.
+        // The IPv6 unspecified address (::, which is also IPv6None) reaches the local host on most
+        // systems, the same as 0.0.0.0, and a multicast group is never a single server.
+        if (ipAddress.Equals(IPAddress.IPv6Any) || ipAddress.Equals(IPAddress.IPv6None))
+        {
+            return "The unspecified address (::) is not allowed";
+        }
+
+        if (ipAddress.IsIPv6Multicast)
+        {
+            return "Multicast addresses are not allowed";
+        }
+
         if (ipAddress.IsIPv6LinkLocal)
         {
             return "Link-local addresses are not allowed";
@@ -164,16 +199,22 @@ public static class ConfigurationUtilities
         {
             var bytes = ipAddress.GetAddressBytes();
 
-            // 0.0.0.0/8 — unspecified/this network.
+            // 0.0.0.0/8, unspecified/this network.
             if (bytes[0] == 0)
             {
                 return "0.0.0.0/8 addresses are not allowed";
             }
 
-            // 169.254.0.0/16 — IPv4 link-local (covers AWS/GCP metadata 169.254.169.254).
+            // 169.254.0.0/16, IPv4 link-local (covers AWS/GCP metadata 169.254.169.254).
             if (bytes[0] == 169 && bytes[1] == 254)
             {
                 return "Link-local addresses are not allowed";
+            }
+
+            // 224.0.0.0/4 is IPv4 multicast, a group address rather than one server.
+            if ((bytes[0] & 0xF0) == 0xE0)
+            {
+                return "Multicast addresses are not allowed";
             }
         }
 
@@ -191,19 +232,19 @@ public static class ConfigurationUtilities
         {
             var bytes = ipAddress.GetAddressBytes();
 
-            // 10.0.0.0/8 — RFC1918 private network.
+            // 10.0.0.0/8, RFC1918 private network.
             if (bytes[0] == 10)
             {
                 return "Private-network addresses (10.0.0.0/8) are not allowed when private-network access is disabled";
             }
 
-            // 172.16.0.0/12 — RFC1918 private network.
+            // 172.16.0.0/12, RFC1918 private network.
             if (bytes[0] == 172 && (bytes[1] & 0xF0) == 16)
             {
                 return "Private-network addresses (172.16.0.0/12) are not allowed when private-network access is disabled";
             }
 
-            // 192.168.0.0/16 — RFC1918 private network.
+            // 192.168.0.0/16, RFC1918 private network.
             if (bytes[0] == 192 && bytes[1] == 168)
             {
                 return "Private-network addresses (192.168.0.0/16) are not allowed when private-network access is disabled";
@@ -213,7 +254,7 @@ public static class ConfigurationUtilities
         {
             var bytes = ipAddress.GetAddressBytes();
 
-            // fc00::/7 — IPv6 unique local address (ULA).
+            // fc00::/7, IPv6 unique local address (ULA).
             if ((bytes[0] & 0xFE) == 0xFC)
             {
                 return "IPv6 unique-local addresses are not allowed when private-network access is disabled";

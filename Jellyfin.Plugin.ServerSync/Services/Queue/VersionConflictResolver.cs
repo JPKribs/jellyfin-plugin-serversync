@@ -63,11 +63,15 @@ public sealed class VersionConflictResolver
         Timestamp = DateTime.UtcNow
     };
 
-    /// <summary>Whether a connected peer answers version questions.</summary>
-    /// <param name="source">The connected peer.</param>
+    /// <summary>
+    /// Whether a peer runs a Server Sync that keeps versions: true, false when it answers that it does
+    /// not, or null when it could not be asked. Only a real answer is cached. A failed read is not taken
+    /// to mean "no versions", since a scan would then fall back to the source winning over edits made here.
+    /// </summary>
+    /// <param name="source">The peer.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns><c>true</c> when it runs a Server Sync that carries versions.</returns>
-    public async Task<bool> PeerCarriesVersionsAsync(ScanSource source, CancellationToken cancellationToken)
+    /// <returns>Whether it carries versions, or null when unknown.</returns>
+    public async Task<bool?> PeerCarriesVersionsAsync(ScanSource source, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (_capabilities.TryGetValue(source.Key, out var cached) && DateTime.UtcNow - cached.CheckedAt < CapabilityCache)
@@ -81,19 +85,43 @@ public sealed class VersionConflictResolver
             var capabilities = await source.Client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
             carries = capabilities is not null && capabilities.Features.Contains(HintProtocol.HintFeature);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Could not read capabilities from '{Peer}'", source.Name);
-            carries = false;
+            return null;
         }
 
         _capabilities[source.Key] = (DateTime.UtcNow, carries);
         return carries;
     }
+
+    /// <summary>Whether a version is an edit this server made itself.</summary>
+    /// <param name="version">The version.</param>
+    /// <returns>True when this server made it.</returns>
+    public bool IsThisServer(ObjectVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        return string.Equals(version.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Keeps the version a peer held for a value the scan queued, until that value applies.</summary>
+    /// <param name="version">The peer's version, keyed by this server's key.</param>
+    public void RecordPending(ObjectVersion version) => _versions.SetPending(version);
+
+    /// <summary>Forgets any pending version for an object.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <param name="localKey">This server's key.</param>
+    public void ClearPending(HintKind kind, string localKey) => _versions.ClearPending(kind, localKey);
+
+    /// <summary>Records the pending version of a value that was just applied.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <param name="localKey">This server's key.</param>
+    /// <returns>True when one was pending.</returns>
+    public bool PromotePending(HintKind kind, string localKey) => _versions.PromotePending(kind, localKey);
 
     /// <summary>
     /// Reads the versions a peer holds for a batch of its own keys, in requests of the size the peer
@@ -118,7 +146,7 @@ public sealed class VersionConflictResolver
             {
                 page = await source.Client.GetPeerVersionsAsync(new VersionsRequest { Kind = kind, Keys = batch }, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -136,7 +164,15 @@ public sealed class VersionConflictResolver
             var now = DateTime.UtcNow;
             foreach (var pair in page)
             {
-                // A peer's clock is not trusted past this server's own.
+                // A peer's clock is not trusted past this server's own. Honest skew is read as now. A
+                // version far ahead is a broken clock or a lie and is treated as no version at all, the
+                // same way a hint dated that far ahead is declined.
+                if (HintProtocol.IsFutureVersion(pair.Value.Timestamp, now))
+                {
+                    _logger.LogWarning("'{Peer}' holds a version of {Key} dated {At:u}, ahead of this server's clock. Ignoring it", source.Name, pair.Key, pair.Value.Timestamp);
+                    continue;
+                }
+
                 pair.Value.Timestamp = HintProtocol.BoundVersion(pair.Value.Timestamp, now);
                 all[pair.Key] = pair.Value;
             }

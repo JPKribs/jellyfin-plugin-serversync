@@ -5,7 +5,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
@@ -41,7 +40,7 @@ public class DownloadService
     /// <param name="speedLimitBytesPerSecond">Download speed limit in bytes per second.</param>
     /// <param name="includeCompanionFiles">Whether to download companion files.</param>
     /// <param name="config">Plugin configuration.</param>
-    /// <param name="progress">Optional per-item progress (fraction 0–1 of the main file's bytes).</param>
+    /// <param name="progress">Optional per-item progress (fraction 0 to 1 of the main file's bytes).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Download result.</returns>
     public async Task<DownloadResult> DownloadItemAsync(
@@ -71,14 +70,7 @@ public class DownloadService
             await RetryPolicy.ExecuteWithRetryAsync(
                 async ct =>
                 {
-                    var download = await client.DownloadFileAsync(itemId, ct).ConfigureAwait(false);
-
-                    if (download == null)
-                    {
-                        throw new InvalidOperationException("No response from server");
-                    }
-
-                    var (sourceStream, contentLength) = download.Value;
+                    var (sourceStream, contentLength) = await client.DownloadFileAsync(itemId, ct).ConfigureAwait(false);
                     using (sourceStream)
                     {
                         // Ensure we don't have a partial file from previous attempt
@@ -86,10 +78,10 @@ public class DownloadService
 
                         using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
                         {
-                            // Content-Length is authoritative; the recorded
+                            // Content-Length is authoritative. The recorded
                             // SourceSize is the fallback (can be stale but is
                             // the right order of magnitude). No basis → no
-                            // in-file reporting; the item still completes its
+                            // in-file reporting. The item still completes its
                             // share when it finishes.
                             var expectedBytes = contentLength ?? (item.SourceSize > 0 ? item.SourceSize : (long?)null);
                             Stream destination = progress != null && expectedBytes.HasValue
@@ -131,10 +123,14 @@ public class DownloadService
             // with the previous version stuck in the recycling bin and no working
             // file at the target path:
             //   1. Move existing file (and its companions) to *.replacing.<guid>
-            //      sidecars on the same volume — atomic, so rolling back is fast.
+            //      sidecars on the same volume, atomic, so rolling back is fast.
             //   2. Atomically rename the just-downloaded temp file into place.
-            //   3. Only after step 2 succeeds, archive sidecars to the recycling
-            //      bin (or delete them).
+            //   3. Only after step 2 succeeds, archive the old main file to the
+            //      recycling bin (or delete it).
+            //   4. After the companion download, put back every companion the
+            //      download did not replace. The source only serves external
+            //      subtitles, so nfo files, artwork and subtitles it no longer
+            //      lists stay with the new file instead of being thrown away.
             // If step 2 throws, the catch block restores the sidecars so the
             // user's previous version stays intact at item.LocalPath.
             string? backupMain = null;
@@ -200,31 +196,39 @@ public class DownloadService
                 throw;
             }
 
-            // Rename succeeded — archive or delete the sidecars.
+            // The rename succeeded, so the old main file is no longer needed.
             ArchiveOrDeleteSidecar(backupMain, item.LocalPath, config);
-            foreach (var (orig, bk) in backupCompanions)
-            {
-                ArchiveOrDeleteSidecar(bk, orig, config);
-            }
 
             string? companionFilesList = null;
-            if (includeCompanionFiles)
+            try
             {
-                var downloadedCompanions = await DownloadCompanionFilesAsync(
-                    client,
-                    itemId,
-                    targetDir ?? Path.GetDirectoryName(item.LocalPath) ?? string.Empty,
-                    tempPath,
-                    speedLimitBytesPerSecond,
-                    config,
-                    cancellationToken).ConfigureAwait(false);
-
-                if (downloadedCompanions.Count > 0)
+                if (includeCompanionFiles)
                 {
-                    companionFilesList = string.Join(",", downloadedCompanions);
+                    var downloadedCompanions = await DownloadCompanionFilesAsync(
+                        client,
+                        itemId,
+                        targetDir ?? Path.GetDirectoryName(item.LocalPath) ?? string.Empty,
+                        tempPath,
+                        speedLimitBytesPerSecond,
+                        config,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (downloadedCompanions.Count > 0)
+                    {
+                        companionFilesList = string.Join(",", downloadedCompanions);
+                    }
                 }
             }
+            finally
+            {
+                // Runs on cancellation and on a failed companion lookup too, since both leave the old
+                // companions aside with nothing written in their place.
+                SettleCompanionSidecars(backupCompanions, config);
+            }
 
+            // Jellyfin finds the file in a later scan. This keeps that from being announced to peers as a
+            // new local file.
+            Queue.WrittenFiles.Mark(item.LocalPath);
             return new DownloadResult(true, null, companionFilesList);
         }
         catch (OperationCanceledException)
@@ -337,9 +341,16 @@ public class DownloadService
                 }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A cancelled run must stop here rather than report the item as downloaded.
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to get companion files for item {ItemId}", itemId);
+            // The lookup failing is not the same as the item having no companions. Say so plainly,
+            // and the caller puts back the companions it moved aside since nothing replaced them.
+            _logger.LogWarning(ex, "Could not list companion files for item {ItemId}, keeping the existing companions", itemId);
         }
 
         return downloadedFiles;
@@ -409,7 +420,37 @@ public class DownloadService
             }
             catch (UnauthorizedAccessException)
             {
-                // File is read-only or ACL denies; leave for OS cleanup.
+                // File is read-only or ACL denies. Leave for OS cleanup.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Settles the companions moved aside while replacing a file. A companion the download wrote again
+    /// is in place at its original path, so its old copy is archived or deleted. Every other companion
+    /// goes back to its original path, because the source only serves external subtitles and the rest
+    /// (nfo files, artwork, subtitles it does not list) would otherwise be lost with the old file.
+    /// </summary>
+    private void SettleCompanionSidecars(List<(string Original, string Backup)> backupCompanions, PluginConfiguration config)
+    {
+        foreach (var (orig, bk) in backupCompanions)
+        {
+            if (File.Exists(orig))
+            {
+                ArchiveOrDeleteSidecar(bk, orig, config);
+                continue;
+            }
+
+            try
+            {
+                if (File.Exists(bk))
+                {
+                    File.Move(bk, orig);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to put companion back from sidecar {Sidecar} to {Path}", bk, orig);
             }
         }
     }

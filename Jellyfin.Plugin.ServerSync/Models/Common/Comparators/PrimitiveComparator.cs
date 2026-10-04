@@ -5,7 +5,7 @@ using System.Globalization;
 namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 
 /// <summary>
-/// Comparator for primitive value types — bool, int, long, DateTime, Guid, etc.
+/// Comparator for primitive value types, bool, int, long, DateTime, Guid, etc.
 /// Equality uses <see cref="EqualityComparer{T}.Default"/>. Hashing returns the
 /// invariant <c>ToString()</c> form for non-null values, which is sufficient
 /// to detect "did the value change since last sync" for the

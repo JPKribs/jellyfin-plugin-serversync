@@ -75,4 +75,17 @@ public class VersionDeciderTests
         Assert.Equal(VersionDecision.Keep, VersionDecider.Decide(secondEditOnA, copyOfFirstEditHeldByB, valuesEqual: false));
     }
 
+    /// <summary>
+    /// Both sides holding the same version with different values apply the copy that arrives.
+    /// True: a value that drifted under one version settles instead of bouncing between two servers.
+    /// False: each side keeps its value, republishes, and the pair trades the same hint forever.
+    /// </summary>
+    [Fact]
+    public void Decide_SameVersionDifferentValue_Applies()
+    {
+        Assert.Equal(VersionDecision.Apply, VersionDecider.Decide(V("a", 5), V("a", 5), valuesEqual: false));
+        Assert.True(VersionDecider.SameVersion(V("a", 5), V("a", 5)));
+        Assert.False(VersionDecider.SameVersion(V("a", 5), V("b", 5)));
+        Assert.False(VersionDecider.SameVersion(V("a", 5), V("a", 6)));
+    }
 }

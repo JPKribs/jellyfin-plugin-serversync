@@ -17,7 +17,6 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
-using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
@@ -104,13 +103,13 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 Logger.LogError(ex, "Metadata apply threw for {PersonName}", record.PersonName);
-                failures.Add($"Metadata: apply threw — {ex.Message}");
+                failures.Add($"Metadata: apply threw, {ex.Message}");
             }
         }
 
         // Persist metadata immediately, independent of any image outcome.
         // Previously this was gated on failures.Count == 0, which meant a
-        // later image apply failure would skip the metadata DB write — the
+        // later image apply failure would skip the metadata DB write, the
         // mutation lived only in Jellyfin's in-memory cache until eviction.
         if (metadataChanged)
         {
@@ -118,14 +117,14 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             {
                 await localPerson.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "UpdateToRepositoryAsync threw for {PersonName}", record.PersonName);
-                failures.Add($"Persist: UpdateToRepositoryAsync threw — {ex.Message}");
+                failures.Add($"Persist: UpdateToRepositoryAsync threw, {ex.Message}");
             }
         }
 
@@ -145,14 +144,14 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                 {
                     await ApplyPersonImagesAsync(localPerson, sourceGuid, record, imageSource.Client, cancellationToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     throw;
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Images apply threw for {PersonName}", record.PersonName);
-                    failures.Add($"Images: apply threw — {ex.Message}");
+                    failures.Add($"Images: apply threw, {ex.Message}");
                 }
             }
         }
@@ -232,9 +231,10 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         }
     }
 
-    // Prefer the id the refresh matched. GetPerson builds the item path from
-    // the name it is given, and a name that differs from the stored one only
-    // by casing makes Jellyfin recreate the Person blank over the real one.
+    // Prefer the id the refresh matched. The fallback looks the person up by
+    // name with a query, the same lookup the refresh uses for a single item,
+    // because GetPerson creates a blank Person when none exists and recreates
+    // one over the real Person when the name differs only by casing.
     private (Guid LocalPersonId, BaseItem LocalPerson) ResolveLocalPerson(PeopleSyncItem record)
     {
         if (Guid.TryParse(record.LocalPersonId, out var knownId)
@@ -243,17 +243,27 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             return (knownId, known);
         }
 
-        var personStub = _libraryManager.GetPerson(record.PersonName)
-            ?? throw new InvalidOperationException($"Local person not found: {record.PersonName}");
+        if (string.IsNullOrEmpty(record.PersonName))
+        {
+            throw new InvalidOperationException("Local person not found: the row has no person name");
+        }
 
-        var localPerson = _libraryManager.GetItemById(personStub.Id)
-            ?? throw new InvalidOperationException($"Could not load person entity: {record.PersonName}");
+        var found = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            IncludeItemTypes = new[] { Jellyfin.Data.Enums.BaseItemKind.Person },
+            Name = record.PersonName,
+            Limit = 1
+        });
+        if (found is not { Count: > 0 } || !string.Equals(found[0].Name, record.PersonName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Local person not found: {record.PersonName}");
+        }
 
-        return (personStub.Id, localPerson);
+        return (found[0].Id, found[0]);
     }
 
-    // No-op: per-category MarkSynced already happens inside ApplyAsync for
-    // the categories this run actually applied + verified. Marking the
+    // No-op: per-category MarkSynced already happens inside VerifyAfterApplyAsync
+    // for the categories this run actually applied and verified. Marking the
     // whole record here would advance SyncedHash on un-applied categories
     // too, falsely short-circuiting the next Refresh.
     /// <inheritdoc />
@@ -269,15 +279,6 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         config.LastPeopleSyncTime = utcNow;
     }
 
-    /// <inheritdoc />
-    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
-    {
-        new TaskTriggerInfo
-        {
-            Type = TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(14).Ticks
-        }
-    };
 
     /// <summary>
     /// Applies metadata fields to the local person, writing nulls and empty
@@ -295,16 +296,16 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
         var hasChanges = false;
 
-        // Strings — assign through nulls. Name is the match key and is never
+        // Strings, assign through nulls. Name is the match key and is never
         // written, see PeopleSyncMergeService.BuildSourceMetadata.
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "OriginalTitle", v => { if (localPerson.OriginalTitle != v) { localPerson.OriginalTitle = v; return true; } return false; });
-        // SortName intentionally not synced — Jellyfin derives it from
+        // SortName intentionally not synced, Jellyfin derives it from
         // Name independently per server, so cross-server writes never
         // stick. ForcedSortName (user override) IS synced.
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "ForcedSortName", v => { if (localPerson.ForcedSortName != v) { localPerson.ForcedSortName = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "Overview", v => { if (localPerson.Overview != v) { localPerson.Overview = v; return true; } return false; });
 
-        // Dates — date-only compare.
+        // Dates, date-only compare.
         if (metadata.TryGetValue("PremiereDate", out var premiereValue))
         {
             var d = JsonFieldHelpers.ParseNullableDate(premiereValue);
@@ -336,7 +337,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
         }
 
-        // Arrays — empty/null source clears local.
+        // Arrays, empty/null source clears local.
         if (metadata.TryGetValue("ProductionLocations", out var locationsValue))
         {
             var newLocations = JsonFieldHelpers.ReadStringArray(locationsValue);
@@ -383,7 +384,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
         }
 
-        // LockedFields — empty source clears local.
+        // LockedFields, empty source clears local.
         if (metadata.TryGetValue("LockedFields", out var lockedValue))
         {
             var newLocked = JsonFieldHelpers.ReadEnumArray<MetadataField>(lockedValue);
@@ -395,7 +396,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
         }
 
-        // LockData — coalesce null to false.
+        // LockData, coalesce null to false.
         if (metadata.TryGetValue("LockData", out var lockDataValue))
         {
             bool target = lockDataValue.ValueKind == JsonValueKind.True;
@@ -409,7 +410,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         return hasChanges;
     }
 
-    private async Task<bool> ApplyPersonImagesAsync(
+    private async Task ApplyPersonImagesAsync(
         BaseItem localPerson,
         Guid sourcePersonId,
         PeopleSyncItem record,
@@ -421,7 +422,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         // but fall back to the source manifest we already cached during
         // refresh when the info call comes back empty. On Jellyfin source
         // servers we sometimes see /Items/{personId}/Images return zero
-        // entries even though /Persons reported ImageTags for that person —
+        // entries even though /Persons reported ImageTags for that person , 
         // appears to be an indexing inconsistency on the source side.
         // Without this fallback, the apply was a no-op for ~15 records per
         // run, leaving them pinned in Errored forever despite source clearly
@@ -465,21 +466,21 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                         {
                             fellBack = true;
                             Logger.LogInformation(
-                                "Image apply for {PersonName}: /Items/{Id}/Images returned no entries; falling back to cached ImageTags manifest with {Count} type(s)",
+                                "Image apply for {PersonName}: /Items/{Id}/Images returned no entries. Falling back to cached ImageTags manifest with {Count} type(s)",
                                 record.PersonName, sourcePersonId, work.Count);
                         }
                     }
                 }
                 catch (JsonException ex)
                 {
-                    Logger.LogWarning(ex, "Could not parse cached image manifest for {PersonName}; falling back to no-op", record.PersonName);
+                    Logger.LogWarning(ex, "Could not parse cached image manifest for {PersonName}. Falling back to no-op", record.PersonName);
                 }
             }
         }
 
         if (work.Count == 0)
         {
-            return false;
+            return;
         }
 
         // Order the work by type, then by source index, and hand each image
@@ -518,7 +519,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                     downloadFailures++;
                     failedTypes.Add(imageType);
                     Logger.LogWarning(
-                        "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned null (404/timeout/network — see prior LogDebug for details). Source manifest claims this image exists; source server may have stale ImageTags pointing at deleted image data.",
+                        "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned null (404/timeout/network, see prior LogDebug for details). Source manifest claims this image exists. Source server may have stale ImageTags pointing at deleted image data.",
                         record.PersonName, imageType, imageIndex, sourcePersonId);
                     continue;
                 }
@@ -540,13 +541,13 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
                     if (tempBytes == 0)
                     {
-                        // 200 OK with empty body — source served the request but
+                        // 200 OK with empty body, source served the request but
                         // had no actual image data. SaveImage will silently no-op
                         // on a zero-byte file, which produces a "verify says local
                         // is empty" failure with no other clue. Skip the save and
                         // log loudly so the cause is visible.
                         Logger.LogWarning(
-                            "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned 0 bytes (Content-Type: {Ct}). Source server delivered the response but had no image data — likely stale ImageTags pointing at deleted file.",
+                            "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned 0 bytes (Content-Type: {Ct}). Source server delivered the response but had no image data, likely stale ImageTags pointing at deleted file.",
                             record.PersonName, imageType, imageIndex, sourcePersonId, contentType ?? "(none)");
                         downloadFailures++;
                         failedTypes.Add(imageType);
@@ -643,17 +644,17 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                         if (afterCount <= beforeCount)
                         {
                             Logger.LogWarning(
-                                "Image apply for {PersonName}: SaveImage returned for {Type}/{Index} ({Bytes} bytes) but local count did not increase ({Before} → {After}). SaveImage silently no-op'd — likely an unsupported image type for Person items, a path issue, or a Jellyfin internal rejection.",
+                                "Image apply for {PersonName}: SaveImage returned for {Type}/{Index} ({Bytes} bytes) but local count did not increase ({Before} → {After}). SaveImage silently no-op'd, likely an unsupported image type for Person items, a path issue, or a Jellyfin internal rejection.",
                                 record.PersonName, entry.ImageType, entry.TargetIndex, entry.Bytes, beforeCount, afterCount);
                         }
                         else
                         {
                             Logger.LogInformation(
-                                "Image apply for {PersonName}: SaveImage applied {Type}/{Index} ({Bytes} bytes); local count {Before} → {After}",
+                                "Image apply for {PersonName}: SaveImage applied {Type}/{Index} ({Bytes} bytes). Local count {Before} → {After}",
                                 record.PersonName, entry.ImageType, entry.TargetIndex, entry.Bytes, beforeCount, afterCount);
                         }
                     }
-                    catch (OperationCanceledException) { throw; }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                     catch (Exception ex)
                     {
                         saveFailures++;
@@ -675,15 +676,15 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             Logger.LogWarning(
                 "Image apply for {PersonName} produced no successful saves: {Total} attempted, {DownloadFails} download failures, {SaveFails} save failures, fellBack={FellBack}",
                 record.PersonName, work.Count, downloadFailures, saveFailures, fellBack);
-            return false;
+            return;
         }
 
         // Persist the image mutations to the repository. SaveImage updates
         // localPerson._imageInfos in memory, but the DB write does NOT
-        // happen reliably for Person items — the verify path's
+        // happen reliably for Person items, the verify path's
         // GetItemById call reloads from the DB and reports 0 images
         // unless we force a persist here. The metadata sync's
-        // ApplyImagesAsync has had this call all along; people sync was
+        // ApplyImagesAsync has had this call all along. People sync was
         // missing it, which is why every record that genuinely needed an
         // image sync was failing verification with "local manifest empty,
         // source non-empty" while the in-memory localPerson count went
@@ -692,13 +693,11 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         {
             await localPerson.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Image apply for {PersonName}: UpdateToRepositoryAsync(ImageUpdate) threw after SaveImage; image mutations may not have persisted", record.PersonName);
+            Logger.LogWarning(ex, "Image apply for {PersonName}: UpdateToRepositoryAsync(ImageUpdate) threw after SaveImage. Image mutations may not have persisted", record.PersonName);
         }
-
-        return appliedAny;
     }
 
     // ===================================================================
@@ -720,7 +719,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         var differingFields = JsonComparisonUtility.GetDifferingFields(record.Metadata.Source, freshBlob);
         var fieldList = differingFields.Count == 0 ? "(none)" : string.Join(",", differingFields);
         var detail = JsonComparisonUtility.DescribeDifferingFields(record.Metadata.Source, freshBlob);
-        return (false, $"verification found {differingFields.Count} divergent field(s) [{fieldList}]; {detail}");
+        return (false, $"verification found {differingFields.Count} divergent field(s) [{fieldList}]. {detail}");
     }
 
     private async Task<(bool Succeeded, string? FailureReason)> VerifyImagesAppliedAsync(
@@ -747,11 +746,11 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         record.Images.Local = freshLocal;
 
         // Refresh stores source manifests tag-only (Size=0) for performance
-        // — no per-person HTTP. Local manifests have real sizes from the
+        // ,  no per-person HTTP. Local manifests have real sizes from the
         // filesystem. The comparator can only compare sizes when both sides
-        // have non-zero values; otherwise it has no honest signal. Enrich
+        // have non-zero values. Otherwise it has no honest signal. Enrich
         // the source side here (one HTTP call) so the verify is meaningful.
-        // The enriched manifest stays local to this method; the refresh path
+        // The enriched manifest stays local to this method. The refresh path
         // does its own enrichment when it rebuilds the record. If enrichment
         // is unavailable on both sides the comparator treats unmeasurable
         // source sizes as indeterminate rather than as a difference, so the
@@ -772,13 +771,13 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                     record.PersonName ?? record.SourcePersonId,
                     cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Source image enrichment for verify failed for person {PersonName}; falling back to tag-only comparison", record.PersonName);
+                Logger.LogWarning(ex, "Source image enrichment for verify failed for person {PersonName}. Falling back to tag-only comparison", record.PersonName);
             }
         }
 
@@ -800,9 +799,4 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
 
         return (false, "image manifest after apply does not match source manifest");
     }
-
-    // ===================================================================
-    // Local helpers
-    // ===================================================================
-
 }

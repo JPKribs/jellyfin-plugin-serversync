@@ -22,18 +22,18 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// whitelist entry, the source collection's leaves are resolved to their
 /// already-synced local counterparts (by translated path) and a matching
 /// local collection is created or updated. The collection itself is a sync
-/// SELECTOR — its members arrive through normal content sync; this task only
+/// SELECTOR, its members arrive through normal content sync. This task only
 /// rebuilds the container so the local server shows the same collection
 /// the source has.
 /// Mirrored collections are tagged with a provider id holding the source
-/// collection's ID; membership of tagged collections tracks the source
+/// collection's ID. Membership of tagged collections tracks the source
 /// (items the source dropped are removed locally).
 /// </summary>
 public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
 {
     /// <summary>
     /// Provider-id key marking a local collection as a mirror of a source
-    /// collection; the value is the source BoxSet ID ("N" format).
+    /// collection. The value is the source BoxSet ID ("N" format).
     /// </summary>
     public const string SourceCollectionProviderKey = "ServerSyncSourceCollection";
 
@@ -83,14 +83,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
     public bool IsLogged => true;
 
     /// <inheritdoc />
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
-    {
-        new TaskTriggerInfo
-        {
-            Type = TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(12).Ticks
-        }
-    };
+    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
@@ -104,7 +97,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
 
         // Per server: (collection id -> (mappings that whitelist it)). A collection can be
         // whitelisted under several mappings of one server (movies + shows split across
-        // libraries); its local members are gathered across all of them. Collection ids are
+        // libraries). Its local members are gathered across all of them. Collection ids are
         // the peer's own, so the grouping never crosses servers.
         var work = new List<(Models.Configuration.SourceServer Server, Dictionary<string, List<Models.Configuration.LibraryMapping>> Collections)>();
         foreach (var server in config.GetPullServers())
@@ -141,7 +134,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
         var total = work.Sum(w => w.Collections.Count);
         if (total == 0)
         {
-            _logger.LogDebug("No whitelisted collections configured; nothing to mirror");
+            _logger.LogDebug("No whitelisted collections configured. Nothing to mirror");
             return;
         }
 
@@ -161,7 +154,22 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
             foreach (var (server, collectionsByIdN) in work)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                using var client = _clientFactory.Create(server);
+                SourceServerClient client;
+                try
+                {
+                    client = _clientFactory.Create(server);
+                }
+                catch (ArgumentException ex)
+                {
+                    // An invalid or refused URL on one server must not stop the
+                    // other servers' collections from mirroring.
+                    _logger.LogError("Sync Collections: server '{Server}' rejected: {Error}", server.DisplayName, ex.Message);
+                    processed += collectionsByIdN.Count;
+                    progress.Report(100.0 * processed / total);
+                    continue;
+                }
+
+                using var clientScope = client;
                 var connection = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
                 if (!connection.Success)
                 {
@@ -178,7 +186,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
                     {
                         await MirrorOneAsync(client, Guid.Parse(sourceIdN), sourceIdN, mappings, localBoxSets, cancellationToken).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
                         throw;
                     }
@@ -186,8 +194,8 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
                     {
                         // One dead collection (deleted on source, transport fault)
                         // must not stop the rest. Membership is never REMOVED on a
-                        // failed read — MirrorOneAsync throws before any diff.
-                        _logger.LogWarning(ex, "Sync Collections: failed to mirror collection {Id} from '{Server}'; leaving the local mirror untouched", sourceIdN, server.DisplayName);
+                        // failed read, MirrorOneAsync throws before any diff.
+                        _logger.LogWarning(ex, "Sync Collections: failed to mirror collection {Id} from '{Server}'. Leaving the local mirror untouched", sourceIdN, server.DisplayName);
                     }
 
                     processed++;
@@ -211,7 +219,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
         IReadOnlyList<BaseItem> localBoxSets,
         CancellationToken cancellationToken)
     {
-        // Name comes from the source collection itself; a missing collection
+        // Name comes from the source collection itself. A missing collection
         // throws (GetWhitelistedItemLeavesAsync would too) so a deleted
         // source collection never empties the local mirror.
         var roots = await client.GetItemsByIdsAsync(new[] { sourceId }, new[] { Jellyfin.Sdk.Generated.Models.ItemFields.Path }, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -224,8 +232,8 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
         var leaves = await client.GetWhitelistedItemLeavesAsync(sourceId, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         // Resolve leaves to local items via each whitelisting mapping's path
-        // translation; leaves not yet downloaded (or outside every mapping's
-        // root) simply aren't members yet — the next run picks them up.
+        // translation. Leaves not yet downloaded (or outside every mapping's
+        // root) simply aren't members yet, the next run picks them up.
         var targetIds = new HashSet<Guid>();
         foreach (var leaf in leaves)
         {
@@ -265,7 +273,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
             if (targetIds.Count == 0)
             {
                 _logger.LogInformation(
-                    "Sync Collections: no synced members for '{Name}' yet; the collection will be created once content sync has downloaded some",
+                    "Sync Collections: no synced members for '{Name}' yet. The collection will be created once content sync has downloaded some",
                     root.Name);
                 return;
             }

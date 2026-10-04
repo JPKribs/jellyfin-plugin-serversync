@@ -5,7 +5,7 @@ namespace Jellyfin.Plugin.ServerSync.Tests.ApiIntegration;
 
 /// <summary>
 /// A fact that only runs when a live Jellyfin server is provided via
-/// environment variables; otherwise the test is skipped. All tests using
+/// environment variables. Otherwise the test is skipped. All tests using
 /// this attribute are strictly read-only (GET/HEAD) against that server.
 /// <code>
 ///   export SERVERSYNC_TEST_SERVER_URL=http://localhost:8096

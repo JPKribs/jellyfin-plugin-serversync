@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using JPKribs.Jellyfin.Base;
+using MediaBrowser.Common.Configuration;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -13,7 +15,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Configuration;
 /// By default ASP.NET Data Protection derives its application discriminator from
 /// the host's content-root path and stores keys in a per-user profile directory
 /// (<c>~/.aspnet/DataProtection-Keys</c>). Both move when the install is updated,
-/// switched between the desktop app and a service, or run under Docker — and when
+/// switched between the desktop app and a service, or run under Docker, and when
 /// either moves, every previously encrypted secret fails to decrypt with "payload
 /// was invalid". This pins both: keys live in a fixed directory under the Jellyfin
 /// data folder (persisted with the config they protect, including across Docker
@@ -26,9 +28,31 @@ public static class StableSecretProtection
     // regardless of the host's content root.
     private const string ApplicationName = "Jellyfin.Plugin.ServerSync";
 
-    // The key-ring container manages the on-disk keys for the process lifetime;
+    // The folder under the plugin configurations path that holds the key ring, and the purpose the
+    // stored secrets are protected under. Changing either makes every stored secret unreadable.
+    private const string KeyDirectoryName = "Jellyfin.Plugin.ServerSync.Keys";
+    private const string SecretPurpose = "Jellyfin.Plugin.ServerSync.Secrets.v1";
+
+    // The key-ring container manages the on-disk keys for the process lifetime.
     // hold a reference so it is never collected out from under the protector.
     private static IServiceProvider? _keyRingContainer;
+
+    /// <summary>
+    /// Builds the protector for stored secrets. The plugin and the DI container each need one, and
+    /// both must use the same key folder and purpose or a secret one writes the other cannot read,
+    /// so both build it here.
+    /// </summary>
+    /// <param name="paths">Jellyfin's application paths, or null when unavailable, in which case secrets stay in plaintext.</param>
+    /// <param name="logger">Logger for diagnostics.</param>
+    /// <returns>The protector.</returns>
+    public static SecretProtector CreateProtector(IApplicationPaths? paths, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        var provider = paths is null
+            ? null
+            : Build(Path.Combine(paths.PluginConfigurationsPath, KeyDirectoryName), logger);
+        return new SecretProtector(SecretPurpose, logger, provider);
+    }
 
     /// <summary>
     /// Returns a provider that encrypts with a plugin-managed, launch-independent
@@ -60,7 +84,7 @@ public static class StableSecretProtection
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not initialize plugin-managed Data Protection keys at {Path}; secrets will be stored in plaintext.", keyDirectory);
+            logger.LogWarning(ex, "Could not initialize plugin-managed Data Protection keys at {Path}. Secrets will be stored in plaintext.", keyDirectory);
             return null;
         }
     }

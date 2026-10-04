@@ -118,7 +118,8 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Moves history items to Queued status.
+    /// Moves history items to Queued status. With no ids and a Status, queues every row in that
+    /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
     /// <param name="request">Bulk history items request.</param>
     /// <returns>Action result with updated count.</returns>
@@ -130,50 +131,12 @@ public partial class ConfigurationController
         [FromBody] BulkHistoryItemsRequest request)
     {
         ArgumentNullException.ThrowIfNull(manager);
-        // Support both Ids (preferred) and Items (legacy)
-        if ((request?.Ids == null || request.Ids.Count == 0) &&
-            (request?.Items == null || request.Items.Count == 0))
+        if (request != null && (request.Ids == null || request.Ids.Count == 0) && !string.IsNullOrEmpty(request.Status))
         {
-            return BadRequest("No items specified");
+            return QueueAllWithStatus(manager, request.Status, "QueueHistoryItems");
         }
 
-        // Process by database ID if provided (preferred path)
-        if (request?.Ids != null && request.Ids.Count > 0)
-        {
-            try
-            {
-                var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Queued);
-                return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "QueueHistoryItems"));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to queue history items by IDs");
-                return StatusCode(500, new { Error = "Bulk queue failed; see server log" });
-            }
-        }
-
-        // Legacy fallback by composite key — preserved for older clients.
-        var successCount = 0;
-        if (request?.Items != null)
-        {
-            foreach (var item in request.Items)
-            {
-                try
-                {
-                    manager.UpdateStatusByKey((item.SourceUserId, item.SourceItemId), SyncStatus.Queued);
-                    successCount++;
-                }
-                catch (Exception ex)
-                {
-                    var sanitizedUserId = SanitizeForLog(item.SourceUserId);
-                    var sanitizedItemId = SanitizeForLog(item.SourceItemId);
-                    _logger.LogWarning(ex, "Failed to queue history item {SourceUserId}/{SourceItemId}",
-                            sanitizedUserId, sanitizedItemId);
-                }
-            }
-        }
-
-        return Ok(new BulkOperationResult { Updated = successCount, Requested = request?.Items?.Count ?? 0 });
+        return UpdateHistoryItemsStatus(manager, request, SyncStatus.Queued, "QueueHistoryItems", "queue");
     }
 
     /// <summary>
@@ -189,48 +152,57 @@ public partial class ConfigurationController
         [FromBody] BulkHistoryItemsRequest request)
     {
         ArgumentNullException.ThrowIfNull(manager);
-        // Support both Ids (preferred) and Items (legacy)
-        if ((request?.Ids == null || request.Ids.Count == 0) &&
-            (request?.Items == null || request.Items.Count == 0))
+        return UpdateHistoryItemsStatus(manager, request, SyncStatus.Ignored, "IgnoreHistoryItems", "ignore");
+    }
+
+    // The shared body of the history Queue and Ignore endpoints. Ids are the preferred way to name
+    // rows. The composite key list is kept for older clients.
+    private ActionResult UpdateHistoryItemsStatus(
+        HistorySyncTableManager manager,
+        BulkHistoryItemsRequest? request,
+        SyncStatus status,
+        string operation,
+        string verb)
+    {
+        var hasIds = request?.Ids is { Count: > 0 };
+        var hasItems = request?.Items is { Count: > 0 };
+        if (request is null || (!hasIds && !hasItems))
         {
             return BadRequest("No items specified");
         }
 
-        if (request?.Ids != null && request.Ids.Count > 0)
+        if (hasIds)
         {
             try
             {
-                var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Ignored);
-                return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "IgnoreHistoryItems"));
+                var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, status);
+                return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, operation));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to ignore history items by IDs");
-                return StatusCode(500, new { Error = "Bulk ignore failed; see server log" });
+                _logger.LogError(ex, "Failed to {Verb} history items by IDs", verb);
+                return StatusCode(500, new { Error = $"Bulk {verb} failed. See server log" });
             }
         }
 
         var successCount = 0;
-        if (request?.Items != null)
+        foreach (var item in request.Items)
         {
-            foreach (var item in request.Items)
+            try
             {
-                try
-                {
-                    manager.UpdateStatusByKey((item.SourceUserId, item.SourceItemId), SyncStatus.Ignored);
-                    successCount++;
-                }
-                catch (Exception ex)
-                {
-                    var sanitizedUserId = SanitizeForLog(item.SourceUserId);
-                    var sanitizedItemId = SanitizeForLog(item.SourceItemId);
-                    _logger.LogWarning(ex, "Failed to ignore history item {SourceUserId}/{SourceItemId}",
-                            sanitizedUserId, sanitizedItemId);
-                }
+                manager.UpdateStatusByKey((item.SourceUserId, item.SourceItemId), status);
+                successCount++;
+            }
+            catch (Exception ex)
+            {
+                var sanitizedUserId = SanitizeForLog(item.SourceUserId);
+                var sanitizedItemId = SanitizeForLog(item.SourceItemId);
+                _logger.LogWarning(ex, "Failed to {Verb} history item {SourceUserId}/{SourceItemId}",
+                        verb, sanitizedUserId, sanitizedItemId);
             }
         }
 
-        return Ok(new BulkOperationResult { Updated = successCount, Requested = request?.Items?.Count ?? 0 });
+        return Ok(new BulkOperationResult { Updated = successCount, Requested = request.Items.Count });
     }
 
     /// <summary>

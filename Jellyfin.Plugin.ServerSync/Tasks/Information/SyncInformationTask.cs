@@ -61,49 +61,97 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
         ArgumentNullException.ThrowIfNull(progress);
 
         var config = _configManager.Configuration;
-        var steps = new List<Func<IScheduledTask>>();
+        var modules = new List<(Func<IScheduledTask> Refresh, Func<IScheduledTask> Sync)>();
         if (config.EnableMetadataSync)
         {
-            steps.Add(() => ActivatorUtilities.CreateInstance<RefreshMetadataSyncTableTask>(_services));
-            steps.Add(() => ActivatorUtilities.CreateInstance<SyncMissingMetadataTask>(_services));
+            modules.Add((
+                () => ActivatorUtilities.CreateInstance<RefreshMetadataSyncTableTask>(_services),
+                () => ActivatorUtilities.CreateInstance<SyncMissingMetadataTask>(_services)));
         }
 
         if (config.EnablePeopleSync)
         {
-            steps.Add(() => ActivatorUtilities.CreateInstance<RefreshPeopleSyncTableTask>(_services));
-            steps.Add(() => ActivatorUtilities.CreateInstance<SyncMissingPeopleTask>(_services));
+            modules.Add((
+                () => ActivatorUtilities.CreateInstance<RefreshPeopleSyncTableTask>(_services),
+                () => ActivatorUtilities.CreateInstance<SyncMissingPeopleTask>(_services)));
         }
 
         if (config.EnableUserSync)
         {
-            steps.Add(() => ActivatorUtilities.CreateInstance<RefreshUserSyncTableTask>(_services));
-            steps.Add(() => ActivatorUtilities.CreateInstance<SyncMissingUserTask>(_services));
+            modules.Add((
+                () => ActivatorUtilities.CreateInstance<RefreshUserSyncTableTask>(_services),
+                () => ActivatorUtilities.CreateInstance<SyncMissingUserTask>(_services)));
         }
 
         if (config.EnableHistorySync)
         {
-            steps.Add(() => ActivatorUtilities.CreateInstance<RefreshHistorySyncTableTask>(_services));
-            steps.Add(() => ActivatorUtilities.CreateInstance<SyncMissingHistoryTask>(_services));
+            modules.Add((
+                () => ActivatorUtilities.CreateInstance<RefreshHistorySyncTableTask>(_services),
+                () => ActivatorUtilities.CreateInstance<SyncMissingHistoryTask>(_services)));
         }
 
-        if (steps.Count == 0)
+        if (modules.Count == 0)
         {
             _logger.LogInformation("{Task}: no information module is enabled, nothing to do", Name);
             progress.Report(100);
             return;
         }
 
-        var share = 100.0 / steps.Count;
-        for (var i = 0; i < steps.Count; i++)
+        // One module failing must not starve the others, so each step is
+        // caught on its own and the failures are raised together at the end,
+        // which keeps the task marked failed. A module whose refresh threw
+        // skips its apply, since the queue it would drain was not rebuilt.
+        var failures = new List<Exception>();
+        var share = 100.0 / (modules.Count * 2);
+        for (var i = 0; i < modules.Count; i++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var offset = i * share;
-            var task = steps[i]();
-            _logger.LogInformation("{Task}: running {Step}", Name, task.Name);
-            await task.ExecuteAsync(new Progress<double>(p => progress.Report(offset + (share * Math.Clamp(p, 0, 100) / 100.0))), cancellationToken).ConfigureAwait(false);
+            var refreshOffset = 2 * i * share;
+            var refreshed = await RunStepAsync(modules[i].Refresh, refreshOffset, share, progress, failures, cancellationToken).ConfigureAwait(false);
+            if (!refreshed)
+            {
+                continue;
+            }
+
+            await RunStepAsync(modules[i].Sync, refreshOffset + share, share, progress, failures, cancellationToken).ConfigureAwait(false);
         }
 
         progress.Report(100);
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException($"{Name}: {failures.Count} step(s) failed, see the log for each", failures);
+        }
+    }
+
+    private async Task<bool> RunStepAsync(
+        Func<IScheduledTask> create,
+        double offset,
+        double share,
+        IProgress<double> progress,
+        List<Exception> failures,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var stepName = "a module step";
+        try
+        {
+            var task = create();
+            stepName = task.Name;
+            _logger.LogInformation("{Task}: running {Step}", Name, stepName);
+            await task.ExecuteAsync(new Progress<double>(p => progress.Report(offset + (share * Math.Clamp(p, 0, 100) / 100.0))), cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Task}: {Step} failed, continuing with the remaining modules", Name, stepName);
+            failures.Add(ex);
+            progress.Report(offset + share);
+            return false;
+        }
     }
 
     /// <inheritdoc />

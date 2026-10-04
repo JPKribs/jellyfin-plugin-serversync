@@ -33,7 +33,7 @@ public abstract class SyncRecord
     /// <summary>
     /// Gets or sets a human-readable explanation associated with the current
     /// status. Populated for <see cref="SyncStatus.Errored"/> (error message)
-    /// and <see cref="SyncStatus.Ignored"/> (why-ignored); null otherwise.
+    /// and <see cref="SyncStatus.Ignored"/> (why-ignored). Null otherwise.
     /// </summary>
     public string? Reason { get; set; }
 
@@ -53,6 +53,43 @@ public abstract class SyncRecord
     public string? ServerKey { get; set; }
 
     /// <summary>
+    /// Marks the row as settled without writing anything, because this server's value is kept. The
+    /// stored hash is left alone, so the next scan compares again.
+    /// </summary>
+    /// <param name="reason">Why the value was kept, shown on the dashboard.</param>
+    public void MarkKept(string reason)
+    {
+        Status = SyncStatus.Synced;
+        StatusDate = DateTime.UtcNow;
+        Reason = reason;
+    }
+
+    /// <summary>Marks the row as applied: settled now, with no reason or retries left over.</summary>
+    /// <param name="utcNow">The time of the apply.</param>
+    public void MarkApplied(DateTime utcNow)
+    {
+        Status = SyncStatus.Synced;
+        StatusDate = utcNow;
+        LastSyncTime = utcNow;
+        Reason = null;
+        RetryCount = 0;
+        MarkSynced();
+    }
+
+    /// <summary>
+    /// Queues a row whose retries ran out once more. A fresh change is a fresh reason to try it, and an
+    /// errored row would otherwise read as already settled.
+    /// </summary>
+    public void RetryIfErrored()
+    {
+        if (Status == SyncStatus.Errored)
+        {
+            Status = SyncStatus.Queued;
+            RetryCount = 0;
+        }
+    }
+
+    /// <summary>
     /// Gets a value indicating whether this record has differences that should
     /// be synced. Implementations typically OR together the
     /// <see cref="SyncableValue{T}.HasChanges"/> of their constituent fields.
@@ -64,7 +101,7 @@ public abstract class SyncRecord
     /// <see cref="SyncableValue{T}.MarkSynced"/> on each constituent field to
     /// record the applied baseline in <see cref="SyncableValue{T}.Synced"/> /
     /// <see cref="SyncableValue{T}.SyncedHash"/>. Change detection does not
-    /// consult those — see <see cref="SyncableValue{T}.HasChanges"/>.
+    /// consult those, see <see cref="SyncableValue{T}.HasChanges"/>.
     /// </summary>
     public abstract void MarkSynced();
 }

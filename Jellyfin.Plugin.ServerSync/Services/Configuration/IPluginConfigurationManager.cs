@@ -25,8 +25,10 @@ public interface IPluginConfigurationManager
     /// </summary>
     /// <param name="requestApiKey">The key as posted, or the sentinel.</param>
     /// <param name="serverKey">The server entry the request is about.</param>
+    /// <param name="requestUrl">The address the key is about to be sent to. The stored key only goes to the address saved on the entry.</param>
     /// <returns>The usable key, or empty when there is none.</returns>
-    string ResolveRequestApiKey(string? requestApiKey, string? serverKey);
+    /// <exception cref="System.ArgumentException">The sentinel was posted for an address other than the one saved.</exception>
+    string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl);
 
     /// <summary>
     /// Saves the current configuration to disk.

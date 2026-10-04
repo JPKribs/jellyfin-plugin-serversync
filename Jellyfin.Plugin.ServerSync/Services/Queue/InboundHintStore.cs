@@ -73,29 +73,6 @@ public sealed class InboundHintStore : QueueStoreBase
             Add(cmd, "@recorded", row.Recorded ? 1 : 0);
             Add(cmd, "@received", Stamp(row.ReceivedAt));
             row.Id = Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
-
-            // One origin cannot fill the queue without bound. Beyond the cap its oldest rows go; the
-            // scheduled tasks carry whatever they would have.
-            using var count = conn.CreateCommand();
-            count.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE OriginServerId = @origin";
-            Add(count, "@origin", row.OriginServerId);
-            if (Convert.ToInt32(count.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) <= HintProtocol.MaxPendingPerPeer)
-            {
-                return;
-            }
-
-            using var trim = conn.CreateCommand();
-            trim.CommandText = @"
-                DELETE FROM InboundHints
-                WHERE OriginServerId = @origin AND Id NOT IN (
-                    SELECT Id FROM InboundHints WHERE OriginServerId = @origin ORDER BY Id DESC LIMIT @cap)";
-            Add(trim, "@origin", row.OriginServerId);
-            Add(trim, "@cap", HintProtocol.MaxPendingPerPeer);
-            var trimmed = trim.ExecuteNonQuery();
-            if (trimmed > 0)
-            {
-                Logger.LogWarning("Dropped {Count} of the oldest inbound hint(s) from {Origin}: more than {Cap} were waiting", trimmed, row.OriginServerId, HintProtocol.MaxPendingPerPeer);
-            }
         });
     }
 
@@ -120,7 +97,51 @@ public sealed class InboundHintStore : QueueStoreBase
     /// <returns>The rows.</returns>
     public IList<InboundHint> GetAll() => GetOldest(int.MaxValue);
 
-    /// <summary>Returns the oldest rows, for a view that polls often and must not carry the whole table.</summary>
+    /// <summary>Returns the newest rows, for the dashboard's list, which shows the latest first.</summary>
+    /// <param name="limit">The most rows to return.</param>
+    /// <returns>The rows.</returns>
+    public IList<InboundHint> GetRecent(int limit) => Read(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM InboundHints ORDER BY Id DESC LIMIT @limit";
+        Add(cmd, "@limit", limit);
+        return ReadAll(cmd);
+    });
+
+    /// <summary>Returns every row from one origin, for the status that origin reads.</summary>
+    /// <param name="originServerId">The origin's server id.</param>
+    /// <returns>The rows.</returns>
+    public IList<InboundHint> GetForOrigin(string originServerId) => Read(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM InboundHints WHERE OriginServerId = @origin ORDER BY Id";
+        Add(cmd, "@origin", originServerId);
+        return ReadAll(cmd);
+    });
+
+    /// <summary>Counts the rows held from one origin, so a full queue can answer "busy" rather than grow.</summary>
+    /// <param name="originServerId">The origin's server id.</param>
+    /// <returns>How many rows.</returns>
+    public int CountForOrigin(string originServerId) => Read(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE OriginServerId = @origin";
+        Add(cmd, "@origin", originServerId);
+        return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+    });
+
+    /// <summary>Removes every row from one origin, for when its server entry is removed.</summary>
+    /// <param name="originServerId">The origin's server id.</param>
+    /// <returns>How many rows were removed.</returns>
+    public int DeleteForOrigin(string originServerId) => Write(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM InboundHints WHERE OriginServerId = @origin COLLATE NOCASE";
+        Add(cmd, "@origin", originServerId);
+        return cmd.ExecuteNonQuery();
+    });
+
+    /// <summary>Returns the oldest rows, the next to apply, up to the limit.</summary>
     /// <param name="limit">The most rows to return.</param>
     /// <returns>The rows, oldest first.</returns>
     public IList<InboundHint> GetOldest(int limit) => Read(conn =>
@@ -131,27 +152,15 @@ public sealed class InboundHintStore : QueueStoreBase
         return ReadAll(cmd);
     });
 
-    /// <summary>Returns one row by id.</summary>
-    /// <param name="id">The row id.</param>
-    /// <returns>The row, or null.</returns>
-    public InboundHint? Get(long id) => Read(conn =>
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM InboundHints WHERE Id = @id";
-        Add(cmd, "@id", id);
-        using var reader = cmd.ExecuteReader();
-        return reader.Read() ? Map(reader) : null;
-    });
-
     /// <summary>
     /// Removes a row once its work is done, but only while it still carries the version the apply worked
-    /// from. The origin reuses one hint id per object, so the id cannot tell a refresh apart; the version
+    /// from. The origin reuses one hint id per object, so the id cannot tell a refresh apart. The version
     /// can. A row refreshed with a newer version during the apply stays and is applied again.
     /// </summary>
     /// <param name="id">The row id.</param>
     /// <param name="appliedVersion">The version the apply worked from.</param>
     /// <returns><c>true</c> when the row was removed.</returns>
-    public bool Remove(long id, DateTime appliedVersion) => Read(conn =>
+    public bool Remove(long id, DateTime appliedVersion) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM InboundHints WHERE Id = @id AND VersionTimestamp <= @version";
@@ -163,7 +172,7 @@ public sealed class InboundHintStore : QueueStoreBase
     /// <summary>Removes a row by id regardless of its hint, for the operator.</summary>
     /// <param name="id">The row id.</param>
     /// <returns><c>true</c> when a row was removed.</returns>
-    public bool Delete(long id) => Read(conn =>
+    public bool Delete(long id) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM InboundHints WHERE Id = @id";
@@ -172,18 +181,47 @@ public sealed class InboundHintStore : QueueStoreBase
     });
 
     /// <summary>Schedules a row for another attempt after a failed apply.</summary>
-    /// <param name="id">The row id.</param>
+    /// <param name="row">The row as tried.</param>
     /// <param name="nextAttempt">When to try again.</param>
     /// <param name="error">What went wrong.</param>
-    public void Defer(long id, DateTime nextAttempt, string error) => Write(conn =>
+    public void Defer(InboundHint row, DateTime nextAttempt, string error)
     {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE InboundHints SET Attempts = Attempts + 1, NextAttempt = @next, LastError = @error WHERE Id = @id";
-        Add(cmd, "@next", Stamp(nextAttempt));
-        Add(cmd, "@error", error);
-        Add(cmd, "@id", id);
-        cmd.ExecuteNonQuery();
-    });
+        ArgumentNullException.ThrowIfNull(row);
+        Write(conn =>
+        {
+            // Only while the row still carries the version tried. A newer hint that arrived during the
+            // apply reset the row to due with no attempts, and must not inherit the older one's backoff.
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE InboundHints SET Attempts = Attempts + 1, NextAttempt = @next, LastError = @error WHERE Id = @id AND VersionTimestamp = @version";
+            Add(cmd, "@next", Stamp(nextAttempt));
+            Add(cmd, "@error", error);
+            Add(cmd, "@id", row.Id);
+            Add(cmd, "@version", Stamp(row.VersionTimestamp));
+            cmd.ExecuteNonQuery();
+        });
+    }
+
+    /// <summary>
+    /// Puts a row off without counting an attempt, for a row that could not start because the module's
+    /// scheduled run was busy. Nothing failed, so it must not count toward giving up on the row.
+    /// </summary>
+    /// <param name="row">The row as tried.</param>
+    /// <param name="nextAttempt">When to try again.</param>
+    /// <param name="reason">Why.</param>
+    public void Postpone(InboundHint row, DateTime nextAttempt, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        Write(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE InboundHints SET NextAttempt = @next, LastError = @reason WHERE Id = @id AND VersionTimestamp = @version";
+            Add(cmd, "@next", Stamp(nextAttempt));
+            Add(cmd, "@reason", reason);
+            Add(cmd, "@id", row.Id);
+            Add(cmd, "@version", Stamp(row.VersionTimestamp));
+            cmd.ExecuteNonQuery();
+        });
+    }
 
     /// <summary>Counts the rows.</summary>
     /// <returns>The count.</returns>

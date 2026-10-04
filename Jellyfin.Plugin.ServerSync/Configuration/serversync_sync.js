@@ -38,7 +38,6 @@ export default function (view) {
         // Stop any running pollTaskProgress handles
         _activePollIntervals.forEach(function(handle) {
             if (handle && typeof handle.cancel === 'function') handle.cancel();
-            else clearInterval(handle);
         });
         _activePollIntervals.length = 0;
 
@@ -86,16 +85,48 @@ export default function (view) {
                 }
             }
 
-            // Always re-fetch config to pick up changes from Settings tab
+            // The config is fetched again on every show and handed to the dropdown, the queue, and every
+            // table module, so a change saved on the Settings page shows here without a reload.
             _sharedPromise.then(function() {
+                // Coming back to the page re-selects the view it showed, which does not switch views, so the
+                // queue's refresh is restarted here rather than only on a switch.
+                if (self.currentView === 'queue') {
+                    QueueModule._signature = null;
+                    QueueModule.startAutoRefresh();
+                    QueueModule.load(true);
+                }
+
+                // Leaving the page disconnects every table's infinite scroll observer, and re-selecting the
+                // same view does not switch views either, so the open table's observer is reconnected here.
+                // Without this, scrolling stops loading more rows after a visit to another page.
+                var currentModule = self._getTableModule(self.currentView);
+                if (currentModule && currentModule.table && currentModule.table.reconnectObserver) {
+                    currentModule.table.reconnectObserver();
+                }
+
                 ServerSyncShared.getConfig().then(function(config) {
                     QueueModule._config = config;
+                    self._applyConfig(config);
                     self._applyEnabledTypes(config);
                 }).catch(function() {
-                    // Config fetch failed — show all options as fallback
+                    // Without a config the enabled types are unknown, so the dropdown keeps the options it
+                    // already shows and the current view, or the first one still offered, is selected.
                     self._selectFirstEnabled();
                 });
             });
+        },
+
+        // Hands a freshly fetched config to every table module that keeps one. Each module first loaded
+        // its config when its view opened, and without this it would keep that copy until a page reload,
+        // so a server, mapping, or category changed on another page would never reach its rows or modal.
+        _applyConfig: function(config) {
+            [SyncTableModule, HistorySyncTableModule, MetadataSyncTableModule, UserSyncTableModule, PeopleSyncTableModule].forEach(function(mod) {
+                mod.currentConfig = config;
+            });
+            // The pending filters follow the approval modes, which are set on the Settings page.
+            if (SyncTableModule.table) {
+                SyncTableModule.updatePendingFilterVisibility(config);
+            }
         },
 
         _applyEnabledTypes: function(config) {
@@ -103,7 +134,9 @@ export default function (view) {
             if (!dropdown) return;
 
             var options = dropdown.querySelectorAll('option');
-            var enabledCount = 0;
+            // Only the sync modules count toward the empty state. The Queue option has no config key and is
+            // always offered, so counting it would keep the "no sync types enabled" message from ever showing.
+            var enabledModuleCount = 0;
 
             for (var i = 0; i < options.length; i++) {
                 var opt = options[i];
@@ -113,29 +146,37 @@ export default function (view) {
                 if (isEnabled) {
                     opt.style.display = '';
                     opt.disabled = false;
-                    enabledCount++;
+                    if (configKey) enabledModuleCount++;
                 } else {
                     opt.style.display = 'none';
                     opt.disabled = true;
                 }
             }
 
-            var syncTypeContainer = view.querySelector('#syncTypeContainer');
             var noSyncMessage = view.querySelector('#noSyncTypesMessage');
-            var titleEl = view.querySelector('#syncPageTitle');
 
-            if (enabledCount === 0) {
-                // No sync types enabled — show empty state
-                if (syncTypeContainer) syncTypeContainer.classList.add('hidden');
+            // An operator who already opened the Queue keeps it. Otherwise, with every module off, the
+            // message points to the Settings page and the dropdown stays so the Queue can still be picked.
+            if (enabledModuleCount === 0 && this.currentView !== 'queue') {
+                var outgoingModule = this._getTableModule(this.currentView);
+                if (outgoingModule && outgoingModule.table && outgoingModule.table.disconnectObserver) {
+                    outgoingModule.table.disconnectObserver();
+                }
+                this.currentView = null;
+                // Nothing is selected, so picking the Queue raises a change event and opens it.
+                dropdown.selectedIndex = -1;
+
                 if (noSyncMessage) noSyncMessage.classList.remove('hidden');
+                var titleEl = view.querySelector('#syncPageTitle');
                 if (titleEl) titleEl.textContent = 'Sync';
+                var descEl = view.querySelector('#syncTypeDescription');
+                if (descEl) descEl.textContent = '';
 
                 var views = view.querySelectorAll('.syncView');
                 for (var j = 0; j < views.length; j++) {
                     views[j].classList.add('hidden');
                 }
             } else {
-                if (syncTypeContainer) syncTypeContainer.classList.remove('hidden');
                 if (noSyncMessage) noSyncMessage.classList.add('hidden');
                 this._selectFirstEnabled();
             }
@@ -149,7 +190,7 @@ export default function (view) {
             if (this.currentView) {
                 var currentOpt = dropdown.querySelector('option[value="' + this.currentView + '"]');
                 if (currentOpt && !currentOpt.disabled) {
-                    // Current view is still valid — just ensure dropdown matches
+                    // Current view is still valid, just ensure dropdown matches
                     dropdown.value = this.currentView;
                     // Re-trigger switchView in case it wasn't initialized yet
                     // (reset currentView to force re-entry)
@@ -162,7 +203,7 @@ export default function (view) {
                 }
             }
 
-            // Current view is disabled or not set — find first enabled option
+            // Current view is disabled or not set, find first enabled option
             var firstEnabled = null;
             for (var i = 0; i < dropdown.options.length; i++) {
                 if (!dropdown.options[i].disabled) {
@@ -203,6 +244,10 @@ export default function (view) {
             for (var i = 0; i < views.length; i++) {
                 views[i].classList.add('hidden');
             }
+
+            // A view is open now, so the empty state shown while every module was off goes away.
+            var noSyncMessage = view.querySelector('#noSyncTypesMessage');
+            if (noSyncMessage) noSyncMessage.classList.add('hidden');
 
             var targetView = view.querySelector('#syncView-' + viewName);
             if (targetView) {
@@ -415,7 +460,7 @@ export default function (view) {
 
         _bindModuleEvents: function() {
             var self = this;
-            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'SyncTableModule'); };
+            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler); };
 
             bind('btnRefreshItems', function() { self.refreshSyncTable(); });
             bind('btnTriggerSync', function() { self.triggerSync(); });
@@ -628,7 +673,7 @@ export default function (view) {
             this.bulkAction('IgnoreItems');
         },
 
-        // Pending-deletion items cannot be queued — filter them out.
+        // Pending-deletion items cannot be queued, filter them out.
         bulkQueue: function() {
             var self = this;
             var ids = this.table.getSelectedIds();
@@ -944,7 +989,9 @@ export default function (view) {
 
             var showPendingDownload = downloadMode === 'RequireApproval';
             var showPendingReplace = replaceMode === 'RequireApproval';
-            var showPendingDelete = deleteMode === 'RequireApproval';
+            // Automatic deletion still holds some deletions for approval, so both deletion states can
+            // appear whenever deletion is on at all.
+            var showPendingDelete = deleteMode !== 'Disabled';
 
             if (this.table) {
                 this.table.setFilterOptionVisible('optPendingDownload', showPendingDownload);
@@ -981,7 +1028,7 @@ export default function (view) {
                 SyncTableModule.currentConfig = config;
                 SyncTableModule.updatePendingFilterVisibility(config);
             }).catch(function() {
-                // Config fetch failed — continue without pending filter visibility
+                // Config fetch failed, continue without pending filter visibility
             });
 
             SyncTableModule.loadSyncStatus();
@@ -1021,7 +1068,7 @@ export default function (view) {
                         className: 'jpk-table-cell-with-thumb',
                         render: function(item) {
                             var itemName = item.ItemName || 'Unknown';
-                            var userMapping = self.findUserMapping(item.SourceUserId, item.LocalUserId);
+                            var userMapping = self.findUserMapping(item);
                             var sourceUserName = userMapping ? userMapping.SourceUserName : 'Unknown';
                             var localUserName = userMapping ? userMapping.LocalUserName : 'Unknown';
                             var userDisplay = sourceUserName + ' \u2192 ' + localUserName;
@@ -1119,7 +1166,7 @@ export default function (view) {
 
         _bindModuleEvents: function() {
             var self = this;
-            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'HistorySyncTableModule'); };
+            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler); };
 
             bind('btnRefreshHistoryItems', function() { self.refreshHistoryTable(); });
             bind('btnTriggerHistorySync', function() { self.triggerHistorySync(); });
@@ -1234,16 +1281,10 @@ export default function (view) {
             });
         },
 
-        // Empty Ids + Status filter = retry all.
         retryErrors: function() {
             var self = this;
-
-            ServerSyncShared.apiRequest('HistoryItems/Queue', 'POST', { Ids: [], Status: 'Errored' }).then(function() {
-                ServerSyncShared.showAlert('Errored history items queued for retry');
-                self.loadHistoryStatus();
-                self.loadHistoryItems();
-            }).catch(function() {
-                ServerSyncShared.showAlert('Failed to retry errored items');
+            return retryAllErrored('HistoryItems/Queue', 'history item(s)', function() {
+                return Promise.all([self.loadHistoryStatus(), self.loadHistoryItems()]);
             });
         },
 
@@ -1321,7 +1362,7 @@ export default function (view) {
                 errorSection.classList.add('hidden');
             }
 
-            var userMapping = self.findUserMapping(item.SourceUserId, item.LocalUserId);
+            var userMapping = self.findUserMapping(item);
             var sourceUserName = userMapping ? userMapping.SourceUserName : 'Unknown';
             var localUserName = userMapping ? userMapping.LocalUserName : 'Unknown';
 
@@ -1428,11 +1469,29 @@ export default function (view) {
             }
         },
 
-        findUserMapping: function(sourceUserId, localUserId) {
-            if (!this.currentConfig) return null;
-            return ServerSyncShared.allUserMappings(this.currentConfig).find(function(m) {
-                return m.SourceUserId === sourceUserId || m.LocalUserId === localUserId;
-            });
+        // Finds the user mapping a row was synced through. Only the mappings of the row's own server are
+        // searched, since another server can map the same ids to other users, and a row with no server key
+        // belongs to the first scan server. The source user id must match. The local user id is used only
+        // when the row has no source user id, because several source users can map onto one local user.
+        findUserMapping: function(item) {
+            if (!this.currentConfig || !item) return null;
+            var server = item.ServerKey
+                ? ((this.currentConfig.Servers || []).find(function(s) { return s.Key === item.ServerKey; }) || null)
+                : (ServerSyncShared.scanServers(this.currentConfig)[0] || null);
+            if (!server) return null;
+
+            // Stored ids may have been written with or without dashes and in either case.
+            var normalize = function(id) { return String(id || '').replace(/-/g, '').toLowerCase(); };
+            var mappings = server.UserMappings || [];
+            if (item.SourceUserId) {
+                var sourceId = normalize(item.SourceUserId);
+                return mappings.find(function(m) { return normalize(m.SourceUserId) === sourceId; }) || null;
+            }
+            if (item.LocalUserId) {
+                var localId = normalize(item.LocalUserId);
+                return mappings.find(function(m) { return normalize(m.LocalUserId) === localId; }) || null;
+            }
+            return null;
         },
 
         closeModal: function() {
@@ -1474,20 +1533,14 @@ export default function (view) {
     // ============================================
 
     var HistoryPageController = {
-        currentConfig: null,
-
         init: function() {
             this.loadConfig();
         },
 
         loadConfig: function() {
-            var self = this;
-
             ServerSyncShared.fetchLocalServerName().then(function() {
                 return ServerSyncShared.getConfig();
             }).then(function(config) {
-                self.currentConfig = config;
-
                 HistorySyncTableModule.currentConfig = config;
                 HistorySyncTableModule.init(config);
 
@@ -1495,7 +1548,7 @@ export default function (view) {
                 HistorySyncTableModule.loadHistoryItems();
                 HistorySyncTableModule.loadHealthStats();
             }).catch(function() {
-                // Config fetch failed — initialize table without config
+                // Config fetch failed, initialize table without config
                 HistorySyncTableModule.init(null);
                 HistorySyncTableModule.loadHistoryStatus();
                 HistorySyncTableModule.loadHistoryItems();
@@ -1513,6 +1566,7 @@ export default function (view) {
         currentModalItem: null, // Item shown in the detail modal (fetched via separate API call)
         currentConfig: null,    // Cached plugin configuration (includes sync category toggles)
         _initialized: false,    // Prevents duplicate initialization
+        _detailSeq: 0,          // Counts detail requests so only the newest reply fills the modal
 
         init: function(config) {
             if (this._initialized) {
@@ -1632,7 +1686,7 @@ export default function (view) {
 
         _bindModuleEvents: function() {
             var self = this;
-            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'MetadataSyncTableModule'); };
+            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler); };
 
             bind('btnRefreshMetadataItems', function() { self.refreshMetadataTable(); });
             bind('btnTriggerMetadataSync', function() { self.triggerMetadataSync(); });
@@ -1747,16 +1801,10 @@ export default function (view) {
             });
         },
 
-        // Empty Ids + Status filter = retry all.
         retryErrors: function() {
             var self = this;
-
-            ServerSyncShared.apiRequest('MetadataItems/Queue', 'POST', { Ids: [], Status: 'Errored' }).then(function() {
-                ServerSyncShared.showAlert('Errored metadata items queued for retry');
-                self.loadMetadataStatus();
-                self.loadMetadataItems();
-            }).catch(function() {
-                ServerSyncShared.showAlert('Failed to retry errored items');
+            return retryAllErrored('MetadataItems/Queue', 'metadata item(s)', function() {
+                return Promise.all([self.loadMetadataStatus(), self.loadMetadataItems()]);
             });
         },
 
@@ -1801,8 +1849,12 @@ export default function (view) {
 
         showItemDetail: function(itemId) {
             var self = this;
+            // Only the newest click may fill the modal. A slower reply for an earlier row, or one that
+            // lands after the modal was closed, is dropped instead of showing the wrong item.
+            var seq = ++self._detailSeq;
 
             ServerSyncShared.apiRequest('MetadataItems/' + itemId).then(function(item) {
+                if (seq !== self._detailSeq) return;
                 if (!item) {
                     ServerSyncShared.showAlert('Item not found');
                     return;
@@ -1852,6 +1904,7 @@ export default function (view) {
 
                 view.querySelector('#metadataSyncItemDetailModal').classList.remove('hidden');
             }).catch(function(err) {
+                if (seq !== self._detailSeq) return;
                 console.error('Failed to load metadata item details:', err);
                 ServerSyncShared.showAlert('Failed to load item details');
             });
@@ -1869,8 +1922,8 @@ export default function (view) {
             var peopleEnabled = config.MetadataSyncPeople === true;
             var imagesEnabled = config.MetadataSyncImages !== false;
 
-            var sourceMetadata = this.parseJsonSafe(item.SourceMetadataValue) || {};
-            var localMetadata = this.parseJsonSafe(item.LocalMetadataValue) || {};
+            var sourceMetadata = parseJsonSafe(item.SourceMetadataValue) || {};
+            var localMetadata = parseJsonSafe(item.LocalMetadataValue) || {};
 
             if (metadataEnabled) {
                 var hasMetadataChanges = item.HasMetadataChanges === true;
@@ -1934,14 +1987,14 @@ export default function (view) {
             var peopleEnabled = config.MetadataSyncPeople === true;
             var imagesEnabled = config.MetadataSyncImages !== false;
 
-            var sourceMetadata = self.parseJsonSafe(item.SourceMetadataValue) || {};
-            var localMetadata = self.parseJsonSafe(item.LocalMetadataValue) || {};
-            var sourceImages = self.parseJsonSafe(item.SourceImagesValue);
-            var localImages = self.parseJsonSafe(item.LocalImagesValue);
-            var sourcePeople = self.parseJsonSafe(item.SourcePeopleValue);
-            var localPeople = self.parseJsonSafe(item.LocalPeopleValue);
-            var sourceStudios = self.parseJsonSafe(item.SourceStudiosValue);
-            var localStudios = self.parseJsonSafe(item.LocalStudiosValue);
+            var sourceMetadata = parseJsonSafe(item.SourceMetadataValue) || {};
+            var localMetadata = parseJsonSafe(item.LocalMetadataValue) || {};
+            var sourceImages = parseJsonSafe(item.SourceImagesValue);
+            var localImages = parseJsonSafe(item.LocalImagesValue);
+            var sourcePeople = parseJsonSafe(item.SourcePeopleValue);
+            var localPeople = parseJsonSafe(item.LocalPeopleValue);
+            var sourceStudios = parseJsonSafe(item.SourceStudiosValue);
+            var localStudios = parseJsonSafe(item.LocalStudiosValue);
 
             if (metadataEnabled) {
                 html += '<tr class="metadataSyncModal-sectionHeader"><td colspan="4">Metadata</td></tr>';
@@ -1984,16 +2037,6 @@ export default function (view) {
             }
 
             tbody.innerHTML = html;
-        },
-
-        parseJsonSafe: function(jsonString) {
-            if (!jsonString) return null;
-            try {
-                return JSON.parse(jsonString);
-            } catch (e) {
-                console.error('Failed to parse JSON:', e);
-                return null;
-            }
         },
 
         // Full-width muted note naming the server-computed reason a category's
@@ -2278,8 +2321,8 @@ export default function (view) {
                     });
                 }
 
-                var srcDisplay = self.formatImageDisplay(srcSize, srcCount);
-                var localDisplay = self.formatImageDisplay(localSize, localCount);
+                var srcDisplay = formatImageDisplay(srcSize, srcCount);
+                var localDisplay = formatImageDisplay(localSize, localCount);
 
                 var isChanged = srcCount !== localCount || srcSize !== localSize;
                 var rowClass = isChanged ? 'metadataSyncModal-changedRow' : '';
@@ -2299,21 +2342,10 @@ export default function (view) {
             return html;
         },
 
-        formatImageDisplay: function(size, count) {
-            if (count === 0) return '-';
-            if (!size || size === 0) {
-                return count === 1 ? '1 image' : count + ' images';
-            }
-            var sizeStr = ServerSyncShared.formatSize(size);
-            if (count > 1) {
-                return sizeStr + ' (' + count + ')';
-            }
-            return sizeStr;
-        },
-
         closeModal: function() {
             view.querySelector('#metadataSyncItemDetailModal').classList.add('hidden');
             this.currentModalItem = null;
+            this._detailSeq++;
             this.table.refresh();
             this.loadMetadataStatus();
             this.loadHealthStats();
@@ -2351,21 +2383,15 @@ export default function (view) {
     // ============================================
 
     var MetadataPageController = {
-        currentConfig: null,
-
         init: function() {
             var self = this;
             self.loadConfig();
         },
 
         loadConfig: function() {
-            var self = this;
-
             ServerSyncShared.fetchLocalServerName().then(function() {
                 return ServerSyncShared.getConfig();
             }).then(function(config) {
-                self.currentConfig = config;
-
                 MetadataSyncTableModule.currentConfig = config;
                 MetadataSyncTableModule.init(config);
 
@@ -2373,7 +2399,7 @@ export default function (view) {
                 MetadataSyncTableModule.loadMetadataItems();
                 MetadataSyncTableModule.loadHealthStats();
             }).catch(function() {
-                // Config fetch failed — initialize table without config
+                // Config fetch failed, initialize table without config
                 MetadataSyncTableModule.init(null);
                 MetadataSyncTableModule.loadMetadataStatus();
                 MetadataSyncTableModule.loadMetadataItems();
@@ -2391,6 +2417,7 @@ export default function (view) {
         currentModalDetail: null,// Detail object from API (separate from list item — fetched per-user)
         currentConfig: null,     // Cached plugin configuration (includes sync category toggles)
         _initialized: false,     // Prevents duplicate initialization
+        _detailSeq: 0,           // Counts detail requests so only the newest reply fills the modal
 
         init: function(config) {
             if (this._initialized) {
@@ -2510,7 +2537,7 @@ export default function (view) {
 
         _bindModuleEvents: function() {
             var self = this;
-            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'UserSyncTableModule'); };
+            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler); };
 
             bind('btnRefreshUserItems', function() { self.triggerRefresh(); });
             bind('btnTriggerUserSync', function() { self.triggerSync(); });
@@ -2621,16 +2648,10 @@ export default function (view) {
             });
         },
 
-        // Empty Ids + Status filter = retry all.
         retryErrors: function() {
             var self = this;
-
-            ServerSyncShared.apiRequest('UserItems/Queue', 'POST', { Ids: [], Status: 'Errored' }).then(function() {
-                ServerSyncShared.showAlert('Errored user items queued for retry');
-                self.loadUserStatus();
-                self.loadUserItems();
-            }).catch(function() {
-                ServerSyncShared.showAlert('Failed to retry errored items');
+            return retryAllErrored('UserItems/Queue', 'user item(s)', function() {
+                return Promise.all([self.loadUserStatus(), self.loadUserItems()]);
             });
         },
 
@@ -2687,8 +2708,12 @@ export default function (view) {
             var self = this;
             var sourceUserId = item.SourceUserId;
             var localUserId = item.LocalUserId;
+            // Only the newest click may fill the modal. A slower reply for an earlier row, or one that
+            // lands after the modal was closed, is dropped instead of showing the wrong user.
+            var seq = ++self._detailSeq;
 
             ServerSyncShared.apiRequest('UserSyncUsers/' + encodeURIComponent(sourceUserId) + '/' + encodeURIComponent(localUserId)).then(function(detail) {
+                if (seq !== self._detailSeq) return;
                 if (!detail) {
                     ServerSyncShared.showAlert('User not found');
                     return;
@@ -2765,6 +2790,7 @@ export default function (view) {
 
                 view.querySelector('#userSyncItemDetailModal').classList.remove('hidden');
             }).catch(function(err) {
+                if (seq !== self._detailSeq) return;
                 console.error('Failed to load user detail:', err);
                 ServerSyncShared.showAlert('Failed to load user details');
             });
@@ -2793,9 +2819,9 @@ export default function (view) {
         _addPropertyRows: function(tbody, item) {
             var self = this;
 
-            var sourceObj = self._parseJson(item.SourceValue);
-            var localObj = self._parseJson(item.LocalValue);
-            var mergedObj = self._parseJson(item.MergedValue);
+            var sourceObj = parseJsonSafe(item.SourceValue);
+            var localObj = parseJsonSafe(item.LocalValue);
+            var mergedObj = parseJsonSafe(item.MergedValue);
 
             if (!sourceObj && !localObj && !mergedObj) {
                 var row = document.createElement('tr');
@@ -2867,15 +2893,6 @@ export default function (view) {
 
                 tbody.appendChild(row);
             });
-        },
-
-        _parseJson: function(str) {
-            if (!str || typeof str !== 'string') return null;
-            try {
-                return JSON.parse(str);
-            } catch (e) {
-                return null;
-            }
         },
 
         _addProfileImageRow: function(tbody, item) {
@@ -2963,6 +2980,7 @@ export default function (view) {
         closeModal: function() {
             view.querySelector('#userSyncItemDetailModal').classList.add('hidden');
             this.currentModalDetail = null;
+            this._detailSeq++;
             this.table.reload();
             this.loadUserStatus();
         },
@@ -3009,21 +3027,15 @@ export default function (view) {
     // ============================================
 
     var UsersPageController = {
-        currentConfig: null,
-
         init: function() {
             var self = this;
             self.loadConfig();
         },
 
         loadConfig: function() {
-            var self = this;
-
             ServerSyncShared.fetchLocalServerName().then(function() {
                 return ServerSyncShared.getConfig();
             }).then(function(config) {
-                self.currentConfig = config;
-
                 UserSyncTableModule.currentConfig = config;
                 UserSyncTableModule.init(config);
 
@@ -3031,7 +3043,7 @@ export default function (view) {
                 UserSyncTableModule.loadUserItems();
                 UserSyncTableModule.loadHealthStats();
             }).catch(function() {
-                // Config fetch failed — initialize table without config
+                // Config fetch failed, initialize table without config
                 UserSyncTableModule.init(null);
                 UserSyncTableModule.loadUserStatus();
                 UserSyncTableModule.loadUserItems();
@@ -3049,6 +3061,7 @@ export default function (view) {
         currentModalItem: null,
         currentConfig: null,
         _initialized: false,
+        _detailSeq: 0,
 
         init: function(config) {
             if (this._initialized) return;
@@ -3146,7 +3159,7 @@ export default function (view) {
 
         _bindModuleEvents: function() {
             var self = this;
-            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler, 'PeopleSyncTableModule'); };
+            var bind = function(id, handler) { ServerSyncShared.bindClick(id, handler); };
 
             bind('btnRefreshPeopleItems', function() { self.triggerRefresh(); });
             bind('btnTriggerPeopleSync', function() { self.triggerSync(); });
@@ -3255,17 +3268,8 @@ export default function (view) {
 
         retryErrors: function() {
             var self = this;
-            ServerSyncShared.apiRequest('PeopleItems?status=Errored&take=200', 'GET').then(function(result) {
-                if (result && result.Items && result.Items.length > 0) {
-                    var ids = result.Items.map(function(item) { return item.Id; });
-                    ServerSyncShared.apiRequest('PeopleItems/Queue', 'POST', { Ids: ids }).then(function() {
-                        ServerSyncShared.showAlert('Errored people queued for retry');
-                        self.loadPeopleStatus();
-                        self.loadPeopleItems();
-                    });
-                }
-            }).catch(function() {
-                ServerSyncShared.showAlert('Failed to retry errored items');
+            return retryAllErrored('PeopleItems/Queue', 'person(s)', function() {
+                return Promise.all([self.loadPeopleStatus(), self.loadPeopleItems()]);
             });
         },
 
@@ -3313,8 +3317,12 @@ export default function (view) {
 
         showPersonDetail: function(item) {
             var self = this;
+            // Only the newest click may fill the modal. A slower reply for an earlier row, or one that
+            // lands after the modal was closed, is dropped instead of showing the wrong person.
+            var seq = ++self._detailSeq;
 
             ServerSyncShared.apiRequest('PeopleItems/' + item.Id).then(function(detail) {
+                if (seq !== self._detailSeq) return;
                 if (!detail) {
                     ServerSyncShared.showAlert('Person not found');
                     return;
@@ -3358,8 +3366,8 @@ export default function (view) {
                 var tbody = view.querySelector('#peopleSyncModalTableBody');
                 tbody.innerHTML = '';
 
-                var sourceMetadata = self._parseJson(detail.SourceMetadataValue) || {};
-                var localMetadata = self._parseJson(detail.LocalMetadataValue) || {};
+                var sourceMetadata = parseJsonSafe(detail.SourceMetadataValue) || {};
+                var localMetadata = parseJsonSafe(detail.LocalMetadataValue) || {};
 
                 self._addSectionHeader(tbody, 'Metadata');
 
@@ -3387,9 +3395,10 @@ export default function (view) {
                 var sourceTags = Array.isArray(sourceMetadata.Tags) ? sourceMetadata.Tags : [];
                 var localTags = Array.isArray(localMetadata.Tags) ? localMetadata.Tags : [];
                 var tagsChanged = JSON.stringify(sourceTags.slice().sort()) !== JSON.stringify(localTags.slice().sort());
+                // The comparison cells are filled with textContent, so the values go in unescaped.
                 self._addComparisonRow(tbody, 'Tags',
-                    sourceTags.length > 0 ? ServerSyncShared.escapeHtml(sourceTags.join(', ')) : '-',
-                    localTags.length > 0 ? ServerSyncShared.escapeHtml(localTags.join(', ')) : '-',
+                    sourceTags.length > 0 ? sourceTags.join(', ') : '-',
+                    localTags.length > 0 ? localTags.join(', ') : '-',
                     tagsChanged);
 
                 var sourceProviders = sourceMetadata.ProviderIds || {};
@@ -3415,8 +3424,8 @@ export default function (view) {
 
                 self._addSectionHeader(tbody, 'Images');
 
-                var sourceImages = self._parseJson(detail.SourceImagesValue);
-                var localImages = self._parseJson(detail.LocalImagesValue);
+                var sourceImages = parseJsonSafe(detail.SourceImagesValue);
+                var localImages = parseJsonSafe(detail.LocalImagesValue);
                 if (sourceImages) {
                     Object.keys(sourceImages).forEach(function(imageType) {
                         var sourceList = sourceImages[imageType] || [];
@@ -3424,13 +3433,11 @@ export default function (view) {
                         var sourceSize = sourceList.reduce(function(sum, img) { return sum + (img.Size || 0); }, 0);
                         var localSize = localList.reduce(function(sum, img) { return sum + (img.Size || 0); }, 0);
                         var sizeChanged = sourceList.length !== localList.length || (sourceSize > 0 && localSize > 0 && sourceSize !== localSize);
-                        // Render identically to the Metadata modal: when size is
-                        // unknown (server didn't ship Size in the manifest) show
-                        // "1 image" rather than "1 (0 B)" — the latter reads as
-                        // "image is empty" even when the image is fine.
+                        // The same formatter as the Metadata modal, so a size the server did not send shows
+                        // as a count of images rather than as zero bytes, which would read as an empty image.
                         self._addComparisonRow(tbody, imageType,
-                            self._formatImageCell(sourceList.length, sourceSize),
-                            self._formatImageCell(localList.length, localSize),
+                            formatImageDisplay(sourceSize, sourceList.length),
+                            formatImageDisplay(localSize, localList.length),
                             sizeChanged);
                     });
                 } else {
@@ -3443,6 +3450,7 @@ export default function (view) {
 
                 view.querySelector('#peopleSyncItemDetailModal').classList.remove('hidden');
             }).catch(function(err) {
+                if (seq !== self._detailSeq) return;
                 console.error('Failed to load person detail:', err);
                 ServerSyncShared.showAlert('Failed to load person details');
             });
@@ -3471,6 +3479,8 @@ export default function (view) {
             tbody.appendChild(row);
         },
 
+        // Returns plain text. The People modal writes every cell with textContent, so escaping here would
+        // show the operator HTML entity codes instead of characters such as an ampersand.
         _formatFieldValue: function(val, field) {
             if (val == null) return '-';
             if (field && field.isDate && typeof val === 'string') {
@@ -3480,36 +3490,14 @@ export default function (view) {
                 } catch (e) { return String(val); }
             }
             if (field && field.truncate && typeof val === 'string' && val.length > 200) {
-                return ServerSyncShared.escapeHtml(val.substring(0, 200) + '...');
+                return val.substring(0, 200) + '...';
             }
             if (Array.isArray(val)) {
-                return val.length > 0 ? ServerSyncShared.escapeHtml(val.join(', ')) : '-';
+                return val.length > 0 ? val.join(', ') : '-';
             }
             if (typeof val === 'boolean') return val ? 'Yes' : 'No';
             if (typeof val === 'object') return JSON.stringify(val);
-            return ServerSyncShared.escapeHtml(String(val));
-        },
-
-        _formatBytes: function(bytes) {
-            if (!bytes || bytes === 0) return '0 B';
-            var units = ['B', 'KB', 'MB', 'GB'];
-            var i = 0;
-            var size = bytes;
-            while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
-            return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
-        },
-
-        // Renders an image-cell value identically to the Metadata modal's
-        // formatImageDisplay: count alone when size is unknown (avoids the
-        // "1 (0 B)" misread on tag-only source manifests), size-with-count
-        // when both are known.
-        _formatImageCell: function(count, size) {
-            if (count === 0) return '-';
-            if (!size || size === 0) {
-                return count === 1 ? '1 image' : count + ' images';
-            }
-            var sizeStr = this._formatBytes(size);
-            return count > 1 ? sizeStr + ' (' + count + ')' : sizeStr;
+            return String(val);
         },
 
         _addComparisonRow: function(tbody, property, sourceVal, localVal, isChanged) {
@@ -3539,19 +3527,10 @@ export default function (view) {
             tbody.appendChild(row);
         },
 
-        _parseJson: function(str) {
-            if (!str || typeof str !== 'string') return null;
-            try { return JSON.parse(str); } catch (e) { return null; }
-        },
-
-        _truncate: function(str, maxLen) {
-            if (!str) return '-';
-            return str.length > maxLen ? str.substring(0, maxLen) + '...' : str;
-        },
-
         closeModal: function() {
             view.querySelector('#peopleSyncItemDetailModal').classList.add('hidden');
             this.currentModalItem = null;
+            this._detailSeq++;
             this.table.reload();
             this.loadPeopleStatus();
         },
@@ -3588,20 +3567,14 @@ export default function (view) {
     // ============================================
 
     var PeoplePageController = {
-        currentConfig: null,
-
         init: function() {
             this.loadConfig();
         },
 
         loadConfig: function() {
-            var self = this;
-
             ServerSyncShared.fetchLocalServerName().then(function() {
                 return ServerSyncShared.getConfig();
             }).then(function(config) {
-                self.currentConfig = config;
-
                 PeopleSyncTableModule.currentConfig = config;
                 PeopleSyncTableModule.init(config);
 
@@ -3618,19 +3591,81 @@ export default function (view) {
     };
 
     // ============================================
+    // VALUE HELPERS (shared by the detail modals)
+    // ============================================
+
+    // Parses a stored JSON value, or returns null when it is missing or not JSON. Some user sync values
+    // are plain strings rather than JSON, so a failed parse is expected and is not logged.
+    function parseJsonSafe(value) {
+        if (!value || typeof value !== 'string') return null;
+        try {
+            return JSON.parse(value);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // One image type as shown in a comparison cell. A size the server did not send shows as a count of
+    // images, since "1 (0 B)" would read as an empty image when the image is fine.
+    function formatImageDisplay(size, count) {
+        if (count === 0) return '-';
+        if (!size) {
+            return count === 1 ? '1 image' : count + ' images';
+        }
+        var sizeStr = ServerSyncShared.formatSize(size);
+        return count > 1 ? sizeStr + ' (' + count + ')' : sizeStr;
+    }
+
+    // ============================================
+    // RETRY ERRORED ROWS (shared by the History, Metadata, Users, and People tables)
+    // ============================================
+    // Posts an empty id list with Status Errored to a module's Queue endpoint, which asks the server to
+    // requeue every errored row itself. Listing ids from the page instead would only cover the rows that
+    // happen to be loaded. The counts and rows reload whether or not the request worked, since the table
+    // should show what the server holds now, and every promise in the chain is returned so nothing fails
+    // without an alert.
+    function retryAllErrored(endpoint, noun, reload) {
+        return ServerSyncShared.apiRequest(endpoint, 'POST', { Ids: [], Status: 'Errored' }).then(function(result) {
+            var updated = result && typeof result.Updated === 'number' ? result.Updated : null;
+            if (updated === 0) {
+                ServerSyncShared.showAlert('No errored ' + noun + ' to retry');
+            } else if (updated !== null) {
+                ServerSyncShared.showAlert(updated + ' errored ' + noun + ' queued for retry');
+            } else {
+                ServerSyncShared.showAlert('Errored ' + noun + ' queued for retry');
+            }
+        }, function(err) {
+            console.error('Retry of errored rows failed:', err);
+            ServerSyncShared.showAlert('Failed to retry errored ' + noun);
+        }).then(function() {
+            return reload();
+        }).catch(function(err) {
+            console.error('Reload after retry failed:', err);
+        });
+    }
+
+    // ============================================
     // OBJECT VERSION (shared by the detail modals)
     // ============================================
     // Which server last edited an object and when, from ServerSync/Hints/Version. An object no one
     // has edited since versions began shows as not recorded.
 
+    // Requests per version element. Opening a second row before the first row's version arrives must
+    // not let the older reply land last and label the second row with the first row's editor.
+    var _versionSeq = {};
+
     function showObjectVersion(elementId, params) {
         var el = view.querySelector('#' + elementId);
         if (!el) return;
+        var seq = (_versionSeq[elementId] || 0) + 1;
+        _versionSeq[elementId] = seq;
         el.textContent = '\u2026';
+        el.title = '';
         var query = Object.keys(params).filter(function (k) { return params[k]; }).map(function (k) {
             return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
         }).join('&');
         ServerSyncShared.apiRequest('Hints/Version?' + query, 'GET').then(function (version) {
+            if (_versionSeq[elementId] !== seq) return;
             if (!version || !version.Timestamp) {
                 el.textContent = 'Not recorded';
                 return;
@@ -3639,6 +3674,7 @@ export default function (view) {
             el.textContent = ServerSyncShared.formatRelativeTime(new Date(version.Timestamp)) + ' ' + where;
             el.title = new Date(version.Timestamp).toLocaleString();
         }).catch(function () {
+            if (_versionSeq[elementId] !== seq) return;
             el.textContent = 'Not recorded';
         });
     }
@@ -3653,6 +3689,15 @@ export default function (view) {
     var QueueModule = {
         _timer: null,
         _tick: null,
+        // A poll still in flight is not started again, and a picture that has not changed is not rebuilt.
+        _loading: false,
+        _signature: null,
+        // Numbers every load so only the newest reply renders.
+        _loadSeq: 0,
+        // Posters fetched through the image proxy, kept for the life of the page so a refresh does not
+        // fetch every poster again.
+        _proxyCache: {},
+        _maxRows: 200,
         _bound: false,
         _config: null,
         _data: null,
@@ -3664,7 +3709,7 @@ export default function (view) {
             var self = this;
             if (!this._bound) {
                 this._bound = true;
-                view.querySelector('#btnQueueRefresh').addEventListener('click', function() { self.load(); });
+                view.querySelector('#btnQueueRefresh').addEventListener('click', function() { self.load(true); });
                 view.querySelector('#btnQueueRun').addEventListener('click', function() { self.runNow(); });
                 view.querySelector('#queueList').addEventListener('click', function(e) { self._onDiscard(e); });
                 view.querySelectorAll('.qCards .qCard').forEach(function(card) {
@@ -3699,14 +3744,48 @@ export default function (view) {
             if (this._tick) { clearInterval(this._tick); this._tick = null; }
         },
 
-        load: function() {
+        load: function(force) {
             var self = this;
-            if (!ServerSyncShared) return Promise.resolve();
+            if (!ServerSyncShared || (self._loading && !force)) return Promise.resolve();
+            self._loading = true;
+            // A forced load can start while a poll is still in flight, and the poll's older reply must not
+            // land last and put back a picture the forced load already replaced.
+            var seq = ++self._loadSeq;
             return ServerSyncShared.apiRequest('Hints', 'GET').then(function(data) {
+                if (seq !== self._loadSeq) return;
+                var signature = JSON.stringify(data || {});
+                if (!force && signature === self._signature) return;
+                self._signature = signature;
                 self._data = data || {};
                 self.render();
             }).catch(function() {
-                // Leave the last picture in place; the next tick tries again.
+                // Leave the last picture in place. The next tick tries again.
+            }).then(function() {
+                // Only the newest load clears the flag, so an older reply finishing first does not let the
+                // next poll start while the newest load is still in flight.
+                if (seq === self._loadSeq) self._loading = false;
+            });
+        },
+
+        // Fetches a poster through the image proxy once per page and remembers it.
+        _loadProxy: function(imgId, cacheKey, itemId, peerKey) {
+            var self = this;
+            var url = ApiClient.getUrl('ServerSync/ImageProxy', { itemId: itemId, user: 'false', maxHeight: 128, serverKey: peerKey });
+            ApiClient.fetch({ url: url, type: 'GET' }).then(function(response) {
+                if (!response || !response.ok) throw new Error('image fetch failed');
+                return response.blob();
+            }).then(function(blob) {
+                var objectUrl = URL.createObjectURL(blob);
+                self._proxyCache[cacheKey] = objectUrl;
+                var img = document.getElementById(imgId);
+                if (img) img.src = objectUrl;
+            }).catch(function() {
+                self._proxyCache[cacheKey] = '';
+                var img = document.getElementById(imgId);
+                if (img) {
+                    img.style.display = 'none';
+                    if (img.nextElementSibling) img.nextElementSibling.style.display = 'flex';
+                }
             });
         },
 
@@ -3715,11 +3794,11 @@ export default function (view) {
             var btn = view.querySelector('#btnQueueRun');
             btn.disabled = true;
             ServerSyncShared.apiRequest('Hints/Run', 'POST').then(function() {
-                return self.load();
+                return self.load(true);
             }).then(function() {
                 ServerSyncShared.showAlert('Delivered and applied what was due');
             }).catch(function() {
-                ServerSyncShared.showAlert('The run failed; see the server log');
+                ServerSyncShared.showAlert('The run failed. See the server log');
             }).then(function() {
                 btn.disabled = false;
             });
@@ -3818,7 +3897,11 @@ export default function (view) {
                 return self._dir === 'all' || r.dir === self._dir;
             });
             var list = view.querySelector('#queueList');
-            list.innerHTML = rows.map(function(r) { return QueueModule._row(r); }).join('');
+            var shown = rows.slice(0, self._maxRows);
+            list.innerHTML = shown.map(function(r) { return QueueModule._row(r); }).join('') +
+                (rows.length > shown.length
+                    ? '<div class="qMore">Showing the latest ' + shown.length + ' of ' + rows.length + '. Filter by state or server to see others.</div>'
+                    : '');
             view.querySelector('#queueEmpty').classList.toggle('hidden', rows.length > 0);
             list.classList.toggle('hidden', rows.length === 0);
         },
@@ -3834,12 +3917,20 @@ export default function (view) {
             var thumb;
             if (r.itemId && !isUser) {
                 var url = ApiClient.getImageUrl(r.itemId, { type: 'Primary', maxHeight: 128 });
-                thumb = '<img class="qThumb' + shape + '" src="' + esc(url) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" />' +
+                thumb = '<img class="qThumb' + shape + '" loading="lazy" src="' + esc(url) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" />' +
                     holder.replace('<div ', '<div style="display:none" ');
             } else if (r.originItemId && r.peerKey && !isUser) {
-                var id = 'ss-q-thumb-' + Math.random().toString(36).slice(2);
-                ServerSyncShared.scheduleProxyImage(id, r.originItemId, false, 128, r.peerKey);
-                thumb = '<img id="' + id + '" class="qThumb' + shape + '" alt="" />' + holder.replace('<div ', '<div style="display:none" ');
+                var cacheKey = r.peerKey + '|' + r.originItemId;
+                var cached = QueueModule._proxyCache[cacheKey];
+                if (cached) {
+                    thumb = '<img class="qThumb' + shape + '" src="' + esc(cached) + '" alt="" />' + holder.replace('<div ', '<div style="display:none" ');
+                } else if (cached === '') {
+                    thumb = holder;
+                } else {
+                    var id = 'ss-q-thumb-' + Math.random().toString(36).slice(2);
+                    setTimeout(function() { QueueModule._loadProxy(id, cacheKey, r.originItemId, r.peerKey); }, 0);
+                    thumb = '<img id="' + id + '" class="qThumb' + shape + '" alt="" />' + holder.replace('<div ', '<div style="display:none" ');
+                }
             } else {
                 thumb = holder;
             }
@@ -3974,7 +4065,7 @@ export default function (view) {
             btn.disabled = true;
             ServerSyncShared.apiRequest('Hints/' + btn.getAttribute('data-lane') + '/' + btn.getAttribute('data-discard'), 'DELETE').then(function() {
                 ServerSyncShared.showAlert('Hint discarded');
-                return self.load();
+                return self.load(true);
             }).catch(function() {
                 ServerSyncShared.showAlert('Could not discard the hint');
                 btn.disabled = false;

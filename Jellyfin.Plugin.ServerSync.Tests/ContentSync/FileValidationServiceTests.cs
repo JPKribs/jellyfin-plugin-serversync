@@ -70,7 +70,7 @@ public sealed class FileValidationServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Disabled mappings must not vouch for a path — a file under a disabled
+    /// Disabled mappings must not vouch for a path, a file under a disabled
     /// mapping's root is out of bounds for deletion.
     /// </summary>
     [Fact]
@@ -84,7 +84,7 @@ public sealed class FileValidationServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Traversal sequences resolve before comparison; escaping via ".." from
+    /// Traversal sequences resolve before comparison. Escaping via ".." from
     /// inside a library must be caught.
     /// </summary>
     [Fact]
@@ -113,7 +113,7 @@ public sealed class FileValidationServiceTests : IDisposable
     }
 
     /// <summary>
-    /// A plain nested directory is not flagged — the guard must not block
+    /// A plain nested directory is not flagged, the guard must not block
     /// ordinary deletions.
     /// </summary>
     [Fact]
@@ -154,8 +154,8 @@ public sealed class FileValidationServiceTests : IDisposable
     }
 
     /// <summary>
-    /// The file itself being a symlink is fine — deleting a link leaves its
-    /// target intact — only directory components are dangerous.
+    /// The file itself being a symlink is fine, deleting a link leaves its
+    /// target intact, only directory components are dangerous.
     /// </summary>
     [Fact]
     public void HasSymlinkedDirectoryComponent_FileIsLink_False()

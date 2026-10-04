@@ -28,7 +28,7 @@ public sealed class OutboundHintStore : QueueStoreBase
     /// <summary>
     /// Records a hint for one peer. An existing row for the same peer, kind, and key is reused: it goes
     /// back to pending with the newer version and a fresh attempt count, whatever state it was in, so
-    /// an edit made after delivery is delivered again. The hint id is this server's id and the row id.
+    /// an edit made after delivery is delivered again. The hint id is this server's id and a random id.
     /// </summary>
     /// <param name="row">The row to store. Its id and hint id are filled in.</param>
     /// <param name="originServerId">This server's id.</param>
@@ -43,24 +43,29 @@ public sealed class OutboundHintStore : QueueStoreBase
                     HintId, PeerKey, Kind, Key, ItemPath, ItemId, ItemType, UserId, UserName,
                     VersionServerId, VersionTimestamp, Recorded, State, Attempts, NextAttempt, SentAt, LastError, CreatedAt
                 ) VALUES (
-                    '', @peer, @kind, @key, @itemPath, @itemId, @itemType, @userId, @userName,
+                    @hint, @peer, @kind, @key, @itemPath, @itemId, @itemType, @userId, @userName,
                     @versionServer, @versionAt, @recorded, 0, 0, @now, NULL, NULL, @now
                 )
                 ON CONFLICT(PeerKey, Kind, Key) DO UPDATE SET
+                    HintId = CASE WHEN HintId = '' THEN @hint ELSE HintId END,
+                    VersionServerId = CASE WHEN @versionAt >= VersionTimestamp AND (@recorded = 1 OR Recorded = 0) THEN @versionServer ELSE VersionServerId END,
+                    VersionTimestamp = CASE WHEN @versionAt >= VersionTimestamp AND (@recorded = 1 OR Recorded = 0) THEN @versionAt ELSE VersionTimestamp END,
                     Recorded = MAX(Recorded, @recorded),
                     ItemPath = @itemPath,
                     ItemId = @itemId,
                     ItemType = @itemType,
                     UserId = @userId,
                     UserName = @userName,
-                    VersionServerId = CASE WHEN @versionAt >= VersionTimestamp THEN @versionServer ELSE VersionServerId END,
-                    VersionTimestamp = CASE WHEN @versionAt >= VersionTimestamp THEN @versionAt ELSE VersionTimestamp END,
                     State = 0,
                     Attempts = 0,
                     NextAttempt = @now,
                     SentAt = NULL,
                     LastError = NULL
-                RETURNING Id";
+                RETURNING Id, HintId";
+            // The id is minted before the insert, so the row and its id land in one statement and a crash
+            // cannot leave a row with no id. It stays the same for every later edit of the object, and is
+            // never reused after the database is reset, since a peer may still remember a completed one.
+            Add(cmd, "@hint", originServerId + ":" + Guid.NewGuid().ToString("N", System.Globalization.CultureInfo.InvariantCulture));
             Add(cmd, "@peer", row.PeerKey);
             Add(cmd, "@kind", (int)row.Kind);
             Add(cmd, "@key", row.Key);
@@ -73,20 +78,29 @@ public sealed class OutboundHintStore : QueueStoreBase
             Add(cmd, "@versionAt", Stamp(row.VersionTimestamp));
             Add(cmd, "@recorded", row.Recorded ? 1 : 0);
             Add(cmd, "@now", Stamp(DateTime.UtcNow));
-            row.Id = Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
-            row.HintId = $"{originServerId}:{row.Id}";
+            using var reader = cmd.ExecuteReader();
+            reader.Read();
+            row.Id = reader.GetInt64(0);
+            row.HintId = reader.GetString(1);
+        });
+    }
 
-            using var stamp = conn.CreateCommand();
-            stamp.CommandText = "UPDATE OutboundHints SET HintId = @hint WHERE Id = @id";
-            Add(stamp, "@hint", row.HintId);
-            Add(stamp, "@id", row.Id);
-            stamp.ExecuteNonQuery();
-
-            // A paused peer would otherwise accumulate rows without bound. The oldest pending rows beyond
-            // the cap go; the scheduled tasks carry whatever they would have.
+    /// <summary>
+    /// Keeps at most the cap of pending rows for one peer, dropping the oldest. A paused peer would
+    /// otherwise accumulate rows without bound. The scheduled tasks carry whatever they would have. Run
+    /// once per delivery pass rather than on every insert, so a scan raising thousands of hints does not
+    /// count the table thousands of times.
+    /// </summary>
+    /// <param name="peerKey">The peer's entry key.</param>
+    /// <returns>How many rows were dropped.</returns>
+    public int TrimPending(string peerKey)
+    {
+        var trimmed = 0;
+        Write(conn =>
+        {
             using var count = conn.CreateCommand();
             count.CommandText = "SELECT COUNT(*) FROM OutboundHints WHERE PeerKey = @peer AND State = 0";
-            Add(count, "@peer", row.PeerKey);
+            Add(count, "@peer", peerKey);
             if (Convert.ToInt32(count.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) <= HintProtocol.MaxPendingPerPeer)
             {
                 return;
@@ -96,15 +110,37 @@ public sealed class OutboundHintStore : QueueStoreBase
             trim.CommandText = @"
                 DELETE FROM OutboundHints
                 WHERE PeerKey = @peer AND State = 0 AND Id NOT IN (
-                    SELECT Id FROM OutboundHints WHERE PeerKey = @peer AND State = 0 ORDER BY Id DESC LIMIT @cap)";
-            Add(trim, "@peer", row.PeerKey);
+                    SELECT Id FROM OutboundHints WHERE PeerKey = @peer AND State = 0 ORDER BY VersionTimestamp DESC, Id DESC LIMIT @cap)";
+            Add(trim, "@peer", peerKey);
             Add(trim, "@cap", HintProtocol.MaxPendingPerPeer);
-            var trimmed = trim.ExecuteNonQuery();
-            if (trimmed > 0)
-            {
-                Logger.LogWarning("Dropped {Count} of the oldest pending hint(s) for peer {Peer}: more than {Cap} were waiting", trimmed, row.PeerKey, HintProtocol.MaxPendingPerPeer);
-            }
+            trimmed = trim.ExecuteNonQuery();
         });
+        if (trimmed > 0)
+        {
+            Logger.LogWarning("Dropped {Count} of the oldest pending hint(s) for peer {Peer}: more than {Cap} were waiting", trimmed, peerKey, HintProtocol.MaxPendingPerPeer);
+        }
+
+        return trimmed;
+    }
+
+    /// <summary>
+    /// Removes rows that have sat sent or failed for longer than the cutoff. A sent row a peer never
+    /// completes, and a failed row nobody discards, would otherwise stay forever. The scheduled tasks
+    /// carry whatever they would have.
+    /// </summary>
+    /// <param name="before">The cutoff.</param>
+    /// <returns>How many rows were removed.</returns>
+    public int ExpireSettled(DateTime before)
+    {
+        var removed = 0;
+        Write(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM OutboundHints WHERE State <> 0 AND COALESCE(SentAt, CreatedAt) < @before";
+            Add(cmd, "@before", Stamp(before));
+            removed = cmd.ExecuteNonQuery();
+        });
+        return removed;
     }
 
     /// <summary>Returns the pending rows for one peer that are due, oldest first.</summary>
@@ -153,13 +189,17 @@ public sealed class OutboundHintStore : QueueStoreBase
         return ReadAll(cmd);
     });
 
-    /// <summary>Marks rows accepted by the peer.</summary>
-    /// <param name="ids">The row ids.</param>
+    // Every state change below names the version that was sent. An edit that merges into the row while
+    // the request is in flight moves the version on, and the change then leaves the row pending so the
+    // newer edit is sent too, rather than marking it sent, failed, or done on the strength of an older one.
+
+    /// <summary>Marks rows accepted by the peer, each only while it still carries the version sent.</summary>
+    /// <param name="rows">The rows as sent.</param>
     /// <param name="utcNow">Now.</param>
-    public void MarkSent(IEnumerable<long> ids, DateTime utcNow)
+    public void MarkSent(IEnumerable<OutboundHint> rows, DateTime utcNow)
     {
-        ArgumentNullException.ThrowIfNull(ids);
-        var list = ids.ToList();
+        ArgumentNullException.ThrowIfNull(rows);
+        var list = rows.ToList();
         if (list.Count == 0)
         {
             return;
@@ -168,13 +208,14 @@ public sealed class OutboundHintStore : QueueStoreBase
         Write(conn =>
         {
             using var transaction = conn.BeginTransaction();
-            foreach (var id in list)
+            foreach (var row in list)
             {
                 using var cmd = conn.CreateCommand();
                 cmd.Transaction = transaction;
-                cmd.CommandText = "UPDATE OutboundHints SET State = 1, SentAt = @now, LastError = NULL WHERE Id = @id AND State = 0";
+                cmd.CommandText = "UPDATE OutboundHints SET State = 1, SentAt = @now, LastError = NULL WHERE Id = @id AND State = 0 AND VersionTimestamp = @version";
                 Add(cmd, "@now", Stamp(utcNow));
-                Add(cmd, "@id", id);
+                Add(cmd, "@id", row.Id);
+                Add(cmd, "@version", Stamp(row.VersionTimestamp));
                 cmd.ExecuteNonQuery();
             }
 
@@ -182,40 +223,63 @@ public sealed class OutboundHintStore : QueueStoreBase
         });
     }
 
-    /// <summary>Marks a row permanently failed, with the peer's reason.</summary>
-    /// <param name="id">The row id.</param>
+    /// <summary>Marks a row the peer rejected for good, while it still carries the version sent.</summary>
+    /// <param name="row">The row as sent.</param>
     /// <param name="reason">Why.</param>
-    public void MarkFailed(long id, string reason) => Write(conn =>
+    public void MarkFailed(OutboundHint row, string reason)
     {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE OutboundHints SET State = 2, LastError = @reason WHERE Id = @id";
-        Add(cmd, "@reason", reason);
-        Add(cmd, "@id", id);
-        cmd.ExecuteNonQuery();
-    });
+        ArgumentNullException.ThrowIfNull(row);
+        Write(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE OutboundHints SET State = 2, LastError = @reason WHERE Id = @id AND VersionTimestamp = @version";
+            Add(cmd, "@reason", reason);
+            Add(cmd, "@id", row.Id);
+            Add(cmd, "@version", Stamp(row.VersionTimestamp));
+            cmd.ExecuteNonQuery();
+        });
+    }
 
-    /// <summary>Schedules rows for another attempt after a failed delivery.</summary>
-    /// <param name="ids">The row ids.</param>
+    /// <summary>Puts rows off until later, each only while it still carries the version sent.</summary>
+    /// <param name="rows">The rows as sent.</param>
     /// <param name="nextAttempt">When to try again.</param>
-    /// <param name="error">What went wrong.</param>
-    public void Defer(IEnumerable<long> ids, DateTime nextAttempt, string error)
+    /// <param name="error">Why.</param>
+    public void Defer(IEnumerable<OutboundHint> rows, DateTime nextAttempt, string error)
     {
-        ArgumentNullException.ThrowIfNull(ids);
+        ArgumentNullException.ThrowIfNull(rows);
+        var list = rows.ToList();
         Write(conn =>
         {
             using var transaction = conn.BeginTransaction();
-            foreach (var id in ids)
+            foreach (var row in list)
             {
                 using var cmd = conn.CreateCommand();
                 cmd.Transaction = transaction;
-                cmd.CommandText = "UPDATE OutboundHints SET Attempts = Attempts + 1, NextAttempt = @next, LastError = @error WHERE Id = @id AND State = 0";
+                cmd.CommandText = "UPDATE OutboundHints SET Attempts = Attempts + 1, NextAttempt = @next, LastError = @error WHERE Id = @id AND State = 0 AND VersionTimestamp = @version";
                 Add(cmd, "@next", Stamp(nextAttempt));
                 Add(cmd, "@error", error);
-                Add(cmd, "@id", id);
+                Add(cmd, "@id", row.Id);
+                Add(cmd, "@version", Stamp(row.VersionTimestamp));
                 cmd.ExecuteNonQuery();
             }
 
             transaction.Commit();
+        });
+    }
+
+    /// <summary>Removes a row the peer declined, while it still carries the version sent.</summary>
+    /// <param name="row">The row as sent.</param>
+    /// <returns>True when it was removed.</returns>
+    public bool DeleteSent(OutboundHint row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return Write(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM OutboundHints WHERE Id = @id AND VersionTimestamp = @version";
+            Add(cmd, "@id", row.Id);
+            Add(cmd, "@version", Stamp(row.VersionTimestamp));
+            return cmd.ExecuteNonQuery() > 0;
         });
     }
 
@@ -223,6 +287,7 @@ public sealed class OutboundHintStore : QueueStoreBase
     /// Removes rows the peer reports done. A row is only removed when it still carries the version the
     /// peer applied. A row that was edited again after delivery stays pending with its newer version.
     /// </summary>
+    /// <param name="peerKey">The entry key of the peer that reports them, whose rows alone may be removed.</param>
     /// <param name="completed">The peer's report.</param>
     /// <returns>How many rows were removed.</returns>
     public int Complete(string peerKey, IEnumerable<CompletedHint> completed)
@@ -289,7 +354,7 @@ public sealed class OutboundHintStore : QueueStoreBase
     /// <summary>Removes every row for a peer, used when the peer leaves the configuration.</summary>
     /// <param name="peerKey">The peer's entry key.</param>
     /// <returns>How many rows were removed.</returns>
-    public int DeleteForPeer(string peerKey) => Read(conn =>
+    public int DeleteForPeer(string peerKey) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM OutboundHints WHERE PeerKey = @peer";
@@ -300,7 +365,7 @@ public sealed class OutboundHintStore : QueueStoreBase
     /// <summary>Removes one row, used by the operator to discard a failed hint.</summary>
     /// <param name="id">The row id.</param>
     /// <returns><c>true</c> when a row was removed.</returns>
-    public bool Delete(long id) => Read(conn =>
+    public bool Delete(long id) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM OutboundHints WHERE Id = @id";

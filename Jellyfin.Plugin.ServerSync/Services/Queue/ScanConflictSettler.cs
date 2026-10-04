@@ -71,14 +71,26 @@ public sealed class ScanConflictSettler
         foreach (var source in sources)
         {
             var rows = queued.Where(r => string.Equals(r.ServerKey, source.Key, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (rows.Count == 0 || !await _resolver.PeerCarriesVersionsAsync(source, cancellationToken).ConfigureAwait(false))
+            if (rows.Count == 0)
             {
                 continue;
             }
 
-            var peerVersions = await _resolver.PeerVersionsAsync(source, kind, rows.Select(peerKeyOf).Distinct(StringComparer.Ordinal).ToList(), cancellationToken).ConfigureAwait(false);
+            // A peer that answers it keeps no versions is scanned the way it always was, the source
+            // winning. One that could not be asked, or whose versions could not be read, is not taken to
+            // have none: its rows that would overwrite an edit recorded here wait for the next scan.
+            var carries = await _resolver.PeerCarriesVersionsAsync(source, cancellationToken).ConfigureAwait(false);
+            if (carries == false)
+            {
+                continue;
+            }
+
+            var peerVersions = carries == true
+                ? await _resolver.PeerVersionsAsync(source, kind, rows.Select(peerKeyOf).Distinct(StringComparer.Ordinal).ToList(), cancellationToken).ConfigureAwait(false)
+                : null;
             if (peerVersions is null)
             {
+                Hold(rows, source, kind, localKeyOf, store, logger);
                 continue;
             }
 
@@ -96,14 +108,22 @@ public sealed class ScanConflictSettler
                 peerVersions.TryGetValue(peerKeyOf(row), out var peerVersion);
                 if (_resolver.Decide(kind, localKey, peerVersion) != VersionDecision.Keep)
                 {
+                    // The value was read together with this version, so the version is recorded once the
+                    // value applies, rather than whatever the peer holds by then.
+                    if (peerVersion is null)
+                    {
+                        _resolver.ClearPending(kind, localKey);
+                    }
+                    else
+                    {
+                        _resolver.RecordPending(new ObjectVersion { Kind = kind, Key = localKey, ServerId = peerVersion.ServerId, Timestamp = peerVersion.Timestamp });
+                    }
+
                     continue;
                 }
 
-                row.Status = SyncStatus.Synced;
-                row.StatusDate = DateTime.UtcNow;
-                row.Reason = source.Server.Pushes
-                    ? $"kept: this server's edit is newer than the one on '{source.Name}', which will pull it"
-                    : $"kept: this server's edit is newer than the one on '{source.Name}'";
+                _resolver.ClearPending(kind, localKey);
+                row.MarkKept($"kept: this server's edit is newer than the one on '{source.Name}'");
                 store(row);
                 kept++;
 
@@ -112,8 +132,10 @@ public sealed class ScanConflictSettler
                     continue;
                 }
 
+                // Only an edit made here is announced from here. A newer value this server holds from a
+                // third server is that server's to announce, and repeating it would loop between peers.
                 var version = _resolver.Recorded(kind, localKey);
-                if (version is null)
+                if (version is null || !_resolver.IsThisServer(version))
                 {
                     continue;
                 }
@@ -130,8 +152,34 @@ public sealed class ScanConflictSettler
 
             if (kept > 0)
             {
-                logger.LogInformation("Kept {Count} local {Kind} value(s) that are newer than '{Peer}' and told it to pull them", kept, kind, source.Name);
+                logger.LogInformation("Kept {Count} local {Kind} value(s) that are newer than '{Peer}'", kept, kind, source.Name);
             }
+        }
+    }
+
+    // Rows whose local value carries a recorded edit are left alone this scan, since nothing can say
+    // whether the peer's value is newer. Their stored hash is not touched, so the next scan queues them
+    // again and decides once the versions can be read.
+    private void Hold<TRecord>(IList<TRecord> rows, ScanSource source, HintKind kind, Func<TRecord, string> localKeyOf, Action<TRecord> store, ILogger logger)
+        where TRecord : SyncRecord
+    {
+        var held = 0;
+        foreach (var row in rows)
+        {
+            var localKey = localKeyOf(row);
+            if (string.IsNullOrEmpty(localKey) || _resolver.Recorded(kind, localKey) is null)
+            {
+                continue;
+            }
+
+            row.MarkKept($"held: this server's value carries an edit and the versions on '{source.Name}' could not be read, so the next scan decides");
+            store(row);
+            held++;
+        }
+
+        if (held > 0)
+        {
+            logger.LogWarning("Held {Count} {Kind} value(s) that carry an edit here, since the versions on '{Peer}' could not be read. The next scan decides", held, kind, source.Name);
         }
     }
 }

@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 public class PeopleSyncItem : SyncRecord
 {
     /// <summary>
-    /// Gets or sets the person name — natural key for cross-server matching.
+    /// Gets or sets the person name, natural key for cross-server matching.
     /// </summary>
     public string PersonName { get; set; } = string.Empty;
 
@@ -23,7 +23,7 @@ public class PeopleSyncItem : SyncRecord
 
     /// <summary>
     /// Gets or sets the local server's person item ID. Null when no local
-    /// match exists; the refresh skips writing rows in that case.
+    /// match exists. The refresh skips writing rows in that case.
     /// </summary>
     public string? LocalPersonId { get; set; }
 

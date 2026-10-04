@@ -14,7 +14,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
 /// Per-table manager for <see cref="HistorySyncItem"/>. Natural key is the
-/// composite (SourceUserId, SourceItemId) — one row per source-side
+/// composite (SourceUserId, SourceItemId), one row per source-side
 /// (user, item) pair, regardless of which local user it maps to (the local
 /// side is informational, not part of the key).
 /// </summary>
@@ -50,7 +50,7 @@ public sealed class HistorySyncTableManager
     /// <inheritdoc />
     protected override string TableName => "HistorySyncItems";
 
-    // Sentinel — unused, since UpdateStatusByKey is overridden directly to
+    // Sentinel, unused, since UpdateStatusByKey is overridden directly to
     // handle the composite (SourceUserId, SourceItemId) key.
     /// <inheritdoc />
     protected override string KeyColumn => "SourceItemId";
@@ -166,6 +166,9 @@ public sealed class HistorySyncTableManager
     /// <inheritdoc />
     public override void Upsert(HistorySyncItem record)
     {
+        // The negotiated base never moves backwards. A refresh that read the row before a hint or a
+        // negotiation recorded a newer base would otherwise write its older copy over it. The base only
+        // changes to one agreed at least as recently, and a write that carries no base keeps the one held.
         ArgumentNullException.ThrowIfNull(record);
         ExecuteWrite(conn =>
         {
@@ -213,12 +216,12 @@ public sealed class HistorySyncTableManager
                     MergedPlaybackPositionTicks = @mrgPos,
                     MergedLastPlayedDate = @mrgLast,
                     MergedIsFavorite = @mrgFav,
-                    NegotiatedIsPlayed = @negPlayed,
-                    NegotiatedPlayCount = @negCount,
-                    NegotiatedPlaybackPositionTicks = @negPos,
-                    NegotiatedLastPlayedDate = @negLast,
-                    NegotiatedIsFavorite = @negFav,
-                    NegotiatedAt = @negAt,
+                    NegotiatedIsPlayed = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negPlayed ELSE NegotiatedIsPlayed END,
+                    NegotiatedPlayCount = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negCount ELSE NegotiatedPlayCount END,
+                    NegotiatedPlaybackPositionTicks = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negPos ELSE NegotiatedPlaybackPositionTicks END,
+                    NegotiatedLastPlayedDate = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negLast ELSE NegotiatedLastPlayedDate END,
+                    NegotiatedIsFavorite = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negFav ELSE NegotiatedIsFavorite END,
+                    NegotiatedAt = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negAt ELSE NegotiatedAt END,
                     Status = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
                     StatusDate = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.StatusDate ELSE @statusDate END,
                     LastSyncTime = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.LastSyncTime ELSE @lastSync END,
@@ -294,7 +297,7 @@ public sealed class HistorySyncTableManager
 
     /// <summary>
     /// Returns all history rows for a given user mapping, regardless of
-    /// library — used by the controller to scope queries by user.
+    /// library, used by the controller to scope queries by user.
     /// </summary>
     public IList<HistorySyncItem> GetByUserMapping(string sourceUserId, string localUserId) => ExecuteRead(
         conn =>
@@ -309,7 +312,7 @@ public sealed class HistorySyncTableManager
 
     /// <summary>
     /// Searches history items with optional filters. Adds a SourceUserId
-    /// filter beyond what <see cref="Paginate"/> exposes — used by the
+    /// filter beyond what <see cref="Paginate"/> exposes, used by the
     /// admin UI which can scope the list to a single source user.
     /// </summary>
     public (IList<HistorySyncItem> Items, int TotalCount) SearchHistoryItemsPaginated(

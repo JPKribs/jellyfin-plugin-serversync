@@ -8,7 +8,7 @@ namespace Jellyfin.Plugin.ServerSync.Tests.ContentSync;
 
 /// <summary>
 /// OverlapsLibraryRoot gates both the recycling-bin retention cleanup and the
-/// temp-dir cleanup — the two tasks that permanently delete stale files by
+/// temp-dir cleanup, the two tasks that permanently delete stale files by
 /// age. A miss here means "pointed the bin at a media folder" ends in media
 /// files being deleted once they age past retention.
 /// </summary>

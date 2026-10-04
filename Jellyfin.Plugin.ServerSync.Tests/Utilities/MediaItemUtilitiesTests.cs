@@ -33,7 +33,7 @@ public class MediaItemUtilitiesTests
     /// <summary>
     /// UntypedString returns its underlying string value.
     /// True: ProviderIds like IMDB/TMDB tags are correctly unwrapped.
-    /// False: IMDB and TMDB ProviderIds would stringify to "UntypedString" — the production bug this method exists to prevent.
+    /// False: IMDB and TMDB ProviderIds would stringify to "UntypedString", the production bug this method exists to prevent.
     /// </summary>
     [Fact]
     public void UnwrapKiotaPrimitive_UntypedString_ReturnsValue()

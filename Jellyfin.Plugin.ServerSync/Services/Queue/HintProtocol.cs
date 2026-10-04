@@ -33,7 +33,7 @@ public static class HintProtocol
     public static readonly TimeSpan ClockSkewWarning = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// The most pending rows kept for one peer. A paused peer accumulates rows without bound otherwise;
+    /// The most pending rows kept for one peer. A paused peer accumulates rows without bound otherwise.
     /// beyond the cap the oldest pending rows are dropped, since the scheduled tasks recover anything a
     /// dropped hint would have carried.
     /// </summary>
@@ -61,8 +61,24 @@ public static class HintProtocol
     /// </summary>
     public static readonly TimeSpan MaxVersionLead = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// How many failed attempts a received hint gets before it is dropped. With backoff that holds at an
+    /// hour, this is about a day of trying. The scheduled tasks carry the change after that.
+    /// </summary>
+    public const int MaxInboundAttempts = 24;
+
     /// <summary>The most completed hint ids a receiver remembers for peers that read them from its status.</summary>
     public const int MaxRememberedCompletions = 10000;
+
+    /// <summary>
+    /// How long one call between peers may take, from sending to the last byte of the answer. The
+    /// answer is read after its headers arrive, so the HTTP client's own timeout does not cover it. A
+    /// peer that stops mid answer would otherwise hold a worker forever.
+    /// </summary>
+    public static readonly TimeSpan PeerCallTimeout = TimeSpan.FromMinutes(2);
+
+    /// <summary>How long opening a connection to a peer may take before the attempt is abandoned.</summary>
+    public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>The most bytes a peer's answer to a hint request may carry.</summary>
     public const long MaxPeerResponseBytes = 32L * 1024 * 1024;
@@ -82,8 +98,25 @@ public static class HintProtocol
     /// <returns>The timestamp, or now when it lay ahead.</returns>
     public static DateTime BoundVersion(DateTime timestamp, DateTime utcNow)
     {
-        var at = timestamp.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(timestamp, DateTimeKind.Utc) : timestamp.ToUniversalTime();
+        var at = AsUtc(timestamp);
         return at > utcNow ? utcNow : at;
+    }
+
+    private static DateTime AsUtc(DateTime timestamp) => Utilities.UtcTime.AsUtc(timestamp);
+
+    /// <summary>
+    /// The version a received hint carries, bounded to this server's clock, for deciding and recording.
+    /// The row itself keeps the sender's own timestamp, since the sender only completes a row on the
+    /// timestamp it sent. A bounded one would never match and the hint would be sent forever.
+    /// </summary>
+    /// <param name="hint">The inbound row.</param>
+    /// <param name="kind">The kind, which is the hint's own unless a caller keys it otherwise.</param>
+    /// <param name="localKey">This server's key for the object.</param>
+    /// <returns>The version.</returns>
+    public static ObjectVersion IncomingVersion(InboundHint hint, HintKind kind, string localKey)
+    {
+        ArgumentNullException.ThrowIfNull(hint);
+        return new ObjectVersion { Kind = kind, Key = localKey, ServerId = hint.VersionServerId, Timestamp = BoundVersion(hint.VersionTimestamp, DateTime.UtcNow) };
     }
 
     /// <summary>Whether a version lies too far ahead of this server's clock to be trusted at all.</summary>
@@ -92,8 +125,7 @@ public static class HintProtocol
     /// <returns>True when it is beyond the allowed lead.</returns>
     public static bool IsFutureVersion(DateTime timestamp, DateTime utcNow)
     {
-        var at = timestamp.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(timestamp, DateTimeKind.Utc) : timestamp.ToUniversalTime();
-        return at - utcNow > MaxVersionLead;
+        return AsUtc(timestamp) - utcNow > MaxVersionLead;
     }
 
     /// <summary>The kinds a server applies from hints, by its module switches. Users are never among them.</summary>
@@ -186,7 +218,8 @@ public static class HintProtocol
 
     /// <summary>
     /// How long to wait before the next attempt after a failure: one minute, five, fifteen, then one
-    /// hour for every attempt after that. Nothing is ever given up.
+    /// hour for every attempt after that. A received hint gives up after <see cref="MaxInboundAttempts"/>
+    /// attempts, and a sent one keeps trying until the peer answers or the row expires.
     /// </summary>
     /// <param name="attemptsSoFar">How many attempts have failed, including this one.</param>
     /// <returns>The delay.</returns>

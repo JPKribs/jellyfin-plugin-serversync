@@ -1,6 +1,5 @@
 using System;
 using System.Globalization;
-using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Utilities;
@@ -15,7 +14,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// Builder helpers for <see cref="HistorySyncItem"/> records. Translates a
 /// source <see cref="BaseItemDto"/> + (user, library) mapping context into
 /// a fully-populated record with merged target state. Used by the Refresh
-/// task; the Sync task calls the record's <see cref="HistorySyncMergeService"/>
+/// task. The Sync task calls the record's <see cref="HistorySyncMergeService"/>
 /// directly and applies the merged values via <see cref="LocalServerClient"/>.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
@@ -64,7 +63,7 @@ public class HistorySyncTableService
             return null;
         }
 
-        // Library-filter exclusion — items matching the filter are not
+        // Library-filter exclusion, items matching the filter are not
         // tracked. Returning null here causes the base's prune pass to
         // delete any pre-existing row for this key.
         if (libraryMapping.FilterMode != LibraryFilterMode.AllowAll

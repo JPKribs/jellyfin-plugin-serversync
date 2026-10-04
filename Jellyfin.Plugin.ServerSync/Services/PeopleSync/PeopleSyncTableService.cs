@@ -11,8 +11,8 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
 /// Per-modal helpers for People Sync. The build/merge logic lives in
-/// <see cref="PeopleSyncMergeService"/>; this service owns operations that
-/// need <see cref="ILibraryManager"/> or per-modal HTTP — refreshing the
+/// <see cref="PeopleSyncMergeService"/>. This service owns operations that
+/// need <see cref="ILibraryManager"/> or per-modal HTTP, refreshing the
 /// local snapshot for the UI, and enriching the source image manifest with
 /// real sizes.
 /// </summary>
@@ -36,7 +36,7 @@ public class PeopleSyncTableService
     /// <summary>
     /// Re-reads the local side of a person record so the modal shows live
     /// data rather than the snapshot captured at the last people refresh.
-    /// Call this from per-item endpoints — without it, a successful Sync
+    /// Call this from per-item endpoints, without it, a successful Sync
     /// apply updates local state in Jellyfin but the modal keeps showing
     /// the pre-sync local blob until the user re-runs the full Refresh.
     /// Source-side fields (and all hashes) are left untouched.
@@ -73,7 +73,7 @@ public class PeopleSyncTableService
     /// Height fetched from the source server. The refresh builds the
     /// manifest from <c>BaseItemDto.ImageTags</c> (tag-only) for
     /// performance, so without enrichment the People modal renders Source
-    /// as "1 (0 B)" — looks like a sync failure even when nothing's wrong.
+    /// as "1 (0 B)", looks like a sync failure even when nothing's wrong.
     /// One HTTP call per modal open.
     /// </summary>
     public async Task EnrichSourceImageSizesAsync(

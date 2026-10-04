@@ -79,7 +79,7 @@ public class InboundHint
             UserId = hint.UserId,
             UserName = hint.UserName,
             VersionServerId = hint.VersionServerId,
-            VersionTimestamp = Services.Queue.HintProtocol.BoundVersion(hint.VersionTimestamp, utcNow),
+            VersionTimestamp = hint.VersionTimestamp,
             Recorded = hint.Recorded,
             ReceivedAt = utcNow,
             NextAttempt = utcNow

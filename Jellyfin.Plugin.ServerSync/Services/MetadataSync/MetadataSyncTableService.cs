@@ -43,7 +43,7 @@ public class MetadataSyncTableService
     /// <summary>
     /// Re-reads the local side of a record so the modal shows live data
     /// rather than the snapshot captured at the last metadata refresh. Call
-    /// this from per-item endpoints — without it, a successful Sync apply
+    /// this from per-item endpoints, without it, a successful Sync apply
     /// updates local state in Jellyfin but the modal keeps showing the
     /// pre-sync local blob until the user re-runs the full Refresh task.
     /// Source-side fields (and all hashes) are left untouched, so this is
@@ -90,7 +90,7 @@ public class MetadataSyncTableService
     /// Enriches the source-side image manifest in <paramref name="item"/>
     /// with Size / Width / Height fetched from the source server. The refresh
     /// task builds the source manifest from <c>BaseItemDto.ImageTags</c> for
-    /// performance — tag-only with Size=0 — so the modal would otherwise
+    /// performance, tag-only with Size=0, so the modal would otherwise
     /// render source-side as "0 B" while local has a real KB value. This
     /// per-modal-open helper compensates with one HTTP call.
     /// </summary>
@@ -152,10 +152,10 @@ public class MetadataSyncTableService
     /// Builds a <see cref="MetadataSyncItem"/> from a source item, or null if
     /// the source path is missing, the library filter excludes it, or no
     /// local item matches by translated path. Category flags gate which
-    /// blobs are populated; <paramref name="syncGenres"/> / <paramref name="syncTags"/>
+    /// blobs are populated. <paramref name="syncGenres"/> / <paramref name="syncTags"/>
     /// gate the corresponding subfields inside the metadata blob.
     /// <paramref name="priorSourceImagesJson"/> is the previous refresh's
-    /// source image manifest for this key — image sizes carry forward from it
+    /// source image manifest for this key, image sizes carry forward from it
     /// when tags are unchanged, skipping the per-item enrichment HTTP call.
     /// </summary>
     public async Task<MetadataSyncItem?> BuildRecordAsync(
@@ -199,7 +199,7 @@ public class MetadataSyncTableService
         var localItem = _libraryManager.FindByPath(localPath, isFolder: isFolder);
         if (localItem == null)
         {
-            // No local match — skip. If a row existed previously the base
+            // No local match, skip. If a row existed previously the base
             // class will prune it.
             return null;
         }

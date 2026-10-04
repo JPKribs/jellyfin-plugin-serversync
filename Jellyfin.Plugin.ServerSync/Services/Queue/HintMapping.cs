@@ -32,7 +32,7 @@ public static class HintMapping
         ArgumentNullException.ThrowIfNull(peer);
         return string.IsNullOrEmpty(localPath)
             ? null
-            : peer.GetEnabledLibraryMappings().FirstOrDefault(m => IsUnder(localPath, m.LocalRootPath));
+            : MostSpecific(peer.GetEnabledLibraryMappings().Where(m => IsUnder(localPath, m.LocalRootPath)), m => m.LocalRootPath);
     }
 
     /// <summary>Finds the enabled user mapping for a user id on the origin, on the receiving side.</summary>
@@ -54,7 +54,7 @@ public static class HintMapping
         ArgumentNullException.ThrowIfNull(origin);
         return string.IsNullOrEmpty(originPath)
             ? null
-            : origin.GetEnabledLibraryMappings().FirstOrDefault(m => IsUnder(originPath, m.SourceRootPath));
+            : MostSpecific(origin.GetEnabledLibraryMappings().Where(m => IsUnder(originPath, m.SourceRootPath)), m => m.SourceRootPath);
     }
 
     /// <summary>Whether a path lies under a root, with either separator and in any case.</summary>
@@ -78,6 +78,11 @@ public static class HintMapping
         return normalPath.Equals(normalRoot, StringComparison.OrdinalIgnoreCase)
             || normalPath.StartsWith(normalRoot + "/", StringComparison.OrdinalIgnoreCase);
     }
+
+    // Mappings can overlap, a whole drive and a folder on it. The deepest root that holds the path is the
+    // one meant for it, whatever order the mappings were added in.
+    private static LibraryMapping? MostSpecific(System.Collections.Generic.IEnumerable<LibraryMapping> matches, Func<LibraryMapping, string?> rootOf)
+        => matches.OrderByDescending(m => Normalize(rootOf(m) ?? string.Empty).TrimEnd('/').Length).FirstOrDefault();
 
     private static string Normalize(string path) => path.Replace(Path.DirectorySeparatorChar, '/').Replace('\\', '/');
 

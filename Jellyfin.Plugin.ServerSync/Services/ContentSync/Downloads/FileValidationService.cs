@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
@@ -71,16 +70,10 @@ public static class FileValidationService
     }
 
     /// <summary>
-    /// Validates that a path is within one of the configured library paths.
-    /// Uses <see cref="Path.GetRelativePath"/> to ensure proper path boundary checking
-    /// (prevents "/media/videos_evil" from matching library root "/media/videos").
-    /// </summary>
-    /// <param name="path">Path to validate.</param>
-    /// <param name="config">Plugin configuration containing library mappings.</param>
-    /// <returns>True if path is within a configured library.</returns>
-    /// <summary>
     /// Returns the LocalRootPath of the enabled library mapping containing
     /// <paramref name="path"/>, or null when no mapping contains it.
+    /// Uses <see cref="Path.GetRelativePath"/> to ensure proper path boundary checking
+    /// (prevents "/media/videos_evil" from matching library root "/media/videos").
     /// </summary>
     public static string? GetContainingLibraryRoot(string? path, PluginConfiguration config)
     {
@@ -110,7 +103,7 @@ public static class FileValidationService
     /// linked directory points outside the library, so deleting "inside" the
     /// root would remove a physical file elsewhere. The file itself being a
     /// link is fine (deleting a link leaves the target intact). Errors count
-    /// as linked — refusal is the safe direction for a deletion guard.
+    /// as linked, refusal is the safe direction for a deletion guard.
     /// </summary>
     public static bool HasSymlinkedDirectoryComponent(string filePath, string libraryRootPath)
     {
@@ -146,34 +139,14 @@ public static class FileValidationService
         }
     }
 
+    /// <summary>
+    /// Validates that a path is within one of the configured library paths.
+    /// </summary>
+    /// <param name="path">Path to validate.</param>
+    /// <param name="config">Plugin configuration containing library mappings.</param>
+    /// <returns>True if path is within a configured library.</returns>
     public static bool IsPathWithinLibrary(string? path, PluginConfiguration config)
-    {
-        if (string.IsNullOrEmpty(path))
-        {
-            return false;
-        }
-
-        var normalizedPath = Path.GetFullPath(path);
-
-        foreach (var mapping in config.GetEnabledLibraryMappings().Where(m => !string.IsNullOrEmpty(m.LocalRootPath)))
-        {
-            var normalizedLibraryPath = Path.GetFullPath(mapping.LocalRootPath);
-
-            // Use GetRelativePath to safely check containment.
-            // If the path is within the library, the relative path will NOT start with ".."
-            // This correctly handles "/media/videos_evil" vs "/media/videos" —
-            // GetRelativePath("/media/videos", "/media/videos_evil") => "../videos_evil" (starts with "..")
-            // GetRelativePath("/media/videos", "/media/videos/movie.mkv") => "movie.mkv" (no "..")
-            var relativePath = Path.GetRelativePath(normalizedLibraryPath, normalizedPath);
-            if (!relativePath.StartsWith("..", StringComparison.Ordinal)
-                && !Path.IsPathRooted(relativePath))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+        => GetContainingLibraryRoot(path, config) != null;
 
     /// <summary>
     /// Checks if a download should be skipped because the local file already exists and is valid.

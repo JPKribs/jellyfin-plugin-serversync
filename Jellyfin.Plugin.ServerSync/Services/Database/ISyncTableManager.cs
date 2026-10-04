@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
 /// Per-table CRUD surface for sync records. One implementation per record
-/// type; <see cref="SyncTableManagerBase{TRecord, TKey}"/> provides the
+/// type. <see cref="SyncTableManagerBase{TRecord, TKey}"/> provides the
 /// universal operations and concrete subclasses fill in schema-specific
 /// methods (key lookup, upsert SQL, search columns).
 /// </summary>
@@ -76,12 +76,7 @@ public interface ISyncTableManager<TRecord, TKey>
     void DeleteByKey(TKey key);
 
     /// <summary>
-    /// Deletes all rows with the given status. Returns count deleted.
-    /// </summary>
-    int DeleteByStatus(SyncStatus status);
-
-    /// <summary>
-    /// Truncates the table — deletes every row regardless of status. Used
+    /// Truncates the table, deletes every row regardless of status. Used
     /// by the per-module "Reset Database" admin actions.
     /// </summary>
     int ResetTable();
@@ -95,11 +90,6 @@ public interface ISyncTableManager<TRecord, TKey>
     /// Updates only the status (and reason) of a row by natural key.
     /// </summary>
     void UpdateStatusByKey(TKey key, SyncStatus status, string? reason = null);
-
-    /// <summary>
-    /// Updates the status of many rows in one transaction. Returns count updated.
-    /// </summary>
-    int BulkUpdateStatus(IReadOnlyList<long> ids, SyncStatus status, string? reason = null);
 
     /// <summary>
     /// Returns one page of records with optional filtering, search, and sort.

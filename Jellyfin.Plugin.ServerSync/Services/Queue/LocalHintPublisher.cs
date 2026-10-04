@@ -108,25 +108,6 @@ public sealed class LocalHintPublisher
             () => new OutboundHint { Kind = HintKind.Content, Key = key, ItemPath = itemPath, ItemId = key, ItemType = itemType });
     }
 
-    /// <summary>Publishes a change to a user's policy, configuration, or profile image.</summary>
-    /// <param name="localUserId">The local user.</param>
-    /// <param name="userName">The local username.</param>
-    /// <param name="version">The version the change carries.</param>
-    /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
-    /// <returns>How many peers were queued a hint.</returns>
-    public int PublishUsers(Guid localUserId, string? userName, ObjectVersion version, string? excludePeerKey)
-    {
-        ArgumentNullException.ThrowIfNull(version);
-        var key = HintProtocol.UsersKey(localUserId);
-        return Publish(
-            HintKind.Users,
-            key,
-            version,
-            excludePeerKey,
-            peer => HintMapping.FindByLocalUser(peer, localUserId) is not null,
-            () => new OutboundHint { Kind = HintKind.Users, Key = key, UserId = key, UserName = userName });
-    }
-
     private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true)
     {
         version.Kind = kind;
@@ -179,60 +160,21 @@ public sealed class LocalHintPublisher
     /// <param name="itemPath">The local path of the item.</param>
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change and needs no hint, or null.</param>
+    /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
     /// <returns>How many peers were queued a hint.</returns>
     public int PublishHistory(Guid localUserId, string? userName, Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
 
         var key = HintProtocol.HistoryKey(localUserId, localItemId);
-        version.Kind = HintKind.History;
-        version.Key = key;
-        _versions.Set(version);
-
-        var queued = 0;
-        foreach (var peer in _configManager.Configuration.Servers)
-        {
-            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase) || !_worker.PeerAccepts(peer.Key, HintKind.History))
-            {
-                continue;
-            }
-
-            if (HintMapping.FindByLocalUser(peer, localUserId) is null || HintMapping.FindByLocalPath(peer, itemPath) is null)
-            {
-                continue;
-            }
-
-            var row = new OutboundHint
-            {
-                PeerKey = peer.Key,
-                Kind = HintKind.History,
-                Key = key,
-                ItemPath = itemPath,
-                ItemId = localItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
-                ItemType = itemType,
-                UserId = localUserId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
-                UserName = userName,
-                VersionServerId = version.ServerId,
-                VersionTimestamp = version.Timestamp
-            };
-
-            try
-            {
-                _outbound.Enqueue(row, _applicationHost.SystemId);
-                queued++;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Could not queue a history hint for '{Peer}'", peer.DisplayName);
-            }
-        }
-
-        if (queued > 0)
-        {
-            _logger.LogDebug("Queued a history hint for {Count} peer(s): {Key}", queued, key);
-            _worker.Wake();
-        }
-
-        return queued;
+        var itemKey = localItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        var userKey = localUserId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        return Publish(
+            HintKind.History,
+            key,
+            version,
+            excludePeerKey,
+            peer => HintMapping.FindByLocalUser(peer, localUserId) is not null && HintMapping.FindByLocalPath(peer, itemPath) is not null,
+            () => new OutboundHint { Kind = HintKind.History, Key = key, ItemPath = itemPath, ItemId = itemKey, ItemType = itemType, UserId = userKey, UserName = userName });
     }
 }

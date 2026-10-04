@@ -66,7 +66,9 @@ public sealed class HintStoreTests : IDisposable
         var rows = _outbound.GetAll();
         Assert.Single(rows);
         Assert.Equal(first.Id, second.Id);
-        Assert.Equal($"me:{first.Id}", rows[0].HintId);
+        Assert.StartsWith("me:", rows[0].HintId, StringComparison.Ordinal);
+        Assert.Equal(first.HintId, second.HintId);
+        Assert.Equal(first.HintId, rows[0].HintId);
         Assert.Equal(2, rows[0].VersionTimestamp.Minute);
     }
 
@@ -83,7 +85,7 @@ public sealed class HintStoreTests : IDisposable
         var now = DateTime.UtcNow;
 
         Assert.Single(_outbound.GetDue("peer-a", now, 10));
-        _outbound.MarkSent(new[] { row.Id }, now);
+        _outbound.MarkSent(new[] { row }, now);
         Assert.Empty(_outbound.GetDue("peer-a", now, 10));
         Assert.Equal(OutboundState.Sent, _outbound.GetAll()[0].State);
 
@@ -103,7 +105,7 @@ public sealed class HintStoreTests : IDisposable
     {
         var row = Row(minute: 1);
         _outbound.Enqueue(row, "me");
-        _outbound.MarkSent(new[] { row.Id }, DateTime.UtcNow);
+        _outbound.MarkSent(new[] { row }, DateTime.UtcNow);
 
         _outbound.Enqueue(Row(minute: 2), "me");
         var again = _outbound.GetAll()[0];
@@ -128,14 +130,14 @@ public sealed class HintStoreTests : IDisposable
         _outbound.Enqueue(row, "me");
         var later = DateTime.UtcNow.AddMinutes(5);
 
-        _outbound.Defer(new[] { row.Id }, later, "peer answered 503");
+        _outbound.Defer(new[] { row }, later, "peer answered 503");
         var deferred = _outbound.GetAll()[0];
         Assert.Equal(1, deferred.Attempts);
         Assert.Equal("peer answered 503", deferred.LastError);
         Assert.Empty(_outbound.GetDue("peer-a", DateTime.UtcNow, 10));
         Assert.Single(_outbound.GetDue("peer-a", later.AddSeconds(1), 10));
 
-        _outbound.MarkFailed(row.Id, "bad");
+        _outbound.MarkFailed(row, "bad");
         Assert.Equal(OutboundState.Failed, _outbound.GetAll()[0].State);
         Assert.Empty(_outbound.GetDue("peer-a", later.AddHours(1), 10));
     }
@@ -151,7 +153,7 @@ public sealed class HintStoreTests : IDisposable
         var row = Row();
         _outbound.Enqueue(row, "me");
         var sentAt = DateTime.UtcNow.AddHours(-2);
-        _outbound.MarkSent(new[] { row.Id }, sentAt);
+        _outbound.MarkSent(new[] { row }, sentAt);
 
         var stale = _outbound.GetSentBefore("peer-a", DateTime.UtcNow.AddHours(-1));
         Assert.Single(stale);
@@ -231,7 +233,7 @@ public sealed class HintStoreTests : IDisposable
         var now = DateTime.UtcNow;
         var row = InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.History, Key = "u|i", VersionTimestamp = now }, now);
         _inbound.Enqueue(row);
-        _inbound.Defer(row.Id, now.AddMinutes(1), "origin unreachable");
+        _inbound.Defer(row, now.AddMinutes(1), "origin unreachable");
 
         Assert.Empty(_inbound.GetDue(now, 10, content: false));
         var due = _inbound.GetDue(now.AddMinutes(2), 10, content: false);
@@ -315,39 +317,44 @@ public sealed class HintStoreTests : IDisposable
     }
 
     /// <summary>
-    /// A received hint never carries a version ahead of this server's clock.
-    /// True: the row the handlers decide on is already bounded.
-    /// False: the far future reaches the conflict decision and the version store.
+    /// A received row keeps the sender's own timestamp, and the version used for deciding is bounded.
+    /// True: the completion matches the sender's row, and a far future stamp still cannot win a decision.
+    /// False: a sender a few minutes ahead never sees its rows completed and sends them forever.
     /// </summary>
     [Fact]
-    public void Inbound_FromHint_BoundsTheVersion()
+    public void Inbound_KeepsTheSendersVersion_AndDecidesOnABoundedOne()
     {
-        var now = new DateTime(2026, 10, 4, 12, 0, 0, DateTimeKind.Utc);
         var hint = Row().ToHint("me");
-        hint.VersionTimestamp = new DateTime(2999, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        Assert.Equal(now, InboundHint.FromHint(hint, now).VersionTimestamp);
+        hint.VersionTimestamp = DateTime.UtcNow.AddMinutes(3);
+        var row = InboundHint.FromHint(hint, DateTime.UtcNow);
+        Assert.Equal(hint.VersionTimestamp, row.VersionTimestamp);
+
+        var decided = HintProtocol.IncomingVersion(row, HintKind.History, "k");
+        Assert.True(decided.Timestamp <= DateTime.UtcNow.AddSeconds(1));
     }
 
     /// <summary>
-    /// One origin cannot fill the inbound queue without bound.
-    /// True: past the cap its oldest rows go and the newest stay.
-    /// False: a hostile or runaway peer grows the database forever.
+    /// The inbound queue counts and reads rows per origin, so a full queue can answer "busy" and an origin
+    /// reads only its own rows. Nothing is trimmed: the oldest rows are the ones about to apply.
+    /// True: one origin cannot fill the queue, and another origin's rows never show in its status.
+    /// False: the cap drops the next rows to apply, or an origin sees every peer's queue.
     /// </summary>
     [Fact]
-    public void Inbound_CapsRowsPerOrigin()
+    public void Inbound_CountsAndReadsPerOrigin()
     {
         var now = DateTime.UtcNow;
-        for (var i = 0; i < HintProtocol.MaxPendingPerPeer + 5; i++)
+        for (var i = 0; i < 3; i++)
         {
-            var hint = Row(key: "k" + i).ToHint("origin");
-            hint.HintId = "origin:" + i;
+            var hint = Row(key: "k" + i).ToHint("origin-a");
             _inbound.Enqueue(InboundHint.FromHint(hint, now));
         }
 
-        var rows = _inbound.GetAll();
-        Assert.Equal(HintProtocol.MaxPendingPerPeer, rows.Count);
-        Assert.DoesNotContain(rows, r => r.Key == "k0");
-        Assert.Contains(rows, r => r.Key == "k" + (HintProtocol.MaxPendingPerPeer + 4));
+        _inbound.Enqueue(InboundHint.FromHint(Row(key: "other").ToHint("origin-b"), now));
+        Assert.Equal(3, _inbound.CountForOrigin("origin-a"));
+        Assert.Single(_inbound.GetForOrigin("origin-b"));
+        Assert.Equal(4, _inbound.GetRecent(10).Count);
+        Assert.Equal(1, _inbound.DeleteForOrigin("origin-b"));
+        Assert.Equal(3, _inbound.Count());
     }
 
     /// <summary>
@@ -373,5 +380,129 @@ public sealed class HintStoreTests : IDisposable
         public FixedProvider(SyncDatabase db) => Database = db;
 
         public SyncDatabase Database { get; }
+    }
+
+    /// <summary>
+    /// A version never moves backwards: an older one is refused, an equal time goes to the higher server
+    /// id, and a newer one is taken.
+    /// True: a retried older hint or a late copy cannot undo a newer edit.
+    /// False: the store says the old edit is current and the next conflict goes the wrong way.
+    /// </summary>
+    [Fact]
+    public void Versions_NeverMoveBackwards()
+    {
+        var at = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        Assert.True(_versions.Set(new ObjectVersion { Kind = HintKind.Metadata, Key = "k", ServerId = "b", Timestamp = at }));
+        Assert.False(_versions.Set(new ObjectVersion { Kind = HintKind.Metadata, Key = "k", ServerId = "z", Timestamp = at.AddMinutes(-1) }));
+        Assert.False(_versions.Set(new ObjectVersion { Kind = HintKind.Metadata, Key = "k", ServerId = "a", Timestamp = at }));
+        Assert.Equal("b", _versions.Get(HintKind.Metadata, "k")?.ServerId);
+        Assert.True(_versions.Set(new ObjectVersion { Kind = HintKind.Metadata, Key = "k", ServerId = "c", Timestamp = at }));
+        Assert.True(_versions.Set(new ObjectVersion { Kind = HintKind.Metadata, Key = "k", ServerId = "a", Timestamp = at.AddMinutes(1) }));
+        Assert.Equal("a", _versions.Get(HintKind.Metadata, "k")?.ServerId);
+    }
+
+    /// <summary>
+    /// A version read by the scan waits as pending and is recorded only when its value applies.
+    /// True: the version stored after an apply is the one read with the value, not whatever the peer holds by then.
+    /// False: a stale value carries the peer's newer version and the next hint for it ties.
+    /// </summary>
+    [Fact]
+    public void PendingVersions_PromoteOnApply()
+    {
+        var at = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        Assert.False(_versions.PromotePending(HintKind.Metadata, "k"));
+        _versions.SetPending(new ObjectVersion { Kind = HintKind.Metadata, Key = "k", ServerId = "peer", Timestamp = at });
+        Assert.Null(_versions.Get(HintKind.Metadata, "k"));
+        Assert.True(_versions.PromotePending(HintKind.Metadata, "k"));
+        Assert.Equal(at, _versions.Get(HintKind.Metadata, "k")?.Timestamp);
+        Assert.False(_versions.PromotePending(HintKind.Metadata, "k"));
+
+        _versions.SetPending(new ObjectVersion { Kind = HintKind.People, Key = "p", ServerId = "peer", Timestamp = at });
+        _versions.ClearPending(HintKind.People, "p");
+        Assert.False(_versions.PromotePending(HintKind.People, "p"));
+        Assert.Equal(0, _versions.PrunePending(DateTime.UtcNow.AddDays(-1)));
+    }
+
+    /// <summary>
+    /// A state change names the version it was sent with, so an edit merged in while a request was in
+    /// flight keeps the row pending.
+    /// True: the newer edit is sent too.
+    /// False: it is marked sent, failed, or deleted on the strength of the older one, and waits for a scan.
+    /// </summary>
+    [Fact]
+    public void StateChanges_IgnoreARowThatMovedOn()
+    {
+        var sent = Row(minute: 1);
+        _outbound.Enqueue(sent, "me");
+        _outbound.Enqueue(Row(minute: 2), "me");
+
+        _outbound.MarkSent(new[] { sent }, DateTime.UtcNow);
+        Assert.Equal(OutboundState.Pending, _outbound.GetAll()[0].State);
+
+        _outbound.MarkFailed(sent, "bad");
+        Assert.Equal(OutboundState.Pending, _outbound.GetAll()[0].State);
+
+        _outbound.Defer(new[] { sent }, DateTime.UtcNow.AddHours(1), "later");
+        Assert.Equal(0, _outbound.GetAll()[0].Attempts);
+
+        Assert.False(_outbound.DeleteSent(sent));
+        Assert.Single(_outbound.GetAll());
+    }
+
+    /// <summary>
+    /// Provider work merged into a pending hand made edit does not move its version.
+    /// True: the hint still carries the time of the hand made edit.
+    /// False: the provider's later time poses as the edit and beats real edits made in between elsewhere.
+    /// </summary>
+    [Fact]
+    public void Enqueue_ProviderWorkDoesNotAdvanceAHandMadeEdit()
+    {
+        var edit = Row(minute: 1);
+        edit.Recorded = true;
+        _outbound.Enqueue(edit, "me");
+        var provider = Row(minute: 5);
+        provider.Recorded = false;
+        _outbound.Enqueue(provider, "me");
+
+        var row = _outbound.GetAll()[0];
+        Assert.True(row.Recorded);
+        Assert.Equal(1, row.VersionTimestamp.Minute);
+    }
+
+    /// <summary>
+    /// The pending cap trims once per pass, keeping the newest, and expiry removes long settled rows.
+    /// True: a paused peer's queue stays bounded and old sent or failed rows go.
+    /// False: the queue grows without bound.
+    /// </summary>
+    [Fact]
+    public void TrimAndExpire_BoundTheQueue()
+    {
+        Assert.Equal(0, _outbound.TrimPending("peer-a"));
+        var row = Row();
+        _outbound.Enqueue(row, "me");
+        _outbound.MarkSent(new[] { row }, DateTime.UtcNow.AddDays(-10));
+        Assert.Equal(1, _outbound.ExpireSettled(DateTime.UtcNow.AddDays(-7)));
+        Assert.Empty(_outbound.GetAll());
+    }
+
+    /// <summary>
+    /// A deferral or postponement names the version it tried, so a newer hint that arrived meanwhile keeps
+    /// its fresh, due state.
+    /// True: the newer edit applies at once.
+    /// False: it inherits the older attempt's backoff and waits up to an hour.
+    /// </summary>
+    [Fact]
+    public void Inbound_DeferIgnoresARowThatMovedOn()
+    {
+        var now = DateTime.UtcNow;
+        var tried = InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.History, Key = "u|i", VersionTimestamp = now.AddMinutes(-2) }, now);
+        _inbound.Enqueue(tried);
+        _inbound.Enqueue(InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.History, Key = "u|i", VersionTimestamp = now.AddMinutes(-1) }, now));
+
+        _inbound.Defer(tried, now.AddHours(1), "failed");
+        _inbound.Postpone(tried, now.AddHours(1), "busy");
+        var row = _inbound.GetAll()[0];
+        Assert.Equal(0, row.Attempts);
+        Assert.Single(_inbound.GetDue(now.AddSeconds(1), 10, content: false));
     }
 }

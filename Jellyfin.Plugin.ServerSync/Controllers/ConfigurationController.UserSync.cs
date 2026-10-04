@@ -61,31 +61,13 @@ public partial class ConfigurationController
             statusFilter = parsed;
         }
 
-        var page = (skip / Math.Max(1, take)) + 1;
-        var result = manager.Paginate(new PaginationRequest
-        {
-            Page = page,
-            PageSize = take,
-            SearchTerm = search,
-            StatusFilter = statusFilter
-        });
-
-        // Manager.Paginate doesn't filter by sourceUserId/propertyCategory; apply
-        // those in-memory. The page may shrink as a result — acceptable since
-        // these are rarely used together with search/status filters in the UI.
-        var filtered = result.Items.AsEnumerable();
-        if (!string.IsNullOrEmpty(sourceUserId))
-        {
-            filtered = filtered.Where(i => string.Equals(i.SourceUserId, sourceUserId, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrEmpty(propertyCategory))
-        {
-            filtered = filtered.Where(i => string.Equals(i.PropertyCategory, propertyCategory, StringComparison.OrdinalIgnoreCase));
-        }
+        // Page by offset, with the user and category filters in the query. Filtering a page after the
+        // fact shrank it and left the total counting rows the filters excluded, and converting skip to
+        // a page number landed on the wrong rows whenever skip was not a multiple of take.
+        var result = manager.SearchPaginated(search, statusFilter, sourceUserId, propertyCategory, skip, take);
 
         return Ok(new PagedResult<UserSyncItemDto>(
-            filtered.Select(i => i.ToDto(BrowserUrlFor(i.ServerKey))).ToList(),
+            result.Items.Select(i => i.ToDto(BrowserUrlFor(i.ServerKey))).ToList(),
             result.TotalCount,
             skip,
             take));
@@ -133,7 +115,8 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Moves user sync items to Queued status.
+    /// Moves user sync items to Queued status. With no ids and a Status, queues every row in that
+    /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
     [HttpPost("UserItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -143,6 +126,11 @@ public partial class ConfigurationController
         [FromServices] UserSyncTableManager manager)
     {
         ArgumentNullException.ThrowIfNull(manager);
+        if (request != null && (request.Ids == null || request.Ids.Count == 0) && !string.IsNullOrEmpty(request.Status))
+        {
+            return QueueAllWithStatus(manager, request.Status, "QueueUserSyncItems");
+        }
+
         if (request?.Ids == null || request.Ids.Count == 0)
         {
             return BadRequest("No items specified");
@@ -156,7 +144,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue user sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk queue failed; see server log" });
+            return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
         }
     }
 
@@ -184,7 +172,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore user sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk ignore failed; see server log" });
+            return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
         }
     }
 
@@ -248,14 +236,7 @@ public partial class ConfigurationController
             statusFilter = parsed;
         }
 
-        var page = (skip / Math.Max(1, take)) + 1;
-        var result = manager.PaginateUserMappings(new PaginationRequest
-        {
-            Page = page,
-            PageSize = take,
-            SearchTerm = search,
-            StatusFilter = statusFilter
-        });
+        var result = manager.SearchUserMappingsPaginated(search, statusFilter, skip, take);
 
         var config = _configManager.Configuration;
         var dtos = result.Items.Select(g => MapToUserSyncUserDto(
@@ -328,7 +309,7 @@ public partial class ConfigurationController
         return Ok(new { Updated = successCount });
     }
 
-    // ===== DTO mapping helpers (unchanged from prior version) =====
+    // ===== DTO mapping helpers =====
 
     private static UserSyncUserDto MapToUserSyncUserDto(
         string sourceUserId,

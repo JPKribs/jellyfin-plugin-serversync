@@ -40,7 +40,7 @@ public class HistorySyncItem : SyncRecord
     // ===== Item Identification =====
 
     /// <summary>
-    /// Gets or sets the source server item ID — second component of the
+    /// Gets or sets the source server item ID, second component of the
     /// natural key.
     /// </summary>
     public string SourceItemId { get; set; } = string.Empty;

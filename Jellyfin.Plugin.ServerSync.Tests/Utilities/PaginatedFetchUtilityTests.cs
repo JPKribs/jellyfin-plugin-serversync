@@ -32,7 +32,7 @@ public class PaginatedFetchUtilityTests
     };
 
     /// <summary>
-    /// Serves pre-baked pages by startIndex; anything past the script is an
+    /// Serves pre-baked pages by startIndex. Anything past the script is an
     /// empty page (the utility's normal termination signal).
     /// </summary>
     private static PaginatedFetchUtility.FetchPageAsync Pager(Dictionary<int, BaseItemDtoQueryResult?> pages)
@@ -58,7 +58,7 @@ public class PaginatedFetchUtilityTests
         => Enumerable.Range(0, count).Select(i => Item(Guid.NewGuid(), $"/media/{i}.mkv")).ToArray();
 
     /// <summary>
-    /// The happy path must complete fully — if a clean single page reported
+    /// The happy path must complete fully, if a clean single page reported
     /// incomplete, pruning would be permanently blocked for healthy libraries.
     /// </summary>
     [Fact]
@@ -73,8 +73,8 @@ public class PaginatedFetchUtilityTests
 
     /// <summary>
     /// A genuinely empty library is a complete answer (legitimate mass
-    /// removal reconciles); the per-mapping zero-seen guard upstream decides
-    /// whether to trust it — not this utility.
+    /// removal reconciles). The per-mapping zero-seen guard upstream decides
+    /// whether to trust it, not this utility.
     /// </summary>
     [Fact]
     public async Task EmptyFirstPage_CompletesFully()
@@ -89,7 +89,7 @@ public class PaginatedFetchUtilityTests
     }
 
     /// <summary>
-    /// The same item ID on two pages means page boundaries shifted mid-scan —
+    /// The same item ID on two pages means page boundaries shifted mid-scan , 
     /// a duplicate on one side implies a silent skip on the other, and the
     /// skipped item would be pruned as "removed from source". The count check
     /// alone can't see this (the duplicate keeps totals matching), which is
@@ -197,7 +197,7 @@ public class PaginatedFetchUtilityTests
     }
 
     /// <summary>
-    /// Cancellation mid-run must not report complete discovery — the
+    /// Cancellation mid-run must not report complete discovery, the
     /// remaining items were never enumerated and are not "removed".
     /// </summary>
     [Fact]

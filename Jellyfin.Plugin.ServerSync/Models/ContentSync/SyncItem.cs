@@ -23,7 +23,7 @@ public class SyncItem : SyncRecord
     public string LocalLibraryId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the source server's item ID — natural key.
+    /// Gets or sets the source server's item ID, natural key.
     /// </summary>
     public string SourceItemId { get; set; } = string.Empty;
 
@@ -33,7 +33,7 @@ public class SyncItem : SyncRecord
     public string SourcePath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the source file size in bytes — primary change-detection signal.
+    /// Gets or sets the source file size in bytes, primary change-detection signal.
     /// </summary>
     public long SourceSize { get; set; }
 
@@ -71,7 +71,7 @@ public class SyncItem : SyncRecord
         {
             // Content sync's "needs work" signal is the PendingType, not a
             // hash compare. Refresh sets PendingType when the file needs to
-            // be downloaded/replaced/deleted; HasChanges is true while it's
+            // be downloaded/replaced/deleted. HasChanges is true while it's
             // pending or queued, false once Synced.
             return Status == SyncStatus.Queued
                 || Status == SyncStatus.Deleting
@@ -82,6 +82,6 @@ public class SyncItem : SyncRecord
     /// <inheritdoc />
     public override void MarkSynced()
     {
-        // No SyncableValue<T> fields on Content — nothing to mark.
+        // No SyncableValue<T> fields on Content, nothing to mark.
     }
 }

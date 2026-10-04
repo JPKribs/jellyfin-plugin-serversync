@@ -18,6 +18,16 @@ namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 public sealed class PeerPairingStore : QueueStoreBase
 {
     private readonly SecretProtector _secrets;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _rechecks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> _pairing = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The lock that keeps pairings with one entry from running at once. Two at once would each mint a
+    /// secret, and the two sides could keep different ones.
+    /// </summary>
+    /// <param name="peerKey">The server entry's key.</param>
+    /// <returns>The entry's lock.</returns>
+    public System.Threading.SemaphoreSlim PairingLock(string peerKey) => _pairing.GetOrAdd(peerKey, _ => new System.Threading.SemaphoreSlim(1, 1));
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerPairingStore"/> class.
@@ -97,10 +107,36 @@ public sealed class PeerPairingStore : QueueStoreBase
         });
     }
 
-    /// <summary>Whether the peer refused this server's key the last time it tried to issue a secret.</summary>
+    /// <summary>
+    /// Claims the right to check a refused pairing again, at most once per interval per peer, so a stream
+    /// of requests from that peer starts one check rather than one each.
+    /// </summary>
     /// <param name="peerKey">The server entry's key.</param>
-    /// <returns>True when it did.</returns>
-    public bool IsInboundRefused(string peerKey) => InboundRefusedAt(peerKey) is not null;
+    /// <param name="interval">The least time between checks.</param>
+    /// <returns>True when the caller should check now.</returns>
+    public bool TryClaimRecheck(string peerKey, TimeSpan interval)
+    {
+        var now = DateTime.UtcNow;
+        var claimed = false;
+        _rechecks.AddOrUpdate(
+            peerKey,
+            _ =>
+            {
+                claimed = true;
+                return now;
+            },
+            (_, last) =>
+            {
+                if (now - last < interval)
+                {
+                    return last;
+                }
+
+                claimed = true;
+                return now;
+            });
+        return claimed;
+    }
 
     /// <summary>When the peer last refused this server's key, or null when it never did or has since paired.</summary>
     /// <param name="peerKey">The server entry's key.</param>
@@ -126,7 +162,13 @@ public sealed class PeerPairingStore : QueueStoreBase
         cmd.ExecuteNonQuery();
     });
 
-    private string? Unprotect(string? stored) => string.IsNullOrEmpty(stored) ? null : _secrets.Unprotect(stored);
+    // A secret that can no longer be decrypted, after the protection key changed, reads as no secret, so
+    // the next pairing issues a fresh one rather than sending an empty one forever.
+    private string? Unprotect(string? stored)
+    {
+        var plain = string.IsNullOrEmpty(stored) ? null : _secrets.Unprotect(stored);
+        return string.IsNullOrEmpty(plain) ? null : plain;
+    }
 
     private string? ReadColumn(string peerKey, string column) => Read(conn =>
     {

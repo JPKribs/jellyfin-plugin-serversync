@@ -89,7 +89,7 @@ public class ImageManifestComparatorTests
     }
 
     // The tag-only-source case is covered below in the degraded-manifest
-    // section; it is now indeterminate rather than a difference. See
+    // section. It is now indeterminate rather than a difference. See
     // Equals_TagOnlySourceVsSizedLocal_IsNotADifference for why.
 
     /// <summary>
@@ -149,7 +149,7 @@ public class ImageManifestComparatorTests
     }
 
     /// <summary>
-    /// Local has extra types beyond source — comparator is one-directional and tolerates this.
+    /// Local has extra types beyond source, comparator is one-directional and tolerates this.
     /// True: source-vs-local direction only, local can retain types source doesn't have.
     /// False: local extras would force a wipe, defeating the "sync from source" intent.
     /// </summary>
@@ -233,7 +233,7 @@ public class ImageManifestComparatorTests
 
     // ===================================================================
     // Degraded (tag-only) source manifests. A source Size of 0 means
-    // enrichment could not measure the image — /Items/{id}/Images failed,
+    // enrichment could not measure the image, /Items/{id}/Images failed,
     // which a non-admin token reproduces with a 403.
     // ===================================================================
 
@@ -243,7 +243,7 @@ public class ImageManifestComparatorTests
     /// True: enrichment failure degrades to count-only comparison and the row settles.
     /// False: the row queues, sync re-downloads every image, verify hits the
     /// same unmeasurable source and errors, and the next refresh queues it
-    /// again — an unbounded re-download loop. The removed SourceHash
+    /// again, an unbounded re-download loop. The removed SourceHash
     /// short-circuit used to be what stopped this repeating.
     /// </summary>
     [Fact]

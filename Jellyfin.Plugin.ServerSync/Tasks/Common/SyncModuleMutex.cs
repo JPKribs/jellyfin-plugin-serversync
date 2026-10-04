@@ -7,12 +7,19 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 /// <summary>
 /// Per-module async mutex shared between a module's Refresh task and its
 /// Sync task. Without this, both tasks can run concurrently and stomp on each
-/// other's row writes — a Refresh upsert can revert a row from Synced back
+/// other's row writes, a Refresh upsert can revert a row from Synced back
 /// to Queued by overwriting status with stale in-memory state.
 /// </summary>
 internal static class SyncModuleMutex
 {
     private static readonly Dictionary<string, SemaphoreSlim> _semaphores = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// How long a single row refresh or apply, run for a hint, waits for the module before giving up. A
+    /// scheduled run holds the module for its whole length, which can be an hour. The hint is put off and
+    /// tried again rather than holding its lane for that long.
+    /// </summary>
+    public static readonly TimeSpan SingleRowWait = TimeSpan.FromSeconds(5);
     private static readonly object _lock = new();
 
     /// <summary>

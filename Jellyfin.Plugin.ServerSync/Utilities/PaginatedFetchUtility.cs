@@ -11,7 +11,7 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 /// <summary>
 /// Outcome of a paginated fetch loop.
 /// <see cref="CompletedFully"/> is false when the loop broke early on
-/// errors/null results/cancellation — callers that drive pruning from
+/// errors/null results/cancellation, callers that drive pruning from
 /// "items I didn't see this run" must treat partial discovery as
 /// unsafe-to-prune, since the unseen items may just be ones we never
 /// got to enumerate.
@@ -168,7 +168,7 @@ public static class PaginatedFetchUtility
                 {
                     // A repeated ID means page boundaries shifted mid-scan
                     // (tie reorder or source mutation). A duplicate on one
-                    // side implies a silent skip on the other — and the
+                    // side implies a silent skip on the other, and the
                     // count-based check below can't see a swap, because the
                     // duplicate keeps the totals matching.
                     duplicateIds++;
@@ -179,7 +179,7 @@ public static class PaginatedFetchUtility
                 {
                     // Distinct from a plain skip: a Path-less item is invisible
                     // to the caller's seen set, and Jellyfin omits Path on
-                    // every item when the API key lacks admin rights — the
+                    // every item when the API key lacks admin rights, the
                     // per-mapping zero-seen guard catches the all-pathless
                     // case, this counter surfaces partial ones.
                     pathlessSkipped++;
@@ -216,7 +216,7 @@ public static class PaginatedFetchUtility
                 }
             }
 
-            // Cancellation can break the item loop mid-page; the remaining
+            // Cancellation can break the item loop mid-page. The remaining
             // items on this page were never processed, so this run must not
             // report complete discovery.
             if (cancellationToken.IsCancellationRequested)
@@ -235,16 +235,16 @@ public static class PaginatedFetchUtility
 
         // Offset pagination races with catalog mutations: an item deleted on
         // the source mid-enumeration shifts everything after it down one slot,
-        // silently skipping an unrelated item at the next page boundary — and
+        // silently skipping an unrelated item at the next page boundary, and
         // a skipped item is indistinguishable from a removed one to the
         // caller's prune. The first page's TotalRecordCount tells us how many
-        // items existed at scan start; fetching a different number means the
+        // items existed at scan start. Fetching a different number means the
         // catalog changed underneath us, so report incomplete discovery and
         // let the next run get a consistent snapshot.
         if (completedFully && expectedTotal.HasValue && rawFetched != expectedTotal.Value)
         {
             logger.LogWarning(
-                "Library {LibraryName} changed during enumeration (expected {Expected} items, fetched {Fetched}) — reporting incomplete discovery so shifted items are not treated as removed",
+                "Library {LibraryName} changed during enumeration (expected {Expected} items, fetched {Fetched}), reporting incomplete discovery so shifted items are not treated as removed",
                 libraryName, expectedTotal.Value, rawFetched);
             completedFully = false;
         }
@@ -252,7 +252,7 @@ public static class PaginatedFetchUtility
         if (duplicateIds > 0)
         {
             logger.LogWarning(
-                "{Count} duplicate item ID(s) across pages in library {LibraryName} — page boundaries shifted during enumeration; reporting incomplete discovery so skipped items are not treated as removed",
+                "{Count} duplicate item ID(s) across pages in library {LibraryName}, page boundaries shifted during enumeration. Reporting incomplete discovery so skipped items are not treated as removed",
                 duplicateIds, libraryName);
             completedFully = false;
         }
@@ -260,14 +260,14 @@ public static class PaginatedFetchUtility
         if (pathlessSkipped > 0)
         {
             logger.LogWarning(
-                "{Count} item(s) in library {LibraryName} came back without a file path and were skipped — if this is unexpected, check that the API key has admin rights on the source",
+                "{Count} item(s) in library {LibraryName} came back without a file path and were skipped, if this is unexpected, check that the API key has admin rights on the source",
                 pathlessSkipped, libraryName);
         }
 
         if (processFailures > 0)
         {
             logger.LogWarning(
-                "{Count} item(s) in library {LibraryName} failed to process; reporting incomplete discovery so they are not treated as removed",
+                "{Count} item(s) in library {LibraryName} failed to process. Reporting incomplete discovery so they are not treated as removed",
                 processFailures, libraryName);
             completedFully = false;
         }

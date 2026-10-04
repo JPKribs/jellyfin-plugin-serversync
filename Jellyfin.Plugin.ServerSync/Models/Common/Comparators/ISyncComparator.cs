@@ -23,7 +23,7 @@ public interface ISyncComparator<T>
     /// Returns a stable content fingerprint of <paramref name="value"/>.
     /// Returns null when the value is empty or hashing is not meaningful for
     /// this comparator. Used as a fast-path equality test against a previously
-    /// stored hash; never used as a cross-server comparator.
+    /// stored hash. Never used as a cross-server comparator.
     /// </summary>
     /// <param name="value">Value to fingerprint.</param>
     /// <returns>Lowercase hex hash, or null for empty/non-hashable inputs.</returns>

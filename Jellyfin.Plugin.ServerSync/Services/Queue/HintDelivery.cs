@@ -9,7 +9,7 @@ public enum DeliveryOutcome
     /// <summary>400. The peer could not read the hints. Rows fail for good and are shown to the operator.</summary>
     Malformed,
 
-    /// <summary>401, 403, 404, or 409. The peer cannot take hints from this server until something is fixed. The peer is paused with the reason.</summary>
+    /// <summary>401, 403, 404, 409, or 428. The peer cannot take hints from this server until something is fixed. The peer is paused with the reason.</summary>
     PausePeer,
 
     /// <summary>Anything else, including no answer. Rows are retried with backoff, forever.</summary>

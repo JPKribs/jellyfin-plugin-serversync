@@ -87,7 +87,7 @@ public class MetadataSyncItemTests
 
     /// <summary>
     /// HasPeopleChanges is false when LocalItemId is missing.
-    /// True: people apply requires a local item; missing LocalItemId correctly disables it.
+    /// True: people apply requires a local item. Missing LocalItemId correctly disables it.
     /// False: apply would crash trying to write people on a missing local item.
     /// </summary>
     [Fact]
@@ -131,7 +131,7 @@ public class MetadataSyncItemTests
 
     /// <summary>
     /// HasStudiosChanges is false when LocalItemId is missing.
-    /// True: studios apply requires a local item; missing disables it.
+    /// True: studios apply requires a local item. Missing disables it.
     /// False: apply would crash trying to write studios on a missing local item.
     /// </summary>
     [Fact]
@@ -252,7 +252,7 @@ public class MetadataSyncItemTests
     }
 
     /// <summary>
-    /// List views (includeBlobs false) skip the detail computation — it
+    /// List views (includeBlobs false) skip the detail computation, it
     /// deserializes both blobs per row and the table only shows badges.
     /// </summary>
     [Fact]

@@ -18,7 +18,7 @@ public class CompanionFileInfo
     public int StreamIndex { get; set; }
 
     /// <summary>
-    /// Gets or sets the media source the stream belongs to — required by the
+    /// Gets or sets the media source the stream belongs to, required by the
     /// <c>/Videos/{item}/{mediaSource}/Subtitles/{index}/Stream.{format}</c>
     /// download route.
     /// </summary>

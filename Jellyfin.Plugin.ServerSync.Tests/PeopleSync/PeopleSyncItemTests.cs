@@ -43,7 +43,7 @@ public class PeopleSyncItemTests
 
     /// <summary>
     /// HasImagesChanges is false when LocalPersonId is missing.
-    /// True: image apply requires a local person; missing disables it.
+    /// True: image apply requires a local person. Missing disables it.
     /// False: apply would crash trying to write a profile image to a missing local person.
     /// </summary>
     [Fact]

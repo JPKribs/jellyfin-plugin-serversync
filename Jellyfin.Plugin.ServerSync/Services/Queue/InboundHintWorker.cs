@@ -16,8 +16,8 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// Applies inbound hints. Runs for the life of the server, in two lanes: content, whose applies
 /// download files and can take a long time, and everything else, so a slow download never delays a
 /// history or metadata change. Each due row is handed to the handler for its kind, then removed and
-/// reported complete to its origin. A failure keeps the row and tries again
-/// with backoff, forever, and the error is kept for the dashboard. A row for an origin that is not a
+/// reported complete to its origin. A failure keeps the row and tries again with backoff, keeping the
+/// error for the dashboard, until about a day of attempts has passed. A row for an origin that is not a
 /// scan source here cannot be applied, since there is nothing to pull from, and waits with that reason.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
@@ -32,12 +32,13 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     private readonly HistoryHintHandler _history;
     private readonly ItemHintHandler _items;
     private readonly ContentHintHandler _content;
-    private readonly UserHintHandler _users;
     private readonly HintActivityLog _activity;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<InboundHintWorker> _logger;
     private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly SemaphoreSlim _wakeContent = new(0, 1);
+    private readonly SemaphoreSlim _quickPass = new(1, 1);
+    private readonly SemaphoreSlim _contentPass = new(1, 1);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, DateTime Version)> _completed = new(StringComparer.Ordinal);
     private CancellationTokenSource? _stopping;
     private Task? _loop;
@@ -52,7 +53,6 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     /// <param name="history">The history handler.</param>
     /// <param name="items">The metadata and people handler.</param>
     /// <param name="content">The content handler.</param>
-    /// <param name="users">The users handler.</param>
     /// <param name="activity">Writes each conclusion to Jellyfin's activity log.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="logger">Logger.</param>
@@ -63,7 +63,6 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         HistoryHintHandler history,
         ItemHintHandler items,
         ContentHintHandler content,
-        UserHintHandler users,
         HintActivityLog activity,
         IServerApplicationHost applicationHost,
         ILogger<InboundHintWorker> logger)
@@ -75,7 +74,6 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         _history = history;
         _items = items;
         _content = content;
-        _users = users;
         _applicationHost = applicationHost;
         _logger = logger;
     }
@@ -102,12 +100,15 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
-    // Finished ids are kept for a day and never more than the cap; past it the oldest go first, and an
+    // Finished ids are kept for a day and never more than the cap. Past it the oldest go first, and an
     // origin that then asks sends the hint again, which applies as unchanged.
     private void Remember(string hintId, DateTime version)
     {
         _completed[hintId] = (DateTime.UtcNow, version);
-        if (_completed.Count <= HintProtocol.MaxRememberedCompletions)
+
+        // Trimmed back to the cap only once it runs a tenth over, so the sort runs once per thousand
+        // completions rather than on every one.
+        if (_completed.Count <= HintProtocol.MaxRememberedCompletions + (HintProtocol.MaxRememberedCompletions / 10))
         {
             return;
         }
@@ -173,12 +174,43 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>How many rows were finished.</returns>
     public async Task<int> ApplyAsync(CancellationToken cancellationToken)
-        => await ApplyLaneAsync(content: false, cancellationToken).ConfigureAwait(false)
-           + await ApplyLaneAsync(content: true, cancellationToken).ConfigureAwait(false);
+        => (await ApplyLaneAsync(content: false, cancellationToken).ConfigureAwait(false)).Finished
+           + (await ApplyLaneAsync(content: true, cancellationToken).ConfigureAwait(false)).Finished;
 
-    private async Task<int> ApplyLaneAsync(bool content, CancellationToken cancellationToken)
+    /// <summary>
+    /// What the dashboard's Run does: applies what is due in the lane of quick changes now, and wakes the
+    /// lane that downloads files, so a download never runs inside the request that asked for it.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>How many rows of the quick lane finished.</returns>
+    public async Task<int> ApplyNowAsync(CancellationToken cancellationToken)
+    {
+        var finished = (await ApplyLaneAsync(content: false, cancellationToken).ConfigureAwait(false)).Finished;
+        Wake();
+        return finished;
+    }
+
+    // Returns how many rows finished and whether the lane read a full batch, so its loop goes again at
+    // once rather than after the idle wait.
+    private async Task<(int Finished, bool Full)> ApplyLaneAsync(bool content, CancellationToken cancellationToken)
+    {
+        // One pass per lane at a time, whether the lane's loop or the dashboard starts it.
+        var laneLock = content ? _contentPass : _quickPass;
+        await laneLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await ApplyLanePassAsync(content, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            laneLock.Release();
+        }
+    }
+
+    private async Task<(int Finished, bool Full)> ApplyLanePassAsync(bool content, CancellationToken cancellationToken)
     {
         var finished = 0;
+        var full = false;
         var config = _configManager.Configuration;
 
         // One client per origin for the pass, and the completions for each origin gathered into one
@@ -188,6 +220,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         try
         {
             var due = _inbound.GetDue(DateTime.UtcNow, BatchSize, content);
+            full = due.Count >= BatchSize;
             var prefetched = content ? new Dictionary<string, Jellyfin.Sdk.Generated.Models.BaseItemDto>(StringComparer.Ordinal) : await PrefetchItemsAsync(due, config, clients, cancellationToken).ConfigureAwait(false);
             foreach (var row in due)
             {
@@ -196,59 +229,21 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 var origin = config.Servers.FirstOrDefault(s => s.Pulls && string.Equals(s.ServerId, row.OriginServerId, StringComparison.OrdinalIgnoreCase));
                 if (origin is null)
                 {
-                    _inbound.Defer(row.Id, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), $"server {row.OriginServerId} is not configured as a Pull or Sync server here, so its change cannot be pulled");
+                    _inbound.Defer(row, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), $"server {row.OriginServerId} is not configured as a Pull or Sync server here, so its change cannot be pulled");
                     continue;
                 }
 
-                if (!clients.TryGetValue(origin.Key, out var client))
+                if (!TryGetClient(origin, clients, out var client, out var clientError))
                 {
-                    try
-                    {
-                        client = _clientFactory.Create(origin);
-                    }
-                    catch (ArgumentException ex)
-                    {
-                        _inbound.Defer(row.Id, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), $"server '{origin.DisplayName}' has an invalid URL: {ex.Message}");
-                        continue;
-                    }
-
-                    clients[origin.Key] = client;
-                }
-
-                HintApplyResult result;
-                try
-                {
-                    prefetched.TryGetValue(PrefetchKey(row.OriginServerId, row.Key), out var item);
-                    result = await ApplyOneAsync(row, origin, client, item, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    result = HintApplyResult.RetryLater(ex.Message);
-                }
-
-                if (result.Outcome == HintApplyOutcome.Retry)
-                {
-                    _inbound.Defer(row.Id, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), result.Reason ?? "failed");
-                    _logger.LogWarning("Hint {Hint} from '{Origin}' will be retried: {Reason}", row.HintId, origin.DisplayName, result.Reason);
-                    await _activity.RetryingAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
+                    _inbound.Defer(row, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), $"server '{origin.DisplayName}' has an invalid URL: {clientError}");
                     continue;
                 }
 
-                if (result.Outcome == HintApplyOutcome.Dropped)
+                prefetched.TryGetValue(PrefetchKey(row.OriginServerId, row.Key), out var item);
+                var result = await TryApplyAsync(row, origin, client, item, cancellationToken).ConfigureAwait(false);
+                if (result is null || !await ConcludeAsync(row, origin, result.Value).ConfigureAwait(false))
                 {
-                    _logger.LogInformation("Hint {Hint} from '{Origin}' dropped: {Reason}", row.HintId, origin.DisplayName, result.Reason);
-                    await _activity.DroppedAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
-                }
-                else if (result.Outcome == HintApplyOutcome.Applied && row.Recorded)
-                {
-                    // A hand made edit is worth a line on the Activity page. Provider work is not: a
-                    // scan on the peer would otherwise write one entry here per item it refreshed, and
-                    // the server log already says what was applied.
-                    await _activity.AppliedAsync(row, origin.DisplayName, result).ConfigureAwait(false);
+                    continue;
                 }
 
                 // A row refreshed with a newer version during the apply stays and is applied again.
@@ -279,7 +274,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             }
         }
 
-        return finished;
+        return (finished, full);
     }
 
     /// <inheritdoc />
@@ -287,19 +282,26 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     {
         _wake.Dispose();
         _wakeContent.Dispose();
+        _quickPass.Dispose();
+        _contentPass.Dispose();
         _stopping?.Dispose();
     }
 
     private async Task RunAsync(SemaphoreSlim gate, bool content, CancellationToken cancellationToken)
     {
+        var more = false;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await gate.WaitAsync(IdleWait, cancellationToken).ConfigureAwait(false);
-                await ApplyLaneAsync(content, cancellationToken).ConfigureAwait(false);
+                if (!more)
+                {
+                    await gate.WaitAsync(IdleWait, cancellationToken).ConfigureAwait(false);
+                }
+
+                more = (await ApplyLaneAsync(content, cancellationToken).ConfigureAwait(false)).Full;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
             }
@@ -310,9 +312,94 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
+    // One client per origin for a pass. An address the factory refuses yields the reason instead.
+    private bool TryGetClient(SourceServer origin, Dictionary<string, SourceServerClient> clients, out SourceServerClient client, out string? error)
+    {
+        error = null;
+        if (clients.TryGetValue(origin.Key, out client!))
+        {
+            return true;
+        }
+
+        try
+        {
+            client = _clientFactory.Create(origin);
+            clients[origin.Key] = client;
+            return true;
+        }
+        catch (ArgumentException ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    // Applies one row. Null means the module's scheduled run holds it: nothing failed, so the row is put
+    // off for a minute without counting an attempt.
+    private async Task<HintApplyResult?> TryApplyAsync(InboundHint row, SourceServer origin, SourceServerClient client, Jellyfin.Sdk.Generated.Models.BaseItemDto? prefetched, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ApplyOneAsync(row, origin, client, prefetched, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Tasks.Common.ModuleBusyException ex)
+        {
+            _inbound.Postpone(row, DateTime.UtcNow + TimeSpan.FromMinutes(1), ex.Message);
+            _logger.LogDebug("Hint {Hint} from '{Origin}' waits: {Reason}", row.HintId, origin.DisplayName, ex.Message);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return HintApplyResult.RetryLater(ex.Message);
+        }
+    }
+
+    // Records how a row ended and says whether it is finished. A retry keeps the row with its backoff
+    // until about a day of attempts has passed. A hint dropped on its first try is routine, a mapping that
+    // does not cover it or a file that has not arrived yet, and goes to the server log only, while one
+    // dropped after failing is worth a line on the Activity page. An applied hand made edit is worth a
+    // line too. Provider work is not, since a scan on the peer would otherwise write one entry here per
+    // item it refreshed.
+    private async Task<bool> ConcludeAsync(InboundHint row, SourceServer origin, HintApplyResult result)
+    {
+        if (result.Outcome == HintApplyOutcome.Retry && row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
+        {
+            result = HintApplyResult.Dropped($"{row.Attempts + 1} attempts failed, the last with {result.Reason ?? "no reason given"}");
+        }
+
+        switch (result.Outcome)
+        {
+            case HintApplyOutcome.Retry:
+                _inbound.Defer(row, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), result.Reason ?? "failed");
+                _logger.LogWarning("Hint {Hint} from '{Origin}' will be retried: {Reason}", row.HintId, origin.DisplayName, result.Reason);
+                await _activity.RetryingAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
+                return false;
+
+            case HintApplyOutcome.Dropped:
+                _logger.LogInformation("Hint {Hint} from '{Origin}' dropped: {Reason}", row.HintId, origin.DisplayName, result.Reason);
+                if (row.Attempts > 0)
+                {
+                    await _activity.DroppedAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
+                }
+
+                return true;
+
+            case HintApplyOutcome.Applied when row.Recorded:
+                await _activity.AppliedAsync(row, origin.DisplayName, result).ConfigureAwait(false);
+                return true;
+
+            default:
+                return true;
+        }
+    }
+
     private static string PrefetchKey(string originServerId, string key) => originServerId.ToUpperInvariant() + ":" + key.ToUpperInvariant();
 
-    // The scheduled scan reads items in pages; a pass of hints reads them the same way, one request per
+    // The scheduled scan reads items in pages. A pass of hints reads them the same way, one request per
     // page per origin, instead of one request per hint. A bulk provider refresh on a peer then costs the
     // receiver no more fetches than its own scan would. A page that cannot be read falls back to the
     // per hint fetch, which says why.
@@ -335,18 +422,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 continue;
             }
 
-            if (!clients.TryGetValue(origin.Key, out var client))
+            if (!TryGetClient(origin, clients, out var client, out _))
             {
-                try
-                {
-                    client = _clientFactory.Create(origin);
-                }
-                catch (ArgumentException)
-                {
-                    continue;
-                }
-
-                clients[origin.Key] = client;
+                continue;
             }
 
             var ids = group.Select(r => Guid.Parse(r.Key)).Distinct().ToList();
@@ -361,7 +439,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                     }
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -382,7 +460,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             HintKind.Metadata => await _items.ApplyMetadataAsync(row, origin, client, cancellationToken, prefetched).ConfigureAwait(false),
             HintKind.People => await _items.ApplyPeopleAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
             HintKind.Content => await _content.ApplyAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
-            HintKind.Users => await _users.ApplyAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
+            HintKind.Users => HintApplyResult.Dropped("user settings are not announced live, the scheduled Sync Information task carries them"),
             _ => HintApplyResult.Dropped($"this version does not apply {row.Kind} hints")
         };
     }
@@ -396,16 +474,16 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             {
                 // A standard user's key cannot reach the origin's endpoint. The origin reads the
                 // completions from this server's status with its own key instead.
-                _logger.LogInformation("Could not tell '{Origin}' that {Count} hint(s) are complete; it will read them from this server's status", origin.DisplayName, done.Count);
+                _logger.LogInformation("Could not tell '{Origin}' that {Count} hint(s) are complete. It will read them from this server's status", origin.DisplayName, done.Count);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not tell '{Origin}' that {Count} hint(s) are complete; it will check back later", origin.DisplayName, done.Count);
+            _logger.LogWarning(ex, "Could not tell '{Origin}' that {Count} hint(s) are complete. It will check back later", origin.DisplayName, done.Count);
         }
     }
 }

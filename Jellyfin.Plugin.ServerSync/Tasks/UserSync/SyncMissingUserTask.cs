@@ -14,7 +14,6 @@ using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
-using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
@@ -23,7 +22,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// Sync phase for User. Reads Queued rows and applies the per-category
 /// change (Policy / Configuration / ProfileImage) directly to local users.
 /// On success, mutates the in-memory record so the base's MarkSynced
-/// short-circuit fires next refresh; on failure, throws so the base records
+/// short-circuit fires next refresh. On failure, throws so the base records
 /// the reason and transitions to <see cref="Models.Common.SyncStatus.Errored"/>.
 /// </summary>
 public class SyncMissingUserTask
@@ -266,7 +265,7 @@ public class SyncMissingUserTask
             && (!record.SourceImageSize.HasValue || record.SourceImageSize <= 0);
         if (sourceHasNoImage)
         {
-            // Apply is "remove local image" — verify local has no image.
+            // Apply is "remove local image", verify local has no image.
             var localHasImage = !string.IsNullOrEmpty(record.LocalImageHash)
                 || (record.LocalImageSize.HasValue && record.LocalImageSize > 0);
             if (localHasImage)
@@ -297,7 +296,7 @@ public class SyncMissingUserTask
     {
         if (a == null && b == null) return true;
         if (a == null || b == null) return false;
-        // Reflection comparison — for collections, fall back to JSON.
+        // Reflection comparison, for collections, fall back to JSON.
         if (a is System.Collections.IEnumerable ea && b is System.Collections.IEnumerable eb
             && a is not string && b is not string)
         {
@@ -314,18 +313,9 @@ public class SyncMissingUserTask
         config.LastUserSyncTime = utcNow;
     }
 
-    /// <inheritdoc />
-    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
-    {
-        new TaskTriggerInfo
-        {
-            Type = MediaBrowser.Model.Tasks.TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(24).Ticks
-        }
-    };
 
     // ===================================================================
-    // Apply logic — per-category mutations on the local user. Each method
+    // Apply logic, per-category mutations on the local user. Each method
     // updates the record's in-memory fields on success so the base's upsert
     // captures the new state and the next Refresh sees no diff.
     // ===================================================================
@@ -350,7 +340,7 @@ public class SyncMissingUserTask
     /// Shared apply path for Policy and Configuration: deserialize the merged
     /// JSON blob, reflect each key onto the typed target object, log unknown
     /// fields, and call the category-specific persist delegate. Both
-    /// categories had near-identical bodies — this collapses them so a fix
+    /// categories had near-identical bodies, this collapses them so a fix
     /// to the apply loop lands in one place.
     /// </summary>
     private async Task ApplyJsonPropertyChangesAsync<T>(
@@ -408,7 +398,7 @@ public class SyncMissingUserTask
         if (skippedProperties.Count > 0)
         {
             // Source server's schema has fields that don't exist (or aren't
-            // settable) on local — cross-Jellyfin-version drift. Surface so
+            // settable) on local, cross-Jellyfin-version drift. Surface so
             // the operator can see what didn't make it across.
             Logger.LogDebug("{Category}: skipped {Count} unknown/unsettable propert(ies) for {User}: {Properties}",
                 categoryLabel, skippedProperties.Count, localUser.Username, string.Join(", ", skippedProperties));
@@ -430,7 +420,7 @@ public class SyncMissingUserTask
         SourceServerClient sourceClient,
         CancellationToken cancellationToken)
     {
-        // Already in sync (hash match) — populate synced fields and return.
+        // Already in sync (hash match), populate synced fields and return.
         if (!string.IsNullOrEmpty(item.SourceImageHash)
             && string.Equals(item.SourceImageHash, item.LocalImageHash, StringComparison.OrdinalIgnoreCase))
         {
@@ -484,10 +474,11 @@ public class SyncMissingUserTask
         var stagingPath = Path.Combine(userDataPath, "profile.jpg.serversync.staging");
         var tempPath = Path.Combine(userDataPath, "profile.jpg.serversync.download");
         Directory.CreateDirectory(userDataPath);
+        var promoted = false;
 
         try
         {
-            // Phase 1: download and hash. tempPath is a fresh temp file —
+            // Phase 1: download and hash. tempPath is a fresh temp file , 
             // failures here don't touch local state.
             using (var fileStream = File.Create(tempPath))
             {
@@ -524,12 +515,13 @@ public class SyncMissingUserTask
             }
 
             // Phase 4: atomically promote staging → profile.jpg. Single FS
-            // operation — overwrite is safe because Phase 3 just removed
+            // operation, overwrite is safe because Phase 3 just removed
             // the old profile.jpg.
             File.Move(stagingPath, profilePath, overwrite: true);
+            promoted = true;
 
             // Phase 5: update the DB pointer. Even if this throws, the file
-            // is in place; the next refresh will see source == local on the
+            // is in place. The next refresh will see source == local on the
             // file and reconcile the DB row.
             localUser.ProfileImage = new ImageInfo(profilePath);
             await _userManager.UpdateUserAsync(localUser).ConfigureAwait(false);
@@ -557,19 +549,28 @@ public class SyncMissingUserTask
                 // Best-effort cleanup of the in-profile download buffer.
             }
 
-            // Clean up staging only if it survived past the move (i.e. the
-            // move never happened). If the move succeeded, staging no
-            // longer exists at that path.
-            try
+            // The staging file is removed only after a successful promotion,
+            // where the move has normally consumed it already. When the move
+            // never happened it is kept, so the new image survives for manual
+            // recovery even if Phase 3 already cleared the old one. The next
+            // sync run overwrites it with a fresh download.
+            if (promoted)
             {
-                if (File.Exists(stagingPath))
+                try
                 {
-                    File.Delete(stagingPath);
+                    if (File.Exists(stagingPath))
+                    {
+                        File.Delete(stagingPath);
+                    }
+                }
+                catch (IOException)
+                {
+                    // Best-effort cleanup.
                 }
             }
-            catch (IOException)
+            else if (File.Exists(stagingPath))
             {
-                // Same — best-effort cleanup.
+                Logger.LogWarning("ProfileImage: update for {User} did not complete, the downloaded image is kept at {Path} for recovery", localUser.Username, stagingPath);
             }
         }
     }

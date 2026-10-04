@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -75,11 +76,28 @@ public sealed class ContentHintHandler
             return HintApplyResult.Dropped($"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
         }
 
-        var dto = await client.GetItemDetailsAsync(originItemId, cancellationToken).ConfigureAwait(false);
-        if (dto is null || !dto.Id.HasValue || string.IsNullOrEmpty(dto.Path))
+        // A failed read throws and is retried by the worker. An answer with no item means it is gone.
+        var dto = await client.FindItemDetailsAsync(originItemId, cancellationToken).ConfigureAwait(false);
+        if (dto is null || !dto.Id.HasValue)
         {
-            return HintApplyResult.RetryLater($"could not read the item from '{origin.DisplayName}', or it no longer exists");
+            return HintApplyResult.Dropped($"the item no longer exists on '{origin.DisplayName}'");
         }
+
+        if (string.IsNullOrEmpty(dto.Path))
+        {
+            return HintApplyResult.Dropped($"'{origin.DisplayName}' did not say where the file is, which happens when the key for it is not an administrator's");
+        }
+
+        // The same filters the scan applies. A file the mapping leaves out must not arrive by hint, since
+        // the next scan would find it out of place and a mapping that deletes stale files would remove it.
+        if (PathUtilities.IsItemFiltered(dto.Path, mapping.SourceRootPath, mapping.FilterMode, mapping.FilteredItems))
+        {
+            return HintApplyResult.Dropped(mapping.FilterMode == LibraryFilterMode.Whitelist
+                ? "the file is not on the library mapping's allow list"
+                : "the file is on the library mapping's block list");
+        }
+
+        var watchedByAll = await IsWatchedByAllAsync(client, originItemId, config, cancellationToken).ConfigureAwait(false);
 
         // Priority: the earliest configured server that offers a file is the one that provides it.
         var scanServers = config.GetPullServers();
@@ -97,7 +115,7 @@ public sealed class ContentHintHandler
 
         var source = new ScanSource(origin, client, Math.Max(0, originIndex));
         var refresh = ActivatorUtilities.CreateInstance<UpdateSyncTablesTask>(_services);
-        var record = await refresh.RefreshOneAsync(new ContentRefreshWork(source, mapping, dto, WatchedByAll: false), cancellationToken).ConfigureAwait(false);
+        var record = await refresh.RefreshOneAsync(new ContentRefreshWork(source, mapping, dto, watchedByAll), cancellationToken).ConfigureAwait(false);
         if (record is null)
         {
             return HintApplyResult.Dropped("the item is filtered out or has no path");
@@ -123,7 +141,70 @@ public sealed class ContentHintHandler
 
         _logger.LogInformation("Downloaded {Path} on a hint from '{Origin}'", record.LocalPath, origin.DisplayName);
 
-        // The file is new, so the library may not have it yet; then the file's name stands in.
+        // The file is new, so the library may not have it yet. Then the file's name stands in.
         return HintApplyResult.AppliedTo(string.IsNullOrEmpty(record.LocalPath) ? null : _libraryManager.FindByPath(record.LocalPath, false));
+    }
+
+    // Whether every user the content filter names has played the item on the origin, which the scan
+    // records as Ignored rather than downloading. A user that cannot be read counts as not having played
+    // it, so a filter that cannot be checked never hides a file.
+    private async Task<bool> IsWatchedByAllAsync(SourceServerClient client, Guid itemId, PluginConfiguration config, CancellationToken cancellationToken)
+    {
+        if (!config.SkipWatchedByAllUsers || config.WatchedFilterUserIds is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        // The filter names users of several servers. Only the ones that exist on the origin are asked
+        // about, and an origin with none of them has no filter to apply.
+        HashSet<Guid> originUsers;
+        try
+        {
+            originUsers = (await client.GetUsersAsync(null, cancellationToken).ConfigureAwait(false))
+                .Where(u => u.Id.HasValue)
+                .Select(u => u.Id!.Value)
+                .ToHashSet();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read the users of the origin for the watched by all filter");
+            return false;
+        }
+
+        var filterUsers = config.WatchedFilterUserIds
+            .Select(id => Guid.TryParse(id, out var parsed) ? parsed : Guid.Empty)
+            .Where(originUsers.Contains)
+            .ToList();
+        if (filterUsers.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var userId in filterUsers)
+        {
+            try
+            {
+                var page = await client.GetItemsWithUserDataByIdsAsync(userId, new Guid?[] { itemId }, cancellationToken).ConfigureAwait(false);
+                if (page?.Items?.FirstOrDefault()?.UserData?.Played != true)
+                {
+                    return false;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not read whether user {User} played item {Item}", userId, itemId);
+                return false;
+            }
+        }
+
+        return true;
     }
 }

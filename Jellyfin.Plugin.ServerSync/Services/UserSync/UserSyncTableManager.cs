@@ -15,7 +15,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// <summary>
 /// Per-table manager for <see cref="UserSyncItem"/>. Replaces the old
 /// <c>SyncDatabase.UserSync.cs</c> partial-class methods. Natural key is the
-/// composite (SourceUserId, LocalUserId, PropertyCategory) — three rows per
+/// composite (SourceUserId, LocalUserId, PropertyCategory), three rows per
 /// user mapping (one each for Policy, Configuration, ProfileImage).
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
@@ -39,7 +39,7 @@ public sealed class UserSyncTableManager
     /// <inheritdoc />
     protected override string TableName => "UserSyncItems";
 
-    // Sentinel — UpdateStatusByKey is overridden directly to handle the
+    // Sentinel, UpdateStatusByKey is overridden directly to handle the
     // composite (SourceUserId, LocalUserId, PropertyCategory) key.
     /// <inheritdoc />
     protected override string KeyColumn => "SourceUserId";
@@ -177,7 +177,24 @@ public sealed class UserSyncTableManager
         ArgumentNullException.ThrowIfNull(request);
         var page = Math.Max(1, request.Page);
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
-        var skip = (page - 1) * pageSize;
+        return SearchUserMappingsPaginated(request.SearchTerm, request.StatusFilter, (page - 1) * pageSize, pageSize);
+    }
+
+    /// <summary>
+    /// Returns the distinct user mappings starting at an offset, each with its grouped category
+    /// items. Paging by offset rather than page number keeps a skip that is not a multiple of the
+    /// page size on the rows the caller asked for.
+    /// </summary>
+    /// <param name="searchTerm">Optional user name search.</param>
+    /// <param name="status">Optional status filter.</param>
+    /// <param name="skip">Mappings to skip.</param>
+    /// <param name="take">Mappings to return, at most 200.</param>
+    /// <returns>The page of mappings.</returns>
+    public PagedResult<UserMappingGroup> SearchUserMappingsPaginated(string? searchTerm, SyncStatus? status, int skip, int take)
+    {
+        skip = Math.Max(0, skip);
+        var pageSize = Math.Clamp(take, 1, 200);
+        var request = new PaginationRequest { SearchTerm = searchTerm, StatusFilter = status };
 
         return ExecuteRead(
             conn =>
@@ -444,38 +461,86 @@ public sealed class UserSyncTableManager
         ArgumentNullException.ThrowIfNull(request);
         var page = Math.Max(1, request.Page);
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
-        var skip = (page - 1) * pageSize;
+        return SearchPaginated(request.SearchTerm, request.StatusFilter, sourceUserId: null, propertyCategory: null, (page - 1) * pageSize, pageSize);
+    }
+
+    /// <summary>
+    /// Returns the rows starting at an offset, filtered in the query. Every filter is applied before
+    /// paging, so the total counts the rows that match and each page is full. Filtering a page
+    /// afterwards shrank pages and left the total counting rows the filter excluded.
+    /// </summary>
+    /// <param name="searchTerm">Optional user name search.</param>
+    /// <param name="status">Optional status filter.</param>
+    /// <param name="sourceUserId">Optional source user id, matched without regard to case.</param>
+    /// <param name="propertyCategory">Optional category, matched without regard to case.</param>
+    /// <param name="skip">Rows to skip.</param>
+    /// <param name="take">Rows to return, at most 200.</param>
+    /// <returns>The page of rows.</returns>
+    public PagedResult<UserSyncItem> SearchPaginated(
+        string? searchTerm,
+        SyncStatus? status,
+        string? sourceUserId,
+        string? propertyCategory,
+        int skip,
+        int take)
+    {
+        skip = Math.Max(0, skip);
+        var pageSize = Math.Clamp(take, 1, 200);
 
         return ExecuteRead(
             conn =>
             {
                 var conditions = new List<string>();
-                if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+                if (!string.IsNullOrWhiteSpace(searchTerm))
                 {
                     conditions.Add("(SourceUserName LIKE @search OR LocalUserName LIKE @search)");
                 }
 
-                if (request.StatusFilter.HasValue)
+                if (status.HasValue)
                 {
                     conditions.Add("Status = @status");
                 }
 
+                if (!string.IsNullOrEmpty(sourceUserId))
+                {
+                    conditions.Add("SourceUserId = @sourceUserId COLLATE NOCASE");
+                }
+
+                if (!string.IsNullOrEmpty(propertyCategory))
+                {
+                    conditions.Add("PropertyCategory = @propertyCategory COLLATE NOCASE");
+                }
+
                 var whereClause = conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : string.Empty;
+
+                void BindFilters(SqliteCommand cmd)
+                {
+                    if (!string.IsNullOrWhiteSpace(searchTerm))
+                    {
+                        cmd.Parameters.AddWithValue("@search", $"%{searchTerm}%");
+                    }
+
+                    if (status.HasValue)
+                    {
+                        cmd.Parameters.AddWithValue("@status", (int)status.Value);
+                    }
+
+                    if (!string.IsNullOrEmpty(sourceUserId))
+                    {
+                        cmd.Parameters.AddWithValue("@sourceUserId", sourceUserId);
+                    }
+
+                    if (!string.IsNullOrEmpty(propertyCategory))
+                    {
+                        cmd.Parameters.AddWithValue("@propertyCategory", propertyCategory);
+                    }
+                }
 
                 int totalCount;
                 using (var countCmd = conn.CreateCommand())
                 {
                     countCmd.CommandText = $"SELECT COUNT(*) FROM UserSyncItems {whereClause}";
-                    if (!string.IsNullOrWhiteSpace(request.SearchTerm))
-                    {
-                        countCmd.Parameters.AddWithValue("@search", $"%{request.SearchTerm}%");
-                    }
-
-                    if (request.StatusFilter.HasValue)
-                    {
-                        countCmd.Parameters.AddWithValue("@status", (int)request.StatusFilter.Value);
-                    }
-
+                    BindFilters(countCmd);
                     totalCount = Convert.ToInt32(countCmd.ExecuteScalar(), CultureInfo.InvariantCulture);
                 }
 
@@ -487,16 +552,7 @@ public sealed class UserSyncTableManager
                         {whereClause}
                         ORDER BY {StatusPriorityOrderBy}, SourceUserName ASC, PropertyCategory ASC, Id ASC
                         LIMIT @take OFFSET @skip";
-                    if (!string.IsNullOrWhiteSpace(request.SearchTerm))
-                    {
-                        dataCmd.Parameters.AddWithValue("@search", $"%{request.SearchTerm}%");
-                    }
-
-                    if (request.StatusFilter.HasValue)
-                    {
-                        dataCmd.Parameters.AddWithValue("@status", (int)request.StatusFilter.Value);
-                    }
-
+                    BindFilters(dataCmd);
                     dataCmd.Parameters.AddWithValue("@take", pageSize);
                     dataCmd.Parameters.AddWithValue("@skip", skip);
 
@@ -517,7 +573,7 @@ public sealed class UserSyncTableManager
 /// One user mapping with its grouped category items, returned by
 /// <see cref="UserSyncTableManager.PaginateUserMappings"/>. The user-grouping
 /// UI displays all three categories (Policy, Configuration, ProfileImage)
-/// per user as one logical row; this DTO is that shape.
+/// per user as one logical row. This DTO is that shape.
 /// </summary>
 public sealed class UserMappingGroup
 {

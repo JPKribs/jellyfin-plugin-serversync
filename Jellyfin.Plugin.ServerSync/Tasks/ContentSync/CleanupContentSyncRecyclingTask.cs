@@ -56,7 +56,7 @@ public class EmptyRecyclingBinTask : IScheduledTask
         if (RecyclingBinService.OverlapsLibraryRoot(config.RecyclingBinPath, config))
         {
             _logger.LogError(
-                "Recycling bin path {Path} overlaps a configured library root — cleanup would permanently delete media files. Skipping cleanup until the path is corrected.",
+                "Recycling bin path {Path} overlaps a configured library root, cleanup would permanently delete media files. Skipping cleanup until the path is corrected.",
                 config.RecyclingBinPath);
             return Task.CompletedTask;
         }

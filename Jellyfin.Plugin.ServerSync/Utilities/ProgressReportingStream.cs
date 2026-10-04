@@ -11,10 +11,10 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 /// during a download so a single multi-hour file moves the task's progress
 /// bar instead of freezing it at the item boundary.
 /// <para>
-/// Reports are throttled to whole-percent steps — a 50 GB copy writes
+/// Reports are throttled to whole-percent steps, a 50 GB copy writes
 /// hundreds of thousands of buffers, and forwarding every one of them to
 /// Jellyfin's task-progress plumbing is pure overhead. Does not own the
-/// inner stream; the caller's <c>using</c> disposes it.
+/// inner stream. The caller's <c>using</c> disposes it.
 /// </para>
 /// </summary>
 public sealed class ProgressReportingStream : Stream
@@ -28,9 +28,9 @@ public sealed class ProgressReportingStream : Stream
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
-    /// <param name="inner">Destination stream; not disposed by this wrapper.</param>
-    /// <param name="expectedBytes">Total bytes expected; must be positive.</param>
-    /// <param name="progress">Receives the written fraction (0–1) at whole-percent steps.</param>
+    /// <param name="inner">Destination stream. Not disposed by this wrapper.</param>
+    /// <param name="expectedBytes">Total bytes expected. Must be positive.</param>
+    /// <param name="progress">Receives the written fraction (0 to 1) at whole-percent steps.</param>
     public ProgressReportingStream(Stream inner, long expectedBytes, IProgress<double> progress)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -107,7 +107,7 @@ public sealed class ProgressReportingStream : Stream
     {
         _written += count;
 
-        // Sizes drift (stale SourceSize, transfer encoding); never report past 1.
+        // Sizes drift (stale SourceSize, transfer encoding). Never report past 1.
         var fraction = Math.Min(1.0, (double)_written / _expectedBytes);
         var percent = (int)(fraction * 100);
         if (percent > _lastReportedPercent)

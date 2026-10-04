@@ -109,11 +109,10 @@ public class HintsController : ControllerBase
             return Ok(result);
         }
 
-        var apiKey = _configManager.ResolveRequestApiKey(request.ApiKey, request.ServerKey);
-
         SourceServerClient client;
         try
         {
+            var apiKey = _configManager.ResolveRequestApiKey(request.ApiKey, request.ServerKey, request.ServerUrl.Trim());
             client = _clientFactory.Create(new SourceServer { Key = request.ServerKey ?? SourceServer.NewKey(), Url = request.ServerUrl.Trim(), ApiKey = apiKey, AllowPrivateNetwork = request.AllowPrivateNetwork });
         }
         catch (ArgumentException ex)
@@ -136,11 +135,11 @@ public class HintsController : ControllerBase
             result.ServerId = connection.ServerId;
             if (connection.IsAdministrator == false)
             {
-                result.Severity = mode == ServerMode.Pull ? "warn" : "error";
-                result.Message = mode == ServerMode.Pull
-                    ? "Connected with a standard user's key. This server will pull what that user can see on a schedule, but changes will not arrive as they happen, since Server Sync's endpoints there need an administrator's key."
-                    : "Connected with a standard user's key. Push and Sync need an administrator's key or sign in, because Server Sync's endpoints there require elevation. Pull still works for what that user can see.";
-                return Ok(result);
+                return Limited(
+                    result,
+                    mode,
+                    "Connected with a standard user's key. This server will pull what that user can see on a schedule, but changes will not arrive as they happen, since Server Sync's endpoints there need an administrator's key.",
+                    "Connected with a standard user's key. Push and Sync need an administrator's key or sign in, because Server Sync's endpoints there require elevation. Pull still works for what that user can see.");
             }
 
             PeerCapabilities? capabilities;
@@ -148,7 +147,7 @@ public class HintsController : ControllerBase
             {
                 capabilities = await client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -165,11 +164,11 @@ public class HintsController : ControllerBase
 
             if (capabilities is null)
             {
-                result.Severity = mode == ServerMode.Pull ? "warn" : "error";
-                result.Message = mode == ServerMode.Pull
-                    ? "Connected. Server Sync is not installed there, so this server will pull on a schedule but changes will not arrive as they happen."
-                    : "Connected. Server Sync is not installed there, so it cannot take changes from this server. Install Server Sync there, or use Pull.";
-                return Ok(result);
+                return Limited(
+                    result,
+                    mode,
+                    "Connected. Server Sync is not installed there, so this server will pull on a schedule but changes will not arrive as they happen.",
+                    "Connected. Server Sync is not installed there, so it cannot take changes from this server. Install Server Sync there, or use Pull.");
             }
 
             result.HasPlugin = true;
@@ -177,15 +176,15 @@ public class HintsController : ControllerBase
             result.SupportsHints = capabilities.Features.Contains(HintProtocol.HintFeature);
             if (!result.SupportsHints)
             {
-                result.Severity = mode == ServerMode.Pull ? "warn" : "error";
-                result.Message = mode == ServerMode.Pull
-                    ? $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes, so this server will pull on a schedule only. Update it there for changes as they happen."
-                    : $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes. Update it before using Push or Sync.";
-                return Ok(result);
+                return Limited(
+                    result,
+                    mode,
+                    $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes, so this server will pull on a schedule only. Update it there for changes as they happen.",
+                    $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes. Update it before using Push or Sync.");
             }
 
             // Conflicts are decided on the two clocks, so a peer whose clock is off is worth a sentence.
-            var skew = capabilities.ServerTime.HasValue ? (DateTime.UtcNow - capabilities.ServerTime.Value.ToUniversalTime()).Duration() : TimeSpan.Zero;
+            var skew = capabilities.ServerTime.HasValue ? (DateTime.UtcNow - Utilities.UtcTime.AsUtc(capabilities.ServerTime.Value)).Duration() : TimeSpan.Zero;
             result.ClockSkewSeconds = (int)Math.Round(skew.TotalSeconds);
             var skewNote = skew > HintProtocol.ClockSkewWarning
                 ? $" Its clock is about {FormatSkew(skew)} off from this server's, so edits made on both within that window may be settled the wrong way round. Put both servers on NTP."
@@ -196,92 +195,89 @@ public class HintsController : ControllerBase
                 : capabilities.Accepts.Count == 0 ? " Every module is off there, so it applies no changes from this server."
                 : $" It applies {JoinWords(capabilities.Accepts.Select(DescribeKind).ToList())} from this server. Other kinds are off there.";
 
-            var link = await client.GetPeerLinkAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
+            PeerLinkResponse? link;
+            try
+            {
+                link = await client.GetPeerLinkAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result.Message = $"Connected, but Server Sync there did not say whether it lists this server: {ex.Message}";
+                return Ok(result);
+            }
+
             result.Paired = link is { Paired: true };
             result.PairingError = link?.PairingError;
             result.ListsThisServer = link is { Listed: true, Enabled: true, PullsFromYou: true };
             result.PeerMode = link?.Mode;
             result.SendsToThisServer = link is { Enabled: true, SendsToYou: true };
-            var version = capabilities.PluginVersion;
-            var listing = link is { Listed: true }
-                ? $"lists this server as {link.Mode}{(link.Enabled ? string.Empty : ", disabled")}"
-                : "does not list this server";
-
-            switch (mode)
-            {
-                case ServerMode.Pull:
-                    if (result.SendsToThisServer)
-                    {
-                        result.Severity = "ok";
-                        result.Message = $"Ready. Server Sync {version} there {listing}, so this server will pull on a schedule and changes will also arrive as they happen.";
-                    }
-                    else
-                    {
-                        result.Severity = "warn";
-                        result.Message = $"Server Sync {version} there {listing}. This server will pull on a schedule, but changes will not arrive as they happen until that server lists this one as Push or Sync.";
-                    }
-
-                    break;
-
-                case ServerMode.Push:
-                    if (result.ListsThisServer)
-                    {
-                        result.Severity = "ok";
-                        result.Message = $"Ready. Server Sync {version} there {listing}, so it will pull the changes this server announces.";
-                    }
-                    else
-                    {
-                        result.Severity = "error";
-                        result.Message = $"Server Sync {version} there {listing}. Push needs that server to list this one as Pull or Sync, enabled, with a URL and key.";
-                    }
-
-                    break;
-
-                default:
-                    if (link is { Listed: true, Enabled: true } && string.Equals(link.Mode, "Sync", StringComparison.OrdinalIgnoreCase))
-                    {
-                        result.Severity = "ok";
-                        result.Message = $"Ready. Server Sync {version} there lists this server as Sync, so changes travel both ways as they happen.";
-                    }
-                    else
-                    {
-                        result.Severity = "error";
-                        result.Message = $"Server Sync {version} there {listing}. Sync needs that server to list this one as Sync, enabled, with a URL and key.";
-                    }
-
-                    break;
-            }
+            (result.Severity, result.Message) = Verdict(mode, link, capabilities.PluginVersion, result);
 
             if (mode != ServerMode.Pull || result.SendsToThisServer)
             {
                 result.Message += acceptsNote;
             }
 
-            if (skewNote.Length > 0)
-            {
-                result.Message += skewNote;
-                if (result.Severity == "ok")
-                {
-                    result.Severity = "warn";
-                }
-            }
+            AppendWarning(result, skewNote);
 
             // A listed server pairs on every check. One that could not reach this server back cannot
             // prove itself on later requests, so nothing it sends as this server would be accepted.
             if (link is { Listed: true } && !result.Paired)
             {
                 var refused = link.PairingError?.Contains("standard user", StringComparison.Ordinal) == true;
-                result.Message += refused
+                AppendWarning(result, refused
                     ? $" It could not pair with this server: {link.PairingError}."
-                    : $" It could not pair with this server: {link.PairingError ?? "no reason was given"}. Until it can, hints between the two are refused.";
-                if (result.Severity == "ok")
-                {
-                    result.Severity = "warn";
-                }
+                    : $" It could not pair with this server: {link.PairingError ?? "no reason was given"}. Until it can, hints between the two are refused.");
             }
 
             return Ok(result);
         }
+    }
+
+    // The verdict for the chosen direction, given how the peer lists this server.
+    private static (string Severity, string Message) Verdict(ServerMode mode, PeerLinkResponse? link, string? version, PeerCheckResult result)
+    {
+        var listing = link is { Listed: true }
+            ? $"lists this server as {link.Mode}{(link.Enabled ? string.Empty : ", disabled")}"
+            : "does not list this server";
+        return mode switch
+        {
+            ServerMode.Pull when result.SendsToThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so this server will pull on a schedule and changes will also arrive as they happen."),
+            ServerMode.Pull => ("warn", $"Server Sync {version} there {listing}. This server will pull on a schedule, but changes will not arrive as they happen until that server lists this one as Push or Sync."),
+            ServerMode.Push when result.ListsThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so it will pull the changes this server announces."),
+            ServerMode.Push => ("error", $"Server Sync {version} there {listing}. Push needs that server to list this one as Pull or Sync, enabled, with a URL and key."),
+            _ when link is { Listed: true, Enabled: true } && string.Equals(link.Mode, "Sync", StringComparison.OrdinalIgnoreCase)
+                => ("ok", $"Ready. Server Sync {version} there lists this server as Sync, so changes travel both ways as they happen."),
+            _ => ("error", $"Server Sync {version} there {listing}. Sync needs that server to list this one as Sync, enabled, with a URL and key.")
+        };
+    }
+
+    // Adds a caveat to the message. A ready link with a caveat is shown as a warning.
+    private static void AppendWarning(PeerCheckResult result, string note)
+    {
+        if (note.Length == 0)
+        {
+            return;
+        }
+
+        result.Message += note;
+        if (result.Severity == "ok")
+        {
+            result.Severity = "warn";
+        }
+    }
+
+    // The answer for a link that works on a schedule only: a warning for Pull, which still pulls, and an
+    // error for Push and Sync, which need more than a schedule.
+    private static ActionResult<PeerCheckResult> Limited(PeerCheckResult result, ServerMode mode, string pullMessage, string otherMessage)
+    {
+        result.Severity = mode == ServerMode.Pull ? "warn" : "error";
+        result.Message = mode == ServerMode.Pull ? pullMessage : otherMessage;
+        return result;
     }
 
     // Jellyfin's own title for a local item, and a second line: the episode under its series, the year
@@ -295,9 +291,7 @@ public class HintsController : ControllerBase
 
         if (item is MediaBrowser.Controller.Entities.TV.Episode episode)
         {
-            var code = episode.ParentIndexNumber.HasValue && episode.IndexNumber.HasValue
-                ? $"S{episode.ParentIndexNumber.Value:D2}E{episode.IndexNumber.Value:D2} · "
-                : string.Empty;
+            var code = HintActivityLog.EpisodeCode(episode) is { } number ? number + " · " : string.Empty;
             return (episode.SeriesName ?? item.Name, code + item.Name);
         }
 
@@ -348,7 +342,7 @@ public class HintsController : ControllerBase
             Pending = _observer.PendingCount,
             Unmatched = _observer.UnmatchedCount,
             LastUnmatched = _observer.LastUnmatched,
-            Inbound = _inbound.GetOldest(OverviewRows).Select(InboundHintDto.From).ToList(),
+            Inbound = _inbound.GetRecent(OverviewRows).Select(InboundHintDto.From).ToList(),
             InboundCount = _inbound.Count()
         };
         foreach (var (state, count) in _outbound.CountByState())
@@ -464,7 +458,7 @@ public class HintsController : ControllerBase
         var config = _configManager.Configuration;
         var serverName = string.Equals(version.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase)
             ? _applicationHost.FriendlyName
-            : config.Servers.FirstOrDefault(s => string.Equals(s.ServerId, version.ServerId, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? version.ServerId;
+            : config.FindServerById(version.ServerId)?.DisplayName ?? version.ServerId;
         return Ok(new ObjectVersionDto { ServerId = version.ServerId, ServerName = serverName, Timestamp = version.Timestamp, IsThisServer = string.Equals(version.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase) });
     }
 
@@ -477,7 +471,7 @@ public class HintsController : ControllerBase
     {
         _observer.Flush(DateTime.MaxValue);
         await _outboundWorker.DeliverAsync(cancellationToken, refreshCapabilities: true).ConfigureAwait(false);
-        await _inboundWorker.ApplyAsync(cancellationToken).ConfigureAwait(false);
+        await _inboundWorker.ApplyNowAsync(cancellationToken).ConfigureAwait(false);
         return NoContent();
     }
 
@@ -535,7 +529,7 @@ public class HintsOverview
     /// <summary>Gets or sets how many outbound rows exist per state, by state name.</summary>
     public Dictionary<string, int> OutboundCounts { get; set; } = new();
 
-    /// <summary>Gets or sets the oldest inbound rows, at most a few hundred.</summary>
+    /// <summary>Gets or sets the newest inbound rows, at most a few hundred.</summary>
     public List<InboundHintDto> Inbound { get; set; } = new();
 
     /// <summary>Gets or sets how many inbound rows exist.</summary>

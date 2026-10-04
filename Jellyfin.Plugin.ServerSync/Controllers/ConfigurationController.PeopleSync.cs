@@ -51,7 +51,7 @@ public partial class ConfigurationController
         // Enrich source-side image manifest with real sizes/dimensions so
         // the modal renders Source as e.g. "623.4 KB" instead of "1 (0 B)".
         // The refresh builds source manifests from ImageTags only (no per-
-        // person HTTP call) for performance; this is the per-modal-open
+        // person HTTP call) for performance. This is the per-modal-open
         // compensation.
         if (config.PeopleSyncImages && !string.IsNullOrEmpty(item.Images.Source))
         {
@@ -69,7 +69,7 @@ public partial class ConfigurationController
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Source image enrichment failed for person {Name}; modal will show tag-only sizes", item.PersonName);
+                _logger.LogWarning(ex, "Source image enrichment failed for person {Name}. Modal will show tag-only sizes", item.PersonName);
             }
         }
 
@@ -98,14 +98,9 @@ public partial class ConfigurationController
             statusFilter = parsedStatus;
         }
 
-        var page = (skip / Math.Max(1, take)) + 1;
-        var result = manager.Paginate(new PaginationRequest
-        {
-            Page = page,
-            PageSize = take,
-            SearchTerm = search,
-            StatusFilter = statusFilter
-        });
+        // Page by offset. Converting skip to a page number landed on the wrong rows whenever skip was
+        // not a multiple of take.
+        var result = manager.SearchPaginated(search, statusFilter, skip, take);
 
         return Ok(new PagedResult<PeopleSyncItemDto>(
             result.Items.Select(i => i.ToDto(BrowserUrlFor(i.ServerKey))).ToList(),
@@ -156,7 +151,8 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Moves people sync items to Queued status.
+    /// Moves people sync items to Queued status. With no ids and a Status, queues every row in that
+    /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
     [HttpPost("PeopleItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -166,6 +162,11 @@ public partial class ConfigurationController
         [FromServices] PeopleSyncTableManager manager)
     {
         ArgumentNullException.ThrowIfNull(manager);
+        if (request != null && (request.Ids == null || request.Ids.Count == 0) && !string.IsNullOrEmpty(request.Status))
+        {
+            return QueueAllWithStatus(manager, request.Status, "QueuePeopleSyncItems");
+        }
+
         if (request?.Ids == null || request.Ids.Count == 0)
         {
             return BadRequest("No items specified");
@@ -179,7 +180,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue people sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk queue failed; see server log" });
+            return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
         }
     }
 
@@ -207,7 +208,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore people sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk ignore failed; see server log" });
+            return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
         }
     }
 

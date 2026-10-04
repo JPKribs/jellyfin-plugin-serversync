@@ -19,41 +19,8 @@ public static class FileOperationUtilities
     public static readonly string[] CompanionExtensions = { ".srt", ".sub", ".ass", ".ssa", ".vtt", ".nfo", ".jpg", ".png" };
 
     /// <summary>
-    /// Moves a file with overwrite semantics, retrying on transient IO failures.
-    /// </summary>
-    public static void MoveFileWithOverwrite(
-        string sourcePath,
-        string destinationPath,
-        ILogger? logger = null,
-        int maxRetries = 3,
-        int retryDelayMs = 100)
-    {
-        for (var attempt = 1; attempt <= maxRetries; attempt++)
-        {
-            try
-            {
-                File.Move(sourcePath, destinationPath, overwrite: true);
-                return;
-            }
-            catch (IOException ex) when (attempt < maxRetries)
-            {
-                logger?.LogWarning(
-                    ex,
-                    "File move attempt {Attempt}/{MaxRetries} failed for {Destination}, retrying",
-                    attempt,
-                    maxRetries,
-                    Path.GetFileName(destinationPath));
-                Thread.Sleep(retryDelayMs * attempt);
-            }
-        }
-
-        // Last attempt — let the exception propagate.
-        File.Move(sourcePath, destinationPath, overwrite: true);
-    }
-
-    /// <summary>
-    /// Async version of <see cref="MoveFileWithOverwrite"/> using <see cref="Task.Delay"/>
-    /// so retry waits don't block thread-pool threads.
+    /// Moves a file with overwrite semantics, retrying on transient IO failures. Retry waits use
+    /// <see cref="Task.Delay(int, CancellationToken)"/> so they don't block thread-pool threads.
     /// </summary>
     public static async Task MoveFileWithOverwriteAsync(
         string sourcePath,
@@ -234,7 +201,7 @@ public static class FileOperationUtilities
                     }
                     catch (IOException)
                     {
-                        // DeleteOnClose handles cleanup; explicit delete is best-effort.
+                        // DeleteOnClose handles cleanup. Explicit delete is best-effort.
                     }
                 }
             }

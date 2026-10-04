@@ -37,10 +37,28 @@ public class PluginConfigurationManager : IPluginConfigurationManager
     public string DecryptApiKey(string protectedKey) => _secrets.Unprotect(protectedKey);
 
     /// <inheritdoc />
-    public string ResolveRequestApiKey(string? requestApiKey, string? serverKey)
-        => string.Equals(requestApiKey, JPKribs.Jellyfin.Base.SecretProtector.KeptSentinel, StringComparison.Ordinal)
-            ? DecryptApiKey(Configuration.FindServer(serverKey)?.ApiKey ?? string.Empty)
-            : requestApiKey ?? string.Empty;
+    public string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl)
+    {
+        if (!string.Equals(requestApiKey, JPKribs.Jellyfin.Base.SecretProtector.KeptSentinel, StringComparison.Ordinal))
+        {
+            return requestApiKey ?? string.Empty;
+        }
+
+        var entry = Configuration.FindServer(serverKey);
+        if (entry is null)
+        {
+            return string.Empty;
+        }
+
+        // The stored key is a secret the page never sees. Sent to whatever address a request names, an
+        // edited URL would hand it to any server, so it only goes to the address saved on the entry.
+        if (requestUrl is not null && !Utilities.ConfigurationUtilities.SameServerUrl(entry.Url, requestUrl))
+        {
+            throw new ArgumentException("The stored key is only sent to the address saved for this server. Enter the key again to use a new address.");
+        }
+
+        return DecryptApiKey(entry.ApiKey);
+    }
 
     /// <inheritdoc />
     public void SaveConfiguration()

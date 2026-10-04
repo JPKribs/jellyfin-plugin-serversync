@@ -7,13 +7,13 @@
 // configurationpage?name=serversync_jpkribs_shared.js.
 //
 // This module re-exports the base paginated table unchanged and exposes
-// createServerSyncShared(view) — the base shared helper bag (bound to this
+// createServerSyncShared(view), the base shared helper bag (bound to this
 // plugin's id + "ServerSync" controller prefix) plus the few ServerSync-domain
 // helpers the pages rely on (item/user/person thumbnails, local server name).
 //
-// Note: getTabs() is defined locally in each page controller (sync, settings)
-// because LibraryMenu.setTabs() must be called synchronously during the
-// viewshow event.
+// Note: getTabs() is defined locally in each page controller (sync, servers,
+// settings) because LibraryMenu.setTabs() must be called synchronously during
+// the viewshow event.
 // ============================================
 
 import {
@@ -26,7 +26,7 @@ import {
 // Relative specifier, not '/web/...': it resolves against this module's own
 // URL, so a server hosted under a base URL (http://host:8096/jellyfin) still
 // loads the bundle. An absolute path skipped the base URL, the import
-// rejected, and the page controller never initialized — the settings
+// rejected, and the page controller never initialized, the settings
 // categories silently refused to expand.
 } from './configurationpage?name=serversync_jpkribs_shared.js';
 
@@ -45,7 +45,7 @@ export function createServerSyncShared(view) {
     // Source images go through the plugin's ImageProxy endpoint so the
     // source API key never reaches the browser. The image bytes are fetched
     // with ApiClient (session token in the Authorization header, never in
-    // the URL — URLs land in proxy logs and browser caches) and attached as
+    // the URL, URLs land in proxy logs and browser caches) and attached as
     // a blob object-URL after the row is in the DOM.
     var thumbSeq = 0;
 
@@ -56,8 +56,8 @@ export function createServerSyncShared(view) {
         function tryLoad() {
             var img = document.getElementById(imgId);
             if (!img) {
-                // Caller inserts the rendered HTML in the same tick; one
-                // deferred retry covers slower table renderers.
+                // The caller inserts the rendered HTML in the same tick. Up to three deferred
+                // retries, each waiting a little longer, cover slower table renderers.
                 if (++attempts <= 3) setTimeout(tryLoad, 100 * attempts);
                 return;
             }
@@ -91,7 +91,7 @@ export function createServerSyncShared(view) {
             placeholderHtml.replace('class="', 'style="display:none" class="');
     }
 
-    // Item thumbnail. Starts as portrait (40×60); on load, if the image is
+    // Item thumbnail. Starts as portrait (40×60). On load, if the image is
     // landscape (width > height), it swaps to the landscape class (106×60).
     shared.renderItemThumb = function (itemId, serverKey) {
         return renderProxyThumb(itemId, false,
@@ -119,10 +119,14 @@ export function createServerSyncShared(view) {
     };
 
     // The configured servers in priority order, and the mappings across the ones that scan.
-    // Rows carry a ServerKey; a row with none belongs to the first scan server.
+    // Rows carry a ServerKey. A row with none belongs to the first scan server.
+    // A server with no Mode is a Pull server, matching the server side default. The mode arrives as
+    // the enum name or, from older writers, as its number, so both spellings of Pull and Sync count.
     shared.scanServers = function (config) {
         return ((config && config.Servers) || []).filter(function (s) {
-            return s.IsEnabled !== false && s.Url && s.ApiKey && (s.Mode === 'Pull' || s.Mode === 'Sync' || s.Mode === 0 || s.Mode === 2);
+            if (!s || s.IsEnabled === false || !s.Url || !s.ApiKey) return false;
+            var mode = s.Mode === undefined || s.Mode === null || s.Mode === '' ? 'Pull' : s.Mode;
+            return mode === 'Pull' || mode === 'Sync' || mode === 0 || mode === 2;
         });
     };
 
@@ -154,6 +158,71 @@ export function createServerSyncShared(view) {
 
     shared.serverNameFor = function (config, serverKey) {
         return shared.serverDisplayName(shared.serverFor(config, serverKey));
+    };
+
+    // The body of a request that names one configured server, for the endpoints that talk to it. The
+    // server resolves a kept key sentinel against the stored entry with the same key.
+    shared.requestFor = function (server, apiKeyOverride) {
+        return {
+            ServerUrl: server.Url,
+            ApiKey: apiKeyOverride || (server.ApiKey ? server.ApiKey : ''),
+            ServerKey: server.Key,
+            AllowPrivateNetwork: server.AllowPrivateNetwork !== false,
+            AuthenticatedUserId: server.AuthenticatedUserId || null
+        };
+    };
+
+    shared.setValue = function (id, value) {
+        var el = shared.getEl(id);
+        if (el) el.value = value;
+    };
+
+    shared.getValue = function (id, fallback) {
+        var el = shared.getEl(id);
+        return el ? el.value : (fallback || '');
+    };
+
+    shared.getIntValue = function (id, fallback) {
+        var v = parseInt(shared.getValue(id, ''), 10);
+        return isNaN(v) ? fallback : v;
+    };
+
+    // Section saves re-fetch the config and apply only that section's fields. Posting a page load
+    // snapshot whole would overwrite values other writers changed since, such as the timestamps and
+    // failure records the tasks write, or the sections of the other dashboard page.
+    // Resolves with the saved config once the save landed and with null when it did not. The caller
+    // keeps its own copy of the config and updates it only from a save the server really kept.
+    shared.saveSection = function (mutator, successMessage, failureMessage) {
+        var pending = null;
+        return shared.getConfig().then(function (config) {
+            mutator(config);
+            pending = config;
+            return shared.saveConfig(config);
+        }).then(function () {
+            Dashboard.alert(successMessage);
+            return pending;
+        }, function () {
+            Dashboard.alert(failureMessage);
+            return null;
+        });
+    };
+
+    // The helpers the Servers and Settings pages call by bare name, bound to this shared object so a
+    // page can take the ones it uses in one destructuring assignment once the module has loaded.
+    shared.pageHelpers = function () {
+        return {
+            escapeHtml: shared.escapeHtml.bind(shared),
+            apiRequest: shared.apiRequest.bind(shared),
+            setVisible: shared.setVisible.bind(shared),
+            bindClick: shared.bindClick.bind(shared),
+            getEl: shared.getEl.bind(shared),
+            setChecked: shared.setChecked.bind(shared),
+            getChecked: shared.getChecked.bind(shared),
+            setValue: shared.setValue,
+            getValue: shared.getValue,
+            getIntValue: shared.getIntValue,
+            requestFor: shared.requestFor
+        };
     };
 
     shared.fetchLocalServerName = function () {

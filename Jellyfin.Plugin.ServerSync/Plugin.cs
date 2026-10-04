@@ -34,14 +34,12 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     {
         _logger = logger;
 
-        // Same key directory and purpose as the DI-registered protector, so
-        // both resolve the same key ring (file-based, safe to share).
-        _secrets = new Lazy<SecretProtector>(() =>
-        {
-            var keyDirectory = System.IO.Path.Combine(applicationPaths.PluginConfigurationsPath, "Jellyfin.Plugin.ServerSync.Keys");
-            var provider = Services.Configuration.StableSecretProtection.Build(keyDirectory, logger);
-            return new SecretProtector("Jellyfin.Plugin.ServerSync.Secrets.v1", logger, provider);
-        });
+        // Built by the same factory as the DI-registered protector, so both resolve the same key ring
+        // (file based, safe to share).
+        _secrets = new Lazy<SecretProtector>(() => Services.Configuration.StableSecretProtection.CreateProtector(applicationPaths, logger));
+
+        // The disk space checks are static and called from places with no logger of their own.
+        Services.DiskSpaceService.Logger = logger;
 
         // One-time upgrade: a pre-encryption config holds the key in
         // plaintext, and the core config endpoint returns it verbatim on
@@ -84,7 +82,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to prepare the stored server list at startup; it will be fixed on the next save");
+            _logger.LogWarning(ex, "Failed to prepare the stored server list at startup. It will be fixed on the next save");
         }
 
         _logger.LogInformation("Server Sync plugin initialized");

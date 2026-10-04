@@ -17,7 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Tests.ApiIntegration;
 /// <summary>
 /// Read-only integration tests that exercise every <see cref="SourceServerClient"/>
 /// GET path against a live Jellyfin server. Skipped unless
-/// SERVERSYNC_TEST_SERVER_URL and SERVERSYNC_TEST_API_KEY are set — see
+/// SERVERSYNC_TEST_SERVER_URL and SERVERSYNC_TEST_API_KEY are set, see
 /// <see cref="ApiFactAttribute"/>. These tests never write to the server.
 /// </summary>
 [Collection("SourceServerApi")]
@@ -50,7 +50,7 @@ public class SourceServerClientApiTests
     public async Task TestConnection_WithInvalidKey_Fails()
     {
         // Regression: the connection test must NOT fall back to the anonymous
-        // /System/Info/Public endpoint on a 401 — a bad key must fail loudly.
+        // /System/Info/Public endpoint on a 401, a bad key must fail loudly.
         using var badClient = new SourceServerClient(
             NullLogger<SourceServerClient>.Instance,
             _fx.HttpClient,
@@ -180,7 +180,7 @@ public class SourceServerClientApiTests
     {
         Assert.NotEmpty(_fx.SampleItems);
 
-        var details = await _fx.Client.GetItemDetailsAsync(_fx.SampleItems[0].Id!.Value);
+        var details = await _fx.Client.FindItemDetailsAsync(_fx.SampleItems[0].Id!.Value);
 
         Assert.NotNull(details);
         Assert.Equal(_fx.SampleItems[0].Id, details!.Id);
@@ -188,7 +188,7 @@ public class SourceServerClientApiTests
     }
 
     // =====================================================================
-    // Persons — the client must return the complete /Persons catalog in one
+    // Persons, the client must return the complete /Persons catalog in one
     // call: no duplicates, nothing missing versus the raw endpoint. /Persons
     // (not /Items?recursive) is load-bearing here: recursive Items queries
     // scope to the requesting user's libraries and return an empty 200 for
@@ -252,7 +252,7 @@ public class SourceServerClientApiTests
 
         if (hash == null)
         {
-            // No profile image (or fetch failed) — both halves must agree.
+            // No profile image (or fetch failed), both halves must agree.
             Assert.Null(size);
         }
         else
@@ -286,7 +286,7 @@ public class SourceServerClientApiTests
         Assert.NotEmpty(_fx.Users);
         Assert.NotNull(_fx.LibraryWithItems);
 
-        // Must complete without throwing; an empty set is a legitimate result,
+        // Must complete without throwing. An empty set is a legitimate result,
         // a throw means the source gave no real answer.
         var ids = await _fx.Client.GetUserPlayedItemIdsAsync(_fx.Users[0].Id!.Value, _fx.LibraryWithItemsId);
 
@@ -295,7 +295,7 @@ public class SourceServerClientApiTests
     }
 
     // =====================================================================
-    // Downloads (Content sync paths) — read-only: streams are read and
+    // Downloads (Content sync paths), read-only: streams are read and
     // discarded, nothing is written to the server.
     // =====================================================================
 
@@ -305,8 +305,8 @@ public class SourceServerClientApiTests
         Assert.NotEmpty(_fx.SampleItems);
 
         // The server may reference files that are currently missing on its
-        // disk (unmounted volume, moved media) — that's a server-state 404,
-        // not an API regression. Try several items; any non-404 failure or
+        // disk (unmounted volume, moved media), that's a server-state 404,
+        // not an API regression. Try several items. Any non-404 failure or
         // an all-items-missing pass is reported.
         var attempts = 0;
         foreach (var item in _fx.SampleItems.Take(10))
@@ -373,7 +373,7 @@ public class SourceServerClientApiTests
             var bytes = ms.ToArray();
             Assert.True(bytes.Length > 0, $"Companion {companion.FileName} downloaded 0 bytes");
 
-            // EBML (mkv/webm) magic: 1A 45 DF A3 — the signature of the old
+            // EBML (mkv/webm) magic: 1A 45 DF A3, the signature of the old
             // corruption where video bytes were written into .srt files.
             var isEbml = bytes.Length >= 4 && bytes[0] == 0x1A && bytes[1] == 0x45 && bytes[2] == 0xDF && bytes[3] == 0xA3;
             Assert.False(isEbml, $"Companion {companion.FileName} contains Matroska video bytes — the corruption regression is back");

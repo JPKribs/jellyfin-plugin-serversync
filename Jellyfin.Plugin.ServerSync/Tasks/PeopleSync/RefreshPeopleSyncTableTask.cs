@@ -12,10 +12,8 @@ using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 using SdkBaseItemDto = Jellyfin.Sdk.Generated.Models.BaseItemDto;
-using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
@@ -38,7 +36,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
     /// Per-run cache of local Person items keyed by Name. Built by
     /// <see cref="GetListAsync"/>, consumed by <see cref="BuildRecordAsync"/>
     /// so the build phase doesn't re-hit Jellyfin's library SQLite for every
-    /// item — that contention was producing
+    /// item, that contention was producing
     /// <c>SQLite Error 5: 'database is locked'</c> under parallelism.
     /// </summary>
     private Dictionary<string, BaseItem>? _localPersonsByName;
@@ -111,7 +109,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
     /// <inheritdoc />
     protected override string ModuleMutexKey => "People";
 
-    // User-configurable (Configuration > Processing) — shared with the
+    // User-configurable (Configuration > Processing), shared with the
     // Metadata refresh. <c>BuildRecordAsync</c> is HTTP-free in steady state
     // (source data comes from the bulk <c>/Persons</c> fetch, image data
     // from <c>BaseItemDto.ImageTags</c>), so this dial is effectively "how
@@ -136,7 +134,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
     // Bulk fetch + in-memory join: enumerate local Person items, then pull
     // the full source Person catalog in one /Persons call and intersect by
     // name in memory. /Persons is the only route that works for every token
-    // type — /Items?recursive=true scopes to the requesting user's libraries
+    // type, /Items?recursive=true scopes to the requesting user's libraries
     // and returns an empty 200 for non-admin tokens because Person items
     // live outside library folders. The per-name fan-out this replaced cost
     // one HTTP round-trip per local person (130k+ requests on a real
@@ -152,7 +150,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         // Step 1: enumerate local Person items once per run and cache them for
         // BuildRecordAsync. Doing this once up front (rather than per-item)
         // avoids hammering Jellyfin's library SQLite during the parallel
-        // build phase — that was producing "database is locked" errors.
+        // build phase, that was producing "database is locked" errors.
         if (_localPersonsByName == null)
         {
             var localPersons = _libraryManager.GetItemList(new InternalItemsQuery
@@ -171,28 +169,28 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
 
             _localPersonsByName = byName;
             Logger.LogInformation(
-                "{Task}: enumerated {Count} local persons; bulk-fetching source persons",
+                "{Task}: enumerated {Count} local persons. Bulk-fetching source persons",
                 Name,
                 _localPersonsByName.Count);
         }
 
         // Local enumeration is the long pole of this phase on large
         // libraries (single blocking GetItemList call), so it owns the
-        // front of the fetch band; the /Persons download owns the rest.
+        // front of the fetch band. The /Persons download owns the rest.
         progress.Report(35);
 
         if (_localPersonsByName.Count == 0)
         {
             // Mirror of the zero-source guard below. Jellyfin rebuilds the
             // people table during a library rescan, so a momentary empty read
-            // is normal — and with an empty work list every tracked row falls
+            // is normal, and with an empty work list every tracked row falls
             // out of the seen set and looks removed. The table-wide circuit
-            // breaker only catches this above 50 rows; below that the whole
+            // breaker only catches this above 50 rows. Below that the whole
             // table would go. Refuse to prune instead.
             if (Manager.Count() > 0)
             {
                 MarkSourceUnavailable(
-                    "no Person items found on this server while tracking rows exist — local catalog is likely mid rescan, so pruning is skipped");
+                    "no Person items found on this server while tracking rows exist, local catalog is likely mid rescan, so pruning is skipped");
             }
 
             return Array.Empty<PersonWork>();
@@ -206,7 +204,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         {
             sourcePersons = await source.Client.GetAllPersonsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -215,25 +213,25 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             // Source returned an error (or no real answer). Skip pruning this run
             // so persons that still exist aren't deleted, and enumerate nothing.
             MarkSourceUnavailable($"server '{source.Name}' unavailable bulk-fetching persons");
-            Logger.LogWarning(ex, "Failed to bulk-fetch persons from {Server}; skipping prune this run", source.Name);
+            Logger.LogWarning(ex, "Failed to bulk-fetch persons from {Server}. Skipping prune this run", source.Name);
             return Array.Empty<PersonWork>();
         }
 
         if (sourcePersons.Count == 0)
         {
-            // A server whose library overlaps ours never has zero persons —
+            // A server whose library overlaps ours never has zero persons , 
             // an empty 200 means the source didn't give a real answer (mid-
             // startup, migrating, or an endpoint/auth regression). Treating
             // it as truth is what wiped the tracking table on 10.11.64.0.
             MarkSourceUnavailable(
-                $"server '{source.Name}' returned 0 persons while {_localPersonsByName.Count} exist locally — treating as an unreliable answer");
+                $"server '{source.Name}' returned 0 persons while {_localPersonsByName.Count} exist locally, treating as an unreliable answer");
             return Array.Empty<PersonWork>();
         }
 
         progress.Report(85);
 
         // Step 3: intersect by name in memory. Source duplicates (same name
-        // appearing twice on source) keep the first occurrence — the local
+        // appearing twice on source) keep the first occurrence, the local
         // dictionary uses the same first-wins rule above.
         var matched = new List<PersonWork>(_localPersonsByName.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -287,7 +285,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         record.LocalPersonId = localPerson.Id.ToString("N", CultureInfo.InvariantCulture);
         record.ServerKey = work.Source.Key;
 
-        // Build metadata blobs for both sides; SyncableValue.RecomputeSourceHash
+        // Build metadata blobs for both sides. SyncableValue.RecomputeSourceHash
         // ensures the SourceHash field is populated for the Compare fast-path.
         record.Metadata.Source = PeopleSyncMergeService.BuildSourceMetadata(source);
         record.Metadata.Local = PeopleSyncMergeService.BuildLocalMetadata(localPerson);
@@ -299,12 +297,12 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             var (sourceImg, localImg) = PeopleSyncMergeService.PopulateImageData(source, localPerson);
 
             // Size the source-side manifest: carry sizes forward from the
-            // prior manifest for unchanged tags (no HTTP — the steady-state
+            // prior manifest for unchanged tags (no HTTP, the steady-state
             // path), falling back to live /Items/{id}/Images enrichment only
             // when a tag changed or a size is missing. PopulateImageData
             // builds the source side tag-only (Size=0) from
-            // BaseItemDto.ImageTags; without sizing, the comparator's
-            // tag-only-vs-sized fallback fires on every row, every refresh —
+            // BaseItemDto.ImageTags. Without sizing, the comparator's
+            // tag-only-vs-sized fallback fires on every row, every refresh , 
             // every row queues and re-downloads images that already match.
             if (!string.IsNullOrEmpty(record.SourcePersonId)
                 && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
@@ -321,13 +319,13 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
                         config.DeepImageVerification,
                         cancellationToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     throw;
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogDebug(ex, "Source image enrichment failed for {PersonName}; comparator will fall back to tag-only", source.Name);
+                    Logger.LogDebug(ex, "Source image enrichment failed for {PersonName}. Comparator will fall back to tag-only", source.Name);
                     sourceImg = ImageManifestEnricher.CarryForwardSizes(sourceImg, record.Images.Source);
                 }
             }
@@ -337,7 +335,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         }
         else
         {
-            // Clear image fields if image sync is disabled — the Compare phase
+            // Clear image fields if image sync is disabled, the Compare phase
             // then sees no Image-side changes regardless of what was stored.
             record.Images.Source = null;
             record.Images.Local = null;
@@ -365,13 +363,4 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         config.LastPeopleSyncTime = utcNow;
     }
 
-    /// <inheritdoc />
-    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
-    {
-        new TaskTriggerInfo
-        {
-            Type = MediaBrowser.Model.Tasks.TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(12).Ticks
-        }
-    };
 }

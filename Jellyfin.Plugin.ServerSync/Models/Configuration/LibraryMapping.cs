@@ -52,7 +52,7 @@ public class LibraryMapping
     /// <summary>
     /// Items selected for whitelist/blacklist filtering.
     /// Only used when <see cref="FilterMode"/> is Whitelist or Blacklist.
-    /// Each item's path is used for child matching — selecting a series filters all its episodes.
+    /// Each item's path is used for child matching, selecting a series filters all its episodes.
     /// </summary>
     public List<FilteredItem> FilteredItems { get; set; } = new();
 }

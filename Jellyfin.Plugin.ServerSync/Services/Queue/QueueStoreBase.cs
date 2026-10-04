@@ -1,7 +1,6 @@
 #pragma warning disable CA2100 // SQL is internal and parameterized.
 using System;
 using System.Data;
-using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
@@ -47,6 +46,19 @@ public abstract class QueueStoreBase
 
     /// <summary>Runs a write under the write lock.</summary>
     /// <param name="write">The write.</param>
+    /// <summary>Runs a write that returns a value, such as a count of deleted rows, under the write lock.</summary>
+    /// <typeparam name="T">The result type.</typeparam>
+    /// <param name="write">The write.</param>
+    /// <returns>Its result.</returns>
+    protected T Write<T>(Func<SqliteConnection, T> write)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+        lock (Database.WriteLock)
+        {
+            return write(Database.Connection);
+        }
+    }
+
     protected void Write(Action<SqliteConnection> write)
     {
         ArgumentNullException.ThrowIfNull(write);
@@ -59,13 +71,12 @@ public abstract class QueueStoreBase
     /// <summary>Formats a UTC time the way every table stores it.</summary>
     /// <param name="value">The time.</param>
     /// <returns>The ISO 8601 text.</returns>
-    protected static string Stamp(DateTime value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    protected static string Stamp(DateTime value) => Utilities.UtcTime.Format(value);
 
     /// <summary>Parses a stored time.</summary>
     /// <param name="value">The stored text.</param>
     /// <returns>The UTC time.</returns>
-    protected static DateTime Unstamp(string value)
-        => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+    protected static DateTime Unstamp(string value) => Utilities.UtcTime.Parse(value);
 
     /// <summary>Reads a nullable text column.</summary>
     /// <param name="reader">The reader.</param>

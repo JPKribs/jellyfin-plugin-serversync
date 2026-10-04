@@ -57,7 +57,7 @@ public partial class ConfigurationController
             client = _clientFactory.Create(new SourceServer
             {
                 Url = urlValidation.NormalizedUrl!,
-                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey),
+                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey, urlValidation.NormalizedUrl),
                 AllowPrivateNetwork = request.AllowPrivateNetwork
             });
         }
@@ -134,6 +134,7 @@ public partial class ConfigurationController
             request.Password,
             _configManager.LocalServerName,
             _configManager.PluginVersion,
+            request.AllowPrivateNetwork,
             cancellationToken).ConfigureAwait(false);
 
         if (!result.Success)
@@ -200,7 +201,7 @@ public partial class ConfigurationController
             using var client = _clientFactory.Create(new SourceServer
             {
                 Url = urlValidation.NormalizedUrl!,
-                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey),
+                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey, urlValidation.NormalizedUrl),
                 AllowPrivateNetwork = request.AllowPrivateNetwork
             });
 
@@ -223,7 +224,7 @@ public partial class ConfigurationController
         }
         catch (ArgumentException ex)
         {
-            // SSRF gate in the factory rejected the URL; surface the reason.
+            // SSRF gate in the factory rejected the URL. Surface the reason.
             return BadRequest(ex.Message);
         }
         catch (HttpRequestException ex)
@@ -262,7 +263,7 @@ public partial class ConfigurationController
             using var client = _clientFactory.Create(new SourceServer
             {
                 Url = urlValidation.NormalizedUrl!,
-                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey),
+                ApiKey = ResolveRequestApiKey(request.ApiKey, request.ServerKey, urlValidation.NormalizedUrl),
                 AllowPrivateNetwork = request.AllowPrivateNetwork
             });
 
@@ -283,7 +284,7 @@ public partial class ConfigurationController
         }
         catch (ArgumentException ex)
         {
-            // SSRF gate in the factory rejected the URL; surface the reason.
+            // SSRF gate in the factory rejected the URL. Surface the reason.
             return BadRequest(ex.Message);
         }
         catch (HttpRequestException ex)
@@ -323,7 +324,7 @@ public partial class ConfigurationController
             return BadRequest("Library ID is required");
         }
 
-        // Same clamps as every other list endpoint — an unclamped take pulls
+        // Same clamps as every other list endpoint, an unclamped take pulls
         // an entire source library into one response.
         startIndex = Math.Max(0, startIndex);
         limit = Math.Clamp(limit, 1, 200);
@@ -408,7 +409,7 @@ public partial class ConfigurationController
 
     /// <summary>
     /// Validates and normalizes a server URL. Classification is delegated to
-    /// <see cref="ConfigurationUtilities.ValidateServerUrlForSsrf"/> — the same
+    /// <see cref="ConfigurationUtilities.ValidateServerUrlForSsrf"/>, the same
     /// gate <see cref="ISourceServerClientFactory.Create"/> enforces. A second,
     /// weaker copy lived here and ignored
     /// <c>AllowSourceServerOnPrivateNetwork</c>, so a rejected URL passed this
@@ -432,7 +433,7 @@ public partial class ConfigurationController
             };
         }
 
-        // Guaranteed to parse — ValidateServerUrlForSsrf rejects anything that doesn't.
+        // Guaranteed to parse, ValidateServerUrlForSsrf rejects anything that doesn't.
         var uri = new Uri(url, UriKind.Absolute);
 
         var isLocalhost = uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
@@ -445,7 +446,7 @@ public partial class ConfigurationController
             normalizedUrl += $":{uri.Port}";
         }
 
-        // Keep a sub-path (reverse proxy serving Jellyfin at /jellyfin) —
+        // Keep a sub-path (reverse proxy serving Jellyfin at /jellyfin) , 
         // dropping it made such servers impossible to configure, with a
         // misleading "connection failed" as the only symptom.
         var path = uri.AbsolutePath.TrimEnd('/');

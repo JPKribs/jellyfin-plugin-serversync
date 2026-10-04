@@ -13,13 +13,13 @@ public sealed class PaginationRequest
     public int Page { get; init; } = 1;
 
     /// <summary>
-    /// Gets the page size. Capped per-implementation; managers may clamp
+    /// Gets the page size. Capped per-implementation. Managers may clamp
     /// excessive values to a reasonable upper bound.
     /// </summary>
     public int PageSize { get; init; } = 50;
 
     /// <summary>
-    /// Gets an optional status filter; null returns all statuses.
+    /// Gets an optional status filter. Null returns all statuses.
     /// </summary>
     public SyncStatus? StatusFilter { get; init; }
 
@@ -30,7 +30,7 @@ public sealed class PaginationRequest
     public string? SearchTerm { get; init; }
 
     /// <summary>
-    /// Gets the column to sort by; managers define their own valid set and
+    /// Gets the column to sort by. Managers define their own valid set and
     /// fall back to an internal default for unknown values.
     /// </summary>
     public string? SortColumn { get; init; }

@@ -24,13 +24,6 @@ public class PeopleSyncMergeServiceTests
         return dto;
     }
 
-    private static PeopleSyncItem MakeItem(string localPersonId = "loc-person-1") => new()
-    {
-        PersonName = "Test Person",
-        SourcePersonId = Guid.NewGuid().ToString("N"),
-        LocalPersonId = localPersonId
-    };
-
     /// <summary>
     /// BuildSourceMetadata returns valid JSON that deserialises back to an object.
     /// True: downstream comparators can parse the blob without throwing.
@@ -212,52 +205,5 @@ public class PeopleSyncMergeServiceTests
         var (src, _) = PeopleSyncMergeService.PopulateImageData(dto, null);
 
         Assert.Null(src);
-    }
-
-    /// <summary>
-    /// HasChangesToSync delegates to the record's HasChanges.
-    /// True: the parity helper matches the surface of the other merge services.
-    /// False: divergent behaviour between helper and record's HasChanges would confuse callers.
-    /// </summary>
-    [Fact]
-    public void HasChangesToSync_PassesThroughToItemHasChanges()
-    {
-        var item = MakeItem();
-
-        Assert.False(PeopleSyncMergeService.HasChangesToSync(item));
-
-        item.Metadata.UpdateSource("{\"a\":1}");
-        Assert.True(PeopleSyncMergeService.HasChangesToSync(item));
-    }
-
-    /// <summary>
-    /// Idempotent row returns "No changes".
-    /// True: synced rows show the canonical no-op message.
-    /// False: noisy summaries on idempotent rows mislead the operator.
-    /// </summary>
-    [Fact]
-    public void GetChangeSummary_NoChanges_ReturnsNoChanges()
-    {
-        var item = MakeItem();
-
-        Assert.Equal("No changes", PeopleSyncMergeService.GetChangeSummary(item));
-    }
-
-    /// <summary>
-    /// Summary lists each changed category by name.
-    /// True: operators see "Metadata, Images" rather than a generic "changes detected".
-    /// False: only the first category surfaces and others are silently swallowed.
-    /// </summary>
-    [Fact]
-    public void GetChangeSummary_ListsChangedCategories()
-    {
-        var item = MakeItem();
-        item.Metadata.UpdateSource("{\"a\":1}");
-        item.Images.UpdateSource("{\"Primary\":[{\"Size\":100,\"Tag\":\"t\"}]}");
-
-        var summary = PeopleSyncMergeService.GetChangeSummary(item);
-
-        Assert.Contains("Metadata", summary);
-        Assert.Contains("Images", summary);
     }
 }

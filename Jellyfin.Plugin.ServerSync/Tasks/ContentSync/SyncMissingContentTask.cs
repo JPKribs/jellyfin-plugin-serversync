@@ -12,9 +12,7 @@ using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
@@ -23,7 +21,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 /// (bounded by <see cref="PluginConfiguration.MaxConcurrentDownloads"/>),
 /// processes pending deletions, and triggers a library refresh on
 /// completion. Pre-flight (disk space, connection, circuit breaker) lives
-/// in <see cref="BeforeRunAsync"/>; post-flight in <see cref="FinalizeAsync"/>.
+/// in <see cref="BeforeRunAsync"/>. Post-flight in <see cref="FinalizeAsync"/>.
 /// </summary>
 public class SyncMissingContentTask
     : SyncQueueTaskBase<SyncItem, string>
@@ -31,8 +29,9 @@ public class SyncMissingContentTask
     private const int DefaultMaxRetries = 3;
 
     /// <summary>
-    /// Circuit breakers keyed by source server URL — state survives across
-    /// runs but resets when the URL changes.
+    /// Circuit breakers keyed by source server URL, one per configured scan
+    /// server. State survives across runs. A breaker is dropped once its URL
+    /// is no longer configured, so a changed URL starts with a fresh one.
     /// </summary>
     private static readonly Dictionary<string, CircuitBreaker> _circuitBreakers = new();
     private static readonly object _circuitBreakerLock = new();
@@ -120,7 +119,7 @@ public class SyncMissingContentTask
             var message = diskInfo != null
                 ? DiskSpaceService.FormatInsufficientSpaceMessage(insufficientPath!, diskInfo.FreeBytes, config.MinimumFreeDiskSpaceGb)
                 : $"Insufficient disk space on {insufficientPath}";
-            Logger.LogError("Sync skipped: {Message}", message);
+            FailPreflight(message);
             return false;
         }
 
@@ -216,7 +215,7 @@ public class SyncMissingContentTask
     }
 
     // Weight items by file size so the run's percentage tracks bytes moved,
-    // not item count — one 50 GB movie plus nine small episodes used to jump
+    // not item count, one 50 GB movie plus nine small episodes used to jump
     // 10% per episode and then freeze for the movie's entire download.
     /// <inheritdoc />
     protected override long GetApplyWeight(SyncItem record)
@@ -236,7 +235,7 @@ public class SyncMissingContentTask
 
         if (_tempPath == null)
         {
-            throw new InvalidOperationException("BeforeRunAsync did not complete; aborting apply.");
+            throw new InvalidOperationException("BeforeRunAsync did not complete. Aborting apply.");
         }
 
         // The breaker may open during the run. A row skipped for that reason is not a failed attempt.
@@ -284,7 +283,7 @@ public class SyncMissingContentTask
 
         if (!ActiveDownloadTracker.TryStartDownload(record.SourceItemId, tempFilePath))
         {
-            // Already in flight on this run — let the base treat it as success
+            // Already in flight on this run, let the base treat it as success
             // so the row isn't re-flagged as Errored. The other thread will
             // persist the actual outcome.
             Logger.LogDebug("Item {SourceItemId} is already being downloaded, skipping", record.SourceItemId);
@@ -311,7 +310,7 @@ public class SyncMissingContentTask
                     fileName, fileSize, result.ErrorMessage, record.SourcePath);
                 // Include filename + size + source path in the message so the
                 // Reason field surfaces actionable context. Bare "Connection
-                // timeout" is useless when 50 items errored — user can't tell
+                // timeout" is useless when 50 items errored, user can't tell
                 // which file or whether the issue is network or filesystem.
                 throw new InvalidOperationException(
                     $"Download failed for {fileName} ({fileSize}): {result.ErrorMessage ?? "unknown error"} (source: {record.SourcePath ?? record.SourceItemId})");
@@ -323,10 +322,10 @@ public class SyncMissingContentTask
         }
     }
 
-    // No-op — Content has no SyncableValue fields and the base's
-    // post-apply Status/LastSyncTime/Reason write covers everything we
-    // need. <see cref="ApplyAsync"/> already populated CompanionFiles on
-    // the record.
+    // Content has no SyncableValue fields, so there is nothing to mark synced.
+    // The base's post-apply Status, LastSyncTime, and Reason write covers the
+    // rest, and <see cref="ApplyAsync"/> already populated CompanionFiles.
+    // The retry count resets so a later failure gets the full allowance again.
     /// <inheritdoc />
     protected override void OnApplySucceeded(SyncItem record)
     {
@@ -356,12 +355,12 @@ public class SyncMissingContentTask
         var config = ConfigManager.Configuration;
 
         // Progress allocation within finalize:
-        //   0– 10 %  pending-deletion processing
-        //  10– 95 %  library refresh (the slow part)
-        //  95–100 %  config save + cleanup
+        //   0 to 10 %  pending-deletion processing
+        //  10 to 95 %  library refresh (the slow part)
+        //  95 to 100 %  config save + cleanup
         progress.Report(0);
 
-        // Process pending-deletion rows (separate from Queued items — these
+        // Process pending-deletion rows (separate from Queued items, these
         // were soft-deleted by the Refresh task). Always run so the user's
         // "approve deletion" action gets picked up even when nothing was
         // queued.
@@ -405,15 +404,6 @@ public class SyncMissingContentTask
         config.LastSyncEndTime = utcNow;
     }
 
-    /// <inheritdoc />
-    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
-    {
-        new TaskTriggerInfo
-        {
-            Type = TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(12).Ticks
-        }
-    };
 
     private ContentSyncTableManager TypedManager => (ContentSyncTableManager)Manager;
 
@@ -426,9 +416,17 @@ public class SyncMissingContentTask
                 return existing;
             }
 
-            // Evict stale entries for old server URLs to prevent unbounded growth.
+            // Evict entries for URLs no server is configured with any more, to
+            // prevent unbounded growth. Every current server keeps its breaker,
+            // or with two servers each lookup would evict the other's state.
+            var current = new HashSet<string>(
+                ConfigManager.Configuration.GetPullServers().Select(s => s.Url),
+                StringComparer.OrdinalIgnoreCase)
+            {
+                sourceUrl
+            };
             var stale = _circuitBreakers.Keys
-                .Where(k => !string.Equals(k, sourceUrl, StringComparison.OrdinalIgnoreCase))
+                .Where(k => !current.Contains(k))
                 .ToList();
             foreach (var key in stale)
             {

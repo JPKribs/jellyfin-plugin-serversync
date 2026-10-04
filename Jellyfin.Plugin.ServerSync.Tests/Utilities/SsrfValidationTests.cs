@@ -58,4 +58,20 @@ public class SsrfValidationTests
     {
         Assert.NotNull(ConfigurationUtilities.ValidateServerUrlForSsrf("http://169.254.169.254/latest", allowPrivateNetwork: true));
     }
+
+    /// <summary>
+    /// The IPv6 unspecified address and multicast groups are refused even when private networks are
+    /// allowed.
+    /// True: "[::]" cannot reach this host the way 0.0.0.0 could, and no entry points at a group.
+    /// False: "[::]" slips through as an ordinary IPv6 address.
+    /// </summary>
+    [Theory]
+    [InlineData("http://[::]:8096")]
+    [InlineData("http://[ff02::1]:8096")]
+    [InlineData("http://224.0.0.1:8096")]
+    [InlineData("http://239.255.255.250:8096")]
+    public void UnspecifiedAndMulticast_AreAlwaysRefused(string url)
+    {
+        Assert.NotNull(ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork: true));
+    }
 }

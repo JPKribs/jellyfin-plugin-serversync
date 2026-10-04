@@ -43,7 +43,26 @@ public static class VersionDecider
             return VersionDecision.Apply;
         }
 
+        // Both sides claim the same edit but hold different values: one copy drifted, through provider
+        // work, a field the apply cannot write, or an image that compares differently. Keeping would
+        // leave each side sending the same version to the other forever, so the copy arriving wins.
+        if (SameVersion(local, incoming))
+        {
+            return VersionDecision.Apply;
+        }
+
         return IsNewer(incoming, local) ? VersionDecision.Apply : VersionDecision.Keep;
+    }
+
+    /// <summary>Whether two versions name the same edit: the same server at the same instant.</summary>
+    /// <param name="a">One version.</param>
+    /// <param name="b">The other.</param>
+    /// <returns>True when they are the same edit.</returns>
+    public static bool SameVersion(ObjectVersion a, ObjectVersion b)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+        return Utilities.UtcTime.AsUtc(a.Timestamp) == Utilities.UtcTime.AsUtc(b.Timestamp) && string.Equals(a.ServerId, b.ServerId, StringComparison.Ordinal);
     }
 
     /// <summary>Whether one version is newer than another, with the server id breaking ties.</summary>
@@ -55,7 +74,7 @@ public static class VersionDecider
         ArgumentNullException.ThrowIfNull(candidate);
         ArgumentNullException.ThrowIfNull(other);
 
-        var byTime = candidate.Timestamp.CompareTo(other.Timestamp);
+        var byTime = Utilities.UtcTime.AsUtc(candidate.Timestamp).CompareTo(Utilities.UtcTime.AsUtc(other.Timestamp));
         if (byTime != 0)
         {
             return byTime > 0;

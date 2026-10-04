@@ -69,7 +69,7 @@ public static class PathUtilities
     /// <summary>
     /// True when <paramref name="path"/> lies under <paramref name="root"/> on a
     /// path-segment boundary. A bare <c>StartsWith</c> matched sibling roots that
-    /// merely share a name prefix — with a root of <c>/media/Movies</c>, a path of
+    /// merely share a name prefix, with a root of <c>/media/Movies</c>, a path of
     /// <c>/media/Movies 4K/film.mkv</c> matched and translated to
     /// <c>&lt;LocalRoot&gt;/ 4K/film.mkv</c>, silently writing the file to the wrong
     /// folder. An empty root matches everything, preserving the "no source root

@@ -14,7 +14,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
 /// Per-table manager for <see cref="MetadataSyncItem"/>. Natural key is the
-/// composite (SourceLibraryId, SourceItemId) — one row per source-side item
+/// composite (SourceLibraryId, SourceItemId), one row per source-side item
 /// with four parallel <see cref="SyncableValue{T}"/> categories
 /// (Metadata, Images, People, Studios), each with its own
 /// Source/SyncedHash columns to drive the per-category short-circuit on
@@ -38,10 +38,23 @@ public sealed class MetadataSyncTableManager
         return provider.Database;
     }
 
+    // Queuing a row clears every category's synced hash, so the next Sync run applies each category
+    // again instead of skipping the ones it last recorded as applied.
+    private static readonly string[] _queueClearsSyncedHashes =
+    {
+        "SyncedMetadataHash = NULL",
+        "SyncedImagesHash = NULL",
+        "SyncedPeopleHash = NULL",
+        "SyncedStudiosHash = NULL"
+    };
+
     /// <inheritdoc />
     protected override string TableName => "MetadataSyncItems";
 
-    // Sentinel — UpdateStatusByKey is overridden directly to handle the
+    /// <inheritdoc />
+    protected override IReadOnlyList<string> OperatorQueueClauses => _queueClearsSyncedHashes;
+
+    // Sentinel, UpdateStatusByKey is overridden directly to handle the
     // composite key.
     /// <inheritdoc />
     protected override string KeyColumn => "SourceItemId";
@@ -83,7 +96,7 @@ public sealed class MetadataSyncTableManager
             item.IsFolder = reader.GetInt32(isFolderOrd) != 0;
         }
 
-        // Bridge property setters recompute the source hash; bypass them by
+        // Bridge property setters recompute the source hash. Bypass them by
         // setting the underlying SyncableValue fields so the stored hash is
         // preserved as-written.
         item.Metadata.Source = ReadNullableString(reader, "SourceMetadataValue");
@@ -251,24 +264,11 @@ public sealed class MetadataSyncTableManager
     }
 
     /// <summary>
-    /// Returns all metadata rows for a source library.
-    /// </summary>
-    public IList<MetadataSyncItem> GetByLibrary(string sourceLibraryId) => ExecuteRead(
-        conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT * FROM MetadataSyncItems WHERE SourceLibraryId = @lib";
-            cmd.Parameters.AddWithValue("@lib", sourceLibraryId);
-            return ReadAll(cmd);
-        },
-        fallback: (IList<MetadataSyncItem>)Array.Empty<MetadataSyncItem>());
-
-    /// <summary>
     /// Searches metadata items with optional filters. Loads the full record
     /// including the <c>Source*Value</c> / <c>Local*Value</c> JSON blobs so the
     /// per-category change flags deep-compare to the same result the modal and
     /// the Compare phase produce. The DTO mapper drops the blobs from the
-    /// response (they aren't shipped to the UI); only the flags are.
+    /// response (they aren't shipped to the UI). Only the flags are.
     /// </summary>
     public (IList<MetadataSyncItem> Items, int TotalCount) SearchMetadataSyncItemsPaginated(
         string? searchTerm = null,
@@ -307,11 +307,11 @@ public sealed class MetadataSyncTableManager
             using var dataCmd = conn.CreateCommand();
             // SELECT * like every other query that feeds MapFromReader. This
             // was a hand-written column list, and when RetryCount was added
-            // to the schema the list wasn't updated — GetOrdinal then threw
+            // to the schema the list wasn't updated, GetOrdinal then threw
             // ArgumentOutOfRangeException on every row, Jellyfin's exception
             // middleware turned that into a 400, and the Metadata tab
             // rendered empty. A projection here can never drift from the
-            // mapper; the mapper defines what it needs.
+            // mapper. The mapper defines what it needs.
             dataCmd.CommandText = $@"
                 SELECT * FROM MetadataSyncItems
                 {whereClause}
@@ -344,49 +344,15 @@ public sealed class MetadataSyncTableManager
     }
 
     /// <summary>
-    /// Returns all non-empty source-people JSON values across the table.
-    /// Lightweight column-only query used for cross-item person-name
-    /// aggregation (avoids loading full records). Skips empty arrays.
-    /// </summary>
-    public IList<string> GetAllSourcePeopleValues() => ExecuteRead(
-        conn =>
-        {
-            var values = new List<string>();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT SourcePeopleValue FROM MetadataSyncItems WHERE SourcePeopleValue IS NOT NULL AND SourcePeopleValue != '[]'";
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                var v = reader.GetString(0);
-                if (!string.IsNullOrEmpty(v))
-                {
-                    values.Add(v);
-                }
-            }
-
-            return (IList<string>)values;
-        },
-        fallback: (IList<string>)Array.Empty<string>());
-
-    /// <summary>
     /// Updates the status of many items by primary-key Id in one transaction.
     /// When transitioning to <see cref="SyncStatus.Queued"/>, also clears all
     /// four <c>Synced*Hash</c> columns so the next Sync run is forced to
-    /// re-apply each category — preserves the historical "re-queue forces
-    /// re-sync" semantic that the partial's bespoke method had for images.
-    /// </summary>
-    public int BatchUpdateStatusByIds(IEnumerable<long> ids, SyncStatus status, string? reason = null)
-    {
-        var result = BatchUpdateStatusByIdsWithDetails(ids, status, reason);
-        return result.Updated;
-    }
-
-    /// <summary>
-    /// Same as <see cref="BatchUpdateStatusByIds"/> but reports the
+    /// re-apply each category.
+    /// Reports the
     /// per-call breakdown: rows updated, plus the input IDs that didn't
     /// match (typically: row was deleted between the user's click and the
     /// request landing). Bulk endpoints call this so the UI can surface
-    /// "5 of 10 items updated; 5 not found" instead of silently swallowing
+    /// "5 of 10 items updated. 5 not found" instead of silently swallowing
     /// the partial failure.
     /// </summary>
     public (int Updated, IReadOnlyList<long> NotFoundIds) BatchUpdateStatusByIdsWithDetails(
@@ -405,10 +371,7 @@ public sealed class MetadataSyncTableManager
             var clauses = BuildStatusTransitionClauses(status);
             if (status == SyncStatus.Queued)
             {
-                clauses.Add("SyncedMetadataHash = NULL");
-                clauses.Add("SyncedImagesHash = NULL");
-                clauses.Add("SyncedPeopleHash = NULL");
-                clauses.Add("SyncedStudiosHash = NULL");
+                clauses.AddRange(OperatorQueueClauses);
             }
 
             cmd.CommandText = $"UPDATE MetadataSyncItems SET {string.Join(", ", clauses)} WHERE Id = @Id";
@@ -432,7 +395,6 @@ public sealed class MetadataSyncTableManager
         });
         return (count, notFound);
     }
-
 
     private static void BindFilters(SqliteCommand cmd, string? searchTerm, SyncStatus? status, string? sourceLibraryId)
     {

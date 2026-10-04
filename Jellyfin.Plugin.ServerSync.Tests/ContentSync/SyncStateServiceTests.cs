@@ -12,8 +12,8 @@ namespace Jellyfin.Plugin.ServerSync.Tests.ContentSync;
 /// <summary>
 /// The Content deletion state machine, run against a REAL SQLite-backed
 /// <see cref="ContentSyncTableManager"/> (temp-file database) so the Upsert
-/// SQL — including its Ignored CASE guard — is exercised, not mocked.
-/// These transitions gate actual file deletion; a wrong transition here is
+/// SQL, including its Ignored CASE guard, is exercised, not mocked.
+/// These transitions gate actual file deletion. A wrong transition here is
 /// user data loss, so every branch gets its own test.
 /// </summary>
 public sealed class SyncStateServiceTests : IDisposable
@@ -64,7 +64,7 @@ public sealed class SyncStateServiceTests : IDisposable
     };
 
     // -----------------------------------------------------------------------
-    // ProcessMissingItem — the prune's per-row action
+    // ProcessMissingItem, the prune's per-row action
     // -----------------------------------------------------------------------
 
     /// <summary>
@@ -85,7 +85,7 @@ public sealed class SyncStateServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Rows already awaiting deletion approval must not be re-processed —
+    /// Rows already awaiting deletion approval must not be re-processed , 
     /// re-marking them would reset StatusDate and could double-count in
     /// the breaker's stale math.
     /// </summary>
@@ -106,7 +106,7 @@ public sealed class SyncStateServiceTests : IDisposable
     /// remove its file, so a second refresh must leave it alone.
     /// True: the scheduled deletion survives until Sync executes it.
     /// False: the row falls through to the not-Synced branch below and its
-    /// tracking row is deleted while the file stays on disk — the file is then
+    /// tracking row is deleted while the file stays on disk, the file is then
     /// orphaned permanently, with nothing left pointing at it. Reachable any
     /// time a refresh lands between the mark and the sync (aborted pre-flight,
     /// cancelled run, or the default 10h/12h trigger cadence drifting).
@@ -129,7 +129,7 @@ public sealed class SyncStateServiceTests : IDisposable
     }
 
     /// <summary>
-    /// A non-Synced row (never downloaded) loses only its tracking row — no
+    /// A non-Synced row (never downloaded) loses only its tracking row, no
     /// file is scheduled for deletion.
     /// </summary>
     [Fact]
@@ -166,7 +166,7 @@ public sealed class SyncStateServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Auto-delete mode marks Deleting — the only path that feeds
+    /// Auto-delete mode marks Deleting, the only path that feeds
     /// FileDeletionService.ProcessPendingDeletions.
     /// </summary>
     [Fact]
@@ -199,8 +199,89 @@ public sealed class SyncStateServiceTests : IDisposable
         Assert.Null(_manager.GetByKey("a"));
     }
 
+    /// <summary>
+    /// A row that is not Synced but still has a file on disk keeps its row when the item leaves the
+    /// source, and the file waits for approval even in auto delete mode.
+    /// True: an earlier download whose replacement failed is not left on disk with nothing tracking it.
+    /// False: the row is dropped and the file is orphaned.
+    /// </summary>
+    [Fact]
+    public void ProcessMissingItem_NotSyncedWithLocalFile_KeepsRowPendingApproval()
+    {
+        var file = Path.Combine(_tempDir, "a.mkv");
+        File.WriteAllText(file, "x");
+        _manager.Upsert(Row("a", SyncStatus.Errored, localPath: file));
+        var persisted = _manager.GetByKey("a")!;
+
+        var result = SyncStateService.ProcessMissingItem(_manager, persisted, ApprovalMode.Enabled, NullLogger.Instance);
+
+        Assert.True(result.Changed);
+        var after = _manager.GetByKey("a");
+        Assert.NotNull(after);
+        Assert.Equal(SyncStatus.Pending, after!.Status);
+        Assert.Equal(PendingType.Deletion, after.PendingType);
+        Assert.True(File.Exists(file));
+    }
+
     // -----------------------------------------------------------------------
-    // ProcessExistingItem — reappearance rescues
+    // ProcessExistingItem, renames on the source
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A rename on the source moves the local file to the new translated path instead of leaving it
+    /// behind and downloading a second copy.
+    /// True: the row follows the file and stays Synced.
+    /// False: the old file is orphaned and the item is queued again.
+    /// </summary>
+    [Fact]
+    public void ProcessExistingItem_RenamedOnSource_MovesLocalFile()
+    {
+        var oldFile = Path.Combine(_tempDir, "old", "a.mkv");
+        var newFile = Path.Combine(_tempDir, "new", "a renamed.mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(oldFile)!);
+        File.WriteAllBytes(oldFile, new byte[100]);
+        File.WriteAllText(Path.Combine(_tempDir, "old", "a.en.srt"), "subs");
+        var row = Row("a", SyncStatus.Synced, localPath: oldFile);
+
+        var updated = SyncStateService.ProcessExistingItem(
+            row, "/src/a renamed.mkv", row.SourceSize, row.SourceCreateDate, newFile,
+            ApprovalMode.Enabled, detectUpdatedFiles: true, sizeMatchToleranceBytes: 0, NullLogger.Instance);
+
+        Assert.Equal(SyncStatus.Synced, updated.Status);
+        Assert.Equal(newFile, updated.LocalPath);
+        Assert.True(File.Exists(newFile));
+        Assert.False(File.Exists(oldFile));
+        Assert.True(File.Exists(Path.Combine(_tempDir, "new", "a renamed.en.srt")));
+    }
+
+    /// <summary>
+    /// When the renamed path is already taken, nothing moves and the row keeps tracking the old file
+    /// with a reason.
+    /// True: neither file is touched and the user can see why.
+    /// False: a file is overwritten, or the row points at a file it did not download.
+    /// </summary>
+    [Fact]
+    public void ProcessExistingItem_RenameTargetTaken_KeepsOldPathWithReason()
+    {
+        var oldFile = Path.Combine(_tempDir, "a.mkv");
+        var newFile = Path.Combine(_tempDir, "b.mkv");
+        File.WriteAllBytes(oldFile, new byte[100]);
+        File.WriteAllText(newFile, "someone else's file");
+        var row = Row("a", SyncStatus.Synced, localPath: oldFile);
+
+        var updated = SyncStateService.ProcessExistingItem(
+            row, "/src/b.mkv", row.SourceSize, row.SourceCreateDate, newFile,
+            ApprovalMode.Enabled, detectUpdatedFiles: true, sizeMatchToleranceBytes: 0, NullLogger.Instance);
+
+        Assert.Equal(SyncStatus.Synced, updated.Status);
+        Assert.Equal(oldFile, updated.LocalPath);
+        Assert.NotNull(updated.Reason);
+        Assert.Equal(100, new FileInfo(oldFile).Length);
+        Assert.Equal("someone else's file", File.ReadAllText(newFile));
+    }
+
+    // -----------------------------------------------------------------------
+    // ProcessExistingItem, reappearance rescues
     // -----------------------------------------------------------------------
 
     /// <summary>
@@ -237,11 +318,11 @@ public sealed class SyncStateServiceTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
-    // ContentSyncTableManager.Upsert — the SQL-level Ignored guard
+    // ContentSyncTableManager.Upsert, the SQL-level Ignored guard
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// A refresh working from a stale snapshot upserts with the OLD status;
+    /// A refresh working from a stale snapshot upserts with the OLD status.
     /// the SQL CASE guard must keep a concurrently-set Ignored override
     /// rather than reverting it. This is the DB-level race the in-memory
     /// snapshot checks cannot close.
@@ -297,7 +378,7 @@ public sealed class SyncStateServiceTests : IDisposable
     /// <summary>
     /// Queued through UpdateStatus is an operator action and must reset the
     /// retry counter, in one well-formed UPDATE. This exercises the real SQL
-    /// against SQLite — the transition clauses briefly emitted "RetryCount = 0"
+    /// against SQLite, the transition clauses briefly emitted "RetryCount = 0"
     /// twice for this path.
     /// True: a Retry click hands the row its full MaxRetryCount allowance.
     /// False: a row at the cap gets one attempt and drops back out, or the

@@ -61,7 +61,7 @@ public partial class ConfigurationController
             syncGenres: config.MetadataSyncGenres,
             syncTags: config.MetadataSyncTags);
 
-        // Refresh builds tag-only manifests for speed; the modal needs real
+        // Refresh builds tag-only manifests for speed. The modal needs real
         // sizes/dimensions to render "623.4 KB" instead of "1 (0 B)".
         if (config.MetadataSyncImages && !string.IsNullOrEmpty(item.Images.Source))
         {
@@ -79,7 +79,7 @@ public partial class ConfigurationController
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Source image enrichment failed for metadata item {Id} ({Name}); modal will show tag-only sizes", id, item.ItemName);
+                _logger.LogWarning(ex, "Source image enrichment failed for metadata item {Id} ({Name}). Modal will show tag-only sizes", id, item.ItemName);
             }
         }
 
@@ -238,12 +238,15 @@ public partial class ConfigurationController
             return BadRequest("Invalid status value");
         }
 
-        manager.UpdateStatus(request.Id, status);
+        // The same path as the bulk actions, so queueing one row clears its synced hashes exactly as
+        // queueing many does. Without that the sync skipped every category it last recorded as applied.
+        manager.BatchUpdateStatusByIdsWithDetails(new[] { request.Id }, status);
         return Ok(new { Success = true });
     }
 
     /// <summary>
-    /// Moves metadata sync items to Queued status.
+    /// Moves metadata sync items to Queued status. With no ids and a Status, queues every row in that
+    /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
     /// <param name="request">Bulk metadata sync items request.</param>
     /// <returns>Action result with updated count.</returns>
@@ -255,6 +258,11 @@ public partial class ConfigurationController
         [FromBody] BulkMetadataSyncItemsRequest request)
     {
         ArgumentNullException.ThrowIfNull(manager);
+        if (request != null && (request.Ids == null || request.Ids.Count == 0) && !string.IsNullOrEmpty(request.Status))
+        {
+            return QueueAllWithStatus(manager, request.Status, "QueueMetadataSyncItems");
+        }
+
         if (request?.Ids == null || request.Ids.Count == 0)
         {
             return BadRequest("No items specified");
@@ -268,7 +276,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue metadata sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk queue failed; see server log" });
+            return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
         }
     }
 
@@ -298,7 +306,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore metadata sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk ignore failed; see server log" });
+            return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
         }
     }
 

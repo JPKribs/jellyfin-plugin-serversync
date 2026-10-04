@@ -245,7 +245,7 @@ public partial class ConfigurationController
     {
         ArgumentNullException.ThrowIfNull(manager);
         // Queued via UpdateStatus is an operator action, so the transition
-        // clauses reset RetryCount — the row gets its full allowance back.
+        // clauses reset RetryCount, the row gets its full allowance back.
         if (request?.SourceItemIds?.Count > 0)
         {
             foreach (var itemId in request.SourceItemIds)
@@ -281,7 +281,7 @@ public partial class ConfigurationController
         if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status)
             || status == SyncStatus.Deleting)
         {
-            // Deleting schedules unattended file removal; it is only ever set
+            // Deleting schedules unattended file removal. It is only ever set
             // by the refresh pipeline or the approval flow, never directly.
 
             return BadRequest("Invalid status value");
@@ -309,22 +309,18 @@ public partial class ConfigurationController
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
-        foreach (var itemId in request.SourceItemIds)
+        // Count the rows the update actually touched. Counting every posted id reported ids with no
+        // row behind them as updated.
+        try
         {
-            try
-            {
-                manager.UpdateStatus(itemId, SyncStatus.Ignored);
-                successCount++;
-            }
-            catch (Exception ex)
-            {
-                var sanitizedId = SanitizeForLog(itemId);
-                _logger.LogWarning(ex, "Failed to update status for item {ItemId}", sanitizedId);
-            }
+            var updated = manager.BatchUpdateStatus(request.SourceItemIds, SyncStatus.Ignored);
+            return Ok(new { Updated = updated });
         }
-
-        return Ok(new { Updated = successCount });
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to ignore {Count} content item(s)", request.SourceItemIds.Count);
+            return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
+        }
     }
 
     /// <summary>
@@ -345,22 +341,18 @@ public partial class ConfigurationController
             return BadRequest("No items specified");
         }
 
-        var successCount = 0;
-        foreach (var itemId in request.SourceItemIds)
+        // Count the rows the update actually touched. Counting every posted id reported ids with no
+        // row behind them as updated.
+        try
         {
-            try
-            {
-                manager.UpdateStatus(itemId, SyncStatus.Queued);
-                successCount++;
-            }
-            catch (Exception ex)
-            {
-                var sanitizedId = SanitizeForLog(itemId);
-                _logger.LogWarning(ex, "Failed to update status for item {ItemId}", sanitizedId);
-            }
+            var updated = manager.BatchUpdateStatus(request.SourceItemIds, SyncStatus.Queued);
+            return Ok(new { Updated = updated });
         }
-
-        return Ok(new { Updated = successCount });
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to queue {Count} content item(s)", request.SourceItemIds.Count);
+            return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
+        }
     }
 
     /// <summary>
@@ -482,7 +474,7 @@ public partial class ConfigurationController
                 if (containingRoot != null && FileValidationService.HasSymlinkedDirectoryComponent(item.LocalPath, containingRoot))
                 {
                     _logger.LogWarning(
-                        "SKIPPED DELETE: {FileName} - Path traverses a symlinked directory; the physical file may live outside the library. Local path: {LocalPath}",
+                        "SKIPPED DELETE: {FileName} - Path traverses a symlinked directory. The physical file may live outside the library. Local path: {LocalPath}",
                         sanitizedFileName,
                         sanitizedLocalPath);
                     skippedCount++;
@@ -504,7 +496,7 @@ public partial class ConfigurationController
 
             // The id-based delete removes whatever file the Jellyfin item
             // points at, and LocalItemId can go stale when a mapping's root
-            // changes — so the RESOLVED path must pass the same checks the
+            // changes, so the RESOLVED path must pass the same checks the
             // tracked path did, and must actually be the tracked file.
             if (localItem != null)
             {
@@ -516,7 +508,7 @@ public partial class ConfigurationController
                     || !FileValidationService.IsPathWithinLibrary(resolvedPath, config))
                 {
                     _logger.LogWarning(
-                        "Stale LocalItemId for {FileName}: resolved item path {ResolvedPath} does not match the tracked path or escapes library roots; falling back to the tracked path",
+                        "Stale LocalItemId for {FileName}: resolved item path {ResolvedPath} does not match the tracked path or escapes library roots. Falling back to the tracked path",
                         sanitizedFileName,
                         SanitizeForLog(resolvedPath));
                     localItem = null;

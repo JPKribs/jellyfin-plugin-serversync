@@ -7,7 +7,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.Common;
 /// One comparable field on a <see cref="SyncRecord"/>: source / local /
 /// synced snapshots, plus content fingerprints recording what was last
 /// applied. Change detection compares source against local through the
-/// comparator — see <see cref="HasChanges"/>.
+/// comparator, see <see cref="HasChanges"/>.
 /// </summary>
 /// <typeparam name="T">Value type, typically <see cref="string"/> for JSON blobs.</typeparam>
 public sealed class SyncableValue<T>
@@ -26,7 +26,7 @@ public sealed class SyncableValue<T>
 
     /// <summary>
     /// Gets or sets the value that was last successfully applied to local.
-    /// Recorded for display and per-module bookkeeping; not consulted by
+    /// Recorded for display and per-module bookkeeping. Not consulted by
     /// <see cref="HasChanges"/>.
     /// </summary>
     public T? Synced { get; set; }
@@ -41,7 +41,7 @@ public sealed class SyncableValue<T>
     /// Gets or sets the content fingerprint of <see cref="Source"/> at the
     /// time of the most recent successful Sync. Equality with
     /// <see cref="SourceHash"/> tells you the source has not moved since that
-    /// apply — which is NOT the same as local still matching it, so this is
+    /// apply, which is NOT the same as local still matching it, so this is
     /// no longer used to skip comparison. See <see cref="HasChanges"/>.
     /// </summary>
     public string? SyncedHash { get; set; }
@@ -61,7 +61,7 @@ public sealed class SyncableValue<T>
     /// "has the source moved since the last apply?", which is not the same
     /// question: local can drift on its own. Because the refresh calls
     /// <c>MarkSynced</c> on any row where source already matched local, nearly
-    /// every row carried a baseline — so a later local edit (an overview
+    /// every row carried a baseline, so a later local edit (an overview
     /// rewritten, a tag dropped, an image replaced on this server) was invisible
     /// until the source item happened to change.
     /// </para>
@@ -70,7 +70,7 @@ public sealed class SyncableValue<T>
     /// apply time persisted alongside <see cref="SyncedHash"/>. It is not worth
     /// it: <see cref="ISyncComparator{T}.ComputeHash"/> is a raw-bytes digest
     /// and is documented as unstable across code paths, and the refresh
-    /// materializes both blobs before consulting this property anyway — the
+    /// materializes both blobs before consulting this property anyway, the
     /// short-circuit only ever skipped a comparison of two strings already in
     /// memory. <see cref="SyncedHash"/> is still maintained for the modal and
     /// for module-specific bookkeeping.
@@ -87,7 +87,7 @@ public sealed class SyncableValue<T>
     /// <summary>
     /// Assigns a new source value and recomputes <see cref="SourceHash"/>
     /// in one step. The canonical "I just observed a new source value"
-    /// path during Refresh — equivalent to setting <see cref="Source"/>
+    /// path during Refresh, equivalent to setting <see cref="Source"/>
     /// and then calling <see cref="RecomputeSourceHash"/>.
     /// </summary>
     public void UpdateSource(T? value)

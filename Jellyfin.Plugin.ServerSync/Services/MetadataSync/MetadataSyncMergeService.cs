@@ -18,8 +18,8 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// <summary>
 /// Per-category merge logic for Metadata Sync. Each method extracts the
 /// comparable representation of one category (Metadata / Images / People /
-/// Studios) and writes it onto the <see cref="MetadataSyncItem"/>; source-wins
-/// per category. Static class — cross-cutting dependencies are passed in.
+/// Studios) and writes it onto the <see cref="MetadataSyncItem"/>. Source-wins
+/// per category. Static class, cross-cutting dependencies are passed in.
 /// </summary>
 public static class MetadataSyncMergeService
 {
@@ -60,7 +60,7 @@ public static class MetadataSyncMergeService
             // Core info
             ["Name"] = sourceItem.Name,
             ["OriginalTitle"] = sourceItem.OriginalTitle,
-            // SortName intentionally excluded — servers normalize SortName
+            // SortName intentionally excluded, servers normalize SortName
             // from Name independently, so cross-server comparison always
             // diffs. ForcedSortName (user override) is still synced.
             ["ForcedSortName"] = sourceItem.ForcedSortName,
@@ -75,7 +75,7 @@ public static class MetadataSyncMergeService
             ["CommunityRating"] = sourceItem.CommunityRating,
             ["CriticRating"] = sourceItem.CriticRating,
 
-            // Dates — stored date-only: the apply step syncs these as
+            // Dates, stored date-only: the apply step syncs these as
             // calendar dates (DateOnlyEquals), so the blobs must not carry
             // time-of-day or comparison and apply disagree forever.
             ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(sourceItem.PremiereDate),
@@ -98,7 +98,7 @@ public static class MetadataSyncMergeService
             ["Video3DFormat"] = sourceItem.Video3DFormat?.ToString(),
 
             // Lock settings (prevents metadata providers from overwriting).
-            // Sort LockedFields so source/local serialize identically — the
+            // Sort LockedFields so source/local serialize identically, the
             // JSON comparator compares arrays element-by-element, so an
             // unsorted source vs an alphabetised local would diff every refresh.
             ["LockedFields"] = sourceItem.LockedFields?.Select(f => f.ToString())
@@ -134,7 +134,7 @@ public static class MetadataSyncMergeService
     /// is built from <c>BaseItemDto</c> image tags (free in the bulk list
     /// response), then sized via carry-forward from
     /// <paramref name="priorSourceManifestJson"/> when tags are unchanged, or
-    /// a per-item HTTP enrichment call when they aren't — so the
+    /// a per-item HTTP enrichment call when they aren't, so the
     /// <see cref="ImageManifestComparator"/> has honest numbers to compare
     /// against the sized local manifest without paying one GET + one HEAD per
     /// image on every unchanged item every refresh.
@@ -178,7 +178,7 @@ public static class MetadataSyncMergeService
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Source image enrichment failed for {ItemName}; comparator will fall back to tag-only", item.ItemName);
+                logger.LogDebug(ex, "Source image enrichment failed for {ItemName}. Comparator will fall back to tag-only", item.ItemName);
             }
         }
 
@@ -308,7 +308,7 @@ public static class MetadataSyncMergeService
         {
             ["Name"] = localItem.Name,
             ["OriginalTitle"] = localItem.OriginalTitle,
-            // SortName excluded — see source-side comment in MergeMetadataFields.
+            // SortName excluded, see source-side comment in MergeMetadataFields.
             ["ForcedSortName"] = localItem.ForcedSortName,
             ["Overview"] = localItem.Overview,
             ["Tagline"] = localItem.Tagline,
@@ -316,7 +316,7 @@ public static class MetadataSyncMergeService
             ["CustomRating"] = localItem.CustomRating,
             ["CommunityRating"] = localItem.CommunityRating,
             ["CriticRating"] = localItem.CriticRating,
-            // Date-only — see source-side comment in MergeMetadataFields.
+            // Date-only, see source-side comment in MergeMetadataFields.
             ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.PremiereDate),
             ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.EndDate),
             ["ProductionYear"] = localItem.ProductionYear,
@@ -385,7 +385,7 @@ public static class MetadataSyncMergeService
                     }
                     catch (System.IO.IOException)
                     {
-                        // Ignore — leave size at 0
+                        // Ignore, leave size at 0
                     }
                 }
 
@@ -455,49 +455,18 @@ public static class MetadataSyncMergeService
     }
 
     // ===================================================================
-    // Parity helpers (match HistorySyncMergeService surface)
-    // ===================================================================
-
-    /// <summary>
-    /// True if any enabled category on the record has changes worth syncing.
-    /// Mirrors <see cref="HistorySyncMergeService.HasChangesToSync"/>.
-    /// </summary>
-    public static bool HasChangesToSync(MetadataSyncItem item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        return item.HasChanges;
-    }
-
-    /// <summary>
-    /// Human-readable summary of which categories changed, for logs / modals.
-    /// Mirrors <see cref="HistorySyncMergeService.GetChangeSummary"/>.
-    /// </summary>
-    public static string GetChangeSummary(MetadataSyncItem item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-
-        var changes = new List<string>();
-        if (item.HasMetadataChanges) changes.Add("Metadata");
-        if (item.HasImagesChanges) changes.Add("Images");
-        if (item.HasPeopleChanges) changes.Add("People");
-        if (item.HasStudiosChanges) changes.Add("Studios");
-
-        return changes.Count > 0 ? string.Join(", ", changes) : "No changes";
-    }
-
-    // ===================================================================
     // Private helpers
     // ===================================================================
 
     /// <summary>
     /// Populates the source-side image manifest from <see cref="BaseItemDto"/>
-    /// tags. Tags are returned in the bulk list response for free; using them
+    /// tags. Tags are returned in the bulk list response for free. Using them
     /// avoids the per-item HTTP call to <c>/Items/{id}/Images</c>.
     /// </summary>
     private static void PopulateSourceImagesFromTags(BaseItemDto sourceItem, Dictionary<string, List<ImageInfoDto>> sourceImagesByType)
     {
         // Process single image types from ImageTags. The values are Kiota
-        // UntypedString wrappers — naive .ToString() returns the type name,
+        // UntypedString wrappers, naive .ToString() returns the type name,
         // not the tag. Unwrap properly so per-item Tag is the real hash.
         if (sourceItem.ImageTags?.AdditionalData != null)
         {
@@ -505,10 +474,10 @@ public static class MetadataSyncMergeService
             {
                 // Skip image types that this sync path can't apply to its
                 // targets. Metadata sync only operates on Movie/Series/Season/
-                // Episode/Album/Artist/BoxSet — never Person — so a Profile
+                // Episode/Album/Artist/BoxSet, never Person, so a Profile
                 // tag in the source DTO (sometimes present on TMDB-imported
                 // metadata for actors associated with a Movie record) cannot
-                // be saved on the local item; Jellyfin's repository drops
+                // be saved on the local item. Jellyfin's repository drops
                 // such writes silently. Including them here would put the
                 // Profile entry in the source manifest, fail the post-apply
                 // verification ("Profile present on source but missing on

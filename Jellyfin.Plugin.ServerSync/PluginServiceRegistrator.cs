@@ -6,7 +6,6 @@ using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -30,24 +29,15 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             serviceCollection.Add(new ServiceDescriptor(serviceType, impl, attr.Lifetime));
         }
 
-        // Encrypts the source-server API key at rest (base helper; degrades to plaintext + a logged
+        // Encrypts the source-server API key at rest (base helper. Degrades to plaintext + a logged
         // warning when no provider is available). Keys live in a fixed directory under the Jellyfin
-        // data folder with a pinned application name — otherwise a host launch-context change (app
+        // data folder with a pinned application name, otherwise a host launch-context change (app
         // update, desktop-app vs service, Docker) shifts the Data Protection discriminator and every
         // stored secret fails to decrypt. See StableSecretProtection.
         serviceCollection.AddSingleton(sp =>
         {
             var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Jellyfin.Plugin.ServerSync.SecretProtector");
-            IDataProtectionProvider? provider = null;
-
-            var paths = sp.GetService<MediaBrowser.Common.Configuration.IApplicationPaths>();
-            if (paths is not null)
-            {
-                var keyDirectory = System.IO.Path.Combine(paths.PluginConfigurationsPath, "Jellyfin.Plugin.ServerSync.Keys");
-                provider = StableSecretProtection.Build(keyDirectory, logger);
-            }
-
-            return new SecretProtector("Jellyfin.Plugin.ServerSync.Secrets.v1", logger, provider);
+            return StableSecretProtection.CreateProtector(sp.GetService<MediaBrowser.Common.Configuration.IApplicationPaths>(), logger);
         });
 
         // The hint pipeline runs for the life of the server. Each worker is registered once as itself,
@@ -57,13 +47,20 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.InboundHintWorker>());
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.LocalChangeObserver>());
         serviceCollection.AddHostedService<Tasks.HiddenTaskScheduleCleaner>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.QueueMaintenanceService>());
 
         // Named HttpClient for source server communication. 
         // HandlerLifetime caps DNS staleness for the long-lived plugin process.
+        // A connect timeout keeps one unreachable peer from holding a worker for the operating system's
+        // own connect timeout, which runs to minutes.
         serviceCollection
             .AddHttpClient(SourceServerClient.HttpClientName, c =>
             {
                 c.Timeout = TimeSpan.FromMinutes(5);
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                ConnectTimeout = Services.Queue.HintProtocol.ConnectTimeout
             })
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
 
@@ -76,6 +73,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             })
             .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
             {
+                ConnectTimeout = Services.Queue.HintProtocol.ConnectTimeout,
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPublicOnlyAsync
             })
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));

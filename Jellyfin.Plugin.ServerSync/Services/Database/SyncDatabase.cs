@@ -1,11 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
-using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
@@ -41,7 +37,7 @@ public class SyncDatabase : IDisposable
 
     /// <summary>
     /// Open SQLite connection. Used by per-table <c>SyncTableManager</c> instances.
-    /// Throws if disposed; reopens transparently if closed.
+    /// Throws if disposed. Reopens transparently if closed.
     /// </summary>
     internal SqliteConnection Connection
     {
@@ -101,7 +97,52 @@ public class SyncDatabase : IDisposable
         // - Mode=ReadWriteCreate: Create the file if it doesn't exist
         // - Pooling=False: Disable connection pooling to avoid stale cached connections
         //   causing SQLITE_READONLY errors after server restarts or crashes
-        return $"Data Source={_dbPath};Mode=ReadWriteCreate;Pooling=False";
+        // The builder quotes the path, since a data folder holding a semicolon or a quote would
+        // otherwise break the string apart.
+        return new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false
+        }.ToString();
+    }
+
+    /// <summary>
+    /// Opens a connection with the pragmas every connection here relies on. The connection is
+    /// disposed when opening or the pragmas fail, so a failed open never leaves a handle behind.
+    /// </summary>
+    private SqliteConnection OpenConnection()
+    {
+        var connection = new SqliteConnection(BuildConnectionString());
+        try
+        {
+            connection.Open();
+
+            // Set pragmas for reliability in multi-threaded environments
+            using var pragmaCmd = connection.CreateCommand();
+            pragmaCmd.CommandText = @"
+                PRAGMA journal_mode=WAL;
+                PRAGMA busy_timeout=5000;
+                PRAGMA synchronous=NORMAL;
+            ";
+            pragmaCmd.ExecuteNonQuery();
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Closes and releases the current connection, if any.
+    /// </summary>
+    private void CloseConnection()
+    {
+        _connection?.Close();
+        _connection?.Dispose();
+        _connection = null;
     }
 
     /// <summary>
@@ -189,37 +230,39 @@ public class SyncDatabase : IDisposable
     {
         try
         {
-            _connection = new SqliteConnection(BuildConnectionString());
-            _connection.Open();
-
-            // Set pragmas for reliability in multi-threaded environments
-            using (var pragmaCmd = _connection.CreateCommand())
-            {
-                pragmaCmd.CommandText = @"
-                    PRAGMA journal_mode=WAL;
-                    PRAGMA busy_timeout=5000;
-                    PRAGMA synchronous=NORMAL;
-                ";
-                pragmaCmd.ExecuteNonQuery();
-            }
+            _connection = OpenConnection();
 
             var currentVersion = DatabaseMigrationService.GetSchemaVersion(_connection);
 
             if (currentVersion == 0)
             {
                 DatabaseMigrationService.CreateInitialSchema(_connection);
-                DatabaseMigrationService.SetSchemaVersion(_connection, DatabaseMigrationService.CurrentSchemaVersion);
+                DatabaseMigrationService.StampSchema(_connection);
+            }
+            else if (currentVersion > DatabaseMigrationService.CurrentSchemaVersion
+                && DatabaseMigrationService.GetMinReaderVersion(_connection) is { } minReader
+                && minReader <= DatabaseMigrationService.CurrentSchemaVersion)
+            {
+                // A newer build wrote this database and says builds from v{minReader} on can still use it,
+                // since everything it added since is extra. It is used as is, version untouched, so the
+                // newer build finds it exactly as it left it.
+                _logger.LogInformation(
+                    "Sync database is schema v{Found}, newer than this plugin's v{Expected}, and readable by v{MinReader} and later. Using it as is",
+                    currentVersion,
+                    DatabaseMigrationService.CurrentSchemaVersion,
+                    minReader);
+                return;
             }
             else if (currentVersion > DatabaseMigrationService.CurrentSchemaVersion)
             {
                 // Downgrade: the file was written by a newer plugin build and
                 // may have columns this one doesn't know about (or be missing
                 // ones it needs). Carrying on produces a stream of confusing
-                // per-query SQLite errors. Move it aside — RecreateDatabase
-                // keeps it as a timestamped backup — so re-upgrading can
+                // per-query SQLite errors. Move it aside, RecreateDatabase
+                // keeps it as a timestamped backup, so re-upgrading can
                 // restore it, and start clean on the schema this build expects.
                 _logger.LogError(
-                    "Sync database is schema v{Found}, newer than this plugin's v{Expected}. The plugin was downgraded. Moving the database aside and starting fresh; the existing file is kept as a .corrupt-* backup and is still readable by the newer build",
+                    "Sync database is schema v{Found}, newer than this plugin's v{Expected}. The plugin was downgraded. Moving the database aside and starting fresh. The existing file is kept as a .corrupt-* backup and is still readable by the newer build",
                     currentVersion,
                     DatabaseMigrationService.CurrentSchemaVersion);
                 RecreateDatabase();
@@ -236,13 +279,19 @@ public class SyncDatabase : IDisposable
                 }
             }
 
+            // A database already at this version from a build that did not record the marker gets it now.
+            if (DatabaseMigrationService.GetMinReaderVersion(_connection) != DatabaseMigrationService.MinReaderVersion)
+            {
+                DatabaseMigrationService.StampSchema(_connection);
+            }
+
             _logger.LogDebug("Sync database initialized at {DbPath} (schema v{Version})", _dbPath, DatabaseMigrationService.CurrentSchemaVersion);
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 11 || ex.SqliteErrorCode == 26)
         {
             // SQLITE_CORRUPT / SQLITE_NOTADB: the file itself is unusable, so
-            // recreation is the only way forward. Anything else — a locked
-            // file at boot, a permissions hiccup, a full disk — is transient:
+            // recreation is the only way forward. Anything else, a locked
+            // file at boot, a permissions hiccup, a full disk, is transient:
             // recreating would reset every tracking table and the user's
             // Ignored/approval state over a condition that fixes itself, so
             // those propagate and the plugin retries on the next start.
@@ -254,23 +303,29 @@ public class SyncDatabase : IDisposable
             catch (Exception recreateEx)
             {
                 _logger.LogError(recreateEx, "Failed to recreate database");
+                CloseConnection();
                 throw new InvalidOperationException("Unable to initialize or recover sync database", recreateEx);
             }
+        }
+        catch
+        {
+            // Any other failure propagates so the plugin retries on the next start. Release the
+            // connection first, or the open handle outlives the failed start.
+            CloseConnection();
+            throw;
         }
     }
 
     /// <summary>
     /// Closes the current database, moves it aside as a timestamped backup,
     /// and creates a fresh one. The old file is preserved (not deleted): the
-    /// tracking DB carries user intent — Ignored overrides and pending
-    /// deletion/download approvals — that a transient init failure (disk
+    /// tracking DB carries user intent, Ignored overrides and pending
+    /// deletion/download approvals, that a transient init failure (disk
     /// briefly full, permissions hiccup at boot) must not silently destroy.
     /// </summary>
     private void RecreateDatabase()
     {
-        _connection?.Close();
-        _connection?.Dispose();
-        _connection = null;
+        CloseConnection();
 
         if (File.Exists(_dbPath))
         {
@@ -281,16 +336,16 @@ public class SyncDatabase : IDisposable
 
                 // The WAL belongs to the moved database and may hold committed-
                 // but-uncheckpointed transactions (e.g. approvals set just
-                // before a crash); it must travel with the backup, not be
+                // before a crash). It must travel with the backup, not be
                 // deleted, or a restore from the backup loses those commits.
                 MoveJournalFile(_dbPath + "-wal", backupPath + "-wal");
                 MoveJournalFile(_dbPath + "-shm", backupPath + "-shm");
-                _logger.LogWarning("Moved unreadable database aside to {BackupPath}; a fresh database will be created", backupPath);
+                _logger.LogWarning("Moved unreadable database aside to {BackupPath}. A fresh database will be created", backupPath);
                 PruneOldCorruptBackups();
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to back up unreadable database file; deleting it instead");
+                _logger.LogWarning(ex, "Failed to back up unreadable database file. Deleting it instead");
                 try
                 {
                     File.Delete(_dbPath);
@@ -305,22 +360,9 @@ public class SyncDatabase : IDisposable
         // Also delete WAL and SHM files if they exist
         DeleteWalFiles();
 
-        _connection = new SqliteConnection(BuildConnectionString());
-        _connection.Open();
-
-        // Set pragmas on fresh connection
-        using (var pragmaCmd = _connection.CreateCommand())
-        {
-            pragmaCmd.CommandText = @"
-                PRAGMA journal_mode=WAL;
-                PRAGMA busy_timeout=5000;
-                PRAGMA synchronous=NORMAL;
-            ";
-            pragmaCmd.ExecuteNonQuery();
-        }
-
+        _connection = OpenConnection();
         DatabaseMigrationService.CreateInitialSchema(_connection);
-        DatabaseMigrationService.SetSchemaVersion(_connection, DatabaseMigrationService.CurrentSchemaVersion);
+        DatabaseMigrationService.StampSchema(_connection);
         _logger.LogInformation("Database recreated with fresh schema v{Version}", DatabaseMigrationService.CurrentSchemaVersion);
     }
 
@@ -386,34 +428,14 @@ public class SyncDatabase : IDisposable
 
         _connection = null;
 
-        SqliteConnection? newConnection = null;
         try
         {
-            newConnection = new SqliteConnection(BuildConnectionString());
-            newConnection.Open();
-
-            // Re-apply pragmas on reconnection
-            using var pragmaCmd = newConnection.CreateCommand();
-            pragmaCmd.CommandText = @"
-                PRAGMA journal_mode=WAL;
-                PRAGMA busy_timeout=5000;
-                PRAGMA synchronous=NORMAL;
-            ";
-            pragmaCmd.ExecuteNonQuery();
-
-            _connection = newConnection;
-            newConnection = null; // Transfer ownership, prevent dispose in finally
+            _connection = OpenConnection();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to open database connection to {DbPath}", _dbPath);
             throw new InvalidOperationException($"Unable to open database connection: {ex.Message}", ex);
-        }
-        finally
-        {
-            // If newConnection is still set, we failed after Open() but before
-            // assigning to _connection — dispose to prevent leak
-            newConnection?.Dispose();
         }
     }
 
@@ -431,9 +453,7 @@ public class SyncDatabase : IDisposable
         {
             _logger.LogWarning("Resetting sync database - all tracking data will be lost");
 
-            _connection?.Close();
-            _connection?.Dispose();
-            _connection = null;
+            CloseConnection();
 
             // Delete main database file with retry logic
             if (File.Exists(_dbPath))

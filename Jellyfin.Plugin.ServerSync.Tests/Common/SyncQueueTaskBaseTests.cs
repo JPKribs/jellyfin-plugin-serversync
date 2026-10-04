@@ -18,7 +18,7 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Common;
 /// Run-state contract of <see cref="SyncQueueTaskBase{TRecord, TKey}"/>: a
 /// run that didn't actually finish must never look finished (no completion
 /// stamp, no failure-record clear), failures must persist as Errored rows,
-/// and apply groups must be real barriers — parents fully applied before
+/// and apply groups must be real barriers, parents fully applied before
 /// children start.
 /// </summary>
 public class SyncQueueTaskBaseTests
@@ -77,8 +77,6 @@ public class SyncQueueTaskBaseTests
         {
         }
 
-        public int DeleteByStatus(SyncStatus status) => 0;
-
         public int ResetTable() => 0;
 
         public void UpdateStatus(long id, SyncStatus status, string? reason = null)
@@ -88,8 +86,6 @@ public class SyncQueueTaskBaseTests
         public void UpdateStatusByKey(string key, SyncStatus status, string? reason = null)
         {
         }
-
-        public int BulkUpdateStatus(IReadOnlyList<long> ids, SyncStatus status, string? reason = null) => 0;
 
         public PagedResult<TestRecord> Paginate(PaginationRequest request)
             => new(Array.Empty<TestRecord>(), 0, 0, 50);
@@ -101,7 +97,7 @@ public class SyncQueueTaskBaseTests
 
         public string DecryptApiKey(string protectedKey) => protectedKey;
 
-        public string ResolveRequestApiKey(string? requestApiKey, string? serverKey) => requestApiKey ?? string.Empty;
+        public string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl) => requestApiKey ?? string.Empty;
 
         public void SaveConfiguration()
         {
@@ -129,6 +125,16 @@ public class SyncQueueTaskBaseTests
             : base(NullLogger.Instance, manager, new FakeClientFactory(), new FakeConfigManager())
         {
         }
+
+        /// <summary>Gets the configuration the task reads, so tests can seed servers and failures.</summary>
+        public PluginConfiguration Config => ConfigManager.Configuration;
+
+        /// <summary>Sources the pre-flight installs, standing in for the connection loop.</summary>
+        public Func<IReadOnlyList<ScanSource>>? SourcesFactory { get; set; }
+
+        public void SetSources(IReadOnlyList<ScanSource> sources) => Sources = sources;
+
+        public ScanSource? InvokeSourceFor(TestRecord record) => SourceFor(record);
 
         public bool RunCompletedRecorded { get; private set; }
 
@@ -177,7 +183,15 @@ public class SyncQueueTaskBaseTests
 
         protected override int MaxDegreeOfParallelism => Parallelism;
 
-        protected override Task<bool> BeforeRunAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+        protected override Task<bool> BeforeRunAsync(CancellationToken cancellationToken)
+        {
+            if (SourcesFactory != null)
+            {
+                Sources = SourcesFactory();
+            }
+
+            return Task.FromResult(true);
+        }
 
         protected override IEnumerable<IList<TestRecord>> GetApplyGroups(IList<TestRecord> items)
         {
@@ -204,8 +218,6 @@ public class SyncQueueTaskBaseTests
 
         protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
             => RunCompletedRecorded = true;
-
-        public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
     }
 
     private static TestRecord Record(long id, string key, int group = 0) => new()
@@ -218,7 +230,7 @@ public class SyncQueueTaskBaseTests
 
     /// <summary>
     /// A clean run stamps completion and marks rows Synced with MarkSynced
-    /// called — the baseline the negative tests contrast against.
+    /// called, the baseline the negative tests contrast against.
     /// </summary>
     [Fact]
     public async Task CleanRun_StampsCompletionAndMarksSynced()
@@ -236,7 +248,7 @@ public class SyncQueueTaskBaseTests
     }
 
     /// <summary>
-    /// Cancellation mid-run must propagate and must NOT stamp completion —
+    /// Cancellation mid-run must propagate and must NOT stamp completion , 
     /// a cancelled run with items still queued looking "finished and clean"
     /// on the dashboard was one of the audited bugs.
     /// </summary>
@@ -387,7 +399,7 @@ public class SyncQueueTaskBaseTests
     /// <summary>
     /// An in-flight item's own fraction moves the overall bar.
     /// True: a single multi-hour download advances the bar continuously.
-    /// False: the bar freezes for the entire file and jumps at the end —
+    /// False: the bar freezes for the entire file and jumps at the end , 
     /// the exact behaviour this change removes.
     /// </summary>
     [Fact]
@@ -468,5 +480,109 @@ public class SyncQueueTaskBaseTests
         Assert.Contains(captured.Reports, r => Math.Abs(r - 60.0) < 0.001);
         Assert.Contains(captured.Reports, r => Math.Abs(r - 90.0) < 0.001);
         Assert.Contains(captured.Reports, r => Math.Abs(r - 100.0) < 0.001);
+    }
+
+    // -----------------------------------------------------------------------
+    // Timeouts, server ownership of keyless rows, and per phase failures.
+    // -----------------------------------------------------------------------
+
+    private static Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer PullServer(string name) => new()
+    {
+        Name = name,
+        Url = "http://localhost:1",
+        ApiKey = "k"
+    };
+
+    private static ScanSource Connected(Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer server, int priority)
+        => new(server, new SourceServerClient(NullLogger<SourceServerClient>.Instance, new System.Net.Http.HttpClient(), server.Url, server.ApiKey, "test", "0"), priority);
+
+    /// <summary>
+    /// An apply that times out (a cancellation while the run's token is not cancelled) errors that row
+    /// and the run goes on to the rest.
+    /// True: one slow download or request costs only its own row.
+    /// False: a single HTTP timeout aborts the whole sync run.
+    /// </summary>
+    [Fact]
+    public async Task ApplyTimeout_ErrorsRowAndContinues()
+    {
+        var manager = new FakeManager();
+        manager.Queued.AddRange(new[] { Record(1, "slow"), Record(2, "good") });
+        var task = new TestableQueueTask(manager);
+        task.ApplyBody = (record, _) => record.Key == "slow"
+            ? throw new TaskCanceledException("test: request timed out")
+            : Task.CompletedTask;
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(SyncStatus.Errored, manager.Upserted.Single(r => r.Key == "slow").Status);
+        Assert.Equal(SyncStatus.Synced, manager.Upserted.Single(r => r.Key == "good").Status);
+        Assert.True(task.RunCompletedRecorded);
+    }
+
+    /// <summary>
+    /// A row with no server key belongs to the first configured server, not to whichever server
+    /// connected first.
+    /// True: a keyless row is pulled from the server it was written for.
+    /// False: it is applied from an unrelated server that happened to be listed first this run.
+    /// </summary>
+    [Fact]
+    public void SourceFor_KeylessRow_ResolvesToFirstConfiguredServer()
+    {
+        var task = new TestableQueueTask(new FakeManager());
+        var first = PullServer("first");
+        var second = PullServer("second");
+        task.Config.Servers = new List<Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer> { first, second };
+        using var secondSource = Connected(second, 1);
+        using var firstSource = Connected(first, 0);
+
+        task.SetSources(new[] { secondSource, firstSource });
+        Assert.Same(firstSource, task.InvokeSourceFor(Record(1, "a")));
+
+        task.SetSources(new[] { secondSource });
+        Assert.Null(task.InvokeSourceFor(Record(1, "a")));
+    }
+
+    /// <summary>
+    /// A keyless row whose server did not connect is left queued, like any row whose server is absent.
+    /// True: an outage of the first server leaves its rows for a later run.
+    /// False: the rows are applied from another server or errored every run.
+    /// </summary>
+    [Fact]
+    public async Task KeylessRow_FirstServerAbsent_IsLeftQueued()
+    {
+        var manager = new FakeManager();
+        var first = PullServer("first");
+        var second = PullServer("second");
+        var keyless = Record(1, "keyless");
+        var owned = Record(2, "owned");
+        owned.ServerKey = second.Key;
+        manager.Queued.AddRange(new[] { keyless, owned });
+        var task = new TestableQueueTask(manager);
+        task.Config.Servers = new List<Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer> { first, second };
+        task.SourcesFactory = () => new[] { Connected(second, 1) };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.Equal(new[] { "owned" }, task.ApplyOrder.Select(r => r.Key));
+        Assert.DoesNotContain(manager.Upserted, r => r.Key == "keyless");
+    }
+
+    /// <summary>
+    /// A clean sync clears only the sync failure and keeps the module's refresh failure.
+    /// True: a blocked prune or unavailable source stays visible after a clean sync.
+    /// False: the sync run wipes the refresh failure from the dashboard.
+    /// </summary>
+    [Fact]
+    public async Task CleanRun_ClearsOnlySyncFailure()
+    {
+        var manager = new FakeManager();
+        var task = new TestableQueueTask(manager);
+        task.Config.LastRunFailures.Add(new SyncRunFailure { ModuleKey = "TestQueue", Phase = "Refresh", Reason = "prune blocked" });
+        task.Config.LastRunFailures.Add(new SyncRunFailure { ModuleKey = "TestQueue", Phase = "Sync", Reason = "old sync failure" });
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        var remaining = Assert.Single(task.Config.LastRunFailures);
+        Assert.Equal("Refresh", remaining.Phase);
     }
 }

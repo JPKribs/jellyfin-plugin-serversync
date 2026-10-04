@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// Universal operations on a sync table — the parts that depend only on the
+/// Universal operations on a sync table, the parts that depend only on the
 /// standard columns (<c>Id</c>, <c>Status</c>, <c>StatusDate</c>,
 /// <c>LastSyncTime</c>, <c>Reason</c>). Schema-specific methods (key lookup,
 /// upsert SQL, search) remain abstract for subclasses. Composite-key tables
@@ -42,7 +42,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Gets the live SQLite connection (re-resolved per access — handles closes/reopens).
+    /// Gets the live SQLite connection (re-resolved per access, handles closes/reopens).
     /// </summary>
     private SqliteConnection Connection => _database.Connection;
 
@@ -57,7 +57,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     protected ILogger Logger { get; }
 
     /// <summary>
-    /// Gets the SQL table name. Must be a constant identifier — never derived
+    /// Gets the SQL table name. Must be a constant identifier, never derived
     /// from user input.
     /// </summary>
     protected abstract string TableName { get; }
@@ -231,22 +231,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         return deleted;
     }
 
-    /// <inheritdoc />
-    public int DeleteByStatus(SyncStatus status)
-    {
-        var deleted = 0;
-        ExecuteWrite(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"DELETE FROM {TableName} WHERE Status = @Status";
-            cmd.Parameters.AddWithValue("@Status", (int)status);
-            deleted = cmd.ExecuteNonQuery();
-        });
-        return deleted;
-    }
-
     /// <summary>
-    /// Truncates the table — deletes every row regardless of status.
+    /// Truncates the table, deletes every row regardless of status.
     /// Powers the per-module "Reset Database" admin actions.
     /// </summary>
     public int ResetTable()
@@ -272,19 +258,12 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         cmd.ExecuteNonQuery();
     });
 
-    /// <inheritdoc />
-    public int BulkUpdateStatus(IReadOnlyList<long> ids, SyncStatus status, string? reason = null)
-    {
-        var result = BulkUpdateStatusWithDetails(ids, status, reason);
-        return result.Updated;
-    }
-
     /// <summary>
-    /// Same as <see cref="BulkUpdateStatus"/> but returns the per-call
+    /// Updates the status of many rows in one transaction and returns the per-call
     /// breakdown: how many rows were actually updated, and which input IDs
     /// were NOT present in the table (typically: row was deleted between
     /// the user clicking Queue and the request reaching the server). Used
-    /// by the bulk endpoints to surface "5 of 10 items updated; 5 not
+    /// by the bulk endpoints to surface "5 of 10 items updated. 5 not
     /// found" in the UI instead of silently dropping the missing ones.
     /// </summary>
     public (int Updated, IReadOnlyList<long> NotFoundIds) BulkUpdateStatusWithDetails(
@@ -329,6 +308,37 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         return (updated, notFound);
     }
 
+    /// <summary>
+    /// Queues every row that is in one status, in a single statement with no row cap. Used by the
+    /// "Retry errors" actions, which must reach every errored row rather than only those on the page
+    /// the operator has loaded. The Queued transition resets RetryCount, so each row gets its full
+    /// allowance again.
+    /// </summary>
+    /// <param name="fromStatus">The status whose rows are queued.</param>
+    /// <returns>How many rows were queued.</returns>
+    public int QueueAllWithStatus(SyncStatus fromStatus)
+    {
+        var updated = 0;
+        ExecuteWrite(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            var clauses = BuildStatusTransitionClauses(SyncStatus.Queued);
+            clauses.AddRange(OperatorQueueClauses);
+            cmd.CommandText = $"UPDATE {TableName} SET {string.Join(", ", clauses)} WHERE Status = @fromStatus";
+            AddStatusTransitionParameters(cmd, SyncStatus.Queued, reason: null);
+            cmd.Parameters.AddWithValue("@fromStatus", (int)fromStatus);
+            updated = cmd.ExecuteNonQuery();
+        });
+        return updated;
+    }
+
+    /// <summary>
+    /// Gets extra SET clauses a module applies when an operator queues its rows, on top of the status
+    /// transition. A module whose sync skips categories it believes are already applied clears that
+    /// belief here, so a queued row is really applied again.
+    /// </summary>
+    protected virtual IReadOnlyList<string> OperatorQueueClauses => Array.Empty<string>();
+
     /// <inheritdoc />
     public virtual void UpdateStatusByKey(TKey key, SyncStatus status, string? reason = null) => ExecuteWrite(conn =>
     {
@@ -341,7 +351,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     });
 
     // ===================================================================
-    // Status transition helpers — used by every UpdateStatus variant so
+    // Status transition helpers, used by every UpdateStatus variant so
     // transition semantics (LastSyncTime on Synced, Reason auto-clear,
     // optional retry-count tracking) stay consistent across modules.
     // ===================================================================
@@ -351,8 +361,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// includes Status, StatusDate, Reason. Adds LastSyncTime when
     /// transitioning to <see cref="SyncStatus.Synced"/>. When
     /// <paramref name="trackRetryCount"/> is true, also resets RetryCount on
-    /// Synced and increments it on Errored — only enable for tables that
-    /// have a RetryCount column (currently Content only).
+    /// Synced and increments it on Errored. Every module's table has had a
+    /// RetryCount column since schema v22.
     /// </summary>
     /// <param name="status">Target status.</param>
     /// <param name="trackRetryCount">Whether to manage RetryCount column.</param>
@@ -379,7 +389,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
             // Reaching Queued through this path means an operator asked for it
             // (a Queue or Retry action), so hand back the full allowance. The
             // refresh re-queues through Upsert instead, which preserves the
-            // count — that is what lets the ceiling actually stop a row that
+            // count, that is what lets the ceiling actually stop a row that
             // can never converge.
             clauses.Add("RetryCount = 0");
         }
@@ -394,7 +404,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <summary>
     /// Binds the universal status-transition parameters (<c>@status</c>,
     /// <c>@statusDate</c>, <c>@reason</c>) onto <paramref name="cmd"/>.
-    /// Synced auto-clears the reason regardless of the caller's input — the
+    /// Synced auto-clears the reason regardless of the caller's input, the
     /// row's prior error text shouldn't survive a successful sync.
     /// </summary>
     protected static void AddStatusTransitionParameters(SqliteCommand cmd, SyncStatus status, string? reason)
@@ -407,7 +417,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     // ===================================================================
-    // Reader helpers — used by MapFromReader implementations to keep
+    // Reader helpers, used by MapFromReader implementations to keep
     // null-handling and timestamp parsing identical across modules.
     // ===================================================================
 
@@ -496,12 +506,10 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     // ===================================================================
 
     /// <summary>
-    /// Formats a <see cref="DateTime"/> as ISO-8601 round-trip text using the
-    /// invariant culture. The canonical wire format for all timestamp
-    /// columns in this database.
+    /// Formats a <see cref="DateTime"/> as UTC round trip text, the format for every timestamp column in
+    /// this database. See <see cref="Utilities.UtcTime"/>.
     /// </summary>
-    protected static string FormatTimestamp(DateTime value)
-        => value.ToString("o", CultureInfo.InvariantCulture);
+    protected static string FormatTimestamp(DateTime value) => Utilities.UtcTime.Format(value);
 
     /// <summary>
     /// Parses an ISO-8601 round-trip text timestamp written by
@@ -509,9 +517,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// on parse failure (legacy rows occasionally have malformed dates).
     /// </summary>
     protected static DateTime ParseTimestamp(string value)
-        => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt)
-            ? dt
-            : DateTime.MinValue;
+        => Utilities.UtcTime.TryParse(value, out var dt) ? dt : DateTime.MinValue;
 
     // ===================================================================
     // Helpers for subclasses
@@ -556,7 +562,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
             ex.SqliteErrorCode == 8 ||  // SQLITE_READONLY
             ex.SqliteErrorCode == 14)   // SQLITE_CANTOPEN
         {
-            Logger.LogWarning(ex, "Read '{Op}' on {Table} failed with SQLite error {Code}; returning fallback", callerName, TableName, ex.SqliteErrorCode);
+            Logger.LogWarning(ex, "Read '{Op}' on {Table} failed with SQLite error {Code}. Returning fallback", callerName, TableName, ex.SqliteErrorCode);
             return fallback;
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 11) // SQLITE_CORRUPT
@@ -566,14 +572,14 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("connection", StringComparison.OrdinalIgnoreCase))
         {
-            Logger.LogWarning(ex, "Connection error during read '{Op}' on {Table}; returning fallback", callerName, TableName);
+            Logger.LogWarning(ex, "Connection error during read '{Op}' on {Table}. Returning fallback", callerName, TableName);
             return fallback;
         }
     }
 
     /// <summary>
     /// Executes a write against the connection under the write-lock. Errors
-    /// propagate; callers decide retry policy.
+    /// propagate. Callers decide retry policy.
     /// </summary>
     protected void ExecuteWrite(
         Action<SqliteConnection> writeOperation,

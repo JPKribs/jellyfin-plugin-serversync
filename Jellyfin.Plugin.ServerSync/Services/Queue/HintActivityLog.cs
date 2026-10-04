@@ -111,7 +111,10 @@ public sealed class HintActivityLog
             : TitleOf(item);
     }
 
-    private static string? EpisodeCode(MediaBrowser.Controller.Entities.TV.Episode episode)
+    /// <summary>The episode's season and number, as S01E02, or null when either is unknown.</summary>
+    /// <param name="episode">The episode.</param>
+    /// <returns>The code.</returns>
+    public static string? EpisodeCode(MediaBrowser.Controller.Entities.TV.Episode episode)
         => episode.ParentIndexNumber.HasValue && episode.IndexNumber.HasValue
             ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "S{0:D2}E{1:D2}", episode.ParentIndexNumber.Value, episode.IndexNumber.Value)
             : null;
@@ -153,7 +156,12 @@ public sealed class HintActivityLog
             LogLevel.Information);
     }
 
-    /// <summary>Records that a hint from a peer could not apply here and was dropped.</summary>
+    /// <summary>
+    /// Records that a hint from a peer could not apply here and was dropped. The entry reads "Skipped
+    /// sync for [name]" and its detail names the type, as "Metadata for Only A (2021) could not be
+    /// updated from source-a because the row is ignored on this server". A reason that already names
+    /// the type and the name is used as it is.
+    /// </summary>
     /// <param name="hint">The hint.</param>
     /// <param name="originName">The peer's display name.</param>
     /// <param name="reason">Why.</param>
@@ -161,11 +169,12 @@ public sealed class HintActivityLog
     public Task DroppedAsync(InboundHint hint, string originName, string? reason)
     {
         ArgumentNullException.ThrowIfNull(hint);
-        return WriteAsync(
-            Prefix + $"dropped {Describe(hint.Kind, hint.ItemPath, hint.UserName, hint.Key)} from {originName}",
-            "ServerSync.HintDropped",
-            reason,
-            LogLevel.Information);
+        var name = NameOf(hint.Kind, hint.ItemPath, hint.UserName, hint.Key);
+        var subject = SubjectOf(hint.Kind, name, hint.UserName);
+        var overview = !string.IsNullOrEmpty(reason) && reason.StartsWith(subject, StringComparison.Ordinal)
+            ? reason
+            : $"{subject} could not be updated from {originName} because {reason ?? "it could not be applied"}";
+        return WriteAsync($"Skipped sync for {name}", "ServerSync.HintDropped", overview, LogLevel.Information);
     }
 
     /// <summary>Records that a hint from a peer keeps failing here.</summary>
@@ -177,8 +186,9 @@ public sealed class HintActivityLog
     {
         ArgumentNullException.ThrowIfNull(hint);
 
-        // The first failure is often a passing one. Later failures are worth a line each.
-        if (hint.Attempts < 1)
+        // The first failure is often a passing one. The second and the sixth are worth a line. The rest
+        // would repeat the same line hourly, and giving up writes its own.
+        if (hint.Attempts is not (1 or 5))
         {
             return Task.CompletedTask;
         }
@@ -197,20 +207,13 @@ public sealed class HintActivityLog
     public Task PausedAsync(string peerName, string reason)
         => WriteAsync(Prefix + $"paused hints to {peerName}", "ServerSync.PeerPaused", reason, LogLevel.Warning);
 
-    /// <summary>Records that a peer rejected a hint for good.</summary>
-    /// <param name="hint">The outbound row.</param>
+    /// <summary>Records that a peer rejected a whole request, once for the batch.</summary>
     /// <param name="peerName">The peer's display name.</param>
+    /// <param name="count">How many hints the request carried.</param>
     /// <param name="reason">Why.</param>
     /// <returns>A task.</returns>
-    public Task RejectedAsync(OutboundHint hint, string peerName, string reason)
-    {
-        ArgumentNullException.ThrowIfNull(hint);
-        return WriteAsync(
-            Prefix + $"{peerName} rejected {Describe(hint.Kind, hint.ItemPath, hint.UserName, hint.Key)}",
-            "ServerSync.HintRejected",
-            reason,
-            LogLevel.Error);
-    }
+    public Task RejectedBatchAsync(string peerName, int count, string reason)
+        => WriteAsync(Prefix + $"{peerName} rejected a request carrying {count} hint(s)", "ServerSync.HintRejected", reason, LogLevel.Error);
 
     /// <summary>Records that a peer lost hints and they were sent again.</summary>
     /// <param name="peerName">The peer's display name.</param>

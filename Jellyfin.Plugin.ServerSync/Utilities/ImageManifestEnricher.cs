@@ -22,7 +22,7 @@ public static class ImageManifestEnricher
     /// <item>Carry sizes forward from <paramref name="priorSourceManifestJson"/>
     /// for entries whose Tag is unchanged (same image → same size).</item>
     /// <item>If every entry now has a size and <paramref name="deepVerification"/>
-    /// is off, return without any HTTP — the steady-state path. This is what
+    /// is off, return without any HTTP, the steady-state path. This is what
     /// keeps refresh from issuing one GET + one HEAD per image per item per
     /// run on libraries where nothing changed.</item>
     /// <item>Otherwise fall through to <see cref="EnrichAsync"/> (per-item GET
@@ -166,7 +166,7 @@ public static class ImageManifestEnricher
                 // /Items/{id}/Images reads Size from Jellyfin's in-memory
                 // item state, which goes stale when the image file is
                 // replaced on disk without a metadata rescan. HEAD the
-                // actual image URL — Jellyfin's image controller serves
+                // actual image URL, Jellyfin's image controller serves
                 // the file directly, so Content-Length is the current
                 // file length and the comparator sees the replacement
                 // even when Jellyfin hasn't re-indexed.
@@ -187,10 +187,10 @@ public static class ImageManifestEnricher
     /// Fills missing Size / Width / Height on a freshly built (tag-only) source
     /// manifest from the previously stored manifest, for images whose Tag is
     /// unchanged. Refresh rebuilds the source side tag-only every run and only
-    /// enriches it with a live HTTP call; when that call fails or is skipped,
+    /// enriches it with a live HTTP call. When that call fails or is skipped,
     /// the row would otherwise drop back to Size=0 and read as a change against
     /// the sized local side until the next successful enrichment. An unchanged
-    /// Tag means the same image, so the previously measured size still holds —
+    /// Tag means the same image, so the previously measured size still holds , 
     /// carrying it forward keeps the comparison honest with no extra HTTP. A
     /// changed Tag is a real new image and is left tag-only so the change is
     /// still detected.

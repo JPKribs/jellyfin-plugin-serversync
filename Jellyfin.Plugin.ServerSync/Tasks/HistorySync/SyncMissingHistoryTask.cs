@@ -13,9 +13,7 @@ using Jellyfin.Plugin.ServerSync.Services.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using MediaBrowser.Controller;
-using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using TaskTriggerInfo = MediaBrowser.Model.Tasks.TaskTriggerInfo;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
@@ -137,7 +135,7 @@ public class SyncMissingHistoryTask
             {
                 capabilities = await source.Client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -249,7 +247,7 @@ public class SyncMissingHistoryTask
                     : new PeerHistoryResult { Outcome = PeerHistoryOutcome.Failed, Reason = "source returned no result for this row" };
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -434,7 +432,7 @@ public class SyncMissingHistoryTask
             diffs.Add($"Favorite wanted={record.MergedIsFavorite.Value}, got={fresh.IsFavorite}");
         }
 
-        // LastPlayedDate is harder — Jellyfin does not round-trip sub-second
+        // LastPlayedDate is harder, Jellyfin does not round-trip sub-second
         // precision. Shares its definition of "the same instant" with
         // HasChangesToSync, so the change detector and this verifier can never
         // disagree about whether the write landed.
@@ -495,13 +493,4 @@ public class SyncMissingHistoryTask
         config.LastHistorySyncTime = utcNow;
     }
 
-    /// <inheritdoc />
-    public override IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => new[]
-    {
-        new TaskTriggerInfo
-        {
-            Type = TaskTriggerInfoType.IntervalTrigger,
-            IntervalTicks = TimeSpan.FromHours(6).Ticks
-        }
-    };
 }
