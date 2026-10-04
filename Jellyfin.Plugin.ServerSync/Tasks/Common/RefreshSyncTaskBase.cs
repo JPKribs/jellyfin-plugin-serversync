@@ -764,14 +764,24 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
     }
 
+    // Progress allocation. The snapshot takes 0 to 3 %, the source fetch 3 to 50 %, and 50 to 99 % is
+    // split between the build and the prune by how many rows each will touch, so a run that builds
+    // nothing but prunes 100k rows spends its band on the prune instead of freezing at the tail. The
+    // finalize takes the last 1 %.
+    private const double SnapshotEnd = 3.0;
+    private const double FetchEnd = 50.0;
+    private const double WorkEnd = 99.0;
+
+    // Deletes are weighted cheaper than builds when the band is split, since they make no HTTP calls
+    // and touch no blobs.
+    private const double PruneRowWeight = 0.25;
+
     private async Task RunAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         if (!await TestConnectionAsync(cancellationToken).ConfigureAwait(false))
         {
-            // Bumped to LogError + recorded to config so the dashboard can
-            // surface "last refresh failed: connection check" instead of the
-            // user assuming everything's fine because the row count didn't
-            // change.
+            // Recorded so the dashboard shows the refresh failed instead of the operator assuming all is
+            // well because the row count did not change.
             Logger.LogError("{Task}: connection check failed. Aborting refresh", Name);
             RecordRunFailure("Refresh", "Connection check failed: no scan server is reachable or every configured key is invalid");
             return;
@@ -779,25 +789,36 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         _enabledSourceLibraryIdsForRun = BuildEnabledSourceLibraryIds();
         OnRunStarting();
-
-        // Progress allocation:
-        //   0 to 3 %  existing-row snapshot
-        //   3 to 50 %  source-side fetch (sub-reported by GetListAsync)
-        //  50 to 99 %  split between per-item build and prune, weighted by how
-        //            many rows each phase will actually touch, a run that
-        //            builds nothing but prunes 100k rows spends its band on
-        //            the prune instead of freezing at the tail
-        //  99 to 100 %  finalize
-        const double SnapshotEnd = 3.0;
-        const double FetchEnd = 50.0;
-        const double WorkEnd = 99.0;
         progress.Report(0);
 
-        // 1. Snapshot existing rows so we can detect stale ones at the end.
-        // Strict read: if this silently degraded to an empty list on a
-        // transient DB error, every source item would look new and the
-        // upserts would overwrite user-set statuses (Ignored, pending
-        // approvals). Failing the run is the safe outcome.
+        var existing = SnapshotExistingRows();
+        progress.Report(SnapshotEnd);
+
+        var fetchProgress = new Progress<double>(p =>
+            progress.Report(SnapshotEnd + ((FetchEnd - SnapshotEnd) * Math.Clamp(p, 0, 100) / 100.0)));
+        var sourceItems = await CollectAsync(fetchProgress, cancellationToken).ConfigureAwait(false);
+        sourceItems = await FilterAsync(sourceItems, cancellationToken).ConfigureAwait(false);
+        progress.Report(FetchEnd);
+
+        var run = StartRun(existing, sourceItems.Count);
+        await BuildAllAsync(run, sourceItems, progress, cancellationToken).ConfigureAwait(false);
+        await ResolveRunConflictsAsync(run, cancellationToken).ConfigureAwait(false);
+        RetireCoveredRows(run);
+        var pruned = await PruneIfSafeAsync(run, progress, cancellationToken).ConfigureAwait(false);
+
+        progress.Report(WorkEnd);
+        await FinalizeAsync(cancellationToken).ConfigureAwait(false);
+        RecordRunCompletedAndSave();
+        progress.Report(100);
+
+        ReportRunOutcome(run, pruned);
+    }
+
+    // Strict read. If this degraded to an empty list on a transient database error, every source item
+    // would look new and the upserts would overwrite statuses the operator set, such as Ignored and
+    // pending approvals. Failing the run is the safe outcome.
+    private Dictionary<TKey, TRecord> SnapshotExistingRows()
+    {
         var existingList = Manager.GetAllStrict();
         var existing = new Dictionary<TKey, TRecord>(existingList.Count);
         foreach (var rec in existingList)
@@ -805,54 +826,21 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             existing[ExtractKey(rec)] = rec;
         }
 
-        progress.Report(SnapshotEnd);
+        return existing;
+    }
 
-        // 2. Fetch + filter source items. Sub-progress (0 to 100 within the
-        // fetch phase) is mapped into the SnapshotEnd, FetchEnd band.
-        var fetchProgress = new Progress<double>(p =>
-            progress.Report(SnapshotEnd + ((FetchEnd - SnapshotEnd) * Math.Clamp(p, 0, 100) / 100.0)));
-        var sourceItems = await CollectAsync(fetchProgress, cancellationToken).ConfigureAwait(false);
-        sourceItems = await FilterAsync(sourceItems, cancellationToken).ConfigureAwait(false);
-
-        progress.Report(FetchEnd);
-
-        // 3. Build/update one record per source item. When BuildRecordAsync
-        // spends most of its time on per-item HTTP calls (Metadata fetches
-        // per-item image info from the source), parallelism here turns
-        // hours into minutes. SQLite still serializes the actual Upsert via
-        // the manager's WriteLock, so concurrent builds queue cleanly at
-        // persist time.
-        var seenKeys = new System.Collections.Concurrent.ConcurrentDictionary<TKey, byte>();
-        var seenPriorityKeys = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
-        var queuedThisRun = new System.Collections.Concurrent.ConcurrentBag<TRecord>();
-        var processed = 0;
-        var total = Math.Max(sourceItems.Count, 1);
-        var parallelism = Math.Max(1, BuildRecordParallelism);
-
-        // Split FetchEnd, WorkEnd between build and prune proportional to the
-        // rows each will touch. The prune count isn't exact until the build
-        // finishes, but (existing − source) is a solid lower bound. Deletes
-        // are weighted cheaper than builds (no HTTP, no blob work). Without
-        // this, a run that builds 0 items and prunes 130k rows jumps to the
-        // build band's end instantly and then sits frozen through the prune.
-        const double PruneRowWeight = 0.25;
-        var buildWeight = (double)sourceItems.Count;
-        var pruneWeight = Math.Max(0, existing.Count - sourceItems.Count) * PruneRowWeight;
+    private RefreshRun StartRun(Dictionary<TKey, TRecord> existing, int sourceCount)
+    {
+        // The build and the prune share the band by the rows each will touch. The prune count is not
+        // exact until the build finishes, but existing minus source is a solid lower bound.
+        var buildWeight = (double)sourceCount;
+        var pruneWeight = Math.Max(0, existing.Count - sourceCount) * PruneRowWeight;
         var buildEnd = buildWeight + pruneWeight <= 0
             ? WorkEnd
             : FetchEnd + ((WorkEnd - FetchEnd) * buildWeight / (buildWeight + pruneWeight));
 
-        // Per-item failures during build/upsert get counted so the run
-        // summary tells the user how many records didn't make it. A single
-        // bad item must not abort the whole refresh.
-        var buildFailures = 0;
-        var persistFailures = 0;
-
-        // A row held by a higher priority server that did not answer this run stays with that server. A
-        // lower one would otherwise take it over for the outage and hand it back afterwards, writing its
-        // values and then the first server's values over the same row twice.
-        var pullOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var pullServers = _configManager.Configuration.GetPullServers();
+        var pullOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < pullServers.Count; i++)
         {
             pullOrder.TryAdd(pullServers[i].Key, i);
@@ -869,291 +857,271 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             heldServerKeys[kvp.Key] = string.IsNullOrEmpty(kvp.Value.ServerKey) ? firstServerKey : kvp.Value.ServerKey;
         }
 
-        // A server that connected but whose listing failed counts as absent too: it offered nothing
-        // trustworthy, so its rows must not pass to a lower server for the outage.
-        var listedCleanly = new HashSet<string>(_listedCleanly, StringComparer.OrdinalIgnoreCase);
-        bool HeldByAbsentHigherServer(string? heldKey, TRecord built)
-        {
-            if (string.IsNullOrEmpty(heldKey)
-                || string.Equals(heldKey, built.ServerKey, StringComparison.OrdinalIgnoreCase)
-                || listedCleanly.Contains(heldKey)
-                || !pullOrder.TryGetValue(heldKey, out var heldRank))
-            {
-                return false;
-            }
+        return new RefreshRun(existing, sourceCount, buildEnd, pullOrder, heldServerKeys, new HashSet<string>(_listedCleanly, StringComparer.OrdinalIgnoreCase));
+    }
 
-            return !pullOrder.TryGetValue(built.ServerKey ?? string.Empty, out var builtRank) || heldRank < builtRank;
-        }
-
-        async ValueTask BuildOneAsync(TSource src, CancellationToken ct)
-        {
-            try
-            {
-                TRecord? record;
-                try
-                {
-                    record = await BuildRecordAsync(src, existing, ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    // Bad source item (path translate fault, source HTTP
-                    // hiccup or timeout, etc.). An HTTP timeout surfaces as a
-                    // cancellation while the run's token is not cancelled, so
-                    // it lands here as a per item failure. Log loudly with
-                    // item context where possible, count the failure, and let
-                    // other items continue. Without this catch, one bad record
-                    // aborts the entire refresh and the row vanishes silently
-                    // from the user's table.
-                    Interlocked.Increment(ref buildFailures);
-                    Logger.LogError(ex, "{Task}: BuildRecordAsync threw for source {Source}. Record skipped", Name, src);
-                    return;
-                }
-
-                if (record == null)
-                {
-                    return;
-                }
-
-                var key = ExtractKey(record);
-                seenKeys.TryAdd(key, 0);
-                if (heldServerKeys.TryGetValue(key, out var heldKey) && HeldByAbsentHigherServer(heldKey, record))
-                {
-                    return;
-                }
-
-                var priorityKey = PriorityKeyOf(record);
-                if (priorityKey is not null)
-                {
-                    seenPriorityKeys.TryAdd(priorityKey, 0);
-                }
-
-                // Refresh + Compare in one pass: snapshot data is fresh, so
-                // decide status immediately. Subclasses can override
-                // DecideStatus to implement workflows like Content's approval
-                // gate.
-                DecideStatus(record);
-                if (record.Status == SyncStatus.Queued)
-                {
-                    queuedThisRun.Add(record);
-                }
-
-                try
-                {
-                    Manager.Upsert(record);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    Interlocked.Increment(ref persistFailures);
-                    Logger.LogError(ex, "{Task}: failed to upsert record for key {Key}", Name, key);
-                }
-            }
-            finally
-            {
-                var p = Interlocked.Increment(ref processed);
-                progress.Report(FetchEnd + ((buildEnd - FetchEnd) * p / total));
-            }
-        }
-
+    // Builds and stores one row per source item. When BuildRecordAsync spends most of its time on per
+    // item HTTP calls, as Metadata does, parallelism turns hours into minutes. SQLite still serializes
+    // the upserts through the manager's write lock.
+    private async Task BuildAllAsync(RefreshRun run, IList<TSource> sourceItems, IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        var parallelism = Math.Max(1, BuildRecordParallelism);
         if (parallelism == 1)
         {
             foreach (var src in sourceItems)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await BuildOneAsync(src, cancellationToken).ConfigureAwait(false);
+                await BuildOneAsync(run, src, progress, cancellationToken).ConfigureAwait(false);
             }
         }
         else
         {
             await Parallel.ForEachAsync(
                 sourceItems,
-                new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = parallelism,
-                    CancellationToken = cancellationToken
-                },
-                async (src, ct) => await BuildOneAsync(src, ct).ConfigureAwait(false))
+                new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = cancellationToken },
+                async (src, ct) => await BuildOneAsync(run, src, progress, ct).ConfigureAwait(false))
                 .ConfigureAwait(false);
         }
 
-        var seenKeySet = new HashSet<TKey>(seenKeys.Keys);
+        run.SeenKeySet = new HashSet<TKey>(run.SeenKeys.Keys);
+    }
 
-        // A failed conflict pass leaves the queued rows as they were built. It counts as a failure so
-        // the run skips the prune and the dashboard shows why.
-        var conflictsFailed = false;
-        if (!queuedThisRun.IsEmpty)
+    // A single bad item never aborts the refresh. Its failure is counted so the run skips the prune and
+    // the summary says how many rows did not make it.
+    private async ValueTask BuildOneAsync(RefreshRun run, TSource src, IProgress<double> progress, CancellationToken ct)
+    {
+        try
         {
+            TRecord? record;
             try
             {
-                await ResolveConflictsAsync(queuedThisRun.ToList(), cancellationToken).ConfigureAwait(false);
+                record = await BuildRecordAsync(src, run.Existing, ct).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
-                conflictsFailed = true;
-                Logger.LogError(ex, "{Task}: resolving conflicts with peers failed, queued rows are kept as they are", Name);
-                RecordRunFailure("Refresh", $"Conflict resolution failed: {ex.Message}");
+                // A bad source item, a path that does not translate, or a source HTTP failure. An HTTP
+                // timeout surfaces as a cancellation while the run's token is not cancelled, so it lands
+                // here as a per item failure too.
+                run.CountBuildFailure();
+                Logger.LogError(ex, "{Task}: BuildRecordAsync threw for source {Source}. Record skipped", Name, src);
+                return;
+            }
+
+            if (record == null)
+            {
+                return;
+            }
+
+            var key = ExtractKey(record);
+            run.SeenKeys.TryAdd(key, 0);
+            if (run.IsHeldByAbsentHigherServer(key, record))
+            {
+                return;
+            }
+
+            var priorityKey = PriorityKeyOf(record);
+            if (priorityKey is not null)
+            {
+                run.SeenPriorityKeys.TryAdd(priorityKey, 0);
+            }
+
+            // The snapshot is fresh, so the status is decided right away. Content overrides this for its
+            // approval modes.
+            DecideStatus(record);
+            if (record.Status == SyncStatus.Queued)
+            {
+                run.QueuedThisRun.Add(record);
+            }
+
+            try
+            {
+                Manager.Upsert(record);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                run.CountPersistFailure();
+                Logger.LogError(ex, "{Task}: failed to upsert record for key {Key}", Name, key);
             }
         }
+        finally
+        {
+            var done = run.CountProcessed();
+            progress.Report(FetchEnd + ((run.BuildEnd - FetchEnd) * done / run.Total));
+        }
+    }
 
-        var hadFailures = buildFailures > 0 || persistFailures > 0 || conflictsFailed;
+    // A failed conflict pass leaves the queued rows as they were built. It counts as a failure so the
+    // run skips the prune and the dashboard shows why.
+    private async Task ResolveRunConflictsAsync(RefreshRun run, CancellationToken cancellationToken)
+    {
+        if (run.QueuedThisRun.IsEmpty)
+        {
+            return;
+        }
 
-        // 3b. Retire rows another server now covers. When priorities change or a higher priority
-        // server gains an item, the row that previously tracked it under a lower priority server is
-        // not a removal: the thing is still here, tracked by the new winner's row. Delete it quietly
-        // and count it as seen so neither the module prune nor the circuit breaker treats it as stale.
-        // Never while a server did not answer this run: its items were never offered, so a lower
-        // priority server's rows would claim them and the unanswered server's rows, negotiated bases
-        // included, would be deleted over an outage rather than a real change of ownership.
+        try
+        {
+            await ResolveConflictsAsync(run.QueuedThisRun.ToList(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            run.ConflictsFailed = true;
+            Logger.LogError(ex, "{Task}: resolving conflicts with peers failed, queued rows are kept as they are", Name);
+            RecordRunFailure("Refresh", $"Conflict resolution failed: {ex.Message}");
+        }
+    }
+
+    // When priorities change or a higher priority server gains an item, the row that tracked it under a
+    // lower priority server is not a removal. The thing is still here, tracked by the new winner's row,
+    // so the old row is deleted quietly and counted as seen, and neither the prune nor the circuit
+    // breaker treats it as stale. Never while a server did not answer this run: its items were never
+    // offered, so a lower server's rows would claim them, and the unanswered server's rows, negotiated
+    // bases included, would be deleted over an outage rather than a real change of ownership.
+    private void RetireCoveredRows(RefreshRun run)
+    {
         if (_sourceUnavailable)
         {
-            if (!seenPriorityKeys.IsEmpty)
+            if (!run.SeenPriorityKeys.IsEmpty)
             {
                 Logger.LogInformation("{Task}: a server did not answer this run, so no rows are retired to another server", Name);
             }
-        }
-        else
-        {
-            var superseded = RetireSupersededRows(existing, seenKeySet, seenPriorityKeys, hadFailures);
-            if (superseded > 0)
-            {
-                Logger.LogInformation("{Task}: retired {Count} row(s) now covered by a higher priority server", Name, superseded);
-            }
+
+            return;
         }
 
-        // 4. Prune rows no longer present on the source, but ONLY when the whole
-        // discovery completed cleanly. If the source returned any error this run
-        // (anything other than a real response), rows missing from the seen set
-        // might still exist on the source, so deleting them would be data loss.
-        // Skip pruning entirely and let the next clean run reconcile.
-        var pruned = 0;
+        var superseded = RetireSupersededRows(run.Existing, run.SeenKeySet, run.SeenPriorityKeys, run.HadFailures);
+        if (superseded > 0)
+        {
+            Logger.LogInformation("{Task}: retired {Count} row(s) now covered by a higher priority server", Name, superseded);
+        }
+    }
+
+    // Removes rows no longer present on the source, but only after a clean discovery. When a source
+    // answered with anything but a real response, a row missing from the seen set might still exist
+    // there, and when an item could not be built or stored it is missing from the seen set too. Either
+    // way deleting would be data loss, so the next clean run reconciles instead.
+    private async Task<int> PruneIfSafeAsync(RefreshRun run, IProgress<double> progress, CancellationToken cancellationToken)
+    {
         if (_sourceUnavailable)
         {
             Logger.LogWarning("{Task}: source was unavailable during discovery, skipping prune. No rows removed this run", Name);
+            return 0;
         }
-        else if (hadFailures)
+
+        if (run.HadFailures)
         {
-            // Items the source DID return couldn't all be built or persisted this
-            // run (e.g. a per-item 4xx/5xx fetching detail, or a transient DB
-            // write), or the conflict pass failed. Those items aren't in the seen
-            // set, so pruning would delete rows for items that still exist on the
-            // source. Skip pruning until a run completes with no failures.
             Logger.LogWarning(
                 "{Task}: {BuildFailed} build / {PersistFailed} persist failure(s) this run, conflict resolution failed: {ConflictsFailed}. Skipping prune so partially processed items are not deleted",
-                Name, buildFailures, persistFailures, conflictsFailed);
+                Name, run.BuildFailures, run.PersistFailures, run.ConflictsFailed);
+            return 0;
         }
-        else
+
+        if (PruneGuardApplies && PruneWouldExceedSafetyLimit(run, out var staleInScope, out var inScope))
         {
-            // Circuit breaker: a discovery that looked clean but would delete
-            // most of the table is treated as a source-side truncation, not a
-            // real mass removal. An empty-but-200 catalog answer passes every
-            // error guard above. This is the last line of defense before the
-            // table (and, for Content, local files) is destroyed.
-            // Both counts are measured against the in-scope population only:
-            // rows under disabled mappings would otherwise dilute the fraction
-            // and let a truncation wipe 100% of an enabled mapping while
-            // staying under the table-wide threshold. Rows the prune would
-            // no-op on (IsPruneCandidate false) are excluded from the stale
-            // count so already-pending/ignored rows can't accumulate into a
-            // permanently tripped breaker.
-            // Judged per server as well as for the table: with several servers, one that answers with an
-            // empty catalog is at most a share of the table, and would slip under a table wide threshold
-            // while every row it tracks is deleted.
-            var inScope = 0;
-            var staleInScope = 0;
-            var byServer = new Dictionary<string, (int InScope, int Stale)>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kvp in existing)
-            {
-                if (!IsInScope(kvp.Value))
-                {
-                    continue;
-                }
-
-                var stale = !seenKeySet.Contains(kvp.Key) && IsPruneCandidate(kvp.Value);
-                inScope++;
-                staleInScope += stale ? 1 : 0;
-                var server = kvp.Value.ServerKey ?? string.Empty;
-                byServer.TryGetValue(server, out var counts);
-                byServer[server] = (counts.InScope + 1, counts.Stale + (stale ? 1 : 0));
-            }
-
-            var tableTripped = inScope >= PruneGuardMinRows && staleInScope > inScope * MaxPruneFraction;
-            var serverTripped = byServer.Values
-                .Where(c => c.InScope >= PruneGuardMinRows && c.Stale > c.InScope * MaxPruneFraction)
-                .OrderByDescending(c => c.Stale)
-                .Take(1)
-                .ToList();
-            if (!tableTripped && serverTripped.Count > 0)
-            {
-                // Reported against the server that tripped, which is the number that explains it.
-                (inScope, staleInScope) = serverTripped[0];
-            }
-
-            if (PruneGuardApplies && (tableTripped || serverTripped.Count > 0))
-            {
-                Logger.LogWarning(
-                    "{Task}: refusing to prune {Stale} of {Existing} in-scope rows (>{Percent:P0}) in one run — this usually means the source answered with a truncated or empty catalog. If the removal is real, it will reconcile once the source returns a majority of the rows; to force it, reset this module's sync table from the dashboard",
-                    Name, staleInScope, inScope, MaxPruneFraction);
-                MarkPruneBlocked($"Prune of {staleInScope}/{inScope} rows blocked by safety limit, source likely returned a truncated catalog");
-            }
-            else
-            {
-                var pruneProgress = new Progress<double>(p =>
-                    progress.Report(buildEnd + ((WorkEnd - buildEnd) * Math.Clamp(p, 0, 100) / 100.0)));
-                pruned = await PruneStaleAsync(existing, seenKeySet, pruneProgress, cancellationToken).ConfigureAwait(false);
-                if (pruned > 0)
-                {
-                    Logger.LogInformation("{Task}: pruned {Count} stale records", Name, pruned);
-                }
-            }
+            Logger.LogWarning(
+                "{Task}: refusing to prune {Stale} of {Existing} in-scope rows (>{Percent:P0}) in one run. This usually means the source answered with a truncated or empty catalog. If the removal is real, it will reconcile once the source returns a majority of the rows. To force it, reset this module's sync table from the dashboard",
+                Name, staleInScope, inScope, MaxPruneFraction);
+            MarkPruneBlocked($"Prune of {staleInScope}/{inScope} rows blocked by safety limit, source likely returned a truncated catalog");
+            return 0;
         }
 
-        progress.Report(WorkEnd);
-        await FinalizeAsync(cancellationToken).ConfigureAwait(false);
-        RecordRunCompletedAndSave();
+        var pruneProgress = new Progress<double>(p =>
+            progress.Report(run.BuildEnd + ((WorkEnd - run.BuildEnd) * Math.Clamp(p, 0, 100) / 100.0)));
+        var pruned = await PruneStaleAsync(run.Existing, run.SeenKeySet, pruneProgress, cancellationToken).ConfigureAwait(false);
+        if (pruned > 0)
+        {
+            Logger.LogInformation("{Task}: pruned {Count} stale records", Name, pruned);
+        }
 
-        progress.Report(100);
+        return pruned;
+    }
 
-        // Surface per-item failure counts so the user / log-reader can
-        // tell the difference between "no rows changed" (normal) and "lots
-        // of rows silently failed to build or persist" (problem). Logs at
-        // Warning when any failure occurred and records a config-side
-        // failure entry so the dashboard can surface it.
+    /// <summary>
+    /// The circuit breaker. A discovery that looked clean but would delete most of the table is taken as
+    /// a truncated answer from the source, not a real mass removal, since an empty catalog answered with
+    /// success passes every other guard. It is the last line of defense before the table, and for
+    /// Content the local files, are destroyed. Counts cover the rows in scope only, so rows under a
+    /// disabled mapping cannot dilute the fraction, and only rows the prune would act on count as stale,
+    /// so pending and ignored rows cannot pile up into a breaker that never resets. It is judged per
+    /// server as well as for the table, since one server answering with an empty catalog is only a
+    /// share of the table and would slip under a table wide limit while every row it tracks is deleted.
+    /// </summary>
+    /// <param name="run">The run.</param>
+    /// <param name="stale">The stale rows in the count that tripped, for the message.</param>
+    /// <param name="inScope">The rows in scope in the count that tripped, for the message.</param>
+    /// <returns>True when the prune must not run.</returns>
+    private bool PruneWouldExceedSafetyLimit(RefreshRun run, out int stale, out int inScope)
+    {
+        inScope = 0;
+        stale = 0;
+        var byServer = new Dictionary<string, (int InScope, int Stale)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in run.Existing)
+        {
+            if (!IsInScope(kvp.Value))
+            {
+                continue;
+            }
+
+            var isStale = !run.SeenKeySet.Contains(kvp.Key) && IsPruneCandidate(kvp.Value);
+            inScope++;
+            stale += isStale ? 1 : 0;
+            var server = kvp.Value.ServerKey ?? string.Empty;
+            byServer.TryGetValue(server, out var counts);
+            byServer[server] = (counts.InScope + 1, counts.Stale + (isStale ? 1 : 0));
+        }
+
+        if (inScope >= PruneGuardMinRows && stale > inScope * MaxPruneFraction)
+        {
+            return true;
+        }
+
+        var worstServer = byServer.Values
+            .Where(c => c.InScope >= PruneGuardMinRows && c.Stale > c.InScope * MaxPruneFraction)
+            .OrderByDescending(c => c.Stale)
+            .Take(1)
+            .ToList();
+        if (worstServer.Count == 0)
+        {
+            return false;
+        }
+
+        // Reported against the server that tripped, which is the number that explains it.
+        (inScope, stale) = worstServer[0];
+        return true;
+    }
+
+    // Tells "no rows changed" apart from "rows failed to build or store", and records a failure the
+    // dashboard shows. A source outage or a blocked prune recorded its own failure earlier in the run,
+    // which is kept rather than cleared here.
+    private void ReportRunOutcome(RefreshRun run, int pruned)
+    {
         if (_sourceUnavailable)
         {
-            // The failure was already recorded by MarkSourceUnavailable. Leave
-            // it in place (don't clear) so the dashboard shows the source was
-            // unavailable and pruning was skipped.
-            Logger.LogWarning(
-                "{Task} complete with source unavailable: {Processed} processed, prune skipped this run",
-                Name, processed);
+            Logger.LogWarning("{Task} complete with source unavailable: {Processed} processed, prune skipped this run", Name, run.Processed);
         }
         else if (_pruneBlocked)
         {
-            // The failure was already recorded when the breaker fired. Leave
-            // it in place so the dashboard shows the prune was blocked instead
-            // of this branch's ClearRunFailure wiping it in the same run.
-            Logger.LogWarning(
-                "{Task} complete with prune blocked by safety limit: {Processed} processed, no rows removed this run",
-                Name, processed);
+            Logger.LogWarning("{Task} complete with prune blocked by safety limit: {Processed} processed, no rows removed this run", Name, run.Processed);
         }
-        else if (hadFailures)
+        else if (run.HadFailures)
         {
             Logger.LogWarning(
                 "{Task} complete: {Processed} processed, {Pruned} pruned, {BuildFailed} build-failed, {PersistFailed} persist-failed, conflict resolution failed: {ConflictsFailed} (see prior errors for details)",
-                Name, processed, pruned, buildFailures, persistFailures, conflictsFailed);
-            var reason = $"{buildFailures} build failures, {persistFailures} persist failures (check log)";
-            if (conflictsFailed)
+                Name, run.Processed, pruned, run.BuildFailures, run.PersistFailures, run.ConflictsFailed);
+            var reason = $"{run.BuildFailures} build failures, {run.PersistFailures} persist failures (check log)";
+            if (run.ConflictsFailed)
             {
                 reason += ", conflict resolution failed";
             }
@@ -1162,7 +1130,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
         else
         {
-            Logger.LogInformation("{Task} complete: {Processed} processed, {Pruned} pruned", Name, processed, pruned);
+            Logger.LogInformation("{Task} complete: {Processed} processed, {Pruned} pruned", Name, run.Processed, pruned);
             ClearRunFailure();
         }
     }
@@ -1297,6 +1265,87 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
     private void ClearRunFailure()
         => RunFailureLog.Clear(_configManager, ModuleMutexKey, "Refresh", Logger, Name);
+
+    /// <summary>
+    /// The state one refresh run carries from phase to phase: the stored rows, what the build saw and
+    /// queued, its failure counts, and who held each row before it.
+    /// </summary>
+    private sealed class RefreshRun
+    {
+        private readonly Dictionary<string, int> _pullOrder;
+        private readonly Dictionary<TKey, string?> _heldServerKeys;
+        private readonly HashSet<string> _listedCleanly;
+        private int _processed;
+        private int _buildFailures;
+        private int _persistFailures;
+
+        public RefreshRun(
+            Dictionary<TKey, TRecord> existing,
+            int sourceCount,
+            double buildEnd,
+            Dictionary<string, int> pullOrder,
+            Dictionary<TKey, string?> heldServerKeys,
+            HashSet<string> listedCleanly)
+        {
+            Existing = existing;
+            Total = Math.Max(sourceCount, 1);
+            BuildEnd = buildEnd;
+            _pullOrder = pullOrder;
+            _heldServerKeys = heldServerKeys;
+            _listedCleanly = listedCleanly;
+        }
+
+        public Dictionary<TKey, TRecord> Existing { get; }
+
+        public int Total { get; }
+
+        public double BuildEnd { get; }
+
+        public System.Collections.Concurrent.ConcurrentDictionary<TKey, byte> SeenKeys { get; } = new();
+
+        public System.Collections.Concurrent.ConcurrentDictionary<string, byte> SeenPriorityKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public System.Collections.Concurrent.ConcurrentBag<TRecord> QueuedThisRun { get; } = new();
+
+        /// <summary>Gets or sets the keys the build saw, fixed once the build is done.</summary>
+        public HashSet<TKey> SeenKeySet { get; set; } = new();
+
+        public bool ConflictsFailed { get; set; }
+
+        public int Processed => Volatile.Read(ref _processed);
+
+        public int BuildFailures => Volatile.Read(ref _buildFailures);
+
+        public int PersistFailures => Volatile.Read(ref _persistFailures);
+
+        public bool HadFailures => BuildFailures > 0 || PersistFailures > 0 || ConflictsFailed;
+
+        public int CountProcessed() => Interlocked.Increment(ref _processed);
+
+        public void CountBuildFailure() => Interlocked.Increment(ref _buildFailures);
+
+        public void CountPersistFailure() => Interlocked.Increment(ref _persistFailures);
+
+        /// <summary>
+        /// Whether a stored row belongs to a higher priority server that did not answer this run. A
+        /// lower one would otherwise take it over for the outage and hand it back afterwards, writing
+        /// its values and then the first server's values over the same row twice. A server that
+        /// connected but whose listing failed counts as absent too, since it offered nothing trustworthy.
+        /// </summary>
+        public bool IsHeldByAbsentHigherServer(TKey key, TRecord built)
+        {
+            if (!_heldServerKeys.TryGetValue(key, out var heldKey)
+                || string.IsNullOrEmpty(heldKey)
+                || string.Equals(heldKey, built.ServerKey, StringComparison.OrdinalIgnoreCase)
+                || _listedCleanly.Contains(heldKey)
+                || !_pullOrder.TryGetValue(heldKey, out var heldRank))
+            {
+                return false;
+            }
+
+            return !_pullOrder.TryGetValue(built.ServerKey ?? string.Empty, out var builtRank) || heldRank < builtRank;
+        }
+    }
 
     // Reads stored rows on demand for RefreshOneAsync. Only TryGetValue is used by the record builders.
     private sealed class StoredRows : IReadOnlyDictionary<TKey, TRecord>

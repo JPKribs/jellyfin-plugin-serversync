@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.2.1"
+version: "12.2.3.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, and watch history."
@@ -28,29 +28,6 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - A slow or silent peer no longer stops hint delivery until a restart. Peer calls have a deadline that covers the whole answer, connections time out after fifteen seconds, and peers are served in parallel
-  - Two servers holding the same version with different values settle instead of trading the hint forever, and a server only announces edits it made itself
-  - A sender whose clock runs a few minutes ahead sees its hints completed instead of resent forever
-  - Versions only move forward, are written at the moment of a hand made edit, and a scan records the version it read with each value rather than asking the peer again per row
-  - A failed version read no longer lets a scan overwrite edits made here, and those rows wait for the next scan
-  - In a pool of three or more, a history base made stale by a third server no longer reverts a newer edit, and both sides record a base when nothing needed to change
-  - Jellyfin's own housekeeping saves no longer pose as hand made edits, and provider work never replaces an item locked here
-  - Content hints obey the library's allow and block lists and the watched by all filter, and a downloaded file is no longer announced back to the pool
-  - The negotiated history base cannot be rolled back by a scan, and moving rows to a higher priority server keeps ignored rows and bases and counts toward the safety limit, judged per server like the prune
-  - The hidden per module tasks no longer run on schedules of their own
-  - Removing a server takes effect only once saved, removes the hints it sent, and a slow answer for one server can no longer land in another server's editor
-  - The stored key and pairing secret are only sent to the address saved on the entry, and IPv4 addresses written as IPv6 are checked as IPv4
-  - Hint queues are bounded and indexed. A full inbound queue answers busy, hints give up after about a day, sent and failed rows expire after a week, and errored rows are retried daily
-  - A scheduled run no longer holds hint applies for its whole length, and a backlog drains without waiting between batches
-  - The Queue view refreshes only when something changed, caches posters, shows at most 200 rows, and resumes refreshing when you come back to the page
-  - A timeout on one item no longer aborts a whole scheduled run, one server that fails to list no longer stops the others, and one module that fails no longer skips the rest of Sync Information or Sync Content
-  - A transient error no longer reads as an item, a library page, or a profile image being gone, so it cannot truncate a scan or clear a user's picture
-  - Replacing a file keeps its NFO, images, and other sidecars, a renamed file on a source is moved instead of downloaded again, and a file still on disk stays tracked when its source item goes
-  - Free space is measured on the library's own disk, the sign in honors the private network rule, and the address check refuses unspecified and multicast addresses
-  - Retry errors works for History, Metadata, People, and Users, the dashboard keeps scrolling and refreshing after you come back, and slow answers no longer land in the wrong server or modal
-  - The database records the oldest version that can read it, so going back to an older version keeps it whenever that version can read it
-  - Every stored and compared time is read and written as UTC in one place
-  - Writing an item's cast holds back people hints only during the write, not while its images download
-  - The sync table shows deletions held for approval and deletions in progress when deletion is set to Enabled
-  - A hint that could not apply shows as Skipped sync for its name on the Activity page, with a plainer reason when the person does not exist here
-  - Dead code removed and repeated code shared across the plugin, with docs corrected where they had drifted
+  - The five Sync tables are built from one shared module, so a fix to the table, its buttons, or its modals reaches every view at once
+  - The refresh run is split into named steps, with the prune's safety checks gathered in one place
+  - Every Sync view reloads its counts and health figures when a detail dialog closes, and alerts and empty states read the same across views
