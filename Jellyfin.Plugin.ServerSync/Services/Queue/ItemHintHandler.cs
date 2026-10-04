@@ -210,16 +210,23 @@ public sealed class ItemHintHandler
         if (record.Status != SyncStatus.Queued)
         {
             // The values already match, so the hint's version is the version of the value here too.
-            _resolver.Record(incoming);
+            if (hint.Recorded)
+            {
+                _resolver.Record(incoming);
+            }
+
             return HintApplyResult.Unchanged;
         }
 
+        // A recorded edit here beats a newer provider's work there, and beats an older edit there.
         var local = _resolver.Recorded(kind, localKey);
-        if (local is not null && VersionDecider.Decide(local, incoming, valuesEqual: false) == VersionDecision.Keep)
+        if (local is not null && (!hint.Recorded || VersionDecider.Decide(local, incoming, valuesEqual: false) == VersionDecision.Keep))
         {
             record.Status = SyncStatus.Synced;
             record.StatusDate = DateTime.UtcNow;
-            record.Reason = $"kept: this server's edit is newer than the one on '{origin.DisplayName}', which will pull it";
+            record.Reason = hint.Recorded
+                ? $"kept: this server's edit is newer than the one on '{origin.DisplayName}', which will pull it"
+                : $"kept: this server's edit beats a provider's work on '{origin.DisplayName}', which will pull it";
             StoreKept(record, kind);
             publishLocal(local);
             _logger.LogInformation("Kept this server's {Kind} for {Name}, newer than '{Origin}', and told the peers to pull it", kind, name, origin.DisplayName);
@@ -232,8 +239,13 @@ public sealed class ItemHintHandler
         }
 
         // The apply task recorded the version it read from the peer; the hint's is at least as exact.
-        _resolver.Record(incoming);
-        _logger.LogInformation("Applied a {Kind} hint from '{Origin}' for {Name}", kind, origin.DisplayName, name);
+        // Provider work leaves no version, so a later edit anywhere still wins over it.
+        if (hint.Recorded)
+        {
+            _resolver.Record(incoming);
+        }
+
+        _logger.LogInformation("Applied a {Kind} hint from '{Origin}' for {Name}{Provider}", kind, origin.DisplayName, name, hint.Recorded ? string.Empty : " (provider work)");
         return HintApplyResult.Applied;
     }
 

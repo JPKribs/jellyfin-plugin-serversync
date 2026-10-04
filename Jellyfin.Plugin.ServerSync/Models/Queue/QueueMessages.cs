@@ -87,6 +87,9 @@ public class InboundHintDto
     /// <summary>Gets or sets the last error.</summary>
     public string? LastError { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the change was made by hand rather than by a provider.</summary>
+    public bool Recorded { get; set; } = true;
+
     /// <summary>Builds the DTO for a row.</summary>
     /// <param name="row">The row.</param>
     /// <returns>The DTO.</returns>
@@ -102,7 +105,8 @@ public class InboundHintDto
             Key = row.Key,
             ReceivedAt = row.ReceivedAt,
             Attempts = row.Attempts,
-            LastError = row.LastError
+            LastError = row.LastError,
+            Recorded = row.Recorded
         };
     }
 }

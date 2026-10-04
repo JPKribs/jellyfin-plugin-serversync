@@ -190,6 +190,34 @@ public sealed class HintStoreTests : IDisposable
     }
 
     /// <summary>
+    /// A hint carries whether it is a hand made edit or a provider's work, on both ends, and a row that
+    /// gathers both kinds of change is a hand made edit.
+    /// True: a scan's poster is applied only where nothing was chosen by hand, and one hand made edit in the window counts.
+    /// False: provider work would look like an edit, or an edit gathered behind provider work would be downgraded.
+    /// </summary>
+    [Fact]
+    public void Recorded_RoundTripsAndHandEditsWin()
+    {
+        var now = DateTime.UtcNow;
+        var provider = new OutboundHint { PeerKey = "peer-a", Kind = HintKind.Metadata, Key = "item", VersionServerId = "me", VersionTimestamp = now, Recorded = false };
+        _outbound.Enqueue(provider, "me");
+        Assert.False(_outbound.GetAll()[0].Recorded);
+        Assert.False(provider.ToHint("me").Recorded);
+
+        var edit = new OutboundHint { PeerKey = "peer-a", Kind = HintKind.Metadata, Key = "item", VersionServerId = "me", VersionTimestamp = now.AddSeconds(1), Recorded = true };
+        _outbound.Enqueue(edit, "me");
+        Assert.True(_outbound.GetAll()[0].Recorded);
+        var again = new OutboundHint { PeerKey = "peer-a", Kind = HintKind.Metadata, Key = "item", VersionServerId = "me", VersionTimestamp = now.AddSeconds(2), Recorded = false };
+        _outbound.Enqueue(again, "me");
+        Assert.True(_outbound.GetAll()[0].Recorded);
+
+        _inbound.Enqueue(InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.Metadata, Key = "k", VersionTimestamp = now, Recorded = false }, now));
+        Assert.False(_inbound.GetAll()[0].Recorded);
+        _inbound.Enqueue(InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "a", Kind = HintKind.Metadata, Key = "k", VersionTimestamp = now.AddSeconds(1), Recorded = true }, now));
+        Assert.True(_inbound.GetAll()[0].Recorded);
+    }
+
+    /// <summary>
     /// A deferred inbound row waits out its delay and keeps the error.
     /// True: a flaky origin is retried later, not spun on.
     /// False: the worker would loop on the same row.

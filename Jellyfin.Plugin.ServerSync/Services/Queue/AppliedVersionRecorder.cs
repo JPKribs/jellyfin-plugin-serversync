@@ -11,9 +11,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
 /// What an apply task does around a write for the hint pipeline: registers the write with the apply
-/// guard, and afterwards records the version the copied value carries. The version is the peer's own
-/// when the peer carries versions, so a copy never looks newer than the edit it came from. A peer
-/// that carries none gets a version of its id and now, the best that can be known.
+/// guard, and afterwards records the version the copied value carries, which is the peer's own, so a
+/// copy never looks newer than the edit it came from. A value the peer never recorded an edit for
+/// leaves no version here either.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class AppliedVersionRecorder
@@ -82,12 +82,20 @@ public sealed class AppliedVersionRecorder
                 }
             }
 
+            // Only a version the peer recorded is carried over. A value the peer never edited by hand,
+            // provider work or a scan only source, leaves none here either, so the next scan or hint
+            // from that source still wins over it and a hand made edit anywhere beats it.
+            if (peerVersion is null)
+            {
+                return;
+            }
+
             _resolver.Record(new ObjectVersion
             {
                 Kind = kind,
                 Key = localKey,
-                ServerId = peerVersion?.ServerId ?? source.Server.ServerId,
-                Timestamp = peerVersion?.Timestamp ?? DateTime.UtcNow
+                ServerId = peerVersion.ServerId,
+                Timestamp = peerVersion.Timestamp
             });
         }
         catch (OperationCanceledException)

@@ -84,20 +84,24 @@ public class HintProtocolTests
     }
 
     /// <summary>
-    /// An image change travels when it was made by hand: outside a library scan and outside a refresh of
-    /// the item. The same reason during a scan or a refresh is a provider's fetch and is left to the scan.
-    /// True: a poster someone picks reaches the peers; a poster a provider fetched after a download does not.
-    /// False: either hand picked posters never travel, or every scan floods the pool with provider images.
+    /// Every item update that changes something travels. A metadata edit, or an image change outside a
+    /// scan and outside a refresh of the item, is a hand made edit. An image change during either, or a
+    /// metadata download, is a provider's work and travels marked, so it fills in on the other side
+    /// without replacing a hand made edit.
+    /// True: a poster someone picks and a poster a scan fetched both reach the peers, and the peers can tell them apart.
+    /// False: either posters never travel, or a scan's posters silently replace posters chosen by hand.
     /// </summary>
     [Theory]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, false, true)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, true, false, false)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, true, false)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, true, true, true)]
-    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataDownload, false, false, false)]
-    public void IsHintedUpdate_ImagesOnlyByHand(MediaBrowser.Controller.Library.ItemUpdateType reason, bool refreshing, bool scanning, bool expected)
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, false, ChangeOrigin.Edit)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, true, false, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.ImageUpdate, false, true, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataEdit, true, true, ChangeOrigin.Edit)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataDownload, false, false, ChangeOrigin.Provider)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.MetadataImport, false, false, ChangeOrigin.None)]
+    [InlineData(MediaBrowser.Controller.Library.ItemUpdateType.None, false, false, ChangeOrigin.None)]
+    public void Classify_SortsEditsFromProviderWork(MediaBrowser.Controller.Library.ItemUpdateType reason, bool refreshing, bool scanning, ChangeOrigin expected)
     {
-        Assert.Equal(expected, LocalChangeObserver.IsHintedUpdate(reason, refreshing, scanning));
+        Assert.Equal(expected, LocalChangeObserver.Classify(reason, refreshing, scanning));
     }
 
     /// <summary>

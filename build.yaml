@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.1.1"
+version: "12.2.1.2"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, and watch history."
@@ -28,9 +28,5 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - A server only announces the kinds of change its peer applies, read from the peer's enabled modules every minute; Check Link and each peer's card on the Queue view name them
-  - Send Changes After, under Settings > Processing, sets how long an item must go untouched before a change is sent to peers, sixty seconds by default; every further edit restarts the wait and one update goes out at the end of it
-  - History hints honour the receiver's History switch like every other kind
-  - New library mapping rows start enabled
-  - The Queue view says when a local change matched no library or user mapping on any Push or Sync server, and names the last one
-  - A poster or other image uploaded or picked by hand travels as a metadata hint; images a provider fetches during a scan or a refresh are still left to the scheduled task
+  - Every metadata and image change travels, posters included. Provider work from a scan or a refresh is marked, fills in where the other server has recorded no edit, and never replaces a poster or field set by hand. Sync database schema v26
+  - The Queue view's To Send card is now Pending, matching the row badges

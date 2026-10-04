@@ -115,7 +115,7 @@ A standard user's key, from signing in as someone who is not an administrator, p
 
 A server only announces the kinds of change the other side applies: it reads the peer's enabled modules every few minutes and skips the rest, and the peer declines anything it does not want in the meantime. Edits to one object are gathered until it has gone untouched for sixty seconds, adjustable under Settings > Processing, and then sent once, so a poster changed twice a minute apart travels once and a playback that reports progress every few seconds travels once it stops. A change is announced as a hint that says what changed and where, never the value. The other server pulls the live state through the same code the scan uses, so a hint and a scan can never disagree. Hints are kept on both ends until the work is done, retried with backoff, and recovered if lost, and the dashboard shows both queues and any paused peer with the reason. A write made because of a hint never raises a hint of its own, and a value that already matches is never written, so a pool of three or more servers settles without echoing.
 
-When two servers disagree, watch history merges three way against what the servers last agreed on, and everything else resolves on where and when the value was last edited, so the newest edit wins. A metadata edit, or an image uploaded or picked by hand, raises an item hint. Metadata and images a provider fetches during a scan or a refresh are left to the scheduled scan. Replacements and removals of files are also left to Sync Content.
+When two servers disagree, watch history merges three way against what the servers last agreed on, and everything else resolves on where and when the value was last edited, so the newest edit wins. Every metadata and image change raises an item hint, including posters and metadata a provider fetches during a scan or a refresh. Provider work is marked as such: it fills in on a server that has recorded no edit of its own for the item and never replaces a poster or a field someone set by hand, and it leaves no version behind, so a hand made edit anywhere in the pool still wins over it. Replacements and removals of files are also left to Sync Content.
 
 | Change Queue |
 | :--- |
@@ -313,13 +313,14 @@ Offer a batch of change hints. A hint says what changed and where, never the val
       "UserId": null,
       "UserName": null,
       "VersionServerId": "2f40d5…",
-      "VersionTimestamp": "2026-10-03T19:30:47Z"
+      "VersionTimestamp": "2026-10-03T19:30:47Z",
+      "Recorded": true
     }
   ]
 }
 ```
 
-`Kind` is one of `History`, `Metadata`, `People`, `Content`, or `Users`. `Key` is the sender's own key for the object: the item id for metadata and content, the user id for users, the person's name for people, and `userId|itemId` for history. `ItemPath` and `UserName` are what the receiver maps through its own library and user mappings for the sender.
+`Recorded` says whether the change was made by hand (`true`) or is a provider's work such as a poster a scan fetched (`false`). Provider work is applied only where the receiver has recorded no edit of its own and leaves no version behind. Absent from older peers, which is read as `true`. `Kind` is one of `History`, `Metadata`, `People`, `Content`, or `Users`. `Key` is the sender's own key for the object: the item id for metadata and content, the user id for users, the person's name for people, and `userId|itemId` for history. `ItemPath` and `UserName` are what the receiver maps through its own library and user mappings for the sender.
 
 The answer is one result per hint, in request order. `200` means queued, not applied. A hint for something the receiver does not map is answered as not accepted with the reason, and the sender treats that as done.
 

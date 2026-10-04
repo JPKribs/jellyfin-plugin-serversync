@@ -51,8 +51,9 @@ public sealed class LocalHintPublisher
     /// <param name="itemPath">The local path of the item.</param>
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
+    /// <param name="recorded">Whether the change was made by hand. Provider work is sent marked and records no version here.</param>
     /// <returns>How many peers were queued a hint.</returns>
-    public int PublishMetadata(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey)
+    public int PublishMetadata(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, bool recorded = true)
     {
         ArgumentNullException.ThrowIfNull(version);
         var key = HintProtocol.MetadataKey(localItemId);
@@ -62,7 +63,8 @@ public sealed class LocalHintPublisher
             version,
             excludePeerKey,
             peer => HintMapping.FindByLocalPath(peer, itemPath) is not null,
-            () => new OutboundHint { Kind = HintKind.Metadata, Key = key, ItemPath = itemPath, ItemId = key });
+            () => new OutboundHint { Kind = HintKind.Metadata, Key = key, ItemPath = itemPath, ItemId = key, Recorded = recorded },
+            recorded);
     }
 
     /// <summary>Publishes a change to a person's own metadata or images.</summary>
@@ -70,8 +72,9 @@ public sealed class LocalHintPublisher
     /// <param name="localPersonId">The local person item.</param>
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
+    /// <param name="recorded">Whether the change was made by hand. Provider work is sent marked and records no version here.</param>
     /// <returns>How many peers were queued a hint.</returns>
-    public int PublishPeople(string name, Guid localPersonId, ObjectVersion version, string? excludePeerKey)
+    public int PublishPeople(string name, Guid localPersonId, ObjectVersion version, string? excludePeerKey, bool recorded = true)
     {
         ArgumentNullException.ThrowIfNull(version);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -82,7 +85,8 @@ public sealed class LocalHintPublisher
             version,
             excludePeerKey,
             _ => true,
-            () => new OutboundHint { Kind = HintKind.People, Key = name, ItemId = localPersonId.ToString("N", System.Globalization.CultureInfo.InvariantCulture), UserName = name });
+            () => new OutboundHint { Kind = HintKind.People, Key = name, ItemId = localPersonId.ToString("N", System.Globalization.CultureInfo.InvariantCulture), UserName = name, Recorded = recorded },
+            recorded);
     }
 
     /// <summary>Publishes a media file that appeared here.</summary>
@@ -123,11 +127,16 @@ public sealed class LocalHintPublisher
             () => new OutboundHint { Kind = HintKind.Users, Key = key, UserId = key, UserName = userName });
     }
 
-    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor)
+    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true)
     {
         version.Kind = kind;
         version.Key = localKey;
-        _versions.Set(version);
+        if (recorded)
+        {
+            // Only a hand made edit is a version of this server's own. Provider work leaves none, so a
+            // recorded edit anywhere in the pool still beats it.
+            _versions.Set(version);
+        }
 
         var queued = 0;
         foreach (var peer in _configManager.Configuration.Servers)

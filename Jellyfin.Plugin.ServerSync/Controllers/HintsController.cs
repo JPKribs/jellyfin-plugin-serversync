@@ -307,7 +307,8 @@ public class HintsController : ControllerBase
                 NextAttempt = row.NextAttempt,
                 SentAt = row.SentAt,
                 LastError = row.LastError,
-                CreatedAt = row.CreatedAt
+                CreatedAt = row.CreatedAt,
+                Recorded = row.Recorded
             });
         }
 
@@ -489,6 +490,9 @@ public class OutboundHintDto
 
     /// <summary>Gets or sets when the row was created.</summary>
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the change was made by hand rather than by a provider.</summary>
+    public bool Recorded { get; set; } = true;
 }
 
 /// <summary>Delivery state of one peer as shown to the operator.</summary>

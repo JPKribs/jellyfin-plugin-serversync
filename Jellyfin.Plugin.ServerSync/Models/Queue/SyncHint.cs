@@ -40,4 +40,12 @@ public class SyncHint
 
     /// <summary>Gets or sets the time of the edit this hint carries, in UTC.</summary>
     public DateTime VersionTimestamp { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the change was made by hand. A provider's work, such as
+    /// a poster fetched during a scan, is announced too but marked false: it fills in where the
+    /// receiver has recorded no edit of its own and never replaces one. Absent from older peers, which
+    /// is read as true.
+    /// </summary>
+    public bool Recorded { get; set; } = true;
 }

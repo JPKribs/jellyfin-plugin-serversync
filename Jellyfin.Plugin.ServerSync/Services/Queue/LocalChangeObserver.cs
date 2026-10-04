@@ -20,10 +20,11 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// item updates for metadata and people, items added for content, and user updates for users. Policy
 /// and configuration changes raise no Jellyfin event, so mapped users are also checked on a timer
 /// against a snapshot. The module switches are the receiver's business: a server raises a hint for
-/// anything a peer it sends to has mapped, and the peer decides. Only a metadata edit raises an item hint. Provider
-/// downloads and image refreshes are left to the scheduled scan, since a server that fetches its own
-/// metadata after receiving a file would otherwise push that over the other server's curated values
-/// the moment it arrived. Each object's edits are
+/// anything a peer it sends to has mapped, and the peer decides. A metadata edit or an image change
+/// raises an item hint. Provider work during a scan or a refresh is marked as such, since a server
+/// that fetches its own metadata after receiving a file would otherwise push that over the other
+/// server's curated values
+/// the moment it arrived; it still travels, marked as a provider's, and never replaces a recorded edit. Each object's edits are
 /// gathered until it has gone untouched for the configured wait, so a poster changed twice or a
 /// playback that reports progress every few seconds becomes one hint, not one per edit. An event raised while a peer's hint is being applied to the same
 /// object is the echo of that apply and raises nothing. See <see cref="ApplyGuard"/>.
@@ -209,19 +210,30 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     public static bool IsHintedUpdate(ItemUpdateType reason) => (reason & ItemUpdateType.MetadataEdit) != 0;
 
     /// <summary>
-    /// Whether an item update is the kind of change hints carry. A metadata edit always is. An image
-    /// change is when it was made by hand: Jellyfin reports a poster someone uploaded or picked and a
-    /// poster a provider fetched with the same reason, so a provider's work is told apart by what else
-    /// is going on, a library scan or a metadata refresh of the item. Those images are left to the
-    /// scheduled scan, as a server that fetches its own images after receiving a file would otherwise
-    /// push them over the other server's chosen ones the moment they arrived. Public for tests.
+    /// Sorts an item update into what travels and how. A metadata edit is a hand made change. An image
+    /// change is a hand made change too, unless a library scan or a refresh of the item is running, when
+    /// it is a provider's; Jellyfin reports both with the same reason. A metadata download is always a
+    /// provider's. Provider work travels as well, marked so a hand made edit on the other side still
+    /// wins and so it only fills in where the other side has recorded nothing. Public for tests.
     /// </summary>
     /// <param name="reason">Why Jellyfin saved the item.</param>
     /// <param name="beingRefreshed">Whether the item, an ancestor, or for a person any item, is in a metadata refresh.</param>
     /// <param name="scanRunning">Whether a library scan is running.</param>
-    /// <returns><c>true</c> when the change should travel.</returns>
-    public static bool IsHintedUpdate(ItemUpdateType reason, bool beingRefreshed, bool scanRunning)
-        => IsHintedUpdate(reason) || ((reason & ItemUpdateType.ImageUpdate) != 0 && !beingRefreshed && !scanRunning);
+    /// <returns>What the update is.</returns>
+    public static ChangeOrigin Classify(ItemUpdateType reason, bool beingRefreshed, bool scanRunning)
+    {
+        if (IsHintedUpdate(reason))
+        {
+            return ChangeOrigin.Edit;
+        }
+
+        if ((reason & ItemUpdateType.ImageUpdate) != 0)
+        {
+            return beingRefreshed || scanRunning ? ChangeOrigin.Provider : ChangeOrigin.Edit;
+        }
+
+        return (reason & ItemUpdateType.MetadataDownload) != 0 ? ChangeOrigin.Provider : ChangeOrigin.None;
+    }
 
     private void OnRefreshStarted(object? sender, Jellyfin.Data.Events.GenericEventArgs<BaseItem> e)
     {
@@ -268,16 +280,23 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     {
         try
         {
-            if (e?.Item is null || !IsHintedUpdate(e.UpdateReason, IsBeingRefreshed(e.Item), _libraryManager.IsScanRunning))
+            if (e?.Item is null)
             {
                 return;
             }
 
+            var origin = Classify(e.UpdateReason, IsBeingRefreshed(e.Item), _libraryManager.IsScanRunning);
+            if (origin == ChangeOrigin.None)
+            {
+                return;
+            }
+
+            var recorded = origin == ChangeOrigin.Edit;
             if (e.Item is Person person)
             {
                 if (!string.IsNullOrWhiteSpace(person.Name))
                 {
-                    Note(HintKind.People, HintProtocol.PeopleKey(person.Name), Guid.Empty, person.Id);
+                    Note(HintKind.People, HintProtocol.PeopleKey(person.Name), Guid.Empty, person.Id, recorded);
                 }
 
                 return;
@@ -285,7 +304,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
             if (!string.IsNullOrEmpty(e.Item.Path))
             {
-                Note(HintKind.Metadata, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id);
+                Note(HintKind.Metadata, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id, recorded);
             }
         }
         catch (Exception ex)
@@ -428,7 +447,9 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
-    private void Note(HintKind kind, string localKey, Guid userId, Guid itemId)
+    // A change gathers with the others to the same object. One hand made edit in the window makes the
+    // whole hint a recorded edit; a window of nothing but provider work travels as provider work.
+    private void Note(HintKind kind, string localKey, Guid userId, Guid itemId, bool recorded = true)
     {
         if (_guard.IsApplying(HintProtocol.GuardKey(kind, localKey)))
         {
@@ -439,8 +460,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         var due = now + HintProtocol.Debounce(_configManager.Configuration);
         _pending.AddOrUpdate(
             HintProtocol.GuardKey(kind, localKey),
-            _ => new PendingChange(kind, userId, itemId, now, due),
-            (_, existing) => existing with { EditedAt = now, Due = due });
+            _ => new PendingChange(kind, userId, itemId, now, due, recorded),
+            (_, existing) => existing with { EditedAt = now, Due = due, Recorded = existing.Recorded || recorded });
     }
 
     private async Task FlushLoopAsync(CancellationToken cancellationToken)
@@ -497,11 +518,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 break;
 
             case HintKind.Metadata when !string.IsNullOrEmpty(item.Path):
-                NoteUnmatched(_publisher.PublishMetadata(change.ItemId, item.Path, version, excludePeerKey: null), HintKind.Metadata, item.Path, null);
+                NoteUnmatched(_publisher.PublishMetadata(change.ItemId, item.Path, version, excludePeerKey: null, recorded: change.Recorded), HintKind.Metadata, item.Path, null);
                 break;
 
             case HintKind.People when !string.IsNullOrWhiteSpace(item.Name):
-                NoteUnmatched(_publisher.PublishPeople(item.Name, change.ItemId, version, excludePeerKey: null), HintKind.People, null, item.Name);
+                NoteUnmatched(_publisher.PublishPeople(item.Name, change.ItemId, version, excludePeerKey: null, recorded: change.Recorded), HintKind.People, null, item.Name);
                 break;
 
             case HintKind.Content when !string.IsNullOrEmpty(item.Path):
@@ -527,5 +548,18 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", _lastUnmatched);
     }
 
-    private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due);
+    private sealed record PendingChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded);
+}
+
+/// <summary>What an item update is, as the observer sorts it.</summary>
+public enum ChangeOrigin
+{
+    /// <summary>Nothing hints carry.</summary>
+    None,
+
+    /// <summary>A change made by hand. Travels as a recorded edit.</summary>
+    Edit,
+
+    /// <summary>A provider's work during a scan or a refresh. Travels marked, and never replaces a recorded edit.</summary>
+    Provider
 }

@@ -3759,7 +3759,7 @@ export default function (view) {
                 else detail = 'waiting for delivery';
                 return '<tr>' +
                     '<td>' + ServerSyncShared.escapeHtml(r.PeerName || r.PeerKey) + '</td>' +
-                    '<td>' + QueueModule._change(r.Kind, r.ItemPath, r.UserName, r.Key) + '</td>' +
+                    '<td>' + QueueModule._change(r.Kind, r.ItemPath, r.UserName, r.Key, r.Recorded) + '</td>' +
                     '<td><span class="jpk-badge ' + (state === 'Sent' ? 'blue' : state === 'Failed' ? 'red' : 'orange') + '">' + state + '</span></td>' +
                     '<td><span class="queueDetail' + (state === 'Failed' || r.Attempts > 0 ? ' queueDetail-error' : '') + '">' + ServerSyncShared.escapeHtml(detail) + '</span></td>' +
                     '<td class="queueTable-actions"><button type="button" class="jpk-row-btn" data-discard="' + r.Id + '" title="Discard this hint. The scheduled task still covers the change."><span class="material-icons">delete</span></button></td>' +
@@ -3773,7 +3773,7 @@ export default function (view) {
                 var detail = r.Attempts > 0 ? (r.LastError || 'retrying') : 'waiting to be applied';
                 return '<tr>' +
                     '<td>' + ServerSyncShared.escapeHtml(QueueModule._originName(r.OriginServerId)) + '</td>' +
-                    '<td>' + QueueModule._change(r.Kind, r.ItemPath, r.UserName, r.Key) + '</td>' +
+                    '<td>' + QueueModule._change(r.Kind, r.ItemPath, r.UserName, r.Key, r.Recorded) + '</td>' +
                     '<td>' + ServerSyncShared.escapeHtml(QueueModule._ago(r.ReceivedAt)) + '</td>' +
                     '<td><span class="queueDetail' + (r.Attempts > 0 ? ' queueDetail-error' : '') + '">' + ServerSyncShared.escapeHtml(detail) + (r.Attempts > 0 ? ' (' + r.Attempts + ' attempt' + (r.Attempts === 1 ? '' : 's') + ')' : '') + '</span></td>' +
                     '<td class="queueTable-actions"><button type="button" class="jpk-row-btn" data-discard="' + r.Id + '" title="Discard this hint. The scheduled task still covers the change."><span class="material-icons">delete</span></button></td>' +
@@ -3791,13 +3791,15 @@ export default function (view) {
             return match ? (match.Name || match.ServerName || match.Url) : (serverId || 'unknown server');
         },
 
-        _change: function(kind, path, userName, key) {
+        _change: function(kind, path, userName, key, recorded) {
             var what;
             if (kind === 'History' || kind === 0) what = (userName ? userName + ' on ' : '') + QueueModule._fileName(path);
             else if (kind === 'Users' || kind === 4) what = userName || key;
             else if (kind === 'People' || kind === 2) what = userName || key;
             else what = QueueModule._fileName(path) || key;
-            return '<span class="queueChangeKind">' + ServerSyncShared.escapeHtml(QueueModule._kindName(kind)) + '</span>' +
+            // Provider work, such as a poster a scan fetched, is marked: it fills in on the other side but never replaces a hand made edit.
+            var kindLabel = QueueModule._kindName(kind) + (recorded === false ? ' \u00b7 provider' : '');
+            return '<span class="queueChangeKind">' + ServerSyncShared.escapeHtml(kindLabel) + '</span>' +
                 '<span class="queueChangeWhat" title="' + ServerSyncShared.escapeHtml(path || '') + '">' + ServerSyncShared.escapeHtml(what || '') + '</span>';
         },
 

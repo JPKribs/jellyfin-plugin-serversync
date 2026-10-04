@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 25;
+    public const int CurrentSchemaVersion = 26;
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -261,6 +261,7 @@ public static class DatabaseMigrationService
                 UserName TEXT,
                 VersionServerId TEXT NOT NULL,
                 VersionTimestamp TEXT NOT NULL,
+                Recorded INTEGER NOT NULL DEFAULT 1,
                 State INTEGER NOT NULL,
                 Attempts INTEGER NOT NULL DEFAULT 0,
                 NextAttempt TEXT NOT NULL,
@@ -284,6 +285,7 @@ public static class DatabaseMigrationService
                 UserName TEXT,
                 VersionServerId TEXT NOT NULL,
                 VersionTimestamp TEXT NOT NULL,
+                Recorded INTEGER NOT NULL DEFAULT 1,
                 ReceivedAt TEXT NOT NULL,
                 Attempts INTEGER NOT NULL DEFAULT 0,
                 NextAttempt TEXT NOT NULL,
@@ -566,6 +568,29 @@ public static class DatabaseMigrationService
             {
                 logger.LogInformation("Schema upgrade to v25: adding hint queues and object versions.");
                 CreateQueueTables(connection);
+            }
+
+            // v26: a hint says whether it carries a hand made edit or a provider's work.
+            if (fromVersion >= 25 && fromVersion < 26)
+            {
+                logger.LogInformation("Schema upgrade to v26: marking hints as hand made or provider work.");
+                using var v26Transaction = connection.BeginTransaction();
+                foreach (var table in new[] { "OutboundHints", "InboundHints" })
+                {
+                    using var addCol = connection.CreateCommand();
+                    addCol.Transaction = v26Transaction;
+                    addCol.CommandText = $"ALTER TABLE {table} ADD COLUMN Recorded INTEGER NOT NULL DEFAULT 1";
+                    try
+                    {
+                        addCol.ExecuteNonQuery();
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Idempotent, so a partially applied upgrade recovers on the next start.
+                    }
+                }
+
+                v26Transaction.Commit();
             }
 
             SetSchemaVersion(connection, CurrentSchemaVersion);

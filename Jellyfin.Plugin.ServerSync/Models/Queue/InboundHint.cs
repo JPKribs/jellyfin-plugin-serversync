@@ -42,6 +42,9 @@ public class InboundHint
     /// <summary>Gets or sets the time of the edit the hint carries, in UTC.</summary>
     public DateTime VersionTimestamp { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the change was made by hand rather than by a provider.</summary>
+    public bool Recorded { get; set; } = true;
+
     /// <summary>Gets or sets when the hint arrived, in UTC.</summary>
     public DateTime ReceivedAt { get; set; }
 
@@ -73,6 +76,7 @@ public class InboundHint
             UserName = hint.UserName,
             VersionServerId = hint.VersionServerId,
             VersionTimestamp = hint.VersionTimestamp,
+            Recorded = hint.Recorded,
             ReceivedAt = utcNow,
             NextAttempt = utcNow
         };

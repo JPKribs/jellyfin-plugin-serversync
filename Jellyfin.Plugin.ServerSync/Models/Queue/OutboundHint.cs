@@ -55,6 +55,9 @@ public class OutboundHint
     /// <summary>Gets or sets the time of the edit the row carries, in UTC.</summary>
     public DateTime VersionTimestamp { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the change was made by hand rather than by a provider.</summary>
+    public bool Recorded { get; set; } = true;
+
     /// <summary>Gets or sets the delivery state.</summary>
     public OutboundState State { get; set; }
 
@@ -87,6 +90,7 @@ public class OutboundHint
         UserId = UserId,
         UserName = UserName,
         VersionServerId = VersionServerId,
-        VersionTimestamp = VersionTimestamp
+        VersionTimestamp = VersionTimestamp,
+        Recorded = Recorded
     };
 }

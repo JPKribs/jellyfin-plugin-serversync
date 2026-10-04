@@ -39,13 +39,14 @@ public sealed class InboundHintStore : QueueStoreBase
             cmd.CommandText = @"
                 INSERT INTO InboundHints (
                     HintId, OriginServerId, Kind, Key, ItemPath, ItemId, UserId, UserName,
-                    VersionServerId, VersionTimestamp, ReceivedAt, Attempts, NextAttempt, LastError
+                    VersionServerId, VersionTimestamp, Recorded, ReceivedAt, Attempts, NextAttempt, LastError
                 ) VALUES (
                     @hint, @origin, @kind, @key, @itemPath, @itemId, @userId, @userName,
-                    @versionServer, @versionAt, @received, 0, @received, NULL
+                    @versionServer, @versionAt, @recorded, @received, 0, @received, NULL
                 )
                 ON CONFLICT(OriginServerId, Kind, Key) DO UPDATE SET
                     HintId = @hint,
+                    Recorded = MAX(Recorded, @recorded),
                     ItemPath = @itemPath,
                     ItemId = @itemId,
                     UserId = @userId,
@@ -67,6 +68,7 @@ public sealed class InboundHintStore : QueueStoreBase
             Add(cmd, "@userName", row.UserName);
             Add(cmd, "@versionServer", row.VersionServerId);
             Add(cmd, "@versionAt", Stamp(row.VersionTimestamp));
+            Add(cmd, "@recorded", row.Recorded ? 1 : 0);
             Add(cmd, "@received", Stamp(row.ReceivedAt));
             row.Id = Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
         });
@@ -192,6 +194,7 @@ public sealed class InboundHintStore : QueueStoreBase
         UserName = Text(reader, "UserName"),
         VersionServerId = reader.GetString(reader.GetOrdinal("VersionServerId")),
         VersionTimestamp = Unstamp(reader.GetString(reader.GetOrdinal("VersionTimestamp"))),
+        Recorded = reader.GetInt32(reader.GetOrdinal("Recorded")) != 0,
         ReceivedAt = Unstamp(reader.GetString(reader.GetOrdinal("ReceivedAt"))),
         Attempts = reader.GetInt32(reader.GetOrdinal("Attempts")),
         NextAttempt = Unstamp(reader.GetString(reader.GetOrdinal("NextAttempt"))),
