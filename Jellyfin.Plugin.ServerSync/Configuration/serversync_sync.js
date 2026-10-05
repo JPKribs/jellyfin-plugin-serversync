@@ -133,53 +133,18 @@ export default function (view) {
             var dropdown = view.querySelector('#syncTypeDropdown');
             if (!dropdown) return;
 
+            // The Queue has no config key and is always offered, so with every module off it is the
+            // view that opens: a server that only receives hints still has its queue to watch.
             var options = dropdown.querySelectorAll('option');
-            // Only the sync modules count toward the empty state. The Queue option has no config key and is
-            // always offered, so counting it would keep the "no sync types enabled" message from ever showing.
-            var enabledModuleCount = 0;
-
             for (var i = 0; i < options.length; i++) {
                 var opt = options[i];
                 var configKey = opt.getAttribute('data-config-key');
                 var isEnabled = !configKey || (config && config[configKey]);
-
-                if (isEnabled) {
-                    opt.style.display = '';
-                    opt.disabled = false;
-                    if (configKey) enabledModuleCount++;
-                } else {
-                    opt.style.display = 'none';
-                    opt.disabled = true;
-                }
+                opt.style.display = isEnabled ? '' : 'none';
+                opt.disabled = !isEnabled;
             }
 
-            var noSyncMessage = view.querySelector('#noSyncTypesMessage');
-
-            // An operator who already opened the Queue keeps it. Otherwise, with every module off, the
-            // message points to the Settings page and the dropdown stays so the Queue can still be picked.
-            if (enabledModuleCount === 0 && this.currentView !== 'queue') {
-                var outgoingModule = this._getTableModule(this.currentView);
-                if (outgoingModule && outgoingModule.table && outgoingModule.table.disconnectObserver) {
-                    outgoingModule.table.disconnectObserver();
-                }
-                this.currentView = null;
-                // Nothing is selected, so picking the Queue raises a change event and opens it.
-                dropdown.selectedIndex = -1;
-
-                if (noSyncMessage) noSyncMessage.classList.remove('hidden');
-                var titleEl = view.querySelector('#syncPageTitle');
-                if (titleEl) titleEl.textContent = 'Sync';
-                var descEl = view.querySelector('#syncTypeDescription');
-                if (descEl) descEl.textContent = '';
-
-                var views = view.querySelectorAll('.syncView');
-                for (var j = 0; j < views.length; j++) {
-                    views[j].classList.add('hidden');
-                }
-            } else {
-                if (noSyncMessage) noSyncMessage.classList.add('hidden');
-                this._selectFirstEnabled();
-            }
+            this._selectFirstEnabled();
         },
 
         // Preserves the current view if it's still enabled.
@@ -244,10 +209,6 @@ export default function (view) {
             for (var i = 0; i < views.length; i++) {
                 views[i].classList.add('hidden');
             }
-
-            // A view is open now, so the empty state shown while every module was off goes away.
-            var noSyncMessage = view.querySelector('#noSyncTypesMessage');
-            if (noSyncMessage) noSyncMessage.classList.add('hidden');
 
             var targetView = view.querySelector('#syncView-' + viewName);
             if (targetView) {
@@ -2689,6 +2650,7 @@ export default function (view) {
                 this._bound = true;
                 view.querySelector('#btnQueueRefresh').addEventListener('click', function() { self.load(true); });
                 view.querySelector('#btnQueueRun').addEventListener('click', function() { self.runNow(); });
+                view.querySelector('#btnQueueUnmatchedDismiss').addEventListener('click', function() { self.dismissUnmatched(); });
                 view.querySelector('#queueList').addEventListener('click', function(e) { self._onDiscard(e); });
                 view.querySelectorAll('.qCards .qCard').forEach(function(card) {
                     card.addEventListener('click', function() {
@@ -2782,6 +2744,19 @@ export default function (view) {
             });
         },
 
+        dismissUnmatched: function() {
+            var self = this;
+            var btn = view.querySelector('#btnQueueUnmatchedDismiss');
+            btn.disabled = true;
+            ServerSyncShared.apiRequest('Hints/Unmatched', 'DELETE').then(function() {
+                return self.load(true);
+            }).catch(function() {
+                ServerSyncShared.showAlert('Could not dismiss the warning');
+            }).then(function() {
+                btn.disabled = false;
+            });
+        },
+
         render: function() {
             var data = this._data || {};
             var outbound = data.Outbound || [];
@@ -2820,8 +2795,8 @@ export default function (view) {
             var unmatched = data.Unmatched || 0;
             unmatchedEl.classList.toggle('hidden', unmatched === 0);
             if (unmatched > 0) {
-                unmatchedEl.textContent = unmatched + ' local change' + (unmatched === 1 ? '' : 's') + ' since start matched no library or user mapping on any Push or Sync server, so nothing was sent for ' + (unmatched === 1 ? 'it' : 'them') +
-                    (data.LastUnmatched ? '. Last: ' + data.LastUnmatched : '') + '. Check the Libraries and Users steps of those servers.';
+                unmatchedEl.querySelector('#queueUnmatchedText').textContent = unmatched + ' local change' + (unmatched === 1 ? '' : 's') + ' matched no library or user mapping on any Push or Sync server, so nothing was sent for ' + (unmatched === 1 ? 'it' : 'them') +
+                    (data.LastUnmatched ? '. Last: ' + data.LastUnmatched : '') + '. Saving the Libraries or Users step of those servers checks ' + (unmatched === 1 ? 'it' : 'them') + ' again.';
             }
 
             // Peer filters follow the peers that exist.

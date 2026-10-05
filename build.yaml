@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.3.1"
+version: "12.2.4.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, and watch history."
@@ -31,3 +31,6 @@ changelog:
   - Built on base 2026.10.6, which now owns the database's schema version, its oldest reader marker, and setting an unreadable database aside
   - A database set aside because a newer version wrote it is kept as a .newer backup instead of a .corrupt one, and the three newest of each are kept
   - Activity log entries are written through the base package's logger
+  - The Queue view's warning about local changes that matched no mapping has a Dismiss button, and saving the configuration checks those changes again so a newly mapped library or user sends them
+  - Processing settings set how hints are retried. A peer that cannot be reached is tried again after 30 seconds, doubling up to an hour, and a peer that refuses waits 15 minutes. Each has a max retries setting, where 0 keeps trying forever
+  - The Sync page opens on the Queue when no sync module is enabled, instead of an empty page

@@ -32,6 +32,36 @@
                             </div>
 
                             <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtHintRetrySeconds">Retry When Unreachable (seconds)</label>
+                                <input is="emby-input" type="number" id="txtHintRetrySeconds" min="5" max="3600" />
+                                <div class="fieldDescription">How long to wait before sending a change again when a peer gives no answer or answers with an error. Each further failure doubles the wait. Default: 30.</div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtHintRetryMaxMinutes">Longest Wait When Unreachable (minutes)</label>
+                                <input is="emby-input" type="number" id="txtHintRetryMaxMinutes" min="1" max="1440" />
+                                <div class="fieldDescription">The doubling stops here, so a server that is down for a day is tried at this pace. Default: 60.</div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtHintMaxRetries">Max Retries When Unreachable</label>
+                                <input is="emby-input" type="number" id="txtHintMaxRetries" min="0" max="1000" />
+                                <div class="fieldDescription">How many times a change is sent before it is marked failed. 0 keeps trying until the peer answers. Default: 0.</div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtHintRefusedRetryMinutes">Retry When Refused (minutes)</label>
+                                <input is="emby-input" type="number" id="txtHintRefusedRetryMinutes" min="1" max="1440" />
+                                <div class="fieldDescription">How long sending to a peer pauses after it refuses this server's key or does not have Server Sync installed. Default: 15.</div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtHintRefusedMaxRetries">Max Retries When Refused</label>
+                                <input is="emby-input" type="number" id="txtHintRefusedMaxRetries" min="0" max="1000" />
+                                <div class="fieldDescription">How many times a change is sent to a peer that keeps refusing before it is marked failed. 0 keeps trying until the peer answers. Default: 0.</div>
+                            </div>
+
+                            <div class="inputContainer">
                                 <label class="inputLabel inputLabelUnfocused" for="txtRefreshParallelism">Refresh Parallelism</label>
                                 <input is="emby-input" type="number" id="txtRefreshParallelism" min="1" max="16" />
                                 <div class="fieldDescription">Items processed at once during Metadata and People refreshes. Higher finishes faster but uses more CPU. Lower leaves headroom for playback and transcoding. Default: 8.</div>

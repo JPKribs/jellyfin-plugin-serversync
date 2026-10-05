@@ -49,8 +49,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly ConcurrentDictionary<string, PendingChange> _pending = new(StringComparer.Ordinal);
     private CancellationTokenSource? _stopping;
     private Task? _flushLoop;
-    private int _unmatched;
-    private string? _lastUnmatched;
+    // The most unmatched changes kept to check again. A server whose mappings miss a whole library
+    // would otherwise hold every change made there.
+    private const int MaxUnmatched = 1000;
+
+    private readonly ConcurrentDictionary<string, UnmatchedChange> _unmatched = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalChangeObserver"/> class.
@@ -96,14 +99,17 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     public int PendingCount => _pending.Count;
 
     /// <summary>
-    /// Gets how many local changes were raised since start that no Push or Sync server mapped, so
-    /// nothing was sent. The usual reason is a server entry whose Libraries or Users step does not
-    /// cover the changed item or user.
+    /// Gets how many objects changed here since start that no Push or Sync server mapped, so nothing
+    /// was sent. The usual reason is a server entry whose Libraries or Users step does not cover the
+    /// changed item or user. Saving the configuration checks them again.
     /// </summary>
-    public int UnmatchedCount => _unmatched;
+    public int UnmatchedCount => _unmatched.Count;
 
     /// <summary>Gets a description of the last change that matched no mapping, or null.</summary>
-    public string? LastUnmatched => _lastUnmatched;
+    public string? LastUnmatched => _unmatched.Values.OrderByDescending(u => u.At).FirstOrDefault()?.Description;
+
+    /// <summary>Forgets the unmatched changes once the operator has seen them and accepts them.</summary>
+    public void DismissUnmatched() => _unmatched.Clear();
 
     /// <summary>Gets the changes still gathering, newest edit first, for the dashboard.</summary>
     /// <returns>A snapshot.</returns>
@@ -117,6 +123,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager.UserDataSaved += OnUserDataSaved;
         _libraryManager.ItemUpdated += OnItemUpdated;
         _libraryManager.ItemAdded += OnItemAdded;
+        if (Plugin.Instance is { } plugin)
+        {
+            plugin.ConfigurationChanged += OnConfigurationChanged;
+        }
+
         _flushLoop = Task.Run(() => FlushLoopAsync(_stopping.Token), CancellationToken.None);
         _logger.LogInformation("Server Sync is watching for local changes to watch history, metadata, people, and files. User settings are not announced live, since Jellyfin raises no event for policy and configuration changes. The scheduled Sync Information task carries them");
         return Task.CompletedTask;
@@ -128,6 +139,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager.UserDataSaved -= OnUserDataSaved;
         _libraryManager.ItemUpdated -= OnItemUpdated;
         _libraryManager.ItemAdded -= OnItemAdded;
+        if (Plugin.Instance is { } plugin)
+        {
+            plugin.ConfigurationChanged -= OnConfigurationChanged;
+        }
+
         if (_stopping is not null)
         {
             await _stopping.CancelAsync().ConfigureAwait(false);
@@ -351,8 +367,26 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
+    // A saved mapping may now cover a change that matched nothing, so each is raised again. One that
+    // still matches nothing is noted again by the raise.
+    private void OnConfigurationChanged(object? sender, MediaBrowser.Model.Plugins.BasePluginConfiguration e)
+    {
+        foreach (var entry in _unmatched.Values.ToList())
+        {
+            try
+            {
+                Raise(entry.Change);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not check an unmatched change again: {Change}", entry.Description);
+            }
+        }
+    }
+
     private void Raise(PendingChange change)
     {
+        _unmatched.TryRemove(HintProtocol.GuardKey(change.Kind, change.LocalKey), out _);
         var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = change.VersionAt };
 
         // A peer's newer edit that applied during the wait supersedes this one, and this server now holds
@@ -375,19 +409,19 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         {
             case HintKind.History when !string.IsNullOrEmpty(item.Path):
                 var user = _userManager.GetUserById(change.UserId);
-                NoteUnmatched(_publisher.PublishHistory(change.UserId, user?.Username, change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), HintKind.History, item.Path, user?.Username);
+                NoteUnmatched(_publisher.PublishHistory(change.UserId, user?.Username, change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), change, HintKind.History, item.Path, user?.Username);
                 break;
 
             case HintKind.Metadata when !string.IsNullOrEmpty(item.Path):
-                NoteUnmatched(_publisher.PublishMetadata(change.ItemId, item.Path, version, excludePeerKey: null, recorded: change.Recorded, itemType: item.GetType().Name), HintKind.Metadata, item.Path, null);
+                NoteUnmatched(_publisher.PublishMetadata(change.ItemId, item.Path, version, excludePeerKey: null, recorded: change.Recorded, itemType: item.GetType().Name), change, HintKind.Metadata, item.Path, null);
                 break;
 
             case HintKind.People when !string.IsNullOrWhiteSpace(item.Name):
-                NoteUnmatched(_publisher.PublishPeople(item.Name, change.ItemId, version, excludePeerKey: null, recorded: change.Recorded), HintKind.People, null, item.Name);
+                NoteUnmatched(_publisher.PublishPeople(item.Name, change.ItemId, version, excludePeerKey: null, recorded: change.Recorded), change, HintKind.People, null, item.Name);
                 break;
 
             case HintKind.Content when !string.IsNullOrEmpty(item.Path):
-                NoteUnmatched(_publisher.PublishContent(change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), HintKind.Content, item.Path, null);
+                NoteUnmatched(_publisher.PublishContent(change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), change, HintKind.Content, item.Path, null);
                 break;
 
             default:
@@ -410,17 +444,19 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         return false;
     }
 
-    private void NoteUnmatched(int queued, HintKind kind, string? itemPath, string? userName)
+    private void NoteUnmatched(int queued, PendingChange change, HintKind kind, string? itemPath, string? userName)
     {
-        if (queued > 0 || !AnyPeerAccepts(kind))
+        if (queued > 0 || !AnyPeerAccepts(kind) || _unmatched.Count >= MaxUnmatched)
         {
             return;
         }
 
-        Interlocked.Increment(ref _unmatched);
-        _lastUnmatched = HintActivityLog.Describe(kind, itemPath, userName, itemPath ?? userName ?? string.Empty);
-        _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", _lastUnmatched);
+        var description = HintActivityLog.Describe(kind, itemPath, userName, itemPath ?? userName ?? string.Empty);
+        _unmatched[HintProtocol.GuardKey(change.Kind, change.LocalKey)] = new UnmatchedChange(change, description, DateTime.UtcNow);
+        _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", description);
     }
+
+    private sealed record UnmatchedChange(PendingChange Change, string Description, DateTime At);
 
     private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, DateTime VersionAt);
 }

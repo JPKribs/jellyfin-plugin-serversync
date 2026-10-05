@@ -318,6 +318,11 @@ export default function (view) {
 
     function loadProcessingSettings(config) {
         setValue('txtHintDebounceSeconds', config.HintDebounceSeconds || 60);
+        setValue('txtHintRetrySeconds', config.HintRetrySeconds || 30);
+        setValue('txtHintRetryMaxMinutes', config.HintRetryMaxMinutes || 60);
+        setValue('txtHintMaxRetries', config.HintMaxRetries || 0);
+        setValue('txtHintRefusedRetryMinutes', config.HintRefusedRetryMinutes || 15);
+        setValue('txtHintRefusedMaxRetries', config.HintRefusedMaxRetries || 0);
         setValue('txtRefreshParallelism', config.RefreshParallelism || 8);
         setChecked('chkDeepImageVerification', config.DeepImageVerification === true);
     }
@@ -325,6 +330,11 @@ export default function (view) {
     function saveProcessingSettings() {
         saveSection(function (config) {
             config.HintDebounceSeconds = Math.min(3600, Math.max(1, getIntValue('txtHintDebounceSeconds', 60)));
+            config.HintRetrySeconds = Math.min(3600, Math.max(5, getIntValue('txtHintRetrySeconds', 30)));
+            config.HintRetryMaxMinutes = Math.min(1440, Math.max(1, getIntValue('txtHintRetryMaxMinutes', 60)));
+            config.HintMaxRetries = Math.min(1000, Math.max(0, getIntValue('txtHintMaxRetries', 0)));
+            config.HintRefusedRetryMinutes = Math.min(1440, Math.max(1, getIntValue('txtHintRefusedRetryMinutes', 15)));
+            config.HintRefusedMaxRetries = Math.min(1000, Math.max(0, getIntValue('txtHintRefusedMaxRetries', 0)));
             config.RefreshParallelism = Math.min(16, Math.max(1, getIntValue('txtRefreshParallelism', 8)));
             config.DeepImageVerification = getChecked('chkDeepImageVerification');
 

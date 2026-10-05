@@ -49,6 +49,37 @@ public class HintProtocolTests
     }
 
     /// <summary>
+    /// The outbound wait starts at the configured seconds and doubles until it reaches the ceiling.
+    /// True: a peer that is down is tried quickly at first and then at the ceiling's pace.
+    /// False: a down peer is hammered every thirty seconds forever, or a short outage waits an hour.
+    /// </summary>
+    [Theory]
+    [InlineData(1, 30)]
+    [InlineData(2, 60)]
+    [InlineData(3, 120)]
+    [InlineData(8, 3600)]
+    [InlineData(500, 3600)]
+    public void OutboundDelay_DoublesUpToCeiling(int attempts, int seconds)
+    {
+        var config = new Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration { HintRetrySeconds = 30, HintRetryMaxMinutes = 60 };
+        Assert.Equal(TimeSpan.FromSeconds(seconds), HintProtocol.OutboundDelay(config, attempts));
+    }
+
+    /// <summary>
+    /// A max of zero never gives up, and any other max gives up once that many attempts failed.
+    /// True: the default keeps a hint until it expires, and a set limit marks it failed on time.
+    /// False: the default would drop hints, or a limit would be off by one.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 1000, false)]
+    [InlineData(3, 2, false)]
+    [InlineData(3, 3, true)]
+    public void OutOfRetries_HonoursMax(int max, int attempts, bool expected)
+    {
+        Assert.Equal(expected, HintProtocol.OutOfRetries(max, attempts));
+    }
+
+    /// <summary>
     /// People keys fold case and padding so the same person on two servers shares one key.
     /// True: a hint for "alice actor" finds the row for "Alice Actor".
     /// False: a casing difference would make every person look like two.

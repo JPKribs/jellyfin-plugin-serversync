@@ -30,19 +30,6 @@
                         </select>
                     </div>
 
-                    <!-- Empty State: No sync types enabled -->
-                    <div id="noSyncTypesMessage" class="hidden emptyState">
-                        <div class="emptyState-card">
-                            <span class="material-icons emptyState-icon">sync_disabled</span>
-                            <div class="emptyState-title">No Sync Types Enabled</div>
-                            <div class="emptyState-subtitle">Enable Content, History, Metadata, User, or People syncing in the Settings tab to get started.</div>
-                            <a is="emby-linkbutton" class="raised jpk-button-submit emptyState-button" href="configurationpage?name=serversync_settings">
-                                <span class="material-icons" style="font-size:18px; margin-right:6px;">settings</span>
-                                <span>Go to Settings</span>
-                            </a>
-                        </div>
-                    </div>
-
                     <!-- ============================================
                          VIEW: Content Sync
                          ============================================ -->
@@ -767,7 +754,7 @@
                             <div class="healthRow" id="queuePeerRow"></div>
                         </div>
                         <div id="queueNoPeers" class="jpk-info hidden">No server is in Push or Sync mode, so this server sends no hints. Hints it receives from peers still appear below.</div>
-                        <div id="queueUnmatched" class="jpk-warn hidden"></div>
+                        <div id="queueUnmatched" class="jpk-warn hidden"><span id="queueUnmatchedText"></span> <button is="emby-button" type="button" id="btnQueueUnmatchedDismiss" class="raised button-cancel" style="margin-left: 8px; padding: 2px 10px;"><span>Dismiss</span></button></div>
 
                         <!-- Action Buttons -->
                         <div class="syncActionButtonRow">

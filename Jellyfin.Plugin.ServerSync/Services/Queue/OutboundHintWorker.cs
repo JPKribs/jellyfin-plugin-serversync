@@ -358,10 +358,13 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
             default:
                 var error = status == 0 ? "no answer: " + Trim(body) : $"peer answered {status}: {Trim(body)}";
+                var config = _configManager.Configuration;
+                var retry = GiveUp(peer, due, config.HintMaxRetries, error);
+
                 // Rows that failed as often share a backoff, so each group is put off in one transaction.
-                foreach (var group in due.GroupBy(r => r.Attempts))
+                foreach (var group in retry.GroupBy(r => r.Attempts))
                 {
-                    _outbound.Defer(group, now + HintProtocol.NextDelay(group.Key + 1), error);
+                    _outbound.Defer(group, now + HintProtocol.OutboundDelay(config, group.Key + 1), error);
                 }
 
                 state.Reason = error;
@@ -370,13 +373,40 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         }
     }
 
+    // Marks failed the rows that have used up their attempts and returns the rest to be tried again.
+    private List<OutboundHint> GiveUp(SourceServer peer, IList<OutboundHint> due, int maxRetries, string error)
+    {
+        var retry = new List<OutboundHint>();
+        var failed = 0;
+        foreach (var row in due)
+        {
+            if (HintProtocol.OutOfRetries(maxRetries, row.Attempts + 1))
+            {
+                _outbound.MarkFailed(row, $"gave up after {row.Attempts + 1} attempts: {error}");
+                failed++;
+            }
+            else
+            {
+                retry.Add(row);
+            }
+        }
+
+        if (failed > 0)
+        {
+            _logger.LogWarning("Gave up on {Count} hint(s) to '{Peer}' after {Max} attempts: {Error}", failed, peer.DisplayName, maxRetries, error);
+        }
+
+        return retry;
+    }
+
     private async Task PauseAsync(SourceServer peer, PeerDeliveryState state, IList<OutboundHint> due, string reason)
     {
-        var until = DateTime.UtcNow + HintProtocol.PeerPause;
+        var config = _configManager.Configuration;
+        var until = DateTime.UtcNow + HintProtocol.PeerPause(config);
         var alreadyPaused = state.PausedUntil.HasValue && string.Equals(state.Reason, reason, StringComparison.Ordinal);
         state.PausedUntil = until;
         state.Reason = reason;
-        _outbound.Defer(due, until, reason);
+        _outbound.Defer(GiveUp(peer, due, config.HintRefusedMaxRetries, reason), until, reason);
         _logger.LogError("Hints to '{Peer}' are paused until {Until:u}: {Reason}", peer.DisplayName, until, reason);
         if (!alreadyPaused)
         {

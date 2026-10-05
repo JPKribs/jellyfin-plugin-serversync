@@ -24,7 +24,38 @@ public static class HintProtocol
     public static readonly TimeSpan CompletionGrace = TimeSpan.FromMinutes(10);
 
     /// <summary>How long a peer that refused the key or lacks the plugin is left alone before another try.</summary>
-    public static readonly TimeSpan PeerPause = TimeSpan.FromMinutes(15);
+    /// <param name="config">The configuration, which holds the minutes.</param>
+    /// <returns>The pause.</returns>
+    public static TimeSpan PeerPause(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return TimeSpan.FromMinutes(Math.Clamp(config.HintRefusedRetryMinutes, 1, 1440));
+    }
+
+    /// <summary>
+    /// How long to wait before sending a hint again after a peer could not be reached: the configured
+    /// first wait, doubled for every failure after the first, and never longer than the configured ceiling.
+    /// </summary>
+    /// <param name="config">The configuration, which holds the first wait and the ceiling.</param>
+    /// <param name="attemptsSoFar">How many attempts have failed, including this one.</param>
+    /// <returns>The delay.</returns>
+    public static TimeSpan OutboundDelay(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, int attemptsSoFar)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        var first = TimeSpan.FromSeconds(Math.Clamp(config.HintRetrySeconds, 5, 3600));
+        var ceiling = TimeSpan.FromMinutes(Math.Clamp(config.HintRetryMaxMinutes, 1, 1440));
+
+        // Past thirty doublings any first wait is beyond the ceiling, and the shift would overflow.
+        var doublings = Math.Clamp(attemptsSoFar - 1, 0, 30);
+        var delay = first * (1L << doublings);
+        return delay < ceiling ? delay : ceiling;
+    }
+
+    /// <summary>Whether a hint has used up its attempts.</summary>
+    /// <param name="maxRetries">The configured most attempts, where zero means no limit.</param>
+    /// <param name="attemptsSoFar">How many attempts have failed, including this one.</param>
+    /// <returns>True when the hint should be marked failed instead of tried again.</returns>
+    public static bool OutOfRetries(int maxRetries, int attemptsSoFar) => maxRetries > 0 && attemptsSoFar >= maxRetries;
 
     /// <summary>
     /// How far a peer's clock may differ from this server's before Check Link says so. Two edits of one

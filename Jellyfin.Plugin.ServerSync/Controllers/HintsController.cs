@@ -475,6 +475,16 @@ public class HintsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Clears the warning about local changes that matched no mapping.</summary>
+    /// <returns>No content.</returns>
+    [HttpDelete("Unmatched")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult DismissUnmatched()
+    {
+        _observer.DismissUnmatched();
+        return NoContent();
+    }
+
     /// <summary>Discards one outbound row.</summary>
     /// <param name="id">The row id.</param>
     /// <returns>No content, or not found.</returns>

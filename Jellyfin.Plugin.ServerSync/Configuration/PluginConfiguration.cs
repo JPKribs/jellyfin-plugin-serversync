@@ -517,6 +517,37 @@ public class PluginConfiguration : BasePluginConfiguration
     public int HintDebounceSeconds { get; set; } = 60;
 
     /// <summary>
+    /// How long, in seconds, to wait before sending a change again after a peer could not be reached or
+    /// answered with an error. Each further failure doubles the wait, up to
+    /// <see cref="HintRetryMaxMinutes"/>. Default 30. Clamped 5 to 3600.
+    /// </summary>
+    public int HintRetrySeconds { get; set; } = 30;
+
+    /// <summary>
+    /// The longest wait, in minutes, between attempts to send a change to a peer that cannot be reached.
+    /// Default 60. Clamped 1 to 1440.
+    /// </summary>
+    public int HintRetryMaxMinutes { get; set; } = 60;
+
+    /// <summary>
+    /// How many times a change is sent to a peer that cannot be reached before it is marked failed.
+    /// Zero keeps trying for as long as the peer is configured. Default 0. Clamped 0 to 1000.
+    /// </summary>
+    public int HintMaxRetries { get; set; }
+
+    /// <summary>
+    /// How long, in minutes, hints to a peer are paused after it refused this server's key or answered
+    /// that it lacks the plugin. Default 15. Clamped 1 to 1440.
+    /// </summary>
+    public int HintRefusedRetryMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// How many times a change is sent to a peer that keeps refusing before it is marked failed. Zero
+    /// keeps trying for as long as the peer is configured. Default 0. Clamped 0 to 1000.
+    /// </summary>
+    public int HintRefusedMaxRetries { get; set; }
+
+    /// <summary>
     /// Verify source image sizes with live HTTP calls on every refresh, even
     /// for images whose tag hasn't changed. Applies to all sync modules.
     /// Catches the rare case of an image file replaced on the source's disk
@@ -824,6 +855,11 @@ public class PluginConfiguration : BasePluginConfiguration
         SizeMatchToleranceBytes = Math.Max(0, SizeMatchToleranceBytes);
         RefreshParallelism = Math.Clamp(RefreshParallelism, 1, 16);
         HintDebounceSeconds = Math.Clamp(HintDebounceSeconds, 1, 3600);
+        HintRetrySeconds = Math.Clamp(HintRetrySeconds, 5, 3600);
+        HintRetryMaxMinutes = Math.Clamp(HintRetryMaxMinutes, 1, 1440);
+        HintMaxRetries = Math.Clamp(HintMaxRetries, 0, 1000);
+        HintRefusedRetryMinutes = Math.Clamp(HintRefusedRetryMinutes, 1, 1440);
+        HintRefusedMaxRetries = Math.Clamp(HintRefusedMaxRetries, 0, 1000);
 
         // A hand edited or truncated XML file can deserialize a list as null or with null entries. Every
         // reader walks these lists without checking, so they are repaired here before anything else runs.

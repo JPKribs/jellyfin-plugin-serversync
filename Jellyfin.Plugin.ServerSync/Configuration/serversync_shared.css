@@ -195,49 +195,6 @@
     border-bottom: none;
 }
 
-/* ===== Empty State ===== */
-.emptyState {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 48px 16px;
-}
-.emptyState-card {
-    text-align: center;
-    padding: 40px 48px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    max-width: 420px;
-    width: 100%;
-}
-.emptyState-icon {
-    font-size: 56px;
-    color: var(--accent-color);
-    opacity: 0.6;
-    margin-bottom: 16px;
-    display: block;
-}
-.emptyState-title {
-    font-size: 1.3em;
-    font-weight: 600;
-    margin-bottom: 8px;
-    color: rgba(255, 255, 255, 0.85);
-}
-.emptyState-subtitle {
-    font-size: 0.95em;
-    color: rgba(255, 255, 255, 0.45);
-    line-height: 1.5;
-    margin-bottom: 28px;
-}
-.emptyState-button {
-    display: inline-flex !important;
-    align-items: center;
-    padding: 10px 28px !important;
-    font-size: 0.95em;
-    border-radius: 4px;
-}
-
 /* Change badges wrap onto multiple rows with even spacing when an item has
    many differences (Metadata, Images, People, Studios, ...). */
 .jpk-table-cell.pt-cell-details {
