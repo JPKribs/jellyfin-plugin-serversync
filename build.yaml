@@ -28,9 +28,6 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Built on base 2026.10.6, which now owns the database's schema version, its oldest reader marker, and setting an unreadable database aside
-  - A database set aside because a newer version wrote it is kept as a .newer backup instead of a .corrupt one, and the three newest of each are kept
-  - Activity log entries are written through the base package's logger
   - The Queue view's warning about local changes that matched no mapping has a Dismiss button, and saving the configuration checks those changes again so a newly mapped library or user sends them
   - Processing settings set how hints are retried. A peer that cannot be reached is tried again after 30 seconds, doubling up to an hour, and a peer that refuses waits 15 minutes. Each has a max retries setting, where 0 keeps trying forever
   - The Sync page opens on the Queue when no sync module is enabled, instead of an empty page
