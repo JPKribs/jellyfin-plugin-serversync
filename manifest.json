@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.4.0",
+        "changelog": "\n## Developer\n- The Queue view's warning about local changes that matched no mapping has a Dismiss button, and saving the configuration checks those changes again so a newly mapped library or user sends them\n- Processing settings set how hints are retried. A peer that cannot be reached is tried again after 30 seconds, doubling up to an hour, and a peer that refuses waits 15 minutes. Each has a max retries setting, where 0 keeps trying forever\n- The Sync page opens on the Queue when no sync module is enabled, instead of an empty page",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.4.0/jellyfin-plugin-serversync-12.2.4.0.zip",
+        "checksum": "af89b204061b69e4cb8f9cc28fa0ebb2",
+        "timestamp": "2026-10-05T16:15:21Z"
+      },
+      {
         "version": "12.2.3.1",
         "changelog": "## Developer\r\n- Built on base 2026.10.6, which now owns the database's schema version, its oldest reader marker, and setting an unreadable database aside\r\n- A database set aside because a newer version wrote it is kept as a .newer backup instead of a .corrupt one, and the three newest of each are kept\r\n- Activity log entries are written through the base package's logger",
         "targetAbi": "12.1.0.0",
