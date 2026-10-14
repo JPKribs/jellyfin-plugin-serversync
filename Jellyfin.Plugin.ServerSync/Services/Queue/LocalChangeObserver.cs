@@ -216,7 +216,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
             // Versions are recorded whether or not any peer is sent to, so a server that only receives
             // still knows when its own values were edited when a first contact has to be decided.
-            Note(HintKind.History, HintProtocol.HistoryKey(e.UserId, e.Item.Id), e.UserId, e.Item.Id);
+            Note(HintKind.History, HintProtocol.HistoryKey(e.UserId, e.Item.Id), e.UserId, e.Item.Id, itemPath: e.Item.Path);
         }
         catch (Exception ex)
         {
@@ -275,7 +275,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
             if (!string.IsNullOrEmpty(e.Item.Path))
             {
-                Note(HintKind.Metadata, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id, recorded);
+                Note(HintKind.Metadata, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id, recorded, e.Item.Path);
             }
         }
         catch (Exception ex)
@@ -306,7 +306,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
-            Note(HintKind.Content, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id);
+            Note(HintKind.Content, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id, itemPath: e.Item.Path);
         }
         catch (Exception ex)
         {
@@ -316,7 +316,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     // A change gathers with the others to the same object. One hand made edit in the window makes the
     // whole hint a recorded edit. A window of nothing but provider work travels as provider work.
-    private void Note(HintKind kind, string localKey, Guid userId, Guid itemId, bool recorded = true)
+    private void Note(HintKind kind, string localKey, Guid userId, Guid itemId, bool recorded = true, string? itemPath = null)
     {
         if (_guard.IsApplying(HintProtocol.GuardKey(kind, localKey)))
         {
@@ -334,7 +334,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
         // Nothing gathers for a kind no peer will take, and the queue does not show it. The server entries
         // are few, so this is a short scan on every event rather than a row that waits for nothing.
-        if (!AnyPeerAccepts(kind))
+        if (!AnyPeerAccepts(kind, itemPath, userId))
         {
             return;
         }
@@ -431,11 +431,12 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     // A change raised to no peer is only worth counting when there is a peer to send to. A server
     // with no Push or Sync entry is not misconfigured, it just does not send.
-    private bool AnyPeerAccepts(HintKind kind)
+    private bool AnyPeerAccepts(HintKind kind, string? itemPath = null, Guid userId = default)
     {
         foreach (var server in _configManager.Configuration.Servers)
         {
-            if (server.Pushes && _worker.PeerAccepts(server.Key, kind))
+            if (server.Pushes && _worker.PeerAccepts(server.Key, kind) && (itemPath is null || HintMapping.FindByLocalPath(server, itemPath) is not null)
+                && (kind != HintKind.History || userId == Guid.Empty || HintMapping.FindByLocalUser(server, userId) is not null))
             {
                 return true;
             }
@@ -446,7 +447,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     private void NoteUnmatched(int queued, PendingChange change, HintKind kind, string? itemPath, string? userName)
     {
-        if (queued > 0 || !AnyPeerAccepts(kind) || _unmatched.Count >= MaxUnmatched)
+        if (queued > 0 || !AnyPeerAccepts(kind, itemPath, change.UserId) || _unmatched.Count >= MaxUnmatched)
         {
             return;
         }
