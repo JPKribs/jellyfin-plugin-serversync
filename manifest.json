@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.4.1",
+        "changelog": "## Developer\r\n- Only changes to items in a mapped library, and watch history for mapped users, are queued for a peer. Everything else is dropped before it gathers, so it is never checked or sent",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.4.1/jellyfin-plugin-serversync-12.2.4.1.zip",
+        "checksum": "5c5708c6c3b6d4b6b4dc9e02c7edd3d1",
+        "timestamp": "2026-10-14T03:44:00Z"
+      },
+      {
         "version": "12.2.4.0",
         "changelog": "\n## Developer\n- The Queue view's warning about local changes that matched no mapping has a Dismiss button, and saving the configuration checks those changes again so a newly mapped library or user sends them\n- Processing settings set how hints are retried. A peer that cannot be reached is tried again after 30 seconds, doubling up to an hour, and a peer that refuses waits 15 minutes. Each has a max retries setting, where 0 keeps trying forever\n- The Sync page opens on the Queue when no sync module is enabled, instead of an empty page",
         "targetAbi": "12.1.0.0",
