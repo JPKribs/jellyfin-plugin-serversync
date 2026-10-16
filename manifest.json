@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.5.1",
+        "changelog": "\n## Developer\n- Updated JPKribs.Jellyfin.Base to 2026.10.16.",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.5.1/jellyfin-plugin-serversync-12.2.5.1.zip",
+        "checksum": "9d585f67aeaaea1929cfcd0ae4ee8a87",
+        "timestamp": "2026-10-16T21:37:09Z"
+      },
+      {
         "version": "12.2.5.0",
         "changelog": "\n## Developer\n- A hint is applied only when the item's own path on the origin is inside a mapped library, not just the path the hint names\n- Server Sync does not follow redirects from another server. A redirect is reported with the address to use instead\n- Plain http:// only reaches loopback, private network, and Tailscale addresses. A server on the public internet needs https://\n- Any signed in user's key can pair, so a peer held with a standard user's key pairs like any other\n- A peer that cannot pair has its hints refused instead of being taken on its word\n- When one server holds a standard user's key for the other, both need this version to pair",
         "targetAbi": "12.1.0.0",
