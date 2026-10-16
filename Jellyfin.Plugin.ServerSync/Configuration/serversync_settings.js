@@ -22,6 +22,7 @@ export default function (view) {
     // ============================================
 
     var ServerSyncShared = null;
+    var confirmDialog = null;
 
     // Helpers called by bare name, taken from the shared module once it loads. Every call happens after
     // the load, from a viewshow handler that waits for it.
@@ -30,6 +31,7 @@ export default function (view) {
     // Relative specifier so a server hosted under a base URL still resolves it.
     var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
+        confirmDialog = shared.confirmDialog;
         ({ escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor } = ServerSyncShared.pageHelpers());
     });
 
@@ -365,29 +367,40 @@ export default function (view) {
     // TROUBLESHOOTING: DATABASE RESET
     // ============================================
 
-    function resetTable(endpoint, tableName) {
-        if (!confirm('Are you sure you want to reset the ' + tableName + ' table?\n\nThis will delete all ' + tableName + ' tracking data and you will need to re-sync. This cannot be undone.')) {
-            return;
-        }
+    // Asks in the shared dialog. Each paragraph of the question is its own line.
+    function confirmReset(paragraphs) {
+        return confirmDialog(paragraphs.map(function (p) { return '<p>' + escapeHtml(p) + '</p>'; }).join(''), { html: true, destructive: true });
+    }
 
-        ServerSyncShared.apiRequest(endpoint, 'POST').then(function() {
-            ServerSyncShared.showAlert('The ' + tableName + ' table has been reset.');
-        }).catch(function(err) {
-            console.error(endpoint + ' error:', err);
-            ServerSyncShared.showAlert('Failed to reset ' + tableName + ' table.');
+    function resetTable(endpoint, tableName) {
+        confirmReset([
+            'Are you sure you want to reset the ' + tableName + ' table?',
+            'This will delete all ' + tableName + ' tracking data and you will need to re-sync. This cannot be undone.'
+        ]).then(function (confirmed) {
+            if (!confirmed) return;
+
+            ServerSyncShared.apiRequest(endpoint, 'POST').then(function() {
+                ServerSyncShared.showAlert('The ' + tableName + ' table has been reset.');
+            }).catch(function(err) {
+                console.error(endpoint + ' error:', err);
+                ServerSyncShared.showAlert('Failed to reset ' + tableName + ' table.');
+            });
         });
     }
 
     function resetEntireDatabase() {
-        if (!confirm('Are you sure you want to reset the ENTIRE sync database?\n\nThis will delete ALL tracking data across all sync types (Content, History, Metadata, Users). You will need to re-sync everything from scratch. This cannot be undone.')) {
-            return;
-        }
+        confirmReset([
+            'Are you sure you want to reset the ENTIRE sync database?',
+            'This will delete ALL tracking data across all sync types (Content, History, Metadata, Users). You will need to re-sync everything from scratch. This cannot be undone.'
+        ]).then(function (confirmed) {
+            if (!confirmed) return;
 
-        ServerSyncShared.apiRequest('ResetSyncDatabase', 'POST').then(function() {
-            ServerSyncShared.showAlert('The entire sync database has been reset.');
-        }).catch(function(err) {
-            console.error('ResetSyncDatabase error:', err);
-            ServerSyncShared.showAlert('Failed to reset sync database.');
+            ServerSyncShared.apiRequest('ResetSyncDatabase', 'POST').then(function() {
+                ServerSyncShared.showAlert('The entire sync database has been reset.');
+            }).catch(function(err) {
+                console.error('ResetSyncDatabase error:', err);
+                ServerSyncShared.showAlert('Failed to reset sync database.');
+            });
         });
     }
 

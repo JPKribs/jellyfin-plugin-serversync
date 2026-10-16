@@ -20,6 +20,10 @@ namespace Jellyfin.Plugin.ServerSync;
 /// </remarks>
 public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 {
+    // The name the secret key folder, application name and purpose derive from. Changing it makes
+    // every stored API key unreadable.
+    public const string SecretsName = "Jellyfin.Plugin.ServerSync";
+
     private readonly ILogger<Plugin> _logger;
     private readonly Lazy<SecretProtector> _secrets;
 
@@ -36,7 +40,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
         // Built by the same factory as the DI-registered protector, so both resolve the same key ring
         // (file based, safe to share).
-        _secrets = new Lazy<SecretProtector>(() => Services.Configuration.StableSecretProtection.CreateProtector(applicationPaths, logger));
+        _secrets = new Lazy<SecretProtector>(() => StableSecretProtection.CreateProtector(applicationPaths, SecretsName, logger));
 
         // The disk space checks are static and called from places with no logger of their own.
         Services.DiskSpaceService.Logger = logger;
@@ -95,22 +99,29 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     /// encryption of the API key. The kept-sentinel posted by the page
     /// resolves to the already-stored secret so it never round-trips.
     /// </summary>
+    protected override void OnConfigurationSaving(PluginConfiguration incoming, PluginConfiguration stored)
+    {
+        ArgumentNullException.ThrowIfNull(incoming);
+        ArgumentNullException.ThrowIfNull(stored);
+
+        incoming.SanitizeValues();
+
+        // The page posts the kept sentinel in place of a key it never saw. Resolve each entry
+        // against the stored entry with the same key, so a server can be renamed or reordered
+        // without the operator retyping its API key.
+        foreach (var server in incoming.Servers)
+        {
+            var storedServer = stored.FindServer(server.Key);
+            server.ApiKey = _secrets.Value.ResolveIncoming(server.ApiKey, storedServer?.ApiKey ?? string.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Saves from the settings page also take the plugin-wide save lock, so the write cannot
+    /// interleave with a task recording a run failure (see ConfigurationSaveLock).
+    /// </summary>
     public override void UpdateConfiguration(BasePluginConfiguration configuration)
     {
-        if (configuration is PluginConfiguration incoming)
-        {
-            incoming.SanitizeValues();
-
-            // The page posts the kept sentinel in place of a key it never saw. Resolve each entry
-            // against the stored entry with the same key, so a server can be renamed or reordered
-            // without the operator retyping its API key.
-            foreach (var server in incoming.Servers)
-            {
-                var stored = Configuration.FindServer(server.Key);
-                server.ApiKey = _secrets.Value.ResolveIncoming(server.ApiKey, stored?.ApiKey ?? string.Empty);
-            }
-        }
-
         lock (Services.Configuration.ConfigurationSaveLock.Sync)
         {
             base.UpdateConfiguration(configuration);

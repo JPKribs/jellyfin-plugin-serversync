@@ -53,15 +53,7 @@
     --font-mono: var(--jpk-mono);
 }
 
-/* ===== Animations ===== */
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
 /* ===== Layout Utility Classes ===== */
-.hidden { display: none !important; }
-
 .jpk-collapsible-actions { border-top: none; padding-top: 0; }
 
 .modal-relative { position: relative; }

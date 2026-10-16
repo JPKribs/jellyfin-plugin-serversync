@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Jellyfin.Plugin.ServerSync.Services;
-using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
@@ -34,14 +33,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // data folder with a pinned application name, otherwise a host launch-context change (app
         // update, desktop-app vs service, Docker) shifts the Data Protection discriminator and every
         // stored secret fails to decrypt. See StableSecretProtection.
-        serviceCollection.AddSingleton(sp =>
-        {
-            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Jellyfin.Plugin.ServerSync.SecretProtector");
-            return StableSecretProtection.CreateProtector(sp.GetService<MediaBrowser.Common.Configuration.IApplicationPaths>(), logger);
-        });
+        serviceCollection.AddPluginSecretProtector(Plugin.SecretsName);
 
         // The shared writer for Jellyfin's activity log, from the base package.
-        serviceCollection.AddSingleton<ActivityLogger>();
+        serviceCollection.AddActivityLogger();
 
         // The hint pipeline runs for the life of the server. Each worker is registered once as itself,
         // by the attribute scan above, and once more as a hosted service that resolves that same

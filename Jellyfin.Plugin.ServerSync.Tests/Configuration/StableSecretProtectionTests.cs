@@ -1,7 +1,10 @@
 using System;
 using System.IO;
-using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using System.Reflection;
+using JPKribs.Jellyfin.Base;
+using MediaBrowser.Common.Configuration;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -9,32 +12,46 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Configuration;
 
 public class StableSecretProtectionTests
 {
-    private static string TempKeyDir() =>
+    private static string TempDir() =>
         Path.Combine(Path.GetTempPath(), "ss-keys-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void Build_RoundTripsWithKeysInTheGivenDirectory()
+    public void CreateProtector_KeepsTheKeyFolderApplicationNameAndPurposeTheCopyUsed()
     {
-        var dir = TempKeyDir();
+        // The plugin carried its own copy with these exact values. The base derives them from the
+        // plugin name, and a mismatch would make every stored API key unreadable.
+        Assert.Equal("Jellyfin.Plugin.ServerSync", Plugin.SecretsName);
+
+        var configDir = TempDir();
         try
         {
-            var provider = StableSecretProtection.Build(dir, NullLogger.Instance);
-            Assert.NotNull(provider);
+            var paths = ConfigPaths.Create(configDir);
+            var keyDir = Path.Combine(configDir, "Jellyfin.Plugin.ServerSync.Keys");
+            Assert.Equal(keyDir, StableSecretProtection.KeyDirectory(paths, Plugin.SecretsName));
 
-            var protector = provider!.CreateProtector("Jellyfin.Plugin.ServerSync.Secrets.v1");
-            var encrypted = protector.Protect("api-key");
+            var secrets = StableSecretProtection.CreateProtector(paths, Plugin.SecretsName, NullLogger.Instance);
+            Assert.True(secrets.IsAvailable);
+            var stored = secrets.Protect("api-key");
+            Assert.True(SecretProtector.IsProtected(stored));
 
-            Assert.NotEqual("api-key", encrypted);
-            Assert.Equal("api-key", protector.Unprotect(encrypted));
+            // Keys must be written to the fixed folder, not a profile path.
+            Assert.NotEmpty(Directory.GetFiles(keyDir, "key-*.xml"));
 
-            // Keys must be written to the supplied directory, not a profile path.
-            Assert.NotEmpty(Directory.GetFiles(dir, "key-*.xml"));
+            // A provider built the way the old copy built it reads what the base wrote.
+            var services = new ServiceCollection();
+            services.AddDataProtection()
+                .PersistKeysToFileSystem(new DirectoryInfo(keyDir))
+                .SetApplicationName("Jellyfin.Plugin.ServerSync");
+            using var container = services.BuildServiceProvider();
+            var legacy = container.GetRequiredService<IDataProtectionProvider>()
+                .CreateProtector("Jellyfin.Plugin.ServerSync.Secrets.v1");
+            Assert.Equal("api-key", legacy.Unprotect(stored["enc:v1:".Length..]));
         }
         finally
         {
-            if (Directory.Exists(dir))
+            if (Directory.Exists(configDir))
             {
-                Directory.Delete(dir, true);
+                Directory.Delete(configDir, true);
             }
         }
     }
@@ -46,11 +63,29 @@ public class StableSecretProtectionTests
         var file = Path.GetTempFileName();
         try
         {
-            Assert.Null(StableSecretProtection.Build(Path.Combine(file, "keys"), NullLogger.Instance));
+            Assert.Null(StableSecretProtection.Build(Path.Combine(file, "keys"), Plugin.SecretsName, NullLogger.Instance));
         }
         finally
         {
             File.Delete(file);
         }
+    }
+
+    // IApplicationPaths with only the plugin configurations folder answered.
+    public class ConfigPaths : DispatchProxy
+    {
+        private string _configDir = string.Empty;
+
+        public static IApplicationPaths Create(string configDir)
+        {
+            var paths = DispatchProxy.Create<IApplicationPaths, ConfigPaths>();
+            ((ConfigPaths)(object)paths)._configDir = configDir;
+            return paths;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+            => targetMethod?.Name == "get_" + nameof(IApplicationPaths.PluginConfigurationsPath)
+                ? _configDir
+                : throw new NotSupportedException(targetMethod?.Name);
     }
 }

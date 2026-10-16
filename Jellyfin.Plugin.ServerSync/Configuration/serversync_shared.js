@@ -22,6 +22,8 @@ import {
     createSortableCardList,
     createChoiceGroup,
     generateGuid,
+    bindDialog,
+    confirmDialog,
     SECRET_KEPT
 // Relative specifier, not '/web/...': it resolves against this module's own
 // URL, so a server hosted under a base URL (http://host:8096/jellyfin) still
@@ -30,7 +32,7 @@ import {
 // categories silently refused to expand.
 } from './configurationpage?name=serversync_jpkribs_shared.js';
 
-export { createPaginatedTable, createSortableCardList, createChoiceGroup, generateGuid, SECRET_KEPT };
+export { createPaginatedTable, createSortableCardList, createChoiceGroup, generateGuid, bindDialog, confirmDialog, SECRET_KEPT };
 
 var PLUGIN_ID = 'ebd650b5-6f4c-4ccb-b10d-23dffb3a7286';
 
@@ -172,21 +174,6 @@ export function createServerSyncShared(view) {
         };
     };
 
-    shared.setValue = function (id, value) {
-        var el = shared.getEl(id);
-        if (el) el.value = value;
-    };
-
-    shared.getValue = function (id, fallback) {
-        var el = shared.getEl(id);
-        return el ? el.value : (fallback || '');
-    };
-
-    shared.getIntValue = function (id, fallback) {
-        var v = parseInt(shared.getValue(id, ''), 10);
-        return isNaN(v) ? fallback : v;
-    };
-
     // Section saves re-fetch the config and apply only that section's fields. Posting a page load
     // snapshot whole would overwrite values other writers changed since, such as the timestamps and
     // failure records the tasks write, or the sections of the other dashboard page.
@@ -218,9 +205,9 @@ export function createServerSyncShared(view) {
             getEl: shared.getEl.bind(shared),
             setChecked: shared.setChecked.bind(shared),
             getChecked: shared.getChecked.bind(shared),
-            setValue: shared.setValue,
-            getValue: shared.getValue,
-            getIntValue: shared.getIntValue,
+            setValue: shared.setValue.bind(shared),
+            getValue: shared.getValue.bind(shared),
+            getIntValue: shared.getIntValue.bind(shared),
             requestFor: shared.requestFor
         };
     };

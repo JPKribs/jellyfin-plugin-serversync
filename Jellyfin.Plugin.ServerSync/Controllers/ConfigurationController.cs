@@ -10,6 +10,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -210,25 +211,7 @@ public partial class ConfigurationController : ControllerBase
     /// </summary>
     /// <param name="input">User input to sanitize.</param>
     /// <returns>Sanitized string safe for logging.</returns>
-    private static string SanitizeForLog(string? input)
-    {
-        if (string.IsNullOrEmpty(input))
-        {
-            return "[empty]";
-        }
-
-        // Remove control characters (newlines, tabs, etc.) that could forge log entries
-        var sanitized = new string(input.Where(c => !char.IsControl(c)).ToArray());
-
-        // Truncate to prevent log flooding
-        const int maxLength = 100;
-        if (sanitized.Length > maxLength)
-        {
-            sanitized = string.Concat(sanitized.AsSpan(0, maxLength), "...");
-        }
-
-        return sanitized;
-    }
+    private static string SanitizeForLog(string? input) => FormatUtilities.SanitizeForLog(input, 100);
 
     /// <summary>
     /// Computes the overall sync status from a set of individual status values using priority ordering:

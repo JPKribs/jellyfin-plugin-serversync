@@ -57,11 +57,13 @@ export default function (view) {
 
     var ServerSyncShared = null;
     var createPaginatedTable = null;
+    var bindDialog = null;
 
     // Relative specifier so a server hosted under a base URL still resolves it.
     var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
         createPaginatedTable = shared.createPaginatedTable;
+        bindDialog = shared.bindDialog;
     });
 
     // ============================================
@@ -370,6 +372,7 @@ export default function (view) {
         var module = {
             table: null,            // PaginatedTable instance
             currentModalItem: null, // Row or detail shown in the modal
+            _dialog: null,          // The detail modal, opened by showDetail and closed by closeModal
             currentConfig: null,    // Plugin configuration, refreshed whenever the page is shown
             _initialized: false,
             _detailSeq: 0,          // Counts detail requests so only the newest reply fills the modal
@@ -425,7 +428,9 @@ export default function (view) {
 
                 bind(ids.modal('Ignore'), function() { self.modalIgnore(); });
                 bind(ids.modal('Queue'), function() { self.modalQueue(); });
-                bind(ids.modal('Close'), function() { self.closeModal(); });
+                // The close button carries jpk-dialog-close, so the dialog closes on it, on Escape, and on
+                // a backdrop click alike, and every close runs the same refresh.
+                self._dialog = bindDialog(spec.modalId, { root: view, onClose: function() { self._onModalClosed(); } });
                 (spec.extraModalButtons || []).forEach(function(b) {
                     bind(ids.modal(b.id), function() { self[b.method](); });
                 });
@@ -553,8 +558,16 @@ export default function (view) {
                 });
             },
 
+            // A status change can land after the admin already closed the modal, and still refreshes.
             closeModal: function() {
-                view.querySelector('#' + spec.modalId).classList.add('hidden');
+                if (this._dialog.isOpen()) {
+                    this._dialog.close();
+                } else {
+                    this._onModalClosed();
+                }
+            },
+
+            _onModalClosed: function() {
                 this.currentModalItem = null;
                 this._detailSeq++;
                 this.table.refresh();
@@ -975,7 +988,7 @@ export default function (view) {
                     }
                 }
 
-                view.querySelector('#itemDetailModal').classList.remove('hidden');
+                self._dialog.open();
             },
 
             // A pending deletion cannot be queued.
@@ -1221,7 +1234,7 @@ export default function (view) {
                 self.highlightChangedRow('historyModalRowPosition', item.MergedPlaybackPositionTicks, item.LocalPlaybackPositionTicks);
                 self.highlightChangedRow('historyModalRowLastPlayed', item.MergedLastPlayedDate, item.LocalLastPlayedDate);
 
-                view.querySelector('#historyItemDetailModal').classList.remove('hidden');
+                self._dialog.open();
             },
 
             setTableValue: function(elementId, value, type) {
@@ -1445,7 +1458,7 @@ export default function (view) {
 
                     self.buildPropertyTable(item);
 
-                    view.querySelector('#metadataSyncItemDetailModal').classList.remove('hidden');
+                    self._dialog.open();
                 }).catch(function(err) {
                     if (seq !== self._detailSeq) return;
                     console.error('Failed to load metadata item details:', err);
@@ -2056,7 +2069,7 @@ export default function (view) {
                         }
                     }
 
-                    view.querySelector('#userSyncItemDetailModal').classList.remove('hidden');
+                    self._dialog.open();
                 }).catch(function(err) {
                     if (seq !== self._detailSeq) return;
                     console.error('Failed to load user detail:', err);
@@ -2448,7 +2461,7 @@ export default function (view) {
                         self._addChangeDetailRow(tbody, detail.ImagesChangesDetail);
                     }
 
-                    view.querySelector('#peopleSyncItemDetailModal').classList.remove('hidden');
+                    self._dialog.open();
                 }).catch(function(err) {
                     if (seq !== self._detailSeq) return;
                     console.error('Failed to load person detail:', err);

@@ -27,6 +27,7 @@ export default function (view) {
     var _filterThumbSeq = 0;
     var createSortableCardList = null;
     var createChoiceGroup = null;
+    var confirmDialog = null;
 
     // Helpers called by bare name, taken from the shared module once it loads. Every call happens after
     // the load, from a viewshow handler that waits for it.
@@ -38,6 +39,7 @@ export default function (view) {
         createPaginatedTable = shared.createPaginatedTable;
         createSortableCardList = shared.createSortableCardList;
         createChoiceGroup = shared.createChoiceGroup;
+        confirmDialog = shared.confirmDialog;
         ({ escapeHtml, apiRequest, setVisible, bindClick, getEl, setChecked, getChecked, setValue, getValue, requestFor } = ServerSyncShared.pageHelpers());
     });
 
@@ -485,27 +487,33 @@ export default function (view) {
         var server = selectedServer();
         if (!server) return;
         var label = server.Name || server.ServerName || server.Url || 'this server';
-        if (!confirm('Remove ' + label + '?\n\nIts mappings and the sync rows tracked from it are removed with it. Files already downloaded stay where they are.')) {
-            return;
-        }
-        var removedKey = server.Key;
-        var removedId = server.ServerId || '';
-        var removedIndex = selectedIndex;
-
-        // The list on the page changes only once the save lands. Removing it first would leave the page
-        // showing a list the server never kept, and the rows would be forgotten for a server still in use.
-        var remaining = servers.filter(function (s, i) { return i !== removedIndex; });
-        saveServers('Server removed', 'Failed to remove server', remaining).then(function (saved) {
-            if (!saved) {
+        var question = '<p>' + escapeHtml('Remove ' + label + '?') + '</p>' +
+            '<p>Its mappings and the sync rows tracked from it are removed with it. Files already downloaded stay where they are.</p>';
+        confirmDialog(question, { html: true, destructive: true }).then(function (confirmed) {
+            // A save landing while the dialog is open replaces the entries with fresh copies, so the
+            // entry removed is found again by its key.
+            var removedIndex = servers.findIndex(function (s) { return s === server || (server.Key && s.Key === server.Key); });
+            if (!confirmed || removedIndex < 0) {
                 return;
             }
+            var removedKey = servers[removedIndex].Key;
+            var removedId = servers[removedIndex].ServerId || '';
 
-            selectServer(servers.length > 0 ? Math.min(removedIndex, servers.length - 1) : -1);
-            // The rows it tracked and the hints it sent have nothing to pull from now. Failing to clear
-            // them is not fatal. The tables simply keep inert rows until a reset.
-            if (removedKey) {
-                apiRequest('Servers/' + encodeURIComponent(removedKey) + '/Rows' + (removedId ? '?serverId=' + encodeURIComponent(removedId) : ''), 'DELETE').catch(function () {});
-            }
+            // The list on the page changes only once the save lands. Removing it first would leave the page
+            // showing a list the server never kept, and the rows would be forgotten for a server still in use.
+            var remaining = servers.filter(function (s, i) { return i !== removedIndex; });
+            saveServers('Server removed', 'Failed to remove server', remaining).then(function (saved) {
+                if (!saved) {
+                    return;
+                }
+
+                selectServer(servers.length > 0 ? Math.min(removedIndex, servers.length - 1) : -1);
+                // The rows it tracked and the hints it sent have nothing to pull from now. Failing to clear
+                // them is not fatal. The tables simply keep inert rows until a reset.
+                if (removedKey) {
+                    apiRequest('Servers/' + encodeURIComponent(removedKey) + '/Rows' + (removedId ? '?serverId=' + encodeURIComponent(removedId) : ''), 'DELETE').catch(function () {});
+                }
+            });
         });
     }
 

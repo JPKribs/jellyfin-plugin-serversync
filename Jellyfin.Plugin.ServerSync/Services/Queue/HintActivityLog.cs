@@ -220,5 +220,5 @@ public sealed class HintActivityLog
 
     // Never throws, and cuts the text to what the activity log keeps.
     private Task WriteAsync(string name, string type, string? overview, LogLevel severity)
-        => _activity.LogAsync(name, type, overview, severity);
+        => _activity.LogAndWaitAsync(name, type, overview, severity);
 }
