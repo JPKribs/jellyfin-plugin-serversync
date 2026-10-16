@@ -88,6 +88,12 @@ public sealed class ContentHintHandler
             return HintApplyResult.Dropped($"'{origin.DisplayName}' did not say where the file is, which happens when the key for it is not an administrator's");
         }
 
+        mapping = HintMapping.FindBySourcePath(origin, dto.Path);
+        if (mapping is null)
+        {
+            return HintApplyResult.Dropped($"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
+        }
+
         // The same filters the scan applies. A file the mapping leaves out must not arrive by hint, since
         // the next scan would find it out of place and a mapping that deletes stale files would remove it.
         if (PathUtilities.IsItemFiltered(dto.Path, mapping.SourceRootPath, mapping.FilterMode, mapping.FilteredItems))

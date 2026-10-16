@@ -171,21 +171,6 @@ public sealed class AuditFixTests : IDisposable
         Assert.NotNull(ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork: false));
     }
 
-    /// <summary>
-    /// A refused pairing is checked again at most once per interval.
-    /// True: a stream of requests from a peer held with a standard user's key starts one check, not one each.
-    /// False: every request calls the peer back.
-    /// </summary>
-    [Fact]
-    public void Pairing_RecheckIsRateLimited()
-    {
-        var store = new PeerPairingStore(_provider, new SecretProtector("tests", NullLogger.Instance), NullLogger<PeerPairingStore>.Instance);
-        Assert.True(store.TryClaimRecheck("peer", TimeSpan.FromMinutes(1)));
-        Assert.False(store.TryClaimRecheck("peer", TimeSpan.FromMinutes(1)));
-        Assert.True(store.TryClaimRecheck("other", TimeSpan.FromMinutes(1)));
-        Assert.True(store.TryClaimRecheck("peer", TimeSpan.Zero));
-    }
-
     private static HistorySyncItem Row(DateTime? negotiatedAt, bool played) => new()
     {
         SourceUserId = "su",

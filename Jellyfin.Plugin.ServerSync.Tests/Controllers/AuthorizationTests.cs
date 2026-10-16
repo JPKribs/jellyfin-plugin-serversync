@@ -19,7 +19,7 @@ public class AuthorizationTests
     [Fact]
     public void EveryController_RequiresElevation()
     {
-        var controllers = PluginAssembly.GetTypes().Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract).ToList();
+        var controllers = PluginAssembly.GetTypes().Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract && t != typeof(Jellyfin.Plugin.ServerSync.Controllers.PeerPairController)).ToList();
         Assert.NotEmpty(controllers);
         foreach (var controller in controllers)
         {

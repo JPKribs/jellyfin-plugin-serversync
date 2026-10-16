@@ -228,10 +228,7 @@ public class HintsController : ControllerBase
             // prove itself on later requests, so nothing it sends as this server would be accepted.
             if (link is { Listed: true } && !result.Paired)
             {
-                var refused = link.PairingError?.Contains("standard user", StringComparison.Ordinal) == true;
-                AppendWarning(result, refused
-                    ? $" It could not pair with this server: {link.PairingError}."
-                    : $" It could not pair with this server: {link.PairingError ?? "no reason was given"}. Until it can, hints between the two are refused.");
+                AppendWarning(result, $" It could not pair with this server: {link.PairingError ?? "no reason was given"}. Until it can, hints between the two are refused.");
             }
 
             return Ok(result);

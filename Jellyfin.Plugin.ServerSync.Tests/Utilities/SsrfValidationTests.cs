@@ -15,7 +15,7 @@ public class SsrfValidationTests
     [Fact]
     public async Task ResolvingValidator_RefusesANameThatPointsAtLoopback()
     {
-        var error = await ConfigurationUtilities.ValidateServerUrlForSsrfAsync("http://localhost:8096", allowPrivateNetwork: false);
+        var error = await ConfigurationUtilities.ValidateServerUrlForSsrfAsync("https://localhost:8096", allowPrivateNetwork: false);
         Assert.NotNull(error);
         Assert.Contains("resolves to", error, System.StringComparison.Ordinal);
     }

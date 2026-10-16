@@ -63,8 +63,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             })
             .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
             {
-                ConnectTimeout = Services.Queue.HintProtocol.ConnectTimeout
+                ConnectTimeout = Services.Queue.HintProtocol.ConnectTimeout,
+                AllowAutoRedirect = false,
+                ConnectCallback = Utilities.ConfigurationUtilities.ConnectPrivateAllowedAsync
             })
+            .AddHttpMessageHandler(() => new RedirectRefusingHandler())
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
 
         // The same client for entries that disallow private networks, with the rule enforced on every
@@ -77,8 +80,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
             {
                 ConnectTimeout = Services.Queue.HintProtocol.ConnectTimeout,
+                AllowAutoRedirect = false,
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPublicOnlyAsync
             })
+            .AddHttpMessageHandler(() => new RedirectRefusingHandler())
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
     }
 

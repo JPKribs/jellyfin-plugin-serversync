@@ -142,35 +142,6 @@ public class PeerController : ControllerBase
         return Ok(response);
     }
 
-    /// <summary>
-    /// A peer hands this server the secret it must present on requests that name it as the sender to
-    /// that peer. The peer makes the call over its own connection to this server, so the secret only
-    /// ever arrives from a server this one is configured to reach.
-    /// </summary>
-    /// <param name="request">The issuing server's id and the secret.</param>
-    /// <returns>Whether the secret was kept.</returns>
-    [HttpPost("Pair")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public ActionResult<object> Pair([FromBody] PairRequest request)
-    {
-        if (request is null || string.IsNullOrWhiteSpace(request.ServerId) || string.IsNullOrWhiteSpace(request.Secret) || request.Secret.Length > 256)
-        {
-            return BadRequest("A request body with ServerId and a Secret of at most 256 characters is required");
-        }
-
-        var entry = _configManager.Configuration.FindServerById(request.ServerId);
-        if (entry is null)
-        {
-            return Conflict($"server {request.ServerId} is not configured on this server, so it cannot pair");
-        }
-
-        _pairings.SetOutbound(entry.Key, request.Secret);
-        _logger.LogInformation("Paired with '{Peer}': it issued the secret this server presents to it", entry.DisplayName);
-        return Ok(new { Paired = true });
-    }
-
     // Hands an entry its secret by calling the entry's own address. The secret already issued is sent
     // again when there is one, so a peer that lost its copy is whole again the moment it checks the link.
     // Pairings with one entry run one at a time, so two checks at once send the same secret.
@@ -198,20 +169,11 @@ public class PeerController : ControllerBase
             deadline.CancelAfter(PairTimeout);
             using var client = _clientFactory.Create(entry);
             var (status, body) = await client.PairAsync(new PairRequest { ServerId = _applicationHost.SystemId, Secret = secret }, deadline.Token).ConfigureAwait(false);
-            if (status is 401 or 403)
-            {
-                // A standard user's key cannot reach the peer's endpoint, so no secret can be issued. The
-                // peer is then taken on its word, which is what the operator chose with that key.
-                _pairings.MarkInboundRefused(entry.Key);
-                var why = "this server holds a standard user's key for it, so it cannot be issued a secret and its hints are accepted on its word";
-                _logger.LogWarning("Could not pair with '{Peer}': {Why}", entry.DisplayName, why);
-                return (false, why);
-            }
-
             if (status is < 200 or >= 300)
             {
                 var why = status switch
                 {
+                    401 or 403 => "it refused the key this server holds for it, so it could not be issued a secret. Check the key on this server's entry for it, and update Server Sync there if it is older than this server's",
                     404 => "its Server Sync predates pairing",
                     409 => "it does not list this server: " + body,
                     _ => $"it answered {status}: {body}"
@@ -244,20 +206,6 @@ public class PeerController : ControllerBase
         return (true, null);
     }
 
-    // The background check of a refused pairing. It runs after the request that started it has ended, so
-    // it logs its own failures.
-    private async Task RecheckPairingAsync(Models.Configuration.SourceServer entry)
-    {
-        try
-        {
-            await PairAsync(entry, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not check the pairing with '{Peer}' again", entry.DisplayName);
-        }
-    }
-
     // The entry a request's sender claims to be, proven by the secret this server issued to that entry,
     // or the answer to send back. An entry without a secret has never paired, so the sender pairs on
     // hearing so and comes back.
@@ -275,21 +223,7 @@ public class PeerController : ControllerBase
         }
 
         var presented = Request.Headers[HintProtocol.PairingHeader].FirstOrDefault();
-        var expected = _pairings.GetInbound(entry.Key);
-        if (expected is null && _pairings.InboundRefusedAt(entry.Key) is not null)
-        {
-            // This server could not issue it a secret the last time, so it is taken on its word. Whether
-            // the entry now holds an administrator's key is checked again in the background, at most once
-            // a minute, so the exemption ends soon after it does without holding up this request.
-            if (_pairings.TryClaimRecheck(entry.Key, HintProtocol.CapabilityRefresh))
-            {
-                _ = Task.Run(() => RecheckPairingAsync(entry), CancellationToken.None);
-            }
-
-            return (entry, null);
-        }
-
-        if (!PeerPairingStore.Matches(presented, expected))
+        if (!PeerPairingStore.Matches(presented, _pairings.GetInbound(entry.Key)))
         {
             return (null, StatusCode(HintProtocol.UnpairedStatus, $"server {senderServerId} is not paired with this server. Its Server Sync pairs by checking the link to this server"));
         }

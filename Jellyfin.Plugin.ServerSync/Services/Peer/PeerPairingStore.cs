@@ -18,7 +18,6 @@ namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 public sealed class PeerPairingStore : QueueStoreBase
 {
     private readonly SecretProtector _secrets;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _rechecks = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> _pairing = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -71,81 +70,10 @@ public sealed class PeerPairingStore : QueueStoreBase
     /// <returns>The secret.</returns>
     public string? GetOutbound(string peerKey) => Unprotect(ReadColumn(peerKey, "OutboundSecret"));
 
-    /// <summary>Stores the secret a peer must present to this server, and clears any note that it refused to pair.</summary>
+    /// <summary>Stores the secret a peer must present to this server.</summary>
     /// <param name="peerKey">The server entry's key.</param>
     /// <param name="secret">The secret.</param>
-    public void SetInbound(string peerKey, string secret)
-    {
-        Upsert(peerKey, "InboundSecret", secret);
-        Write(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "UPDATE PeerPairings SET InboundRefusedAt = NULL WHERE PeerKey = @peer";
-            Add(cmd, "@peer", peerKey);
-            cmd.ExecuteNonQuery();
-        });
-    }
-
-    /// <summary>
-    /// Notes that the peer refused this server's key when it tried to issue a secret, which happens when
-    /// the key is a standard user's. Such a peer cannot be issued a secret, so its requests are taken on
-    /// its word, as every request was before pairing existed.
-    /// </summary>
-    /// <param name="peerKey">The server entry's key.</param>
-    public void MarkInboundRefused(string peerKey)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(peerKey);
-        Write(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-                INSERT INTO PeerPairings (PeerKey, InboundSecret, InboundRefusedAt, UpdatedAt) VALUES (@peer, NULL, @at, @at)
-                ON CONFLICT(PeerKey) DO UPDATE SET InboundSecret = NULL, InboundRefusedAt = @at, UpdatedAt = @at";
-            Add(cmd, "@peer", peerKey);
-            Add(cmd, "@at", Stamp(DateTime.UtcNow));
-            cmd.ExecuteNonQuery();
-        });
-    }
-
-    /// <summary>
-    /// Claims the right to check a refused pairing again, at most once per interval per peer, so a stream
-    /// of requests from that peer starts one check rather than one each.
-    /// </summary>
-    /// <param name="peerKey">The server entry's key.</param>
-    /// <param name="interval">The least time between checks.</param>
-    /// <returns>True when the caller should check now.</returns>
-    public bool TryClaimRecheck(string peerKey, TimeSpan interval)
-    {
-        var now = DateTime.UtcNow;
-        var claimed = false;
-        _rechecks.AddOrUpdate(
-            peerKey,
-            _ =>
-            {
-                claimed = true;
-                return now;
-            },
-            (_, last) =>
-            {
-                if (now - last < interval)
-                {
-                    return last;
-                }
-
-                claimed = true;
-                return now;
-            });
-        return claimed;
-    }
-
-    /// <summary>When the peer last refused this server's key, or null when it never did or has since paired.</summary>
-    /// <param name="peerKey">The server entry's key.</param>
-    /// <returns>The time, in UTC.</returns>
-    public DateTime? InboundRefusedAt(string peerKey)
-    {
-        var stored = ReadColumn(peerKey, "InboundRefusedAt");
-        return string.IsNullOrEmpty(stored) ? null : Unstamp(stored);
-    }
+    public void SetInbound(string peerKey, string secret) => Upsert(peerKey, "InboundSecret", secret);
 
     /// <summary>Stores the secret this server presents to a peer.</summary>
     /// <param name="peerKey">The server entry's key.</param>

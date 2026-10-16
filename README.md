@@ -34,7 +34,7 @@ The Servers tab lists every server this one syncs with, in priority order. When 
 
 - **Name**: An optional label. The server's own name is used when empty
 - **Enabled**: A disabled server keeps its settings and mappings but takes no part in any sync
-- **Server URL**: The full URL of the server (e.g., `http://192.168.1.100:8096`)
+- **Server URL**: The full URL of the server (e.g., `http://192.168.1.100:8096`). Plain `http://` only reaches loopback, private network, and Tailscale addresses, since it sends the API key unencrypted. A server on the public internet needs `https://`. Redirects are not followed, so enter the address the server answers on directly
 - **External URL**: An optional public URL the browser loads thumbnails from, for servers reached over a VPN or an internal address
 - **Allow Private Network Address**: Accept a loopback or LAN address for this server
 
@@ -113,7 +113,7 @@ Every server entry has a direction. **Pull** reads from that server on a schedul
 
 A standard user's key, from signing in as someone who is not an administrator, pulls what that user can see and that one user's watch history, one way. Push and Sync, two way history, and user sync need an administrator's key, because Server Sync's own endpoints and the user APIs on the other server require elevation. The page says which kind of key an entry holds after a connection test or sign in.
 
-Every key a peer holds for a server is an administrator's key, so the key alone cannot say which peer is calling. Servers that list each other pair instead: when a server checks the link to a peer, the peer issues it a secret over the peer's own connection back to it, and the server presents that secret on every request that names it as the sender. A request without the right secret is refused until the real server pairs, which Check Link and the workers do on their own, so an administrator's key alone cannot queue, complete, or negotiate as another peer. A peer that is held with a standard user's key cannot be issued a secret, since the endpoint that receives it requires elevation, and is taken on its word as every peer was before. The server tries to pair it again at most once a minute, so the exemption ends as soon as the entry holds an administrator's key. A peer's clock is held to this server's too: a version dated more than five minutes ahead is declined, and anything less is read as now, so no stamp from elsewhere can outrank every later edit made here.
+Every key a peer holds for a server is an administrator's key, so the key alone cannot say which peer is calling. Servers that list each other pair instead: when a server checks the link to a peer, the peer issues it a secret over the peer's own connection back to it, and the server presents that secret on every request that names it as the sender. A request without the right secret is refused until the real server pairs, which Check Link and the workers do on their own, so an administrator's key alone cannot queue, complete, or negotiate as another peer. The endpoint that receives a secret accepts any signed in user's key, so a peer held with a standard user's key pairs too. No peer is ever taken on its word, and a link that cannot pair refuses hints until it can. A peer's clock is held to this server's too: a version dated more than five minutes ahead is declined, and anything less is read as now, so no stamp from elsewhere can outrank every later edit made here.
 
 A server only announces the kinds of change the other side applies. It reads the peer's enabled modules every minute and skips the rest, and the peer declines anything it does not want in the meantime. A hand made edit is stamped with its time the moment it is made. Edits to one object are then gathered until it has gone untouched for sixty seconds, adjustable under Settings > Processing, and sent once, so a poster changed twice a minute apart travels once and a playback that reports progress every few seconds travels once it stops. A change is announced as a hint that says what changed and where, never the value. The other server pulls the live state through the same code the scan uses, so a hint and a scan can never disagree. Hints are kept on both ends until the work is done, retried with backoff, and recovered if lost, and the dashboard shows both queues and any paused peer with the reason. A received hint that keeps failing is given up after about a day, and the scheduled tasks carry the change from there. A write made because of a hint never raises a hint of its own, a file downloaded by a sync is never announced as a new file, and a value that already matches is never written, so a pool of three or more servers settles without echoing. Every call between peers has a deadline, so a peer that stops answering is retried later instead of holding up the others.
 
@@ -253,7 +253,7 @@ Using the user configurations found in the Sync Table, all Queued records update
 
 # API
 
-Server Sync adds a small HTTP API to Jellyfin. Two servers that both run the plugin talk to each other through the **Peer** routes, and the dashboard's Servers tab and Queue view use the **Hints** and **Servers** routes. Every route sits behind Jellyfin's own `RequiresElevation` policy, so the caller must present an API key or an administrator's access token that the receiving server issued. The plugin adds no authentication of its own. A standard user's token is refused with `403`, and no token with `401`.
+Server Sync adds a small HTTP API to Jellyfin. Two servers that both run the plugin talk to each other through the **Peer** routes, and the dashboard's Servers tab and Queue view use the **Hints** and **Servers** routes. Every route except `Peer/Pair` sits behind Jellyfin's own `RequiresElevation` policy, so the caller must present an API key or an administrator's access token that the receiving server issued. `Peer/Pair` accepts any signed in user's token, since all it does is store the secret a listed peer issued to this server. The plugin adds no authentication of its own. A standard user's token is refused with `403` on every other route, and no token with `401` on all of them.
 
 Requests and responses are JSON. Property names are Pascal case, enums travel as their names, and dates are UTC in ISO 8601. The server reads property names without regard to case.
 
@@ -299,11 +299,11 @@ Whether, and how, this server lists the asking server, and the pairing. When the
 }
 ```
 
-`PairingError` says why no secret could be issued: the listed server refused this server's key, which happens when it is a standard user's, or could not be reached at its URL.
+`PairingError` says why no secret could be issued: the listed server refused this server's key, which happens when the key was revoked or its Server Sync is older than this one, or could not be reached at its URL.
 
 ### POST /ServerSync/Peer/Pair
 
-A peer hands this server the secret it must present on requests that name it as the sender to that peer. Only a server this one lists can call it usefully, and the secret only ever arrives from the server at that entry's URL, since the peer makes the call over its own key for this server.
+A peer hands this server the secret it must present on requests that name it as the sender to that peer. Any signed in user may call it, so a peer holding a standard user's key for this server can still pair. Only a server this one lists can call it usefully. A secret stored by anyone else only makes this server present the wrong one, and the next `428` pairs it again.
 
 ```json
 { "ServerId": "…", "Secret": "…" }
@@ -313,7 +313,7 @@ Answers `{ "Paired": true }`, or `409` when the issuing server is not listed her
 
 #### The pairing header
 
-Every request below that carries a `SenderServerId` must also carry the header `X-ServerSync-Pairing` with the secret that the receiver issued to that sender. A request without it, or with another server's secret, answers `428` with the reason, and the sender pairs through `Link` and tries once more. A sender the receiver holds with a standard user's key cannot be issued a secret and is accepted without the header.
+Every request below that carries a `SenderServerId` must also carry the header `X-ServerSync-Pairing` with the secret that the receiver issued to that sender. A request without it, or with another server's secret, answers `428` with the reason, and the sender pairs through `Link` and tries once more.
 
 ### POST /ServerSync/Peer/Queue
 

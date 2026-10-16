@@ -115,6 +115,12 @@ public sealed class ItemHintHandler
             return HintApplyResult.Dropped($"the item no longer exists on '{origin.DisplayName}'");
         }
 
+        mapping = HintMapping.FindBySourcePath(origin, dto.Path);
+        if (mapping is null)
+        {
+            return HintApplyResult.Dropped($"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
+        }
+
         var source = Connect(origin, client);
         var refresh = ActivatorUtilities.CreateInstance<RefreshMetadataSyncTableTask>(_services);
         var record = await refresh.RefreshOneAsync(new MetadataWork(source, mapping, dto, RefreshMetadataSyncTableTask.IsFolderType(dto.Type)), cancellationToken).ConfigureAwait(false);

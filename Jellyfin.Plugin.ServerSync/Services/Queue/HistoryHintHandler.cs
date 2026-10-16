@@ -119,6 +119,12 @@ public sealed class HistoryHintHandler
             return HintApplyResult.Dropped($"the item no longer exists on '{origin.DisplayName}'");
         }
 
+        libraryMapping = HintMapping.FindBySourcePath(origin, dto.Path);
+        if (libraryMapping is null)
+        {
+            return HintApplyResult.Dropped($"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
+        }
+
         var sourceItemId = dto.Id.Value.ToString("N", CultureInfo.InvariantCulture);
         var record = _tableService.BuildRecord(userMapping, libraryMapping, dto, sourceItemId, negotiateWithSource: true);
         if (record is null)

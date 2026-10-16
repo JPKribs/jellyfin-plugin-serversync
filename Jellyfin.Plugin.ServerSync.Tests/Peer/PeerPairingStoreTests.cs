@@ -78,27 +78,6 @@ public sealed class PeerPairingStoreTests : IDisposable
     }
 
     /// <summary>
-    /// A refused pairing is remembered until a secret is issued.
-    /// True: a peer this server holds a standard user's key for is taken on its word, and a later
-    /// administrator's key makes it strict again.
-    /// False: such a peer is refused forever, or a refusal lingers after pairing succeeds.
-    /// </summary>
-    [Fact]
-    public void Refusal_IsRememberedUntilPaired()
-    {
-        Assert.Null(_store.InboundRefusedAt("peer"));
-        Assert.Null(_store.InboundRefusedAt("peer"));
-        _store.MarkInboundRefused("peer");
-        Assert.NotNull(_store.InboundRefusedAt("peer"));
-        Assert.True(_store.InboundRefusedAt("peer") > DateTime.UtcNow.AddMinutes(-1));
-        Assert.Null(_store.GetInbound("peer"));
-
-        _store.SetInbound("peer", "in-1");
-        Assert.Null(_store.InboundRefusedAt("peer"));
-        Assert.Equal("in-1", _store.GetInbound("peer"));
-    }
-
-    /// <summary>
     /// Matching is exact and never true for a missing side.
     /// True: a request without the header, or with someone else's secret, is refused.
     /// False: an empty header matches an empty store and anyone is "paired".

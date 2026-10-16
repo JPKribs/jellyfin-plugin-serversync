@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.4.1"
+version: "12.2.5.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, and watch history."
@@ -28,4 +28,9 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Only changes to items in a mapped library, and watch history for mapped users, are queued for a peer. Everything else is dropped before it gathers, so it is never checked or sent
+  - A hint is applied only when the item's own path on the origin is inside a mapped library, not just the path the hint names
+  - Server Sync does not follow redirects from another server. A redirect is reported with the address to use instead
+  - Plain http:// only reaches loopback, private network, and Tailscale addresses. A server on the public internet needs https://
+  - Any signed in user's key can pair, so a peer held with a standard user's key pairs like any other
+  - A peer that cannot pair has its hints refused instead of being taken on its word
+  - When one server holds a standard user's key for the other, both need this version to pair
