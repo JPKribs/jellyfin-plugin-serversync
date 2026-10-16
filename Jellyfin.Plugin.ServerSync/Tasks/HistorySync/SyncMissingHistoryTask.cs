@@ -153,13 +153,13 @@ public class SyncMissingHistoryTask
 
             if (capabilities is null)
             {
-                _negotiationBlocked[source.Key] = $"'{source.Name}' does not run Server Sync, or its version predates two way history. Install or update Server Sync there, or turn off Negotiate With Source Server";
+                _negotiationBlocked[source.Key] = $"'{source.Name}' does not run Server Sync. Install Server Sync there, or turn off Negotiate With Source Server";
                 continue;
             }
 
-            if (!capabilities.Features.Contains(PeerHistoryNegotiator.HistoryFeature))
+            if (!HintProtocol.SameVersion(capabilities.PluginVersion, ConfigManager.PluginVersion))
             {
-                _negotiationBlocked[source.Key] = $"Server Sync {capabilities.PluginVersion} on '{source.Name}' does not support two way history";
+                _negotiationBlocked[source.Key] = $"'{source.Name}': " + HintProtocol.VersionMismatch(capabilities.PluginVersion, ConfigManager.PluginVersion);
                 continue;
             }
 

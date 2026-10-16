@@ -87,68 +87,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets image info (including sizes) for a metadata sync item from the source server.
-    /// </summary>
-    /// <param name="id">The database ID of the metadata sync item.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of image info with sizes.</returns>
-    [HttpGet("MetadataItems/{id}/ImageInfo")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<List<ImageInfoDto>>> GetMetadataItemImageInfo(
-        long id,
-        [FromServices] MetadataSyncTableManager manager,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        var item = manager.GetById(id);
-        if (item == null || string.IsNullOrEmpty(item.SourceItemId))
-        {
-            return NotFound();
-        }
-
-        try
-        {
-            using var client = ClientForRow(item.ServerKey);
-            if (client == null)
-            {
-                return NotFound("Source server not configured");
-            }
-
-            if (!Guid.TryParse(item.SourceItemId, out var sourceItemGuid))
-            {
-                return NotFound("Invalid source item ID");
-            }
-
-            var imageInfoList = await client.GetItemImageInfoAsync(sourceItemGuid, cancellationToken).ConfigureAwait(false);
-            if (imageInfoList == null)
-            {
-                return Ok(new List<ImageInfoDto>());
-            }
-
-            var result = imageInfoList.Select(img => new ImageInfoDto
-            {
-                ImageType = img.ImageType?.ToString() ?? "Unknown",
-                ImageIndex = img.ImageIndex ?? 0,
-                Size = img.Size ?? 0,
-                Width = img.Width ?? 0,
-                Height = img.Height ?? 0
-            }).ToList();
-
-            return Ok(result);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to fetch image info for metadata item {Id}", id);
-            return Ok(new List<ImageInfoDto>());
-        }
-    }
-
-    /// <summary>
     /// Gets paginated metadata sync items from the database with optional search and filter.
     /// One record per item containing all categories (Metadata, Images, People).
     /// </summary>

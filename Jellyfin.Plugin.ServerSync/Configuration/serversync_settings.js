@@ -326,6 +326,7 @@ export default function (view) {
         setValue('txtHintRefusedRetryMinutes', config.HintRefusedRetryMinutes || 15);
         setValue('txtHintRefusedMaxRetries', config.HintRefusedMaxRetries || 0);
         setValue('txtRefreshParallelism', config.RefreshParallelism || 8);
+        setValue('txtFullScanIntervalHours', config.FullScanIntervalHours === undefined || config.FullScanIntervalHours === null ? 24 : config.FullScanIntervalHours);
         setChecked('chkDeepImageVerification', config.DeepImageVerification === true);
     }
 
@@ -338,6 +339,7 @@ export default function (view) {
             config.HintRefusedRetryMinutes = Math.min(1440, Math.max(1, getIntValue('txtHintRefusedRetryMinutes', 15)));
             config.HintRefusedMaxRetries = Math.min(1000, Math.max(0, getIntValue('txtHintRefusedMaxRetries', 0)));
             config.RefreshParallelism = Math.min(16, Math.max(1, getIntValue('txtRefreshParallelism', 8)));
+            config.FullScanIntervalHours = Math.min(720, Math.max(0, getIntValue('txtFullScanIntervalHours', 24)));
             config.DeepImageVerification = getChecked('chkDeepImageVerification');
 
         }, 'Processing settings saved', 'Failed to save processing settings');

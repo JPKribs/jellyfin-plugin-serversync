@@ -508,6 +508,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public int RefreshParallelism { get; set; } = 8;
 
+    public int FullScanIntervalHours { get; set; } = 24;
+
     /// <summary>
     /// How long, in seconds, an object must go untouched after its last change before that change is
     /// sent to the servers in Push or Sync mode. Every edit to the same object restarts the wait, and
@@ -855,6 +857,7 @@ public class PluginConfiguration : BasePluginConfiguration
         SizeMatchToleranceBytes = Math.Max(0, SizeMatchToleranceBytes);
         RefreshParallelism = Math.Clamp(RefreshParallelism, 1, 16);
         HintDebounceSeconds = Math.Clamp(HintDebounceSeconds, 1, 3600);
+        FullScanIntervalHours = Math.Clamp(FullScanIntervalHours, 0, 720);
         HintRetrySeconds = Math.Clamp(HintRetrySeconds, 5, 3600);
         HintRetryMaxMinutes = Math.Clamp(HintRetryMaxMinutes, 1, 1440);
         HintMaxRetries = Math.Clamp(HintMaxRetries, 0, 1000);

@@ -33,6 +33,7 @@ public sealed class HistoryHintHandler
     private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly LocalHintPublisher _publisher;
     private readonly IServerApplicationHost _applicationHost;
+    private readonly HintTriage _triage;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ILogger<HistoryHintHandler> _logger;
 
@@ -58,10 +59,12 @@ public sealed class HistoryHintHandler
         LocalHintPublisher publisher,
         IServerApplicationHost applicationHost,
         IPluginConfigurationManager configManager,
+        HintTriage triage,
         MediaBrowser.Controller.Library.ILibraryManager libraryManager,
         ILogger<HistoryHintHandler> logger)
     {
         _configManager = configManager;
+        _triage = triage;
         _libraryManager = libraryManager;
         _tableService = tableService;
         _table = table;
@@ -87,24 +90,29 @@ public sealed class HistoryHintHandler
 
         if (!_configManager.Configuration.EnableHistorySync)
         {
-            return HintApplyResult.Dropped("history sync is off on this server");
+            return HintApplyResult.Dropped(HintCode.ModuleOff, "history sync is off on this server");
         }
 
         if (!HintProtocol.TryParseHistoryKey(hint.Key, out var originUserId, out var originItemId))
         {
-            return HintApplyResult.Dropped("the hint's key is not a user id and item id");
+            return HintApplyResult.Dropped(HintCode.Invalid, "the hint's key is not a user id and item id");
         }
 
         var userMapping = HintMapping.FindBySourceUser(origin, originUserId);
         if (userMapping is null)
         {
-            return HintApplyResult.Dropped($"user '{hint.UserName ?? hint.UserId}' on '{origin.DisplayName}' is not mapped here");
+            return HintApplyResult.Dropped(HintCode.NotMapped, $"user '{hint.UserName ?? hint.UserId}' on '{origin.DisplayName}' is not mapped here");
         }
 
         var libraryMapping = HintMapping.FindBySourcePath(origin, hint.ItemPath);
         if (libraryMapping is null)
         {
-            return HintApplyResult.Dropped($"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
+            return HintApplyResult.Dropped(HintCode.NotMapped, $"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
+        }
+
+        if (_triage.MissingLocal(origin, HintKind.History, hint.ItemPath, hint.Key) is { } waitFor)
+        {
+            return HintApplyResult.Park(waitFor, "no local item at the mapped path yet. It applies when the item arrives");
         }
 
         var page = await client.GetItemsWithUserDataByIdsAsync(originUserId, new Guid?[] { originItemId }, cancellationToken).ConfigureAwait(false);
@@ -116,25 +124,32 @@ public sealed class HistoryHintHandler
         var dto = page.Items?.FirstOrDefault();
         if (dto is null || !dto.Id.HasValue)
         {
-            return HintApplyResult.Dropped($"the item no longer exists on '{origin.DisplayName}'");
+            return HintApplyResult.Dropped(HintCode.SourceGone, $"the item no longer exists on '{origin.DisplayName}'");
         }
 
         libraryMapping = HintMapping.FindBySourcePath(origin, dto.Path);
         if (libraryMapping is null)
         {
-            return HintApplyResult.Dropped($"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
+            return HintApplyResult.Dropped(HintCode.NotMapped, $"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
+        }
+
+        if (HintTriage.IsFiltered(libraryMapping, dto.Path))
+        {
+            return HintApplyResult.Dropped(HintCode.Filtered, $"'{dto.Path}' is left out by the library mapping's filter here");
         }
 
         var sourceItemId = dto.Id.Value.ToString("N", CultureInfo.InvariantCulture);
         var record = _tableService.BuildRecord(userMapping, libraryMapping, dto, sourceItemId, negotiateWithSource: true);
         if (record is null)
         {
-            return HintApplyResult.Dropped("no local item at the mapped path yet. The next content sync or scan will pick it up");
+            return _triage.MissingLocal(origin, HintKind.History, dto.Path, hint.Key) is { } missing
+                ? HintApplyResult.Park(missing, "no local item at the mapped path yet. It applies when the item arrives")
+                : HintApplyResult.Dropped(HintCode.NotMapped, $"the local item or user mapped from '{dto.Path}' could not be matched here");
         }
 
         if (!Guid.TryParse(record.LocalUserId, out var localUserId) || !Guid.TryParse(record.LocalItemId, out var localItemId))
         {
-            return HintApplyResult.Dropped("the local user or item id is not valid");
+            return HintApplyResult.Dropped(HintCode.Invalid, "the local user or item id is not valid");
         }
 
         var localKey = HintProtocol.HistoryKey(localUserId, localItemId);
@@ -146,7 +161,7 @@ public sealed class HistoryHintHandler
         {
             if (previous.Status == SyncStatus.Ignored)
             {
-                return HintApplyResult.Dropped("the row is ignored on this server");
+                return HintApplyResult.Dropped(HintCode.Ignored, "the row is ignored on this server");
             }
 
             record.Id = previous.Id;

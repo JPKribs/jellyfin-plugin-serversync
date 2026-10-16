@@ -67,6 +67,12 @@
                                 <div class="fieldDescription">Items processed at once during Metadata and People refreshes. Higher finishes faster but uses more CPU. Lower leaves headroom for playback and transcoding. Default: 8.</div>
                             </div>
 
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtFullScanIntervalHours">Full Scan Every (hours)</label>
+                                <input is="emby-input" type="number" id="txtFullScanIntervalHours" min="0" max="720" />
+                                <div class="fieldDescription">Content and Metadata scans read only what changed on each server since the last scan. A full scan of everything runs at this interval, and only a full scan removes rows for items deleted on a server. Changing a server's mappings runs a full scan next. Set 0 to make every scan a full scan. Default: 24.</div>
+                            </div>
+
                             <div class="checkboxContainer checkboxContainer-withDescription">
                                 <label class="emby-checkbox-label">
                                     <input type="checkbox" is="emby-checkbox" id="chkDeepImageVerification" />

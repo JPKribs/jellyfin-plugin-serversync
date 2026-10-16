@@ -10,9 +10,6 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// </summary>
 public static class HintProtocol
 {
-    /// <summary>The capability a peer advertises when it accepts hints.</summary>
-    public const string HintFeature = "hints";
-
     /// <summary>The most hints one queue request may carry.</summary>
     public const int MaxHintsPerRequest = 500;
 
@@ -119,6 +116,18 @@ public static class HintProtocol
 
     /// <summary>The status a receiver answers when the sender is not paired with it, so the sender pairs and tries again.</summary>
     public const int UnpairedStatus = 428;
+
+    public static readonly TimeSpan ParkWindow = TimeSpan.FromDays(7);
+
+    public const string VersionHeader = "X-ServerSync-Version";
+
+    public const int VersionMismatchStatus = 426;
+
+    public static bool SameVersion(string? a, string? b)
+        => !string.IsNullOrWhiteSpace(a) && string.Equals(a.Trim(), b?.Trim(), StringComparison.Ordinal);
+
+    public static string VersionMismatch(string? peerVersion, string thisVersion)
+        => $"Server Sync {(string.IsNullOrWhiteSpace(peerVersion) ? "of an unknown version" : peerVersion.Trim())} on the peer and {thisVersion} on this server differ. Update both servers to the same version";
 
     /// <summary>
     /// Bounds a version from elsewhere to this server's clock. A timestamp in the future would beat every

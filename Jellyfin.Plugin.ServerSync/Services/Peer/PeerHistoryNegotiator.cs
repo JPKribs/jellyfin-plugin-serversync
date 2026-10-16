@@ -11,9 +11,6 @@ namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 /// </summary>
 public static class PeerHistoryNegotiator
 {
-    /// <summary>The feature name a peer advertises when it accepts negotiated history writes.</summary>
-    public const string HistoryFeature = "history-negotiate";
-
     /// <summary>Hard cap on entries per request, so an elevated caller cannot queue unbounded work.</summary>
     public const int MaxEntriesPerRequest = 500;
 

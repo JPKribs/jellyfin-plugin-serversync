@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.5.1"
+version: "12.2.6.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, and watch history."
@@ -28,4 +28,13 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Updated JPKribs.Jellyfin.Base to 2026.10.16.
+  - Every server in a pool must run the same Server Sync version. Calls from another version are refused, and Check Link names both versions. Update every server together
+  - Hints are answered with a code that says what the receiver did with them
+  - Each server tells the others what it wants from them, so changes outside its mapped libraries, users, and filters are never sent
+  - A change the other server turned away is held back from it for a day, or until the settings on either side change
+  - A hint for an item a server does not have yet waits up to seven days and applies when the item arrives. The queue view shows these as waiting for the item
+  - A server that already holds the same or a newer edit answers straight away without fetching anything
+  - Server Sync is a metadata and image provider for every media type. Enable it in a library's metadata and image fetchers to fill new items from the servers it pulls from
+  - Content and Metadata scans read only what changed on each server. A full scan runs every 24 hours, set by Full Scan Every under Processing
+  - Peer status reads need the asking server's id and its pairing
+  - Removed unused API routes

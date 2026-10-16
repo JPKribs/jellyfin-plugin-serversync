@@ -28,6 +28,7 @@ public class PeerPairController : ControllerBase
     }
 
     [HttpPost("Pair")]
+    [RequireSameVersion]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

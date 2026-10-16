@@ -111,10 +111,31 @@ public class UpdateSyncTablesTask
         IPluginConfigurationManager configManager,
         ContentSyncTableManager manager,
         ISourceServerClientFactory clientFactory,
-        ILibraryManager libraryManager)
-        : base(logger, manager, clientFactory, configManager)
+        ILibraryManager libraryManager,
+        ScanWatermarkStore watermarks)
+        : base(logger, manager, clientFactory, configManager, watermarks)
     {
         _libraryManager = libraryManager;
+    }
+
+    protected override bool SupportsIncremental => true;
+
+    protected override string ScopeSettings
+    {
+        get
+        {
+            var config = ConfigManager.Configuration;
+            return System.Text.Json.JsonSerializer.Serialize(new
+            {
+                config.SkipWatchedByAllUsers,
+                config.WatchedFilterUserIds,
+                config.DownloadNewContentMode,
+                config.ReplaceExistingContentMode,
+                config.DeleteMissingContentMode,
+                config.DetectUpdatedFiles,
+                config.SizeMatchToleranceBytes
+            });
+        }
     }
 
     /// <inheritdoc />
@@ -448,7 +469,7 @@ public class UpdateSyncTablesTask
 
             var workBefore = work.Count;
             var outcome = await PaginatedFetchUtility.FetchAllPagesAsync(
-                fetchPage: (startIndex, batchSize, ct) => client.GetLibraryItemsAsync(sourceLibraryId, startIndex, batchSize, ct),
+                fetchPage: (startIndex, batchSize, ct) => client.GetLibraryItemsAsync(sourceLibraryId, startIndex, batchSize, ChangedSince(source), ct),
                 processItem: (item, _) =>
                 {
                     if (item.Id.HasValue

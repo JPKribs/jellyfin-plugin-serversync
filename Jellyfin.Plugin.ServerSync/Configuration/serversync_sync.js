@@ -2849,7 +2849,7 @@ export default function (view) {
                 var origin = QueueModule._origin(r.OriginServerId);
                 rows.push({ lane: 'in', state: 'Received', dir: 'in', at: r.ReceivedAt, kind: r.Kind, recorded: r.Recorded, id: r.Id, peerKey: origin ? origin.Key : null, peerName: origin ? (origin.Name || origin.ServerName || origin.Url) : r.OriginServerId,
                     title: QueueModule._fileName(r.ItemPath) || r.UserName || r.Key, subtitle: null, itemType: r.ItemType, originItemId: r.ItemId, userName: r.UserName,
-                    attempts: r.Attempts, lastError: r.LastError, receivedAt: r.ReceivedAt, what: QueueModule._what(r.Kind) });
+                    attempts: r.Attempts, lastError: r.LastError, receivedAt: r.ReceivedAt, parked: r.Parked === true, what: QueueModule._what(r.Kind) });
             });
             rows.sort(function(a, b) { return new Date(b.at || 0) - new Date(a.at || 0); });
             return rows;
@@ -2928,8 +2928,8 @@ export default function (view) {
                 meta = r.lastError || 'rejected'; err = true;
                 act = '<button type="button" class="qAct" data-lane="Outbound" data-discard="' + r.id + '" title="Discard this hint.">✕</button>';
             } else {
-                chip = '<span class="qChip received">Received · ' + (r.attempts > 0 ? 'retrying' : 'applying next pass') + '</span>';
-                if (r.attempts > 0) { meta = (r.lastError || 'retrying') + ', attempt ' + r.attempts; err = true; } else { meta = QueueModule._ago(r.receivedAt); }
+                chip = '<span class="qChip received">Received · ' + (r.parked ? 'waiting for the item' : r.attempts > 0 ? 'retrying' : 'applying next pass') + '</span>';
+                if (r.parked) { meta = r.lastError || 'waiting for the item to arrive here'; } else if (r.attempts > 0) { meta = (r.lastError || 'retrying') + ', attempt ' + r.attempts; err = true; } else { meta = QueueModule._ago(r.receivedAt); }
                 act = '<button type="button" class="qAct" data-lane="Inbound" data-discard="' + r.id + '" title="Discard this hint. The scheduled task still covers the change.">✕</button>';
             }
 

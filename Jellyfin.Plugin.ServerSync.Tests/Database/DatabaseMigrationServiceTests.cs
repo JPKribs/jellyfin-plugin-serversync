@@ -10,6 +10,30 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Database;
 
 public class DatabaseMigrationServiceTests
 {
+    [Fact]
+    public void MigrateSchema_FromV28_AddsParkedHintsAndScanWatermarks()
+    {
+        using var conn = OpenConnection();
+        DatabaseMigrationService.CreateQueueTables(conn);
+        using (var drop = conn.CreateCommand())
+        {
+            drop.CommandText = @"
+                DROP TABLE IF EXISTS ScanWatermarks;
+                DROP TABLE IF EXISTS InboundHints;
+                CREATE TABLE InboundHints (Id INTEGER PRIMARY KEY AUTOINCREMENT, HintId TEXT NOT NULL, OriginServerId TEXT NOT NULL, Kind INTEGER NOT NULL, Key TEXT NOT NULL, NextAttempt TEXT NOT NULL);";
+            drop.ExecuteNonQuery();
+        }
+
+        Assert.DoesNotContain("ParkedPath", GetColumnNames(conn, "InboundHints"));
+
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 28, NullLogger.Instance);
+
+        Assert.True(ok);
+        Assert.Contains("ParkedPath", GetColumnNames(conn, "InboundHints"));
+        Assert.Contains("ScanWatermarks", GetTableNames(conn));
+        Assert.Equal(29, GetVersion(conn));
+    }
+
     private static SqliteConnection OpenConnection()
     {
         var conn = new SqliteConnection("Data Source=:memory:");
@@ -67,7 +91,7 @@ public class DatabaseMigrationServiceTests
     [Fact]
     public void CurrentSchemaVersion_IsTwentySix()
     {
-        Assert.Equal(28, DatabaseMigrationService.CurrentSchemaVersion);
+        Assert.Equal(29, DatabaseMigrationService.CurrentSchemaVersion);
     }
 
     /// <summary>
@@ -147,7 +171,7 @@ public class DatabaseMigrationServiceTests
         Assert.DoesNotContain("OldColumn", cols);
         Assert.Contains("SourceItemId", cols);
         Assert.Contains("PendingType", cols);
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
     }
 
     /// <summary>
@@ -249,7 +273,7 @@ public class DatabaseMigrationServiceTests
             Assert.True(reader.IsDBNull(0));
         }
 
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
     }
 
     /// <summary>
@@ -303,7 +327,7 @@ public class DatabaseMigrationServiceTests
 
         var historyCols = GetColumnNames(conn, "HistorySyncItems");
         Assert.Contains("SourceStateHash", historyCols);
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
     }
 
     /// <summary>
@@ -369,7 +393,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 20, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
     }
 
     /// <summary>
@@ -382,12 +406,12 @@ public class DatabaseMigrationServiceTests
     {
         using var conn = OpenConnection();
         DatabaseMigrationService.CreateInitialSchema(conn);
-        SetVersion(conn, 28);
+        SetVersion(conn, 29);
 
-        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 28, NullLogger.Instance);
+        var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 29, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
     }
 
     /// <summary>
@@ -413,7 +437,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 21, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
         foreach (var table in new[] { "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
         {
             Assert.Contains("RetryCount", GetColumnNames(conn, table));
@@ -436,7 +460,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 21, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
     }
 
     /// <summary>
@@ -461,7 +485,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 22, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
         var columns = GetColumnNames(conn, "HistorySyncItems");
         foreach (var col in new[] { "NegotiatedIsPlayed", "NegotiatedPlayCount", "NegotiatedPlaybackPositionTicks", "NegotiatedLastPlayedDate", "NegotiatedIsFavorite", "NegotiatedAt" })
         {
@@ -499,7 +523,7 @@ public class DatabaseMigrationServiceTests
         var ok = DatabaseMigrationService.MigrateSchema(conn, fromVersion: 23, NullLogger.Instance);
 
         Assert.True(ok);
-        Assert.Equal(28, GetVersion(conn));
+        Assert.Equal(29, GetVersion(conn));
         foreach (var table in new[] { "SyncItems", "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" })
         {
             Assert.Contains("ServerKey", GetColumnNames(conn, table));

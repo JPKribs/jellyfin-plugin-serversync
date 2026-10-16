@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 28;
+    public const int CurrentSchemaVersion = 29;
 
     /// <summary>
     /// The oldest schema version whose code can still work with a database at
@@ -323,6 +323,30 @@ public static class DatabaseMigrationService
             );";
         cmd.ExecuteNonQuery();
         CreateV28Additions(connection);
+        CreateV29Additions(connection);
+    }
+
+    public static void CreateV29Additions(SqliteConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        AddColumnIfMissing(connection, transaction, "InboundHints", "ParkedPath TEXT");
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            cmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS idx_inbound_parked_nocase ON InboundHints(ParkedPath COLLATE NOCASE);
+                CREATE TABLE IF NOT EXISTS ScanWatermarks (
+                    TaskKey TEXT NOT NULL,
+                    ServerKey TEXT NOT NULL,
+                    ScopeHash TEXT NOT NULL,
+                    ListedFrom TEXT NOT NULL,
+                    FullAt TEXT NOT NULL,
+                    PRIMARY KEY(TaskKey, ServerKey)
+                )";
+            cmd.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
     }
 
     /// <summary>
@@ -604,6 +628,12 @@ public static class DatabaseMigrationService
             {
                 logger.LogInformation("Schema upgrade to v28: adding pending versions and queue indexes.");
                 CreateV28Additions(connection);
+            }
+
+            if (fromVersion < 29)
+            {
+                logger.LogInformation("Schema upgrade to v29: adding parked hints and scan watermarks.");
+                CreateV29Additions(connection);
             }
 
             JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, CurrentSchemaVersion, MinReaderVersion);

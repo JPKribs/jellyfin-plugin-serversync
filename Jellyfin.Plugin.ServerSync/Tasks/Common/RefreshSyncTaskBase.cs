@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -30,6 +33,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 {
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly IPluginConfigurationManager _configManager;
+    private readonly ScanWatermarkStore? _watermarks;
+    private readonly Dictionary<string, DateTime> _changedSince = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime _runStartedAt;
+
+    public static readonly TimeSpan IncrementalOverlap = TimeSpan.FromHours(1);
 
     /// <summary>
     /// Initializes a new instance.
@@ -42,7 +50,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         ILogger logger,
         ISyncTableManager<TRecord, TKey> manager,
         ISourceServerClientFactory clientFactory,
-        IPluginConfigurationManager configManager)
+        IPluginConfigurationManager configManager,
+        ScanWatermarkStore? watermarks = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(manager);
@@ -52,7 +61,19 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         Manager = manager;
         _clientFactory = clientFactory;
         _configManager = configManager;
+        _watermarks = watermarks;
     }
+
+    protected virtual bool SupportsIncremental => false;
+
+    protected virtual string ScopeSettings => string.Empty;
+
+    protected bool IsIncrementalRun { get; private set; }
+
+    protected IReadOnlyDictionary<TKey, TRecord> ExistingRows { get; private set; } = new Dictionary<TKey, TRecord>();
+
+    protected DateTime? ChangedSince(ScanSource source)
+        => IsIncrementalRun && source is not null && _changedSince.TryGetValue(source.Key, out var since) ? since : null;
 
     /// <summary>
     /// Gets the logger for subclass use.
@@ -760,6 +781,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             }
 
             Sources = Array.Empty<ScanSource>();
+            ExistingRows = new Dictionary<TKey, TRecord>();
             _enabledSourceLibraryIdsForRun = null;
         }
     }
@@ -792,6 +814,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         progress.Report(0);
 
         var existing = SnapshotExistingRows();
+        ExistingRows = existing;
+        DecideRunKind(existing.Count);
         progress.Report(SnapshotEnd);
 
         var fetchProgress = new Progress<double>(p =>
@@ -804,14 +828,107 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         await BuildAllAsync(run, sourceItems, progress, cancellationToken).ConfigureAwait(false);
         await ResolveRunConflictsAsync(run, cancellationToken).ConfigureAwait(false);
         RetireCoveredRows(run);
-        var pruned = await PruneIfSafeAsync(run, progress, cancellationToken).ConfigureAwait(false);
+        var pruned = 0;
+        if (IsIncrementalRun)
+        {
+            Logger.LogInformation("{Task}: listed only what changed, so stale rows are pruned on the next full scan", Name);
+        }
+        else
+        {
+            pruned = await PruneIfSafeAsync(run, progress, cancellationToken).ConfigureAwait(false);
+        }
 
         progress.Report(WorkEnd);
         await FinalizeAsync(cancellationToken).ConfigureAwait(false);
         RecordRunCompletedAndSave();
+        RecordWatermarks(run);
         progress.Report(100);
 
         ReportRunOutcome(run, pruned);
+    }
+
+    private void DecideRunKind(int existingRows)
+    {
+        IsIncrementalRun = false;
+        _changedSince.Clear();
+        _runStartedAt = DateTime.UtcNow;
+        if (!SupportsIncremental || _watermarks is null || Sources.Count == 0)
+        {
+            return;
+        }
+
+        var intervalHours = _configManager.Configuration.FullScanIntervalHours;
+        string? why = intervalHours <= 0 ? "every scan is a full scan" : existingRows == 0 ? "the table is empty" : null;
+        var since = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in Sources)
+        {
+            if (why is not null)
+            {
+                break;
+            }
+
+            var mark = _watermarks.Get(Key, source.Key);
+            why = mark is null ? $"'{source.Name}' has not been fully scanned yet"
+                : !string.Equals(mark.ScopeHash, ScopeOf(source), StringComparison.Ordinal) ? $"the settings for '{source.Name}' changed"
+                : _runStartedAt - Utilities.UtcTime.AsUtc(mark.FullAt) >= TimeSpan.FromHours(intervalHours) ? $"the last full scan of '{source.Name}' was over {intervalHours} hours ago"
+                : null;
+            if (why is null)
+            {
+                since[source.Key] = Utilities.UtcTime.AsUtc(mark!.ListedFrom) - IncrementalOverlap;
+            }
+        }
+
+        if (why is not null)
+        {
+            Logger.LogInformation("{Task}: full scan, since {Why}", Name, why);
+            return;
+        }
+
+        foreach (var pair in since)
+        {
+            _changedSince[pair.Key] = pair.Value;
+        }
+
+        IsIncrementalRun = true;
+        Logger.LogInformation("{Task}: listing only what changed since the last scan. A full scan runs every {Hours} hours", Name, intervalHours);
+    }
+
+    private void RecordWatermarks(RefreshRun run)
+    {
+        if (!SupportsIncremental || _watermarks is null)
+        {
+            return;
+        }
+
+        if (_sourceUnavailable || run.HadFailures || (!IsIncrementalRun && _pruneBlocked))
+        {
+            Logger.LogInformation("{Task}: the run was not clean, so the next scan lists from where the last clean one did", Name);
+            return;
+        }
+
+        foreach (var source in Sources)
+        {
+            if (!_listedCleanly.Contains(source.Key))
+            {
+                continue;
+            }
+
+            var fullAt = IsIncrementalRun ? _watermarks.Get(Key, source.Key)?.FullAt ?? _runStartedAt : _runStartedAt;
+            _watermarks.Set(Key, source.Key, new ScanWatermark(ScopeOf(source), _runStartedAt, fullAt));
+        }
+    }
+
+    private string ScopeOf(ScanSource source)
+    {
+        var server = source.Server;
+        var shape = JsonSerializer.Serialize(new
+        {
+            server.Url,
+            Libraries = server.GetEnabledLibraryMappings(),
+            Users = server.GetEnabledUserMappings(),
+            Settings = ScopeSettings
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(shape)))[..16];
     }
 
     // Strict read. If this degraded to an empty list on a transient database error, every source item
@@ -857,7 +974,23 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             heldServerKeys[kvp.Key] = string.IsNullOrEmpty(kvp.Value.ServerKey) ? firstServerKey : kvp.Value.ServerKey;
         }
 
-        return new RefreshRun(existing, sourceCount, buildEnd, pullOrder, heldServerKeys, new HashSet<string>(_listedCleanly, StringComparer.OrdinalIgnoreCase));
+        var run = new RefreshRun(existing, sourceCount, buildEnd, pullOrder, heldServerKeys, new HashSet<string>(_listedCleanly, StringComparer.OrdinalIgnoreCase));
+        if (IsIncrementalRun)
+        {
+            var owners = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in existing)
+            {
+                if (PriorityKeyOf(kvp.Value) is { } priorityKey)
+                {
+                    var order = run.OrderOf(heldServerKeys[kvp.Key]);
+                    owners[priorityKey] = owners.TryGetValue(priorityKey, out var best) ? Math.Min(best, order) : order;
+                }
+            }
+
+            run.IncrementalOwners = owners;
+        }
+
+        return run;
     }
 
     // Builds and stores one row per source item. When BuildRecordAsync spends most of its time on per
@@ -924,6 +1057,14 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             }
 
             var priorityKey = PriorityKeyOf(record);
+            if (priorityKey is not null
+                && run.IncrementalOwners is { } owners
+                && owners.TryGetValue(priorityKey, out var ownerOrder)
+                && ownerOrder < run.OrderOf(record.ServerKey))
+            {
+                return;
+            }
+
             if (priorityKey is not null)
             {
                 run.SeenPriorityKeys.TryAdd(priorityKey, 0);
@@ -1131,7 +1272,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         else
         {
             Logger.LogInformation("{Task} complete: {Processed} processed, {Pruned} pruned", Name, run.Processed, pruned);
-            ClearRunFailure();
+            if (!IsIncrementalRun)
+            {
+                ClearRunFailure();
+            }
         }
     }
 
@@ -1296,6 +1440,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
 
         public Dictionary<TKey, TRecord> Existing { get; }
+
+        public Dictionary<string, int>? IncrementalOwners { get; set; }
+
+        public int OrderOf(string? serverKey) => serverKey is not null && _pullOrder.TryGetValue(serverKey, out var order) ? order : int.MaxValue;
 
         public int Total { get; }
 

@@ -28,6 +28,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 public sealed class ItemHintHandler
 {
     private readonly IServiceProvider _services;
+    private readonly HintTriage _triage;
     private readonly IPluginConfigurationManager _configManager;
     private readonly VersionConflictResolver _resolver;
     private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
@@ -46,6 +47,7 @@ public sealed class ItemHintHandler
     public ItemHintHandler(
         IServiceProvider services,
         IPluginConfigurationManager configManager,
+        HintTriage triage,
         VersionConflictResolver resolver,
         LocalHintPublisher publisher,
         MediaBrowser.Controller.Library.ILibraryManager libraryManager,
@@ -53,6 +55,7 @@ public sealed class ItemHintHandler
     {
         _services = services;
         _configManager = configManager;
+        _triage = triage;
         _resolver = resolver;
         _libraryManager = libraryManager;
         _publisher = publisher;
@@ -75,18 +78,23 @@ public sealed class ItemHintHandler
         var config = _configManager.Configuration;
         if (!config.EnableMetadataSync)
         {
-            return HintApplyResult.Dropped("metadata sync is off on this server");
+            return HintApplyResult.Dropped(HintCode.ModuleOff, "metadata sync is off on this server");
         }
 
         if (!Guid.TryParse(hint.Key, out var originItemId))
         {
-            return HintApplyResult.Dropped("the hint's key is not an item id");
+            return HintApplyResult.Dropped(HintCode.Invalid, "the hint's key is not an item id");
         }
 
         var mapping = HintMapping.FindBySourcePath(origin, hint.ItemPath);
         if (mapping is null)
         {
-            return HintApplyResult.Dropped($"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
+            return HintApplyResult.Dropped(HintCode.NotMapped, $"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
+        }
+
+        if (_triage.MissingLocal(origin, HintKind.Metadata, hint.ItemPath, hint.Key) is { } waitFor)
+        {
+            return HintApplyResult.Park(waitFor, "no local item at the mapped path yet. It applies when the item arrives");
         }
 
         // The worker reads a pass's items in pages. A row it did not cover reads its own.
@@ -112,13 +120,18 @@ public sealed class ItemHintHandler
 
         if (dto is null || !dto.Id.HasValue)
         {
-            return HintApplyResult.Dropped($"the item no longer exists on '{origin.DisplayName}'");
+            return HintApplyResult.Dropped(HintCode.SourceGone, $"the item no longer exists on '{origin.DisplayName}'");
         }
 
         mapping = HintMapping.FindBySourcePath(origin, dto.Path);
         if (mapping is null)
         {
-            return HintApplyResult.Dropped($"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
+            return HintApplyResult.Dropped(HintCode.NotMapped, $"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
+        }
+
+        if (HintTriage.IsFiltered(mapping, dto.Path))
+        {
+            return HintApplyResult.Dropped(HintCode.Filtered, $"'{dto.Path}' is left out by the library mapping's filter here");
         }
 
         var source = Connect(origin, client);
@@ -126,7 +139,9 @@ public sealed class ItemHintHandler
         var record = await refresh.RefreshOneAsync(new MetadataWork(source, mapping, dto, RefreshMetadataSyncTableTask.IsFolderType(dto.Type)), cancellationToken).ConfigureAwait(false);
         if (record is null)
         {
-            return HintApplyResult.Dropped("no local item at the mapped path yet. The next content sync or scan will pick it up");
+            return _triage.MissingLocal(origin, HintKind.Metadata, dto.Path, hint.Key) is { } missing
+                ? HintApplyResult.Park(missing, "no local item at the mapped path yet. It applies when the item arrives")
+                : HintApplyResult.Dropped(HintCode.NotMapped, $"the local item at the path mapped from '{dto.Path}' could not be matched here");
         }
 
         return await SettleAndApplyAsync(
@@ -156,12 +171,17 @@ public sealed class ItemHintHandler
 
         if (!_configManager.Configuration.EnablePeopleSync)
         {
-            return HintApplyResult.Dropped("people sync is off on this server");
+            return HintApplyResult.Dropped(HintCode.ModuleOff, "people sync is off on this server");
         }
 
         if (string.IsNullOrWhiteSpace(hint.Key))
         {
-            return HintApplyResult.Dropped("the hint carries no person name");
+            return HintApplyResult.Dropped(HintCode.Invalid, "the hint carries no person name");
+        }
+
+        if (_triage.MissingLocal(origin, HintKind.People, null, hint.Key) is { } waitFor)
+        {
+            return HintApplyResult.Park(waitFor, "the person does not exist on this server yet. It applies when the person arrives");
         }
 
         Jellyfin.Sdk.Generated.Models.BaseItemDto? dto;
@@ -180,7 +200,7 @@ public sealed class ItemHintHandler
 
         if (dto is null || string.IsNullOrEmpty(dto.Name))
         {
-            return HintApplyResult.Dropped($"it no longer exists on '{origin.DisplayName}'");
+            return HintApplyResult.Dropped(HintCode.SourceGone, $"it no longer exists on '{origin.DisplayName}'");
         }
 
         var source = Connect(origin, client);
@@ -188,7 +208,9 @@ public sealed class ItemHintHandler
         var record = await refresh.RefreshOneAsync(new PersonWork(source, dto), cancellationToken).ConfigureAwait(false);
         if (record is null || string.IsNullOrEmpty(record.LocalPersonId))
         {
-            return HintApplyResult.Dropped($"Person {hint.Key} does not exist on this server so it could not be updated from {origin.DisplayName}");
+            return _triage.MissingLocal(origin, HintKind.People, null, hint.Key) is { } missing
+                ? HintApplyResult.Park(missing, $"Person {hint.Key} does not exist on this server yet. It applies when the person arrives")
+                : HintApplyResult.Dropped(HintCode.NotMapped, $"Person {hint.Key} could not be matched on this server");
         }
 
         return await SettleAndApplyAsync(
@@ -221,7 +243,7 @@ public sealed class ItemHintHandler
 
         if (record.Status == SyncStatus.Ignored)
         {
-            return HintApplyResult.Dropped("the row is ignored on this server");
+            return HintApplyResult.Dropped(HintCode.Ignored, "the row is ignored on this server");
         }
 
         // A row whose retries ran out still differs. Taking it for "the values match" would record a
@@ -230,7 +252,7 @@ public sealed class ItemHintHandler
 
         if (record.Status == SyncStatus.Pending)
         {
-            return new HintApplyResult(HintApplyOutcome.Unchanged, "waiting for approval on this server");
+            return HintApplyResult.Kept(HintCode.AwaitingApproval, "waiting for approval on this server");
         }
 
         if (record.Status != SyncStatus.Queued)
@@ -251,7 +273,7 @@ public sealed class ItemHintHandler
             record.MarkKept($"kept: the item is locked here, so a provider's work on '{origin.DisplayName}' does not replace it");
             StoreKept(record, kind);
             _logger.LogInformation("Kept {Kind} for {Name}: the item is locked here and the change from '{Origin}' is a provider's work", kind, name, origin.DisplayName);
-            return new HintApplyResult(HintApplyOutcome.Unchanged, "the item is locked here");
+            return HintApplyResult.Kept(HintCode.Locked, "the item is locked here");
         }
 
         // A recorded edit here beats a newer provider's work there, and beats an older edit there.
@@ -271,7 +293,7 @@ public sealed class ItemHintHandler
             }
 
             _logger.LogInformation("Kept this server's {Kind} for {Name}, newer than '{Origin}'", kind, name, origin.DisplayName);
-            return new HintApplyResult(HintApplyOutcome.Unchanged, "this server's edit is newer");
+            return HintApplyResult.Kept(HintCode.Superseded, "this server's edit is newer");
         }
 
         if (!await apply().ConfigureAwait(false))

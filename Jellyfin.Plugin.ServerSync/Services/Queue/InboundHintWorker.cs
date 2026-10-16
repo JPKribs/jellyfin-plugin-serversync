@@ -33,13 +33,14 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     private readonly ItemHintHandler _items;
     private readonly ContentHintHandler _content;
     private readonly HintActivityLog _activity;
+    private readonly HintTriage _triage;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<InboundHintWorker> _logger;
     private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly SemaphoreSlim _wakeContent = new(0, 1);
     private readonly SemaphoreSlim _quickPass = new(1, 1);
     private readonly SemaphoreSlim _contentPass = new(1, 1);
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, DateTime Version)> _completed = new(StringComparer.Ordinal);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, DateTime Version, HintCode Code, string? Reason)> _completed = new(StringComparer.Ordinal);
     private CancellationTokenSource? _stopping;
     private Task? _loop;
     private Task? _contentLoop;
@@ -64,9 +65,11 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         ItemHintHandler items,
         ContentHintHandler content,
         HintActivityLog activity,
+        HintTriage triage,
         IServerApplicationHost applicationHost,
         ILogger<InboundHintWorker> logger)
     {
+        _triage = triage;
         _activity = activity;
         _inbound = inbound;
         _configManager = configManager;
@@ -96,15 +99,15 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 }
             }
 
-            return _completed.Select(pair => new CompletedHint { HintId = pair.Key, VersionTimestamp = pair.Value.Version }).ToList();
+            return _completed.Select(pair => new CompletedHint { HintId = pair.Key, VersionTimestamp = pair.Value.Version, Code = pair.Value.Code, Reason = pair.Value.Reason }).ToList();
         }
     }
 
     // Finished ids are kept for a day and never more than the cap. Past it the oldest go first, and an
     // origin that then asks sends the hint again, which applies as unchanged.
-    private void Remember(string hintId, DateTime version)
+    private void Remember(CompletedHint done)
     {
-        _completed[hintId] = (DateTime.UtcNow, version);
+        _completed[done.HintId] = (DateTime.UtcNow, done.VersionTimestamp, done.Code, done.Reason);
 
         // Trimmed back to the cap only once it runs a tenth over, so the sort runs once per thousand
         // completions rather than on every one.
@@ -136,6 +139,18 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     }
 
     /// <inheritdoc />
+    public int WakeParked(string parkKey)
+    {
+        var woken = _inbound.WakeParked(parkKey, DateTime.UtcNow);
+        if (woken > 0)
+        {
+            _logger.LogDebug("{Count} parked hint(s) for {Key} are due now", woken, parkKey);
+            Wake();
+        }
+
+        return woken;
+    }
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _stopping = new CancellationTokenSource();
@@ -241,7 +256,13 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
 
                 prefetched.TryGetValue(PrefetchKey(row.OriginServerId, row.Key), out var item);
                 var result = await TryApplyAsync(row, origin, client, item, cancellationToken).ConfigureAwait(false);
-                if (result is null || !await ConcludeAsync(row, origin, result.Value).ConfigureAwait(false))
+                if (result is null)
+                {
+                    continue;
+                }
+
+                var concluded = await ConcludeAsync(row, origin, result.Value).ConfigureAwait(false);
+                if (concluded is null)
                 {
                     continue;
                 }
@@ -250,14 +271,15 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 if (_inbound.Remove(row.Id, row.VersionTimestamp))
                 {
                     finished++;
-                    Remember(row.HintId, row.VersionTimestamp);
+                    var done = new CompletedHint { HintId = row.HintId, VersionTimestamp = row.VersionTimestamp, Code = concluded.Value.Code, Reason = concluded.Value.Reason };
+                    Remember(done);
                     if (!completions.TryGetValue(origin.Key, out var batch))
                     {
                         batch = (origin, new List<CompletedHint>());
                         completions[origin.Key] = batch;
                     }
 
-                    batch.Done.Add(new CompletedHint { HintId = row.HintId, VersionTimestamp = row.VersionTimestamp });
+                    batch.Done.Add(done);
                 }
             }
 
@@ -364,11 +386,30 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     // dropped after failing is worth a line on the Activity page. An applied hand made edit is worth a
     // line too. Provider work is not, since a scan on the peer would otherwise write one entry here per
     // item it refreshed.
-    private async Task<bool> ConcludeAsync(InboundHint row, SourceServer origin, HintApplyResult result)
+    private async Task<HintApplyResult?> ConcludeAsync(InboundHint row, SourceServer origin, HintApplyResult result)
     {
         if (result.Outcome == HintApplyOutcome.Retry && row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
         {
-            result = HintApplyResult.Dropped($"{row.Attempts + 1} attempts failed, the last with {result.Reason ?? "no reason given"}");
+            result = HintApplyResult.Dropped(HintCode.GaveUp, $"{row.Attempts + 1} attempts failed, the last with {result.Reason ?? "no reason given"}");
+        }
+
+        if (result.Outcome == HintApplyOutcome.Parked)
+        {
+            var until = row.ReceivedAt + HintProtocol.ParkWindow;
+            if (DateTime.UtcNow < until && result.ParkKey is not null)
+            {
+                _inbound.Park(row, result.ParkKey, until, result.Reason ?? "waiting for the local item");
+                if (_triage.Present(result.ParkKey, row.Kind == HintKind.People ? row.Key : null))
+                {
+                    WakeParked(result.ParkKey);
+                    return null;
+                }
+
+                _logger.LogDebug("Hint {Hint} from '{Origin}' waits for {Key}", row.HintId, origin.DisplayName, result.ParkKey);
+                return null;
+            }
+
+            result = HintApplyResult.Dropped(HintCode.NoLocalItem, $"the local item did not arrive within {HintProtocol.ParkWindow.TotalDays:0} days: {result.Reason}");
         }
 
         switch (result.Outcome)
@@ -377,23 +418,23 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 _inbound.Defer(row, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), result.Reason ?? "failed");
                 _logger.LogWarning("Hint {Hint} from '{Origin}' will be retried: {Reason}", row.HintId, origin.DisplayName, result.Reason);
                 await _activity.RetryingAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
-                return false;
+                return null;
 
             case HintApplyOutcome.Dropped:
-                _logger.LogInformation("Hint {Hint} from '{Origin}' dropped: {Reason}", row.HintId, origin.DisplayName, result.Reason);
+                _logger.LogInformation("Hint {Hint} from '{Origin}' dropped as {Code}: {Reason}", row.HintId, origin.DisplayName, result.Code, result.Reason);
                 if (row.Attempts > 0)
                 {
                     await _activity.DroppedAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
                 }
 
-                return true;
+                return result;
 
             case HintApplyOutcome.Applied when row.Recorded:
                 await _activity.AppliedAsync(row, origin.DisplayName, result).ConfigureAwait(false);
-                return true;
+                return result;
 
             default:
-                return true;
+                return result;
         }
     }
 
@@ -414,10 +455,16 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             .Where(r => r.Kind == HintKind.Metadata && Guid.TryParse(r.Key, out _))
             .GroupBy(r => r.OriginServerId, StringComparer.OrdinalIgnoreCase)
             .Where(g => g.Count() > 1);
-        foreach (var group in byOrigin)
+        foreach (var originGroup in byOrigin)
         {
-            var origin = config.Servers.FirstOrDefault(s => s.Pulls && string.Equals(s.ServerId, group.Key, StringComparison.OrdinalIgnoreCase));
+            var origin = config.Servers.FirstOrDefault(s => s.Pulls && string.Equals(s.ServerId, originGroup.Key, StringComparison.OrdinalIgnoreCase));
             if (origin is null)
+            {
+                continue;
+            }
+
+            var group = originGroup.Where(r => _triage.MissingLocal(origin, r.Kind, r.ItemPath, r.Key) is null).ToList();
+            if (group.Count < 2)
             {
                 continue;
             }
@@ -460,8 +507,8 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             HintKind.Metadata => await _items.ApplyMetadataAsync(row, origin, client, cancellationToken, prefetched).ConfigureAwait(false),
             HintKind.People => await _items.ApplyPeopleAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
             HintKind.Content => await _content.ApplyAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
-            HintKind.Users => HintApplyResult.Dropped("user settings are not announced live, the scheduled Sync Information task carries them"),
-            _ => HintApplyResult.Dropped($"this version does not apply {row.Kind} hints")
+            HintKind.Users => HintApplyResult.Dropped(HintCode.Unsupported, "user settings are not announced live, the scheduled Sync Information task carries them"),
+            _ => HintApplyResult.Dropped(HintCode.Unsupported, $"this server does not apply {row.Kind} hints")
         };
     }
 

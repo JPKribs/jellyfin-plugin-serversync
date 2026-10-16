@@ -34,6 +34,8 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly IServerApplicationHost _applicationHost;
     private readonly HintActivityLog _activity;
+    private readonly HintSuppression _suppression;
+    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly ILogger<OutboundHintWorker> _logger;
     private readonly SemaphoreSlim _wake = new(0, 1);
 
@@ -60,8 +62,12 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         ISourceServerClientFactory clientFactory,
         IServerApplicationHost applicationHost,
         HintActivityLog activity,
+        HintSuppression suppression,
+        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
         ILogger<OutboundHintWorker> logger)
     {
+        _suppression = suppression;
+        _libraryManager = libraryManager;
         _outbound = outbound;
         _configManager = configManager;
         _clientFactory = clientFactory;
@@ -81,7 +87,38 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     /// <param name="kind">The kind.</param>
     /// <returns><c>true</c> unless the peer said its module for that kind is off.</returns>
     public bool PeerAccepts(string peerKey, HintKind kind)
-        => !_peers.TryGetValue(peerKey, out var state) || state.Accepts is null || state.Accepts.Contains(kind);
+        => !_peers.TryGetValue(peerKey, out var state) || state.Interest is null || state.Interest.Kinds.Contains(kind);
+
+    public bool PeerWants(string peerKey, HintKind kind, string? itemPath, Guid userId, string key)
+    {
+        var interest = _peers.TryGetValue(peerKey, out var state) ? state.Interest : null;
+        return (interest is null || interest.Wants(kind, itemPath, userId))
+            && !_suppression.IsHeld(peerKey, kind, key, interest?.Revision, DateTime.UtcNow);
+    }
+
+    public int Complete(SourceServer peer, IList<CompletedHint> completed)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        ArgumentNullException.ThrowIfNull(completed);
+        var declined = completed.Where(c => HintSuppression.Suppresses(c.Code)).ToList();
+        if (declined.Count > 0)
+        {
+            var revision = _peers.TryGetValue(peer.Key, out var state) ? state.Interest?.Revision : null;
+            var rows = _outbound.GetByHintIds(peer.Key, declined.Select(c => c.HintId));
+            var now = DateTime.UtcNow;
+            foreach (var done in declined)
+            {
+                if (rows.TryGetValue(done.HintId, out var row))
+                {
+                    _suppression.Note(peer.Key, row.Kind, row.Key, done.Code, revision, now);
+                }
+            }
+
+            _logger.LogDebug("'{Peer}' will not use {Count} hint(s): {Codes}", peer.DisplayName, declined.Count, string.Join(", ", declined.GroupBy(c => c.Code).Select(g => $"{g.Key} {g.Count()}")));
+        }
+
+        return _outbound.Complete(peer.Key, completed);
+    }
 
     /// <summary>Asks the worker to deliver now rather than at its next idle tick.</summary>
     public void Wake()
@@ -148,7 +185,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
         // Every peer is asked at once, so one that does not answer costs the others nothing.
         await Task.WhenAll(config.GetPushServers().Select(peer =>
-            RefreshAcceptsAsync(peer, _peers.GetOrAdd(peer.Key, _ => new PeerDeliveryState()), refreshCapabilities, cancellationToken))).ConfigureAwait(false);
+            RefreshInterestAsync(peer, _peers.GetOrAdd(peer.Key, _ => new PeerDeliveryState()), refreshCapabilities, cancellationToken))).ConfigureAwait(false);
 
         var deliveries = new List<Task<bool>>();
         foreach (var peerKey in _outbound.GetPeerKeys())
@@ -245,7 +282,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     private async Task<bool> DeliverToPeerAsync(SourceServer peer, PeerDeliveryState state, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        var due = _outbound.GetDue(peer.Key, now, BatchSize);
+        var due = DropUnwanted(peer, _outbound.GetDue(peer.Key, now, BatchSize));
 
         // Sent rows are only looked at when recovery is due, every few minutes, not on every pass.
         var sent = CheckDue(peer.Key, now) ? _outbound.GetSentBefore(peer.Key, now - HintProtocol.CompletionGrace) : Array.Empty<OutboundHint>();
@@ -309,7 +346,42 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         return due.Count >= BatchSize && state.PausedUntil is null;
     }
 
-    private async Task RecordAsync(SourceServer peer, PeerDeliveryState state, IList<OutboundHint> due, int status, QueueResponse? response, string? body)
+    private List<OutboundHint> DropUnwanted(SourceServer peer, IList<OutboundHint> due)
+    {
+        var kept = new List<OutboundHint>(due.Count);
+        var dropped = 0;
+        foreach (var row in due)
+        {
+            var userId = Guid.TryParse(row.UserId, out var parsedUser) ? parsedUser : Guid.Empty;
+            if (!Exists(row) || !PeerWants(peer.Key, row.Kind, row.ItemPath, userId, row.Key))
+            {
+                _outbound.DeleteSent(row);
+                dropped++;
+                continue;
+            }
+
+            kept.Add(row);
+        }
+
+        if (dropped > 0)
+        {
+            _logger.LogDebug("Dropped {Count} queued hint(s) for '{Peer}' whose object is gone here or that it does not want", dropped, peer.DisplayName);
+        }
+
+        return kept;
+    }
+
+    private bool Exists(OutboundHint row)
+    {
+        if (row.Kind == HintKind.People)
+        {
+            return _libraryManager.GetPerson(row.Key) is not null;
+        }
+
+        return !Guid.TryParse(row.ItemId, out var itemId) || _libraryManager.GetItemById(itemId) is not null;
+    }
+
+    private async Task RecordAsync(SourceServer peer, PeerDeliveryState state, List<OutboundHint> due, int status, QueueResponse? response, string? body)
     {
         var now = DateTime.UtcNow;
         state.LastAttempt = now;
@@ -320,23 +392,36 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                 state.PausedUntil = null;
                 state.Reason = null;
                 var accepted = new List<OutboundHint>();
+                var declined = new Dictionary<HintCode, int>();
+                var revision = state.Interest?.Revision;
+                var answers = (response?.Items ?? new List<QueueResult>()).GroupBy(r => r.HintId, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
                 foreach (var row in due)
                 {
-                    var answer = response?.Items.FirstOrDefault(r => string.Equals(r.HintId, row.HintId, StringComparison.Ordinal));
-                    if (answer is { Accepted: false })
-                    {
-                        // The peer has no mapping for it. That is the peer's business, so the hint is done.
-                        _outbound.DeleteSent(row);
-                        _logger.LogDebug("'{Peer}' declined hint {Hint}: {Reason}", peer.DisplayName, row.HintId, answer.Reason);
-                    }
-                    else
+                    if (!answers.TryGetValue(row.HintId, out var answer) || answer.Code == HintCode.Queued)
                     {
                         accepted.Add(row);
+                        continue;
                     }
+
+                    _outbound.DeleteSent(row);
+                    if (answer.Code != HintCode.NoLocalItem)
+                    {
+                        _suppression.Note(peer.Key, row.Kind, row.Key, answer.Code, revision, now);
+                    }
+
+                    declined[answer.Code] = declined.GetValueOrDefault(answer.Code) + 1;
+                    _logger.LogDebug("'{Peer}' answered {Code} for hint {Hint}: {Reason}", peer.DisplayName, answer.Code, row.HintId, answer.Reason);
                 }
 
                 _outbound.MarkSent(accepted, now);
-                _logger.LogInformation("Sent {Count} hint(s) to '{Peer}'", accepted.Count, peer.DisplayName);
+                if (declined.Count > 0)
+                {
+                    _logger.LogInformation("Sent {Count} hint(s) to '{Peer}'. It closed {Declined} more on receipt: {Codes}", accepted.Count, peer.DisplayName, declined.Values.Sum(), string.Join(", ", declined.Select(d => $"{d.Key} {d.Value}")));
+                }
+                else
+                {
+                    _logger.LogInformation("Sent {Count} hint(s) to '{Peer}'", accepted.Count, peer.DisplayName);
+                }
                 break;
 
             case DeliveryOutcome.Malformed:
@@ -414,56 +499,49 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         }
     }
 
-    // Reads the peer's capabilities every few minutes so the publisher skips kinds the peer has off. A
-    // failed read keeps the last answer. A peer that never answered is sent everything.
-    private async Task RefreshAcceptsAsync(SourceServer peer, PeerDeliveryState state, bool force, CancellationToken cancellationToken)
+    private async Task RefreshInterestAsync(SourceServer peer, PeerDeliveryState state, bool force, CancellationToken cancellationToken)
     {
-        if (!force && (state.PausedUntil > DateTime.UtcNow || DateTime.UtcNow - state.AcceptsReadAt < HintProtocol.CapabilityRefresh))
+        if (!force && (state.PausedUntil > DateTime.UtcNow || DateTime.UtcNow - state.InterestReadAt < HintProtocol.CapabilityRefresh))
         {
             return;
         }
 
-        state.AcceptsReadAt = DateTime.UtcNow;
+        state.InterestReadAt = DateTime.UtcNow;
         try
         {
             using var client = _clientFactory.Create(peer);
-            var capabilities = await client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
-            if (capabilities?.Accepts is null)
+            var interest = await client.GetPeerInterestAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
+            if (interest is null)
             {
-                state.Accepts = null;
                 return;
             }
 
-            var accepts = new HashSet<HintKind>();
-            foreach (var name in capabilities.Accepts)
+            if (state.Interest is null || !string.Equals(state.Interest.Revision, interest.Revision, StringComparison.Ordinal))
             {
-                if (Enum.TryParse<HintKind>(name, ignoreCase: true, out var kind))
-                {
-                    accepts.Add(kind);
-                }
+                var cleared = _suppression.ClearPeer(peer.Key);
+                _logger.LogInformation(
+                    "'{Peer}' wants {Kinds} from {Libraries} librar(ies) and {Users} user(s){Cleared}",
+                    peer.DisplayName,
+                    interest.Kinds.Count == 0 ? "no hints" : string.Join(", ", interest.Kinds),
+                    interest.Libraries.Count,
+                    interest.Users.Count,
+                    cleared > 0 ? $". Its settings changed, so {cleared} held back hint(s) may go again" : string.Empty);
             }
 
-            if (state.Accepts is null || !state.Accepts.SetEquals(accepts))
-            {
-                _logger.LogInformation("'{Peer}' accepts {Kinds}", peer.DisplayName, accepts.Count == 0 ? "no hints" : string.Join(", ", accepts));
-            }
-
-            state.Accepts = accepts;
+            state.Interest = interest;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        catch (System.Net.Http.HttpRequestException ex) when ((int?)ex.StatusCode is 401 or 403 or 404 or 409 or 426 or 428)
         {
-            // The key is refused, so nothing is known about the peer any more. Everything is sent so the
-            // refusal surfaces as a pause with its reason rather than a silent skip.
-            state.Accepts = null;
-            _logger.LogDebug("'{Peer}' refused the key when asked what it accepts. Sending everything until it answers", peer.DisplayName);
+            state.Interest = null;
+            _logger.LogDebug("'{Peer}' refused to say what it wants ({Status}). Sending everything until it answers, so the refusal surfaces as a pause", peer.DisplayName, (int?)ex.StatusCode);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not read what '{Peer}' accepts. Keeping the last answer", peer.DisplayName);
+            _logger.LogDebug(ex, "Could not read what '{Peer}' wants. Keeping the last answer", peer.DisplayName);
         }
     }
 
@@ -521,7 +599,14 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         {
             // The peer finished these but could not say so, which happens when it holds a standard
             // user's key for this server. Its status says it, so the rows are complete.
-            _outbound.Complete(peer.Key, finished.Select(id => new CompletedHint { HintId = id, VersionTimestamp = byId[id].VersionTimestamp }));
+            var reported = (status.CompletedHints ?? new List<CompletedHint>()).GroupBy(c => c.HintId, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+            Complete(peer, finished.Select(id => new CompletedHint
+            {
+                HintId = id,
+                VersionTimestamp = byId[id].VersionTimestamp,
+                Code = reported.TryGetValue(id, out var done) ? done.Code : HintCode.Applied,
+                Reason = reported.TryGetValue(id, out var doneReason) ? doneReason.Reason : null
+            }).ToList());
             _logger.LogInformation("'{Peer}' finished {Count} hint(s) it could not report. Completed from its status", peer.DisplayName, finished.Count);
         }
 
@@ -558,9 +643,10 @@ public sealed class PeerDeliveryState
     /// <summary>Gets or sets why the last delivery did not go through, or null after a success.</summary>
     public string? Reason { get; set; }
 
-    /// <summary>Gets or sets the kinds the peer applies, or null when not known.</summary>
-    public HashSet<HintKind>? Accepts { get; set; }
+    public Models.Peer.PeerInterest? Interest { get; set; }
 
-    /// <summary>Gets or sets when the peer's capabilities were last read, in UTC.</summary>
-    public DateTime AcceptsReadAt { get; set; }
+    /// <summary>Gets the kinds the peer applies, or null when not known.</summary>
+    public HashSet<HintKind>? Accepts => Interest is null ? null : new HashSet<HintKind>(Interest.Kinds);
+
+    public DateTime InterestReadAt { get; set; }
 }

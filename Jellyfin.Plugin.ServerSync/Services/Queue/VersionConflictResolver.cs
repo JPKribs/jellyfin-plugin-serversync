@@ -25,6 +25,7 @@ public sealed class VersionConflictResolver
     private static readonly TimeSpan CapabilityCache = TimeSpan.FromMinutes(5);
     private readonly VersionStore _versions;
     private readonly IServerApplicationHost _applicationHost;
+    private readonly IPluginConfigurationManager _configManager;
     private readonly ILogger<VersionConflictResolver> _logger;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime CheckedAt, bool Carries)> _capabilities = new(StringComparer.OrdinalIgnoreCase);
 
@@ -34,10 +35,11 @@ public sealed class VersionConflictResolver
     /// <param name="versions">The version store.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="logger">Logger.</param>
-    public VersionConflictResolver(VersionStore versions, IServerApplicationHost applicationHost, ILogger<VersionConflictResolver> logger)
+    public VersionConflictResolver(VersionStore versions, IServerApplicationHost applicationHost, IPluginConfigurationManager configManager, ILogger<VersionConflictResolver> logger)
     {
         _versions = versions;
         _applicationHost = applicationHost;
+        _configManager = configManager;
         _logger = logger;
     }
 
@@ -83,7 +85,7 @@ public sealed class VersionConflictResolver
         try
         {
             var capabilities = await source.Client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
-            carries = capabilities is not null && capabilities.Features.Contains(HintProtocol.HintFeature);
+            carries = capabilities is not null && HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

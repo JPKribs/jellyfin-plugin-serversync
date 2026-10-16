@@ -214,22 +214,6 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     public void Delete(string sourceItemId) => DeleteByKey(sourceItemId);
 
     /// <summary>
-    /// Records the local library item a row's file became, leaving the status, its date and
-    /// LastSyncTime alone. Resolving an id is bookkeeping, not a sync, so it must not make the row
-    /// look freshly synced.
-    /// </summary>
-    /// <param name="sourceItemId">The row's source item id.</param>
-    /// <param name="localItemId">The local library item id.</param>
-    public void UpdateLocalItemId(string sourceItemId, string localItemId) => ExecuteWrite(conn =>
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE SyncItems SET LocalItemId = @localItemId WHERE SourceItemId = @key";
-        cmd.Parameters.AddWithValue("@localItemId", localItemId);
-        cmd.Parameters.AddWithValue("@key", sourceItemId);
-        cmd.ExecuteNonQuery();
-    });
-
-    /// <summary>
     /// Searches sync items with pagination. Used by the Content admin UI
     /// which can additionally filter by <see cref="PendingType"/> beyond
     /// what the universal <see cref="Paginate"/> exposes.

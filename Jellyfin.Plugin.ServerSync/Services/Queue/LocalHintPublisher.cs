@@ -64,7 +64,8 @@ public sealed class LocalHintPublisher
             excludePeerKey,
             peer => HintMapping.FindByLocalPath(peer, itemPath) is not null,
             () => new OutboundHint { Kind = HintKind.Metadata, Key = key, ItemPath = itemPath, ItemId = key, ItemType = itemType, Recorded = recorded },
-            recorded);
+            recorded,
+            itemPath);
     }
 
     /// <summary>Publishes a change to a person's own metadata or images.</summary>
@@ -105,10 +106,11 @@ public sealed class LocalHintPublisher
             version,
             excludePeerKey,
             peer => HintMapping.FindByLocalPath(peer, itemPath) is not null,
-            () => new OutboundHint { Kind = HintKind.Content, Key = key, ItemPath = itemPath, ItemId = key, ItemType = itemType });
+            () => new OutboundHint { Kind = HintKind.Content, Key = key, ItemPath = itemPath, ItemId = key, ItemType = itemType },
+            itemPath: itemPath);
     }
 
-    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true)
+    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true, string? itemPath = null, Guid userId = default)
     {
         version.Kind = kind;
         version.Key = localKey;
@@ -122,7 +124,7 @@ public sealed class LocalHintPublisher
         var queued = 0;
         foreach (var peer in _configManager.Configuration.Servers)
         {
-            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase) || !_worker.PeerAccepts(peer.Key, kind) || !mapped(peer))
+            if (!peer.Pushes || string.Equals(peer.Key, excludePeerKey, StringComparison.OrdinalIgnoreCase) || !mapped(peer) || !_worker.PeerWants(peer.Key, kind, itemPath, userId, localKey))
             {
                 continue;
             }
@@ -175,6 +177,8 @@ public sealed class LocalHintPublisher
             version,
             excludePeerKey,
             peer => HintMapping.FindByLocalUser(peer, localUserId) is not null && HintMapping.FindByLocalPath(peer, itemPath) is not null,
-            () => new OutboundHint { Kind = HintKind.History, Key = key, ItemPath = itemPath, ItemId = itemKey, ItemType = itemType, UserId = userKey, UserName = userName });
+            () => new OutboundHint { Kind = HintKind.History, Key = key, ItemPath = itemPath, ItemId = itemKey, ItemType = itemType, UserId = userKey, UserName = userName },
+            itemPath: itemPath,
+            userId: localUserId);
     }
 }

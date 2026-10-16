@@ -57,6 +57,7 @@ public class RefreshHistorySyncTableTask
         _libraryManager = libraryManager;
     }
 
+
     /// <inheritdoc />
     public override string Name => "Refresh History Sync Table";
 
@@ -180,7 +181,7 @@ public class RefreshHistorySyncTableTask
                     Exception? pageError = null;
                     try
                     {
-                        page = await client.GetLibraryItemPathsAsync(sourceLibraryId, leafTypes, startIndex, pageSize, ct).ConfigureAwait(false);
+                        page = await client.GetLibraryItemPathsAsync(sourceLibraryId, leafTypes, startIndex, pageSize, cancellationToken: ct).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {

@@ -574,40 +574,4 @@ public partial class ConfigurationController
 
         return Ok(new { Deleted = deletedCount, Failed = failedCount, Skipped = skippedCount });
     }
-
-    /// <summary>
-    /// Removes items from the sync tracking database without deleting the actual files.
-    /// </summary>
-    /// <param name="request">Bulk items request.</param>
-    /// <returns>Action result with removed count.</returns>
-    [HttpPost("RemoveFromTracking")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult RemoveFromTracking(
-        [FromServices] ContentSyncTableManager manager,
-        [FromBody] BulkItemsRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
-        {
-            return BadRequest("No items specified");
-        }
-
-        var successCount = 0;
-        foreach (var sourceItemId in request.SourceItemIds)
-        {
-            try
-            {
-                manager.Delete(sourceItemId);
-                successCount++;
-            }
-            catch (Exception ex)
-            {
-                var sanitizedId = SanitizeForLog(sourceItemId);
-                _logger.LogWarning(ex, "Failed to remove tracking for item {ItemId}", sanitizedId);
-            }
-        }
-
-        return Ok(new { Removed = successCount });
-    }
 }

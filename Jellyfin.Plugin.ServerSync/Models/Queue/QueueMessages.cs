@@ -19,14 +19,8 @@ public class QueueResult
     /// <summary>Gets or sets the hint id, echoed.</summary>
     public string HintId { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Gets or sets a value indicating whether the hint was stored. A hint for something the receiver
-    /// cannot map is reported as not accepted with a reason, and the sender treats that as done, since
-    /// the sender has no knowledge of the receiver's mappings.
-    /// </summary>
-    public bool Accepted { get; set; }
+    public HintCode Code { get; set; }
 
-    /// <summary>Gets or sets why the hint was not accepted.</summary>
     public string? Reason { get; set; }
 }
 
@@ -48,6 +42,10 @@ public class CompletedHint
     /// carries this version, so an edit made after delivery is not lost to a late completion.
     /// </summary>
     public DateTime VersionTimestamp { get; set; }
+
+    public HintCode Code { get; set; } = HintCode.Applied;
+
+    public string? Reason { get; set; }
 }
 
 /// <summary>A receiver telling an origin that hints are done.</summary>
@@ -102,6 +100,8 @@ public class InboundHintDto
     /// <summary>Gets or sets a value indicating whether the change was made by hand rather than by a provider.</summary>
     public bool Recorded { get; set; } = true;
 
+    public bool Parked { get; set; }
+
     /// <summary>Builds the DTO for a row.</summary>
     /// <param name="row">The row.</param>
     /// <returns>The DTO.</returns>
@@ -122,7 +122,8 @@ public class InboundHintDto
             ReceivedAt = row.ReceivedAt,
             Attempts = row.Attempts,
             LastError = row.LastError,
-            Recorded = row.Recorded
+            Recorded = row.Recorded,
+            Parked = row.ParkedPath is not null
         };
     }
 }
@@ -135,13 +136,6 @@ public class QueueStatusResponse
 
     /// <summary>Gets or sets the inbound rows.</summary>
     public List<InboundHintDto> Inbound { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets the ids of hints finished recently. An origin whose completion reports this server
-    /// could not deliver, because it holds a standard user's key for the origin, reads them from here
-    /// with its own key and removes its rows.
-    /// </summary>
-    public List<string> Completed { get; set; } = new();
 
     /// <summary>
     /// Gets or sets the hints finished recently with the version each one applied. An origin only treats

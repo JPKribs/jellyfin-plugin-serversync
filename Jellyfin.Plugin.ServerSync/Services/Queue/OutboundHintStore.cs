@@ -315,6 +315,36 @@ public sealed class OutboundHintStore : QueueStoreBase
         return removed;
     }
 
+    public Dictionary<string, OutboundHint> GetByHintIds(string peerKey, IEnumerable<string> hintIds)
+    {
+        ArgumentNullException.ThrowIfNull(hintIds);
+        var wanted = new HashSet<string>(hintIds, StringComparer.Ordinal);
+        var found = new Dictionary<string, OutboundHint>(StringComparer.Ordinal);
+        if (wanted.Count == 0)
+        {
+            return found;
+        }
+
+        Read(conn =>
+        {
+            foreach (var hintId in wanted)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT * FROM OutboundHints WHERE PeerKey = @peer AND HintId = @hint";
+                Add(cmd, "@peer", peerKey);
+                Add(cmd, "@hint", hintId);
+                using var reader = cmd.ExecuteReader();
+                if (reader.Read())
+                {
+                    found[hintId] = Map(reader);
+                }
+            }
+
+            return found;
+        });
+        return found;
+    }
+
     /// <summary>Returns the sent rows for a peer that have waited longer than the grace period.</summary>
     /// <param name="peerKey">The peer's entry key.</param>
     /// <param name="sentBefore">Rows sent before this time are returned.</param>

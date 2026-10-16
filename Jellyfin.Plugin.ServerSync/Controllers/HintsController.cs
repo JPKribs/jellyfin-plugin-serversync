@@ -173,14 +173,11 @@ public class HintsController : ControllerBase
 
             result.HasPlugin = true;
             result.PluginVersion = capabilities.PluginVersion;
-            result.SupportsHints = capabilities.Features.Contains(HintProtocol.HintFeature);
-            if (!result.SupportsHints)
+            if (!HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion))
             {
-                return Limited(
-                    result,
-                    mode,
-                    $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes, so this server will pull on a schedule only. Update it there for changes as they happen.",
-                    $"Connected. Server Sync {capabilities.PluginVersion} there predates live changes. Update it before using Push or Sync.");
+                result.Severity = "error";
+                result.Message = "Connected, but " + HintProtocol.VersionMismatch(capabilities.PluginVersion, _configManager.PluginVersion) + ".";
+                return Ok(result);
             }
 
             // Conflicts are decided on the two clocks, so a peer whose clock is off is worth a sentence.
@@ -191,8 +188,7 @@ public class HintsController : ControllerBase
                 : string.Empty;
 
             result.Accepts = capabilities.Accepts;
-            var acceptsNote = capabilities.Accepts is null ? string.Empty
-                : capabilities.Accepts.Count == 0 ? " Every module is off there, so it applies no changes from this server."
+            var acceptsNote = capabilities.Accepts.Count == 0 ? " Every module is off there, so it applies no changes from this server."
                 : $" It applies {JoinWords(capabilities.Accepts.Select(DescribeKind).ToList())} from this server. Other kinds are off there.";
 
             PeerLinkResponse? link;

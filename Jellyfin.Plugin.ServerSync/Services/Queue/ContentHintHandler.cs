@@ -62,43 +62,43 @@ public sealed class ContentHintHandler
         var config = _configManager.Configuration;
         if (!config.EnableContentSync)
         {
-            return HintApplyResult.Dropped("content sync is off on this server");
+            return HintApplyResult.Dropped(HintCode.ModuleOff, "content sync is off on this server");
         }
 
         if (!Guid.TryParse(hint.Key, out var originItemId))
         {
-            return HintApplyResult.Dropped("the hint's key is not an item id");
+            return HintApplyResult.Dropped(HintCode.Invalid, "the hint's key is not an item id");
         }
 
         var mapping = HintMapping.FindBySourcePath(origin, hint.ItemPath);
         if (mapping is null)
         {
-            return HintApplyResult.Dropped($"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
+            return HintApplyResult.Dropped(HintCode.NotMapped, $"path '{hint.ItemPath}' on '{origin.DisplayName}' is not in a mapped library here");
         }
 
         // A failed read throws and is retried by the worker. An answer with no item means it is gone.
         var dto = await client.FindItemDetailsAsync(originItemId, cancellationToken).ConfigureAwait(false);
         if (dto is null || !dto.Id.HasValue)
         {
-            return HintApplyResult.Dropped($"the item no longer exists on '{origin.DisplayName}'");
+            return HintApplyResult.Dropped(HintCode.SourceGone, $"the item no longer exists on '{origin.DisplayName}'");
         }
 
         if (string.IsNullOrEmpty(dto.Path))
         {
-            return HintApplyResult.Dropped($"'{origin.DisplayName}' did not say where the file is, which happens when the key for it is not an administrator's");
+            return HintApplyResult.Dropped(HintCode.Unreadable, $"'{origin.DisplayName}' did not say where the file is, which happens when the key for it is not an administrator's");
         }
 
         mapping = HintMapping.FindBySourcePath(origin, dto.Path);
         if (mapping is null)
         {
-            return HintApplyResult.Dropped($"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
+            return HintApplyResult.Dropped(HintCode.NotMapped, $"'{origin.DisplayName}' has the item at '{dto.Path}', which is not in a library mapped here");
         }
 
         // The same filters the scan applies. A file the mapping leaves out must not arrive by hint, since
         // the next scan would find it out of place and a mapping that deletes stale files would remove it.
         if (PathUtilities.IsItemFiltered(dto.Path, mapping.SourceRootPath, mapping.FilterMode, mapping.FilteredItems))
         {
-            return HintApplyResult.Dropped(mapping.FilterMode == LibraryFilterMode.Whitelist
+            return HintApplyResult.Dropped(HintCode.Filtered, mapping.FilterMode == LibraryFilterMode.Whitelist
                 ? "the file is not on the library mapping's allow list"
                 : "the file is on the library mapping's block list");
         }
@@ -115,7 +115,7 @@ public sealed class ContentHintHandler
             var trackedIndex = scanServers.FindIndex(s => string.Equals(s.Key, tracked.ServerKey, StringComparison.OrdinalIgnoreCase));
             if (trackedIndex >= 0 && trackedIndex < originIndex)
             {
-                return HintApplyResult.Dropped($"'{scanServers[trackedIndex].DisplayName}' has priority for this file");
+                return HintApplyResult.Dropped(HintCode.Priority, $"'{scanServers[trackedIndex].DisplayName}' has priority for this file");
             }
         }
 
@@ -124,7 +124,7 @@ public sealed class ContentHintHandler
         var record = await refresh.RefreshOneAsync(new ContentRefreshWork(source, mapping, dto, watchedByAll), cancellationToken).ConfigureAwait(false);
         if (record is null)
         {
-            return HintApplyResult.Dropped("the item is filtered out or has no path");
+            return HintApplyResult.Dropped(HintCode.Filtered, "the item is filtered out or has no path");
         }
 
         switch (record.Status)
@@ -132,9 +132,9 @@ public sealed class ContentHintHandler
             case SyncStatus.Queued:
                 break;
             case SyncStatus.Pending:
-                return new HintApplyResult(HintApplyOutcome.Unchanged, "waiting for approval on this server");
+                return HintApplyResult.Kept(HintCode.AwaitingApproval, "waiting for approval on this server");
             case SyncStatus.Ignored:
-                return HintApplyResult.Dropped("the row is ignored on this server");
+                return HintApplyResult.Dropped(HintCode.Ignored, "the row is ignored on this server");
             default:
                 return HintApplyResult.Unchanged;
         }

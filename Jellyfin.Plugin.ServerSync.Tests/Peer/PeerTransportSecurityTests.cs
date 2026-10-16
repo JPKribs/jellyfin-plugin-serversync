@@ -77,7 +77,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     {
         var config = new FakeConfigManager();
         config.Configuration.EnableMetadataSync = true;
-        var handler = new ItemHintHandler(null!, config, null!, null!, null!, NullLogger<ItemHintHandler>.Instance);
+        var handler = new ItemHintHandler(null!, config, TriageWithLocal(config, "/media/movies/claimed.mkv"), null!, null!, null!, NullLogger<ItemHintHandler>.Instance);
         using var client = ClientAnswering("{}");
         var prefetched = new Jellyfin.Sdk.Generated.Models.BaseItemDto { Id = ItemId, Path = "/media/private/secret.mkv" };
 
@@ -92,7 +92,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     {
         var config = new FakeConfigManager();
         config.Configuration.EnableHistorySync = true;
-        var handler = new HistoryHintHandler(null!, null!, null!, null!, null!, null!, null!, config, null!, NullLogger<HistoryHintHandler>.Instance);
+        var handler = new HistoryHintHandler(null!, null!, null!, null!, null!, null!, null!, config, TriageWithLocal(config, "/media/movies/claimed.mkv"), null!, NullLogger<HistoryHintHandler>.Instance);
         using var client = ClientAnswering(ItemsJson("/media/private/secret.mkv"));
 
         var result = await handler.ApplyAsync(Hint(HintKind.History, HintProtocol.HistoryKey(UserId, ItemId), "/media/movies/claimed.mkv"), Origin(), client, CancellationToken.None);
@@ -323,9 +323,156 @@ public sealed class PeerTransportSecurityTests : IDisposable
         Assert.IsType<ConflictObjectResult>(result.Result);
     }
 
+    [Fact]
+    public void EveryPeerRouteButCapabilities_RequiresTheSameVersion()
+    {
+        var actions = new[] { typeof(PeerController), typeof(PeerPairController) }
+            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            .Where(m => m.GetCustomAttributes<Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute>().Any())
+            .ToList();
+        Assert.NotEmpty(actions);
+        foreach (var action in actions)
+        {
+            var guarded = action.GetCustomAttribute<RequireSameVersionAttribute>() is not null;
+            Assert.True(guarded == (action.Name != nameof(PeerController.GetCapabilities)), $"{action.DeclaringType!.Name}.{action.Name}");
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0.0.0.1")]
+    public void VersionFilter_RefusesAMissingOrDifferentVersion(string? presented)
+    {
+        var context = FilterContext(presented);
+
+        new RequireSameVersionAttribute().OnActionExecuting(context);
+
+        var refusal = Assert.IsType<ObjectResult>(context.Result);
+        Assert.Equal(HintProtocol.VersionMismatchStatus, refusal.StatusCode);
+        Assert.Contains("0.0.0-test", (string)refusal.Value!, StringComparison.Ordinal);
+        Assert.Contains("same version", (string)refusal.Value!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VersionFilter_LetsTheSameVersionThrough()
+    {
+        var context = FilterContext("0.0.0-test");
+
+        new RequireSameVersionAttribute().OnActionExecuting(context);
+
+        Assert.Null(context.Result);
+    }
+
+    [Theory]
+    [InlineData("12.2.5.0", "12.2.5.0", true)]
+    [InlineData(" 12.2.5.0 ", "12.2.5.0", true)]
+    [InlineData("12.2.5.0", "12.2.5.1", false)]
+    [InlineData(null, "12.2.5.0", false)]
+    [InlineData("", "", false)]
+    public void SameVersion_IsExact(string? a, string? b, bool expected)
+    {
+        Assert.Equal(expected, HintProtocol.SameVersion(a, b));
+    }
+
+    [Fact]
+    public void Delivery_PausesAPeerOnAnotherVersion_WithItsReason()
+    {
+        Assert.Equal(DeliveryOutcome.PausePeer, HintDelivery.Classify(HintProtocol.VersionMismatchStatus));
+        Assert.Equal("both differ", HintDelivery.PauseReason(HintProtocol.VersionMismatchStatus, "both differ"));
+    }
+
+    [Fact]
+    public async Task PeerCalls_CarryThisServersVersion()
+    {
+        string? sent = null;
+        var http = new HttpClient(new StubHandler(request =>
+        {
+            sent = request.Headers.TryGetValues(HintProtocol.VersionHeader, out var values) ? values.Single() : null;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"PluginVersion\":\"0\"}", Encoding.UTF8, "application/json") };
+        }));
+        using var client = new SourceServerClient(NullLogger<SourceServerClient>.Instance, http, "https://peer.example", "key", "test", "12.2.5.0");
+
+        await client.GetPeerCapabilitiesAsync();
+
+        Assert.Equal("12.2.5.0", sent);
+    }
+
+    [Fact]
+    public void Status_WithoutTheAskingServer_IsMalformed()
+    {
+        var controller = PeerControllerFor(new FakeConfigManager(), null);
+
+        Assert.IsType<BadRequestObjectResult>(controller.Status(null).Result);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("wrong")]
+    public void Status_ForAnUnpairedServer_IsRefused(string? presented)
+    {
+        var config = new FakeConfigManager();
+        config.Configuration.Servers.Add(Origin());
+        var controller = PeerControllerFor(config, presented);
+
+        Assert.Equal(HintProtocol.UnpairedStatus, Assert.IsType<ObjectResult>(controller.Status(OriginId).Result).StatusCode);
+    }
+
+    [Fact]
+    public void Status_ForAServerThisOneDoesNotList_IsRefused()
+    {
+        var controller = PeerControllerFor(new FakeConfigManager(), null);
+
+        Assert.IsType<ConflictObjectResult>(controller.Status(OriginId).Result);
+    }
+
+    [Fact]
+    public void History_FromAnUnpairedSender_IsRefused()
+    {
+        var config = new FakeConfigManager();
+        config.Configuration.Servers.Add(Origin());
+        var controller = PeerControllerFor(config, "wrong");
+
+        var result = controller.NegotiateHistory(new Models.Peer.PeerHistoryRequest { SenderServerId = OriginId, Items = new() });
+
+        Assert.Equal(HintProtocol.UnpairedStatus, Assert.IsType<ObjectResult>(result.Result).StatusCode);
+    }
+
+    private static Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext FilterContext(string? presented)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IPluginConfigurationManager>(new FakeConfigManager());
+        var http = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
+        if (presented is not null)
+        {
+            http.Request.Headers[HintProtocol.VersionHeader] = presented;
+        }
+
+        var action = new Microsoft.AspNetCore.Mvc.ActionContext(http, new Microsoft.AspNetCore.Routing.RouteData(), new Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor());
+        return new Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext(action, new List<Microsoft.AspNetCore.Mvc.Filters.IFilterMetadata>(), new Dictionary<string, object?>(), null!);
+    }
+
+    private HintTriage TriageWithLocal(FakeConfigManager config, string originPath)
+    {
+        var local = new FakeLocalItems();
+        local.Add(Jellyfin.Plugin.ServerSync.Utilities.PathUtilities.TranslatePath(originPath, "/media/movies", "/local/movies"));
+        return new HintTriage(config, local, new VersionStore(new FixedProvider(_database), NullLogger<VersionStore>.Instance));
+    }
+
+    private sealed class FakeLocalItems : ILocalItems
+    {
+        private readonly Dictionary<string, MediaBrowser.Controller.Entities.BaseItem> _byPath = new(StringComparer.OrdinalIgnoreCase);
+
+        public void Add(string path) => _byPath[path] = new MediaBrowser.Controller.Entities.Movies.Movie { Id = Guid.NewGuid(), Path = path };
+
+        public MediaBrowser.Controller.Entities.BaseItem? FindByPath(string path) => _byPath.TryGetValue(path, out var item) ? item : null;
+
+        public MediaBrowser.Controller.Entities.Person? GetPerson(string name) => null;
+    }
+
     private PeerController PeerControllerFor(FakeConfigManager config, string? presented)
     {
-        var controller = new PeerController(null!, config, null!, null!, null!, null!, null!, _pairings, null!, NullLogger<PeerController>.Instance)
+        var controller = new PeerController(null!, config, null!, null!, null!, null!, null!, null!, _pairings, null!, null!, null!, NullLogger<PeerController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

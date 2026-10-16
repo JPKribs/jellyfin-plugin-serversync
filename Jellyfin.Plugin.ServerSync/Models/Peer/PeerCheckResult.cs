@@ -20,9 +20,6 @@ public class PeerCheckResult
     /// <summary>Gets or sets its Server Sync version.</summary>
     public string? PluginVersion { get; set; }
 
-    /// <summary>Gets or sets a value indicating whether its Server Sync accepts hints.</summary>
-    public bool SupportsHints { get; set; }
-
     /// <summary>Gets or sets a value indicating whether it lists this server as Pull or Sync, which hints need.</summary>
     public bool ListsThisServer { get; set; }
 

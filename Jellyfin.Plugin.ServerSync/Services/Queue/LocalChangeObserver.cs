@@ -44,6 +44,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly OutboundHintWorker _worker;
     private readonly VersionStore _versions;
     private readonly ApplyGuard _guard;
+    private readonly HintSuppression _suppression;
+    private readonly InboundHintWorker _inboundWorker;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalChangeObserver> _logger;
     private readonly ConcurrentDictionary<string, PendingChange> _pending = new(StringComparer.Ordinal);
@@ -79,9 +81,13 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         OutboundHintWorker worker,
         ApplyGuard guard,
         VersionStore versions,
+        HintSuppression suppression,
+        InboundHintWorker inboundWorker,
         IServerApplicationHost applicationHost,
         ILogger<LocalChangeObserver> logger)
     {
+        _suppression = suppression;
+        _inboundWorker = inboundWorker;
         _worker = worker;
         _versions = versions;
         _userDataManager = userDataManager;
@@ -263,6 +269,12 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             }
 
             var recorded = origin == ChangeOrigin.Edit;
+
+            if (!recorded && ProviderFills.WasFilled(e.Item.Path, e.Item is Person ? e.Item.Name : null, DateTime.UtcNow))
+            {
+                return;
+            }
+
             if (e.Item is Person person)
             {
                 if (!string.IsNullOrWhiteSpace(person.Name))
@@ -289,7 +301,21 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     {
         try
         {
-            if (e?.Item is null || e.Item is Folder || e.Item is Person || string.IsNullOrEmpty(e.Item.Path) || e.Item.IsVirtualItem)
+            if (e?.Item is null)
+            {
+                return;
+            }
+
+            if (e.Item is Person added && !string.IsNullOrWhiteSpace(added.Name))
+            {
+                _inboundWorker.WakeParked(HintTriage.PersonParkKey(added.Name));
+            }
+            else if (!string.IsNullOrEmpty(e.Item.Path))
+            {
+                _inboundWorker.WakeParked(HintTriage.PathParkKey(e.Item.Path));
+            }
+
+            if (e.Item is Folder || e.Item is Person || string.IsNullOrEmpty(e.Item.Path) || e.Item.IsVirtualItem)
             {
                 return;
             }
@@ -334,7 +360,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
         // Nothing gathers for a kind no peer will take, and the queue does not show it. The server entries
         // are few, so this is a short scan on every event rather than a row that waits for nothing.
-        if (!AnyPeerAccepts(kind, itemPath, userId))
+        if (!AnyPeerAccepts(kind, itemPath, userId, localKey))
         {
             return;
         }
@@ -371,6 +397,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     // still matches nothing is noted again by the raise.
     private void OnConfigurationChanged(object? sender, MediaBrowser.Model.Plugins.BasePluginConfiguration e)
     {
+        _suppression.Clear();
+
         foreach (var entry in _unmatched.Values.ToList())
         {
             try
@@ -431,12 +459,13 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     // A change raised to no peer is only worth counting when there is a peer to send to. A server
     // with no Push or Sync entry is not misconfigured, it just does not send.
-    private bool AnyPeerAccepts(HintKind kind, string? itemPath = null, Guid userId = default)
+    private bool AnyPeerAccepts(HintKind kind, string? itemPath = null, Guid userId = default, string? localKey = null)
     {
         foreach (var server in _configManager.Configuration.Servers)
         {
-            if (server.Pushes && _worker.PeerAccepts(server.Key, kind) && (itemPath is null || HintMapping.FindByLocalPath(server, itemPath) is not null)
-                && (kind != HintKind.History || userId == Guid.Empty || HintMapping.FindByLocalUser(server, userId) is not null))
+            if (server.Pushes && (itemPath is null || HintMapping.FindByLocalPath(server, itemPath) is not null)
+                && (kind != HintKind.History || userId == Guid.Empty || HintMapping.FindByLocalUser(server, userId) is not null)
+                && (localKey is null ? _worker.PeerAccepts(server.Key, kind) : _worker.PeerWants(server.Key, kind, itemPath, userId, localKey)))
             {
                 return true;
             }

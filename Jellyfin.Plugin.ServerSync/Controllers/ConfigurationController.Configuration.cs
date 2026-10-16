@@ -78,18 +78,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Validates a server URL format and accessibility.
-    /// </summary>
-    /// <param name="request">URL validation request.</param>
-    /// <returns>URL validation response.</returns>
-    [HttpPost("ValidateUrl")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult<ValidateUrlResponse>> ValidateUrl([FromBody] ValidateUrlRequest request, CancellationToken cancellationToken)
-    {
-        return Ok(await ValidateServerUrlAsync(request.Url, request.AllowPrivateNetwork, cancellationToken).ConfigureAwait(false));
-    }
-
-    /// <summary>
     /// Authenticates with a source server using username and password to generate an access token.
     /// </summary>
     /// <param name="request">Authentication request with credentials.</param>

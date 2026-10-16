@@ -39,25 +39,26 @@ public sealed class InboundHintStore : QueueStoreBase
             cmd.CommandText = @"
                 INSERT INTO InboundHints (
                     HintId, OriginServerId, Kind, Key, ItemPath, ItemId, ItemType, UserId, UserName,
-                    VersionServerId, VersionTimestamp, Recorded, ReceivedAt, Attempts, NextAttempt, LastError
+                    VersionServerId, VersionTimestamp, Recorded, ReceivedAt, Attempts, NextAttempt, LastError, ParkedPath
                 ) VALUES (
                     @hint, @origin, @kind, @key, @itemPath, @itemId, @itemType, @userId, @userName,
-                    @versionServer, @versionAt, @recorded, @received, 0, @received, NULL
+                    @versionServer, @versionAt, @recorded, @received, 0, @next, @error, @parked
                 )
                 ON CONFLICT(OriginServerId, Kind, Key) DO UPDATE SET
                     HintId = @hint,
                     Recorded = MAX(Recorded, @recorded),
-                    ItemPath = @itemPath,
-                    ItemId = @itemId,
-                    ItemType = @itemType,
-                    UserId = @userId,
-                    UserName = @userName,
+                    ItemPath = CASE WHEN @versionAt >= VersionTimestamp THEN @itemPath ELSE ItemPath END,
+                    ItemId = CASE WHEN @versionAt >= VersionTimestamp THEN @itemId ELSE ItemId END,
+                    ItemType = CASE WHEN @versionAt >= VersionTimestamp THEN @itemType ELSE ItemType END,
+                    UserId = CASE WHEN @versionAt >= VersionTimestamp THEN @userId ELSE UserId END,
+                    UserName = CASE WHEN @versionAt >= VersionTimestamp THEN @userName ELSE UserName END,
                     VersionServerId = CASE WHEN @versionAt >= VersionTimestamp THEN @versionServer ELSE VersionServerId END,
                     VersionTimestamp = CASE WHEN @versionAt >= VersionTimestamp THEN @versionAt ELSE VersionTimestamp END,
                     ReceivedAt = @received,
                     Attempts = 0,
-                    NextAttempt = @received,
-                    LastError = NULL
+                    NextAttempt = CASE WHEN @versionAt >= VersionTimestamp THEN @next ELSE NextAttempt END,
+                    LastError = CASE WHEN @versionAt >= VersionTimestamp THEN @error ELSE LastError END,
+                    ParkedPath = CASE WHEN @versionAt >= VersionTimestamp THEN @parked ELSE ParkedPath END
                 RETURNING Id";
             Add(cmd, "@hint", row.HintId);
             Add(cmd, "@origin", row.OriginServerId);
@@ -72,6 +73,9 @@ public sealed class InboundHintStore : QueueStoreBase
             Add(cmd, "@versionAt", Stamp(row.VersionTimestamp));
             Add(cmd, "@recorded", row.Recorded ? 1 : 0);
             Add(cmd, "@received", Stamp(row.ReceivedAt));
+            Add(cmd, "@next", Stamp(row.NextAttempt < row.ReceivedAt ? row.ReceivedAt : row.NextAttempt));
+            Add(cmd, "@parked", row.ParkedPath);
+            Add(cmd, "@error", row.ParkedPath is null ? null : row.LastError);
             row.Id = Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
         });
     }
@@ -125,9 +129,21 @@ public sealed class InboundHintStore : QueueStoreBase
     public int CountForOrigin(string originServerId) => Read(conn =>
     {
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE OriginServerId = @origin";
+        cmd.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE OriginServerId = @origin AND ParkedPath IS NULL";
         Add(cmd, "@origin", originServerId);
         return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+    });
+
+    public int TrimParked(string originServerId, int keep) => Write(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            DELETE FROM InboundHints WHERE Id IN (
+                SELECT Id FROM InboundHints WHERE OriginServerId = @origin AND ParkedPath IS NOT NULL
+                ORDER BY ReceivedAt DESC LIMIT -1 OFFSET @keep)";
+        Add(cmd, "@origin", originServerId);
+        Add(cmd, "@keep", keep);
+        return cmd.ExecuteNonQuery();
     });
 
     /// <summary>Removes every row from one origin, for when its server entry is removed.</summary>
@@ -225,6 +241,32 @@ public sealed class InboundHintStore : QueueStoreBase
 
     /// <summary>Counts the rows.</summary>
     /// <returns>The count.</returns>
+    public void Park(InboundHint row, string parkKey, DateTime until, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentException.ThrowIfNullOrWhiteSpace(parkKey);
+        Write(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE InboundHints SET ParkedPath = @parked, NextAttempt = @next, LastError = @reason WHERE Id = @id AND VersionTimestamp = @version";
+            Add(cmd, "@parked", parkKey);
+            Add(cmd, "@next", Stamp(until));
+            Add(cmd, "@reason", reason);
+            Add(cmd, "@id", row.Id);
+            Add(cmd, "@version", Stamp(row.VersionTimestamp));
+            cmd.ExecuteNonQuery();
+        });
+    }
+
+    public int WakeParked(string parkKey, DateTime utcNow) => Write(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE InboundHints SET ParkedPath = NULL, NextAttempt = @now, LastError = NULL WHERE ParkedPath = @parked COLLATE NOCASE";
+        Add(cmd, "@parked", parkKey);
+        Add(cmd, "@now", Stamp(utcNow));
+        return cmd.ExecuteNonQuery();
+    });
+
     public int Count() => Read(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -262,6 +304,7 @@ public sealed class InboundHintStore : QueueStoreBase
         ReceivedAt = Unstamp(reader.GetString(reader.GetOrdinal("ReceivedAt"))),
         Attempts = reader.GetInt32(reader.GetOrdinal("Attempts")),
         NextAttempt = Unstamp(reader.GetString(reader.GetOrdinal("NextAttempt"))),
-        LastError = Text(reader, "LastError")
+        LastError = Text(reader, "LastError"),
+        ParkedPath = Text(reader, "ParkedPath")
     };
 }

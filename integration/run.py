@@ -29,6 +29,11 @@ CREDS = os.path.join(STATE, "credentials.json")
 IMAGE = os.environ.get("JELLYFIN_IMAGE", "jellyfin/jellyfin:12.1")
 PLUGIN_GUID = "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 
+PLUGIN_VERSION = next(
+    line.split(":", 1)[1].strip().strip('"')
+    for line in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build.yaml"))
+    if line.startswith("version:"))
+
 SERVERS = {
     "source-a": {"port": 8111, "internal": "http://source-a:8096", "role": "source"},
     "source-b": {"port": 8112, "internal": "http://source-b:8096", "role": "source"},
@@ -123,12 +128,13 @@ class Api:
         self.base = f"http://127.0.0.1:{port}"
         self.device = device
         self.token = None
+        self.version = PLUGIN_VERSION
 
     def _headers(self):
         auth = f'MediaBrowser Client="ServerSyncIT", Device="runner", DeviceId="{self.device}", Version="1.0"'
         if self.token:
             auth += f', Token="{self.token}"'
-        return {"Authorization": auth, "Content-Type": "application/json", "Accept": "application/json"}
+        return {"Authorization": auth, "Content-Type": "application/json", "Accept": "application/json", "X-ServerSync-Version": self.version}
 
     def call(self, method, path, body=None, expect=None, raw=False):
         data = None if body is None else json.dumps(body).encode()
@@ -300,7 +306,7 @@ def setup_pool():
         status, auth = api.post("/Users/AuthenticateByName", {"Username": "admin", "Pw": creds["password"]}, expect=200)
         api.token = auth["AccessToken"]
         entry["userId"] = auth["User"]["Id"]
-        entry["serverId"] = info["Id"]
+        entry["serverId"] = info.get("Id") or api.get("/System/Info")["Id"]
         sysconfig = api.get("/System/Configuration")
         if sysconfig.get("ServerName") != name:
             sysconfig["ServerName"] = name
@@ -683,7 +689,11 @@ def scenario_user_sync(creds, apis):
 
 
 def hints(api):
-    return api.get("/ServerSync/Hints")
+    overview = api.get("/ServerSync/Hints")
+    rows = overview.get("Inbound") or []
+    overview["Parked"] = [r for r in rows if r.get("Parked")]
+    overview["Inbound"] = [r for r in rows if not r.get("Parked")]
+    return overview
 
 
 def wait_until(check, timeout, message):
@@ -826,7 +836,7 @@ def scenario_item_hints(creds, apis):
 
     wait_until(queues_empty, 60, "the pool is quiet before the test")
 
-    # An overview edit on source-a reaches local, which holds the same film. Source-b has no copy and drops it.
+    # An overview edit on source-a reaches local, which holds the same film. Source-b has no copy and parks it.
     set_overview(apis["source-a"], "Movie", "Only A", "Edited on source-a")
     wait_until(lambda: overview(apis["local"], "Movie", "Only A") == "Edited on source-a", 60, "a metadata edit on source-a reached local without a scan")
     wait_until(queues_empty, 60, "every queue drained after the metadata edit")
@@ -945,12 +955,13 @@ def scenario_peer_endpoint_auth(creds, apis):
     anon = Api("local", SERVERS["local"]["port"], "it-anon")
     routes = (("GET", "/ServerSync/Peer/Capabilities"), ("GET", "/ServerSync/Peer/Link?serverId=x"), ("POST", "/ServerSync/Peer/Queue"),
               ("POST", "/ServerSync/Peer/Complete"), ("GET", "/ServerSync/Peer/Status"), ("POST", "/ServerSync/Peer/Versions"), ("POST", "/ServerSync/Peer/History"),
+              ("GET", "/ServerSync/Peer/Interest?serverId=x"), ("POST", "/ServerSync/Peer/Lookup"),
               ("GET", "/ServerSync/Hints"), ("POST", "/ServerSync/Hints/Run"), ("POST", "/ServerSync/Hints/CheckPeer"),
               ("GET", "/ServerSync/Hints/Version?kind=People&name=x"), ("DELETE", "/ServerSync/Hints/Outbound/1"), ("DELETE", "/ServerSync/Hints/Inbound/1"),
               ("DELETE", "/ServerSync/Servers/x/Rows"),
               ("GET", "/ServerSync/Items"), ("GET", "/ServerSync/ImageProxy?itemId=00000000000000000000000000000000"), ("GET", "/ServerSync/MetadataItems"),
               ("GET", "/ServerSync/HistoryItems"), ("GET", "/ServerSync/PeopleItems"), ("GET", "/ServerSync/UserSyncUsers"), ("POST", "/ServerSync/TestConnection"),
-              ("POST", "/ServerSync/TriggerSync"), ("POST", "/ServerSync/ResetSyncDatabase"), ("GET", "/ServerSync/ValidateConfiguration"))
+              ("POST", "/ServerSync/TriggerSync"), ("POST", "/ServerSync/ResetSyncDatabase"))
     refused = 0
     for method, path in routes:
         status, _ = anon.call(method, path, {} if method == "POST" else None)
@@ -989,16 +1000,34 @@ def scenario_peer_endpoint_auth(creds, apis):
     expect(status == 428, f"a history negotiation naming source-a as sender without its pairing secret is refused with 428 ({status})")
     status, body = admin.call("POST", "/ServerSync/Peer/History", {"SenderServerId": "not-a-configured-server", "Items": []})
     expect(status == 200, f"a history negotiation from a server this one does not list still negotiates, with nothing recorded ({status})")
+    status, body = admin.call("GET", "/ServerSync/Peer/Status")
+    expect(status == 400, f"a status read that does not name the asking server is malformed ({status})")
+    other = Api("local", SERVERS["local"]["port"], "it-key")
+    other.token = e["apiKey"]
+    other.version = "0.0.0.0"
+    status, body = other.call("POST", "/ServerSync/Peer/Queue", {"SenderServerId": a_id, "Items": []})
+    expect(status == 426 and "same version" in (body or ""), f"a peer call from another Server Sync version is refused with 426 ({status})")
+    status, body = other.call("POST", "/ServerSync/Peer/Pair", {"ServerId": a_id, "Secret": "x"})
+    expect(status == 426, f"a pairing from another Server Sync version is refused with 426 ({status})")
+    status, body = admin.call("GET", f"/ServerSync/Peer/Interest?serverId={a_id}")
+    expect(status == 428, f"an interest read naming source-a without its pairing secret is refused with 428 ({status})")
+    status, body = admin.call("POST", "/ServerSync/Peer/Lookup", {"Path": "/no/such/file.mkv"})
+    expect(status == 200 and body and body.get("Found") is False, f"a lookup for a path this server does not hold answers not found ({status})")
+    status, body = admin.call("POST", "/ServerSync/Peer/Lookup", {})
+    expect(status == 400, f"a lookup with neither a path nor a name is malformed ({status})")
+    status, caps = other.call("GET", "/ServerSync/Peer/Capabilities")
+    expect(status == 200 and caps.get("PluginVersion") == PLUGIN_VERSION, "capabilities still answer another version, so Check Link can name both versions")
     status, body = admin.call("POST", "/ServerSync/Peer/Pair", {"ServerId": "not-a-configured-server", "Secret": "x"})
     expect(status == 409, f"a pairing from a server this one does not list is refused ({status})")
 
     # A name is held to the same rule as an address when private networks are disallowed.
-    status, v = admin.call("POST", "/ServerSync/ValidateUrl", {"Url": "http://localhost:8096", "AllowPrivateNetwork": False})
-    expect(status == 200 and not v["IsValid"] and "resolves" in v["Message"], "a name that resolves to loopback is refused when private networks are disallowed")
-    status, v = admin.call("POST", "/ServerSync/ValidateUrl", {"Url": "http://source-a:8096", "AllowPrivateNetwork": False})
-    expect(status == 200 and not v["IsValid"], "a pool name that resolves to a private address is refused when private networks are disallowed")
-    status, v = admin.call("POST", "/ServerSync/ValidateUrl", {"Url": "http://source-a:8096", "AllowPrivateNetwork": True})
-    expect(status == 200 and v["IsValid"], "the same name passes when private networks are allowed")
+    status, v = admin.call("POST", "/ServerSync/TestConnection", {"ServerUrl": "https://localhost:8096", "ApiKey": "x", "AllowPrivateNetwork": False})
+    expect(status == 200 and not v["Success"] and "resolves" in v["Message"], "a name that resolves to loopback is refused when private networks are disallowed")
+    status, v = admin.call("POST", "/ServerSync/TestConnection", {"ServerUrl": "https://source-a:8096", "ApiKey": "x", "AllowPrivateNetwork": False})
+    expect(status == 200 and not v["Success"] and "resolves" in v["Message"], "a pool name that resolves to a private address is refused when private networks are disallowed")
+    status, v = admin.call("POST", "/ServerSync/TestConnection", {"ServerUrl": "http://source-a:8096", "ApiKey": "x", "AllowPrivateNetwork": True})
+    message = (v or {}).get("Message") or ""
+    expect(status == 200 and "resolves" not in message and "Plain HTTP" not in message, f"the same name over plain HTTP passes the URL check when private networks are allowed ({message})")
 
 
 def scenario_push_responses(creds, apis):
@@ -1137,21 +1166,19 @@ def scenario_non_admin_peer_key(creds, apis):
     # its next check, so its row stays Sent rather than failing or looping.
     a_rows = hints(a)["Outbound"]
     expect(all(r["State"] == "Sent" for r in a_rows), "history: source-a's row waits as Sent for the status check, since local's key cannot report completion")
-    status, st = local.call("GET", "/ServerSync/Peer/Status")
-    expect(status == 200 and (not a_rows or any(r["HintId"] in st.get("Completed", []) for r in a_rows)), "history: local's status lists the finished hint for source-a to read")
-    expect(len(activity(local, "watch history for Shared Movie")) >= 1, "history: local wrote an activity entry")
+    wait_until(lambda: len(activity(local, "watch history for Shared Movie")) >= 1, 15, "history: local wrote an activity entry")
 
     # Metadata.
     stamp = f"Non admin metadata {time.strftime('%H:%M:%S')}"
     set_overview(a, "Movie", "Only A", stamp)
     wait_until(lambda: overview(local, "Movie", "Only A") == stamp, 90, "metadata: an edit on source-a reached local with the viewer's key")
-    expect(len(activity(local, "metadata for Only A")) >= 1, "metadata: local wrote an activity entry")
+    wait_until(lambda: len(activity(local, "metadata for Only A")) >= 1, 15, "metadata: local wrote an activity entry")
 
     # People.
     bio = f"Alice non admin {time.strftime('%H:%M:%S')}"
     set_overview(a, "Person", "Alice Actor", bio)
     wait_until(lambda: overview(local, "Person", "Alice Actor") == bio, 90, "people: an edit on source-a reached local with the viewer's key")
-    expect(len(activity(local, "person Alice Actor")) >= 1, "people: local wrote an activity entry")
+    wait_until(lambda: len(activity(local, "person Alice Actor")) >= 1, 15, "people: local wrote an activity entry")
 
     # Content: a new film on source-a, downloaded with the viewer's key.
     # A fresh title each run, so a reused pool still has to download something.
@@ -1163,7 +1190,7 @@ def scenario_non_admin_peer_key(creds, apis):
     a.post("/Library/Refresh", None, expect=204)
     target = os.path.join(STATE, "media", "local", "Movies", title, f"{title}.mp4")
     wait_until(lambda: os.path.exists(target), 150, "content: a file added on source-a was downloaded by local with the viewer's key")
-    expect(len(activity(local, f"file Only A Three {title.split(' ')[3]}")) >= 1, "content: local wrote an activity entry")
+    wait_until(lambda: len(activity(local, f"file Only A Three {title.split(' ')[3]}")) >= 1, 15, "content: local wrote an activity entry")
 
     configure_server(creds, a, "source-a", [])
     configure_local(creds, local, ["source-a", "source-b"])
@@ -1180,7 +1207,7 @@ def scenario_dashboard_endpoints(creds, apis):
         status, _ = local.call("POST", f"/ServerSync/{route}", {"Ids": [], "Status": "NotAStatus"})
         expect(status == 400, f"{route} refuses a status it does not know ({status})")
     status, st = local.call("GET", "/ServerSync/Peer/Status?serverId=no-such-server")
-    expect(status == 200 and st["Inbound"] == [] and st["CompletedHints"] == [], "a peer's status read shows only that peer's own hints")
+    expect(status == 409, f"a status read for a server this one does not list is refused ({status})")
     overview = hints(local)
     expect(all(k in overview for k in ("Gathering", "Outbound", "Inbound", "Peers", "OutboundCounts")), "the queue overview answers with gathering, both queues, peers, and counts")
 

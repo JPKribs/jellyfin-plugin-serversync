@@ -46,11 +46,32 @@ public class RefreshMetadataSyncTableTask
         ISourceServerClientFactory clientFactory,
         MetadataSyncTableService metadataService,
         MetadataSyncTableManager manager,
-        ScanConflictSettler conflicts)
-        : base(logger, manager, clientFactory, configManager)
+        ScanConflictSettler conflicts,
+        ScanWatermarkStore watermarks)
+        : base(logger, manager, clientFactory, configManager, watermarks)
     {
         _metadataService = metadataService;
         _conflicts = conflicts;
+    }
+
+    protected override bool SupportsIncremental => true;
+
+    protected override string ScopeSettings
+    {
+        get
+        {
+            var config = ConfigManager.Configuration;
+            return System.Text.Json.JsonSerializer.Serialize(new
+            {
+                config.MetadataSyncMetadata,
+                config.MetadataSyncGenres,
+                config.MetadataSyncTags,
+                config.MetadataSyncStudios,
+                config.MetadataSyncPeople,
+                config.MetadataSyncImages,
+                config.MetadataSyncFolderItems
+            });
+        }
     }
 
     // Against a peer that carries versions, a queued row whose local value was edited here more
@@ -192,10 +213,10 @@ public class RefreshMetadataSyncTableTask
                 var leafBag = matchedLeavesByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new System.Collections.Concurrent.ConcurrentBag<Guid>());
                 var folderBag = matchedFoldersByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new System.Collections.Concurrent.ConcurrentBag<Guid>());
 
-                await DiscoverMatchingIdsAsync(client, mapping, sourceLibraryId, leafTypes, localPaths.Leaves, leafBag, mapping.SourceLibraryId + "|leaves", ReportDiscovery, ct).ConfigureAwait(false);
+                await DiscoverForRunAsync(source, mapping, sourceLibraryId, leafTypes, localPaths.Leaves, leafBag, mapping.SourceLibraryId + "|leaves", ReportDiscovery, ct).ConfigureAwait(false);
                 if (includeFolderItems)
                 {
-                    await DiscoverMatchingIdsAsync(client, mapping, sourceLibraryId, folderTypes, localPaths.Folders, folderBag, mapping.SourceLibraryId + "|folders", ReportDiscovery, ct).ConfigureAwait(false);
+                    await DiscoverForRunAsync(source, mapping, sourceLibraryId, folderTypes, localPaths.Folders, folderBag, mapping.SourceLibraryId + "|folders", ReportDiscovery, ct).ConfigureAwait(false);
                 }
             }).ConfigureAwait(false);
 
@@ -305,6 +326,38 @@ public class RefreshMetadataSyncTableTask
     /// whose translated path exists in <paramref name="localPaths"/> to the
     /// shared bag.
     /// </summary>
+    private async Task DiscoverForRunAsync(
+        ScanSource source,
+        LibraryMapping mapping,
+        Guid sourceLibraryId,
+        BaseItemKind[] includeTypes,
+        Dictionary<string, BaseItem> localPaths,
+        System.Collections.Concurrent.ConcurrentBag<Guid> matchedIds,
+        string progressKey,
+        Action<string, long, long> reportDiscovery,
+        CancellationToken cancellationToken)
+    {
+        var changedSince = ChangedSince(source);
+        if (changedSince is null)
+        {
+            await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, includeTypes, localPaths, matchedIds, progressKey, reportDiscovery, null, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var all = new System.Collections.Concurrent.ConcurrentBag<Guid>();
+        var changed = new System.Collections.Concurrent.ConcurrentBag<Guid>();
+        await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, includeTypes, localPaths, all, progressKey, reportDiscovery, null, cancellationToken).ConfigureAwait(false);
+        await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, includeTypes, localPaths, changed, progressKey + "|changed", reportDiscovery, changedSince, cancellationToken).ConfigureAwait(false);
+        var changedIds = new HashSet<Guid>(changed);
+        foreach (var id in new HashSet<Guid>(all))
+        {
+            if (changedIds.Contains(id) || !ExistingRows.ContainsKey((mapping.SourceLibraryId, id.ToString("N", System.Globalization.CultureInfo.InvariantCulture))))
+            {
+                matchedIds.Add(id);
+            }
+        }
+    }
+
     private async Task DiscoverMatchingIdsAsync(
         SourceServerClient client,
         LibraryMapping mapping,
@@ -314,6 +367,7 @@ public class RefreshMetadataSyncTableTask
         System.Collections.Concurrent.ConcurrentBag<Guid> matchedIds,
         string progressKey,
         Action<string, long, long> reportDiscovery,
+        DateTime? changedSince,
         CancellationToken cancellationToken)
     {
         if (localPaths.Count == 0) return;
@@ -332,7 +386,7 @@ public class RefreshMetadataSyncTableTask
             Exception? pageError = null;
             try
             {
-                page = await client.GetLibraryItemPathsAsync(sourceLibraryId, includeTypes, startIndex, pageSize, cancellationToken).ConfigureAwait(false);
+                page = await client.GetLibraryItemPathsAsync(sourceLibraryId, includeTypes, startIndex, pageSize, changedSince, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

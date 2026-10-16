@@ -60,6 +60,8 @@ public class InboundHint
     /// <summary>Gets or sets what went wrong on the last attempt.</summary>
     public string? LastError { get; set; }
 
+    public string? ParkedPath { get; set; }
+
     /// <summary>Builds a row from a received hint.</summary>
     /// <param name="hint">The hint.</param>
     /// <param name="utcNow">The time of receipt.</param>

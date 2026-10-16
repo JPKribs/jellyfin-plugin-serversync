@@ -751,6 +751,7 @@ public class SourceServerClient : IDisposable
         Guid libraryId,
         int startIndex = 0,
         int limit = 100,
+        DateTime? changedSince = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -763,6 +764,7 @@ public class SourceServerClient : IDisposable
                     config.QueryParameters.Recursive = true;
                     config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
                     config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
+                    config.QueryParameters.MinDateLastSaved = changedSince.HasValue ? new DateTimeOffset(Utilities.UtcTime.AsUtc(changedSince.Value)) : null;
                     // The API has no by-Id sort, so a fully stable order isn't
                     // possible. The multi-key sort makes tie order deterministic
                     // and PaginatedFetchUtility's TotalRecordCount check catches
@@ -1102,6 +1104,7 @@ public class SourceServerClient : IDisposable
         BaseItemKind[] includeTypes,
         int startIndex = 0,
         int limit = 1000,
+        DateTime? changedSince = null,
         CancellationToken cancellationToken = default)
     {
         BaseItemDtoQueryResult? page;
@@ -1115,6 +1118,7 @@ public class SourceServerClient : IDisposable
                     config.QueryParameters.Recursive = true;
                     config.QueryParameters.IncludeItemTypes = includeTypes;
                     config.QueryParameters.Fields = new[] { ItemFields.Path };
+                    config.QueryParameters.MinDateLastSaved = changedSince.HasValue ? new DateTimeOffset(Utilities.UtcTime.AsUtc(changedSince.Value)) : null;
                     config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
@@ -1799,6 +1803,65 @@ public class SourceServerClient : IDisposable
 
     // ===== History Sync Methods =====
 
+    public async Task<HashSet<Guid>> GetItemIdsChangedForUserAsync(Guid userId, Guid libraryId, BaseItemKind[] includeTypes, DateTime changedSince, CancellationToken cancellationToken = default)
+    {
+        var ids = new HashSet<Guid>();
+        const int pageSize = 1000;
+        var startIndex = 0;
+        var client = GetApiClient();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            BaseItemDtoQueryResult? page;
+            try
+            {
+                page = await client.Items.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.UserId = userId;
+                        config.QueryParameters.ParentId = libraryId;
+                        config.QueryParameters.Recursive = true;
+                        config.QueryParameters.IncludeItemTypes = includeTypes;
+                        config.QueryParameters.MinDateLastSavedForUser = new DateTimeOffset(Utilities.UtcTime.AsUtc(changedSince));
+                        config.QueryParameters.EnableImages = false;
+                        config.QueryParameters.EnableUserData = false;
+                        config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
+                        config.QueryParameters.StartIndex = startIndex;
+                        config.QueryParameters.Limit = pageSize;
+                    },
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to list items changed for user {userId} in library {libraryId}: {ex.Message}", ex);
+            }
+
+            if (page?.Items is null)
+            {
+                throw new InvalidOperationException($"No answer listing items changed for user {userId} in library {libraryId}");
+            }
+
+            foreach (var item in page.Items)
+            {
+                if (item.Id.HasValue)
+                {
+                    ids.Add(item.Id.Value);
+                }
+            }
+
+            if (page.Items.Count < pageSize || (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value))
+            {
+                return ids;
+            }
+
+            startIndex += page.Items.Count;
+        }
+    }
+
     /// <summary>
     /// Batch-fetches items by ID with the specified user's UserData populated.
     /// Used by the History refresh task after the local-first discovery pass , 
@@ -2067,7 +2130,7 @@ public class SourceServerClient : IDisposable
 
     /// <summary>
     /// Asks the source whether it runs Server Sync and what it can negotiate. Returns null when the
-    /// source answers 404, which means the plugin is not installed there or predates peer support.
+    /// source answers 404, which means the plugin is not installed there.
     /// Any other failure is raised with its status, so a caller can tell a refused key from a peer
     /// that is down.
     /// </summary>
@@ -2198,14 +2261,53 @@ public class SourceServerClient : IDisposable
         return status is >= 200 and < 300;
     }
 
-    /// <summary>Reads the peer's inbound queue and completions, only those that came from one server when it is named.</summary>
-    /// <param name="fromServerId">This server's id, so the peer answers with this server's rows only, or null for all.</param>
+    public async Task<PeerInterest?> GetPeerInterestAsync(string thisServerId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(thisServerId);
+        var (status, parsed, body) = await PeerRequestAsync<PeerInterest>(HttpMethod.Get, "/ServerSync/Peer/Interest?serverId=" + Uri.EscapeDataString(thisServerId), null, cancellationToken).ConfigureAwait(false);
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException($"The peer answered {status} to the interest request: {body}", null, (System.Net.HttpStatusCode)status);
+        }
+
+        return parsed;
+    }
+
+    public async Task<PeerLookupResponse?> LookupPeerItemAsync(PeerLookupRequest lookupRequest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lookupRequest);
+        var (status, parsed, body) = await PeerRequestAsync<PeerLookupResponse>(HttpMethod.Post, "/ServerSync/Peer/Lookup", lookupRequest, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException($"The peer answered {status} to the lookup: {body}", null, (System.Net.HttpStatusCode)status);
+        }
+
+        return parsed;
+    }
+
+    public async Task<HttpResponseMessage> GetAuthorizedAsync(string url, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(url);
+        if (!url.StartsWith(_serverUrl + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("The address is not on this server", nameof(url));
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        AddAuthorizationHeader(request);
+        return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+    }
+
+    public string ServerUrl => _serverUrl;
+
+    /// <summary>Reads the hints this server sent the peer that it still holds, and those it finished.</summary>
+    /// <param name="fromServerId">This server's id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The status, or null when it could not be read.</returns>
-    public async Task<Models.Queue.QueueStatusResponse?> GetPeerQueueStatusAsync(string? fromServerId, CancellationToken cancellationToken)
+    public async Task<Models.Queue.QueueStatusResponse?> GetPeerQueueStatusAsync(string fromServerId, CancellationToken cancellationToken)
     {
-        var path = string.IsNullOrEmpty(fromServerId) ? "/ServerSync/Peer/Status" : "/ServerSync/Peer/Status?serverId=" + Uri.EscapeDataString(fromServerId);
-        var (_, parsed, _) = await PeerRequestAsync<Models.Queue.QueueStatusResponse>(HttpMethod.Get, path, null, cancellationToken).ConfigureAwait(false);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromServerId);
+        var (_, parsed, _) = await PeerRequestAsync<Models.Queue.QueueStatusResponse>(HttpMethod.Get, "/ServerSync/Peer/Status?serverId=" + Uri.EscapeDataString(fromServerId), null, cancellationToken).ConfigureAwait(false);
         return parsed;
     }
 
@@ -2267,6 +2369,7 @@ public class SourceServerClient : IDisposable
     {
         using var request = new HttpRequestMessage(method, _serverUrl + pathAndQuery);
         AddAuthorizationHeader(request);
+        request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.VersionHeader, _pluginVersion);
         var secret = Pairing?.CurrentSecret();
         if (!string.IsNullOrEmpty(secret))
         {

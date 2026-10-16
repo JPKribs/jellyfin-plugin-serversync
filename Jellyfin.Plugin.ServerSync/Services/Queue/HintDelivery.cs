@@ -28,7 +28,7 @@ public static class HintDelivery
     {
         200 => DeliveryOutcome.Accepted,
         400 => DeliveryOutcome.Malformed,
-        401 or 403 or 404 or 409 or 428 => DeliveryOutcome.PausePeer,
+        401 or 403 or 404 or 409 or 426 or 428 => DeliveryOutcome.PausePeer,
         _ => DeliveryOutcome.Retry
     };
 
@@ -73,7 +73,8 @@ public static class HintDelivery
     public static string PauseReason(int statusCode, string body) => statusCode switch
     {
         401 or 403 => "the peer refused this server's key. Push and Sync need an administrator's key for the peer. Check the key on this server entry",
-        404 => "Server Sync is not installed on the peer, or its version predates hints",
+        404 => "Server Sync is not installed on the peer",
+        426 => body,
         428 => "the peer could not pair with this server. It has to reach this server at the URL on its entry for it: " + body,
         _ => "the peer does not list this server as a source: " + body
     };

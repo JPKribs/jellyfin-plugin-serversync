@@ -37,8 +37,11 @@ public class PeerController : ControllerBase
     private readonly OutboundHintStore _outbound;
     private readonly VersionStore _versions;
     private readonly InboundHintWorker _inboundWorker;
+    private readonly OutboundHintWorker _outboundWorker;
     private readonly PeerPairingStore _pairings;
     private readonly ISourceServerClientFactory _clientFactory;
+    private readonly HintTriage _triage;
+    private readonly PeerItemLookup _lookup;
     private readonly Microsoft.Extensions.Logging.ILogger<PeerController> _logger;
 
     // A pairing call is one small request, so a peer that cannot answer it promptly is treated as unreachable.
@@ -65,10 +68,15 @@ public class PeerController : ControllerBase
         OutboundHintStore outbound,
         VersionStore versions,
         InboundHintWorker inboundWorker,
+        OutboundHintWorker outboundWorker,
         PeerPairingStore pairings,
         ISourceServerClientFactory clientFactory,
+        HintTriage triage,
+        PeerItemLookup lookup,
         Microsoft.Extensions.Logging.ILogger<PeerController> logger)
     {
+        _triage = triage;
+        _lookup = lookup;
         _history = history;
         _configManager = configManager;
         _applicationHost = applicationHost;
@@ -76,6 +84,7 @@ public class PeerController : ControllerBase
         _outbound = outbound;
         _versions = versions;
         _inboundWorker = inboundWorker;
+        _outboundWorker = outboundWorker;
         _pairings = pairings;
         _clientFactory = clientFactory;
         _logger = logger;
@@ -94,7 +103,6 @@ public class PeerController : ControllerBase
         {
             ServerId = _applicationHost.SystemId,
             PluginVersion = _configManager.PluginVersion,
-            Features = new List<string> { PeerHistoryNegotiator.HistoryFeature, HintProtocol.HintFeature },
             Accepts = HintProtocol.AcceptedKinds(_configManager.Configuration).Select(k => k.ToString()).ToList(),
             ServerTime = DateTime.UtcNow
         });
@@ -108,6 +116,7 @@ public class PeerController : ControllerBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The listing.</returns>
     [HttpGet("Link")]
+    [RequireSameVersion]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<PeerLinkResponse>> Link([FromQuery] string? serverId, CancellationToken cancellationToken)
     {
@@ -174,7 +183,8 @@ public class PeerController : ControllerBase
                 var why = status switch
                 {
                     401 or 403 => "it refused the key this server holds for it, so it could not be issued a secret. Check the key on this server's entry for it, and update Server Sync there if it is older than this server's",
-                    404 => "its Server Sync predates pairing",
+                    404 => "Server Sync is not installed there",
+                    426 => body ?? "its Server Sync is a different version",
                     409 => "it does not list this server: " + body,
                     _ => $"it answered {status}: {body}"
                 };
@@ -232,15 +242,15 @@ public class PeerController : ControllerBase
     }
 
     /// <summary>
-    /// Receives change hints from a peer. Each hint is stored durably and answered as accepted, which
-    /// means queued, not applied. The sender must be configured here as a Pull or Sync server, since
-    /// that is where the change is pulled from. A hint for something this server does not map is still
-    /// answered, as not accepted with the reason, because the sender knows nothing of this server's
-    /// mappings and must not keep trying.
+    /// Receives change hints from a peer. Each hint is answered with a code: Queued and NoLocalItem are
+    /// stored, the latter parked until the local item arrives, and every other code means this server
+    /// will not use it, so the sender stops trying. The sender must be configured here as a Pull or
+    /// Sync server, since that is where the change is pulled from.
     /// </summary>
     /// <param name="request">The hints.</param>
     /// <returns>One result per hint.</returns>
     [HttpPost("Queue")]
+    [RequireSameVersion]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -284,27 +294,42 @@ public class PeerController : ControllerBase
 
         var response = new QueueResponse();
         var now = DateTime.UtcNow;
+        var parkedAny = false;
         foreach (var hint in request.Items)
         {
-            var result = new QueueResult { HintId = hint.HintId };
-            response.Items.Add(result);
-
-            var reason = string.IsNullOrWhiteSpace(hint.Key) ? "the hint carries no key"
-                : !string.Equals(hint.OriginServerId, request.SenderServerId, StringComparison.OrdinalIgnoreCase) ? "a hint's origin must be the sender, since hints are never forwarded"
-                : HintProtocol.IsFutureVersion(hint.VersionTimestamp, now) ? $"the hint's version is dated more than {HintProtocol.MaxVersionLead.TotalMinutes:0} minutes ahead of this server's clock. Check the clock on the sender"
-                : Unmappable(origin, hint);
-            if (reason is not null)
+            var assessment = _triage.Assess(origin, hint, request.SenderServerId, now);
+            response.Items.Add(new QueueResult { HintId = hint.HintId, Code = assessment.Code, Reason = assessment.Reason });
+            if (!assessment.Keep)
             {
-                result.Accepted = false;
-                result.Reason = reason;
                 continue;
             }
 
-            _inbound.Enqueue(InboundHint.FromHint(hint, now));
-            result.Accepted = true;
+            var row = InboundHint.FromHint(hint, now);
+            if (assessment.ParkKey is not null)
+            {
+                row.ParkedPath = assessment.ParkKey;
+                row.NextAttempt = now + HintProtocol.ParkWindow;
+                row.LastError = assessment.Reason;
+            }
+
+            _inbound.Enqueue(row);
+            if (assessment.ParkKey is not null)
+            {
+                parkedAny = true;
+                if (_triage.Present(assessment.ParkKey, hint.Kind == HintKind.People ? hint.Key : null))
+                {
+                    _inbound.WakeParked(assessment.ParkKey, DateTime.UtcNow);
+                    response.Items[^1].Code = HintCode.Queued;
+                }
+            }
         }
 
-        if (response.Items.Any(r => r.Accepted))
+        if (parkedAny)
+        {
+            _inbound.TrimParked(request.SenderServerId, HintProtocol.MaxPendingPerPeer);
+        }
+
+        if (response.Items.Any(r => r.Code == HintCode.Queued))
         {
             _inboundWorker.Wake();
         }
@@ -316,6 +341,7 @@ public class PeerController : ControllerBase
     /// <param name="request">The finished hints.</param>
     /// <returns>How many rows were removed.</returns>
     [HttpPost("Complete")]
+    [RequireSameVersion]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<object> Complete([FromBody] CompleteRequest request)
@@ -338,37 +364,78 @@ public class PeerController : ControllerBase
 
         // Only the rows queued for the peer that reports them, and never past this server's clock, so a
         // peer can finish its own work and nothing else.
-        var removed = _outbound.Complete(peer.Key, request.Items);
+        var removed = _outboundWorker.Complete(peer, request.Items);
         return Ok(new { Removed = removed });
     }
 
-    /// <summary>Lists this server's inbound queue, so a peer can tell whether work it sent is still held.</summary>
-    /// <param name="serverId">The asking server's id, to list only its own hints, or null for all.</param>
+    /// <summary>Lists the hints a paired peer sent that this server still holds, and those it finished.</summary>
+    /// <param name="serverId">The asking server's id.</param>
     /// <returns>The inbound rows.</returns>
     [HttpGet("Status")]
+    [RequireSameVersion]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<QueueStatusResponse> Status([FromQuery] string? serverId)
     {
-        // An origin asks about its own hints only. Hint ids start with the origin's server id, so both
-        // the queue and the completions can be narrowed to it.
-        var prefix = string.IsNullOrWhiteSpace(serverId) ? null : serverId + ":";
+        var (peer, refusal) = Sender(serverId);
+        if (peer is null)
+        {
+            return refusal!;
+        }
+
+        var prefix = serverId + ":";
         var completed = _inboundWorker.RecentlyCompleted
-            .Where(c => prefix is null || c.HintId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Where(c => c.HintId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var inbound = prefix is null ? _inbound.GetAll() : _inbound.GetForOrigin(serverId!);
         return Ok(new QueueStatusResponse
         {
             ServerId = _applicationHost.SystemId,
-            Inbound = inbound.Select(InboundHintDto.From).ToList(),
-            Completed = completed.Select(c => c.HintId).ToList(),
+            Inbound = _inbound.GetForOrigin(serverId!).Select(InboundHintDto.From).ToList(),
             CompletedHints = completed
         });
+    }
+
+    [HttpGet("Interest")]
+    [RequireSameVersion]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(HintProtocol.UnpairedStatus)]
+    public ActionResult<PeerInterest> Interest([FromQuery] string? serverId)
+    {
+        var (peer, refusal) = Sender(serverId);
+        if (peer is null)
+        {
+            return refusal!;
+        }
+
+        return Ok(peer.Pulls ? PeerInterest.For(_configManager.Configuration, peer) : new PeerInterest { Revision = "none" });
+    }
+
+    [HttpPost("Lookup")]
+    [RequireSameVersion]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult<PeerLookupResponse> Lookup([FromBody] PeerLookupRequest request)
+    {
+        if (request is null || (string.IsNullOrWhiteSpace(request.Path) && string.IsNullOrWhiteSpace(request.Name)))
+        {
+            return BadRequest("A request body with a Path or a Name is required");
+        }
+
+        if (request.Path?.Length > 4096 || request.Name?.Length > 512 || request.ItemType?.Length > 128)
+        {
+            return BadRequest("The Path, Name, or ItemType is too long");
+        }
+
+        return Ok(_lookup.Find(request));
     }
 
     /// <summary>Returns the versions this server holds for a batch of its own keys. Keys with no version are left out.</summary>
     /// <param name="request">The kind and keys.</param>
     /// <returns>The versions.</returns>
     [HttpPost("Versions")]
+    [RequireSameVersion]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<VersionsResponse> Versions([FromBody] VersionsRequest request)
@@ -386,80 +453,6 @@ public class PeerController : ControllerBase
         return Ok(new VersionsResponse { Items = _versions.GetMany(request.Kind, request.Keys).ToList() });
     }
 
-    // What makes a hint impossible to apply here, or null when it can be queued. Decided on receipt so
-    // the sender hears straight away and the row never sits in the queue.
-    private string? Unmappable(Models.Configuration.SourceServer origin, SyncHint hint)
-    {
-        var config = _configManager.Configuration;
-        switch (hint.Kind)
-        {
-            case HintKind.Metadata:
-                if (!config.EnableMetadataSync)
-                {
-                    return "metadata sync is off on this server";
-                }
-
-                if (!Guid.TryParse(hint.Key, out _))
-                {
-                    return "the key is not an item id";
-                }
-
-                return HintMapping.FindBySourcePath(origin, hint.ItemPath) is null ? "the path is not in a library mapped on this server" : null;
-
-            case HintKind.People:
-                if (!config.EnablePeopleSync)
-                {
-                    return "people sync is off on this server";
-                }
-
-                return string.IsNullOrWhiteSpace(hint.Key) ? "the hint carries no person name" : null;
-
-            case HintKind.Content:
-                if (!config.EnableContentSync)
-                {
-                    return "content sync is off on this server";
-                }
-
-                if (!Guid.TryParse(hint.Key, out _))
-                {
-                    return "the key is not an item id";
-                }
-
-                return HintMapping.FindBySourcePath(origin, hint.ItemPath) is null ? "the path is not in a library mapped on this server" : null;
-
-            case HintKind.Users:
-                // Never announced live. Jellyfin raises no event for policy and configuration changes,
-                // so user settings travel on the scheduled task only.
-                return "user settings are not announced live, the scheduled Sync Information task carries them";
-
-            case HintKind.History:
-                if (!config.EnableHistorySync)
-                {
-                    return "history sync is off on this server";
-                }
-
-                if (!HintProtocol.TryParseHistoryKey(hint.Key, out var userId, out _))
-                {
-                    return "the key is not a user id and item id";
-                }
-
-                if (HintMapping.FindBySourceUser(origin, userId) is null)
-                {
-                    return "the user is not mapped on this server";
-                }
-
-                if (HintMapping.FindBySourcePath(origin, hint.ItemPath) is null)
-                {
-                    return "the path is not in a library mapped on this server";
-                }
-
-                return null;
-
-            default:
-                return $"this version does not apply {hint.Kind} hints";
-        }
-    }
-
     /// <summary>
     /// Applies a batch of merged watch history states. Each entry is written only when this server's
     /// live state still matches what the caller expected, so a play that happened here after the caller
@@ -468,6 +461,7 @@ public class PeerController : ControllerBase
     /// <param name="request">The proposed writes.</param>
     /// <returns>One result per entry, in request order.</returns>
     [HttpPost("History")]
+    [RequireSameVersion]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<PeerHistoryResponse> NegotiateHistory([FromBody] PeerHistoryRequest request)

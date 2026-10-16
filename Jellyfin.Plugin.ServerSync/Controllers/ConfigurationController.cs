@@ -267,77 +267,6 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// Returns metadata for all status types including display names and colors.
-    /// Used by the frontend to render status badges consistently.
-    /// </summary>
-    /// <returns>Dictionary of status metadata.</returns>
-    [HttpGet("StatusMetadata")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<Dictionary<string, StatusMetadata>> GetStatusMetadata()
-    {
-        return Ok(StatusAppearanceHelper.GetStatusMetadata());
-    }
-
-    /// <summary>
-    /// Attempts to find and store the local Jellyfin item IDs for synced items.
-    /// </summary>
-    /// <returns>Action result with resolved count.</returns>
-    [HttpPost("ResolveLocalItemIds")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResolveLocalItemIds([FromServices] ContentSyncTableManager manager)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        try
-        {
-            var syncedItems = manager.GetByStatus(SyncStatus.Synced);
-            var resolvedCount = 0;
-            var alreadyResolvedCount = 0;
-
-            foreach (var item in syncedItems)
-            {
-                // Skip if already has LocalItemId
-                if (!string.IsNullOrEmpty(item.LocalItemId))
-                {
-                    alreadyResolvedCount++;
-                    continue;
-                }
-
-                if (string.IsNullOrEmpty(item.LocalPath))
-                {
-                    continue;
-                }
-
-                var sanitizedFileName = SanitizeForLog(Path.GetFileName(item.LocalPath));
-                try
-                {
-                    // Try to find the item in Jellyfin by path
-                    var localItem = _libraryManager.FindByPath(item.LocalPath, isFolder: false);
-                    if (localItem != null)
-                    {
-                        // Only the id changes. A status update would stamp LastSyncTime with now and
-                        // make every resolved row look freshly synced.
-                        manager.UpdateLocalItemId(item.SourceItemId, localItem.Id.ToString());
-                        resolvedCount++;
-                        _logger.LogDebug("Resolved LocalItemId for {FileName}", sanitizedFileName);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to resolve LocalItemId for {FileName}", sanitizedFileName);
-                }
-            }
-
-            _logger.LogInformation("Resolved {Count} local item IDs, {AlreadyResolved} already resolved", resolvedCount, alreadyResolvedCount);
-            return Ok(new { Resolved = resolvedCount, AlreadyResolved = alreadyResolvedCount });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to resolve local item IDs");
-            return StatusCode(500, new { Error = "An internal error occurred. Check server logs for details." });
-        }
-    }
-
-    /// <summary>
     /// Deletes all items from the sync database and recreates it with the latest schema.
     /// </summary>
     /// <returns>Action result with success status.</returns>
@@ -401,36 +330,5 @@ public partial class ConfigurationController : ControllerBase
             _logger.LogError(ex, "Failed to reset history sync database");
             return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
         }
-    }
-
-    /// <summary>
-    /// Validates the current plugin configuration.
-    /// </summary>
-    /// <returns>Validation response with errors.</returns>
-    [HttpGet("ValidateConfiguration")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<ConfigurationValidationResponse> ValidateConfiguration()
-    {
-        var errors = _configManager.Configuration.ValidateConfiguration();
-
-        return Ok(new ConfigurationValidationResponse
-        {
-            IsValid = errors.Count == 0,
-            Errors = errors
-        });
-    }
-
-    /// <summary>
-    /// Sanitizes configuration values to valid ranges.
-    /// </summary>
-    /// <returns>Action result with status message.</returns>
-    [HttpPost("SanitizeConfiguration")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult SanitizeConfiguration()
-    {
-        _configManager.Configuration.SanitizeValues();
-        _configManager.SaveConfiguration();
-
-        return Ok(new { Message = "Configuration sanitized" });
     }
 }
