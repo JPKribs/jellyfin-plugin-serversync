@@ -289,3 +289,215 @@
     opacity: 1;
 }
 
+
+.ssAccessGrid {
+    border: 1px solid var(--jpk-border);
+    border-radius: 6px;
+}
+
+.ssAccessRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1em;
+    padding: 0.75em 1em;
+}
+
+.ssAccessRow + .ssAccessRow {
+    border-top: 1px solid var(--jpk-border);
+}
+
+.ssAccessText {
+    min-width: 0;
+}
+
+.ssAccessTitle {
+    color: #fff;
+}
+
+.ssAccessDescription {
+    color: var(--jpk-gray-fg);
+    font-size: 0.9em;
+    margin-top: 0.2em;
+}
+
+.ssAccessRow .jpk-badge {
+    flex-shrink: 0;
+}
+
+.ssRoleTable {
+    border: 1px solid var(--jpk-border);
+    border-radius: 6px;
+    margin: 0.5em 0 1em;
+}
+
+.ssRoleRow {
+    display: grid;
+    grid-template-columns: 1fr 5.5em 5.5em;
+    align-items: center;
+    gap: 1em;
+    padding: 0.6em 1em;
+}
+
+.ssRoleRow + .ssRoleRow {
+    border-top: 1px solid var(--jpk-border);
+}
+
+.ssRoleHead {
+    color: var(--jpk-gray-fg);
+    font-size: 0.85em;
+}
+
+.ssRoleRow > span:not(:first-child) {
+    justify-self: center;
+    text-align: center;
+}
+
+.ssRoleLabel {
+    color: #fff;
+}
+
+.ssRoleNote {
+    border-top: 1px solid var(--jpk-border);
+    padding: 0.6em 1em;
+    color: var(--jpk-gray-fg);
+    font-size: 0.85em;
+}
+
+.ssFormTable {
+    border: 1px solid var(--jpk-border);
+    border-radius: 6px;
+}
+
+.ssFormRow {
+    display: grid;
+    grid-template-columns: 1fr 12em;
+    align-items: center;
+    gap: 1em;
+    padding: 0.6em 1em;
+}
+
+.ssFormTable3 .ssFormRow {
+    grid-template-columns: 1fr 8em 8em;
+}
+
+.ssFormRow + .ssFormRow {
+    border-top: 1px solid var(--jpk-border);
+}
+
+.ssFormLabel {
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+}
+
+.ssFormHint {
+    color: var(--jpk-gray-fg);
+    font-size: 0.85em;
+    margin-top: 0.15em;
+}
+
+.ssFormCell {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    min-width: 0;
+}
+
+.ssFormNone {
+    color: var(--jpk-gray-fg);
+    font-size: 0.85em;
+}
+
+.ssFormCell .inputContainer,
+.ssFormCell .selectContainer,
+.ssFormCell > div {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+.ssFormInput,
+.ssFormSelect,
+.ssUnitSelect {
+    width: 100%;
+    min-width: 0;
+}
+
+.ssUnit {
+    color: var(--jpk-gray-fg);
+    font-size: 0.85em;
+    white-space: nowrap;
+    min-width: 2em;
+}
+
+@media (max-width: 640px) {
+    .ssFormRow {
+        grid-template-columns: 1fr 9em;
+    }
+
+    .ssFormTable3 .ssFormRow {
+        grid-template-columns: 1fr 6em 6em;
+    }
+}
+
+.ssGrantRow {
+    display: grid;
+    grid-template-columns: minmax(8em, 1fr) minmax(10em, 1.6fr) 6.5em;
+    gap: 0.75em;
+    align-items: center;
+    padding: 0.6em 1em;
+}
+
+#callerGrants .ssGrantRow,
+.ssGrantTable .ssRoleNote {
+    border-top: 1px solid var(--jpk-border);
+}
+
+.ssGrantField {
+    width: 100%;
+    box-sizing: border-box;
+    height: 2.4em;
+    padding: 0 0.75em;
+    border: 1px solid var(--jpk-border);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    font: inherit;
+}
+
+.ssGrantRow .grantRemove {
+    margin: 0;
+    width: 100%;
+    height: 2.4em;
+}
+
+.ssGrantAdd {
+    margin-bottom: 1em;
+}
+
+.ssGrantAdd .emby-button {
+    margin-left: 0;
+}
+
+@media (max-width: 640px) {
+    .ssGrantRow {
+        grid-template-columns: 1fr 6.5em;
+    }
+
+    .ssGrantRow .grantLocations {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+}
+
+.ssFormHead {
+    color: var(--jpk-gray-fg);
+    font-size: 0.85em;
+}
+
+@media (max-width: 640px) {
+    .ssGrantTable .ssFormHead {
+        display: none;
+    }
+}

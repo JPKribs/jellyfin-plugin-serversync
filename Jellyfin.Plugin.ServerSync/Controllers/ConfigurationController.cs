@@ -26,7 +26,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 /// </summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
-[Route("ServerSync")]
+[Route("Sync")]
 [Produces(MediaTypeNames.Application.Json)]
 public partial class ConfigurationController : ControllerBase
 {

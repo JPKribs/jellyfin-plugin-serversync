@@ -25,7 +25,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 /// </summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
-[Route("ServerSync/Hints")]
+[Route("Sync/Hints")]
 [Produces(MediaTypeNames.Application.Json)]
 public class HintsController : ControllerBase
 {
@@ -133,15 +133,6 @@ public class HintsController : ControllerBase
             result.Reachable = true;
             result.ServerName = connection.ServerName;
             result.ServerId = connection.ServerId;
-            if (connection.IsAdministrator == false)
-            {
-                return Limited(
-                    result,
-                    mode,
-                    "Connected with a standard user's key. This server will pull what that user can see on a schedule, but changes will not arrive as they happen, since Server Sync's endpoints there need an administrator's key.",
-                    "Connected with a standard user's key. Push and Sync need an administrator's key or sign in, because Server Sync's endpoints there require elevation. Pull still works for what that user can see.");
-            }
-
             PeerCapabilities? capabilities;
             try
             {
@@ -153,7 +144,8 @@ public class HintsController : ControllerBase
             }
             catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             {
-                result.Message = "Connected, but its Server Sync refused this key. Push and Sync need an administrator's key.";
+                var (_, why) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
+                result.Message = $"Connected, but its Server Sync refused this call: {why}. Add this server or its user to the whitelist there.";
                 return Ok(result);
             }
             catch (Exception ex)
@@ -211,6 +203,9 @@ public class HintsController : ControllerBase
             result.ListsThisServer = link is { Listed: true, Enabled: true, PullsFromYou: true };
             result.PeerMode = link?.Mode;
             result.SendsToThisServer = link is { Enabled: true, SendsToYou: true };
+            result.PeerAccessLevel = link?.AccessLevel;
+            result.PeerAccessUser = link?.AccessUser;
+            result.PeerCanDownload = link?.CanDownload;
             (result.Severity, result.Message) = Verdict(mode, link, capabilities.PluginVersion, result);
 
             if (mode != ServerMode.Pull || result.SendsToThisServer)
@@ -219,6 +214,11 @@ public class HintsController : ControllerBase
             }
 
             AppendWarning(result, skewNote);
+
+            if (link is { Listed: true })
+            {
+                result.Message += PeerAccessNote(link);
+            }
 
             // A listed server pairs on every check. One that could not reach this server back cannot
             // prove itself on later requests, so nothing it sends as this server would be accepted.
@@ -247,6 +247,24 @@ public class HintsController : ControllerBase
                 => ("ok", $"Ready. Server Sync {version} there lists this server as Sync, so changes travel both ways as they happen."),
             _ => ("error", $"Server Sync {version} there {listing}. Sync needs that server to list this one as Sync, enabled, with a URL and key.")
         };
+    }
+
+    private static string PeerAccessNote(PeerLinkResponse link)
+    {
+        if (string.Equals(link.AccessLevel, SourceServer.StandardUserAccess, StringComparison.OrdinalIgnoreCase))
+        {
+            var who = string.IsNullOrWhiteSpace(link.AccessUser) ? "a standard user" : "the standard user " + link.AccessUser;
+            var files = link.CanDownload == false ? " That user may not download media here, so no files are copied to it." : string.Empty;
+            return $" It pulls from this server as {who}, so it only reads the libraries that user can see here, and only that user's watch history, settings, and playlists.{files}";
+        }
+
+        if (string.Equals(link.AccessLevel, SourceServer.AdministratorAccess, StringComparison.OrdinalIgnoreCase))
+        {
+            var files = link.CanDownload == false ? " The account it signed in with may not download media here, so no files are copied to it." : string.Empty;
+            return " It pulls from this server with administrator access." + files;
+        }
+
+        return string.Empty;
     }
 
     // Adds a caveat to the message. A ready link with a caveat is shown as a warning.
@@ -293,7 +311,7 @@ public class HintsController : ControllerBase
             return (season.SeriesName, item.Name);
         }
 
-        if (kind == HintKind.People)
+        if (kind is HintKind.People or HintKind.Playlists)
         {
             return (item.Name, null);
         }
@@ -308,6 +326,7 @@ public class HintsController : ControllerBase
         "History" => "watch history",
         "Users" => "user settings",
         "Content" => "files",
+        "Playlists" => "playlists",
         _ => kind.ToLowerInvariant()
     };
 
@@ -348,7 +367,7 @@ public class HintsController : ControllerBase
         {
             var item = change.ItemId == Guid.Empty ? null : _libraryManager.GetItemById(change.ItemId);
             var userName = change.UserId == Guid.Empty ? null : _userManager.GetUserById(change.UserId)?.Username;
-            var name = change.Kind == HintKind.People ? item?.Name : userName;
+            var name = change.Kind is HintKind.People or HintKind.Playlists ? item?.Name : userName;
             var (title, subtitle) = DisplayOf(item, change.Kind, name);
             overview.Gathering.Add(new GatheringDto
             {
@@ -435,6 +454,7 @@ public class HintsController : ControllerBase
             HintKind.Metadata or HintKind.Content when hasItem => HintProtocol.MetadataKey(itemId),
             HintKind.Users when hasUser => HintProtocol.UsersKey(userId),
             HintKind.People when !string.IsNullOrWhiteSpace(name) => HintProtocol.PeopleKey(name),
+            HintKind.Playlists when hasItem && _libraryManager.GetItemById(itemId) is { } playlist => Services.Playlists.PlaylistMirror.RootKey(playlist),
             _ => null
         };
         if (key is null)

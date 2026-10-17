@@ -19,5 +19,7 @@ public enum HintKind
     Content = 3,
 
     /// <summary>A user's policy, configuration, and profile image. The key is the origin's user id.</summary>
-    Users = 4
+    Users = 4,
+
+    Playlists = 5
 }

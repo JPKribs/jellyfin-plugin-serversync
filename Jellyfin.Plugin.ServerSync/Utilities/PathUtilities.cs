@@ -126,15 +126,9 @@ public static class PathUtilities
 
             var normalizedFilterPath = fi.Path.Replace('\\', '/').TrimEnd('/');
 
-            string fullFilterPrefix;
-            if (normalizedFilterPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                fullFilterPrefix = normalizedFilterPath;
-            }
-            else
-            {
-                fullFilterPrefix = normalizedRoot + "/" + normalizedFilterPath.TrimStart('/');
-            }
+            var fullFilterPrefix = normalizedFilterPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
+                ? normalizedFilterPath
+                : normalizedRoot + "/" + normalizedFilterPath.TrimStart('/');
 
             // StartsWith + segment-boundary check: "Foo" must not match "Foobar".
             if (normalizedSourcePath.StartsWith(fullFilterPrefix, StringComparison.OrdinalIgnoreCase)

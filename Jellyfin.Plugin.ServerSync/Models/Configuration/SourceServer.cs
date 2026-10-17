@@ -12,6 +12,10 @@ namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 /// </summary>
 public class SourceServer
 {
+    public const string AdministratorAccess = "Administrator";
+
+    public const string StandardUserAccess = "User";
+
     /// <summary>
     /// Gets or sets the stable key of this entry. Generated once when the entry is created and carried on
     /// every sync table row that came from it, so reordering or renaming the entry never orphans rows.
@@ -59,6 +63,8 @@ public class SourceServer
     /// </summary>
     public string AccessLevel { get; set; } = string.Empty;
 
+    public bool? CanDownload { get; set; }
+
     /// <summary>Gets or sets what this server does with the peer.</summary>
     public ServerMode Mode { get; set; } = ServerMode.Pull;
 
@@ -104,10 +110,29 @@ public class SourceServer
     public List<LibraryMapping> GetEnabledLibraryMappings()
         => LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
 
+    [System.Xml.Serialization.XmlIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsStandardUser => string.Equals(AccessLevel, StandardUserAccess, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Returns the enabled user mappings of this peer as a fresh list.</summary>
     /// <returns>The enabled mappings.</returns>
     public List<UserMapping> GetEnabledUserMappings()
-        => UserMappings?.Where(m => m.IsEnabled).ToList() ?? new List<UserMapping>();
+        => UserMappings?.Where(m => m.IsEnabled && MaySyncUser(m.SourceUserId)).ToList() ?? new List<UserMapping>();
+
+    public bool MaySyncUser(string? sourceUserId)
+    {
+        if (!IsStandardUser)
+        {
+            return true;
+        }
+
+        if (!Guid.TryParse(AuthenticatedUserId, out var self))
+        {
+            return true;
+        }
+
+        return Guid.TryParse(sourceUserId, out var source) && source == self;
+    }
 
     /// <summary>Makes a new entry key.</summary>
     /// <returns>A 32 character hex key.</returns>

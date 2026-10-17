@@ -5,23 +5,20 @@ Content syncing mirrors missing or updated media files from a source Jellyfin se
 ## Settings
 
 * **Enable Content Sync** turns content syncing on.
-* **Temp Download Path** sets the staging folder where files download before they move to the final location.
+* **Temporary Folder** sets the staging folder where files download before they move to the final location.
 * **Include Companion Files** also downloads external subtitle files with each media file. Other companions (NFO files, local artwork, external audio tracks) have no download route in the Jellyfin API and are skipped.
-* **Max Concurrent Downloads** limits how many files download at once.
-* **Max Download Speed** caps the download rate, where 0 means unlimited.
-* **Download New Content** chooses whether brand new items download automatically or wait for approval.
-* **Replace Existing Content** chooses whether changed items replace automatically or wait for approval.
-* **Delete Missing Content** chooses what happens to a local file once its item is gone from the source. Disabled keeps the file. Require Approval holds it as Pending Deletion until you approve it. Enabled deletes it on the next Sync Content run, but still asks first whenever the plugin cannot be sure the file should go.
-* **Detect Updated Files** requeues files whose size or date no longer matches the source.
-* **Enable Bandwidth Scheduling** uses an alternate download speed during a set window of hours.
-* **Scheduled Download Speed** sets the rate used during the scheduled hours.
-* **Minimum Free Disk Space** blocks downloads when free space falls below this many gigabytes.
+* **Downloads At Once** limits how many files download at once.
+* **Download Speed** sets the **Normal** rate, where 0 means unlimited.
+* **Approvals** sets an action for each kind of change: **New files** download automatically or wait for approval, **Changed files** replace automatically or wait, and **Removed files** what happens to a local file once its item is gone from the source. Disabled keeps the file. Require Approval holds it as Pending Deletion until you approve it. Enabled deletes it on the next Sync Content run, but still asks first whenever the plugin cannot be sure the file should go.
+* **Detect Updated Files** downloads a file again when its size on the source changes.
+* **Scheduled Speed** uses the **Scheduled** rate during the set **Hours**.
+* **Minimum Free Space** blocks downloads when free space falls below this many gigabytes.
 * **Enable Recycling Bin** moves deleted or replaced files to a recycling bin instead of removing them for good.
 * **Recycling Bin Path** sets the folder where soft deleted files are kept.
-* **Recycling Bin Retention** sets how many days files stay in the recycling bin before permanent removal.
+* **Keep For** sets how many days files stay in the recycling bin before permanent removal.
 * **Remove Empty Folders** deletes parent folders that become empty after a file is removed.
-* **Max Retry Count** sets how many times a failed download retries before it errors.
-* **Skip Items Watched by All Selected Users** skips items already watched by every selected user.
+* **Download Retries** sets how many times a failed download retries before it errors.
+* **Skip Items Everyone Watched** skips items already watched by every selected user.
 
 ## Collection Syncing
 
@@ -36,7 +33,7 @@ on:
 * Anyone with collection-management permission on the source can add or remove
   items from the collection in the normal Jellyfin UI, no plugin access
   needed. Removing an item removes it from the whitelist, and its local
-  copy waits for deletion approval unless **Delete Missing Content** is
+  copy waits for deletion approval unless **Removed files** is
   Disabled, since a membership change is not a removal from the source.
 * A collection can span libraries (movies + shows). Each mapping syncs only
   the members that live under its own source root, whitelist the same

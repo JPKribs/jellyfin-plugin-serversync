@@ -174,7 +174,7 @@ public static class HintProtocol
     public static IReadOnlyList<HintKind> AcceptedKinds(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        var kinds = new List<HintKind>(5);
+        var kinds = new List<HintKind>(6);
         if (config.EnableHistorySync)
         {
             kinds.Add(HintKind.History);
@@ -193,6 +193,11 @@ public static class HintProtocol
         if (config.EnableContentSync)
         {
             kinds.Add(HintKind.Content);
+        }
+
+        if (config.EnablePlaylistSync)
+        {
+            kinds.Add(HintKind.Playlists);
         }
 
         // User settings are never announced live: Jellyfin raises no event for policy and configuration
@@ -234,6 +239,25 @@ public static class HintProtocol
     /// <param name="itemId">The item id.</param>
     /// <returns>The key.</returns>
     public static string MetadataKey(Guid itemId) => itemId.ToString("N", CultureInfo.InvariantCulture);
+
+    public static string PlaylistKey(Guid rootId) => rootId.ToString("N", CultureInfo.InvariantCulture);
+
+    public const string PlaylistOriginal = "Playlist";
+
+    public const string PlaylistCopy = "PlaylistCopy";
+
+    public const string PlaylistDeleted = "PlaylistDeleted";
+
+    public const string PlaylistCopyDeleted = "PlaylistCopyDeleted";
+
+    public static string PlaylistItemType(bool copy, bool deleted)
+        => deleted ? (copy ? PlaylistCopyDeleted : PlaylistDeleted) : (copy ? PlaylistCopy : PlaylistOriginal);
+
+    public static bool IsPlaylistDeletion(string? itemType)
+        => itemType is PlaylistDeleted or PlaylistCopyDeleted;
+
+    public static bool IsPlaylistCopy(string? itemType)
+        => itemType is PlaylistCopy or PlaylistCopyDeleted;
 
     /// <summary>Builds the users key for a user.</summary>
     /// <param name="userId">The user id.</param>

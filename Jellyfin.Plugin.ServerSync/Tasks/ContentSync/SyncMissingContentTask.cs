@@ -142,6 +142,13 @@ public class SyncMissingContentTask
                 continue;
             }
 
+            if (server.CanDownload == false)
+            {
+                Logger.LogWarning("{Task}: leaving '{Server}' out of this run: the account its key belongs to may not download media there. Allow media downloading for that user on '{Server}', or use an administrator's API key", Name, source.Name, source.Name);
+                source.Dispose();
+                continue;
+            }
+
             if (!breaker.AllowOperation(out var circuitReason))
             {
                 Logger.LogWarning("{Task}: leaving '{Server}' out of this run: {Reason}", Name, source.Name, circuitReason);

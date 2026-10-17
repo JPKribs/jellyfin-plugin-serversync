@@ -37,7 +37,7 @@ export { createPaginatedTable, createSortableCardList, createChoiceGroup, genera
 var PLUGIN_ID = 'ebd650b5-6f4c-4ccb-b10d-23dffb3a7286';
 
 export function createServerSyncShared(view) {
-    var shared = baseCreateShared(view, PLUGIN_ID, 'ServerSync');
+    var shared = baseCreateShared(view, PLUGIN_ID, 'Sync');
 
     shared.SECRET_KEPT = SECRET_KEPT;
 
@@ -69,7 +69,7 @@ export function createServerSyncShared(view) {
                 maxHeight: maxHeight || 80
             };
             if (serverKey) params.serverKey = serverKey;
-            var url = ApiClient.getUrl('ServerSync/ImageProxy', params);
+            var url = ApiClient.getUrl('Sync/ImageProxy', params);
             ApiClient.fetch({ url: url, type: 'GET' }).then(function (response) {
                 if (!response || !response.ok) throw new Error('image fetch failed');
                 return response.blob();

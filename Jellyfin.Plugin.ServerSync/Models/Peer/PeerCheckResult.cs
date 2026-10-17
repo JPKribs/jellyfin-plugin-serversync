@@ -41,6 +41,12 @@ public class PeerCheckResult
     /// <summary>Gets or sets why the peer could not pair, when it could not.</summary>
     public string? PairingError { get; set; }
 
+    public string? PeerAccessLevel { get; set; }
+
+    public string? PeerAccessUser { get; set; }
+
+    public bool? PeerCanDownload { get; set; }
+
     /// <summary>Gets or sets a sentence for the page.</summary>
     public string Message { get; set; } = string.Empty;
 

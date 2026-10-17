@@ -45,6 +45,7 @@ public sealed class HintActivityLog
             HintKind.People => $"person {userName ?? key}",
             HintKind.Content => $"file {file ?? key}",
             HintKind.Users => $"user {userName ?? key}",
+            HintKind.Playlists => $"playlist {userName ?? key}",
             _ => key
         };
     }
@@ -70,6 +71,7 @@ public sealed class HintActivityLog
         HintKind.People => $"Person {name}",
         HintKind.Content => $"File {name}",
         HintKind.Users => $"User {name}",
+        HintKind.Playlists => $"Playlist {name}",
         _ => name
     };
 
@@ -127,7 +129,7 @@ public sealed class HintActivityLog
         var file = string.IsNullOrEmpty(itemPath) ? null : Path.GetFileNameWithoutExtension(itemPath);
         return kind switch
         {
-            HintKind.People or HintKind.Users => userName ?? key,
+            HintKind.People or HintKind.Users or HintKind.Playlists => userName ?? key,
             _ => file ?? key
         };
     }
@@ -245,9 +247,8 @@ public sealed class HintActivityLog
     {
         ArgumentNullException.ThrowIfNull(rows);
         var names = new System.Collections.Generic.List<string>();
-        foreach (var row in rows)
+        foreach (var name in rows.Select(row => Subject(row.Kind, row.ItemPath, row.UserName, row.Key)))
         {
-            var name = Subject(row.Kind, row.ItemPath, row.UserName, row.Key);
             if (!names.Contains(name, StringComparer.Ordinal))
             {
                 names.Add(name);

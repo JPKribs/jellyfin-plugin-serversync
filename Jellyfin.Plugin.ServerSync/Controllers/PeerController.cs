@@ -20,13 +20,13 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
 /// Endpoints another Server Sync installation calls to negotiate state with this server. Every route
-/// sits behind Jellyfin's own RequiresElevation policy, so the caller must present an API key or an
-/// administrator token that this server issued and validated. The plugin adds no authentication of
-/// its own, and ids in a request are always this server's ids, never paths or foreign ids.
+/// needs a signed in caller that the whitelist allows, and a standard user is held to its own data.
+/// Ids in a request are always this server's ids, never paths or foreign ids.
 /// </summary>
 [ApiController]
-[Authorize(Policy = "RequiresElevation")]
-[Route("ServerSync/Peer")]
+[Authorize]
+[Route("Sync/Peer")]
+[PeerCallerGuard]
 [Produces(MediaTypeNames.Application.Json)]
 public class PeerController : ControllerBase
 {
@@ -134,8 +134,11 @@ public class PeerController : ControllerBase
         response.Enabled = entry.IsEnabled && entry.IsConfigured;
         response.PullsFromYou = entry.Pulls;
         response.SendsToYou = entry.Pushes;
+        response.AccessLevel = string.IsNullOrEmpty(entry.AccessLevel) ? null : entry.AccessLevel;
+        response.AccessUser = string.IsNullOrEmpty(entry.AuthenticatedUser) ? null : entry.AuthenticatedUser;
+        response.CanDownload = entry.CanDownload;
 
-        // The caller says it is this entry. Anyone holding an administrator's key could say so, which
+        // The caller says it is this entry. Any whitelisted caller could say so, which
         // is why the secret goes to the entry's own address over this server's own key for it, not back
         // to the caller. Only the real server at that address receives it, and it is what every later
         // request must carry.
@@ -412,11 +415,25 @@ public class PeerController : ControllerBase
         return Ok(peer.Pulls ? PeerInterest.For(_configManager.Configuration, peer) : new PeerInterest { Revision = "none" });
     }
 
+    [HttpGet("Playlists")]
+    [RequireSameVersion]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<PeerPlaylistsResponse> Playlists([FromServices] Services.Playlists.PeerPlaylistReader reader, [FromQuery] Guid? id, [FromQuery] string? serverId)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        var entry = string.IsNullOrWhiteSpace(serverId) ? null : _configManager.Configuration.FindServerById(serverId);
+        var owners = entry?.GetEnabledUserMappings()
+            .Select(m => Guid.TryParse(m.LocalUserId, out var owner) ? owner : Guid.Empty)
+            .Where(owner => owner != Guid.Empty)
+            .ToList();
+        return Ok(reader.ReadAll(id, PeerCallerGuard.ScopedUser(HttpContext), owners));
+    }
+
     [HttpPost("Lookup")]
     [RequireSameVersion]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult<PeerLookupResponse> Lookup([FromBody] PeerLookupRequest request)
+    public ActionResult<PeerLookupResponse> Lookup([FromBody] PeerLookupRequest request, [FromServices] MediaBrowser.Controller.Library.IUserManager userManager, [FromServices] MediaBrowser.Controller.Library.ILibraryManager libraryManager)
     {
         if (request is null || (string.IsNullOrWhiteSpace(request.Path) && string.IsNullOrWhiteSpace(request.Name) && request.ProviderIds is not { Count: > 0 } && request.SeriesProviderIds is not { Count: > 0 }))
         {
@@ -429,7 +446,18 @@ public class PeerController : ControllerBase
             return BadRequest("The Path, Name, or ItemType is too long");
         }
 
-        return Ok(_lookup.Find(request));
+        var found = _lookup.Find(request);
+        if (found.Found
+            && PeerCallerGuard.ScopedUser(HttpContext) is { } scoped
+            && (userManager.GetUserById(scoped) is not { } user
+                || !Guid.TryParse(found.ItemId, out var itemId)
+                || libraryManager.GetItemById(itemId) is not { } item
+                || !item.IsVisible(user)))
+        {
+            return Ok(new PeerLookupResponse());
+        }
+
+        return Ok(found);
     }
 
     /// <summary>Returns the versions this server holds for a batch of its own keys. Keys with no version are left out.</summary>
@@ -451,7 +479,19 @@ public class PeerController : ControllerBase
             return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} keys per request");
         }
 
-        return Ok(new VersionsResponse { Items = _versions.GetMany(request.Kind, request.Keys).ToList() });
+        var keys = request.Keys;
+        if (PeerCallerGuard.ScopedUser(HttpContext) is { } scoped)
+        {
+            var own = scoped.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+            keys = request.Kind switch
+            {
+                HintKind.History => keys.Where(k => HintProtocol.TryParseHistoryKey(k, out var userId, out _) && userId == scoped).ToList(),
+                HintKind.Users => keys.Where(k => string.Equals(k, own, StringComparison.OrdinalIgnoreCase)).ToList(),
+                _ => keys
+            };
+        }
+
+        return Ok(new VersionsResponse { Items = _versions.GetMany(request.Kind, keys).ToList() });
     }
 
     /// <summary>
@@ -478,7 +518,7 @@ public class PeerController : ControllerBase
         }
 
         // A sender this server lists is recorded against its own rows, so it has to prove it is that
-        // entry. A sender this server does not list negotiates as any administrator may, and nothing is
+        // entry. A sender this server does not list negotiates as any whitelisted caller may, and nothing is
         // recorded against anyone's row.
         if (!string.IsNullOrWhiteSpace(request.SenderServerId)
             && _configManager.Configuration.FindServerById(request.SenderServerId) is not null)
@@ -490,6 +530,22 @@ public class PeerController : ControllerBase
             }
         }
 
-        return Ok(_history.Negotiate(request));
+        if (PeerCallerGuard.ScopedUser(HttpContext) is not { } scoped)
+        {
+            return Ok(_history.Negotiate(request));
+        }
+
+        var all = request.Items;
+        request.Items = all.Where(e => Guid.TryParse(e.UserId, out var id) && id == scoped).ToList();
+        var answered = new Queue<PeerHistoryResult>(_history.Negotiate(request).Items);
+        var response = new PeerHistoryResponse();
+        foreach (var entry in all)
+        {
+            response.Items.Add(Guid.TryParse(entry.UserId, out var id) && id == scoped && answered.Count > 0
+                ? answered.Dequeue()
+                : new PeerHistoryResult { UserId = entry.UserId, ItemId = entry.ItemId, Outcome = PeerHistoryOutcome.Failed, Reason = "a standard user may only negotiate its own history" });
+        }
+
+        return Ok(response);
     }
 }

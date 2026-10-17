@@ -16,8 +16,8 @@ public class ApplyGuardTests
         var guard = new ApplyGuard();
         Assert.False(guard.IsApplying("k"));
 
-        var outer = guard.Enter("k");
-        var inner = guard.Enter("k");
+        using var outer = guard.Enter("k");
+        using var inner = guard.Enter("k");
         Assert.True(guard.IsApplying("k"));
         inner.Dispose();
         Assert.True(guard.IsApplying("k"));

@@ -12,7 +12,8 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("ServerSync/Peer")]
+[Route("Sync/Peer")]
+[PeerCallerGuard]
 [Produces(MediaTypeNames.Application.Json)]
 public class PeerPairController : ControllerBase
 {

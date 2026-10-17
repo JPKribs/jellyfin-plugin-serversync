@@ -13,6 +13,7 @@ using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -106,14 +107,17 @@ public class SourceServerClient : IDisposable
             try
             {
                 var info = await client.System.Info.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-                var isAdministrator = await IsAdministratorAsync(client, cancellationToken).ConfigureAwait(false);
+                var access = await ReadAccessAsync(client, cancellationToken).ConfigureAwait(false);
                 return new ConnectionTestResult
                 {
                     Success = true,
                     ServerName = info?.ServerName,
                     ServerId = info?.Id,
-                    IsAdministrator = isAdministrator,
-                    Message = isAdministrator ? "Connection successful" : "Connection successful, with a standard user's access"
+                    IsAdministrator = access.IsAdministrator,
+                    UserId = access.UserId,
+                    UserName = access.UserName,
+                    CanDownload = access.CanDownload,
+                    Message = access.IsAdministrator ? "Connection successful" : "Connection successful, with a standard user's access"
                 };
             }
             catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode == 403)
@@ -266,6 +270,7 @@ public class SourceServerClient : IDisposable
             string? authenticatedUsername = null;
             string? authenticatedUserId = null;
             bool? isAdministrator = null;
+            bool? canDownload = null;
             if (authResponse.RootElement.TryGetProperty("User", out var userProp))
             {
                 if (userProp.TryGetProperty("Name", out var nameProp))
@@ -278,11 +283,19 @@ public class SourceServerClient : IDisposable
                     authenticatedUserId = idProp.GetString();
                 }
 
-                if (userProp.TryGetProperty("Policy", out var policyProp)
-                    && policyProp.TryGetProperty("IsAdministrator", out var adminProp)
-                    && adminProp.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                if (userProp.TryGetProperty("Policy", out var policyProp))
                 {
-                    isAdministrator = adminProp.GetBoolean();
+                    if (policyProp.TryGetProperty("IsAdministrator", out var adminProp)
+                        && adminProp.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                    {
+                        isAdministrator = adminProp.GetBoolean();
+                    }
+
+                    if (policyProp.TryGetProperty("EnableContentDownloading", out var downloadProp)
+                        && downloadProp.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                    {
+                        canDownload = downloadProp.GetBoolean();
+                    }
                 }
             }
 
@@ -293,6 +306,7 @@ public class SourceServerClient : IDisposable
                 Username = authenticatedUsername ?? username,
                 UserId = authenticatedUserId,
                 IsAdministrator = isAdministrator,
+                CanDownload = canDownload,
                 ServerId = serverName
             };
         }
@@ -422,7 +436,7 @@ public class SourceServerClient : IDisposable
             }
         }
 
-        _logger.LogInformation("Fetched {Count} libraries via user views fallback for user {UserId}", libraries.Count, userId);
+        _logger.LogInformation("Fetched {Count} libraries via user views fallback for user {UserId}", libraries.Count, FormatUtilities.SanitizeForLog(userId));
         return libraries;
     }
 
@@ -505,7 +519,7 @@ public class SourceServerClient : IDisposable
             };
         }
 
-        _logger.LogWarning("Failed to parse user from /Users/{UserId} response", userId);
+        _logger.LogWarning("Failed to parse user from /Users/{UserId} response", FormatUtilities.SanitizeForLog(userId));
         return new List<UserDto>();
     }
 
@@ -845,7 +859,7 @@ public class SourceServerClient : IDisposable
     /// mid-scan inconsistency, a truncated member list would mark the
     /// missing items as removed and schedule their files for deletion.
     /// </summary>
-    private async Task<List<BaseItemDto>> GetPlaylistItemsAsync(Guid playlistId, Guid? userId, CancellationToken cancellationToken)
+    private async Task<List<BaseItemDto>> GetPlaylistItemsAsync(Guid playlistId, Guid? userId, CancellationToken cancellationToken, bool distinct = true)
     {
         var members = new List<BaseItemDto>();
         var memberIds = new HashSet<Guid>();
@@ -900,7 +914,7 @@ public class SourceServerClient : IDisposable
                 // consistency check below uses the RAW count (which includes
                 // those legitimate duplicates) against TotalRecordCount, so a
                 // duplicate never looks like a shifted catalog.
-                if (item.Id.HasValue && memberIds.Add(item.Id.Value))
+                if (item.Id.HasValue && (!distinct || memberIds.Add(item.Id.Value)))
                 {
                     members.Add(item);
                 }
@@ -1845,12 +1859,9 @@ public class SourceServerClient : IDisposable
                 throw new InvalidOperationException($"No answer listing items changed for user {userId} in library {libraryId}");
             }
 
-            foreach (var item in page.Items)
+            foreach (var id in page.Items.Where(item => item.Id.HasValue).Select(item => item.Id!.Value))
             {
-                if (item.Id.HasValue)
-                {
-                    ids.Add(item.Id.Value);
-                }
+                ids.Add(id);
             }
 
             if (page.Items.Count < pageSize || (page.TotalRecordCount.HasValue && startIndex + page.Items.Count >= page.TotalRecordCount.Value))
@@ -1952,12 +1963,9 @@ public class SourceServerClient : IDisposable
                 break;
             }
 
-            foreach (var item in page.Items)
+            foreach (var id in page.Items.Where(item => item.Id.HasValue).Select(item => item.Id!.Value))
             {
-                if (item.Id.HasValue)
-                {
-                    ids.Add(item.Id.Value);
-                }
+                ids.Add(id);
             }
 
             // Bound the loop with TotalRecordCount when the server provides it,
@@ -2077,12 +2085,9 @@ public class SourceServerClient : IDisposable
         }
 
         var builder = new System.Text.StringBuilder(name.Length);
-        foreach (var c in name)
+        foreach (var c in name.Where(ch => ch >= ' ' && ch <= '~' && ch != '"' && ch != '\\'))
         {
-            if (c >= ' ' && c <= '~' && c != '"' && c != '\\')
-            {
-                builder.Append(c);
-            }
+            builder.Append(c);
         }
 
         var safe = builder.ToString().Trim();
@@ -2092,15 +2097,24 @@ public class SourceServerClient : IDisposable
     // Any signed in user may read the system info, so that call says nothing about elevation. The
     // current user's own policy does. An API key has no user behind it and the call fails, and an API
     // key is always elevated, so a failure there means administrator. Callers use the answer for the
-    // access label and to explain a limited link, while the peer's own endpoints still enforce
-    // elevation, so guessing administrator on failure grants nothing. A failure that is not the
+    // access label and to explain a limited link, while the peer's own whitelist still decides
+    // access, so guessing administrator on failure grants nothing. A failure that is not the
     // expected API key answer is logged so a wrong label can be traced.
-    private async Task<bool> IsAdministratorAsync(JellyfinApiClient client, CancellationToken cancellationToken)
+    private async Task<(bool IsAdministrator, string? UserId, string? UserName, bool? CanDownload)> ReadAccessAsync(JellyfinApiClient client, CancellationToken cancellationToken)
     {
         try
         {
             var me = await client.Users.Me.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-            return me?.Policy?.IsAdministrator ?? true;
+            if (me is null)
+            {
+                return (true, null, null, null);
+            }
+
+            return (
+                me.Policy?.IsAdministrator ?? true,
+                me.Id?.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
+                me.Name,
+                me.Policy?.EnableContentDownloading);
         }
         catch (OperationCanceledException)
         {
@@ -2111,12 +2125,12 @@ public class SourceServerClient : IDisposable
             // An API key has no user, so the server refuses this call. That is the expected answer for
             // an API key and says the token is elevated.
             _logger.LogDebug(ex, "Reading the current user returned {Status}, treating the token as an API key with administrator rights", ex.ResponseStatusCode);
-            return true;
+            return (true, null, null, true);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not read the current user's policy, reporting administrator access without confirming it: {Reason}", ex.Message);
-            return true;
+            return (true, null, null, null);
         }
     }
 
@@ -2138,7 +2152,7 @@ public class SourceServerClient : IDisposable
     /// <returns>The peer's capabilities, or null when the source has no peer endpoint.</returns>
     public async Task<PeerCapabilities?> GetPeerCapabilitiesAsync(CancellationToken cancellationToken = default)
     {
-        var (status, parsed, body) = await PeerRequestAsync<PeerCapabilities>(HttpMethod.Get, "/ServerSync/Peer/Capabilities", null, cancellationToken).ConfigureAwait(false);
+        var (status, parsed, body) = await PeerRequestAsync<PeerCapabilities>(HttpMethod.Get, "/Sync/Peer/Capabilities", null, cancellationToken).ConfigureAwait(false);
         if (status == 404)
         {
             return null;
@@ -2152,6 +2166,98 @@ public class SourceServerClient : IDisposable
         return parsed;
     }
 
+    public async Task<(string Code, string Message)> CheckSyncAccessAsync(CancellationToken cancellationToken = default)
+    {
+        int status;
+        string? body;
+        try
+        {
+            (status, _, body) = await PeerRequestAsync<PeerCapabilities>(HttpMethod.Get, "/Sync/Peer/Capabilities", null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return ("Unknown", "Could not reach Server Sync there: " + ex.Message);
+        }
+
+        if (status is >= 200 and < 300)
+        {
+            return ("Allowed", "This key may use the sync endpoints there");
+        }
+
+        if (status == 404)
+        {
+            return ("NotInstalled", "Server Sync is not installed there");
+        }
+
+        if (status == 426)
+        {
+            return ("VersionMismatch", body ?? "Server Sync there is a different version");
+        }
+
+        if (status == 403 && !string.IsNullOrWhiteSpace(body))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && root.TryGetProperty("Code", out var code)
+                    && root.TryGetProperty("Message", out var message))
+                {
+                    return (code.GetString() ?? "Refused", message.GetString() ?? "Refused");
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+            }
+        }
+
+        return ("Refused", $"Server Sync there refused this key ({status})");
+    }
+
+    public async Task<PeerPlaylistsResponse?> GetPeerPlaylistsAsync(string callerServerId, Guid? onlyId = null, CancellationToken cancellationToken = default)
+    {
+        var path = "/Sync/Peer/Playlists?serverId=" + Uri.EscapeDataString(callerServerId ?? string.Empty)
+            + (onlyId is null ? string.Empty : "&id=" + onlyId.Value.ToString("N", System.Globalization.CultureInfo.InvariantCulture));
+        var (status, parsed, body) = await PeerRequestAsync<PeerPlaylistsResponse>(HttpMethod.Get, path, null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        if (status is 401 or 403 or 404 or 426)
+        {
+            _logger.LogDebug("The peer's Server Sync did not list its playlists ({Status}): {Body}", status, body);
+            return null;
+        }
+
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException($"The peer answered {status} to the playlists request: {body}", null, (System.Net.HttpStatusCode)status);
+        }
+
+        return parsed ?? new PeerPlaylistsResponse();
+    }
+
+    public async Task<List<BaseItemDto>> GetVisiblePlaylistsAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var client = GetApiClient();
+        var result = await client.Items.GetAsync(
+            config =>
+            {
+                config.QueryParameters.UserId = userId;
+                config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Playlist };
+                config.QueryParameters.Recursive = true;
+                config.QueryParameters.Fields = new[] { ItemFields.ProviderIds };
+                config.QueryParameters.SortBy = new[] { ItemSortBy.SortName };
+                config.QueryParameters.SortOrder = new[] { SortOrder.Ascending };
+            },
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return result?.Items?.ToList() ?? throw new InvalidOperationException("The source returned no playlist list");
+    }
+
+    public Task<List<BaseItemDto>> GetPlaylistEntriesAsync(Guid playlistId, Guid userId, CancellationToken cancellationToken = default)
+        => GetPlaylistItemsAsync(playlistId, userId, cancellationToken, distinct: false);
+
     /// <summary>
     /// Sends merged history states to the source's Server Sync plugin. The source writes each one only
     /// if its live state still matches what this server expected, and reports the outcome per entry.
@@ -2162,7 +2268,7 @@ public class SourceServerClient : IDisposable
     public async Task<PeerHistoryResponse> NegotiateHistoryAsync(PeerHistoryRequest peerRequest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(peerRequest);
-        var (status, parsed, body) = await PeerRequestAsync<PeerHistoryResponse>(HttpMethod.Post, "/ServerSync/Peer/History", peerRequest, cancellationToken).ConfigureAwait(false);
+        var (status, parsed, body) = await PeerRequestAsync<PeerHistoryResponse>(HttpMethod.Post, "/Sync/Peer/History", peerRequest, cancellationToken).ConfigureAwait(false);
         if (status is < 200 or >= 300)
         {
             throw new Peer.PeerRefusedException((System.Net.HttpStatusCode)status, $"Source server refused the history negotiation with {status}: {body}");
@@ -2181,7 +2287,7 @@ public class SourceServerClient : IDisposable
     public async Task<(int StatusCode, Models.Queue.QueueResponse? Response, string? Body)> SendHintsAsync(Models.Queue.QueueRequest queueRequest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(queueRequest);
-        var (status, parsed, body) = await PeerRequestAsync<Models.Queue.QueueResponse>(HttpMethod.Post, "/ServerSync/Peer/Queue", queueRequest, cancellationToken).ConfigureAwait(false);
+        var (status, parsed, body) = await PeerRequestAsync<Models.Queue.QueueResponse>(HttpMethod.Post, "/Sync/Peer/Queue", queueRequest, cancellationToken).ConfigureAwait(false);
         return status == 200 ? (status, parsed ?? new Models.Queue.QueueResponse(), null) : (status, null, body);
     }
 
@@ -2191,7 +2297,7 @@ public class SourceServerClient : IDisposable
     /// <returns>The listing, or null when the peer has no Server Sync that can answer.</returns>
     public async Task<Models.Peer.PeerLinkResponse?> GetPeerLinkAsync(string thisServerId, CancellationToken cancellationToken = default)
     {
-        var (_, parsed, _) = await PeerRequestAsync<Models.Peer.PeerLinkResponse>(HttpMethod.Get, "/ServerSync/Peer/Link?serverId=" + Uri.EscapeDataString(thisServerId ?? string.Empty), null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        var (_, parsed, _) = await PeerRequestAsync<Models.Peer.PeerLinkResponse>(HttpMethod.Get, "/Sync/Peer/Link?serverId=" + Uri.EscapeDataString(thisServerId ?? string.Empty), null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         return parsed;
     }
 
@@ -2202,7 +2308,7 @@ public class SourceServerClient : IDisposable
     public async Task<(int StatusCode, string? Body)> PairAsync(Models.Peer.PairRequest pairRequest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(pairRequest);
-        var (status, _, body) = await PeerRequestAsync<object>(HttpMethod.Post, "/ServerSync/Peer/Pair", pairRequest, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        var (status, _, body) = await PeerRequestAsync<object>(HttpMethod.Post, "/Sync/Peer/Pair", pairRequest, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         return (status, body);
     }
 
@@ -2235,7 +2341,7 @@ public class SourceServerClient : IDisposable
     public async Task<Dictionary<string, Models.Queue.ObjectVersion>?> GetPeerVersionsAsync(Models.Queue.VersionsRequest versionsRequest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(versionsRequest);
-        var (status, parsed, _) = await PeerRequestAsync<Models.Queue.VersionsResponse>(HttpMethod.Post, "/ServerSync/Peer/Versions", versionsRequest, cancellationToken).ConfigureAwait(false);
+        var (status, parsed, _) = await PeerRequestAsync<Models.Queue.VersionsResponse>(HttpMethod.Post, "/Sync/Peer/Versions", versionsRequest, cancellationToken).ConfigureAwait(false);
         if (status is < 200 or >= 300)
         {
             return null;
@@ -2257,14 +2363,14 @@ public class SourceServerClient : IDisposable
     public async Task<bool> CompleteHintsAsync(Models.Queue.CompleteRequest completeRequest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(completeRequest);
-        var (status, _, _) = await PeerRequestAsync<object>(HttpMethod.Post, "/ServerSync/Peer/Complete", completeRequest, cancellationToken).ConfigureAwait(false);
+        var (status, _, _) = await PeerRequestAsync<object>(HttpMethod.Post, "/Sync/Peer/Complete", completeRequest, cancellationToken).ConfigureAwait(false);
         return status is >= 200 and < 300;
     }
 
     public async Task<PeerInterest?> GetPeerInterestAsync(string thisServerId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(thisServerId);
-        var (status, parsed, body) = await PeerRequestAsync<PeerInterest>(HttpMethod.Get, "/ServerSync/Peer/Interest?serverId=" + Uri.EscapeDataString(thisServerId), null, cancellationToken).ConfigureAwait(false);
+        var (status, parsed, body) = await PeerRequestAsync<PeerInterest>(HttpMethod.Get, "/Sync/Peer/Interest?serverId=" + Uri.EscapeDataString(thisServerId), null, cancellationToken).ConfigureAwait(false);
         if (status is < 200 or >= 300)
         {
             throw new HttpRequestException($"The peer answered {status} to the interest request: {body}", null, (System.Net.HttpStatusCode)status);
@@ -2276,7 +2382,7 @@ public class SourceServerClient : IDisposable
     public async Task<PeerLookupResponse?> LookupPeerItemAsync(PeerLookupRequest lookupRequest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(lookupRequest);
-        var (status, parsed, body) = await PeerRequestAsync<PeerLookupResponse>(HttpMethod.Post, "/ServerSync/Peer/Lookup", lookupRequest, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        var (status, parsed, body) = await PeerRequestAsync<PeerLookupResponse>(HttpMethod.Post, "/Sync/Peer/Lookup", lookupRequest, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         if (status is < 200 or >= 300)
         {
             throw new HttpRequestException($"The peer answered {status} to the lookup: {body}", null, (System.Net.HttpStatusCode)status);
@@ -2307,7 +2413,7 @@ public class SourceServerClient : IDisposable
     public async Task<Models.Queue.QueueStatusResponse?> GetPeerQueueStatusAsync(string fromServerId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(fromServerId);
-        var (_, parsed, _) = await PeerRequestAsync<Models.Queue.QueueStatusResponse>(HttpMethod.Get, "/ServerSync/Peer/Status?serverId=" + Uri.EscapeDataString(fromServerId), null, cancellationToken).ConfigureAwait(false);
+        var (_, parsed, _) = await PeerRequestAsync<Models.Queue.QueueStatusResponse>(HttpMethod.Get, "/Sync/Peer/Status?serverId=" + Uri.EscapeDataString(fromServerId), null, cancellationToken).ConfigureAwait(false);
         return parsed;
     }
 
@@ -2336,7 +2442,7 @@ public class SourceServerClient : IDisposable
 
         // The link call makes the peer issue a secret, or note that it cannot, and either way it
         // decides afresh on the next request.
-        _logger.LogInformation("The peer at {Url} does not hold a pairing for this server, pairing now", _serverUrl);
+        _logger.LogInformation("The peer at {Url} does not hold a pairing for this server, pairing now", FormatUtilities.SanitizeForLog(_serverUrl));
         var link = await GetPeerLinkAsync(Pairing.ThisServerId, cancellationToken).ConfigureAwait(false);
         if (link is null)
         {

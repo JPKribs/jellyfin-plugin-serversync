@@ -76,7 +76,7 @@ public class SyncMissingHistoryTask
     // Servers that cannot negotiate this run, by entry key, with the reason their rows will carry.
     private readonly Dictionary<string, string> _negotiationBlocked = new(StringComparer.OrdinalIgnoreCase);
 
-    // Servers whose key is not an administrator's. Their Server Sync endpoints refuse it, so history
+    // Servers whose Server Sync refuses this server's key. History
     // from them is applied one way, the way it was before negotiation existed, and no base is recorded.
     private readonly HashSet<string> _oneWay = new(StringComparer.OrdinalIgnoreCase);
 
@@ -142,7 +142,7 @@ public class SyncMissingHistoryTask
             catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             {
                 _oneWay.Add(source.Key);
-                Logger.LogWarning("{Task}: the key for '{Server}' is not an administrator's, so its Server Sync cannot be asked to negotiate. History from it is applied one way", Name, source.Name);
+                Logger.LogWarning("{Task}: Server Sync on '{Server}' refused this server's key ({Reason}), so it cannot be asked to negotiate. History from it is applied one way. Add this server or its user to the whitelist there", Name, source.Name, ex.Message);
                 continue;
             }
             catch (Exception ex)
@@ -344,9 +344,8 @@ public class SyncMissingHistoryTask
         }
 
         // Groups never mix servers: each batch is offered to the server its rows came from.
-        foreach (var byServer in items.GroupBy(i => i.ServerKey ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+        foreach (var rows in items.GroupBy(i => i.ServerKey ?? string.Empty, StringComparer.OrdinalIgnoreCase).Select(byServer => byServer.ToList()))
         {
-            var rows = byServer.ToList();
             for (var offset = 0; offset < rows.Count; offset += PeerHistoryNegotiator.MaxEntriesPerRequest)
             {
                 var size = Math.Min(PeerHistoryNegotiator.MaxEntriesPerRequest, rows.Count - offset);

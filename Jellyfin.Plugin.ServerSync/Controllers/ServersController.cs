@@ -2,6 +2,7 @@ using System;
 using System.Net.Mime;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
+using JPKribs.Jellyfin.Base;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -16,7 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 /// </summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
-[Route("ServerSync/Servers")]
+[Route("Sync/Servers")]
 [Produces(MediaTypeNames.Application.Json)]
 public class ServersController : ControllerBase
 {
@@ -90,7 +91,7 @@ public class ServersController : ControllerBase
         _pairings.Remove(key);
         _logger.LogInformation(
             "Forgot server {Key}: {Content} content, {History} history, {Metadata} metadata, {People} people, {Users} user row(s), {Hints} queued hint(s)",
-            key, removed.Content, removed.History, removed.Metadata, removed.People, removed.Users, removed.Hints);
+            FormatUtilities.SanitizeForLog(key), removed.Content, removed.History, removed.Metadata, removed.People, removed.Users, removed.Hints);
         return Ok(removed);
     }
 }

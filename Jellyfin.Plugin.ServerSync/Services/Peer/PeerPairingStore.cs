@@ -10,8 +10,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
 /// <summary>
 /// Holds the pairing secrets that tie a peer's requests to the server entry they claim to come from.
-/// Every key a peer holds for this server is an administrator's key, so the key alone cannot say which
-/// peer is calling. A pairing secret can: this server issues one to a peer over its own connection to
+/// A key alone cannot say which peer is calling. A pairing secret can: this server issues one to a peer over its own connection to
 /// that peer, and the peer presents it on every request that names it as the sender.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]

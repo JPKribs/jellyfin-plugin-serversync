@@ -374,13 +374,10 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                 }
             }
 
-            foreach (var kvp in sourceIds)
+            foreach (var kvp in sourceIds.Where(id => localPerson.GetProviderId(id.Key) != id.Value))
             {
-                if (localPerson.GetProviderId(kvp.Key) != kvp.Value)
-                {
-                    localPerson.SetProviderId(kvp.Key, kvp.Value);
-                    hasChanges = true;
-                }
+                localPerson.SetProviderId(kvp.Key, kvp.Value);
+                hasChanges = true;
             }
         }
 
@@ -442,39 +439,36 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
         }
 
-        if (work.Count == 0)
+        // Fall back to the cached ImageTags-derived manifest. Type and
+        // index are all the download endpoint needs.
+        if (work.Count == 0 && !string.IsNullOrEmpty(record.Images.Source))
         {
-            // Fall back to the cached ImageTags-derived manifest. Type and
-            // index are all the download endpoint needs.
-            if (!string.IsNullOrEmpty(record.Images.Source))
+            try
             {
-                try
+                var manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(record.Images.Source);
+                if (manifest != null)
                 {
-                    var manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(record.Images.Source);
-                    if (manifest != null)
+                    foreach (var (type, list) in manifest)
                     {
-                        foreach (var (type, list) in manifest)
+                        if (string.IsNullOrEmpty(type) || list == null) continue;
+                        foreach (var entry in list)
                         {
-                            if (string.IsNullOrEmpty(type) || list == null) continue;
-                            foreach (var entry in list)
-                            {
-                                work.Add((type, entry.ImageIndex));
-                            }
-                        }
-
-                        if (work.Count > 0)
-                        {
-                            fellBack = true;
-                            Logger.LogInformation(
-                                "Image apply for {PersonName}: /Items/{Id}/Images returned no entries. Falling back to cached ImageTags manifest with {Count} type(s)",
-                                record.PersonName, sourcePersonId, work.Count);
+                            work.Add((type, entry.ImageIndex));
                         }
                     }
+
+                    if (work.Count > 0)
+                    {
+                        fellBack = true;
+                        Logger.LogInformation(
+                            "Image apply for {PersonName}: /Items/{Id}/Images returned no entries. Falling back to cached ImageTags manifest with {Count} type(s)",
+                            record.PersonName, sourcePersonId, work.Count);
+                    }
                 }
-                catch (JsonException ex)
-                {
-                    Logger.LogWarning(ex, "Could not parse cached image manifest for {PersonName}. Falling back to no-op", record.PersonName);
-                }
+            }
+            catch (JsonException ex)
+            {
+                Logger.LogWarning(ex, "Could not parse cached image manifest for {PersonName}. Falling back to no-op", record.PersonName);
             }
         }
 

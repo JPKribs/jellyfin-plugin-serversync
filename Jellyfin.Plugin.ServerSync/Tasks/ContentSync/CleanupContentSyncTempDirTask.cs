@@ -86,9 +86,8 @@ public class CleanupTempFilesTask : IScheduledTask
             try
             {
                 var files = new List<string>(Directory.GetFiles(tempPath));
-                foreach (var subdirectory in ImageTempSubdirectories)
+                foreach (var imageDir in ImageTempSubdirectories.Select(subdirectory => Path.Combine(tempPath, subdirectory)))
                 {
-                    var imageDir = Path.Combine(tempPath, subdirectory);
                     if (Directory.Exists(imageDir))
                     {
                         files.AddRange(Directory.GetFiles(imageDir));

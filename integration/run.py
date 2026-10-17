@@ -420,6 +420,11 @@ def plugin_config(api):
     return api.get(f"/Plugins/{PLUGIN_GUID}/Configuration")
 
 
+# API keys may call the peer routes from anywhere, so the host and servers that do not list each other can.
+def open_grants(creds, name):
+    return [{"UserId": "apikey", "UserName": "API keys", "Locations": []},
+            {"UserId": creds["servers"][name]["userId"], "UserName": "admin", "Locations": []}]
+
 # Every server in the pool once the scenarios run, so a configuration change on one can be announced to the rest.
 POOL_APIS = {}
 
@@ -430,7 +435,7 @@ def save_plugin_config(api, config):
     # that, so every server is asked to re-read now, the way Run Now on the dashboard does.
     for other in POOL_APIS.values():
         try:
-            other.post("/ServerSync/Hints/Run", None, expect=204)
+            other.post("/Sync/Hints/Run", None, expect=204)
         except Exception:
             pass
 
@@ -484,6 +489,7 @@ def configure_server(creds, api, local, order, modes=None, **flags):
         "EnablePeopleSync": False, "EnableUserSync": False,
         # Changes are sent once an object has gone untouched this long. The pool keeps it short.
         "HintDebounceSeconds": 5,
+        "PeerCallerGrants": open_grants(creds, local),
     })
     config.update(flags)
     save_plugin_config(api, config)
@@ -504,6 +510,7 @@ def configure_local(creds, api, order, **flags):
         "EnableContentSync": True, "DownloadNewContentMode": "Enabled", "ReplaceExistingContentMode": "Enabled",
         "DeleteMissingContentMode": "Disabled", "MinimumFreeDiskSpaceGb": 0,
         "EnableMetadataSync": False, "EnableHistorySync": False, "EnablePeopleSync": False, "EnableUserSync": False,
+        "PeerCallerGrants": open_grants(creds, "local"),
     })
     config.update(flags)
     save_plugin_config(api, config)
@@ -529,7 +536,7 @@ def run_task(api, key, timeout=300):
 
 
 def content_rows(api):
-    rows = api.get("/ServerSync/Items?take=200")["Items"]
+    rows = api.get("/Sync/Items?take=200")["Items"]
     return {os.path.basename(r["SourcePath"]): r for r in rows}
 
 
@@ -689,7 +696,7 @@ def scenario_user_sync(creds, apis):
 
 
 def hints(api):
-    overview = api.get("/ServerSync/Hints")
+    overview = api.get("/Sync/Hints")
     rows = overview.get("Inbound") or []
     overview["Parked"] = [r for r in rows if r.get("Parked")]
     overview["Inbound"] = [r for r in rows if not r.get("Parked")]
@@ -762,6 +769,132 @@ def scenario_hints_three_servers(creds, apis):
     for n in ("source-a", "source-b"):
         configure_server(creds, apis[n], n, [])
     configure_local(creds, apis["local"], ["source-a", "source-b"])
+
+
+def playlists_of(api, user_id, name):
+    items = api.get(f"/Items?userId={user_id}&IncludeItemTypes=Playlist&Recursive=true")["Items"]
+    return [i for i in items if i["Name"] == name]
+
+
+def playlist_paths(api, user_id, playlist_id):
+    items = api.get(f"/Playlists/{playlist_id}/Items?userId={user_id}&Fields=Path")["Items"]
+    return [i.get("Path") for i in items]
+
+
+def scenario_playlist_hints(creds, apis):
+    """A playlist made, edited, or deleted on one server of a Sync pair reaches the other through hints alone."""
+    names = ["source-a", "local"]
+    for n in names:
+        peers = [p for p in names if p != n]
+        configure_server(creds, apis[n], n, peers, {p: "Sync" for p in peers}, EnablePlaylistSync=True)
+    admin = {n: creds["servers"][n]["userId"] for n in names}
+    title = "IT Hint Playlist"
+
+    def queues_empty():
+        return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
+
+    for n in names:
+        for p in playlists_of(apis[n], admin[n], title):
+            apis[n].call("DELETE", f"/Items/{p['Id']}", expect=204)
+    wait_until(queues_empty, 60, "the pool is quiet before the test")
+    for n in names:
+        for p in playlists_of(apis[n], admin[n], title):
+            apis[n].call("DELETE", f"/Items/{p['Id']}", expect=204)
+
+    ids = [movie_id(apis["local"], "Only A (2021)"), movie_id(apis["local"], "Shared Movie")]
+    _, made = apis["local"].post("/Playlists", {"Name": title, "Ids": ids, "UserId": admin["local"], "MediaType": "Video"}, expect=200)
+    local_paths = playlist_paths(apis["local"], admin["local"], made["Id"])
+
+    def mirrored_paths():
+        found = playlists_of(apis["source-a"], admin["source-a"], title)
+        return playlist_paths(apis["source-a"], admin["source-a"], found[0]["Id"]) if len(found) == 1 else None
+
+    wait_until(lambda: mirrored_paths() == local_paths, 60, "a playlist made on local reached source-a with its items in order")
+    wait_until(queues_empty, 60, "every queue drained after the playlist was made")
+
+    copy = playlists_of(apis["source-a"], admin["source-a"], title)[0]
+    entries = apis["source-a"].get(f"/Playlists/{copy['Id']}/Items?userId={admin['source-a']}")["Items"]
+    apis["source-a"].call("DELETE", f"/Playlists/{copy['Id']}/Items?entryIds={entries[0]['PlaylistItemId']}", expect=204)
+    wait_until(lambda: playlist_paths(apis["local"], admin["local"], made["Id"]) == local_paths[1:], 60, "removing an item on source-a removed it on local")
+    wait_until(queues_empty, 60, "every queue drained after the edit")
+
+    time.sleep(12)
+    expect(queues_empty(), "no playlist hint was raised by an apply, so the pair is loop free")
+    expect(len(playlists_of(apis["local"], admin["local"], title)) == 1, "local still holds exactly one copy")
+
+    apis["local"].call("DELETE", f"/Items/{made['Id']}", expect=204)
+    wait_until(lambda: not playlists_of(apis["source-a"], admin["source-a"], title), 60, "deleting the playlist on local deleted it on source-a")
+    wait_until(queues_empty, 60, "every queue drained after the deletion")
+
+    configure_server(creds, apis["source-a"], "source-a", [])
+    configure_local(creds, apis["local"], ["source-a", "source-b"])
+
+
+def scenario_playlist_pull(creds, apis):
+    """On Pull the other server's playlist always wins: a copy is made, follows edits, and is deleted with it."""
+    local, a = apis["local"], apis["source-a"]
+    admin = {"local": creds["servers"]["local"]["userId"], "source-a": creds["servers"]["source-a"]["userId"]}
+    title = "IT Pull Playlist"
+    configure_server(creds, a, "source-a", [])
+    configure_local(creds, local, ["source-a", "source-b"], EnablePlaylistSync=True, EnableContentSync=False)
+    for name, api in (("local", local), ("source-a", a)):
+        for p in playlists_of(api, admin[name], title):
+            api.call("DELETE", f"/Items/{p['Id']}", expect=204)
+
+    ids = [movie_id(a, "Only A (2021)"), movie_id(a, "Shared Movie")]
+    if not playlists_of(a, admin["source-a"], "IT Pull Anchor"):
+        a.post("/Playlists", {"Name": "IT Pull Anchor", "Ids": ids[:1], "UserId": admin["source-a"], "MediaType": "Video"}, expect=200)
+    _, made = a.post("/Playlists", {"Name": title, "Ids": ids, "UserId": admin["source-a"], "MediaType": "Video"}, expect=200)
+    run_task(local, "ServerSyncInformation")
+    copies = playlists_of(local, admin["local"], title)
+    expect(len(copies) == 1 and len(playlist_paths(local, admin["local"], copies[0]["Id"])) == 2, "a Pull copies the playlist with both items")
+
+    local_entries = local.get(f"/Playlists/{copies[0]['Id']}/Items?userId={admin['local']}")["Items"]
+    local.call("DELETE", f"/Playlists/{copies[0]['Id']}/Items?entryIds={local_entries[0]['PlaylistItemId']}", expect=204)
+    run_task(local, "ServerSyncInformation")
+    expect(len(playlist_paths(local, admin["local"], copies[0]["Id"])) == 2, "a local edit to a pulled copy is replaced by the parent's copy")
+
+    a.call("DELETE", f"/Items/{made['Id']}", expect=204)
+    run_task(local, "ServerSyncInformation")
+    expect(not playlists_of(local, admin["local"], title), "deleting the playlist on the parent deletes the pulled copy")
+
+    configure_local(creds, local, ["source-a", "source-b"])
+
+
+def scenario_whitelist(creds, apis):
+    """The peer routes refuse callers the whitelist does not name, with a reason the connection test reports."""
+    api = apis["source-a"]
+
+    def capabilities():
+        status, body = api.call("GET", "/Sync/Peer/Capabilities", raw=True)
+        return status, json.loads(body) if status == 403 and body else None
+
+    def grants(value):
+        config = plugin_config(api)
+        config["PeerCallerGrants"] = value
+        save_plugin_config(api, config)
+
+    grants([])
+    status, body = capabilities()
+    expect(status == 403 and body and body["Code"] == "IpNotWhitelisted", "an API key from an address not on the Servers tab is refused as an IP not whitelisted")
+
+    admin = creds["servers"]["source-a"]["userId"]
+    grants([{"UserId": admin, "UserName": "admin", "Locations": ["203.0.113.0/24", "example.invalid"]}])
+    status, body = capabilities()
+    expect(status == 403 and body and body["Code"] == "UserNotWhitelistedForIp", "a user listed for other locations is refused for this IP")
+
+    grants([{"UserId": admin, "UserName": "admin", "Locations": []}])
+    status, _ = capabilities()
+    expect(status == 200, "a user with no locations is allowed from anywhere")
+
+    local = apis["local"]
+    entry = next(s for s in plugin_config(local)["Servers"] if s["Name"] == "source-a")
+    grants([])
+    _, t = local.post("/Sync/TestConnection", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True}, expect=200)
+    expect(t.get("SyncAccess") == "IpNotWhitelisted", "Test Connection reports that this server is not whitelisted there")
+    grants(open_grants(creds, "source-a"))
+    _, t = local.post("/Sync/TestConnection", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True}, expect=200)
+    expect(t.get("SyncAccess") == "Allowed", "Test Connection reports access once whitelisted")
 
 
 def scenario_history_stale_base(creds, apis):
@@ -841,7 +974,7 @@ def scenario_item_hints(creds, apis):
     wait_until(lambda: overview(apis["local"], "Movie", "Only A") == "Edited on source-a", 60, "a metadata edit on source-a reached local without a scan")
     wait_until(queues_empty, 60, "every queue drained after the metadata edit")
     only_a = find_item(apis["local"], "Movie", "Only A")
-    status, version = apis["local"].call("GET", f"/ServerSync/Hints/Version?kind=Metadata&localItemId={only_a['Id']}")
+    status, version = apis["local"].call("GET", f"/Sync/Hints/Version?kind=Metadata&localItemId={only_a['Id']}")
     expect(status == 200 and version and version["ServerId"] == creds["servers"]["source-a"]["serverId"] and not version["IsThisServer"],
            "local records source-a as the editor of the hinted overview")
 
@@ -849,9 +982,9 @@ def scenario_item_hints(creds, apis):
     set_overview(apis["local"], "Movie", "Shared Movie", "First, from local")
     wait_until(lambda: all(overview(apis[n], "Movie", "Shared Movie") == "First, from local" for n in ("source-a", "source-b")), 60, "an edit on local reached both sources")
     shared = find_item(apis["local"], "Movie", "Shared Movie")
-    status, version = apis["local"].call("GET", f"/ServerSync/Hints/Version?kind=Metadata&localItemId={shared['Id']}")
+    status, version = apis["local"].call("GET", f"/Sync/Hints/Version?kind=Metadata&localItemId={shared['Id']}")
     expect(status == 200 and version and version["IsThisServer"], "local records itself as the editor of its own overview")
-    status, version = apis["source-a"].call("GET", f"/ServerSync/Hints/Version?kind=Metadata&localItemId={find_item(apis['source-a'], 'Movie', 'Shared Movie')['Id']}")
+    status, version = apis["source-a"].call("GET", f"/Sync/Hints/Version?kind=Metadata&localItemId={find_item(apis['source-a'], 'Movie', 'Shared Movie')['Id']}")
     expect(status == 200 and version and version["ServerId"] == creds["servers"]["local"]["serverId"], "source-a records local as the editor of the copy it pulled")
     wait_until(queues_empty, 60, "every queue drained after the first shared edit")
     set_overview(apis["source-b"], "Movie", "Shared Movie", "Second, from source-b")
@@ -953,15 +1086,15 @@ def scenario_peer_endpoint_auth(creds, apis):
     local = apis["local"]
     e = creds["servers"]["local"]
     anon = Api("local", SERVERS["local"]["port"], "it-anon")
-    routes = (("GET", "/ServerSync/Peer/Capabilities"), ("GET", "/ServerSync/Peer/Link?serverId=x"), ("POST", "/ServerSync/Peer/Queue"),
-              ("POST", "/ServerSync/Peer/Complete"), ("GET", "/ServerSync/Peer/Status"), ("POST", "/ServerSync/Peer/Versions"), ("POST", "/ServerSync/Peer/History"),
-              ("GET", "/ServerSync/Peer/Interest?serverId=x"), ("POST", "/ServerSync/Peer/Lookup"),
-              ("GET", "/ServerSync/Hints"), ("POST", "/ServerSync/Hints/Run"), ("POST", "/ServerSync/Hints/CheckPeer"),
-              ("GET", "/ServerSync/Hints/Version?kind=People&name=x"), ("DELETE", "/ServerSync/Hints/Outbound/1"), ("DELETE", "/ServerSync/Hints/Inbound/1"),
-              ("DELETE", "/ServerSync/Servers/x/Rows"),
-              ("GET", "/ServerSync/Items"), ("GET", "/ServerSync/ImageProxy?itemId=00000000000000000000000000000000"), ("GET", "/ServerSync/MetadataItems"),
-              ("GET", "/ServerSync/HistoryItems"), ("GET", "/ServerSync/PeopleItems"), ("GET", "/ServerSync/UserSyncUsers"), ("POST", "/ServerSync/TestConnection"),
-              ("POST", "/ServerSync/TriggerSync"), ("POST", "/ServerSync/ResetSyncDatabase"))
+    routes = (("GET", "/Sync/Peer/Capabilities"), ("GET", "/Sync/Peer/Link?serverId=x"), ("POST", "/Sync/Peer/Queue"),
+              ("POST", "/Sync/Peer/Complete"), ("GET", "/Sync/Peer/Status"), ("POST", "/Sync/Peer/Versions"), ("POST", "/Sync/Peer/History"),
+              ("GET", "/Sync/Peer/Interest?serverId=x"), ("POST", "/Sync/Peer/Lookup"),
+              ("GET", "/Sync/Hints"), ("POST", "/Sync/Hints/Run"), ("POST", "/Sync/Hints/CheckPeer"),
+              ("GET", "/Sync/Hints/Version?kind=People&name=x"), ("DELETE", "/Sync/Hints/Outbound/1"), ("DELETE", "/Sync/Hints/Inbound/1"),
+              ("DELETE", "/Sync/Servers/x/Rows"),
+              ("GET", "/Sync/Items"), ("GET", "/Sync/ImageProxy?itemId=00000000000000000000000000000000"), ("GET", "/Sync/MetadataItems"),
+              ("GET", "/Sync/HistoryItems"), ("GET", "/Sync/PeopleItems"), ("GET", "/Sync/UserSyncUsers"), ("POST", "/Sync/TestConnection"),
+              ("POST", "/Sync/TriggerSync"), ("POST", "/Sync/ResetSyncDatabase"))
     refused = 0
     for method, path in routes:
         status, _ = anon.call(method, path, {} if method == "POST" else None)
@@ -973,16 +1106,16 @@ def scenario_peer_endpoint_auth(creds, apis):
     status, auth = local.post("/Users/AuthenticateByName", {"Username": "viewer", "Pw": ""}, expect=200)
     viewer = Api("local", SERVERS["local"]["port"], "it-viewer")
     viewer.token = auth["AccessToken"]
-    for method, path in (("POST", "/ServerSync/Peer/Queue"), ("GET", "/ServerSync/Peer/Status"), ("GET", "/ServerSync/Peer/Capabilities"), ("GET", "/ServerSync/Hints")):
+    for method, path in (("POST", "/Sync/Peer/Queue"), ("GET", "/Sync/Peer/Status"), ("GET", "/Sync/Peer/Capabilities"), ("GET", "/Sync/Hints")):
         status, _ = viewer.call(method, path, {} if method == "POST" else None)
         expect(status == 403, f"{method} {path} with a standard user's token is refused ({status})")
     admin = Api("local", SERVERS["local"]["port"], "it-key")
     admin.token = e["apiKey"]
-    status, caps = admin.call("GET", "/ServerSync/Peer/Capabilities")
+    status, caps = admin.call("GET", "/Sync/Peer/Capabilities")
     expect(status == 200, "an administrator's API key reaches the peer endpoints")
     expect(isinstance(caps.get("Accepts"), list) and "ServerTime" in caps, "capabilities list the kinds this server applies and its clock")
-    expect(admin.call("GET", "/ServerSync/Hints")[0] == 200, "an administrator's API key reaches the operator endpoint")
-    status, removed = admin.call("DELETE", "/ServerSync/Servers/no-such-key/Rows")
+    expect(admin.call("GET", "/Sync/Hints")[0] == 200, "an administrator's API key reaches the operator endpoint")
+    status, removed = admin.call("DELETE", "/Sync/Servers/no-such-key/Rows")
     expect(status == 200 and removed and all(v == 0 for v in removed.values()), "forgetting an unknown server removes nothing and answers with the counts")
 
     # An administrator's key alone does not make a caller a peer. A request that names a configured
@@ -990,42 +1123,42 @@ def scenario_peer_endpoint_auth(creds, apis):
     # completion, and a forged history negotiation are refused with 428 until the real server pairs.
     configure_server(creds, local, "local", ["source-a"], {"source-a": "Sync"})
     a_id = creds["servers"]["source-a"]["serverId"]
-    status, body = admin.call("POST", "/ServerSync/Peer/Queue", {"SenderServerId": a_id, "Items": []})
+    status, body = admin.call("POST", "/Sync/Peer/Queue", {"SenderServerId": a_id, "Items": []})
     expect(status == 428, f"a batch naming source-a as sender without its pairing secret is refused with 428 ({status})")
-    status, body = admin.call("POST", "/ServerSync/Peer/Complete", {"SenderServerId": a_id, "Items": [{"HintId": f"{a_id}:1", "VersionTimestamp": "2999-01-01T00:00:00Z"}]})
+    status, body = admin.call("POST", "/Sync/Peer/Complete", {"SenderServerId": a_id, "Items": [{"HintId": f"{a_id}:1", "VersionTimestamp": "2999-01-01T00:00:00Z"}]})
     expect(status == 428, f"a completion naming source-a as sender without its pairing secret is refused with 428 ({status})")
-    status, body = admin.call("POST", "/ServerSync/Peer/Complete", {"Items": []})
+    status, body = admin.call("POST", "/Sync/Peer/Complete", {"Items": []})
     expect(status == 400, f"a completion with no sender is malformed ({status})")
-    status, body = admin.call("POST", "/ServerSync/Peer/History", {"SenderServerId": a_id, "Items": []})
+    status, body = admin.call("POST", "/Sync/Peer/History", {"SenderServerId": a_id, "Items": []})
     expect(status == 428, f"a history negotiation naming source-a as sender without its pairing secret is refused with 428 ({status})")
-    status, body = admin.call("POST", "/ServerSync/Peer/History", {"SenderServerId": "not-a-configured-server", "Items": []})
+    status, body = admin.call("POST", "/Sync/Peer/History", {"SenderServerId": "not-a-configured-server", "Items": []})
     expect(status == 200, f"a history negotiation from a server this one does not list still negotiates, with nothing recorded ({status})")
-    status, body = admin.call("GET", "/ServerSync/Peer/Status")
+    status, body = admin.call("GET", "/Sync/Peer/Status")
     expect(status == 400, f"a status read that does not name the asking server is malformed ({status})")
     other = Api("local", SERVERS["local"]["port"], "it-key")
     other.token = e["apiKey"]
     other.version = "0.0.0.0"
-    status, body = other.call("POST", "/ServerSync/Peer/Queue", {"SenderServerId": a_id, "Items": []})
+    status, body = other.call("POST", "/Sync/Peer/Queue", {"SenderServerId": a_id, "Items": []})
     expect(status == 426 and "same version" in (body or ""), f"a peer call from another Server Sync version is refused with 426 ({status})")
-    status, body = other.call("POST", "/ServerSync/Peer/Pair", {"ServerId": a_id, "Secret": "x"})
+    status, body = other.call("POST", "/Sync/Peer/Pair", {"ServerId": a_id, "Secret": "x"})
     expect(status == 426, f"a pairing from another Server Sync version is refused with 426 ({status})")
-    status, body = admin.call("GET", f"/ServerSync/Peer/Interest?serverId={a_id}")
+    status, body = admin.call("GET", f"/Sync/Peer/Interest?serverId={a_id}")
     expect(status == 428, f"an interest read naming source-a without its pairing secret is refused with 428 ({status})")
-    status, body = admin.call("POST", "/ServerSync/Peer/Lookup", {"Path": "/no/such/file.mkv"})
+    status, body = admin.call("POST", "/Sync/Peer/Lookup", {"Path": "/no/such/file.mkv"})
     expect(status == 200 and body and body.get("Found") is False, f"a lookup for a path this server does not hold answers not found ({status})")
-    status, body = admin.call("POST", "/ServerSync/Peer/Lookup", {})
+    status, body = admin.call("POST", "/Sync/Peer/Lookup", {})
     expect(status == 400, f"a lookup with neither a path nor a name is malformed ({status})")
-    status, caps = other.call("GET", "/ServerSync/Peer/Capabilities")
+    status, caps = other.call("GET", "/Sync/Peer/Capabilities")
     expect(status == 200 and caps.get("PluginVersion") == PLUGIN_VERSION, "capabilities still answer another version, so Check Link can name both versions")
-    status, body = admin.call("POST", "/ServerSync/Peer/Pair", {"ServerId": "not-a-configured-server", "Secret": "x"})
+    status, body = admin.call("POST", "/Sync/Peer/Pair", {"ServerId": "not-a-configured-server", "Secret": "x"})
     expect(status == 409, f"a pairing from a server this one does not list is refused ({status})")
 
     # A name is held to the same rule as an address when private networks are disallowed.
-    status, v = admin.call("POST", "/ServerSync/TestConnection", {"ServerUrl": "https://localhost:8096", "ApiKey": "x", "AllowPrivateNetwork": False})
+    status, v = admin.call("POST", "/Sync/TestConnection", {"ServerUrl": "https://localhost:8096", "ApiKey": "x", "AllowPrivateNetwork": False})
     expect(status == 200 and not v["Success"] and "resolves" in v["Message"], "a name that resolves to loopback is refused when private networks are disallowed")
-    status, v = admin.call("POST", "/ServerSync/TestConnection", {"ServerUrl": "https://source-a:8096", "ApiKey": "x", "AllowPrivateNetwork": False})
+    status, v = admin.call("POST", "/Sync/TestConnection", {"ServerUrl": "https://source-a:8096", "ApiKey": "x", "AllowPrivateNetwork": False})
     expect(status == 200 and not v["Success"] and "resolves" in v["Message"], "a pool name that resolves to a private address is refused when private networks are disallowed")
-    status, v = admin.call("POST", "/ServerSync/TestConnection", {"ServerUrl": "http://source-a:8096", "ApiKey": "x", "AllowPrivateNetwork": True})
+    status, v = admin.call("POST", "/Sync/TestConnection", {"ServerUrl": "http://source-a:8096", "ApiKey": "x", "AllowPrivateNetwork": True})
     message = (v or {}).get("Message") or ""
     expect(status == 200 and "resolves" not in message and "Plain HTTP" not in message, f"the same name over plain HTTP passes the URL check when private networks are allowed ({message})")
 
@@ -1049,9 +1182,9 @@ def scenario_push_responses(creds, apis):
     save_plugin_config(local, config)
 
     set_overview(local, "Movie", "Shared Movie", f"Push response test {time.strftime('%H:%M:%S')}")
-    local.post("/ServerSync/Hints/Run", None, expect=204)
+    local.post("/Sync/Hints/Run", None, expect=204)
     time.sleep(8)
-    local.post("/ServerSync/Hints/Run", None, expect=204)
+    local.post("/Sync/Hints/Run", None, expect=204)
     h = hints(local)
     peers = {p["Name"]: p for p in h["Peers"]}
     expect("does not list this server" in (peers.get("source-b", {}).get("Reason") or ""), "a peer that does not list this server pauses with that reason (409)")
@@ -1068,7 +1201,7 @@ def scenario_push_responses(creds, apis):
     configure_server(creds, local, "local", ["source-a", "source-b"], {"source-a": "Sync", "source-b": "Sync"}, **INFO_FLAGS)
     # The rows deferred by the pauses above wait fifteen minutes; discard them so only the new hint counts.
     for r in hints(local)["Outbound"]:
-        local.call("DELETE", f"/ServerSync/Hints/Outbound/{r['Id']}", expect=204)
+        local.call("DELETE", f"/Sync/Hints/Outbound/{r['Id']}", expect=204)
     applied_before = len(activity(apis["source-a"], "metadata for Shared Movie"))
     set_overview(local, "Movie", "Shared Movie", f"Declined test {time.strftime('%H:%M:%S')}")
     wait_until(lambda: not [r for r in hints(local)["Outbound"] if r["PeerName"] == "source-a"], 60, "a hint for a module the receiver has off is never owed to it, or is dropped once it declines")
@@ -1089,7 +1222,7 @@ def scenario_check_link_by_direction(creds, apis):
     entry_a = next(s for s in plugin_config(local)["Servers"] if s["Name"] == "source-a")
 
     def check(entry, mode):
-        status, r = local.post("/ServerSync/Hints/CheckPeer", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__",
+        status, r = local.post("/Sync/Hints/CheckPeer", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__",
                                                             "ServerKey": entry["Key"], "AllowPrivateNetwork": True, "Mode": mode}, expect=200)
         return r["Severity"], r["Message"]
 
@@ -1110,14 +1243,14 @@ def scenario_check_link_by_direction(creds, apis):
     expect(sev == "ok", "Sync is ready once the peer lists us as Sync")
     sev, msg = check(entry_a, "Pull")
     expect(sev == "ok" and "also arrive as they happen" in msg, "Pull against a server that pushes to us is ready with live changes")
-    _, full = local.post("/ServerSync/Hints/CheckPeer", {"ServerUrl": entry_a["Url"], "ApiKey": "__JPK_SECRET_KEPT__",
+    _, full = local.post("/Sync/Hints/CheckPeer", {"ServerUrl": entry_a["Url"], "ApiKey": "__JPK_SECRET_KEPT__",
                                                       "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True, "Mode": "Pull"}, expect=200)
     expect(abs(full.get("ClockSkewSeconds", 999)) < 30 and "clock" not in full["Message"], "Check Link reads the peer's clock and finds it in step")
     expect(full.get("Paired") is True and "could not pair" not in full["Message"], "Check Link pairs the two servers, since the peer lists this one and holds an administrator's key for it")
-    _, moved = local.post("/ServerSync/Hints/CheckPeer", {"ServerUrl": "http://source-b:8096", "ApiKey": "__JPK_SECRET_KEPT__",
+    _, moved = local.post("/Sync/Hints/CheckPeer", {"ServerUrl": "http://source-b:8096", "ApiKey": "__JPK_SECRET_KEPT__",
                                                        "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True, "Mode": "Pull"}, expect=200)
     expect(not moved.get("Reachable") and "only sent to the address saved" in moved["Message"], "the stored key is never sent to an address other than the one saved on the entry")
-    status, t = local.post("/ServerSync/TestConnection", {"ServerUrl": "http://source-b:8096", "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True}, expect=200)
+    status, t = local.post("/Sync/TestConnection", {"ServerUrl": "http://source-b:8096", "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry_a["Key"], "AllowPrivateNetwork": True}, expect=200)
     expect(not t["Success"] and "only sent to the address saved" in (t.get("Message") or ""), "the connection test refuses the stored key for an edited address too")
     configure_server(creds, apis["source-a"], "source-a", [])
     configure_local(creds, local, ["source-a", "source-b"])
@@ -1145,10 +1278,17 @@ def scenario_non_admin_peer_key(creds, apis):
     save_plugin_config(local, config)
     configure_server(creds, a, "source-a", ["local"], {"local": "Sync"}, EnableHistorySync=True, HistorySyncNegotiate=True, **INFO_FLAGS, **user_flags)
 
-    status, r = local.post("/ServerSync/Hints/CheckPeer", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True, "Mode": "Pull"}, expect=200)
-    expect(r["Severity"] == "warn" and "standard user" in r["Message"], "Check Link names a standard user's key and still allows Pull")
-    status, t = local.post("/ServerSync/TestConnection", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True}, expect=200)
+    status, t = local.post("/Sync/TestConnection", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True}, expect=200)
     expect(t["Success"] and t.get("IsAdministrator") is False, "the connection test reports the key as a standard user's")
+    expect(t.get("SyncAccess") == "UserNotWhitelisted", "the connection test reports that the viewer is not whitelisted on source-a")
+
+    config = plugin_config(a)
+    config["PeerCallerGrants"] = open_grants(creds, "source-a") + [{"UserId": ea["viewerId"], "UserName": "viewer", "Locations": []}]
+    save_plugin_config(a, config)
+    status, t = local.post("/Sync/TestConnection", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True}, expect=200)
+    expect(t.get("SyncAccess") == "Allowed", "once source-a whitelists the viewer, the connection test reports access")
+    status, r = local.post("/Sync/Hints/CheckPeer", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__", "ServerKey": entry["Key"], "AllowPrivateNetwork": True, "Mode": "Sync"}, expect=200)
+    expect(r["Severity"] in ("ok", "warn"), "Check Link accepts Sync with a whitelisted standard user's key")
 
     def queues_empty():
         h = hints(local)
@@ -1159,13 +1299,10 @@ def scenario_non_admin_peer_key(creds, apis):
     a.call("DELETE", f"/UserPlayedItems/{ai}?userId={ea['viewerId']}", expect=200)
     local.call("DELETE", f"/UserPlayedItems/{li}?userId={el['viewerId']}", expect=200)
     wait_until(queues_empty, 60, "queues are quiet before the history check")
-    a.post(f"/UserPlayedItems/{ai}?userId={ea['viewerId']}&datePlayed=2026-10-02T10:00:00Z", expect=200)
+    a.post(f"/UserPlayedItems/{ai}?userId={ea['viewerId']}&datePlayed={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}", expect=200)
     wait_until(lambda: user_data(local, el["viewerId"], li)["Played"], 90, "history: a play by the viewer on source-a reached local with the viewer's key")
     wait_until(lambda: not hints(local)["Inbound"], 60, "history: local finished the hint")
-    # Local cannot report completion with a standard user's key; source-a reads it from local's status on
-    # its next check, so its row stays Sent rather than failing or looping.
-    a_rows = hints(a)["Outbound"]
-    expect(all(r["State"] == "Sent" for r in a_rows), "history: source-a's row waits as Sent for the status check, since local's key cannot report completion")
+    wait_until(lambda: not hints(a)["Outbound"], 60, "history: local reported completion with the whitelisted viewer's key")
     wait_until(lambda: len(activity(local, "watch history for Shared Movie")) >= 1, 15, "history: local wrote an activity entry")
 
     # Metadata.
@@ -1202,11 +1339,11 @@ def scenario_dashboard_endpoints(creds, apis):
     queue, and the queue overview answers with its parts."""
     local = apis["local"]
     for route in ("HistoryItems/Queue", "MetadataItems/Queue", "PeopleItems/Queue", "UserItems/Queue"):
-        status, body = local.call("POST", f"/ServerSync/{route}", {"Ids": [], "Status": "Errored"})
+        status, body = local.call("POST", f"/Sync/{route}", {"Ids": [], "Status": "Errored"})
         expect(status == 200 and isinstance((body or {}).get("Updated"), int), f"{route} queues every errored row from a status alone ({status})")
-        status, _ = local.call("POST", f"/ServerSync/{route}", {"Ids": [], "Status": "NotAStatus"})
+        status, _ = local.call("POST", f"/Sync/{route}", {"Ids": [], "Status": "NotAStatus"})
         expect(status == 400, f"{route} refuses a status it does not know ({status})")
-    status, st = local.call("GET", "/ServerSync/Peer/Status?serverId=no-such-server")
+    status, st = local.call("GET", "/Sync/Peer/Status?serverId=no-such-server")
     expect(status == 409, f"a status read for a server this one does not list is refused ({status})")
     overview = hints(local)
     expect(all(k in overview for k in ("Gathering", "Outbound", "Inbound", "Peers", "OutboundCounts")), "the queue overview answers with gathering, both queues, peers, and counts")
@@ -1228,6 +1365,9 @@ SCENARIOS = [
     ("push responses: paused peers, declined hints, activity entries", scenario_push_responses),
     ("a standard user's key still receives every category", scenario_non_admin_peer_key),
     ("dashboard bulk and status endpoints", scenario_dashboard_endpoints),
+    ("playlist changes and deletions travel by hints", scenario_playlist_hints),
+    ("the whitelist guards the peer routes", scenario_whitelist),
+    ("playlists on pull follow the parent", scenario_playlist_pull),
 ]
 
 _failures = []
@@ -1248,6 +1388,12 @@ def run_scenarios(creds, apis):
     """Runs every scenario, or only those whose title contains one of the words given after the command."""
     POOL_APIS.clear()
     POOL_APIS.update(apis)
+    # The scenarios call peer routes from the host and between servers that do not list each other, so the
+    # pool starts open. The whitelist scenario locks a server down on its own.
+    for name, api in apis.items():
+        config = plugin_config(api)
+        config["PeerCallerGrants"] = open_grants(creds, name)
+        api.post(f"/Plugins/{PLUGIN_GUID}/Configuration", config, expect=204)
     only = [w.lower() for w in sys.argv[2:]]
     for title, fn in SCENARIOS:
         if only and not any(w in title.lower() for w in only):

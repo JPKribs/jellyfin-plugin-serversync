@@ -156,15 +156,10 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
             removed += _versions.Remove(kind, gone);
         }
 
-        var goneHistory = new List<string>();
-        foreach (var key in _versions.GetKeys(HintKind.History))
-        {
-            if (HintProtocol.TryParseHistoryKey(key, out var userId, out var itemId)
+        var goneHistory = _versions.GetKeys(HintKind.History)
+            .Where(key => HintProtocol.TryParseHistoryKey(key, out var userId, out var itemId)
                 && (_userManager.GetUserById(userId) is null || _libraryManager.GetItemById(itemId) is null))
-            {
-                goneHistory.Add(key);
-            }
-        }
+            .ToList();
 
         removed += _versions.Remove(HintKind.History, goneHistory);
         var goneUsers = _versions.GetKeys(HintKind.Users).Where(k => Guid.TryParse(k, out var id) && _userManager.GetUserById(id) is null).ToList();

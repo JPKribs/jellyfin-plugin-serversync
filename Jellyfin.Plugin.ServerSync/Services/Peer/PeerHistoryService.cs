@@ -2,6 +2,7 @@ using System;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -69,7 +70,7 @@ public sealed class PeerHistoryService
 
         _logger.LogInformation(
             "Peer {Sender} negotiated {Count} history entries: {Applied} applied, {Stale} stale",
-            string.IsNullOrWhiteSpace(request.SenderServerId) ? "(unknown)" : request.SenderServerId,
+            string.IsNullOrWhiteSpace(request.SenderServerId) ? "(unknown)" : FormatUtilities.SanitizeForLog(request.SenderServerId),
             request.Items.Count,
             applied,
             stale);

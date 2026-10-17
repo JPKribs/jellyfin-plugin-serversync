@@ -113,13 +113,10 @@ public static class MetadataFieldWriter
                 }
             }
 
-            foreach (var kvp in sourceIds)
+            foreach (var kvp in sourceIds.Where(id => localItem.GetProviderId(id.Key) != id.Value))
             {
-                if (localItem.GetProviderId(kvp.Key) != kvp.Value)
-                {
-                    localItem.SetProviderId(kvp.Key, kvp.Value);
-                    hasChanges = true;
-                }
+                localItem.SetProviderId(kvp.Key, kvp.Value);
+                hasChanges = true;
             }
         }
 

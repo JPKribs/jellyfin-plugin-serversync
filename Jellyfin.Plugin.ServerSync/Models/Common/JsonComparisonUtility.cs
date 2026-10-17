@@ -110,12 +110,9 @@ public static class JsonComparisonUtility
                         diffCount++;
                     }
                 }
-                else if (has2)
+                else if (has2 && !IsEmptyValue(val2))
                 {
-                    if (!IsEmptyValue(val2))
-                    {
-                        diffCount++;
-                    }
+                    diffCount++;
                 }
             }
 
@@ -182,12 +179,9 @@ public static class JsonComparisonUtility
                         diffs.Add(key);
                     }
                 }
-                else if (has2)
+                else if (has2 && !IsEmptyValue(val2))
                 {
-                    if (!IsEmptyValue(val2))
-                    {
-                        diffs.Add(key);
-                    }
+                    diffs.Add(key);
                 }
             }
 
@@ -388,12 +382,9 @@ public static class JsonComparisonUtility
                             return false;
                         }
                     }
-                    else if (has2)
+                    else if (has2 && !IsEmptyValue(val2))
                     {
-                        if (!IsEmptyValue(val2))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
 

@@ -2,14 +2,14 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.6.2"
+version: "12.2.7.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
-overview: "Keep several Jellyfin servers in step: content, metadata, people, users, and watch history."
+overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
 description: >
   Server Sync keeps a pool of Jellyfin servers in step. Each server scans the others it is told to in
-  priority order and pulls missing or updated content, metadata, people, user settings, and watch
-  history. Servers that both run the plugin also tell each other about changes as they happen, so an
+  priority order and pulls missing or updated content, metadata, people, user settings, playlists, and
+  watch history. Servers that both run the plugin also tell each other about changes as they happen, so an
   edit or a play made on one shows up on the others within seconds, and the scheduled scan remains
   the safety net. Watch history merges three way against what the servers last agreed on, and other
   values resolve on where and when they were last edited, so the newest edit always wins.
@@ -28,6 +28,25 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - Activity entries for changes sent again, paused peers, and rejected requests name the items involved and say why
-  - Activity entry details start with a capital letter
-  - Metadata provider image previews load from the server's External URL when one is set, so a server reached at an internal address still shows them
+  - Playlists sync between servers for mapped users, with each item matched by its path and items not on this server left out until they arrive
+  - Playlist edits and deletions are sent as they happen. Pull keeps the parent's copy, Push overrides the other server, and Sync keeps the newest edit
+  - Playlist sharing and public access are copied when the new Sharing option is on
+  - Playlist Sync needs a user mapping, and playlists of users without one never leave their server
+  - Test Connection shows what the key can do on that server, who it belongs to, and whether it may download media
+  - Test Connection says whether the other server's whitelist lets this key in, and why not
+  - A standard user's key works for Pull, Push, and Sync, limited to what that user can see and that user's own history, settings, and playlists
+  - Sync Content skips a server whose key may not download media and logs why
+  - Check Link reports the access the other server holds for this one
+  - The sync endpoints only accept administrators from servers on the Servers tab and users on the new Whitelist, each with the locations they may call from
+  - Whitelist host names are remembered and looked up again when a caller stops matching, so dynamic DNS keeps working
+  - Refused sync calls are logged with the user, the address, and the reason
+  - Servers that pull from this one without being on its Servers tab need a Whitelist row after updating
+  - The plugin's endpoints moved from /ServerSync to /Sync
+  - Every sync type in Settings shows what a standard user and an administrator can do
+  - Settings descriptions are shorter, and retries, approvals, and download speed are tables
+  - Settings groups the sync types under Synchronization
+  - User Sync and History Sync only use the key's own user when the key is a standard user's
+  - The new Permissions page in the docs lists what each function needs
+  - Identify lists every server that has the item, in the Servers tab order, and picking one keeps the item on that server
+  - The image picker shows the images of every server that has the item, each named after its server
+  - Log entries strip control characters from values another server sends

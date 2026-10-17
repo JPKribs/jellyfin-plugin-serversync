@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
@@ -153,9 +154,8 @@ public sealed class PostUpgradePaginationTests : IDisposable
             var (metaPage2, metaTotal) = metadata.SearchMetadataSyncItemsPaginated(null, null, null, skip: 50, take: 50);
             Assert.Equal(60, metaTotal);
             Assert.Equal(10, metaPage2.Count);
-            foreach (var item in metaPage2)
+            foreach (var dto in metaPage2.Select(item => item.ToDto(null, "http://src", includeBlobs: false)))
             {
-                var dto = item.ToDto(null, "http://src", includeBlobs: false);
                 _ = dto.HasChanges;
                 _ = dto.ChangesSummary;
             }

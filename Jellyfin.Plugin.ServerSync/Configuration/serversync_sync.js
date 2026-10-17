@@ -2599,7 +2599,7 @@ export default function (view) {
     // ============================================
     // OBJECT VERSION (shared by the detail modals)
     // ============================================
-    // Which server last edited an object and when, from ServerSync/Hints/Version. An object no one
+    // Which server last edited an object and when, from Sync/Hints/Version. An object no one
     // has edited since versions began shows as not recorded.
 
     // Requests per version element. Opening a second row before the first row's version arrives must
@@ -2635,7 +2635,7 @@ export default function (view) {
     // CHANGE QUEUE MODULE
     // ============================================
     // Both hint queues and every peer's delivery state, read from
-    // ServerSync/Hints. Rows are few and short lived, so a plain table that
+    // Sync/Hints. Rows are few and short lived, so a plain table that
     // reloads itself every few seconds fits better than the paginated table.
 
     var QueueModule = {
@@ -2723,7 +2723,7 @@ export default function (view) {
         // Fetches a poster through the image proxy once per page and remembers it.
         _loadProxy: function(imgId, cacheKey, itemId, peerKey) {
             var self = this;
-            var url = ApiClient.getUrl('ServerSync/ImageProxy', { itemId: itemId, user: 'false', maxHeight: 128, serverKey: peerKey });
+            var url = ApiClient.getUrl('Sync/ImageProxy', { itemId: itemId, user: 'false', maxHeight: 128, serverKey: peerKey });
             ApiClient.fetch({ url: url, type: 'GET' }).then(function(response) {
                 if (!response || !response.ok) throw new Error('image fetch failed');
                 return response.blob();
@@ -2876,9 +2876,10 @@ export default function (view) {
             var esc = ServerSyncShared.escapeHtml;
             var isPerson = r.kind === 'People' || r.kind === 2;
             var isUser = r.kind === 'Users' || r.kind === 4;
+            var isPlaylist = r.kind === 'Playlists' || r.kind === 5;
             // Jellyfin's own shapes: a person is round, an episode or a home video is wide, the rest are posters.
             var shape = isPerson || isUser ? ' round' : QueueModule._isWide(r.itemType) ? ' wide' : '';
-            var icon = isUser || isPerson ? 'person' : QueueModule._isWide(r.itemType) ? 'tv' : 'movie';
+            var icon = isPlaylist ? 'queue_music' : isUser || isPerson ? 'person' : QueueModule._isWide(r.itemType) ? 'tv' : 'movie';
             var holder = '<div class="qThumbHolder' + shape + '"><span class="material-icons">' + icon + '</span></div>';
             var thumb;
             if (r.itemId && !isUser) {
@@ -2976,20 +2977,20 @@ export default function (view) {
         },
 
         _what: function(kind) {
-            return { 0: 'watch history', 1: 'metadata', 2: 'biography and images', 3: 'new file', 4: 'user settings',
-                History: 'watch history', Metadata: 'metadata', People: 'biography and images', Content: 'new file', Users: 'user settings' }[kind] || String(kind);
+            return { 0: 'watch history', 1: 'metadata', 2: 'biography and images', 3: 'new file', 4: 'user settings', 5: 'playlist',
+                History: 'watch history', Metadata: 'metadata', People: 'biography and images', Content: 'new file', Users: 'user settings', Playlists: 'playlist' }[kind] || String(kind);
         },
 
         _kindLabel: function(kind) {
-            return { History: 'watch history', Metadata: 'metadata', People: 'people', Content: 'files', Users: 'user settings' }[kind] || String(kind).toLowerCase();
+            return { History: 'watch history', Metadata: 'metadata', People: 'people', Content: 'files', Users: 'user settings', Playlists: 'playlists' }[kind] || String(kind).toLowerCase();
         },
 
         _kindLabelTitle: function(kind) {
-            return { 0: 'Watch history', 1: 'Metadata', 2: 'Person', 3: 'File', 4: 'User', History: 'Watch history', Metadata: 'Metadata', People: 'Person', Content: 'File', Users: 'User' }[kind] || String(kind);
+            return { 0: 'Watch history', 1: 'Metadata', 2: 'Person', 3: 'File', 4: 'User', 5: 'Playlist', History: 'Watch history', Metadata: 'Metadata', People: 'Person', Content: 'File', Users: 'User', Playlists: 'Playlist' }[kind] || String(kind);
         },
 
         _kindColor: function(kind) {
-            return { 0: 'purple', 1: 'blue', 2: 'green', 3: 'orange', 4: 'gray', History: 'purple', Metadata: 'blue', People: 'green', Content: 'orange', Users: 'gray' }[kind] || 'gray';
+            return { 0: 'purple', 1: 'blue', 2: 'green', 3: 'orange', 4: 'gray', 5: 'yellow', History: 'purple', Metadata: 'blue', People: 'green', Content: 'orange', Users: 'gray', Playlists: 'yellow' }[kind] || 'gray';
         },
 
         _stateName: function(state) {

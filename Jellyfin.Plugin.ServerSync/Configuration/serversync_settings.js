@@ -26,13 +26,13 @@ export default function (view) {
 
     // Helpers called by bare name, taken from the shared module once it loads. Every call happens after
     // the load, from a viewshow handler that waits for it.
-    var escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor;
+    var escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor, getEl, setVisible;
 
     // Relative specifier so a server hosted under a base URL still resolves it.
     var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
         confirmDialog = shared.confirmDialog;
-        ({ escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor } = ServerSyncShared.pageHelpers());
+        ({ escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor, getEl, setVisible } = ServerSyncShared.pageHelpers());
     });
 
     // ============================================
@@ -191,7 +191,15 @@ export default function (view) {
 
         ServerSyncShared.bindReveal('chkSkipWatchedByAllUsers', 'watchedFilterUsersSettings');
         ServerSyncShared.bindReveal('chkEnableRecyclingBin', 'recyclingBinSettings');
-        ServerSyncShared.bindReveal('chkEnableBandwidthScheduling', 'bandwidthScheduleContainer');
+        var scheduleToggle = getEl('chkEnableBandwidthScheduling');
+        var reflectSchedule = function () {
+            view.querySelectorAll('.ssScheduleRow').forEach(function (row) { row.classList.toggle('hidden', !getChecked('chkEnableBandwidthScheduling')); });
+        };
+        if (scheduleToggle && !scheduleToggle.dataset.bound) {
+            scheduleToggle.dataset.bound = '1';
+            scheduleToggle.addEventListener('change', reflectSchedule);
+        }
+        reflectSchedule();
     }
 
     function saveContentSettings() {
@@ -316,6 +324,32 @@ export default function (view) {
         }, 'User sync settings saved', 'Failed to save user sync settings');
     }
 
+    function hasUserMapping(config) {
+        var norm = function (id) { return (id || '').replace(/-/g, '').toLowerCase(); };
+        return (config.Servers || []).some(function (server) {
+            var self = server.AccessLevel === 'User' ? norm(server.AuthenticatedUserId) : '';
+            return server.IsEnabled !== false && (server.UserMappings || []).some(function (m) {
+                return m.IsEnabled !== false && m.SourceUserId && m.LocalUserId && (!self || norm(m.SourceUserId) === self);
+            });
+        });
+    }
+
+    function loadPlaylistSettings(config) {
+        var mapped = hasUserMapping(config);
+        var toggle = getEl('chkEnablePlaylistSync');
+        if (toggle) toggle.disabled = !mapped;
+        setChecked('chkEnablePlaylistSync', mapped && config.EnablePlaylistSync === true);
+        setChecked('chkPlaylistSyncShares', config.PlaylistSyncShares !== false);
+        setVisible('playlistNeedsMapping', !mapped);
+    }
+
+    function savePlaylistSettings() {
+        saveSection(function (config) {
+            config.EnablePlaylistSync = hasUserMapping(config) && getChecked('chkEnablePlaylistSync');
+            config.PlaylistSyncShares = getChecked('chkPlaylistSyncShares');
+        }, 'Playlist settings saved', 'Failed to save playlist settings');
+    }
+
     // --- Processing Settings ---
 
     function loadProcessingSettings(config) {
@@ -345,6 +379,76 @@ export default function (view) {
         }, 'Processing settings saved', 'Failed to save processing settings');
     }
 
+    var grantUsers = [];
+    var grantsLoaded = false;
+
+    function fetchGrantUsers() {
+        return ApiClient.fetch({ url: ApiClient.getUrl('Users'), type: 'GET', dataType: 'json' }).then(function (users) {
+            grantUsers = (users || []).map(function (u) { return { Id: u.Id.replace(/-/g, '').toLowerCase(), Name: u.Name }; });
+        }).catch(function () {
+            grantUsers = [];
+        });
+    }
+
+    function addGrantRow(grant) {
+        grant = grant || { UserId: '', Locations: [] };
+        var container = getEl('callerGrants');
+        if (!container) return;
+        var row = document.createElement('div');
+        row.className = 'ssGrantRow';
+        var options = '<option value="">Select user...</option><option value="apikey">API keys</option>' + grantUsers.map(function (u) {
+            return '<option value="' + escapeHtml(u.Id) + '">' + escapeHtml(u.Name) + '</option>';
+        }).join('');
+        row.innerHTML =
+            '<select class="grantUser ssGrantField" aria-label="User">' + options + '</select>' +
+            '<input type="text" class="grantLocations ssGrantField" aria-label="Locations" placeholder="All locations" />' +
+            '<button is="emby-button" type="button" class="raised jpk-button-destructive jpk-button-small grantRemove"><span>Remove</span></button>';
+        container.appendChild(row);
+        var select = row.querySelector('.grantUser');
+        var id = (grant.UserId || '').replace(/-/g, '').toLowerCase();
+        if (id && !Array.prototype.some.call(select.options, function (o) { return o.value === id; })) {
+            var missing = document.createElement('option');
+            missing.value = id;
+            missing.textContent = grant.UserName || id;
+            select.appendChild(missing);
+        }
+        select.value = id;
+        row.querySelector('.grantLocations').value = (grant.Locations || []).join(', ');
+        row.querySelector('.grantRemove').addEventListener('click', function () { row.remove(); });
+    }
+
+    function collectGrants() {
+        var grants = [];
+        view.querySelectorAll('#callerGrants .ssGrantRow').forEach(function (row) {
+            var select = row.querySelector('.grantUser');
+            if (!select.value) return;
+            grants.push({
+                UserId: select.value,
+                UserName: select.options[select.selectedIndex] ? select.options[select.selectedIndex].textContent : '',
+                Locations: row.querySelector('.grantLocations').value.split(',').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; })
+            });
+        });
+        return grants;
+    }
+
+    function loadCallerAccessSettings(config) {
+        grantsLoaded = false;
+        fetchGrantUsers().then(function () {
+            var container = getEl('callerGrants');
+            if (container) container.innerHTML = '';
+            (config.PeerCallerGrants || []).forEach(addGrantRow);
+            grantsLoaded = true;
+        });
+    }
+
+    function saveCallerAccessSettings() {
+        if (!grantsLoaded) return;
+        var grants = collectGrants();
+        saveSection(function (config) {
+            config.PeerCallerGrants = grants;
+        }, 'Whitelist saved', 'Failed to save whitelist');
+    }
+
     // ============================================
     // PAGE INITIALIZATION
     // ============================================
@@ -358,7 +462,9 @@ export default function (view) {
             loadMetadataSettings(config);
             loadPeopleSettings(config);
             loadUserSyncSettings(config);
+            loadPlaylistSettings(config);
             loadProcessingSettings(config);
+            loadCallerAccessSettings(config);
             fetchWatchedFilterUsers();
         }).catch(function() {
             Dashboard.alert('Failed to load plugin configuration');
@@ -420,12 +526,15 @@ export default function (view) {
                 ServerSyncShared.initCollapsibles();
 
                 bindClick('btnSaveProcessing', saveProcessingSettings);
+                bindClick('btnSaveCallerAccess', saveCallerAccessSettings);
+                bindClick('btnAddCallerGrant', function () { if (grantsLoaded) addGrantRow(); });
 
                 bindClick('btnSaveContentSettings', saveContentSettings);
                 bindClick('btnSaveHistorySettings', saveHistorySettings);
                 bindClick('btnSaveMetadataSettings', saveMetadataSettings);
                 bindClick('btnSavePeopleSettings', savePeopleSettings);
                 bindClick('btnSaveUserSyncSettings', saveUserSyncSettings);
+                bindClick('btnSavePlaylistSettings', savePlaylistSettings);
 
                 bindClick('btnResetContentTable', function() { resetTable('ResetContentSyncDatabase', 'content sync'); });
                 bindClick('btnResetHistoryTable', function() { resetTable('ResetHistorySyncDatabase', 'history sync'); });

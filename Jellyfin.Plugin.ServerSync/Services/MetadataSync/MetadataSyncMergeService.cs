@@ -420,10 +420,8 @@ public static class MetadataSyncMergeService
         }
 
         var localPeople = new List<Dictionary<string, string>>();
-        foreach (var person in OrderLikeSourceDto(localPeopleList))
+        foreach (var person in OrderLikeSourceDto(localPeopleList).Where(p => !string.IsNullOrEmpty(p.Name)))
         {
-            if (string.IsNullOrEmpty(person.Name)) continue;
-
             var personDict = new Dictionary<string, string> { ["Name"] = person.Name };
             if (!string.IsNullOrEmpty(person.Role)) personDict["Role"] = person.Role;
             personDict["Type"] = person.Type.ToString();

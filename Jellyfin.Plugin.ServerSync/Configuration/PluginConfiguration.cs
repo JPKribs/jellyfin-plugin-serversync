@@ -549,6 +549,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public int HintRefusedMaxRetries { get; set; }
 
+    public List<PeerCallerGrant> PeerCallerGrants { get; set; } = new();
+
     /// <summary>
     /// Verify source image sizes with live HTTP calls on every refresh, even
     /// for images whose tag hasn't changed. Applies to all sync modules.
@@ -569,6 +571,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// a collection is seeing it on this server.
     /// </summary>
     public bool MirrorSyncedCollections { get; set; } = true;
+
+    public bool EnablePlaylistSync { get; set; }
+
+    public bool PlaylistSyncShares { get; set; } = true;
 
     /// <summary>
     /// Legacy 10.11.64.0 element. XML deserialization drops unknown elements,
@@ -870,6 +876,29 @@ public class PluginConfiguration : BasePluginConfiguration
         Servers.RemoveAll(entry => entry is null);
         LastRunFailures ??= new List<SyncRunFailure>();
         WatchedFilterUserIds ??= new List<string>();
+        PeerCallerGrants = (PeerCallerGrants ?? new List<PeerCallerGrant>())
+            .Where(g => g is not null && !string.IsNullOrWhiteSpace(g.UserId))
+            .Select(g => new PeerCallerGrant
+            {
+                UserId = g.UserId.Trim().Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant(),
+                UserName = g.UserName?.Trim() ?? string.Empty,
+                Locations = (g.Locations ?? new List<string>())
+                    .SelectMany(l => (l ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    .ToList()
+            })
+            .Select(g => (Grant: g, Valid: g.Locations.Where(l => l.Length <= 255).Distinct(StringComparer.OrdinalIgnoreCase).ToList()))
+            .Where(x => x.Grant.Locations.Count == 0 || x.Valid.Count > 0)
+            .GroupBy(x => x.Grant.UserId)
+            .Select(g => new PeerCallerGrant
+            {
+                UserId = g.Key,
+                UserName = g.First().Grant.UserName,
+                Locations = g.Any(x => x.Valid.Count == 0)
+                    ? new List<string>()
+                    : g.SelectMany(x => x.Valid).Distinct(StringComparer.OrdinalIgnoreCase).Take(50).ToList()
+            })
+            .Take(200)
+            .ToList();
 
         MigrateLegacyServer();
 

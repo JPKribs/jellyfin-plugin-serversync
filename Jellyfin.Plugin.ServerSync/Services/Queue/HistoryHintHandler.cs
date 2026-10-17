@@ -201,8 +201,7 @@ public sealed class HistoryHintHandler
             return HintApplyResult.Unchanged;
         }
 
-        // A key that is not an administrator's cannot negotiate, since the origin's Server Sync
-        // endpoints refuse it. The merged state is then written here only, the way one way history
+        // A key the origin's whitelist refuses cannot negotiate. The merged state is then written here only, the way one way history
         // always worked, and no base is recorded because the origin never agreed to anything.
         var oneWay = false;
         NegotiationStep settled;
@@ -214,7 +213,7 @@ public sealed class HistoryHintHandler
         {
             oneWay = true;
             settled = new NegotiationStep(NegotiationAction.Proceed, null);
-            _logger.LogWarning("The key for '{Origin}' is not an administrator's, so history from it is applied one way", origin.DisplayName);
+            _logger.LogWarning("Server Sync on '{Origin}' refused this server's key, so history from it is applied one way. Add this server or its user to the whitelist there", origin.DisplayName);
         }
 
         if (settled.Action == NegotiationAction.Fail)

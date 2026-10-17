@@ -36,15 +36,15 @@ All tables live in the existing sync database.
 
 ## Endpoints
 
-All routes sit behind Jellyfin's RequiresElevation policy. The caller presents an API key the receiving server issued. The plugin adds no authentication of its own. The routes live under `/ServerSync/Peer`, beside the history negotiation endpoint, because `/ServerSync/Status` was already taken by the dashboard's content status.
+All routes sit behind Jellyfin's RequiresElevation policy. The caller presents an API key the receiving server issued. The plugin adds no authentication of its own. The routes live under `/Sync/Peer`, beside the history negotiation endpoint, because `/Sync/Status` was already taken by the dashboard's content status.
 
-**POST /ServerSync/Peer/Queue.** Receive a hint. The receiver stores it durably and answers 200, which means queued, not applied. A hint for something the receiver does not map, such as a path in an unmapped library, is still answered 200 and dropped, because the sender has no knowledge of the receiver's mappings.
+**POST /Sync/Peer/Queue.** Receive a hint. The receiver stores it durably and answers 200, which means queued, not applied. A hint for something the receiver does not map, such as a path in an unmapped library, is still answered 200 and dropped, because the sender has no knowledge of the receiver's mappings.
 
-**POST /ServerSync/Peer/Complete.** The receiver reports a hint id as done. The source removes the matching outbound row.
+**POST /Sync/Peer/Complete.** The receiver reports a hint id as done. The source removes the matching outbound row.
 
-**GET /ServerSync/Peer/Status.** Lists this server's inbound queue. A source consults it only for outbound rows that were sent and not completed after a grace period of one hour. If the hint id is still queued the peer is working and the source waits. If it is absent and was never completed, the work was lost and the source resends.
+**GET /Sync/Peer/Status.** Lists this server's inbound queue. A source consults it only for outbound rows that were sent and not completed after a grace period of one hour. If the hint id is still queued the peer is working and the source waits. If it is absent and was never completed, the work was lost and the source resends.
 
-**POST /ServerSync/Peer/Versions.** Returns effective versions for a batch of keys. Used by the full scan against a Both peer so that conflicts resolve on origin versions rather than saved dates.
+**POST /Sync/Peer/Versions.** Returns effective versions for a batch of keys. Used by the full scan against a Both peer so that conflicts resolve on origin versions rather than saved dates.
 
 **Response codes seen by the sender.**
 
@@ -114,7 +114,7 @@ Before switching hints on between two servers in Sync mode, each runs one full s
 ## Phases
 
 **Phase one. Queues and history.** Done 2026-10-03.
-Versions, outbound, and inbound tables with the schema migration (v25). The endpoints above. Both workers as hosted services, plus the change observer with its five second debounce. The history handler builds the same row the scan builds, merges, settles with the origin through the negotiation endpoint, and writes under the apply guard. The two guards. Sync Information as the first consolidated task carrying history only, so the full scan safety net exists from day one. `GET /ServerSync/Hints` shows both queues and every peer's delivery state to the operator, `POST /ServerSync/Hints/Run` forces a pass, and the two `DELETE` routes under it discard a row. Tests: version decisions, queue state transitions, lost work recovery, mapping, the migration, and the Docker scenario "history hints travel across three servers without loops", which configures a full mesh of three servers in Sync mode and proves delivery without a scan, drained queues, a quiet pool, and a newer unmark reversing an older play everywhere.
+Versions, outbound, and inbound tables with the schema migration (v25). The endpoints above. Both workers as hosted services, plus the change observer with its five second debounce. The history handler builds the same row the scan builds, merges, settles with the origin through the negotiation endpoint, and writes under the apply guard. The two guards. Sync Information as the first consolidated task carrying history only, so the full scan safety net exists from day one. `GET /Sync/Hints` shows both queues and every peer's delivery state to the operator, `POST /Sync/Hints/Run` forces a pass, and the two `DELETE` routes under it discard a row. Tests: version decisions, queue state transitions, lost work recovery, mapping, the migration, and the Docker scenario "history hints travel across three servers without loops", which configures a full mesh of three servers in Sync mode and proves delivery without a scan, drained queues, a quiet pool, and a newer unmark reversing an older play everywhere.
 
 **Phase two. Metadata, images, and people.** Done 2026-10-03.
 Item events raise metadata and people hints. Only a metadata edit raises one: provider downloads and image refreshes are left to the scan, because a server that fetches its own metadata after receiving a file would otherwise push it over the other server's curated values the moment it arrived. Images still travel, as part of the item's metadata row. The refresh and apply task bases gained `RefreshOneAsync` and `ApplyRowAsync`, so a hint builds and writes exactly the row the full scan would, under the module mutex, and the apply tasks register their writes with the guard and record the version read from the peer. Conflicts resolve on origin versions in the hint handler and, through the Versions endpoint, in the full scan against any peer that carries versions: a newer local edit is kept with the reason on the row and the peer is told to pull it. Sync Information covers metadata, people, and history. The Docker scenario "metadata and people hints, newest edit wins, scan keeps newer local" proves each of these across the three servers.
@@ -124,7 +124,7 @@ User hints come from Jellyfin's user updated event plus a thirty second check of
 
 **Phase four. Many servers.** Mostly done ahead of order: the server list, the migration from the single source, and the settings page shipped with the multi source scan. What remains is the queue view on the dashboard and showing versions on the tables.
 
-**Phase four, remaining.** Done 2026-10-03: the Queue view on the Sync page, reading `/ServerSync/Hints` and refreshing itself every eight seconds while it shows, with Run Now and per row discard. Each concluded hint also writes to Jellyfin's activity log through `IActivityManager`. Each module's detail dialog shows the version the object carries, which server last edited it and when, through `GET /ServerSync/Hints/Version`.
+**Phase four, remaining.** Done 2026-10-03: the Queue view on the Sync page, reading `/Sync/Hints` and refreshing itself every eight seconds while it shows, with Run Now and per row discard. Each concluded hint also writes to Jellyfin's activity log through `IActivityManager`. Each module's detail dialog shows the version the object carries, which server last edited it and when, through `GET /Sync/Hints/Version`.
 
 **Phase four, original note.**
 The server list in configuration with the migration from the single source. The settings page rework. The queue view on the dashboard.
@@ -135,6 +135,6 @@ The server list in configuration with the migration from the single source. The 
 * The inbound membership guard assumes the event fires on the same server and thread that is applying. It does for user data and library items today. Verified for user policy and configuration updates in phase three: the Docker scenario proves the pool is quiet after a user change travels.
 * A paused peer accumulates outbound rows without bound. Done: pending rows are capped at ten thousand per peer, the oldest beyond the cap are dropped with a log line, and the Queue view shows the count. The full scan recovers anything dropped.
 * Rows that fail forever on the receiver, such as a path that never maps, need an operator action. The DELETE route and a clear button on the queue view cover it.
-* Removing a server entry leaves rows carrying its key in every table with nothing to pull from. Done: the Servers tab asks `DELETE /ServerSync/Servers/{key}/Rows` to remove them with the entry. Files already downloaded stay.
+* Removing a server entry leaves rows carrying its key in every table with nothing to pull from. Done: the Servers tab asks `DELETE /Sync/Servers/{key}/Rows` to remove them with the entry. Files already downloaded stay.
 * Writing an item's cast updates its Person items as a side effect. While a metadata apply runs, every people hint is held back, so a human edit to a person in that short window is caught by the scan rather than a hint.
 * A people hint is accepted only for a person who already exists on the receiver. Looking a person up must never use Jellyfin's `GetPerson`, which creates one when missing.

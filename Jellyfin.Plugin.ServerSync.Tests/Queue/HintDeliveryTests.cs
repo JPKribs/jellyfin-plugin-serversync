@@ -36,7 +36,8 @@ public class HintDeliveryTests
     [Fact]
     public void PauseReason_NamesTheFix()
     {
-        Assert.Contains("administrator", HintDelivery.PauseReason(403, ""), System.StringComparison.Ordinal);
+        Assert.Contains("whitelist", HintDelivery.PauseReason(403, ""), System.StringComparison.Ordinal);
+        Assert.Contains("This IP is not whitelisted", HintDelivery.PauseReason(403, "{\"Code\":\"IpNotWhitelisted\",\"Message\":\"This IP is not whitelisted\"}"), System.StringComparison.Ordinal);
         Assert.Contains("not installed", HintDelivery.PauseReason(404, ""), System.StringComparison.Ordinal);
         Assert.Contains("does not list this server", HintDelivery.PauseReason(409, "server x is not configured"), System.StringComparison.Ordinal);
         Assert.Contains("could not pair", HintDelivery.PauseReason(428, "server x is not paired"), System.StringComparison.Ordinal);

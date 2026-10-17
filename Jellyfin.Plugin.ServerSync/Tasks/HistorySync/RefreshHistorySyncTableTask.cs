@@ -120,10 +120,8 @@ public class RefreshHistorySyncTableTask
             var paths = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
             if (_libraryManager.GetItemById(localLibraryId) is Folder root)
             {
-                foreach (var item in root.GetRecursiveChildren())
+                foreach (var item in root.GetRecursiveChildren().Where(child => child is not Folder && !string.IsNullOrEmpty(child.Path)))
                 {
-                    if (item is Folder) continue;
-                    if (string.IsNullOrEmpty(item.Path)) continue;
                     paths[item.Path] = item;
                 }
             }

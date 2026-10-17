@@ -349,12 +349,9 @@ public class RefreshMetadataSyncTableTask
         await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, includeTypes, localPaths, all, progressKey, reportDiscovery, null, cancellationToken).ConfigureAwait(false);
         await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, includeTypes, localPaths, changed, progressKey + "|changed", reportDiscovery, changedSince, cancellationToken).ConfigureAwait(false);
         var changedIds = new HashSet<Guid>(changed);
-        foreach (var id in new HashSet<Guid>(all))
+        foreach (var id in new HashSet<Guid>(all).Where(candidate => changedIds.Contains(candidate) || !ExistingRows.ContainsKey((mapping.SourceLibraryId, candidate.ToString("N", System.Globalization.CultureInfo.InvariantCulture)))))
         {
-            if (changedIds.Contains(id) || !ExistingRows.ContainsKey((mapping.SourceLibraryId, id.ToString("N", System.Globalization.CultureInfo.InvariantCulture))))
-            {
-                matchedIds.Add(id);
-            }
+            matchedIds.Add(id);
         }
     }
 

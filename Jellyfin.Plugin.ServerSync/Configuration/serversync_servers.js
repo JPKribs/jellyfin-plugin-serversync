@@ -195,6 +195,18 @@ export default function (view) {
             serverHealth[server.Key] = 'checking';
             apiRequest('TestConnection', 'POST', requestFor(server)).then(function (response) {
                 serverHealth[server.Key] = response && response.Success ? 'ok' : 'bad';
+                if (response && response.Success) {
+                    if (response.IsAdministrator === true) server.AccessLevel = 'Administrator';
+                    else if (response.IsAdministrator === false) server.AccessLevel = 'User';
+                    if (response.UserId) {
+                        server.AuthenticatedUserId = response.UserId;
+                        server.AuthenticatedUser = response.UserName || server.AuthenticatedUser || '';
+                    }
+                    if (response.CanDownload === true || response.CanDownload === false) server.CanDownload = response.CanDownload;
+                    server.SyncAccess = response.SyncAccess || '';
+                    server.SyncAccessMessage = response.SyncAccessMessage || '';
+                    if (stillSelected(server.Key)) reflectAccess(server);
+                }
             }).catch(function () {
                 serverHealth[server.Key] = 'bad';
             }).then(function () {
@@ -225,11 +237,112 @@ export default function (view) {
         setVisible('authUserPanel', method === 'user');
     }
 
+    function normalizeId(id) {
+        return (id || '').replace(/-/g, '').toLowerCase();
+    }
+
+    function isStandardUser(server) {
+        return !!server && server.AccessLevel === 'User';
+    }
+
+    function maySyncUser(server, sourceUserId) {
+        if (!isStandardUser(server)) return true;
+        return !!sourceUserId && normalizeId(sourceUserId) === normalizeId(server.AuthenticatedUserId);
+    }
+
+    function accessRows(server) {
+        var admin = server.AccessLevel === 'Administrator';
+        var who = server.AuthenticatedUser || 'this user';
+        var downloads = server.CanDownload === false
+            ? ['no', (server.AuthenticatedUser || 'This account') + ' may not download media there. Turn on Allow media downloading for that user, or use an API key.']
+            : ['ok', 'Allowed'];
+        if (admin) {
+            return [
+                ['Content listing', 'ok', 'Every library, with its folder paths'],
+                ['File downloads', downloads[0], downloads[1]],
+                ['Metadata, people, and collections', 'ok', 'Every item'],
+                ['Watch history', 'ok', 'Every mapped user'],
+                ['User settings', 'ok', 'Every mapped user'],
+                ['Playlists', 'ok', 'Every playlist of a mapped user'],
+                ['Two way history', 'ok', 'Merged history is written back there'],
+                ['Push and Sync', 'ok', 'Once that server whitelists this one']
+            ];
+        }
+        return [
+            ['Content listing', 'limited', 'Only the libraries ' + who + ' can see. Type each source root path by hand, since folder paths are only shown to administrators'],
+            ['File downloads', downloads[0], downloads[1]],
+            ['Metadata, people, and collections', 'limited', 'Only items in the libraries ' + who + ' can see'],
+            ['Watch history', 'limited', 'Only the history of ' + who],
+            ['User settings', 'limited', 'Only the settings of ' + who],
+            ['Playlists', 'limited', 'Only the playlists ' + who + ' can see, owned by that user here'],
+            ['Two way history', 'limited', 'Only for ' + who + ', once that server whitelists ' + who],
+            ['Push and Sync', 'limited', 'Once that server whitelists ' + who]
+        ];
+    }
+
+    var ACCESS_LABELS = { ok: 'Available', limited: 'Limited', no: 'Unavailable', none: 'Not Installed' };
+    var ACCESS_BADGES = { ok: 'green', limited: 'orange', no: 'red', none: 'gray' };
+
+    function syncAccessRow(server) {
+        if (!server.SyncAccess) return null;
+        var state = server.SyncAccess === 'Allowed' ? 'ok' : server.SyncAccess === 'NotInstalled' ? 'none' : 'no';
+        return ['Sync endpoints there', state, server.SyncAccessMessage || ''];
+    }
+
     // What the key can do there, learned by the last test or sign in.
     function reflectAccess(server) {
         var level = (server && server.AccessLevel) || '';
-        setVisible('accessAdmin', level === 'Administrator');
-        setVisible('accessUser', level === 'User');
+        var known = level === 'Administrator' || level === 'User';
+        setVisible('accessUnknown', !!server && !!server.Url && !known);
+        setVisible('accessSummary', known);
+        if (known) {
+            var headline = getEl('accessHeadline');
+            if (headline) {
+                headline.className = 'mb-md ' + (level === 'Administrator' ? 'jpk-success' : 'jpk-warn');
+                headline.textContent = level === 'Administrator'
+                    ? 'Administrator access' + (server.AuthenticatedUser ? ' as ' + server.AuthenticatedUser : '') + '. Every module works.'
+                    : 'Standard user access as ' + (server.AuthenticatedUser || 'an unknown user') + '. Some features are off.';
+            }
+            var rows = getEl('accessRows');
+            if (rows) {
+                var list = accessRows(server);
+                var endpoints = syncAccessRow(server);
+                var reach = !endpoints ? ['limited', 'Checking the sync endpoints there'] : endpoints[1] !== 'ok' ? ['no', 'Needs the sync endpoints there'] : null;
+                if (reach) {
+                    list = list.map(function (row) {
+                        return row[0] === 'Two way history' || row[0] === 'Push and Sync' ? [row[0], reach[0], reach[1]] : row;
+                    });
+                }
+                if (endpoints) list.unshift(endpoints);
+                rows.innerHTML = list.map(function (row) {
+                    return '<div class="ssAccessRow">' +
+                        '<div class="ssAccessText">' +
+                            '<div class="ssAccessTitle">' + escapeHtml(row[0]) + '</div>' +
+                            '<div class="ssAccessDescription">' + escapeHtml(row[2]) + '</div>' +
+                        '</div>' +
+                        '<span class="jpk-badge ' + ACCESS_BADGES[row[1]] + '">' + ACCESS_LABELS[row[1]] + '</span>' +
+                        '</div>';
+                }).join('');
+            }
+        }
+        reflectModeLimits(server);
+        reflectUserLimits(server);
+    }
+
+    function reflectModeLimits(server) {
+        setVisible('modeLimited', isStandardUser(server) && getMode() !== 'Pull');
+    }
+
+    function reflectUserLimits(server) {
+        var limited = isStandardUser(server);
+        var note = getEl('usersLimited');
+        if (note) {
+            note.textContent = limited
+                ? 'Standard user key. Only ' + (server.AuthenticatedUser || 'that user') + ' can be mapped.'
+                : '';
+        }
+        setVisible('usersLimited', limited);
+        updateUserSelects();
     }
 
     function reflectSignedIn(server) {
@@ -257,6 +370,7 @@ export default function (view) {
 
     function reflectMode() {
         setVisible('peerCheckArea', true);
+        reflectModeLimits(selectedServer());
         var statusEl = getEl('peerCheckStatus');
         if (statusEl) statusEl.textContent = '';
     }
@@ -295,7 +409,7 @@ export default function (view) {
             if (result && result.Reachable) renderServerList();
         }).catch(function () {
             if (!stillSelected(key)) return;
-            if (statusEl) statusEl.innerHTML = '<span class="text-error">The check failed; see the server log</span>';
+            if (statusEl) statusEl.innerHTML = '<span class="text-error">The check failed. See the server log</span>';
         });
     }
 
@@ -420,6 +534,10 @@ export default function (view) {
             if (apiKey && apiKey !== ServerSyncShared.SECRET_KEPT) {
                 server.AuthenticatedUser = '';
                 server.AuthenticatedUserId = '';
+                server.AccessLevel = '';
+                server.CanDownload = null;
+                server.SyncAccess = '';
+                server.SyncAccessMessage = '';
             }
         } else if (!server.ApiKey) {
             server.ApiKey = '';
@@ -570,6 +688,13 @@ export default function (view) {
                 current.ServerId = response.ServerId || '';
                 if (response.IsAdministrator === true) current.AccessLevel = 'Administrator';
                 else if (response.IsAdministrator === false) current.AccessLevel = 'User';
+                if (response.UserId) {
+                    current.AuthenticatedUserId = response.UserId;
+                    current.AuthenticatedUser = response.UserName || current.AuthenticatedUser || '';
+                }
+                current.CanDownload = response.CanDownload === true || response.CanDownload === false ? response.CanDownload : null;
+                current.SyncAccess = response.SyncAccess || '';
+                current.SyncAccessMessage = response.SyncAccessMessage || '';
                 reflectAccess(current);
                 var nameEl = getEl('txtSourceServerName');
                 var idEl = getEl('txtSourceServerId');
@@ -652,6 +777,9 @@ export default function (view) {
             current.ServerId = response.ServerId || current.ServerId || '';
             if (response.IsAdministrator === true) current.AccessLevel = 'Administrator';
             else if (response.IsAdministrator === false) current.AccessLevel = 'User';
+            current.CanDownload = response.CanDownload === true || response.CanDownload === false ? response.CanDownload : null;
+            current.SyncAccess = response.SyncAccess || '';
+            current.SyncAccessMessage = response.SyncAccessMessage || '';
 
             if (!selected) {
                 // The operator moved to another server meanwhile. The key still belongs to this one, so it
@@ -1062,15 +1190,10 @@ export default function (view) {
 
     function updateUserSelects() {
         view.querySelectorAll('.sourceUserSelect').forEach(function(select) {
-            var savedValue = select.dataset.savedValue || select.value;
-            select.innerHTML = '<option value="">Select source user...</option>';
-            sourceUsers.forEach(function(user) {
-                var option = document.createElement('option');
-                option.value = user.Id;
-                option.textContent = user.Name;
-                select.appendChild(option);
-            });
+            var savedValue = select.value || select.dataset.savedValue;
+            fillSourceUserOptions(select);
             if (savedValue) selectLoose(select, savedValue);
+            reflectUserRowLimit(select);
         });
         view.querySelectorAll('.localUserSelect').forEach(function(select) {
             var savedValue = select.dataset.savedValue || select.value;
@@ -1083,6 +1206,35 @@ export default function (view) {
             });
             if (savedValue) selectLoose(select, savedValue);
         });
+    }
+
+    function fillSourceUserOptions(select) {
+        var server = selectedServer();
+        select.innerHTML = '<option value="">Select source user...</option>';
+        sourceUsers.forEach(function(user) {
+            var option = document.createElement('option');
+            option.value = user.Id;
+            var allowed = maySyncUser(server, user.Id);
+            option.textContent = allowed ? user.Name : user.Name + ' (needs administrator)';
+            option.disabled = !allowed;
+            select.appendChild(option);
+        });
+    }
+
+    function reflectUserRowLimit(select) {
+        var row = select.closest('.userMapping');
+        if (!row) return;
+        var server = selectedServer();
+        var value = pickedValue(select);
+        var blocked = !!value && !maySyncUser(server, value);
+        var warning = row.querySelector('.userMappingLimit');
+        if (!warning) {
+            warning = document.createElement('div');
+            warning.className = 'userMappingLimit jpk-warn hidden';
+            warning.textContent = 'Skipped. A standard user key only syncs its own user.';
+            row.appendChild(warning);
+        }
+        warning.classList.toggle('hidden', !blocked);
     }
 
     function renderUserMappings(mappings) {
@@ -1116,14 +1268,10 @@ export default function (view) {
         var sourceSelect = div.querySelector('.sourceUserSelect');
         if (mapping.SourceUserId) sourceSelect.dataset.savedValue = mapping.SourceUserId;
         if (mapping.SourceUserName) sourceSelect.dataset.savedName = mapping.SourceUserName;
-        sourceSelect.innerHTML = '<option value="">Select source user...</option>';
-        sourceUsers.forEach(function(user) {
-            var option = document.createElement('option');
-            option.value = user.Id;
-            option.textContent = user.Name;
-            sourceSelect.appendChild(option);
-        });
+        fillSourceUserOptions(sourceSelect);
         if (mapping.SourceUserId) selectLoose(sourceSelect, mapping.SourceUserId);
+        reflectUserRowLimit(sourceSelect);
+        sourceSelect.addEventListener('change', function() { reflectUserRowLimit(sourceSelect); });
 
         var localSelect = div.querySelector('.localUserSelect');
         if (mapping.LocalUserId) localSelect.dataset.savedValue = mapping.LocalUserId;

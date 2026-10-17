@@ -64,6 +64,11 @@ public class PeerInterest
             return true;
         }
 
+        if (kind == HintKind.Playlists)
+        {
+            return Users.Contains(userId.ToString("N", System.Globalization.CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase);
+        }
+
         if (kind == HintKind.History && !Users.Contains(userId.ToString("N", System.Globalization.CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase))
         {
             return false;

@@ -79,7 +79,7 @@ public class StableSecretProtectionTests
         public static IApplicationPaths Create(string configDir)
         {
             var paths = DispatchProxy.Create<IApplicationPaths, ConfigPaths>();
-            ((ConfigPaths)(object)paths)._configDir = configDir;
+            ((ConfigPaths)paths)._configDir = configDir;
             return paths;
         }
 

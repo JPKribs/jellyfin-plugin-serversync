@@ -93,6 +93,7 @@ public sealed class HintTriage
             HintKind.Content => AssessItem(origin, hint, config.EnableContentSync, "content", utcNow),
             HintKind.History => AssessHistory(origin, hint, config.EnableHistorySync, utcNow),
             HintKind.People => AssessPerson(hint, config.EnablePeopleSync, utcNow),
+            HintKind.Playlists => AssessPlaylist(origin, hint, config.EnablePlaylistSync, utcNow),
             HintKind.Users => new(HintCode.Unsupported, "user settings are not announced live, the scheduled Sync Information task carries them"),
             _ => new(HintCode.Unsupported, $"this server does not apply {hint.Kind} hints")
         };
@@ -188,6 +189,28 @@ public sealed class HintTriage
         }
 
         return AssessVersion(hint, HintProtocol.PeopleKey(hint.Key), utcNow);
+    }
+
+    private HintAssessment AssessPlaylist(SourceServer origin, SyncHint hint, bool enabled, DateTime utcNow)
+    {
+        if (!enabled)
+        {
+            return new(HintCode.ModuleOff, "playlist sync is off on this server");
+        }
+
+        if (!Guid.TryParse(hint.Key, out _) || !Guid.TryParse(hint.ItemId, out _))
+        {
+            return new(HintCode.Invalid, "the key is not a playlist id");
+        }
+
+        if (!Guid.TryParse(hint.UserId, out var ownerId) || HintMapping.FindBySourceUser(origin, ownerId) is null)
+        {
+            return new(HintCode.NotMapped, "the playlist's owner is not mapped on this server");
+        }
+
+        return origin.Mode == ServerMode.Pull
+            ? new(HintCode.Queued, null)
+            : AssessVersion(hint, HintProtocol.PlaylistKey(Guid.Parse(hint.Key)), utcNow);
     }
 
     private HintAssessment AssessVersion(SyncHint hint, string localKey, DateTime utcNow)

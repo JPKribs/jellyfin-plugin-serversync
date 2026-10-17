@@ -25,6 +25,12 @@ public class AuthenticateResponse
     /// <summary>Gets or sets a value indicating whether the signed in user is an administrator there.</summary>
     public bool? IsAdministrator { get; set; }
 
+    public bool? CanDownload { get; set; }
+
+    public string? SyncAccess { get; set; }
+
+    public string? SyncAccessMessage { get; set; }
+
     /// <summary>
     /// Server name returned from the authentication.
     /// </summary>

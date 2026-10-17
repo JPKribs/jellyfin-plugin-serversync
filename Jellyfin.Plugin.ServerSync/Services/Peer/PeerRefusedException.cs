@@ -5,8 +5,8 @@ namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
 /// <summary>
 /// A peer answered a Server Sync request with an HTTP error. The status is kept so callers can tell a
-/// key that is not an administrator's, which is 401 or 403 and means the peer's Server Sync endpoints
-/// are off limits to it, from a peer that is simply down.
+/// refused key, which is 401 or 403 and means the peer's whitelist does not allow it, from a peer that
+/// is simply down.
 /// </summary>
 public sealed class PeerRefusedException : InvalidOperationException
 {

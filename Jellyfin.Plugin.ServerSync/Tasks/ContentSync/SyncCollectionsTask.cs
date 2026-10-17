@@ -110,18 +110,15 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
                     continue;
                 }
 
-                foreach (var fi in mapping.FilteredItems)
+                foreach (var fi in mapping.FilteredItems.Where(f => string.Equals(f.Type, "BoxSet", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(f.ItemId, out _)))
                 {
-                    if (string.Equals(fi.Type, "BoxSet", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(fi.ItemId, out _))
+                    if (!collectionsByIdN.TryGetValue(fi.ItemId, out var list))
                     {
-                        if (!collectionsByIdN.TryGetValue(fi.ItemId, out var list))
-                        {
-                            list = new List<Models.Configuration.LibraryMapping>();
-                            collectionsByIdN[fi.ItemId] = list;
-                        }
-
-                        list.Add(mapping);
+                        list = new List<Models.Configuration.LibraryMapping>();
+                        collectionsByIdN[fi.ItemId] = list;
                     }
+
+                    list.Add(mapping);
                 }
             }
 

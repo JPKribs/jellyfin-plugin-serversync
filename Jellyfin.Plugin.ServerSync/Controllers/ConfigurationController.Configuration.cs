@@ -73,7 +73,13 @@ public partial class ConfigurationController
 
         using (client)
         {
-            return Ok(await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false));
+            var tested = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            if (tested.Success)
+            {
+                (tested.SyncAccess, tested.SyncAccessMessage) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return Ok(tested);
         }
     }
 
@@ -155,6 +161,10 @@ public partial class ConfigurationController
             result.ServerName = connectionTest.ServerName;
             result.ServerId = connectionTest.ServerId;
             result.Message = "Authentication successful";
+            if (connectionTest.Success)
+            {
+                (result.SyncAccess, result.SyncAccessMessage) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
 
         return Ok(result);
@@ -390,7 +400,7 @@ public partial class ConfigurationController
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to get source files for library {LibraryId}", libraryId);
+            _logger.LogWarning(ex, "Failed to get source files for library {LibraryId}", SanitizeForLog(libraryId));
             return BadRequest("Failed to fetch items from source server");
         }
     }

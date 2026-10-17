@@ -7,6 +7,7 @@ using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -100,7 +101,7 @@ public sealed class HistoryAgreementRecorder
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not record the history agreement with {Sender} for user {User}, item {Item}", senderServerId, userId, itemId);
+            _logger.LogWarning(ex, "Could not record the history agreement with {Sender} for user {User}, item {Item}", FormatUtilities.SanitizeForLog(senderServerId), userId, itemId);
         }
     }
 

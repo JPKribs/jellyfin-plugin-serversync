@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -41,7 +42,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
     public string Key => "ServerSyncInformation";
 
     /// <inheritdoc />
-    public string Description => "Runs the full metadata, people, user, and watch history comparison with every scan server, refresh then apply, as the safety net under change hints.";
+    public string Description => "Runs the full metadata, people, user, watch history, and playlist comparison with every scan server, refresh then apply, as the safety net under change hints.";
 
     /// <inheritdoc />
     public string Category => "Server Sync";
@@ -61,7 +62,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
         ArgumentNullException.ThrowIfNull(progress);
 
         var config = _configManager.Configuration;
-        var modules = new List<(Func<IScheduledTask> Refresh, Func<IScheduledTask> Sync)>();
+        var modules = new List<(Func<IScheduledTask> Refresh, Func<IScheduledTask>? Sync)>();
         if (config.EnableMetadataSync)
         {
             modules.Add((
@@ -90,6 +91,11 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
                 () => ActivatorUtilities.CreateInstance<SyncMissingHistoryTask>(_services)));
         }
 
+        if (config.EnablePlaylistSync)
+        {
+            modules.Add((() => ActivatorUtilities.CreateInstance<SyncPlaylistsTask>(_services), null));
+        }
+
         if (modules.Count == 0)
         {
             _logger.LogInformation("{Task}: no information module is enabled, nothing to do", Name);
@@ -102,17 +108,23 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
         // which keeps the task marked failed. A module whose refresh threw
         // skips its apply, since the queue it would drain was not rebuilt.
         var failures = new List<Exception>();
-        var share = 100.0 / (modules.Count * 2);
-        for (var i = 0; i < modules.Count; i++)
+        var share = 100.0 / modules.Sum(m => m.Sync is null ? 1 : 2);
+        var offset = 0.0;
+        foreach (var (refresh, sync) in modules)
         {
-            var refreshOffset = 2 * i * share;
-            var refreshed = await RunStepAsync(modules[i].Refresh, refreshOffset, share, progress, failures, cancellationToken).ConfigureAwait(false);
-            if (!refreshed)
+            var refreshed = await RunStepAsync(refresh, offset, share, progress, failures, cancellationToken).ConfigureAwait(false);
+            offset += share;
+            if (sync is null)
             {
                 continue;
             }
 
-            await RunStepAsync(modules[i].Sync, refreshOffset + share, share, progress, failures, cancellationToken).ConfigureAwait(false);
+            if (refreshed)
+            {
+                await RunStepAsync(sync, offset, share, progress, failures, cancellationToken).ConfigureAwait(false);
+            }
+
+            offset += share;
         }
 
         progress.Report(100);

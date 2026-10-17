@@ -17,6 +17,16 @@ public class ConnectionTestResult
     /// </summary>
     public bool? IsAdministrator { get; set; }
 
+    public string? UserId { get; set; }
+
+    public string? UserName { get; set; }
+
+    public bool? CanDownload { get; set; }
+
+    public string? SyncAccess { get; set; }
+
+    public string? SyncAccessMessage { get; set; }
+
     public string? ErrorMessage { get; set; }
 
     /// <summary>

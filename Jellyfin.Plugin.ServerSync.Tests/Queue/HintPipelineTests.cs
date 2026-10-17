@@ -80,6 +80,36 @@ public sealed class HintPipelineTests : IDisposable
     }
 
     [Fact]
+    public void Triage_Playlists_NeedTheModuleAndAMappedOwner()
+    {
+        var triage = Triage();
+        var origin = Origin();
+        var hint = PlaylistHint(UserId);
+
+        Assert.Equal(HintCode.ModuleOff, triage.Assess(origin, hint, OriginId, DateTime.UtcNow).Code);
+
+        _config.Configuration.EnablePlaylistSync = true;
+        Assert.Equal(HintCode.Queued, triage.Assess(origin, hint, OriginId, DateTime.UtcNow).Code);
+        Assert.Equal(HintCode.NotMapped, triage.Assess(origin, PlaylistHint(Guid.NewGuid()), OriginId, DateTime.UtcNow).Code);
+    }
+
+    [Fact]
+    public void Triage_Playlists_PullOriginAlwaysWins_SyncOriginDecidesByVersion()
+    {
+        _config.Configuration.EnablePlaylistSync = true;
+        var triage = Triage();
+        var hint = PlaylistHint(UserId, DateTime.UtcNow.AddMinutes(-10));
+        _versions.Set(new ObjectVersion { Kind = HintKind.Playlists, Key = hint.Key, ServerId = "local", Timestamp = DateTime.UtcNow.AddMinutes(-1) });
+
+        var pull = Origin();
+        Assert.Equal(HintCode.Queued, triage.Assess(pull, hint, OriginId, DateTime.UtcNow).Code);
+
+        var sync = Origin();
+        sync.Mode = ServerMode.Sync;
+        Assert.Equal(HintCode.Superseded, triage.Assess(sync, hint, OriginId, DateTime.UtcNow).Code);
+    }
+
+    [Fact]
     public void Triage_HonorsTheMappingFilter()
     {
         var origin = Origin();
@@ -455,7 +485,7 @@ public sealed class HintPipelineTests : IDisposable
 
     private PeerController Controller(PeerPairingStore pairings, string presented)
     {
-        var inboundWorker = new InboundHintWorker(_inbound, _config, null!, null!, null!, null!, null!, Triage(), null!, NullLogger<InboundHintWorker>.Instance);
+        var inboundWorker = new InboundHintWorker(_inbound, _config, null!, null!, null!, null!, null!, null!, Triage(), null!, NullLogger<InboundHintWorker>.Instance);
         var controller = new PeerController(null!, _config, null!, _inbound, _outbound, _versions, inboundWorker, null!, pairings, null!, Triage(), null!, NullLogger<PeerController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
@@ -490,6 +520,19 @@ public sealed class HintPipelineTests : IDisposable
         Kind = kind,
         Key = key ?? ItemId.ToString("N"),
         ItemPath = path,
+        VersionServerId = OriginId,
+        VersionTimestamp = at ?? DateTime.UtcNow.AddMinutes(-1)
+    };
+
+    private static SyncHint PlaylistHint(Guid owner, DateTime? at = null) => new()
+    {
+        HintId = OriginId + ":p",
+        OriginServerId = OriginId,
+        Kind = HintKind.Playlists,
+        Key = "44444444444444444444444444444444",
+        ItemId = "55555555555555555555555555555555",
+        ItemType = "Playlist",
+        UserId = owner.ToString("N"),
         VersionServerId = OriginId,
         VersionTimestamp = at ?? DateTime.UtcNow.AddMinutes(-1)
     };

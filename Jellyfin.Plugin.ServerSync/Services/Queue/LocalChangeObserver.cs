@@ -8,6 +8,8 @@ using Jellyfin.Plugin.ServerSync.Models.Queue;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Playlists;
+using Jellyfin.Plugin.ServerSync.Services.Playlists;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -129,13 +131,14 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager.UserDataSaved += OnUserDataSaved;
         _libraryManager.ItemUpdated += OnItemUpdated;
         _libraryManager.ItemAdded += OnItemAdded;
+        _libraryManager.ItemRemoved += OnItemRemoved;
         if (Plugin.Instance is { } plugin)
         {
             plugin.ConfigurationChanged += OnConfigurationChanged;
         }
 
         _flushLoop = Task.Run(() => FlushLoopAsync(_stopping.Token), CancellationToken.None);
-        _logger.LogInformation("Server Sync is watching for local changes to watch history, metadata, people, and files. User settings are not announced live, since Jellyfin raises no event for policy and configuration changes. The scheduled Sync Information task carries them");
+        _logger.LogInformation("Server Sync is watching for local changes to watch history, metadata, people, files, and playlists. User settings are not announced live, since Jellyfin raises no event for policy and configuration changes. The scheduled Sync Information task carries them");
         return Task.CompletedTask;
     }
 
@@ -145,6 +148,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _userDataManager.UserDataSaved -= OnUserDataSaved;
         _libraryManager.ItemUpdated -= OnItemUpdated;
         _libraryManager.ItemAdded -= OnItemAdded;
+        _libraryManager.ItemRemoved -= OnItemRemoved;
         if (Plugin.Instance is { } plugin)
         {
             plugin.ConfigurationChanged -= OnConfigurationChanged;
@@ -275,6 +279,16 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
+            if (e.Item is Playlist playlist)
+            {
+                if (recorded && _configManager.Configuration.EnablePlaylistSync)
+                {
+                    Note(HintKind.Playlists, PlaylistMirror.RootKey(playlist), playlist.OwnerUserId, playlist.Id);
+                }
+
+                return;
+            }
+
             if (e.Item is Person person)
             {
                 if (!string.IsNullOrWhiteSpace(person.Name))
@@ -315,6 +329,16 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 _inboundWorker.WakeParked(HintTriage.PathParkKey(e.Item.Path));
             }
 
+            if (e.Item is Playlist created)
+            {
+                if (_httpContext.HttpContext is not null && _configManager.Configuration.EnablePlaylistSync)
+                {
+                    Note(HintKind.Playlists, PlaylistMirror.RootKey(created), created.OwnerUserId, created.Id);
+                }
+
+                return;
+            }
+
             if (e.Item is Folder || e.Item is Person || string.IsNullOrEmpty(e.Item.Path) || e.Item.IsVirtualItem)
             {
                 return;
@@ -337,6 +361,38 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not record a local item addition");
+        }
+    }
+
+    private void OnItemRemoved(object? sender, ItemChangeEventArgs e)
+    {
+        try
+        {
+            if (e?.Item is not Playlist playlist)
+            {
+                return;
+            }
+
+            var rootKey = PlaylistMirror.RootKey(playlist);
+            var copy = PlaylistMirror.IsMirror(playlist);
+            PlaylistCopyRegistry.Remove(playlist.Id);
+            if (_httpContext.HttpContext is null || !_configManager.Configuration.EnablePlaylistSync)
+            {
+                return;
+            }
+
+            if (_guard.IsApplying(HintProtocol.GuardKey(HintKind.Playlists, rootKey)))
+            {
+                return;
+            }
+
+            _pending.TryRemove(HintProtocol.GuardKey(HintKind.Playlists, rootKey), out _);
+            var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = DateTime.UtcNow };
+            _publisher.PublishPlaylist(playlist.Id, rootKey, playlist.Name ?? string.Empty, playlist.OwnerUserId, version, excludePeerKey: null, recorded: true, deleted: true, copy: copy);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not record a local playlist deletion");
         }
     }
 
@@ -448,6 +504,10 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 NoteUnmatched(_publisher.PublishPeople(item.Name, change.ItemId, version, excludePeerKey: null, recorded: change.Recorded), change, HintKind.People, null, item.Name);
                 break;
 
+            case HintKind.Playlists when item is Playlist playlist:
+                NoteUnmatched(_publisher.PublishPlaylist(playlist.Id, change.LocalKey, playlist.Name ?? string.Empty, playlist.OwnerUserId, version, excludePeerKey: null, recorded: change.Recorded, deleted: false, copy: PlaylistMirror.IsMirror(playlist)), change, HintKind.Playlists, null, playlist.Name);
+                break;
+
             case HintKind.Content when !string.IsNullOrEmpty(item.Path):
                 NoteUnmatched(_publisher.PublishContent(change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), change, HintKind.Content, item.Path, null);
                 break;
@@ -464,7 +524,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         foreach (var server in _configManager.Configuration.Servers)
         {
             if (server.Pushes && (itemPath is null || HintMapping.FindByLocalPath(server, itemPath) is not null)
-                && (kind != HintKind.History || userId == Guid.Empty || HintMapping.FindByLocalUser(server, userId) is not null)
+                && (kind is not (HintKind.History or HintKind.Playlists) || userId == Guid.Empty || HintMapping.FindByLocalUser(server, userId) is not null)
                 && (localKey is null ? _worker.PeerAccepts(server.Key, kind) : _worker.PeerWants(server.Key, kind, itemPath, userId, localKey)))
             {
                 return true;

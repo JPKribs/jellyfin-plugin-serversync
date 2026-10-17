@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
@@ -80,15 +81,12 @@ public static class JsonFieldHelpers
         }
 
         var list = new List<string>();
-        foreach (var entry in v.EnumerateArray())
+        foreach (var entry in v.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String))
         {
-            if (entry.ValueKind == JsonValueKind.String)
+            var s = entry.GetString();
+            if (s != null)
             {
-                var s = entry.GetString();
-                if (s != null)
-                {
-                    list.Add(s);
-                }
+                list.Add(s);
             }
         }
 
@@ -107,15 +105,12 @@ public static class JsonFieldHelpers
         }
 
         var list = new List<T>();
-        foreach (var entry in v.EnumerateArray())
+        foreach (var entry in v.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String))
         {
-            if (entry.ValueKind == JsonValueKind.String)
+            var s = entry.GetString();
+            if (!string.IsNullOrEmpty(s) && Enum.TryParse<T>(s, out var parsed))
             {
-                var s = entry.GetString();
-                if (!string.IsNullOrEmpty(s) && Enum.TryParse<T>(s, out var parsed))
-                {
-                    list.Add(parsed);
-                }
+                list.Add(parsed);
             }
         }
 
@@ -134,15 +129,12 @@ public static class JsonFieldHelpers
             return result;
         }
 
-        foreach (var prop in v.EnumerateObject())
+        foreach (var prop in v.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String))
         {
-            if (prop.Value.ValueKind == JsonValueKind.String)
+            var pv = prop.Value.GetString();
+            if (!string.IsNullOrEmpty(pv))
             {
-                var pv = prop.Value.GetString();
-                if (!string.IsNullOrEmpty(pv))
-                {
-                    result[prop.Name] = pv;
-                }
+                result[prop.Name] = pv;
             }
         }
 

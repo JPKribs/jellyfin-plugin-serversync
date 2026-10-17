@@ -32,4 +32,10 @@ public class PeerLinkResponse
 
     /// <summary>Gets or sets why pairing did not happen, when it did not.</summary>
     public string? PairingError { get; set; }
+
+    public string? AccessLevel { get; set; }
+
+    public string? AccessUser { get; set; }
+
+    public bool? CanDownload { get; set; }
 }

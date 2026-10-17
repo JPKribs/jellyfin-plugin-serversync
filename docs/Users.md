@@ -2,6 +2,8 @@
 
 User syncing copies account settings from a source Jellyfin server onto mapped local users.
 
+An entry that holds a standard user's key only syncs that user's own settings. Mappings to other users are skipped. See [Permissions](Permissions.md).
+
 ## Settings
 
 * **Enable User Sync** turns user settings syncing on.
@@ -11,4 +13,4 @@ User syncing copies account settings from a source Jellyfin server onto mapped l
 
 ## Live changes between servers
 
-When a server entry is in Push or Sync mode, a change to a mapped user's policy, configuration, or profile image here is announced to that server and applied there through the same code the scan uses. Jellyfin raises an event for some user changes and none for policy or configuration saves, so mapped users are also checked every thirty seconds against a snapshot. As with metadata, the newest edit wins when the two servers disagree.
+User settings are never sent as they happen. Jellyfin raises no event for policy and configuration saves, so the scheduled Sync Information task carries them.

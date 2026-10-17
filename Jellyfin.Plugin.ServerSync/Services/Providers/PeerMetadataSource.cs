@@ -71,6 +71,8 @@ public sealed class PeerMetadataSource
 {
     public const string ProviderName = "Server Sync";
 
+    public const string PinnedProviderKey = "ServerSyncPeerItem";
+
     public static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(10);
 
     private static readonly HashSet<string> ByName = new(StringComparer.Ordinal)
@@ -153,11 +155,27 @@ public sealed class PeerMetadataSource
     public async Task<PeerMatch?> FindAsync(PeerItemKeys keys, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        if (Pinned(keys.ProviderIds) is { } pinned)
+        {
+            var parents = await _parents.ParentsAsync(cancellationToken).ConfigureAwait(false);
+            if (parents.FirstOrDefault(p => string.Equals(p.Key, pinned.ServerKey, StringComparison.OrdinalIgnoreCase)) is { } parent)
+            {
+                return new PeerMatch(parent, _clientFactory.Create(parent), pinned.ItemId);
+            }
+        }
+
+        return (await FindAllAsync(keys, firstOnly: true, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+    }
+
+    public async Task<List<PeerMatch>> FindAllAsync(PeerItemKeys keys, bool firstOnly, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        var matches = new List<PeerMatch>();
         var parents = await _parents.ParentsAsync(cancellationToken).ConfigureAwait(false);
         if (parents.Count == 0)
         {
             _logger.LogInformation("Server Sync has no match for {Item}: no server this one pulls from answers as Server Sync {Version}", keys.Describe(), _parents.Version);
-            return null;
+            return matches;
         }
 
         var misses = new List<string>();
@@ -178,15 +196,25 @@ public sealed class PeerMetadataSource
                 var found = await client.LookupPeerItemAsync(request, deadline.Token).ConfigureAwait(false);
                 if (found is { Found: true } && Guid.TryParse(found.ItemId, out var itemId))
                 {
-                    var match = new PeerMatch(parent, client, itemId);
+                    matches.Add(new PeerMatch(parent, client, itemId));
                     client = null;
-                    return match;
+                    if (firstOnly)
+                    {
+                        return matches;
+                    }
+
+                    continue;
                 }
 
                 misses.Add($"'{parent.DisplayName}' has no {keys.ItemType} at '{request.Path ?? "(no mapped path)"}' or with its ids");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                foreach (var match in matches)
+                {
+                    match.Dispose();
+                }
+
                 throw;
             }
             catch (Exception ex)
@@ -199,8 +227,66 @@ public sealed class PeerMetadataSource
             }
         }
 
-        _logger.LogInformation("Server Sync has no match for {Item}: {Reasons}", keys.Describe(), string.Join(". ", misses));
-        return null;
+        if (matches.Count == 0)
+        {
+            _logger.LogInformation("Server Sync has no match for {Item}: {Reasons}", keys.Describe(), string.Join(". ", misses));
+        }
+
+        return matches;
+    }
+
+    public async Task<IEnumerable<RemoteSearchResult>> GetSearchResultsAsync(string itemType, ItemLookupInfo info, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        var matches = await FindAllAsync(PeerItemKeys.FromInfo(itemType, info), firstOnly: false, cancellationToken).ConfigureAwait(false);
+        var results = new List<RemoteSearchResult>();
+        foreach (var match in matches)
+        {
+            using (match)
+            {
+                BaseItemDto? dto;
+                try
+                {
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    deadline.CancelAfter(LookupTimeout);
+                    dto = (await match.Client.GetItemsByIdsAsync(new[] { match.ItemId }, Fields, cancellationToken: deadline.Token).ConfigureAwait(false)).FirstOrDefault();
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not read {Item} from '{Parent}'", info.Path ?? info.Name, match.Parent.DisplayName);
+                    continue;
+                }
+
+                if (dto is null)
+                {
+                    continue;
+                }
+
+                var ids = dto.ProviderIds?.AdditionalData?
+                    .Where(kv => kv.Value is not null && !string.IsNullOrWhiteSpace(kv.Value.ToString()))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value!.ToString()!, StringComparer.OrdinalIgnoreCase)
+                    ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                ids[PinnedProviderKey] = PinValue(match.Parent, match.ItemId);
+                results.Add(new RemoteSearchResult
+                {
+                    Name = dto.Name,
+                    ProductionYear = dto.ProductionYear,
+                    PremiereDate = dto.PremiereDate?.UtcDateTime,
+                    IndexNumber = dto.IndexNumber,
+                    ParentIndexNumber = dto.ParentIndexNumber,
+                    Overview = dto.Overview,
+                    ImageUrl = $"{match.Client.ServerUrl}/Items/{match.ItemId:N}/Images/Primary?maxHeight=400",
+                    SearchProviderName = $"{ProviderName} ({match.Parent.DisplayName})",
+                    ProviderIds = ids
+                });
+            }
+        }
+
+        return results;
     }
 
     public async Task<MetadataResult<TItem>> GetMetadataAsync<TItem>(ItemLookupInfo info, CancellationToken cancellationToken)
@@ -213,6 +299,8 @@ public sealed class PeerMetadataSource
         {
             return result;
         }
+
+        var pinned = Pinned(info.ProviderIds) is not null;
 
         BaseItemDto? dto;
         try
@@ -244,6 +332,11 @@ public sealed class PeerMetadataSource
         var item = new TItem();
         MetadataFieldWriter.Apply(item, blobs.Metadata.Source, syncGenres: true, syncTags: true, syncLocks: false);
         item.Studios = MetadataFieldWriter.ReadStudios(blobs.Studios.Source);
+        if (pinned)
+        {
+            item.ProviderIds[PinnedProviderKey] = PinValue(match.Parent, match.ItemId);
+        }
+
         result.Item = item;
         result.People = MetadataFieldWriter.ReadPeople(blobs.People.Source);
         result.ResultLanguage = dto.PreferredMetadataLanguage;
@@ -257,47 +350,52 @@ public sealed class PeerMetadataSource
     public async Task<IEnumerable<RemoteImageInfo>> GetImagesAsync(BaseItem item, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
-        using var match = await FindAsync(PeerItemKeys.FromItem(item), cancellationToken).ConfigureAwait(false);
-        if (match is null)
-        {
-            return Array.Empty<RemoteImageInfo>();
-        }
-
-        List<ImageInfo>? images;
-        try
-        {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(LookupTimeout);
-            images = await match.Client.GetItemImageInfoAsync(match.ItemId, deadline.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Could not read the images of {Item} from '{Parent}'", item.Path ?? item.Name, match.Parent.DisplayName);
-            return Array.Empty<RemoteImageInfo>();
-        }
-
+        var matches = await FindAllAsync(PeerItemKeys.FromItem(item), firstOnly: false, cancellationToken).ConfigureAwait(false);
+        var pin = Pinned(item.ProviderIds);
+        var ordered = matches
+            .OrderBy(m => pin is { } p && string.Equals(m.Parent.Key, p.ServerKey, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ToList();
         var found = new List<RemoteImageInfo>();
-        var browserBase = string.IsNullOrWhiteSpace(match.Parent.BrowserUrl) ? match.Client.ServerUrl : match.Parent.BrowserUrl.TrimEnd('/');
-        foreach (var image in images ?? new List<ImageInfo>())
+        foreach (var match in ordered)
         {
-            if (image.ImageType is null || !Enum.TryParse<MediaBrowser.Model.Entities.ImageType>(image.ImageType.Value.ToString(), out var type))
+            using (match)
             {
-                continue;
-            }
+                List<ImageInfo>? images;
+                try
+                {
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    deadline.CancelAfter(LookupTimeout);
+                    images = await match.Client.GetItemImageInfoAsync(match.ItemId, deadline.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not read the images of {Item} from '{Parent}'", item.Path ?? item.Name, match.Parent.DisplayName);
+                    continue;
+                }
 
-            found.Add(new RemoteImageInfo
-            {
-                ProviderName = ProviderName,
-                Type = type,
-                Url = $"{match.Client.ServerUrl}/Items/{match.ItemId:N}/Images/{type}/{image.ImageIndex ?? 0}",
-                ThumbnailUrl = $"{browserBase}/Items/{match.ItemId:N}/Images/{type}/{image.ImageIndex ?? 0}?maxHeight=400",
-                Width = image.Width,
-                Height = image.Height
-            });
+                var browserBase = string.IsNullOrWhiteSpace(match.Parent.BrowserUrl) ? match.Client.ServerUrl : match.Parent.BrowserUrl.TrimEnd('/');
+                foreach (var image in images ?? new List<ImageInfo>())
+                {
+                    if (image.ImageType is null || !Enum.TryParse<MediaBrowser.Model.Entities.ImageType>(image.ImageType.Value.ToString(), out var type))
+                    {
+                        continue;
+                    }
+
+                    found.Add(new RemoteImageInfo
+                    {
+                        ProviderName = $"{ProviderName} ({match.Parent.DisplayName})",
+                        Type = type,
+                        Url = $"{match.Client.ServerUrl}/Items/{match.ItemId:N}/Images/{type}/{image.ImageIndex ?? 0}",
+                        ThumbnailUrl = $"{browserBase}/Items/{match.ItemId:N}/Images/{type}/{image.ImageIndex ?? 0}?maxHeight=400",
+                        Width = image.Width,
+                        Height = image.Height
+                    });
+                }
+            }
         }
 
         if (found.Count > 0)
@@ -315,6 +413,23 @@ public sealed class PeerMetadataSource
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(LookupTimeout);
         return await client.GetAuthorizedAsync(url, deadline.Token).ConfigureAwait(false);
+    }
+
+    public static string PinValue(SourceServer parent, Guid itemId)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        return parent.Key + ":" + itemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static (string ServerKey, Guid ItemId)? Pinned(Dictionary<string, string>? ids)
+    {
+        if (ids is null || !ids.TryGetValue(PinnedProviderKey, out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var split = value.IndexOf(':', StringComparison.Ordinal);
+        return split > 0 && Guid.TryParse(value[(split + 1)..], out var itemId) ? (value[..split], itemId) : null;
     }
 
     private static void MarkFilled(string? path, string? personName)

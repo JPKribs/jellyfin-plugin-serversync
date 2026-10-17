@@ -32,7 +32,7 @@ public abstract class PeerMetadataProvider<TItem, TInfo> : IRemoteMetadataProvid
         => _source.GetMetadataAsync<TItem>(info, cancellationToken);
 
     public Task<IEnumerable<RemoteSearchResult>> GetSearchResults(TInfo searchInfo, CancellationToken cancellationToken)
-        => Task.FromResult(Enumerable.Empty<RemoteSearchResult>());
+        => _source.GetSearchResultsAsync(typeof(TItem).Name, searchInfo, cancellationToken);
 
     public Task<HttpResponseMessage> GetImageResponse(string url, CancellationToken cancellationToken)
         => _source.GetImageResponseAsync(url, cancellationToken);
@@ -204,4 +204,15 @@ public sealed class PeerImageProvider : IRemoteImageProvider, IHasOrder
 
     public Task<HttpResponseMessage> GetImageResponse(string url, CancellationToken cancellationToken)
         => _source.GetImageResponseAsync(url, cancellationToken);
+}
+
+public sealed class PeerItemExternalId : IExternalId
+{
+    public string ProviderName => "Server Sync Item";
+
+    public string Key => PeerMetadataSource.PinnedProviderKey;
+
+    public ExternalIdMediaType? Type => null;
+
+    public bool Supports(IHasProviderIds item) => item is not MediaBrowser.Controller.Playlists.Playlist;
 }

@@ -28,14 +28,12 @@ public static class UserSyncMergeService
 
         var localIds = new List<string>();
 
-        foreach (var sourceId in sourceLibraryIds)
+        // Find mapping for this source library
+        foreach (var mapping in sourceLibraryIds.Select(sourceId => libraryMappings.FirstOrDefault(m =>
+            m.SourceLibraryId == sourceId &&
+            m.IsEnabled &&
+            !string.IsNullOrEmpty(m.LocalLibraryId))))
         {
-            // Find mapping for this source library
-            var mapping = libraryMappings.FirstOrDefault(m =>
-                m.SourceLibraryId == sourceId &&
-                m.IsEnabled &&
-                !string.IsNullOrEmpty(m.LocalLibraryId));
-
             if (mapping != null)
             {
                 localIds.Add(mapping.LocalLibraryId!);
@@ -234,10 +232,8 @@ public static class UserSyncMergeService
         var syncableProps = new Dictionary<string, object?>();
         var policyType = policy.GetType();
 
-        foreach (var prop in policyType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        foreach (var prop in policyType.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(ShouldSyncPolicyProperty))
         {
-            if (!ShouldSyncPolicyProperty(prop)) continue;
-
             try
             {
                 // Library id fields are Guid typed and excluded above, so nothing read here needs
@@ -263,10 +259,8 @@ public static class UserSyncMergeService
         var syncableProps = new Dictionary<string, object?>();
         var configType = config.GetType();
 
-        foreach (var prop in configType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        foreach (var prop in configType.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(ShouldSyncConfigurationProperty))
         {
-            if (!ShouldSyncConfigurationProperty(prop)) continue;
-
             try
             {
                 syncableProps[prop.Name] = prop.GetValue(config);

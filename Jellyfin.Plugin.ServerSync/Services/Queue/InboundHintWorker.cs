@@ -31,6 +31,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly HistoryHintHandler _history;
     private readonly ItemHintHandler _items;
+    private readonly PlaylistHintHandler _playlists;
     private readonly ContentHintHandler _content;
     private readonly HintActivityLog _activity;
     private readonly HintTriage _triage;
@@ -64,6 +65,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         HistoryHintHandler history,
         ItemHintHandler items,
         ContentHintHandler content,
+        PlaylistHintHandler playlists,
         HintActivityLog activity,
         HintTriage triage,
         IServerApplicationHost applicationHost,
@@ -77,6 +79,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         _history = history;
         _items = items;
         _content = content;
+        _playlists = playlists;
         _applicationHost = applicationHost;
         _logger = logger;
     }
@@ -91,12 +94,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         get
         {
             var cutoff = DateTime.UtcNow.AddDays(-1);
-            foreach (var pair in _completed)
+            foreach (var pair in _completed.Where(entry => entry.Value.At < cutoff))
             {
-                if (pair.Value.At < cutoff)
-                {
-                    _completed.TryRemove(pair.Key, out _);
-                }
+                _completed.TryRemove(pair.Key, out _);
             }
 
             return _completed.Select(pair => new CompletedHint { HintId = pair.Key, VersionTimestamp = pair.Value.Version, Code = pair.Value.Code, Reason = pair.Value.Reason }).ToList();
@@ -478,12 +478,10 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             try
             {
                 var fields = Tasks.RefreshMetadataSyncTableTask.BuildRequestedFields(config);
-                foreach (var dto in await client.GetItemsByIdsAsync(ids, fields, cancellationToken: cancellationToken).ConfigureAwait(false))
+                var fetched = await client.GetItemsByIdsAsync(ids, fields, cancellationToken: cancellationToken).ConfigureAwait(false);
+                foreach (var dto in fetched.Where(d => d.Id.HasValue))
                 {
-                    if (dto.Id.HasValue)
-                    {
-                        items[PrefetchKey(origin.ServerId, dto.Id.Value.ToString("N"))] = dto;
-                    }
+                    items[PrefetchKey(origin.ServerId, dto.Id!.Value.ToString("N"))] = dto;
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -507,6 +505,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             HintKind.Metadata => await _items.ApplyMetadataAsync(row, origin, client, cancellationToken, prefetched).ConfigureAwait(false),
             HintKind.People => await _items.ApplyPeopleAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
             HintKind.Content => await _content.ApplyAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
+            HintKind.Playlists => await _playlists.ApplyAsync(row, origin, client, cancellationToken).ConfigureAwait(false),
             HintKind.Users => HintApplyResult.Dropped(HintCode.Unsupported, "user settings are not announced live, the scheduled Sync Information task carries them"),
             _ => HintApplyResult.Dropped(HintCode.Unsupported, $"this server does not apply {row.Kind} hints")
         };

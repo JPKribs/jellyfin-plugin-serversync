@@ -373,6 +373,11 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
     private bool Exists(OutboundHint row)
     {
+        if (row.Kind == HintKind.Playlists && HintProtocol.IsPlaylistDeletion(row.ItemType))
+        {
+            return true;
+        }
+
         if (row.Kind == HintKind.People)
         {
             return _libraryManager.GetPerson(row.Key) is not null;

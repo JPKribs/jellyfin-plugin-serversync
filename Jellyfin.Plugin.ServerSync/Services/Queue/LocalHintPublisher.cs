@@ -110,6 +110,30 @@ public sealed class LocalHintPublisher
             itemPath: itemPath);
     }
 
+    public int PublishPlaylist(Guid localPlaylistId, string rootKey, string name, Guid ownerId, ObjectVersion version, string? excludePeerKey, bool recorded, bool deleted, bool copy)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        var owner = ownerId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        return Publish(
+            HintKind.Playlists,
+            rootKey,
+            version,
+            excludePeerKey,
+            peer => HintMapping.FindByLocalUser(peer, ownerId) is not null,
+            () => new OutboundHint
+            {
+                Kind = HintKind.Playlists,
+                Key = rootKey,
+                ItemId = localPlaylistId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
+                ItemType = HintProtocol.PlaylistItemType(copy, deleted),
+                UserId = owner,
+                UserName = name,
+                Recorded = recorded
+            },
+            recorded,
+            userId: ownerId);
+    }
+
     private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true, string? itemPath = null, Guid userId = default)
     {
         version.Kind = kind;

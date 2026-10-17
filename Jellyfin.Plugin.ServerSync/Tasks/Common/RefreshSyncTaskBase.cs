@@ -671,14 +671,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     {
         ArgumentNullException.ThrowIfNull(progress);
 
-        var stale = new List<TRecord>();
-        foreach (var kvp in existing)
-        {
-            if (!seenKeys.Contains(kvp.Key) && IsInScope(kvp.Value))
-            {
-                stale.Add(kvp.Value);
-            }
-        }
+        var stale = existing
+            .Where(kvp => !seenKeys.Contains(kvp.Key) && IsInScope(kvp.Value))
+            .Select(kvp => kvp.Value)
+            .ToList();
 
         var pruned = 0;
         var reportEvery = Math.Max(1, stale.Count / 100);

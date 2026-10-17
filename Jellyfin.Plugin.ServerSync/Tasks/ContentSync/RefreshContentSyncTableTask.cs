@@ -809,7 +809,7 @@ public class UpdateSyncTablesTask
         try
         {
             var users = await source.Client.GetUsersAsync(source.Server.AuthenticatedUserId, cancellationToken).ConfigureAwait(false);
-            serverUserIds = new HashSet<Guid>(users.Where(u => u.Id.HasValue).Select(u => u.Id!.Value));
+            serverUserIds = new HashSet<Guid>(users.Where(u => u.Id.HasValue && source.Server.MaySyncUser(u.Id.Value.ToString("N", CultureInfo.InvariantCulture))).Select(u => u.Id!.Value));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

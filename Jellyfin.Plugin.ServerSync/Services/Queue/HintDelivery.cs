@@ -66,13 +66,30 @@ public static class HintDelivery
         return (complete, resend);
     }
 
+    public static string RefusalReason(string body)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && doc.RootElement.TryGetProperty("Message", out var message) && message.GetString() is { Length: > 0 } text)
+            {
+                return "the peer refused this server's key: " + text + ". Add this server or its user to the whitelist there";
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+
+        return "the peer refused this server's key. Add this server or its user to the whitelist there, and check the key on this server entry";
+    }
+
     /// <summary>The reason shown for a paused peer, by status.</summary>
     /// <param name="statusCode">The HTTP status.</param>
     /// <param name="body">The peer's answer body, trimmed.</param>
     /// <returns>The reason.</returns>
     public static string PauseReason(int statusCode, string body) => statusCode switch
     {
-        401 or 403 => "the peer refused this server's key. Push and Sync need an administrator's key for the peer. Check the key on this server entry",
+        401 or 403 => RefusalReason(body),
         404 => "Server Sync is not installed on the peer",
         426 => body,
         428 => "the peer could not pair with this server. It has to reach this server at the URL on its entry for it: " + body,

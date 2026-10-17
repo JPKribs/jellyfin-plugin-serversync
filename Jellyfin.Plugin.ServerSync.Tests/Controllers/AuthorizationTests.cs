@@ -17,15 +17,26 @@ public class AuthorizationTests
     private static readonly Assembly PluginAssembly = typeof(Plugin).Assembly;
 
     [Fact]
-    public void EveryController_RequiresElevation()
+    public void EveryController_RequiresElevation_ExceptThePeerRoutes()
     {
-        var controllers = PluginAssembly.GetTypes().Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract && t != typeof(Jellyfin.Plugin.ServerSync.Controllers.PeerPairController)).ToList();
+        var peerRoutes = new[] { typeof(Jellyfin.Plugin.ServerSync.Controllers.PeerPairController), typeof(Jellyfin.Plugin.ServerSync.Controllers.PeerController) };
+        var controllers = PluginAssembly.GetTypes().Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract && !peerRoutes.Contains(t)).ToList();
         Assert.NotEmpty(controllers);
         foreach (var controller in controllers)
         {
             var authorize = controller.GetCustomAttributes<AuthorizeAttribute>(inherit: true).ToList();
             Assert.True(authorize.Count > 0, $"{controller.Name} has no [Authorize] attribute");
             Assert.True(authorize.Any(a => string.Equals(a.Policy, "RequiresElevation", StringComparison.Ordinal)), $"{controller.Name} does not require elevation");
+        }
+    }
+
+    [Fact]
+    public void PeerRoutes_AreGuardedByTheWhitelist()
+    {
+        foreach (var controller in new[] { typeof(Jellyfin.Plugin.ServerSync.Controllers.PeerPairController), typeof(Jellyfin.Plugin.ServerSync.Controllers.PeerController) })
+        {
+            Assert.NotEmpty(controller.GetCustomAttributes<AuthorizeAttribute>(inherit: true));
+            Assert.NotEmpty(controller.GetCustomAttributes<Jellyfin.Plugin.ServerSync.Controllers.PeerCallerGuardAttribute>(inherit: true));
         }
     }
 
