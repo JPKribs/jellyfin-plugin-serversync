@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.7.2",
+        "changelog": "\n## Developer\n- Hidden titles go back to Synced when they return on the source or Removed files leaves Ignore, instead of staying Ignored after the .ignore is removed\n- Integration tests cover Removed files set to Ignore, switching between Keep, Delete and Ignore, a user's own .ignore, and a single gone episode\n- Integration tests cover updating from 12.2.7.0 and from older versions with the Whitelist",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.7.2/jellyfin-plugin-serversync-12.2.7.2.zip",
+        "checksum": "e00cdb82a6bd6993722d7a6534508651",
+        "timestamp": "2026-10-17T22:46:53Z"
+      },
+      {
         "version": "12.2.7.1",
         "changelog": "\n## Developer\n- Removed files has a new Ignore option that hides a movie or show folder with a .ignore file once everything in it is gone from the source, and never hides a season on its own\n- Hidden titles show again when they come back on the source or when Removed files leaves Ignore, and a .ignore the plugin did not write is never touched\n- Waiting deletions are cancelled when Removed files is not Delete, so switching to Keep or Ignore never removes a file\n- Deleting a file from the Sync tab keeps its row as Ignored so it is not downloaded again, and queueing it brings it back\n- Updating from before 12.2.7 adds API keys and every administrator to the Whitelist once, so servers that pull from this one keep working\n- The Servers tab says where to add the Whitelist row when the other server refuses this one\n- A server running another Server Sync version never overwrites edits recorded here, and changes for it wait in the queue until both match\n- An item a peer changed that is announced more than ten times in ten minutes stops being announced, so two servers can never echo a change forever. Deletions always go out\n- Playlist copies are recorded in the sync database, moved over from playlist-copies.json, and rebuilt from their tags after a reset\n- Playlist copies keep their tags after Jellyfin refreshes them\n- Upkeep forgets copies of deleted playlists and removes replacement backups left next to finished downloads\n- Identify names each result after its server\n- The README is shorter and the API reference moved to docs/API.md\n- The docs say plainly that both servers must keep the same folder structure under each mapped library",
         "targetAbi": "12.1.0.0",
