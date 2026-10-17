@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.6.2",
+        "changelog": "\n## Developer\n- Activity entries for changes sent again, paused peers, and rejected requests name the items involved and say why\n- Activity entry details start with a capital letter\n- Metadata provider image previews load from the server's External URL when one is set, so a server reached at an internal address still shows them",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.6.2/jellyfin-plugin-serversync-12.2.6.2.zip",
+        "checksum": "4fd230e88c66ff2292d2032f3d3c1684",
+        "timestamp": "2026-10-17T01:54:05Z"
+      },
+      {
         "version": "12.2.6.1",
         "changelog": "\n## Developer\n- The metadata provider matches by the item's provider ids when the file path does not match, and seasons and episodes by the show's ids with their season and episode numbers\n- The metadata provider logs why it found no match for an item\n- A server that could not be reached or runs another version is asked again after 30 seconds",
         "targetAbi": "12.1.0.0",
