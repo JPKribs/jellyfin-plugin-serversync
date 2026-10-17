@@ -698,10 +698,7 @@ public class UpdateSyncTablesTask
 
             foreach (var row in title)
             {
-                row.Status = SyncStatus.Synced;
-                row.Reason = null;
-                row.StatusDate = DateTime.UtcNow;
-                manager.Upsert(row);
+                manager.UpdateStatus(row.SourceItemId, SyncStatus.Synced);
                 changed++;
             }
 

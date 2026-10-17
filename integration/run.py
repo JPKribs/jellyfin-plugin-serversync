@@ -11,6 +11,7 @@ Usage:
 Only the standard library is used. Docker and the dotnet SDK must be on the path.
 """
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -1475,6 +1476,167 @@ def scenario_dashboard_endpoints(creds, apis):
     expect(all(k in overview for k in ("Gathering", "Outbound", "Inbound", "Peers", "OutboundCounts")), "the queue overview answers with gathering, both queues, peers, and counts")
 
 
+def make_film(server, title):
+    folder = os.path.join(STATE, "media", server, "Movies", title)
+    os.makedirs(folder, exist_ok=True)
+    ffmpeg(folder, "-f", "lavfi", "-i", "testsrc=duration=2:size=64x64:rate=10", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+           "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{title}.mp4")
+    return folder
+
+
+def rescan_until(api, item_type, needle, present, message):
+    api.post("/Library/Refresh", None, expect=204)
+    return wait_until(lambda: (find_item(api, item_type, needle) is not None) == present, 150, message)
+
+
+def scenario_removed_files_ignore(creds, apis):
+    """Ignore hides a whole title folder with an empty .ignore, never a season, shows it again when it
+    returns or the setting changes, leaves a user's own .ignore alone, and cancels waiting deletions."""
+    local, a, b = apis["local"], apis["source-a"], apis["source-b"]
+    title = "Hidden Title (2019)"
+    file_name = f"{title}.mp4"
+    source = os.path.join(STATE, "media", "source-a", "Movies", title)
+    copy = os.path.join(STATE, "media", "local", "Movies", title)
+    marker = os.path.join(copy, ".ignore")
+    shutil.rmtree(copy, ignore_errors=True)
+    make_film("source-a", title)
+    rescan_until(a, "Movie", "Hidden Title", True, "source-a lists the new film")
+    configure_local(creds, local, ["source-a", "source-b"], FullScanIntervalHours=0)
+
+    def row():
+        return content_rows(local).get(file_name)
+
+    run_task(local, "ServerSyncUpdateTables")
+    if (row() or {}).get("Status") != "Queued":
+        local.post("/Sync/UpdateItemStatus", {"SourceItemId": row()["SourceItemId"], "Status": "Queued"}, expect=200)
+    run_task(local, "ServerSyncDownloadContent")
+    expect(os.path.exists(os.path.join(copy, file_name)), "local downloaded the film")
+
+    def set_action(action, delete_mode):
+        config = plugin_config(local)
+        config["MissingContentAction"] = action
+        config["DeleteMissingContentMode"] = delete_mode
+        config["FullScanIntervalHours"] = 0
+        save_plugin_config(local, config)
+
+    def remove_from_source():
+        shutil.rmtree(source, ignore_errors=True)
+        rescan_until(a, "Movie", "Hidden Title", False, "source-a no longer lists the film")
+
+    set_action("Ignore", "Disabled")
+    remove_from_source()
+    run_task(local, "ServerSyncUpdateTables")
+    expect(os.path.exists(marker) and os.path.getsize(marker) == 0, "Ignore writes an empty .ignore in the title folder")
+    expect(os.path.exists(os.path.join(copy, file_name)), "the hidden file is kept")
+    expect((row() or {}).get("Status") == "Ignored", "the hidden row is Ignored")
+    run_task(local, "ServerSyncDownloadContent")
+    expect(os.path.exists(os.path.join(copy, file_name)), "a Sync run keeps the hidden file")
+
+    make_film("source-a", title)
+    rescan_until(a, "Movie", "Hidden Title", True, "the film is back on source-a")
+    run_task(local, "ServerSyncUpdateTables")
+    expect(not os.path.exists(marker), "the .ignore is removed once the title is back on the source")
+    expect((row() or {}).get("Status") == "Synced", "the returned row is Synced again")
+
+    remove_from_source()
+    run_task(local, "ServerSyncUpdateTables")
+    expect(os.path.exists(marker), "the title is hidden again once it is gone")
+    set_action("Keep", "Disabled")
+    run_task(local, "ServerSyncUpdateTables")
+    expect(not os.path.exists(marker), "switching to Keep shows the title again")
+    expect((row() or {}).get("Status") == "Synced", "Keep leaves the row Synced")
+
+    with open(marker, "w", encoding="utf-8") as f:
+        f.write("*.nfo\n")
+    set_action("Ignore", "Disabled")
+    run_task(local, "ServerSyncUpdateTables")
+    with open(marker, encoding="utf-8") as f:
+        expect(f.read() == "*.nfo\n", "a .ignore the user wrote is left as it is")
+    expect((row() or {}).get("Status") == "Synced", "a title with the user's own .ignore is not marked hidden")
+    set_action("Keep", "Disabled")
+    run_task(local, "ServerSyncUpdateTables")
+    expect(os.path.exists(marker), "showing titles never removes the user's .ignore")
+    os.remove(marker)
+
+    set_action("Delete", "Enabled")
+    run_task(local, "ServerSyncUpdateTables")
+    expect((row() or {}).get("Status") == "Deleting", "Delete marks the gone film for deletion")
+    set_action("Ignore", "Disabled")
+    run_task(local, "ServerSyncUpdateTables")
+    expect((row() or {}).get("Status") != "Deleting", "switching to Ignore cancels the waiting deletion")
+    run_task(local, "ServerSyncDownloadContent")
+    expect(os.path.exists(os.path.join(copy, file_name)), "the file survives a Sync run after the switch")
+    run_task(local, "ServerSyncUpdateTables")
+    expect(os.path.exists(marker), "the next refresh hides the title instead")
+
+    episode = os.path.join(STATE, "media", "source-b", "Shows", "Test Show (2023)", "Season 01", "Test Show (2023) - S01E02 - Second.mp4")
+    parked = os.path.join(STATE, "parked-episode.mp4")
+    show = os.path.join(STATE, "media", "local", "Shows", "Test Show (2023)")
+    shutil.move(episode, parked)
+    try:
+        rescan_until(b, "Episode", "S01E02", False, "source-b no longer lists the second episode")
+        run_task(local, "ServerSyncUpdateTables")
+        expect(not os.path.exists(os.path.join(show, ".ignore")) and not os.path.exists(os.path.join(show, "Season 01", ".ignore")),
+               "a single gone episode never hides the show or its season")
+        expect(content_rows(local)["Test Show (2023) - S01E02 - Second.mp4"]["Status"] != "Ignored", "the gone episode is not marked hidden")
+    finally:
+        shutil.move(parked, episode)
+        rescan_until(b, "Episode", "S01E02", True, "the second episode is back on source-b")
+
+    set_action("Keep", "Disabled")
+    run_task(local, "ServerSyncUpdateTables")
+    expect(not os.path.exists(marker), "leaving Ignore shows the title again")
+    shutil.rmtree(copy, ignore_errors=True)
+    configure_local(creds, local, ["source-a", "source-b"], FullScanIntervalHours=24)
+    run_task(local, "ServerSyncUpdateTables")
+
+
+def rewrite_settings(name, api, edit):
+    """Stops a pool server, rewrites its saved Server Sync settings, and starts it again."""
+    container = f"serversync-it-{name}"
+    path = os.path.join(STATE, f"{name}-settings.xml")
+    run(["docker", "stop", container])
+    run(["docker", "cp", f"{container}:/config/plugins/configurations/Jellyfin.Plugin.ServerSync.xml", path])
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(edit(text))
+    run(["docker", "cp", path, f"{container}:/config/plugins/configurations/Jellyfin.Plugin.ServerSync.xml"])
+    run(["docker", "start", container])
+    api.wait_ready(180)
+    time.sleep(6)
+    os.remove(path)
+
+
+def scenario_whitelist_upgrade(creds, apis):
+    """Updating from 12.2.7.0 keeps its whitelist as it was, and updating from before it adds
+    API keys and every administrator once so pulling servers keep working."""
+    local = apis["local"]
+    unseeded = lambda text: re.sub(r"\s*<PeerCallerWhitelistSeeded>[^<]*</PeerCallerWhitelistSeeded>", "", text)
+    no_grants = lambda text: re.sub(r"\s*<PeerCallerGrants\s*/>|\s*<PeerCallerGrants>.*?</PeerCallerGrants>", "", text, flags=re.S)
+
+    config = plugin_config(local)
+    config["PeerCallerGrants"] = []
+    save_plugin_config(local, config)
+    rewrite_settings("local", local, unseeded)
+    local.token = local.post("/Users/AuthenticateByName", {"Username": "admin", "Pw": creds["password"]}, expect=200)[1]["AccessToken"]
+    config = plugin_config(local)
+    expect(config["PeerCallerGrants"] == [], "a 12.2.7.0 install keeps its empty whitelist after updating")
+    expect(config["PeerCallerWhitelistSeeded"] is True, "the update is recorded so it runs once")
+
+    rewrite_settings("local", local, lambda text: no_grants(unseeded(text)))
+    local.token = local.post("/Users/AuthenticateByName", {"Username": "admin", "Pw": creds["password"]}, expect=200)[1]["AccessToken"]
+    grants = plugin_config(local)["PeerCallerGrants"]
+    admin = creds["servers"]["local"]["userId"].replace("-", "")
+    expect(any(g["UserId"] == "apikey" for g in grants), "an install from before 12.2.7.0 gets an API keys row")
+    expect(any(g["UserId"].replace("-", "") == admin for g in grants), "it also gets a row for the administrator")
+    expect(all(not g["Locations"] for g in grants), "the added rows allow every location")
+
+    config = plugin_config(local)
+    config["PeerCallerGrants"] = open_grants(creds, "local")
+    save_plugin_config(local, config)
+
+
 SCENARIOS = [
     ("content priority across two sources, movies and a show", scenario_content_priority),
     ("reordering re-homes a shared item without deleting", scenario_reorder_rehomes),
@@ -1497,6 +1659,8 @@ SCENARIOS = [
     ("playlists on push override the receiver", scenario_playlist_push),
     ("playlist sharing and public access are copied", scenario_playlist_sharing),
     ("a standard user's key copies the playlists it can see", scenario_playlist_standard_user),
+    ("removed files set to Ignore hide whole titles only", scenario_removed_files_ignore),
+    ("updating keeps a 12.2.7.0 whitelist and seeds older ones", scenario_whitelist_upgrade),
 ]
 
 _failures = []
