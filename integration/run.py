@@ -1059,7 +1059,7 @@ def scenario_push_responses(creds, apis):
     expect("not installed" in (peers.get("no-plugin", {}).get("Reason") or ""), "a URL with no Server Sync behind it pauses as not installed (404)")
     paused_rows = [r for r in h["Outbound"] if r["PeerName"] in ("source-a", "source-b", "no-plugin")]
     expect(paused_rows and all(r["State"] == "Pending" and r["Attempts"] >= 1 for r in paused_rows), "paused rows stay pending with an attempt recorded, nothing is lost")
-    expect(len(activity(local, "paused hints to")) >= 3, "each pause wrote an activity entry")
+    expect(len(activity(local, "paused changes to")) >= 3, "each pause wrote an activity entry")
 
     # Clear the pauses, give source-a its real key, list local on source-b, and send a metadata hint that
     # source-a declines because its metadata module is off while source-b applies it.

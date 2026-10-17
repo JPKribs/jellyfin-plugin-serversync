@@ -281,6 +281,7 @@ public sealed class PeerMetadataSource
         }
 
         var found = new List<RemoteImageInfo>();
+        var browserBase = string.IsNullOrWhiteSpace(match.Parent.BrowserUrl) ? match.Client.ServerUrl : match.Parent.BrowserUrl.TrimEnd('/');
         foreach (var image in images ?? new List<ImageInfo>())
         {
             if (image.ImageType is null || !Enum.TryParse<MediaBrowser.Model.Entities.ImageType>(image.ImageType.Value.ToString(), out var type))
@@ -293,6 +294,7 @@ public sealed class PeerMetadataSource
                 ProviderName = ProviderName,
                 Type = type,
                 Url = $"{match.Client.ServerUrl}/Items/{match.ItemId:N}/Images/{type}/{image.ImageIndex ?? 0}",
+                ThumbnailUrl = $"{browserBase}/Items/{match.ItemId:N}/Images/{type}/{image.ImageIndex ?? 0}?maxHeight=400",
                 Width = image.Width,
                 Height = image.Height
             });

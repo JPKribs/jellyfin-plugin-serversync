@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.6.1"
+version: "12.2.6.2"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, and watch history."
@@ -28,6 +28,6 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   developer:
-  - The metadata provider matches by the item's provider ids when the file path does not match, and seasons and episodes by the show's ids with their season and episode numbers
-  - The metadata provider logs why it found no match for an item
-  - A server that could not be reached or runs another version is asked again after 30 seconds
+  - Activity entries for changes sent again, paused peers, and rejected requests name the items involved and say why
+  - Activity entry details start with a capital letter
+  - Metadata provider image previews load from the server's External URL when one is set, so a server reached at an internal address still shows them

@@ -432,7 +432,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                     _outbound.MarkFailed(row, "peer rejected the request as malformed: " + Trim(body));
                 }
 
-                await _activity.RejectedBatchAsync(peer.DisplayName, due.Count, Trim(body)).ConfigureAwait(false);
+                await _activity.RejectedBatchAsync(peer.DisplayName, due.ToList(), Trim(body)).ConfigureAwait(false);
 
                 _logger.LogError("'{Peer}' rejected {Count} hint(s) as malformed: {Body}", peer.DisplayName, due.Count, Trim(body));
                 break;
@@ -495,7 +495,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         _logger.LogError("Hints to '{Peer}' are paused until {Until:u}: {Reason}", peer.DisplayName, until, reason);
         if (!alreadyPaused)
         {
-            await _activity.PausedAsync(peer.DisplayName, reason).ConfigureAwait(false);
+            await _activity.PausedAsync(peer.DisplayName, reason, due.ToList(), until).ConfigureAwait(false);
         }
     }
 
@@ -610,12 +610,12 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             _logger.LogInformation("'{Peer}' finished {Count} hint(s) it could not report. Completed from its status", peer.DisplayName, finished.Count);
         }
 
-        var lost = sent.Where(row => lostIds.Contains(row.HintId)).Select(row => row.Id).ToList();
+        var lost = sent.Where(row => lostIds.Contains(row.HintId)).ToList();
         if (lost.Count > 0)
         {
-            _outbound.Resend(lost, DateTime.UtcNow);
+            _outbound.Resend(lost.Select(row => row.Id), DateTime.UtcNow);
             _logger.LogWarning("'{Peer}' lost {Count} hint(s) before completing them, sending again", peer.DisplayName, lost.Count);
-            await _activity.ResentAsync(peer.DisplayName, lost.Count).ConfigureAwait(false);
+            await _activity.ResentAsync(peer.DisplayName, lost).ConfigureAwait(false);
         }
     }
 

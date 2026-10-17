@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using JPKribs.Jellyfin.Base;
@@ -200,25 +201,86 @@ public sealed class HintActivityLog
     /// <param name="peerName">The peer's display name.</param>
     /// <param name="reason">Why.</param>
     /// <returns>A task.</returns>
-    public Task PausedAsync(string peerName, string reason)
-        => WriteAsync(Prefix + $"paused hints to {peerName}", "ServerSync.PeerPaused", reason, LogLevel.Warning);
+    public Task PausedAsync(string peerName, string reason, System.Collections.Generic.IReadOnlyList<OutboundHint> waiting, DateTime until)
+    {
+        ArgumentNullException.ThrowIfNull(waiting);
+        var held = waiting.Count == 0 ? string.Empty : $" Waiting to go: {Changes(waiting)}.";
+        return WriteAsync(
+            Prefix + $"paused changes to {peerName}",
+            "ServerSync.PeerPaused",
+            $"{Sentence(reason)?.TrimEnd('.')}. Changes to {peerName} wait until {until.ToLocalTime():t} and are then sent again.{held}",
+            LogLevel.Warning);
+    }
 
     /// <summary>Records that a peer rejected a whole request, once for the batch.</summary>
     /// <param name="peerName">The peer's display name.</param>
     /// <param name="count">How many hints the request carried.</param>
     /// <param name="reason">Why.</param>
     /// <returns>A task.</returns>
-    public Task RejectedBatchAsync(string peerName, int count, string reason)
-        => WriteAsync(Prefix + $"{peerName} rejected a request carrying {count} hint(s)", "ServerSync.HintRejected", reason, LogLevel.Error);
+    public Task RejectedBatchAsync(string peerName, System.Collections.Generic.IReadOnlyList<OutboundHint> rows, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        return WriteAsync(
+            Prefix + $"{peerName} rejected {rows.Count} change(s)",
+            "ServerSync.HintRejected",
+            $"{peerName} rejected the request as malformed: {reason}. The changes were {Changes(rows)}, and they are marked failed.",
+            LogLevel.Error);
+    }
 
     /// <summary>Records that a peer lost hints and they were sent again.</summary>
     /// <param name="peerName">The peer's display name.</param>
     /// <param name="count">How many.</param>
     /// <returns>A task.</returns>
-    public Task ResentAsync(string peerName, int count)
-        => WriteAsync(Prefix + $"sent {count} hint(s) to {peerName} again", "ServerSync.HintResent", "the peer accepted them earlier but no longer held them", LogLevel.Warning);
+    public Task ResentAsync(string peerName, System.Collections.Generic.IReadOnlyList<OutboundHint> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        return WriteAsync(
+            Prefix + $"sent {rows.Count} change(s) to {peerName} again",
+            "ServerSync.HintResent",
+            $"{peerName} had accepted {Changes(rows)} but no longer held them, which happens when it restarts before reporting them done",
+            LogLevel.Warning);
+    }
+
+    public static string Changes(System.Collections.Generic.IReadOnlyList<OutboundHint> rows, int shown = 5)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        var names = new System.Collections.Generic.List<string>();
+        foreach (var row in rows)
+        {
+            var name = Subject(row.Kind, row.ItemPath, row.UserName, row.Key);
+            if (!names.Contains(name, StringComparer.Ordinal))
+            {
+                names.Add(name);
+            }
+        }
+
+        if (names.Count == 0)
+        {
+            return "changes";
+        }
+
+        var listed = names.Count > shown ? names.GetRange(0, shown) : names;
+        var text = listed.Count switch
+        {
+            1 => listed[0],
+            2 => $"{listed[0]} and {listed[1]}",
+            _ => string.Join(", ", listed.GetRange(0, listed.Count - 1)) + ", and " + listed[^1]
+        };
+        return names.Count > shown ? $"{string.Join(", ", listed)}, and {names.Count - shown} more" : text;
+    }
+
+    public static string? Sentence(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return text;
+        }
+
+        var trimmed = text.Trim();
+        return char.ToUpperInvariant(trimmed[0]) + trimmed[1..];
+    }
 
     // Never throws, and cuts the text to what the activity log keeps.
     private Task WriteAsync(string name, string type, string? overview, LogLevel severity)
-        => _activity.LogAndWaitAsync(name, type, overview, severity);
+        => _activity.LogAndWaitAsync(name, type, Sentence(overview), severity);
 }
