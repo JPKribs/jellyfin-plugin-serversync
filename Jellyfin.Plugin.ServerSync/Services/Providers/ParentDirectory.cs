@@ -17,13 +17,16 @@ public sealed class ParentDirectory
 {
     public static readonly TimeSpan Remembered = TimeSpan.FromMinutes(5);
 
-    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
+
+    public static readonly TimeSpan FailedRemembered = TimeSpan.FromSeconds(30);
 
     private readonly IPluginConfigurationManager _configManager;
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<ParentDirectory> _logger;
     private readonly object _gate = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _failed = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (DateTime At, string Url, Task<bool> Runs)> _known = new(StringComparer.OrdinalIgnoreCase);
 
     public ParentDirectory(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<ParentDirectory> logger)
@@ -59,6 +62,8 @@ public sealed class ParentDirectory
             .FirstOrDefault();
     }
 
+    public string Version => _configManager.PluginVersion;
+
     public void Forget()
     {
         lock (_gate)
@@ -72,11 +77,14 @@ public sealed class ParentDirectory
         var now = DateTime.UtcNow;
         lock (_gate)
         {
-            if (_known.TryGetValue(server.Key, out var known) && now - known.At < Remembered && string.Equals(known.Url, server.Url, StringComparison.OrdinalIgnoreCase))
+            if (_known.TryGetValue(server.Key, out var known)
+                && string.Equals(known.Url, server.Url, StringComparison.OrdinalIgnoreCase)
+                && now - known.At < (_failed.ContainsKey(server.Key) ? FailedRemembered : Remembered))
             {
                 return known.Runs;
             }
 
+            _failed.TryRemove(server.Key, out _);
             var probe = ProbeAsync(server);
             _known[server.Key] = (now, server.Url, probe);
             return probe;
@@ -85,18 +93,45 @@ public sealed class ParentDirectory
 
     private async Task<bool> ProbeAsync(SourceServer server)
     {
+        var runs = await AskAsync(server).ConfigureAwait(false);
+        if (!runs)
+        {
+            _failed[server.Key] = 0;
+        }
+
+        return runs;
+    }
+
+    private async Task<bool> AskAsync(SourceServer server)
+    {
         try
         {
             using var deadline = new CancellationTokenSource(ProbeTimeout);
             using var client = _clientFactory.Create(server);
             var capabilities = await client.GetPeerCapabilitiesAsync(deadline.Token).ConfigureAwait(false);
-            return capabilities is not null
-                && HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion)
-                && !string.Equals(capabilities.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase);
+            if (capabilities is null)
+            {
+                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: Server Sync is not installed there", server.DisplayName);
+                return false;
+            }
+
+            if (!HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion))
+            {
+                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: it runs Server Sync {Theirs} and this server runs {Ours}", server.DisplayName, capabilities.PluginVersion, _configManager.PluginVersion);
+                return false;
+            }
+
+            if (string.Equals(capabilities.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: it reports this server's own id", server.DisplayName);
+                return false;
+            }
+
+            return true;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not ask '{Server}' whether it runs Server Sync", server.DisplayName);
+            _logger.LogInformation("Server Sync will not ask '{Server}' for metadata for now: it could not be reached ({Error})", server.DisplayName, ex.Message);
             return false;
         }
     }

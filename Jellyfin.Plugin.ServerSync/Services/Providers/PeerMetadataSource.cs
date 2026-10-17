@@ -26,6 +26,46 @@ public sealed record PeerMatch(SourceServer Parent, SourceServerClient Client, G
     public void Dispose() => Client.Dispose();
 }
 
+public sealed record PeerItemKeys(
+    string ItemType,
+    string? LocalPath,
+    string? Name,
+    Dictionary<string, string>? ProviderIds,
+    Dictionary<string, string>? SeriesProviderIds,
+    int? IndexNumber,
+    int? ParentIndexNumber)
+{
+    public static PeerItemKeys FromInfo(string itemType, ItemLookupInfo info) => new(
+        itemType,
+        info.Path,
+        info.Name,
+        info.ProviderIds,
+        info switch
+        {
+            EpisodeInfo episode => episode.SeriesProviderIds,
+            SeasonInfo season => season.SeriesProviderIds,
+            _ => null
+        },
+        info.IndexNumber,
+        info.ParentIndexNumber);
+
+    public static PeerItemKeys FromItem(BaseItem item) => new(
+        item.GetType().Name,
+        item.Path,
+        item.Name,
+        item.ProviderIds,
+        item switch
+        {
+            MediaBrowser.Controller.Entities.TV.Episode episode => episode.Series?.ProviderIds,
+            MediaBrowser.Controller.Entities.TV.Season season => season.Series?.ProviderIds,
+            _ => null
+        },
+        item.IndexNumber,
+        item.ParentIndexNumber);
+
+    public string Describe() => string.IsNullOrEmpty(LocalPath) ? ItemType + " " + Name : LocalPath;
+}
+
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerMetadataSource
 {
@@ -86,24 +126,46 @@ public sealed class PeerMetadataSource
         return relative.Length == 0 ? sourceRoot : sourceRoot + separator + relative.Replace('/', separator).Replace('\\', separator);
     }
 
-    public static PeerLookupRequest? LookupFor(SourceServer parent, string itemType, string? localPath, string? name)
+    public static PeerLookupRequest? LookupFor(SourceServer parent, PeerItemKeys keys)
     {
-        var parentPath = ToParentPath(parent, localPath);
-        var byName = ByName.Contains(itemType) && !string.IsNullOrWhiteSpace(name);
-        if (parentPath is null && !byName)
+        ArgumentNullException.ThrowIfNull(keys);
+        var parentPath = ToParentPath(parent, keys.LocalPath);
+        var byName = ByName.Contains(keys.ItemType) && !string.IsNullOrWhiteSpace(keys.Name);
+        var ids = Peer.PeerItemLookup.CleanIds(keys.ProviderIds);
+        var seriesIds = keys.IndexNumber.HasValue ? Peer.PeerItemLookup.CleanIds(keys.SeriesProviderIds) : null;
+        if (parentPath is null && !byName && ids is null && seriesIds is null)
         {
             return null;
         }
 
-        return new PeerLookupRequest { Path = parentPath, ItemType = itemType, Name = byName ? name : null };
+        return new PeerLookupRequest
+        {
+            Path = parentPath,
+            ItemType = keys.ItemType,
+            Name = byName ? keys.Name : null,
+            ProviderIds = ids,
+            SeriesProviderIds = seriesIds,
+            IndexNumber = keys.IndexNumber,
+            ParentIndexNumber = keys.ParentIndexNumber
+        };
     }
 
-    public async Task<PeerMatch?> FindAsync(string itemType, string? localPath, string? name, CancellationToken cancellationToken)
+    public async Task<PeerMatch?> FindAsync(PeerItemKeys keys, CancellationToken cancellationToken)
     {
-        foreach (var parent in await _parents.ParentsAsync(cancellationToken).ConfigureAwait(false))
+        ArgumentNullException.ThrowIfNull(keys);
+        var parents = await _parents.ParentsAsync(cancellationToken).ConfigureAwait(false);
+        if (parents.Count == 0)
         {
-            if (LookupFor(parent, itemType, localPath, name) is not { } request)
+            _logger.LogInformation("Server Sync has no match for {Item}: no server this one pulls from answers as Server Sync {Version}", keys.Describe(), _parents.Version);
+            return null;
+        }
+
+        var misses = new List<string>();
+        foreach (var parent in parents)
+        {
+            if (LookupFor(parent, keys) is not { } request)
             {
+                misses.Add($"'{parent.DisplayName}' maps no library holding it and it has no ids to match by");
                 continue;
             }
 
@@ -120,6 +182,8 @@ public sealed class PeerMetadataSource
                     client = null;
                     return match;
                 }
+
+                misses.Add($"'{parent.DisplayName}' has no {keys.ItemType} at '{request.Path ?? "(no mapped path)"}' or with its ids");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -127,7 +191,7 @@ public sealed class PeerMetadataSource
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Could not look up {Type} '{Item}' on '{Parent}'", itemType, localPath ?? name, parent.DisplayName);
+                misses.Add($"'{parent.DisplayName}' could not be asked: {ex.Message}");
             }
             finally
             {
@@ -135,6 +199,7 @@ public sealed class PeerMetadataSource
             }
         }
 
+        _logger.LogInformation("Server Sync has no match for {Item}: {Reasons}", keys.Describe(), string.Join(". ", misses));
         return null;
     }
 
@@ -143,7 +208,7 @@ public sealed class PeerMetadataSource
     {
         ArgumentNullException.ThrowIfNull(info);
         var result = new MetadataResult<TItem> { HasMetadata = false, Provider = ProviderName };
-        using var match = await FindAsync(typeof(TItem).Name, info.Path, info.Name, cancellationToken).ConfigureAwait(false);
+        using var match = await FindAsync(PeerItemKeys.FromInfo(typeof(TItem).Name, info), cancellationToken).ConfigureAwait(false);
         if (match is null)
         {
             return result;
@@ -192,7 +257,7 @@ public sealed class PeerMetadataSource
     public async Task<IEnumerable<RemoteImageInfo>> GetImagesAsync(BaseItem item, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
-        using var match = await FindAsync(item.GetType().Name, item.Path, item.Name, cancellationToken).ConfigureAwait(false);
+        using var match = await FindAsync(PeerItemKeys.FromItem(item), cancellationToken).ConfigureAwait(false);
         if (match is null)
         {
             return Array.Empty<RemoteImageInfo>();

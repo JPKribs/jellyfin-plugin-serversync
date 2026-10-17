@@ -396,17 +396,48 @@ public sealed class HintPipelineTests : IDisposable
     {
         var parent = Origin();
 
-        var person = PeerMetadataSource.LookupFor(parent, nameof(Person), null, "Jane Doe");
+        var person = PeerMetadataSource.LookupFor(parent, Keys(nameof(Person), null, "Jane Doe"));
         Assert.NotNull(person);
         Assert.Equal("Jane Doe", person!.Name);
         Assert.Null(person.Path);
 
-        Assert.Null(PeerMetadataSource.LookupFor(parent, nameof(Movie), "/somewhere/else.mkv", "Film"));
+        Assert.Null(PeerMetadataSource.LookupFor(parent, Keys(nameof(Movie), "/somewhere/else.mkv", "Film")));
 
-        var movie = PeerMetadataSource.LookupFor(parent, nameof(Movie), LocalPath("film.mkv"), "Film");
+        var movie = PeerMetadataSource.LookupFor(parent, Keys(nameof(Movie), LocalPath("film.mkv"), "Film"));
         Assert.Equal("/media/movies/film.mkv", movie!.Path);
         Assert.Null(movie.Name);
     }
+
+    [Fact]
+    public void Provider_FallsBackToIds_WhenThePathIsNotMapped()
+    {
+        var parent = Origin();
+        var ids = new Dictionary<string, string> { ["Tvdb"] = "446831", ["Empty"] = "" };
+
+        var movie = PeerMetadataSource.LookupFor(parent, Keys(nameof(Movie), "/somewhere/else.mkv", "Film", ids));
+
+        Assert.NotNull(movie);
+        Assert.Null(movie!.Path);
+        Assert.Equal(new[] { "Tvdb" }, movie.ProviderIds!.Keys.ToArray());
+    }
+
+    [Fact]
+    public void Provider_MatchesAnEpisodeBySeriesIdsAndNumbers()
+    {
+        var parent = Origin();
+        var series = new Dictionary<string, string> { ["Tvdb"] = "446831" };
+
+        var episode = PeerMetadataSource.LookupFor(parent, Keys("Episode", "/somewhere/else/S02E05.mkv", "Episode 5", null, series, 5, 2));
+        Assert.NotNull(episode);
+        Assert.Equal("446831", episode!.SeriesProviderIds!["Tvdb"]);
+        Assert.Equal(5, episode.IndexNumber);
+        Assert.Equal(2, episode.ParentIndexNumber);
+
+        Assert.Null(PeerMetadataSource.LookupFor(parent, Keys("Episode", "/somewhere/else/S02E05.mkv", "Episode 5", null, series, null, 2)));
+    }
+
+    private static PeerItemKeys Keys(string type, string? path, string? name, Dictionary<string, string>? ids = null, Dictionary<string, string>? seriesIds = null, int? index = null, int? parentIndex = null)
+        => new(type, path, name, ids, seriesIds, index, parentIndex);
 
     [Fact]
     public void ProviderFills_RememberPathsAndPeople()

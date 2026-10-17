@@ -135,7 +135,7 @@ Removing a server entry, once the change is saved, also removes the sync rows tr
 
 ## Metadata Provider
 
-Server Sync is also a metadata and image provider for every media type: movies, series, seasons, episodes, music albums, artists, and tracks, audiobooks, music videos, books, trailers, collections, people, home videos, and photos. Enable **Server Sync** in each library's metadata and image fetchers, above the others. Libraries that already exist start with it off. When Jellyfin reads in or refreshes an item, the provider asks the servers this one pulls from that run Server Sync, in priority order, for the same item: by its path, translated through the library mapping, or by name for people, artists, and collections. The first server that has it supplies the metadata, cast, studios, and images. When none has it, the provider answers with no match straight away and Jellyfin moves on to the next provider. When no server this one pulls from runs the same Server Sync version, it does nothing at all. A server entry that points back at this server is never asked. Metadata filled from a peer is not announced back to the peers, since they already hold it.
+Server Sync is also a metadata and image provider for every media type: movies, series, seasons, episodes, music albums, artists, and tracks, audiobooks, music videos, books, trailers, collections, people, home videos, and photos. Enable **Server Sync** in each library's metadata and image fetchers, above the others. Libraries that already exist start with it off. When Jellyfin reads in or refreshes an item, the provider asks the servers this one pulls from that run Server Sync, in priority order, for the same item: by its path, translated through the library mapping, then by its provider ids, then for a season or an episode by the show's ids with its season and episode numbers, and by name for people, artists, and collections. When nothing matches, the server log says why for each server it asked. The first server that has it supplies the metadata, cast, studios, and images. When none has it, the provider answers with no match straight away and Jellyfin moves on to the next provider. When no server this one pulls from runs the same Server Sync version, it does nothing at all. A server entry that points back at this server is never asked. Metadata filled from a peer is not announced back to the peers, since they already hold it.
 
 ## Content Syncing
 
@@ -428,10 +428,10 @@ What this server wants from the server named by `serverId`: the kinds whose modu
 
 ### POST /ServerSync/Peer/Lookup
 
-Finds one of this server's items, so the metadata provider on a server that pulls from this one can fill its copy from here. Any administrator's key may call it, and it records nothing. Path is at most 4096 characters and Name at most 512. By `Path` on this server, and by `Name` for a `Person`, `MusicArtist`, or `BoxSet`. `ItemType` is the Jellyfin type and must match when given.
+Finds one of this server's items, so the metadata provider on a server that pulls from this one can fill its copy from here. Any administrator's key may call it, and it records nothing. Path is at most 4096 characters and Name at most 512. It tries `Path` on this server first, then `ProviderIds`, then for a `Season` or `Episode` the show's `SeriesProviderIds` with `IndexNumber` and, for an episode, `ParentIndexNumber`, and `Name` for a `Person`, `MusicArtist`, or `BoxSet`. `ItemType` is the Jellyfin type and must match when given. At most 16 ids in each set.
 
 ```json
-{ "Path": "/media/Movies/Only A (2021)/Only A (2021).mp4", "ItemType": "Movie", "Name": null }
+{ "Path": "/media/Shows/Test Show (2023)/Season 01/Test Show (2023) - S01E01 - Pilot.mp4", "ItemType": "Episode", "ProviderIds": {}, "SeriesProviderIds": { "Tvdb": "446831" }, "IndexNumber": 1, "ParentIndexNumber": 1 }
 ```
 
 Answers `{ "Found": true, "ItemId": "9c1e0f…", "ItemType": "Movie" }`, or `{ "Found": false }`. The caller then reads the item through Jellyfin's own API.

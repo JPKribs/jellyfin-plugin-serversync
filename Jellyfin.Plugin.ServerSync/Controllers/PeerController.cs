@@ -418,12 +418,13 @@ public class PeerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<PeerLookupResponse> Lookup([FromBody] PeerLookupRequest request)
     {
-        if (request is null || (string.IsNullOrWhiteSpace(request.Path) && string.IsNullOrWhiteSpace(request.Name)))
+        if (request is null || (string.IsNullOrWhiteSpace(request.Path) && string.IsNullOrWhiteSpace(request.Name) && request.ProviderIds is not { Count: > 0 } && request.SeriesProviderIds is not { Count: > 0 }))
         {
-            return BadRequest("A request body with a Path or a Name is required");
+            return BadRequest("A request body with a Path, a Name, or provider ids is required");
         }
 
-        if (request.Path?.Length > 4096 || request.Name?.Length > 512 || request.ItemType?.Length > 128)
+        if (request.Path?.Length > 4096 || request.Name?.Length > 512 || request.ItemType?.Length > 128
+            || request.ProviderIds?.Count > PeerItemLookup.MaxProviderIds || request.SeriesProviderIds?.Count > PeerItemLookup.MaxProviderIds)
         {
             return BadRequest("The Path, Name, or ItemType is too long");
         }
