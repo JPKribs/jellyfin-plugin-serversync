@@ -12,7 +12,23 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class ApplyGuard
 {
+    private static readonly ConcurrentDictionary<string, DateTime> RecentApplies = new(StringComparer.Ordinal);
+
     private readonly ConcurrentDictionary<string, int> _active = new(StringComparer.Ordinal);
+
+    public static bool AppliedRecently(string guardKey, TimeSpan window)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(guardKey);
+        if (RecentApplies.TryGetValue(guardKey, out var at) && DateTime.UtcNow - at < window)
+        {
+            return true;
+        }
+
+        var split = guardKey.IndexOf(':', StringComparison.Ordinal);
+        return split > 0
+            && RecentApplies.TryGetValue(string.Concat(guardKey.AsSpan(0, split + 1), "*"), out var all)
+            && DateTime.UtcNow - all < window;
+    }
 
     /// <summary>Registers an apply of one object. Dispose the result when the write is done.</summary>
     /// <param name="guardKey">The guard key, see <see cref="HintProtocol.GuardKey"/>.</param>
@@ -42,6 +58,18 @@ public sealed class ApplyGuard
 
     private void Leave(string guardKey)
     {
+        RecentApplies[guardKey] = DateTime.UtcNow;
+        if (RecentApplies.Count > 10000)
+        {
+            foreach (var (key, at) in RecentApplies)
+            {
+                if (DateTime.UtcNow - at > TimeSpan.FromHours(1))
+                {
+                    RecentApplies.TryRemove(key, out _);
+                }
+            }
+        }
+
         while (_active.TryGetValue(guardKey, out var count))
         {
             if (count <= 1)

@@ -861,6 +861,132 @@ def scenario_playlist_pull(creds, apis):
     configure_local(creds, local, ["source-a", "source-b"])
 
 
+def peer_playlists(api, name):
+    return [p for p in api.get("/Sync/Peer/Playlists")["Playlists"] if p["Name"] == name]
+
+
+def clear_playlists(apis, names, title):
+    for n in names:
+        api = apis[n]
+        for p in peer_playlists(api, title):
+            status, body = api.call("DELETE", f"/Items/{p['Id']}", raw=True)
+            if status == 404:
+                owner = api.get(f"/Users/{p['OwnerUserId']}")["Name"]
+                _, auth = api.post("/Users/AuthenticateByName", {"Username": owner, "Pw": ""}, expect=200)
+                as_owner = Api(api.name, api.base.rsplit(":", 1)[1], api.device + "-owner")
+                as_owner.token = auth["AccessToken"]
+                status, body = as_owner.call("DELETE", f"/Items/{p['Id']}", raw=True)
+            assert status in (204, 404), f"{n}: deleting playlist {p['Id']} returned {status}: {body[:300]!r}"
+
+
+def scenario_playlist_push(creds, apis):
+    """On Push the sender's copy always overrides the receiver's, and deletions follow."""
+    local, a = apis["local"], apis["source-a"]
+    admin = {"local": creds["servers"]["local"]["userId"], "source-a": creds["servers"]["source-a"]["userId"]}
+    title = "IT Push Playlist"
+    configure_server(creds, local, "local", ["source-a"], {"source-a": "Push"}, EnablePlaylistSync=True)
+    configure_server(creds, a, "source-a", ["local"], {"local": "Pull"}, EnablePlaylistSync=True)
+    clear_playlists(apis, ["local", "source-a"], title)
+
+    def queues_empty():
+        return all(not hints(api)["Outbound"] and not hints(api)["Inbound"] and hints(api)["Pending"] == 0 for api in (local, a))
+
+    wait_until(queues_empty, 60, "the pair is quiet before the test")
+    ids = [movie_id(local, "Only A (2021)"), movie_id(local, "Shared Movie")]
+    _, made = local.post("/Playlists", {"Name": title, "Ids": ids, "UserId": admin["local"], "MediaType": "Video"}, expect=200)
+    wait_until(lambda: len(playlists_of(a, admin["source-a"], title)) == 1, 60, "a playlist made on local was pushed to source-a")
+    copy = playlists_of(a, admin["source-a"], title)[0]
+
+    entries = a.get(f"/Playlists/{copy['Id']}/Items?userId={admin['source-a']}")["Items"]
+    a.call("DELETE", f"/Playlists/{copy['Id']}/Items?entryIds={entries[0]['PlaylistItemId']}", expect=204)
+    time.sleep(8)
+    local_entries = local.get(f"/Playlists/{made['Id']}/Items?userId={admin['local']}")["Items"]
+    local.call("DELETE", f"/Playlists/{made['Id']}/Items?entryIds={local_entries[1]['PlaylistItemId']}", expect=204)
+    expected = playlist_paths(local, admin["local"], made["Id"])
+    wait_until(lambda: playlist_paths(a, admin["source-a"], copy["Id"]) == expected, 60, "a later edit on local overrides the copy on source-a")
+    expect(len(playlist_paths(local, admin["local"], made["Id"])) == 1, "the edit on source-a's copy never came back to local")
+
+    local.call("DELETE", f"/Items/{made['Id']}", expect=204)
+    wait_until(lambda: not playlists_of(a, admin["source-a"], title), 60, "deleting on local deletes the pushed copy")
+    wait_until(queues_empty, 60, "every queue drained")
+
+    configure_server(creds, a, "source-a", [])
+    configure_local(creds, local, ["source-a", "source-b"])
+
+
+def scenario_playlist_sharing(creds, apis):
+    """With Sharing on, shares map to the mapped users and the public flag is copied."""
+    local, a = apis["local"], apis["source-a"]
+    ea, el = creds["servers"]["source-a"], creds["servers"]["local"]
+    title = "IT Shared Playlist"
+    configure_server(creds, local, "local", ["source-a"], {"source-a": "Sync"}, EnablePlaylistSync=True, PlaylistSyncShares=True)
+    configure_server(creds, a, "source-a", ["local"], {"local": "Sync"}, EnablePlaylistSync=True, PlaylistSyncShares=True)
+    clear_playlists(apis, ["local", "source-a"], title)
+
+    ids = [movie_id(a, "Only A (2021)")]
+    a.post("/Playlists", {"Name": title, "Ids": ids, "UserId": ea["userId"], "MediaType": "Video", "IsPublic": False,
+                          "Users": [{"UserId": ea["viewerId"], "CanEdit": True}]}, expect=200)
+
+    def copied():
+        found = peer_playlists(local, title)
+        return found[0] if len(found) == 1 else None
+
+    wait_until(lambda: copied() is not None, 60, "a shared playlist made on source-a reached local")
+    p = copied()
+    expect(p["OwnerUserId"] == el["userId"].replace("-", ""), "the copy belongs to the mapped owner")
+    expect(p["OpenAccess"] is False, "the copy keeps the playlist private")
+    expect([(s["UserId"], s["CanEdit"]) for s in p["Shares"]] == [(el["viewerId"].replace("-", ""), True)], "the copy is shared with the mapped viewer, who may edit it")
+
+    clear_playlists(apis, ["source-a"], title)
+    wait_until(lambda: copied() is None, 60, "deleting the shared playlist on source-a deletes the copy")
+    configure_server(creds, a, "source-a", [])
+    configure_local(creds, local, ["source-a", "source-b"])
+
+
+def scenario_playlist_standard_user(creds, apis):
+    """A standard user's key copies only the playlists that user can see, all owned by that user here."""
+    local, a = apis["local"], apis["source-a"]
+    ea, el = creds["servers"]["source-a"], creds["servers"]["local"]
+    names = ["IT Viewer Own", "IT Viewer Shared", "IT Admin Private"]
+    clear_playlists(apis, ["local", "source-a"], names[0])
+    clear_playlists(apis, ["local", "source-a"], names[1])
+    clear_playlists(apis, ["local", "source-a"], names[2])
+    ids = [movie_id(a, "Only A (2021)")]
+    a.post("/Playlists", {"Name": names[0], "Ids": ids, "UserId": ea["viewerId"], "MediaType": "Video", "IsPublic": False}, expect=200)
+    a.post("/Playlists", {"Name": names[1], "Ids": ids, "UserId": ea["userId"], "MediaType": "Video", "IsPublic": False,
+                          "Users": [{"UserId": ea["viewerId"], "CanEdit": False}]}, expect=200)
+    a.post("/Playlists", {"Name": names[2], "Ids": ids, "UserId": ea["userId"], "MediaType": "Video", "IsPublic": False}, expect=200)
+
+    _, auth = a.post("/Users/AuthenticateByName", {"Username": "viewer", "Pw": ""}, expect=200)
+    configure_local(creds, local, ["source-a"], EnablePlaylistSync=True, PlaylistSyncShares=True, EnableContentSync=False)
+    config = plugin_config(local)
+    entry = next(s for s in config["Servers"] if s["Name"] == "source-a")
+    entry["ApiKey"] = auth["AccessToken"]
+    entry["AccessLevel"] = "User"
+    entry["AuthenticatedUser"] = "viewer"
+    entry["AuthenticatedUserId"] = ea["viewerId"]
+    save_plugin_config(local, config)
+    config = plugin_config(a)
+    config["PeerCallerGrants"] = open_grants(creds, "source-a") + [{"UserId": ea["viewerId"], "UserName": "viewer", "Locations": []}]
+    save_plugin_config(a, config)
+
+    run_task(local, "ServerSyncInformation")
+    own = peer_playlists(local, names[0])
+    shared = peer_playlists(local, names[1])
+    private = peer_playlists(local, names[2])
+    viewer = el["viewerId"].replace("-", "")
+    expect(len(own) == 1 and own[0]["OwnerUserId"] == viewer, "the viewer's own playlist is copied to the local viewer")
+    expect(len(shared) == 1 and shared[0]["OwnerUserId"] == viewer, "a playlist shared with the viewer is copied, owned by the local viewer")
+    expect(not private, "an administrator's private playlist is not copied")
+
+    for n in names:
+        clear_playlists(apis, ["local", "source-a"], n)
+    config = plugin_config(a)
+    config["PeerCallerGrants"] = open_grants(creds, "source-a")
+    save_plugin_config(a, config)
+    configure_local(creds, local, ["source-a", "source-b"])
+
+
 def scenario_whitelist(creds, apis):
     """The peer routes refuse callers the whitelist does not name, with a reason the connection test reports."""
     api = apis["source-a"]
@@ -1368,6 +1494,9 @@ SCENARIOS = [
     ("playlist changes and deletions travel by hints", scenario_playlist_hints),
     ("the whitelist guards the peer routes", scenario_whitelist),
     ("playlists on pull follow the parent", scenario_playlist_pull),
+    ("playlists on push override the receiver", scenario_playlist_push),
+    ("playlist sharing and public access are copied", scenario_playlist_sharing),
+    ("a standard user's key copies the playlists it can see", scenario_playlist_standard_user),
 ]
 
 _failures = []

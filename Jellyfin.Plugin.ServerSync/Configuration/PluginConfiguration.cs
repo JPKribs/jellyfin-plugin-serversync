@@ -259,6 +259,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public ApprovalMode DeleteMissingContentMode { get; set; } = ApprovalMode.Disabled;
 
+    public MissingContentAction? MissingContentAction { get; set; }
+
+    [System.Xml.Serialization.XmlIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public MissingContentAction EffectiveMissingContentAction
+        => MissingContentAction ?? (DeleteMissingContentMode == ApprovalMode.Disabled ? Models.ContentSync.Configuration.MissingContentAction.Keep : Models.ContentSync.Configuration.MissingContentAction.Delete);
+
     /// <summary>
     /// Re-queue files with size or date mismatches when enabled.
     /// </summary>
@@ -550,6 +557,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public int HintRefusedMaxRetries { get; set; }
 
     public List<PeerCallerGrant> PeerCallerGrants { get; set; } = new();
+
+    public bool PeerCallerWhitelistSeeded { get; set; }
 
     /// <summary>
     /// Verify source image sizes with live HTTP calls on every refresh, even
@@ -876,6 +885,15 @@ public class PluginConfiguration : BasePluginConfiguration
         Servers.RemoveAll(entry => entry is null);
         LastRunFailures ??= new List<SyncRunFailure>();
         WatchedFilterUserIds ??= new List<string>();
+        MissingContentAction = EffectiveMissingContentAction;
+        if (MissingContentAction != Models.ContentSync.Configuration.MissingContentAction.Delete)
+        {
+            DeleteMissingContentMode = ApprovalMode.Disabled;
+        }
+        else if (DeleteMissingContentMode == ApprovalMode.Disabled)
+        {
+            DeleteMissingContentMode = ApprovalMode.Enabled;
+        }
         PeerCallerGrants = (PeerCallerGrants ?? new List<PeerCallerGrant>())
             .Where(g => g is not null && !string.IsNullOrWhiteSpace(g.UserId))
             .Select(g => new PeerCallerGrant

@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 29;
+    public const int CurrentSchemaVersion = 30;
 
     /// <summary>
     /// The oldest schema version whose code can still work with a database at
@@ -324,6 +324,20 @@ public static class DatabaseMigrationService
         cmd.ExecuteNonQuery();
         CreateV28Additions(connection);
         CreateV29Additions(connection);
+        CreateV30Additions(connection);
+    }
+
+    public static void CreateV30Additions(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS PlaylistCopies (
+                PlaylistId TEXT NOT NULL PRIMARY KEY,
+                RootId TEXT NOT NULL,
+                ServerKey TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL
+            )";
+        cmd.ExecuteNonQuery();
     }
 
     public static void CreateV29Additions(SqliteConnection connection)
@@ -634,6 +648,12 @@ public static class DatabaseMigrationService
             {
                 logger.LogInformation("Schema upgrade to v29: adding parked hints and scan watermarks.");
                 CreateV29Additions(connection);
+            }
+
+            if (fromVersion < 30)
+            {
+                logger.LogInformation("Schema upgrade to v30: adding playlist copies.");
+                CreateV30Additions(connection);
             }
 
             JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, CurrentSchemaVersion, MinReaderVersion);

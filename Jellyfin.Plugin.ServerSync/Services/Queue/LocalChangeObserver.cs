@@ -86,8 +86,10 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         HintSuppression suppression,
         InboundHintWorker inboundWorker,
         IServerApplicationHost applicationHost,
+        PlaylistCopyStore playlistCopies,
         ILogger<LocalChangeObserver> logger)
     {
+        ArgumentNullException.ThrowIfNull(playlistCopies);
         _suppression = suppression;
         _inboundWorker = inboundWorker;
         _worker = worker;
@@ -375,7 +377,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
             var rootKey = PlaylistMirror.RootKey(playlist);
             var copy = PlaylistMirror.IsMirror(playlist);
-            PlaylistCopyRegistry.Remove(playlist.Id);
+            PlaylistCopyStore.Remove(playlist.Id);
             if (_httpContext.HttpContext is null || !_configManager.Configuration.EnablePlaylistSync)
             {
                 return;
@@ -536,7 +538,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     private void NoteUnmatched(int queued, PendingChange change, HintKind kind, string? itemPath, string? userName)
     {
-        if (queued > 0 || !AnyPeerAccepts(kind, itemPath, change.UserId) || _unmatched.Count >= MaxUnmatched)
+        if (queued != 0 || !AnyPeerAccepts(kind, itemPath, change.UserId) || _unmatched.Count >= MaxUnmatched)
         {
             return;
         }

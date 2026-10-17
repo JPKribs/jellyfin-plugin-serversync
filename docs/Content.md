@@ -1,6 +1,6 @@
 # Content Syncing
 
-Content syncing mirrors missing or updated media files from a source Jellyfin server onto this server. When a source renames or moves a file, the local copy moves to match, unless something already sits at the new path.
+Content syncing mirrors missing or updated media files from a source Jellyfin server onto this server. Files are matched by their path under each mapped library's root folder, so both servers must keep the same folder and file structure under that root. A file renamed or moved on the source usually gets a new item id there, so it is downloaded again at its new path, and the old copy is handled by **Removed files**.
 
 ## Settings
 
@@ -9,7 +9,8 @@ Content syncing mirrors missing or updated media files from a source Jellyfin se
 * **Include Companion Files** also downloads external subtitle files with each media file. Other companions (NFO files, local artwork, external audio tracks) have no download route in the Jellyfin API and are skipped.
 * **Downloads At Once** limits how many files download at once.
 * **Download Speed** sets the **Normal** rate, where 0 means unlimited.
-* **Approvals** sets an action for each kind of change: **New files** download automatically or wait for approval, **Changed files** replace automatically or wait, and **Removed files** what happens to a local file once its item is gone from the source. Disabled keeps the file. Require Approval holds it as Pending Deletion until you approve it. Enabled deletes it on the next Sync Content run, but still asks first whenever the plugin cannot be sure the file should go.
+* **Approvals** sets an action for each kind of change: **New files** download automatically or wait for approval, and **Changed files** replace automatically or wait.
+* **Removed files** decides what happens to a local file once its item is gone from the source. **Keep** leaves it. **Delete** deletes it on the next Sync Content run, but still asks first whenever the plugin cannot be sure the file should go. **Delete After Approval** holds every deletion as Pending Deletion until you approve it. **Ignore** keeps the files and, once everything in a movie or show folder is gone from the source, writes an empty `.ignore` file in that folder so Jellyfin hides it on its next scan. A season is never hidden on its own, so a show that still has episodes on the source stays as it is. A folder that already has a `.ignore` is left alone. A hidden title shows again when it comes back on the source, or when Removed files is set to anything else. Switching away from Delete cancels deletions that were still waiting.
 * **Detect Updated Files** downloads a file again when its size on the source changes.
 * **Scheduled Speed** uses the **Scheduled** rate during the set **Hours**.
 * **Minimum Free Space** blocks downloads when free space falls below this many gigabytes.
@@ -93,3 +94,7 @@ whitelist still reconciles normally.
 ## Live changes between servers
 
 When a server entry is in Push or Sync mode, a file that appears here is announced to that server as soon as this server's library has picked it up, and that server downloads it through the same code Sync Content uses, respecting its own approval mode and library mappings. When several servers offer the same file, the earliest entry in that server's list provides it. Downloads run in their own lane so a large file never delays a history or metadata change arriving at the same time, and the receiving library is asked to scan once the file is in place. Replacements and removals are not announced. Sync Content handles those on its schedule.
+
+## Deleting From the Sync Tab
+
+Deleting a file from the Sync tab removes it from disk, or moves it to the recycling bin, and keeps its row as **Ignored**, so the next run does not download it again. Queue the row to download it again.

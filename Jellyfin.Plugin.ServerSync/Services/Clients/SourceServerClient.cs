@@ -2224,7 +2224,12 @@ public class SourceServerClient : IDisposable
         var path = "/Sync/Peer/Playlists?serverId=" + Uri.EscapeDataString(callerServerId ?? string.Empty)
             + (onlyId is null ? string.Empty : "&id=" + onlyId.Value.ToString("N", System.Globalization.CultureInfo.InvariantCulture));
         var (status, parsed, body) = await PeerRequestAsync<PeerPlaylistsResponse>(HttpMethod.Get, path, null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
-        if (status is 401 or 403 or 404 or 426)
+        if (status == 426)
+        {
+            throw new HttpRequestException($"The peer runs another Server Sync version, so playlists wait until both match: {body}", null, (System.Net.HttpStatusCode)status);
+        }
+
+        if (status is 401 or 403 or 404)
         {
             _logger.LogDebug("The peer's Server Sync did not list its playlists ({Status}): {Body}", status, body);
             return null;

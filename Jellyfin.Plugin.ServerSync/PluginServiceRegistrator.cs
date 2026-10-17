@@ -45,6 +45,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.InboundHintWorker>());
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.LocalChangeObserver>());
         serviceCollection.AddHostedService<Tasks.HiddenTaskScheduleCleaner>();
+        serviceCollection.AddHostedService<Services.Peer.WhitelistUpgrade>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.QueueMaintenanceService>());
 
         // Named HttpClient for source server communication. 

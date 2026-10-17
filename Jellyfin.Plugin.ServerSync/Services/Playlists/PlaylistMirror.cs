@@ -60,8 +60,9 @@ public sealed class PlaylistMirror
     private readonly ApplyGuard _guard;
     private readonly ILogger<PlaylistMirror> _logger;
 
-    public PlaylistMirror(ILibraryManager libraryManager, IPlaylistManager playlistManager, IUserManager userManager, IServerApplicationHost applicationHost, MediaBrowser.Controller.Providers.IProviderManager providerManager, ApplyGuard guard, ILogger<PlaylistMirror> logger)
+    public PlaylistMirror(ILibraryManager libraryManager, IPlaylistManager playlistManager, IUserManager userManager, IServerApplicationHost applicationHost, MediaBrowser.Controller.Providers.IProviderManager providerManager, ApplyGuard guard, PlaylistCopyStore copies, ILogger<PlaylistMirror> logger)
     {
+        ArgumentNullException.ThrowIfNull(copies);
         _providerManager = providerManager;
         _libraryManager = libraryManager;
         _playlistManager = playlistManager;
@@ -104,6 +105,34 @@ public sealed class PlaylistMirror
         }
 
         return null;
+    }
+
+    public int RebuildCopiesFromTags()
+    {
+        if (PlaylistCopyStore.Count() > 0)
+        {
+            return 0;
+        }
+
+        var rebuilt = 0;
+        foreach (var playlist in LocalPlaylists())
+        {
+            if (playlist.ProviderIds.TryGetValue(SourcePlaylistProviderKey, out var root)
+                && Guid.TryParse(root, out var rootId)
+                && playlist.ProviderIds.TryGetValue(SourceServerProviderKey, out var server)
+                && !string.IsNullOrWhiteSpace(server))
+            {
+                PlaylistCopyStore.Set(playlist.Id, IdKey(rootId), server);
+                rebuilt++;
+            }
+        }
+
+        if (rebuilt > 0)
+        {
+            _logger.LogInformation("Playlists: rebuilt {Count} playlist copies from their tags", rebuilt);
+        }
+
+        return rebuilt;
     }
 
     public Dictionary<string, Guid> UserMap(SourceServer server)
@@ -232,7 +261,7 @@ public sealed class PlaylistMirror
                     Public = openAccess ?? false
                 }).ConfigureAwait(false);
 
-                PlaylistCopyRegistry.Set(Guid.Parse(created.Id), source.RootId, server.Key);
+                PlaylistCopyStore.Set(Guid.Parse(created.Id), source.RootId, server.Key);
                 if (_libraryManager.GetItemById(Guid.Parse(created.Id)) is Playlist made)
                 {
                     made.ProviderIds[SourcePlaylistProviderKey] = source.RootId;
@@ -318,7 +347,7 @@ public sealed class PlaylistMirror
             _libraryManager.DeleteItem(playlist, new DeleteOptions { DeleteFileLocation = true }, playlist.GetParent(), false);
         }
 
-        PlaylistCopyRegistry.Remove(playlist.Id);
+        PlaylistCopyStore.Remove(playlist.Id);
 
         _logger.LogInformation("Playlists: deleted '{Name}'", playlist.Name);
     }
@@ -326,13 +355,13 @@ public sealed class PlaylistMirror
     public static string? CopyServer(BaseItem playlist)
     {
         ArgumentNullException.ThrowIfNull(playlist);
-        return PlaylistCopyRegistry.Get(playlist.Id)?.Server
+        return PlaylistCopyStore.Get(playlist.Id)?.Server
             ?? (playlist.ProviderIds.TryGetValue(SourceServerProviderKey, out var server) ? server : null);
     }
 
     private static string? TaggedRoot(BaseItem playlist)
     {
-        if (PlaylistCopyRegistry.Get(playlist.Id) is { } copy && Guid.TryParse(copy.Root, out var registered))
+        if (PlaylistCopyStore.Get(playlist.Id) is { } copy && Guid.TryParse(copy.Root, out var registered))
         {
             return IdKey(registered);
         }

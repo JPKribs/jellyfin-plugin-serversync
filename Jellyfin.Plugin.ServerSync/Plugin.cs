@@ -30,6 +30,22 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
+    public bool PredatesWhitelist { get; }
+
+    private static bool ReadPredatesWhitelist(string path, ILogger logger)
+    {
+        try
+        {
+            return System.IO.File.Exists(path)
+                && !System.IO.File.ReadAllText(path).Contains("<PeerCallerGrants", StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Could not read the saved Server Sync settings before loading them");
+            return false;
+        }
+    }
+
     public Plugin(
         IApplicationPaths applicationPaths,
         IXmlSerializer xmlSerializer,
@@ -37,6 +53,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         : base(applicationPaths, xmlSerializer)
     {
         _logger = logger;
+        PredatesWhitelist = ReadPredatesWhitelist(ConfigurationFilePath, logger);
 
         // Built by the same factory as the DI-registered protector, so both resolve the same key ring
         // (file based, safe to share).

@@ -131,10 +131,11 @@ public sealed class LocalHintPublisher
                 Recorded = recorded
             },
             recorded,
-            userId: ownerId);
+            userId: ownerId,
+            deletion: deleted);
     }
 
-    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true, string? itemPath = null, Guid userId = default)
+    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true, string? itemPath = null, Guid userId = default, bool deletion = false)
     {
         version.Kind = kind;
         version.Key = localKey;
@@ -143,6 +144,12 @@ public sealed class LocalHintPublisher
             // Only a hand made edit is a version of this server's own. Provider work leaves none, so a
             // recorded edit anywhere in the pool still beats it.
             _versions.Set(version);
+        }
+
+        if (!deletion && ApplyGuard.AppliedRecently(HintProtocol.GuardKey(kind, localKey), LoopBreaker.Window) && LoopBreaker.Trips(kind, localKey, DateTime.UtcNow))
+        {
+            _logger.LogWarning("{Kind} {Key} was announced more than {Limit} times in {Minutes} minutes, which looks like two servers echoing one change. It is not announced again until things settle, and the scheduled task carries it", kind, localKey, LoopBreaker.Limit, LoopBreaker.Window.TotalMinutes);
+            return -1;
         }
 
         var queued = 0;

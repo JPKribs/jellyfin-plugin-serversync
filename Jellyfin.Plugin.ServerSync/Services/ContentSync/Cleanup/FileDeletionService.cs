@@ -1,4 +1,5 @@
 using System;
+using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -289,6 +290,11 @@ public static class FileDeletionService
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(logger);
+        if (config.EffectiveMissingContentAction != MissingContentAction.Delete)
+        {
+            return (0, 0);
+        }
+
         var itemsToDelete = manager.GetByStatus(SyncStatus.Deleting).ToList();
 
         if (itemsToDelete.Count == 0)

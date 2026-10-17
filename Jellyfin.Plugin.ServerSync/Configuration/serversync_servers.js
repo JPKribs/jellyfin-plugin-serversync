@@ -286,7 +286,9 @@ export default function (view) {
     function syncAccessRow(server) {
         if (!server.SyncAccess) return null;
         var state = server.SyncAccess === 'Allowed' ? 'ok' : server.SyncAccess === 'NotInstalled' ? 'none' : 'no';
-        return ['Sync endpoints there', state, server.SyncAccessMessage || ''];
+        var detail = server.SyncAccessMessage || '';
+        if (state === 'no') detail += '. On that server, add this one to its Servers tab or add this key\'s user to its Whitelist.';
+        return ['Sync endpoints there', state, detail];
     }
 
     // What the key can do there, learned by the last test or sign in.

@@ -143,6 +143,7 @@ public class DownloadService
                 {
                     backupMain = item.LocalPath + ".replacing." + Guid.NewGuid().ToString("N");
                     File.Move(item.LocalPath, backupMain);
+                    TouchBackup(backupMain);
 
                     foreach (var companionPath in FileOperationUtilities.GetCompanionFiles(item.LocalPath))
                     {
@@ -150,6 +151,7 @@ public class DownloadService
                         {
                             var companionBackup = companionPath + ".replacing." + Guid.NewGuid().ToString("N");
                             File.Move(companionPath, companionBackup);
+                            TouchBackup(companionBackup);
                             backupCompanions.Add((companionPath, companionBackup));
                         }
                         catch (Exception ex)
@@ -461,6 +463,18 @@ public class DownloadService
     /// the recycling bin is disabled. Quiet on missing sidecars (caller may
     /// have already cleaned up via rollback).
     /// </summary>
+    private void TouchBackup(string backupPath)
+    {
+        try
+        {
+            File.SetLastWriteTimeUtc(backupPath, DateTime.UtcNow);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not stamp the replacement backup {Path}", backupPath);
+        }
+    }
+
     private void ArchiveOrDeleteSidecar(string? sidecarPath, string originalDisplayPath, PluginConfiguration config)
     {
         if (string.IsNullOrEmpty(sidecarPath) || !File.Exists(sidecarPath))

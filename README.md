@@ -14,9 +14,23 @@ When several servers are configured, their order is their priority. If two serve
 
 This plugin modifies live data on your Jellyfin server. While extensively tested, I maintain this plugin for my person use case and I do not account for every server configuration. **Always maintain backups of your Jellyfin data and configuration.** By using this plugin, you accept full responsibility for any data loss or issues that may occur.
 
+# Before You Start
+
+**Matching libraries is the core rule.** Server Sync matches files by their path relative to each mapped library's root folder. Both servers must keep the same folder and file structure under that root.
+
+| Source | Local | Matches |
+| :--- | :--- | :--- |
+| `/media/Movies/Film (2020)/Film (2020).mkv` | `/data/Movies/Film (2020)/Film (2020).mkv` | Yes, with roots `/media/Movies` and `/data/Movies` |
+| `/media/Movies/Film (2020)/Film (2020).mkv` | `/data/Movies/Film/Film.mkv` | No, the names differ |
+
+* A library must be a single folder.
+* A renamed file on the source is usually downloaded again under its new name, and the old one is handled by **Removed files**.
+* Interrupted downloads start over, and a changed file is found by its size.
+* Every server in a pool runs the same Server Sync version. A server on another version is left alone until both match.
+
 # Setup
 
-The plugin has three tabs. **Sync** shows every module's table and the change queue. **Servers** holds the servers this one syncs with. **Settings** holds each module's options.
+The plugin has three tabs. **Sync** shows each module's table and the change queue. **Servers** holds the servers this one syncs with. **Settings** holds the options.
 
 ## Servers
 
@@ -24,65 +38,38 @@ The plugin has three tabs. **Sync** shows every module's table and the change qu
 | :--- |
 | ![Servers](docs/screenshots/settings/Servers.png) |
 
-The Servers tab lists every server this one syncs with, in priority order. When two servers offer the same item, the one nearer the top provides it and the others only add what it lacks. Drag a server, or use its arrows, to change the order. Press **Add Server** to add one. Selecting a server opens its editor in place, with four steps.
+Servers higher in the list win when two offer the same item. Drag a server to change the order. Each server has four steps.
 
-### 1. Connection
+| Step | What it holds |
+| :--- | :--- |
+| 1. Connection | Name, Server URL, an optional External URL for thumbnails, and whether a LAN address is allowed |
+| 2. Authentication | An API key or a sign in, Test Connection, what the key can do there, and the Direction |
+| 3. Libraries | Which library there maps to which library here, their root folders, and a filter |
+| 4. Users | Which user there maps to which user here, for history, user settings, and playlists |
 
-| Connection |
-| :--- |
-| ![Connection](docs/screenshots/settings/Connection.png) |
+| Connection | Authentication |
+| :--- | :--- |
+| ![Connection](docs/screenshots/settings/Connection.png) | ![Authentication](docs/screenshots/settings/Authentication.png) |
 
-- **Name**: An optional label. The server's own name is used when empty
-- **Enabled**: A disabled server keeps its settings and mappings but takes no part in any sync
-- **Server URL**: The full URL of the server (e.g., `http://192.168.1.100:8096`). Plain `http://` only reaches loopback, private network, and Tailscale addresses, since it sends the API key unencrypted. A server on the public internet needs `https://`. Redirects are not followed, so enter the address the server answers on directly
-- **External URL**: An optional public URL the browser loads thumbnails from, for servers reached over a VPN or an internal address
-- **Allow Private Network Address**: Accept a loopback or LAN address for this server
+| Library Mapping | User Mapping |
+| :--- | :--- |
+| ![Library Mapping](docs/screenshots/settings/Library%20Mapping.png) | ![User Mapping](docs/screenshots/settings/User%20Mapping.png) |
 
-### 2. Authentication
+**Test Connection** shows who the key belongs to, whether it may download, whether Server Sync there lets it in, and what each module can do with it.
 
-| Authentication |
-| :--- |
-| ![Authentication](docs/screenshots/settings/Authentication.png) |
+### Direction
 
-Choose one of two ways to authenticate, then press **Test Connection**. The server's name and ID appear once it answers, along with whose access the key carries, whether Server Sync there lets this key use its sync endpoints, and a list of what works with it. A standard user's key works in every direction, limited to what that user can see and that user's own history, settings, and playlists. See **[Permissions](docs/Permissions.md)** for what each function needs.
+| Direction | Needs Server Sync there | What happens |
+| :--- | :--- | :--- |
+| Pull | No | This server reads from that one on a schedule. Changes also arrive as they happen when that server pushes to this one |
+| Push | Yes, listing this server as Pull or Sync | Changes made here are sent to that server as they happen |
+| Sync | Yes, listing this server as Sync | Both, for a pool of equals |
 
-- **API Key**: Paste a key made on that server under **Dashboard > API Keys**. The key is stored encrypted and never shown again
-- **Sign In**: Enter a username and password for that server once. The access token is kept, the password is not
+**Check Link** confirms the other server is set up for the chosen direction and reports the access it holds for this one.
 
-Then choose the **Direction**:
+### Keys and Permissions
 
-- **Pull** reads from the server on a schedule. Nothing needs to be installed there. If it runs Server Sync and lists this server as Push or Sync, changes also arrive as they happen
-- **Push** sends changes made here to that server as they happen. It must run Server Sync and list this server as Pull or Sync
-- **Sync** does both, for a pool of equals. It must run Server Sync and list this server as Sync too
-
-With a standard user's key, Push and Sync need the other server to whitelist that user.
-
-**Check Link** confirms the other server is set up for the direction you chose. See **[Live Changes](#live-changes-between-servers)**.
-
-### 3. Libraries
-
-| Library Mapping |
-| :--- |
-| ![Library Mapping](docs/screenshots/settings/Library%20Mapping.png) |
-
-Libraries appear once the connection has been tested. Map each library on that server to a library on this one:
-
-- **Library**: Select the Source and Local Libraries that should map to each other
-   - *Multiple Source Libraries can be mapped to the same Local Library if desired*
-- **Root Path**: The base folder each library uses for its content
-   - *The Source Library file `/media/Track Testing/My Movie (2025)/movie.mp4` is saved to the Local Library at `/media/My Movie (2025)/movie.mp4`*
-   - **Only single folder libraries are supported by this plugin.**
-- **Library Filter**: Sync everything, a Whitelist, or everything except a Blacklist, picked from the server's files, collections, and playlists
-
-### 4. Users
-
-| User Mapping |
-| :--- |
-| ![User Mapping](docs/screenshots/settings/User%20Mapping.png) |
-
-Map users on that server to users on this one. User mappings are only needed for History and User syncing, not for Content, Metadata, or People. With a standard user's key, only that user can be mapped.
-
-Press **Save Server** when the steps are complete. An existing single source configuration is moved into the first entry of the list the first time the plugin starts after updating.
+A standard user's key works in every direction, limited to what that user can see and that user's own history, settings, and playlists. An administrator's key or an API key reaches everything. See **[Permissions](docs/Permissions.md)** for each function.
 
 ## Settings
 
@@ -90,491 +77,69 @@ Press **Save Server** when the steps are complete. An existing single source con
 | :--- |
 | ![Settings](docs/screenshots/settings/Settings.png) |
 
-Each module has its own section on the Settings tab, with the categories it carries and how much work runs at once. **Processing** also holds **Send Changes After**, the number of seconds an item must go untouched before a change made here is sent to the servers in Push or Sync mode, and how a hint is retried when a peer cannot be reached or refuses it. **Whitelist** lets administrators from the servers on the Servers tab, plus the users you list with the locations they may call from, use the sync endpoints. See **[Permissions](docs/Permissions.md#whitelist)**. Each section saves on its own. **Troubleshooting** holds the table resets, which forget what has been compared and synced without touching any media.
+| Section | What it holds |
+| :--- | :--- |
+| Processing | How long changes wait before they are sent, retries, parallelism, and how often a full scan runs |
+| Whitelist | Who may call this server's sync endpoints. Administrators and API keys from servers on the Servers tab always may. Add users with the locations they may call from |
+| Synchronization | One section per sync type, each with a table of what a standard user and an administrator can do |
+| Troubleshooting | Table resets, which forget tracking but never touch media |
 
----
+**Updating from before 12.2.7:** servers that pull from this one without being on its Servers tab need a Whitelist row here. The update adds API keys and every administrator with all locations so nothing breaks. Narrow those rows to lock it down.
 
-# Syncing Types
+# Sync Types
 
-| Sync Table |
-| :--- |
-| ![Sync Table](docs/screenshots/Sync%20Table.png) |
+Two scheduled tasks do the work. **Sync Content** refreshes and downloads files, handles removed files, and mirrors collections. **Sync Information** compares and applies metadata, people, user settings, and history, then copies playlists.
 
-## Scheduled Tasks
+| Type | Matched by | Live with Push or Sync | Details |
+| :--- | :--- | :--- | :--- |
+| Content | File path under the library root | New files | [Content](docs/Content.md) |
+| History | File path and user mapping | Yes, merged three way | [History](docs/History.md) |
+| Metadata | File path | Yes, newest edit wins | [Metadata](docs/Metadata.md) |
+| People | Name | Yes, newest edit wins | [People](docs/People.md) |
+| Users | User mapping | No, scheduled only | [Users](docs/Users.md) |
+| Playlists | Owner mapping, items by file path | Yes, including deletions | [Playlists](docs/Playlists.md) |
 
-Two tasks do the work, each running the module steps below in order under one progress bar.
+| Sync Table | Item Detail |
+| :--- | :--- |
+| ![Sync Table](docs/screenshots/Sync%20Table.png) | ![Item Detail](docs/screenshots/Item%20Detail.png) |
 
-* **Sync Content** refreshes the content table from every scan server, downloads queued files, processes deletions, and syncs collections.
-* **Sync Information** runs the metadata, people, user, and history comparisons, refresh then apply for each module that is enabled, then copies playlists when Playlist Sync is on.
+## Content
 
-The per module Refresh and Sync steps are still available from the dashboard's buttons, but they no longer keep schedules of their own.
+Files missing here are downloaded, changed files are replaced, and **Approvals** decides which of these wait for you. **Removed files** decides what happens to a file that is gone from the source.
 
-The Content and Metadata refreshes read only what changed on each server since the last clean scan, with an hour of overlap so nothing slips between two scans. A full scan of everything runs every 24 hours, set by **Full Scan Every** under Settings > Processing, and also whenever a server is new, its mappings or the module's settings changed, or the module's table is empty. Only a full scan retires rows to a higher priority server or removes rows for items deleted on a server, so a scan that saw only changes can never remove anything. A scan that hit an error does not move its starting point forward, so the next one lists the same changes again. Metadata still lists every path, which is cheap, so an item that only just arrived here is filled even when the source last changed it long ago. People, user settings, and watch history are always read in full: the people listing cannot be asked for changes only, user settings are small, and Jellyfin keeps no date for when a play or a favorite last changed. Whether an item is watched by every user is checked on full scans only.
+| Removed files | What happens |
+| :--- | :--- |
+| Keep | The file stays |
+| Delete | The file is deleted. Uncertain cases wait for approval |
+| Delete After Approval | Every deletion waits for approval |
+| Ignore | Once everything in a movie or show folder is gone from the source, a `.ignore` file hides that folder from Jellyfin and the files stay. A season is never hidden on its own |
 
-## Live Changes Between Servers
+Deleting a file from the Sync tab keeps its row as **Ignored**, so it is not downloaded again. Queue the row to bring it back.
 
-Every server entry has a direction. **Pull** reads from that server on a schedule and needs nothing installed there. If that server runs Server Sync and lists this one as Push or Sync, changes also arrive as they happen. **Push** sends changes made here to that server as they happen, which needs Server Sync there listing this server as Pull or Sync, since it pulls the change from here. **Sync** does both, for a pool of equals, and needs the peer to list this server as Sync too. The **Check Link** button on a server judges the pairing by the direction chosen: green when it is ready, yellow for a Pull that will work on a schedule but not live, red for a Push or Sync the other side is not set up for. It also compares the two servers' clocks and warns when they differ by more than half a minute, since edits made on both servers close together are settled by those clocks.
+## Live Changes
 
-A standard user's key, from signing in as someone who is not an administrator, reaches only what that user can see and that user's own history, settings, and playlists. Server Sync's own endpoints on the other server accept it once that server whitelists the user. With Push and Sync the receiving server pulls each change with the key it holds for the sender, so that key decides which libraries and users reach it. Check Link reports the access the other server holds for this one. See **[Permissions](docs/Permissions.md)**.
-
-A key alone cannot say which peer is calling. Servers that list each other pair instead: when a server checks the link to a peer, the peer issues it a secret over the peer's own connection back to it, and the server presents that secret on every request that names it as the sender. A request without the right secret is refused until the real server pairs, which Check Link and the workers do on their own, so an administrator's key alone cannot queue, complete, or negotiate as another peer. The endpoint that receives a secret accepts any caller the whitelist allows, so a peer held with a whitelisted standard user's key pairs too. No peer is ever taken on its word, and a link that cannot pair refuses hints until it can. A peer's clock is held to this server's too: a version dated more than five minutes ahead is declined, and anything less is read as now, so no stamp from elsewhere can outrank every later edit made here.
-
-A server only announces what the other side would use. Every minute it reads what the peer wants from it: the modules that are on there, the source roots it maps with their whitelists and blacklists, and the users it maps. A change outside that is never queued. The peer answers every hint with a code, and a code that would hold for the next edit of the same object, such as an unmapped path, a filtered file, or an ignored item, holds that object back from that peer for a day, or until the settings on either side change. A queued hint whose item has since been deleted here is dropped before it is sent. On the receiving side, a hint is checked against the local library before anything is fetched: a hint for a version already held or beaten is answered as done straight away, and a hint for an item that is not here yet is parked and applied the moment the item arrives, from a content sync or a library scan, for up to seven days. A hand made edit is stamped with its time the moment it is made. Edits to one object are then gathered until it has gone untouched for sixty seconds, adjustable under Settings > Processing, and sent once, so a poster changed twice a minute apart travels once and a playback that reports progress every few seconds travels once it stops. A change is announced as a hint that says what changed and where, never the value. The other server pulls the live state through the same code the scan uses, so a hint and a scan can never disagree. Hints are kept on both ends until the work is done, retried with backoff, and recovered if lost, and the dashboard shows both queues and any paused peer with the reason. A received hint that keeps failing is given up after about a day, and the scheduled tasks carry the change from there. A write made because of a hint never raises a hint of its own, a file downloaded by a sync is never announced as a new file, and a value that already matches is never written, so a pool of three or more servers settles without echoing. Every call between peers has a deadline, so a peer that stops answering is retried later instead of holding up the others.
-
-When two servers disagree, watch history merges three way against what the two servers last agreed on, and everything else resolves on where and when the value was last edited, so the newest edit wins. When a server's value has come from a third server since its last agreement with the sender, that agreement no longer describes it, and the newer edit wins instead. Versions only ever move forward, and a version dated far ahead of this server's clock is ignored. Every metadata and image change raises an item hint, including posters and metadata a provider fetches during a scan or a refresh. An edit counts as hand made when it comes from Jellyfin's item editor or image upload outside a refresh of that item. Provider work is marked as such. It fills in on a server that has recorded no edit of its own for the item, never replaces a poster or a field someone set by hand, never touches an item locked there, and leaves no version behind, so a hand made edit anywhere in the pool still wins over it. Content hints obey the library mapping's allow and block lists and the watched by all filter, the same as the scan. Replacements and removals of files are left to Sync Content.
+Servers that both run Server Sync tell each other about changes as they happen. A change is sent as a hint that says what changed, never the value, and the other server pulls the value itself. Hints wait until an item has gone untouched for **Send Changes After**, are retried until delivered, and show on the **Queue** view.
 
 | Change Queue | On a phone |
 | :--- | :--- |
 | ![Change Queue](docs/screenshots/Queue.png) | ![Change Queue on a phone](docs/screenshots/Queue%20Phone.png) |
 
-The **Queue** view on the Sync page is one list. Each change is one row for its whole life, from gathering with a countdown, to pending and sent to a peer, to received from one, with Jellyfin's title and poster, wide for an episode or a video, the user for watch history, and a status chip. It shows the latest two hundred rows and refreshes when something changes. Nothing gathers or shows for a kind no Push or Sync server applies, though a hand made edit still has its version recorded, so a server that only receives knows when its own values were edited the day a conflict has to be decided. The summary cards and the peers act as filters, and each peer's card shows its delivery state with the reason when it is paused. When a change here matched no library or user mapping on any Push or Sync server, the view says so and names the last one, since that is the usual reason nothing is sent. Saving the configuration checks those changes again, so mapping the library or user sends them, and Dismiss clears the warning when the gap is on purpose. Every hand made change applied from a peer writes a line to Jellyfin's activity log, "Synced Only A (2021)" with "Metadata for Only A (2021) was updated from source-a" as the detail, an episode as "Synced The Show S01E02" with "Metadata for The Show S01E02 - Pilot was updated from source-a", and a season as "Synced The Show Season 1". Pauses, rejections, repeated failures, and hints dropped after failing write one too. Provider work and hints dropped on their first try, such as a file that has not arrived yet, go to the server log only, since a scan on a peer would otherwise write one entry here per item it touched. A paused peer keeps at most ten thousand pending hints, and beyond that the oldest are dropped and the scheduled tasks carry the change instead. A receiver holding ten thousand hints from one peer answers that it is busy, and the peer sends again later. Sent and failed hints that sit for a week are removed. Each item's detail dialog shows which server last edited it and when.
-
-| Item Detail |
-| :--- |
-| ![Item Detail](docs/screenshots/Item%20Detail.png) |
-
-Removing a server entry, once the change is saved, also removes the sync rows tracked from it, any hints owed to it, and any hints it sent that are still waiting here. Files already downloaded stay where they are. The stored key and the pairing secret of an entry are only ever sent to the address saved on it, so checking or testing an edited address needs the key entered again.
+* **No echoes.** A write made because of a hint is never announced back, a value that already matches is never written, and an object announced more than ten times in ten minutes is held back for the scheduled task.
+* **Conflicts.** History merges three way against what the two servers last agreed on. Everything else goes to the newest edit.
+* **Pairing.** Servers that list each other share a secret, so one server cannot pretend to be another.
+* **Only what is wanted.** A server only announces what the other side maps and has turned on.
 
 ## Metadata Provider
 
-Server Sync is also a metadata and image provider for every media type: movies, series, seasons, episodes, music albums, artists, and tracks, audiobooks, music videos, books, trailers, collections, people, home videos, and photos. Enable **Server Sync** in each library's metadata and image fetchers, above the others. Libraries that already exist start with it off. When Jellyfin reads in or refreshes an item, the provider asks the servers this one pulls from that run Server Sync, in priority order, for the same item: by its path, translated through the library mapping, then by its provider ids, then for a season or an episode by the show's ids with its season and episode numbers, and by name for people, artists, and collections. When nothing matches, the server log says why for each server it asked. The first server that has it supplies the metadata, cast, studios, and images on an automatic refresh. **Identify** lists every server that has the item as its own result, in the Servers tab order, and picking one pins the item to that server, so later refreshes read it from there. The pin shows as **Server Sync Item** among the item's external ids, and clearing it goes back to the first server that has the item. The image picker lists the images of every server that has the item, the pinned server first and then in the Servers tab order, each named after its server. When none has it, the provider answers with no match straight away and Jellyfin moves on to the next provider. When no server this one pulls from runs the same Server Sync version, it does nothing at all. A server entry that points back at this server is never asked. Metadata filled from a peer is not announced back to the peers, since they already hold it.
+Server Sync is also a metadata and image provider for every media type. Turn on **Server Sync** in a library's metadata and image fetchers, above the others.
 
-## Content Syncing
+* **Refresh** reads from the highest server that has the item, found by path, then provider ids, then show ids with season and episode numbers, and by name for people, artists, and collections.
+* **Identify** lists every server that has the item, named after its server, in the Servers tab order. Picking one pins the item to that server, shown as **Server Sync Item** among its external ids.
+* **Images** lists the images of every server that has the item, the pinned one first, each named after its server.
 
-Content Syncing copies media files from the Source Server and mirrors them on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync Content**.
+## API
 
-### Refresh Sync Table
-
-The Plugin builds a table of all content that exists in the mapped Source Libraries. Source Server files are compared, **by file path**, against files on the Local Server. The following content states are tracked:
-
-* Files missing on Local Server are Queued for download *(or Pending when `Download New Content` is set to require approval)*
-* Files no longer on Source Server are marked for deletion, or Pending when approval is needed, unless `Delete Missing Content` is Disabled *(the default)*
-* External subtitle companion files are included with their parent media
-
-Each Library Mapping can sync everything, a Whitelist, or everything except a Blacklist. The item picker browses Files, Collections, and Playlists. A whitelisted Collection or Playlist syncs whatever it currently contains, checked on every Refresh, so anyone who can edit it on the Source Server controls what syncs. A blacklisted Collection or Playlist excludes its items the same way. Whitelisted Collections are also recreated on the Local Server with the synced copies of their items when `Mirror Synced Collections` is enabled.
-
-Files can be manually approved or ignored using the Approval Process.
-
-Setting a file to Ignored will skip any future actions.
-
-### Sync Content
-
-Using the files found in the Sync Table, all Queued files are downloaded using Jellyfin's API into the Temporary Directory. Once downloaded, files are moved to the mirrored location on the Local Server and any required folders are created. Files with the Pending & Ignored statuses are not processed. Files marked for deletion are removed during this step.
-
-#### For complete information, please see our **[Content Syncing Documentation](docs/Content.md)**!
-
-## History Syncing
-
-History Syncing copies watch history from the Source Server and mirrors it on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync History**.
-
-### Refresh Sync Table
-
-The Plugin builds a table of all content that exists on both the Source Server and the Local Server. Source Server watch history is compared, **by file path**, against the Local Server. The following history fields are tracked:
-
-* Played Status (from the most recently played server)
-* Play Count (uses the greater value between servers)
-* Playback Position (from the most recently played server)
-* Last Played Date (from the most recently played server)
-* Favorite Status (always taken from Source Server, unless negotiating)
-
-Items with history that varies are Queued for import.
-
-With **Negotiate With Source Server** enabled, the merged history is also written back to the Source Server through the Server Sync plugin installed there, so watch state flows both ways. Each write is accepted by the Source Server only when its state has not changed since it was read, and a change made on one server alone always wins over an unchanged server.
-
-Setting a file to Ignored will skip any future actions.
-
-### Sync History
-
-Using the watch history found in the Sync Table, all Queued records update content history using Jellyfin's API.
-
-#### For complete information, please see our **[History Syncing Documentation](docs/History.md)**!
-
-## Metadata Syncing
-
-Metadata Syncing copies media metadata from the Source Server and mirrors them on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync Metadata**.
-
-### Refresh Sync Table
-
-The Plugin builds a table of all content that exists on both the Source Server and the Local Server. Source Server metadata is compared, **by file path**, against the Local Server. The following metadata categories are tracked individually:
-
-* Metadata (Name, Overview, Ratings, Dates, etc.)
-* Genres
-* Tags
-* Studios
-* People (Actors, Directors, Writers)
-* Images (Primary, Backdrop, Logo, etc.)
-
-Items with metadata that varies from the Source Server are Queued for import.
-
-Setting a file to Ignored will skip any future actions.
-
-### Sync Metadata
-
-Using the metadata found in the Sync Table, all Queued records update content metadata using Jellyfin's API.
-
-#### For complete information, please see our **[Metadata Syncing Documentation](docs/Metadata.md)**!
-
-## People Syncing
-
-People Syncing copies person metadata from the Source Server and mirrors it on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync People**.
-
-### Refresh Sync Table
-
-The Plugin builds a table of all people associated with your synced metadata items (actors, directors, writers). Each person's full record is fetched from the Source Server and compared against the Local Server's person entity. People are matched across servers **by name**. The following categories are tracked:
-
-* Metadata (Name, Overview, Birth/Death Dates, Sort Names, Provider IDs, Tags, Lock Status)
-* Images (compared by type count and file size)
-
-People with metadata or images that vary from the Source Server are Queued for import.
-
-Setting a person to Ignored will skip any future actions.
-
-### Sync People
-
-Using the people found in the Sync Table, all Queued records update person metadata and images using Jellyfin's internal APIs.
-
-#### For complete information, please see our **[People Syncing Documentation](docs/People.md)**!
-
-## User Syncing
-
-User Syncing copies user images, settings, and configuration from the Source Server and mirrors them on your Local Server. This is performed in two steps: **Refresh Sync Table** & **Sync Users**.
-
-### Refresh Sync Table
-
-The Plugin builds a table of all mapped users that exist on both the Source Server and the Local Server. Source Server user configuration is compared against the Local Server. The following user settings are tracked:
-
-* Profile Images
-* Policy (permissions and library access, translated to local library IDs)
-* Configuration (playback preferences, subtitle mode, display settings)
-
-Users with configuration that varies from the Source Server are Queued for import.
-
-Setting a user to Ignored will skip any future actions.
-
-### Sync Users
-
-Using the user configurations found in the Sync Table, all Queued records update user settings using Jellyfin's API.
-
-#### For complete information, please see our **[User Syncing Documentation](docs/Users.md)**!
-
-## Playlist Syncing
-
-Playlist Syncing copies the playlists of mapped users. Users without a user mapping keep their playlists to themselves. With an administrator's key it needs Server Sync on the other server, which reports each playlist's owner. Each item is matched **by file path** through the library mappings, items not on this server are left out until they arrive, and the order is kept.
-
-| Direction | What happens |
-| :--- | :--- |
-| Pull | The other server's copy always wins. Local edits to a copied playlist are replaced, and a playlist deleted there is deleted here |
-| Push | This server's copy always wins there. Edits and deletions are sent as they happen |
-| Sync | The newest edit wins on either side. Edits and deletions travel both ways as they happen |
-
-#### For complete information, please see our **[Playlist Syncing Documentation](docs/Playlists.md)**!
-
----
-
-# API
-
-Server Sync adds a small HTTP API to Jellyfin. Two servers that both run the plugin talk to each other through the **Peer** routes, and the dashboard's Servers tab and Queue view use the **Hints** and **Servers** routes. The dashboard routes sit behind Jellyfin's own `RequiresElevation` policy. The `Peer` routes accept any signed in caller that the receiver's **Whitelist** allows: an administrator from a server on its Servers tab, or a user listed there calling from one of their locations. The plugin adds no login of its own. A standard user's token is refused with `403` on the dashboard routes, and no token gets `401` everywhere. See **[Permissions](docs/Permissions.md)**.
-
-Requests and responses are JSON. Property names are Pascal case, enums travel as their names, and dates are UTC in ISO 8601. The server reads property names without regard to case.
-
-```bash
-curl -H 'Authorization: MediaBrowser Token="YOUR_API_KEY"' http://server:8096/Sync/Peer/Capabilities
-```
-
-## Peer routes
-
-These are what one Server Sync installation calls on another. You will not normally call them yourself, but they are plain HTTP and can be exercised from the command line.
-
-Every server in a pool runs the same Server Sync version. Every peer route except `Capabilities` needs the header `X-ServerSync-Version` with the caller's version, and answers `426` with both versions when it differs. Check Link reports a mismatch as an error.
-
-### GET /Sync/Peer/Capabilities
-
-Which server this is and what it applies. A `404` means the plugin is not installed there, and a `403` with `{ "Code", "Message" }` means the whitelist refuses the caller. It answers whatever version the caller runs, so Check Link can name both versions when they differ.
-
-```json
-{
-  "ServerId": "2f40d5d86aba4689819184b48738d2ad",
-  "PluginVersion": "12.2.1.1",
-  "Accepts": ["History", "Metadata", "People", "Content"],
-  "ServerTime": "2026-10-03T19:30:47.9590000Z"
-}
-```
-
-`Accepts` lists the kinds this server applies, which are the modules that are on. A sender announces only those kinds. `ServerTime` is the peer's clock, which Check Link compares against the caller's.
-
-### GET /Sync/Peer/Link?serverId={id}
-
-Whether, and how, this server lists the asking server, and the pairing. When the asking server is listed, enabled, and configured, this server issues it a fresh secret by calling that server's `Pair` route over its own connection to it, and says whether that worked. A server about to Push asks this first, since hints are only accepted from a server listed as Pull or Sync, and every server asks it again on hearing `428`.
-
-```json
-{
-  "ServerId": "…",
-  "ServerName": "local",
-  "Listed": true,
-  "Mode": "Sync",
-  "Enabled": true,
-  "PullsFromYou": true,
-  "SendsToYou": true,
-  "Paired": true,
-  "PairingError": null,
-  "AccessLevel": "User",
-  "AccessUser": "viewer",
-  "CanDownload": true
-}
-```
-
-`AccessLevel`, `AccessUser`, and `CanDownload` describe the key this server holds for the asking server, so the asker knows what it may read here. `PairingError` says why no secret could be issued: the listed server refused this server's key, which happens when the key was revoked or its Server Sync is older than this one, or could not be reached at its URL.
-
-### POST /Sync/Peer/Pair
-
-A peer hands this server the secret it must present on requests that name it as the sender to that peer. Any caller the whitelist allows may call it, so a peer holding a whitelisted standard user's key for this server can still pair. Only a server this one lists can call it usefully. A secret stored by anyone else only makes this server present the wrong one, and the next `428` pairs it again.
-
-```json
-{ "ServerId": "…", "Secret": "…" }
-```
-
-Answers `{ "Paired": true }`, or `409` when the issuing server is not listed here.
-
-#### The pairing header
-
-Every request below that carries a `SenderServerId` must also carry the header `X-ServerSync-Pairing` with the secret that the receiver issued to that sender. A request without it, or with another server's secret, answers `428` with the reason, and the sender pairs through `Link` and tries once more.
-
-### POST /Sync/Peer/Queue
-
-Offer a batch of change hints. A hint says what changed and where, never the value. The receiver pulls the live state from the sender afterwards. The sender must be configured on the receiver as a Pull or Sync server and paired, and every hint's `OriginServerId` must equal `SenderServerId`, since hints are never forwarded. At most 500 hints per request. A hint whose `VersionTimestamp` lies more than five minutes ahead of the receiver's clock is declined with the reason, and one less far ahead is read as now. `ItemType` is the item's Jellyfin type, for the queue view's poster shape.
-
-```json
-{
-  "SenderServerId": "2f40d5…",
-  "Items": [
-    {
-      "HintId": "2f40d5…:42",
-      "OriginServerId": "2f40d5…",
-      "Kind": "Metadata",
-      "Key": "9c1e0f…",
-      "ItemPath": "/media/Movies/Only A (2021)/Only A (2021).mp4",
-      "ItemId": "9c1e0f…",
-      "UserId": null,
-      "UserName": null,
-      "VersionServerId": "2f40d5…",
-      "VersionTimestamp": "2026-10-03T19:30:47Z",
-      "Recorded": true
-    }
-  ]
-}
-```
-
-`Recorded` says whether the change was made by hand (`true`) or is a provider's work such as a poster a scan fetched (`false`). Provider work is applied only where the receiver has recorded no edit of its own and leaves no version behind. `Kind` is one of `History`, `Metadata`, `People`, `Content`, or `Playlists`. `Users` is declined, since user settings travel on the scheduled task only. A `Playlists` hint is keyed by the id of the playlist it was first made as, carries the owner in `UserId`, and an `ItemType` of `Playlist` or `PlaylistCopy`, or `PlaylistDeleted` or `PlaylistCopyDeleted` when it was deleted. A copy is a playlist Server Sync made from another server's, which matters because Jellyfin gives two playlists with the same name the same id on different servers. `Key` is the sender's own key for the object: the item id for metadata and content, the user id for users, the person's name for people, and `userId|itemId` for history. `ItemPath` and `UserName` are what the receiver maps through its own library and user mappings for the sender.
-
-The answer is one result per hint, in request order, each with a `Code` and the `Reason` when it is not `Queued`. `Queued` is stored and applied in turn. `NoLocalItem` is stored but parked until the local item arrives, and the receiver now holds it, so the sender treats it as done the same as every other code.
-
-```json
-{
-  "Items": [
-    { "HintId": "2f40d5…:42", "Code": "Queued", "Reason": null },
-    { "HintId": "2f40d5…:43", "Code": "NotMapped", "Reason": "the path is not in a library mapped on this server" }
-  ]
-}
-```
-
-| Code | Meaning |
-| --- | --- |
-| `Queued` | Stored, and applied in turn. |
-| `NoLocalItem` | Stored but parked: the item is not on the receiver yet. It applies when the item arrives, for up to seven days. |
-| `AlreadyCurrent` | The receiver already holds that version. |
-| `Superseded` | The receiver holds a newer edit. |
-| `ModuleOff` | That module is off on the receiver. |
-| `NotMapped` | The path or user is not mapped on the receiver. |
-| `Filtered` | The library mapping's whitelist or blacklist leaves the path out. |
-| `Invalid` | The key or origin is malformed. |
-| `FutureVersion` | The version is dated more than five minutes ahead of the receiver's clock. |
-| `Unsupported` | The receiver does not apply that kind live. |
-
-Completions add the codes an apply can end with: `Applied`, `Unchanged`, `Locked`, `AwaitingApproval`, `Ignored`, `SourceGone`, `Unreadable` when the sender did not say where a file is, `Priority` when another server provides the file, and `GaveUp` after a day of failed attempts. `NotMapped`, `Filtered`, `Ignored`, `ModuleOff`, `Unsupported`, `Priority`, and a final `NoLocalItem` hold that object back from the receiver for a day.
-
-| Status | Meaning on the sender |
-| --- | --- |
-| `200` | Queued. The rows are marked sent and wait for completion. |
-| `400` | The request itself is malformed, such as a hint with no `HintId`. Permanent for those rows, and written once to the activity log. A problem with one hint is declined for that hint alone in a `200` answer. |
-| `401` or `403` | The key is refused, or the sender is not on the receiver's whitelist. The peer is paused for fifteen minutes, set by **First wait** in the **Refused** column of the Retries table under Settings > Processing. |
-| `404` | No Server Sync behind that URL. The peer is paused. |
-| `409` | The receiver does not list the sender as Pull or Sync. The peer is paused with the reason. |
-| `428` | The sender is not paired. The sender pairs through `Link` and sends once more. If that still answers `428`, the peer is paused with the reason. |
-| `503` | The receiver already holds ten thousand hints from this sender. Retried with backoff, nothing is lost. |
-| anything else | Retried after thirty seconds, doubling up to one hour, forever. The Retries table under Settings > Processing changes these, and a hint out of **Max tries** is marked failed. |
-
-### POST /Sync/Peer/Complete
-
-A receiver reports hints as done. The origin removes the matching outbound rows queued for that receiver, and only when the row still carries the version that was applied, so an edit made after delivery is not lost to a late completion. The receiver must be paired, and a reported version ahead of the origin's clock is read as now. At most 500 completions per request.
-
-```json
-{
-  "SenderServerId": "…",
-  "Items": [ { "HintId": "2f40d5…:42", "VersionTimestamp": "2026-10-03T19:30:47Z", "Code": "Applied", "Reason": null } ]
-}
-```
-
-Answers `{ "Removed": 1 }`.
-
-### GET /Sync/Peer/Status?serverId={id}
-
-The hints the server named by `serverId` sent this one that are still queued, and those it finished in the last day. The caller must be that server, paired with the `X-ServerSync-Pairing` header, so `serverId` is required. An origin reads it every few minutes for rows that were sent and not completed after ten minutes. A hint still held means the peer is working, a hint in `CompletedHints` with a version at least the row's is done, and a hint that is neither was lost and is sent again.
-
-```json
-{
-  "ServerId": "…",
-  "Inbound": [
-    { "Id": 7, "HintId": "…:42", "OriginServerId": "…", "Kind": "Content", "Key": "…", "ReceivedAt": "…", "Attempts": 0, "LastError": null }
-  ],
-  "CompletedHints": [ { "HintId": "…:41", "VersionTimestamp": "…", "Code": "Applied", "Reason": null } ]
-}
-```
-
-### GET /Sync/Peer/Interest?serverId={id}
-
-What this server wants from the server named by `serverId`: the kinds whose module is on, the source roots it maps with their whitelists and blacklists, and the source users it maps. The caller must be that server, paired. A sender reads it every minute and queues nothing outside it. `Revision` changes whenever any of it does, and a new revision lets every held back hint for this server go again. A server this one does not pull from is answered with an empty interest.
-
-```json
-{
-  "Kinds": ["History", "Metadata", "People", "Content"],
-  "Libraries": [ { "Root": "/media/Movies", "FilterMode": "Blacklist", "Filtered": ["/media/Movies/Home Videos"] } ],
-  "Users": ["5c0a71…"],
-  "Revision": "9F2C41B07A1D3E55"
-}
-```
-
-### POST /Sync/Peer/Lookup
-
-Finds one of this server's items, so the metadata provider on a server that pulls from this one can fill its copy from here. Any whitelisted caller may call it, and it records nothing. A standard user only finds items they can see. Path is at most 4096 characters and Name at most 512. It tries `Path` on this server first, then `ProviderIds`, then for a `Season` or `Episode` the show's `SeriesProviderIds` with `IndexNumber` and, for an episode, `ParentIndexNumber`, and `Name` for a `Person`, `MusicArtist`, or `BoxSet`. `ItemType` is the Jellyfin type and must match when given. At most 16 ids in each set.
-
-```json
-{ "Path": "/media/Shows/Test Show (2023)/Season 01/Test Show (2023) - S01E01 - Pilot.mp4", "ItemType": "Episode", "ProviderIds": {}, "SeriesProviderIds": { "Tvdb": "446831" }, "IndexNumber": 1, "ParentIndexNumber": 1 }
-```
-
-Answers `{ "Found": true, "ItemId": "9c1e0f…", "ItemType": "Movie" }`, or `{ "Found": false }`. The caller then reads the item through Jellyfin's own API.
-
-### GET /Sync/Peer/Playlists?serverId={id}&id={id}
-
-Every playlist on this server with its owner, shares, open access, and items in order, so a server that pulls from this one can copy them to the right users. Any whitelisted caller may call it, and it records nothing. `serverId` names the caller: when this server lists it, only playlists owned by users it maps are returned. `id` limits the answer to one playlist. A standard user only gets playlists they can see, and only the items they can see. Each item carries its id and path, and the caller finds its own copy by path. `RootId` is the id of the playlist it was first made as, and `IsCopy` says whether Server Sync made it from another server's playlist.
-
-```json
-{ "Playlists": [ { "Id": "5d2c…", "Name": "Road Trip", "MediaType": "Audio", "OwnerUserId": "0f8f…", "OpenAccess": false, "Shares": [ { "UserId": "7c9e…", "CanEdit": false } ], "Entries": [ { "ItemId": "9c1e…", "Path": "/media/Music/Artist/Album/01 Song.flac" } ] } ] }
-```
-
-### POST /Sync/Peer/Versions
-
-The versions this server holds for a batch of its own keys. Used by the full scan against a peer that carries versions, so conflicts resolve on where and when a value was last edited rather than on saved dates. Keys with no recorded version are left out. At most 500 keys per request.
-
-```json
-{ "Kind": "Metadata", "Keys": ["9c1e0f…", "77ab12…"] }
-```
-
-```json
-{ "Items": [ { "Kind": "Metadata", "Key": "9c1e0f…", "ServerId": "…", "Timestamp": "2026-10-03T19:30:47Z" } ] }
-```
-
-### POST /Sync/Peer/History
-
-Negotiate watch history. Each entry proposes a merged state for one of the receiver's user and item pairs and says what the sender believes the receiver currently holds. The receiver writes only when its live state still matches `Expected`, answers `Stale` with its live state otherwise, and records the agreed state in its own row for the sender so both sides merge three way from the same base next time. A sender the receiver lists must be paired, since the agreement is recorded against that sender's row. A sender it does not list negotiates as any whitelisted caller may and nothing is recorded. A standard user only negotiates entries for their own user, and every other entry answers `Failed`. At most 500 entries per request.
-
-```json
-{
-  "SenderServerId": "…",
-  "Items": [
-    {
-      "UserId": "receiver user id",
-      "ItemId": "receiver item id",
-      "Expected": { "Played": true, "PlayCount": 1, "PlaybackPositionTicks": 0, "LastPlayedDate": "…", "IsFavorite": false },
-      "Proposed": { "Played": true, "PlayCount": 2, "PlaybackPositionTicks": 0, "LastPlayedDate": "…", "IsFavorite": true },
-      "SenderUserId": "sender user id",
-      "SenderItemId": "sender item id"
-    }
-  ]
-}
-```
-
-```json
-{
-  "Items": [
-    { "UserId": "…", "ItemId": "…", "Outcome": "Applied", "Reason": null, "Current": { "Played": true, "PlayCount": 2, "PlaybackPositionTicks": 0, "LastPlayedDate": "…", "IsFavorite": true } }
-  ]
-}
-```
-
-`Outcome` is `Applied`, `Unchanged`, `Stale`, `NotFound`, or `Failed`. A null field in a state means no opinion and matches anything.
-
-## Operator routes
-
-These back the dashboard, and are handy for scripting or for watching a pool from the outside.
-
-### GET /Sync/Hints
-
-Both queues on this server and the delivery state of every peer it sends to.
-
-```json
-{
-  "Pending": 0,
-  "Gathering": [ { "Kind": "Metadata", "Change": "Metadata for Only A (2021)", "Title": "Only A", "Subtitle": "2021", "ItemId": "…", "UserId": null, "UserName": null, "EditedAt": "…", "DueAt": "…", "Recorded": true } ],
-  "Outbound": [
-    { "Id": 42, "HintId": "…:42", "PeerKey": "…", "PeerName": "source-a", "Kind": "Metadata", "Key": "…", "Title": "Only A", "Subtitle": "2021", "ItemId": "…", "ItemPath": "…", "UserId": null, "UserName": null,
-      "State": "Sent", "Attempts": 1, "NextAttempt": "…", "SentAt": "…", "LastError": null, "CreatedAt": "…" }
-  ],
-  "Inbound": [ { "Id": 7, "HintId": "…", "OriginServerId": "…", "Kind": "History", "Key": "…", "ReceivedAt": "…", "Attempts": 0, "LastError": null } ],
-  "Peers": [ { "Key": "…", "Name": "source-a", "LastAttempt": "…", "PausedUntil": null, "Reason": null, "Sends": ["History", "Metadata", "People"] } ]
-}
-```
-
-`Pending` counts local edits still gathering before they become hints, and `Gathering` names them with when each goes out. `Unmatched` counts local changes since start that no Push or Sync server mapped, with the last one described in `LastUnmatched`, which is the first thing to check when nothing is being sent. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. `Sends` lists the kinds this server sends to that peer, which are the modules selected there, or is null until the peer has said. The lists hold at most five hundred rows each. `OutboundCounts` by state name and `InboundCount` cover the whole table.
-
-### POST /Sync/Hints/Run
-
-Raises every gathering edit, delivers, and applies now instead of waiting for the workers. Answers `204`.
-
-### POST /Sync/Hints/CheckPeer
-
-What the Servers tab's Check Link button calls. Judges a server entry against the direction it is about to be saved with.
-
-```json
-{ "ServerUrl": "http://source-a:8096", "ApiKey": "…", "ServerKey": "entry key", "AllowPrivateNetwork": true, "Mode": "Sync" }
-```
-
-`ApiKey` may be the stored key's sentinel `__JPK_SECRET_KEPT__` with `ServerKey` naming the entry, so a key never has to be re-entered. `Mode` is `Pull`, `Push`, or `Sync`.
-
-```json
-{
-  "Reachable": true, "ServerName": "source-a", "ServerId": "…",
-  "HasPlugin": true, "PluginVersion": "12.2.1.0",
-  "ListsThisServer": true, "PeerMode": "Sync", "SendsToThisServer": true,
-  "Accepts": ["History", "Metadata", "People"],
-  "ClockSkewSeconds": 0,
-  "Paired": true, "PairingError": null,
-  "PeerAccessLevel": "Administrator", "PeerAccessUser": null, "PeerCanDownload": true,
-  "Severity": "ok",
-  "Message": "Ready. Server Sync 12.2.1.0 there lists this server as Sync, so changes travel both ways as they happen."
-}
-```
-
-`Severity` is `ok`, `warn`, or `error`, which the page shows as green, yellow, or red.
-
-### GET /Sync/Hints/Version?kind={kind}&localItemId={id}&localUserId={id}&name={name}
-
-The version an object carries on this server: which server last edited it and when. Pass `localItemId` for `Metadata` and `Content`, `localUserId` for `Users`, both for `History`, and `name` for `People`. Answers `204` when no edit has been recorded since versions began.
-
-```json
-{ "ServerId": "…", "ServerName": "source-a", "Timestamp": "2026-10-03T19:30:47Z", "IsThisServer": false }
-```
-
-### DELETE /Sync/Hints/Outbound/{id} and DELETE /Sync/Hints/Inbound/{id}
-
-Discard one row from either queue by its `Id`. The scheduled tasks still carry the change. Answers `204`, or `404`.
-
-### DELETE /Sync/Servers/{key}/Rows
-
-Removes every sync row and queued hint that came from one server entry, by the entry's `Key`. The Servers tab calls this after a server is removed. Files already downloaded are not touched.
-
-```json
-{ "Content": 11, "History": 4, "Metadata": 11, "People": 1, "Users": 2, "Hints": 0 }
-```
+Server Sync adds routes under `/Sync`. See the **[API reference](docs/API.md)**.
 
 ---
 

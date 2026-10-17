@@ -214,7 +214,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
             _outbound.TrimPending(peerKey);
             var state = _peers.GetOrAdd(peerKey, _ => new PeerDeliveryState());
-            if (state.PausedUntil > DateTime.UtcNow)
+            if (state.PausedUntil > DateTime.UtcNow || state.VersionBlocked)
             {
                 continue;
             }
@@ -515,6 +515,28 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         try
         {
             using var client = _clientFactory.Create(peer);
+            var capabilities = await client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
+            if (capabilities is not null && !HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion))
+            {
+                if (!state.VersionBlocked)
+                {
+                    _logger.LogWarning("'{Peer}' runs Server Sync {Theirs} and this server runs {Ours}, so changes for it wait here until both match", peer.DisplayName, capabilities.PluginVersion, _configManager.PluginVersion);
+                }
+
+                state.VersionBlocked = true;
+                state.PausedUntil = DateTime.UtcNow + HintProtocol.CapabilityRefresh;
+                state.Reason = HintProtocol.VersionMismatch(capabilities.PluginVersion, _configManager.PluginVersion);
+                return;
+            }
+
+            if (capabilities is not null && state.VersionBlocked)
+            {
+                state.VersionBlocked = false;
+                state.PausedUntil = null;
+                state.Reason = null;
+                _logger.LogInformation("'{Peer}' now runs the same Server Sync version, so waiting changes go out again", peer.DisplayName);
+            }
+
             var interest = await client.GetPeerInterestAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
             if (interest is null)
             {
@@ -649,6 +671,8 @@ public sealed class PeerDeliveryState
     public string? Reason { get; set; }
 
     public Models.Peer.PeerInterest? Interest { get; set; }
+
+    public bool VersionBlocked { get; set; }
 
     /// <summary>Gets the kinds the peer applies, or null when not known.</summary>
     public HashSet<HintKind>? Accepts => Interest is null ? null : new HashSet<HintKind>(Interest.Kinds);

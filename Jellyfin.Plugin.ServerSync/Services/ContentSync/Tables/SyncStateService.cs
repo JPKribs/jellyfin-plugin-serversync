@@ -182,6 +182,27 @@ public static class SyncStateService
         return existingItem;
     }
 
+    public const string HiddenReason = "Hidden with a .ignore file because it is gone from the source";
+
+    public static TransitionResult MarkHidden(ContentSyncTableManager manager, SyncItem item, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(logger);
+        if (string.IsNullOrEmpty(item.LocalPath) || !File.Exists(item.LocalPath))
+        {
+            manager.DeleteByKey(item.SourceItemId);
+            return new TransitionResult(true, "Removed from tracking (no longer on source)");
+        }
+
+        item.Status = SyncStatus.Ignored;
+        item.PendingType = null;
+        item.StatusDate = DateTime.UtcNow;
+        item.Reason = HiddenReason;
+        manager.Upsert(item);
+        return new TransitionResult(true, "Hidden with a .ignore file");
+    }
+
     /// <summary>
     /// Processes an item that is missing from the source server. Owns its
     /// own writes because the action varies, delete the row outright, or

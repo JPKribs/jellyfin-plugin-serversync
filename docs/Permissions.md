@@ -76,6 +76,8 @@ A standard user who is let in only reaches their own data: history and version r
 | Server Sync is not installed there | The other server has no Server Sync |
 | A version message | Server Sync there is a different version |
 
+Updating from before 12.2.7 adds API keys and every administrator with all locations once, so servers that pulled from this one keep working. Narrow those rows to lock the endpoints down.
+
 Every refused call is answered with `403` and `{ "Code": "UserNotWhitelisted", "Message": "This user is not whitelisted" }`, where `Code` is `UserNotWhitelisted`, `IpNotWhitelisted`, or `UserNotWhitelistedForIp`. It is also logged on the server that refused it, with the user, the address, and the reason.
 
 Host names are looked up once and remembered for an hour. When a caller does not match a remembered address, the name is looked up again before the call is refused, at most every thirty seconds, so a dynamic DNS name that moved keeps working. A name that cannot be looked up is logged as an error and its last known addresses are kept. Behind a reverse proxy, add the proxy under **Dashboard > Networking > Known Proxies** so Jellyfin sees the real address.

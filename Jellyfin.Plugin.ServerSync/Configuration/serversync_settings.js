@@ -171,7 +171,8 @@ export default function (view) {
         renderWatchedFilterUsers(config.WatchedFilterUserIds || []);
         setValue('selDownloadNewContentMode', config.DownloadNewContentMode || 'Enabled');
         setValue('selReplaceExistingContentMode', config.ReplaceExistingContentMode || 'Enabled');
-        setValue('selDeleteMissingContentMode', config.DeleteMissingContentMode || 'Disabled');
+        var missingAction = config.MissingContentAction || ((config.DeleteMissingContentMode || 'Disabled') === 'Disabled' ? 'Keep' : 'Delete');
+        setValue('selMissingContent', missingAction === 'Delete' && config.DeleteMissingContentMode === 'RequireApproval' ? 'DeleteAfterApproval' : missingAction);
         setChecked('chkEnableRecyclingBin', config.EnableRecyclingBin || false);
         setValue('txtRecyclingBinPath', config.RecyclingBinPath || '');
         setValue('txtRecyclingBinRetentionDays', config.RecyclingBinRetentionDays || 7);
@@ -217,7 +218,9 @@ export default function (view) {
             config.WatchedFilterUserIds = collectWatchedFilterUsers().concat(unseen);
             config.DownloadNewContentMode = getValue('selDownloadNewContentMode', 'Enabled');
             config.ReplaceExistingContentMode = getValue('selReplaceExistingContentMode', 'Enabled');
-            config.DeleteMissingContentMode = getValue('selDeleteMissingContentMode', 'Disabled');
+            var missing = getValue('selMissingContent', 'Keep');
+            config.MissingContentAction = missing === 'DeleteAfterApproval' ? 'Delete' : missing;
+            config.DeleteMissingContentMode = missing === 'Delete' ? 'Enabled' : missing === 'DeleteAfterApproval' ? 'RequireApproval' : 'Disabled';
             config.EnableRecyclingBin = getChecked('chkEnableRecyclingBin');
             config.RecyclingBinPath = getValue('txtRecyclingBinPath');
             config.RecyclingBinRetentionDays = getIntValue('txtRecyclingBinRetentionDays', 7);

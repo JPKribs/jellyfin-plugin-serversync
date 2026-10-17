@@ -31,6 +31,8 @@ Every playlist belongs to one user. A copied playlist belongs to the local user 
 
 Making a playlist, adding, removing, or moving items, renaming it, changing who it is shared with, and deleting it each send a hint. The other server then reads the whole playlist from this one and replaces its copy, or deletes its copy for a deletion. Changes made by Server Sync itself are never announced back, so a pair does not echo.
 
-A copied playlist remembers the playlist it was first made as, so both copies stay one playlist across any number of servers. A local playlist that was never copied is only touched when the other server holds a copy made from it, and a hint or a scheduled run only changes or deletes a local playlist that belongs to the mapped owner. Every change holds the playlist lock, so a hint and the scheduled run never create the same copy twice.
+Server Sync records which local playlists are copies in its database, and tags them as well, so a database reset rebuilds the record from the tags. A copied playlist remembers the playlist it was first made as, so both copies stay one playlist across any number of servers. A local playlist that was never copied is only touched when the other server holds a copy made from it, and a hint or a scheduled run only changes or deletes a local playlist that belongs to the mapped owner. Every change holds the playlist lock, so a hint and the scheduled run never create the same copy twice.
 
 See [Permissions](Permissions.md) for what each kind of key can read.
+
+Playlists only travel between servers running the same Server Sync version.

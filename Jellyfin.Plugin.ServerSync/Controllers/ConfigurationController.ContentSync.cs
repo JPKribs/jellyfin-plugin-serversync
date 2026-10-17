@@ -522,10 +522,10 @@ public partial class ConfigurationController
                 // File doesn't exist anywhere - remove from tracking since there's nothing to delete
                 var sanitizedSourcePath = SanitizeForLog(item.SourcePath);
                 _logger.LogWarning(
-                    "SKIPPED DELETE: {FileName} - File not found in Jellyfin library or on disk, removing from tracking. Source path: {SourcePath}",
+                    "SKIPPED DELETE: {FileName} - File not found in Jellyfin library or on disk, so the row is kept as Ignored. Source path: {SourcePath}",
                     sanitizedFileName,
                     sanitizedSourcePath);
-                manager.Delete(sourceItemId);
+                KeepAsIgnored(manager, item);
                 skippedCount++;
                 continue;
             }
@@ -538,7 +538,7 @@ public partial class ConfigurationController
                 var action = useRecyclingBin ? "RECYCLED" : "DELETED";
                 var suffix = localItem == null ? " (direct)" : string.Empty;
                 _logger.LogInformation("{Action}{Suffix}: {FileName} - Local path: {LocalPath}", action, suffix, sanitizedFileName, sanitizedLocalPath);
-                manager.Delete(sourceItemId);
+                KeepAsIgnored(manager, item);
                 deletedCount++;
             }
             else
@@ -550,10 +550,10 @@ public partial class ConfigurationController
                 {
                     // File is gone (deleted elsewhere) - remove from tracking
                     _logger.LogInformation(
-                        "DELETE (external): {FileName} - File no longer exists after deletion attempt, removing from tracking. Local path: {LocalPath}",
+                        "DELETE (external): {FileName} - File no longer exists after deletion attempt, so the row is kept as Ignored. Local path: {LocalPath}",
                         sanitizedFileName,
                         sanitizedLocalPath);
-                    manager.Delete(sourceItemId);
+                    KeepAsIgnored(manager, item);
                     deletedCount++;
                 }
                 else
@@ -573,5 +573,14 @@ public partial class ConfigurationController
             request.SourceItemIds.Count);
 
         return Ok(new { Deleted = deletedCount, Failed = failedCount, Skipped = skippedCount });
+    }
+
+    private static void KeepAsIgnored(ContentSyncTableManager manager, SyncItem item)
+    {
+        item.Status = SyncStatus.Ignored;
+        item.PendingType = null;
+        item.LocalItemId = null;
+        item.StatusDate = DateTime.UtcNow;
+        manager.Upsert(item);
     }
 }

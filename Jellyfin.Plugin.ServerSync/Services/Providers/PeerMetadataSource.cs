@@ -273,7 +273,7 @@ public sealed class PeerMetadataSource
                 ids[PinnedProviderKey] = PinValue(match.Parent, match.ItemId);
                 results.Add(new RemoteSearchResult
                 {
-                    Name = dto.Name,
+                    Name = $"{dto.Name} on {match.Parent.DisplayName}",
                     ProductionYear = dto.ProductionYear,
                     PremiereDate = dto.PremiereDate?.UtcDateTime,
                     IndexNumber = dto.IndexNumber,

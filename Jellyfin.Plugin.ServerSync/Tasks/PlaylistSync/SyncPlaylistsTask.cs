@@ -74,7 +74,9 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
         await mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            _mirror.RebuildCopiesFromTags();
             var failures = 0;
+            var waiting = 0;
             for (var i = 0; i < servers.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -87,6 +89,11 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
                 {
                     throw;
                 }
+                catch (System.Net.Http.HttpRequestException ex) when ((int?)ex.StatusCode == 426)
+                {
+                    waiting++;
+                    _logger.LogWarning("{Task}: '{Server}' runs another Server Sync version, so its playlists wait until both match", Name, server.DisplayName);
+                }
                 catch (Exception ex)
                 {
                     failures++;
@@ -96,7 +103,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
                 progress.Report(100.0 * (i + 1) / servers.Count);
             }
 
-            if (failures == servers.Count)
+            if (failures > 0 && failures + waiting == servers.Count)
             {
                 throw new InvalidOperationException("no server's playlists could be read");
             }

@@ -1,10 +1,12 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
@@ -642,9 +644,164 @@ public class UpdateSyncTablesTask
             && !(record.Status == SyncStatus.Pending && record.PendingType == PendingType.Deletion);
     }
 
+    private static readonly HashSet<string> MediaExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".ts", ".m2ts", ".mpg", ".mpeg", ".webm", ".iso", ".flv",
+        ".mp3", ".flac", ".m4a", ".m4b", ".aac", ".ogg", ".opus", ".wav", ".wma", ".ape", ".epub", ".pdf"
+    };
+
+    private bool ScopeChanged(SyncItem row, Dictionary<string, LibraryMapping> mappingById)
+        => IsBlacklistExcluded(row.SourceLibraryId, row.SourceItemId)
+            || (mappingById.TryGetValue(row.SourceLibraryId, out var mapping)
+                && ((mapping.FilterMode == LibraryFilterMode.Blacklist
+                        && PathUtilities.IsItemFiltered(row.SourcePath, mapping.SourceRootPath ?? string.Empty, mapping.FilterMode, mapping.FilteredItems))
+                    || (mapping.FilterMode == LibraryFilterMode.Whitelist && HasContainerEntry(mapping))));
+
+    private static bool IsHiddenTitle(SyncItem row)
+        => row.Status == SyncStatus.Ignored && row.Reason == SyncStateService.HiddenReason;
+
+    private Func<SyncItem, string?> TitleFolders()
+    {
+        var mappings = new Dictionary<string, LibraryMapping>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mapping in ConfigManager.Configuration.Servers.SelectMany(s => s.LibraryMappings ?? new List<LibraryMapping>()))
+        {
+            mappings.TryAdd(mapping.SourceLibraryId, mapping);
+        }
+
+        return row => !string.IsNullOrEmpty(row.LocalPath) && mappings.TryGetValue(row.SourceLibraryId, out var mapping)
+            ? IgnoreFileWriter.TitleFolder(row.LocalPath, mapping.LocalRootPath)
+            : null;
+    }
+
+    private int ShowTitles(ContentSyncTableManager manager, IEnumerable<SyncItem> hidden, Func<SyncItem, string?> folderOf, Func<string, bool> show, string why)
+    {
+        var changed = 0;
+        foreach (var title in hidden.GroupBy(row => folderOf(row) ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!show(title.Key))
+            {
+                continue;
+            }
+
+            if (title.Key.Length > 0)
+            {
+                try
+                {
+                    IgnoreFileWriter.UnhideFolder(title.Key);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.LogWarning("Could not remove the .ignore file in {Folder}: {Error}", title.Key, ex.Message);
+                    continue;
+                }
+            }
+
+            foreach (var row in title)
+            {
+                row.Status = SyncStatus.Synced;
+                row.Reason = null;
+                row.StatusDate = DateTime.UtcNow;
+                manager.Upsert(row);
+                changed++;
+            }
+
+            Logger.LogInformation("Showed {Folder} again, {Why}", title.Key.Length > 0 ? title.Key : "a title", why);
+        }
+
+        return changed;
+    }
+
+    private int ShowAllTitles(ContentSyncTableManager manager)
+    {
+        var hidden = manager.GetAllStrict().Where(IsHiddenTitle).ToList();
+        return hidden.Count == 0 ? 0 : ShowTitles(manager, hidden, TitleFolders(), _ => true, "since Removed files is no longer Ignore");
+    }
+
+    private int StandDownDeletions(ContentSyncTableManager manager)
+    {
+        var changed = 0;
+        foreach (var row in manager.GetAllStrict().Where(row => row.Status == SyncStatus.Deleting || (row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)))
+        {
+            row.Status = SyncStatus.Synced;
+            row.PendingType = null;
+            row.StatusDate = DateTime.UtcNow;
+            manager.Upsert(row);
+            changed++;
+        }
+
+        if (changed > 0)
+        {
+            Logger.LogInformation("Cancelled {Count} deletion(s) that were waiting, since Removed files is no longer Delete", changed);
+        }
+
+        return changed;
+    }
+
+    private int HideGoneTitles(ContentSyncTableManager manager, List<SyncItem> stale, HashSet<string> returned, Dictionary<string, LibraryMapping> mappingById)
+    {
+        var folderOf = TitleFolders();
+        var current = manager.GetAllStrict();
+        var gone = stale.Where(row => !ScopeChanged(row, mappingById)).ToList();
+        var goneKeys = new HashSet<string>(gone.Select(row => row.SourceItemId), StringComparer.OrdinalIgnoreCase);
+        var alive = new HashSet<string>(
+            current.Where(row => !goneKeys.Contains(row.SourceItemId) && (!IsHiddenTitle(row) || returned.Contains(row.SourceItemId)))
+                .Select(folderOf)
+                .Where(folder => folder is not null)!,
+            StringComparer.OrdinalIgnoreCase);
+        var tracked = new HashSet<string>(current.Where(row => !string.IsNullOrEmpty(row.LocalPath)).Select(row => row.LocalPath!), StringComparer.OrdinalIgnoreCase);
+
+        var changed = ShowTitles(manager, current.Where(IsHiddenTitle), folderOf, folder => folder.Length > 0 && alive.Contains(folder), "since some of it is back on the source");
+
+        foreach (var title in gone.Where(row => folderOf(row) is not null).GroupBy(row => folderOf(row)!, StringComparer.OrdinalIgnoreCase))
+        {
+            if (alive.Contains(title.Key) || title.All(row => row.Status == SyncStatus.Ignored) || HasUntrackedMedia(title.Key, tracked))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (!IgnoreFileWriter.HideFolder(title.Key))
+                {
+                    continue;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Logger.LogWarning("Could not hide {Folder} with a .ignore file: {Error}", title.Key, ex.Message);
+                continue;
+            }
+
+            Logger.LogInformation("Hid {Folder} with a .ignore file, since everything in it is gone from the source", title.Key);
+            foreach (var row in title.Where(row => row.Status != SyncStatus.Ignored))
+            {
+                if (SyncStateService.MarkHidden(manager, row, Logger).Changed)
+                {
+                    changed++;
+                }
+            }
+        }
+
+        return changed;
+    }
+
+    private bool HasUntrackedMedia(string folder, HashSet<string> tracked)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                .Any(file => MediaExtensions.Contains(Path.GetExtension(file)) && !tracked.Contains(file));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.LogDebug(ex, "Could not read {Folder}, so it is not hidden", folder);
+            return true;
+        }
+    }
+
     /// <inheritdoc />
     protected override bool PruneGuardApplies =>
-        ConfigManager.Configuration.DeleteMissingContentMode != ApprovalMode.Disabled;
+        ConfigManager.Configuration.EffectiveMissingContentAction != MissingContentAction.Keep;
 
     // No-op, <see cref="BuildRecordAsync"/> sets the status itself based
     // on the configured approval modes (DownloadNewContentMode,
@@ -666,13 +823,20 @@ public class UpdateSyncTablesTask
         ArgumentNullException.ThrowIfNull(progress);
 
         var deleteMode = ConfigManager.Configuration.DeleteMissingContentMode;
-        if (deleteMode == ApprovalMode.Disabled)
+        var action = ConfigManager.Configuration.EffectiveMissingContentAction;
+        var hide = action == MissingContentAction.Ignore;
+        var typedManager = (ContentSyncTableManager)Manager;
+        var settled = action == MissingContentAction.Delete ? 0 : StandDownDeletions(typedManager);
+        if (!hide)
         {
-            progress.Report(100);
-            return Task.FromResult(0);
+            settled += ShowAllTitles(typedManager);
         }
 
-        var typedManager = (ContentSyncTableManager)Manager;
+        if (action != MissingContentAction.Delete && !hide)
+        {
+            progress.Report(100);
+            return Task.FromResult(settled);
+        }
 
         // Skip rows already seen, and rows whose library mapping is currently
         // disabled (or removed from config), without the scope guard,
@@ -721,6 +885,15 @@ public class UpdateSyncTablesTask
             mappingById.TryAdd(mapping.SourceLibraryId, mapping);
         }
 
+        if (hide)
+        {
+            progress.Report(100);
+            var returned = new HashSet<string>(
+                existing.Where(kvp => seenKeys.Contains(kvp.Key) && IsHiddenTitle(kvp.Value)).Select(kvp => kvp.Value.SourceItemId),
+                StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult(settled + HideGoneTitles(typedManager, stale, returned, mappingById));
+        }
+
         var pruned = 0;
         var reportEvery = Math.Max(1, stale.Count / 100);
         for (var i = 0; i < stale.Count; i++)
@@ -758,7 +931,7 @@ public class UpdateSyncTablesTask
         }
 
         progress.Report(100);
-        return Task.FromResult(pruned);
+        return Task.FromResult(settled + pruned);
     }
 
     /// <inheritdoc />

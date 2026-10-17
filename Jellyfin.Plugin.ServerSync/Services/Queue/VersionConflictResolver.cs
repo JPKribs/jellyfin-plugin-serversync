@@ -27,7 +27,7 @@ public sealed class VersionConflictResolver
     private readonly IServerApplicationHost _applicationHost;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ILogger<VersionConflictResolver> _logger;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime CheckedAt, bool Carries)> _capabilities = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime CheckedAt, bool? Carries)> _capabilities = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VersionConflictResolver"/> class.
@@ -81,11 +81,23 @@ public sealed class VersionConflictResolver
             return cached.Carries;
         }
 
-        bool carries;
+        bool? carries;
         try
         {
             var capabilities = await source.Client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
-            carries = capabilities is not null && HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion);
+            if (capabilities is null)
+            {
+                carries = false;
+            }
+            else if (HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion))
+            {
+                carries = true;
+            }
+            else
+            {
+                carries = null;
+                _logger.LogWarning("'{Peer}' runs Server Sync {Theirs} and this server runs {Ours}. Rows that would overwrite an edit recorded here wait until both run the same version", source.Name, capabilities.PluginVersion, _configManager.PluginVersion);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

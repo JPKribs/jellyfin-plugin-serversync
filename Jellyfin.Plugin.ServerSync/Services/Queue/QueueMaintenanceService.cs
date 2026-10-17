@@ -26,6 +26,8 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     private static readonly TimeSpan SettledKept = TimeSpan.FromDays(7);
     private static readonly TimeSpan PendingKept = TimeSpan.FromDays(14);
     private static readonly TimeSpan ErroredRetryAfter = TimeSpan.FromDays(1);
+    private static readonly TimeSpan ReplacementBackupKept = TimeSpan.FromDays(1);
+    private const string ReplacementMarker = ".replacing.";
 
     private readonly OutboundHintStore _outbound;
     private readonly VersionStore _versions;
@@ -33,6 +35,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     private readonly IPluginConfigurationManager _configManager;
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
+    private readonly IServiceProvider _services;
     private readonly ILogger<QueueMaintenanceService> _logger;
     private CancellationTokenSource? _stopping;
     private Task? _loop;
@@ -54,8 +57,10 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         IPluginConfigurationManager configManager,
         ILibraryManager libraryManager,
         IUserManager userManager,
+        IServiceProvider services,
         ILogger<QueueMaintenanceService> logger)
     {
+        _services = services;
         _outbound = outbound;
         _versions = versions;
         _store = store;
@@ -110,6 +115,86 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         Step("prune pending versions", () => _versions.PrunePending(now - PendingKept));
         Step("requeue errored rows", () => _store.RequeueErrored(now - ErroredRetryAfter));
         Step("prune versions of removed items", PruneMissingVersions);
+        Step("forget copies of deleted playlists", ForgetDeletedPlaylistCopies);
+        Step("remove finished replacement backups", RemoveFinishedReplacementBackups);
+    }
+
+    private int ForgetDeletedPlaylistCopies()
+    {
+        var forgotten = 0;
+        foreach (var id in Playlists.PlaylistCopyStore.Ids())
+        {
+            if (_libraryManager.GetItemById(id) is not MediaBrowser.Controller.Playlists.Playlist)
+            {
+                Playlists.PlaylistCopyStore.Remove(id);
+                forgotten++;
+            }
+        }
+
+        return forgotten;
+    }
+
+    private int RemoveFinishedReplacementBackups()
+    {
+        var content = Tasks.Common.SyncModuleMutex.ForModule("Content");
+        if (!content.Wait(0))
+        {
+            return 0;
+        }
+
+        try
+        {
+            var config = _configManager.Configuration;
+            var manager = _services.GetRequiredService<ContentSyncTableManager>();
+            var cutoff = DateTime.UtcNow - ReplacementBackupKept;
+            var removed = 0;
+            foreach (var row in manager.GetByStatus(Models.Common.SyncStatus.Synced))
+            {
+                if (string.IsNullOrEmpty(row.LocalPath)
+                    || !System.IO.File.Exists(row.LocalPath)
+                    || (row.SourceSize > 0 && new System.IO.FileInfo(row.LocalPath).Length != row.SourceSize)
+                    || System.IO.Path.GetDirectoryName(row.LocalPath) is not { Length: > 0 } folder)
+                {
+                    continue;
+                }
+
+                var paths = new[] { row.LocalPath }.Concat(Utilities.FileOperationUtilities.GetCompanionFiles(row.LocalPath));
+                foreach (var original in paths)
+                {
+                    foreach (var backup in System.IO.Directory.EnumerateFiles(folder, System.IO.Path.GetFileName(original) + ReplacementMarker + "*"))
+                    {
+                        if (System.IO.File.GetLastWriteTimeUtc(backup) > cutoff || !FileValidationService.IsPathWithinLibrary(backup, config))
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
+                            {
+                                RecyclingBinService.ArchiveBackupToRecyclingBin(backup, original, config.RecyclingBinPath, _logger);
+                            }
+                            else
+                            {
+                                System.IO.File.Delete(backup);
+                            }
+
+                            removed++;
+                        }
+                        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+                        {
+                            _logger.LogDebug(ex, "Could not remove the replacement backup {Backup}", backup);
+                        }
+                    }
+                }
+            }
+
+            return removed;
+        }
+        finally
+        {
+            content.Release();
+        }
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
