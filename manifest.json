@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.6.1",
+        "changelog": "\n## Developer\n- The metadata provider matches by the item's provider ids when the file path does not match, and seasons and episodes by the show's ids with their season and episode numbers\n- The metadata provider logs why it found no match for an item\n- A server that could not be reached or runs another version is asked again after 30 seconds",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.6.1/jellyfin-plugin-serversync-12.2.6.1.zip",
+        "checksum": "47de034b7fe6193431f191fc5c447eac",
+        "timestamp": "2026-10-17T00:32:51Z"
+      },
+      {
         "version": "12.2.6.0",
         "changelog": "\n## Developer\n- Every server in a pool must run the same Server Sync version. Calls from another version are refused, and Check Link names both versions. Update every server together\n- Hints are answered with a code that says what the receiver did with them\n- Each server tells the others what it wants from them, so changes outside its mapped libraries, users, and filters are never sent\n- A change the other server turned away is held back from it for a day, or until the settings on either side change\n- A hint for an item a server does not have yet waits up to seven days and applies when the item arrives. The queue view shows these as waiting for the item\n- A server that already holds the same or a newer edit answers straight away without fetching anything\n- Server Sync is a metadata and image provider for every media type. Enable it in a library's metadata and image fetchers to fill new items from the servers it pulls from\n- Content and Metadata scans read only what changed on each server. A full scan runs every 24 hours, set by Full Scan Every under Processing\n- Peer status reads need the asking server's id and its pairing\n- Removed unused API routes",
         "targetAbi": "12.1.0.0",
