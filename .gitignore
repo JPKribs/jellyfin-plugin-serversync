@@ -37,3 +37,9 @@ packages/
 
 # Docs build output
 site/
+
+# Local AI assistant files, never committed
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json

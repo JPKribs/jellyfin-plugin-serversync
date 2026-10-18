@@ -12,6 +12,7 @@ on:
       - '.github/docs/**'
       - '.github/workflows/docs.yaml'
       - '.github/**'
+      - '.gitignore'
   workflow_dispatch:
   repository_dispatch:
     types:
