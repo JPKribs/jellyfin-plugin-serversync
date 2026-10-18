@@ -10,8 +10,8 @@ exclude_docs: |
 
 theme:
   name: material
-  logo: assets/logo.png
-  favicon: assets/logo.png
+  logo: assets/icon.png
+  favicon: assets/icon.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
