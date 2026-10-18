@@ -76,7 +76,7 @@ A standard user who is let in only reaches their own data: history and version r
 | Server Sync is not installed there | The other server has no Server Sync |
 | A version message | Server Sync there is a different version |
 
-Updating from before 12.2.7 adds API keys and every administrator with all locations once, so servers that pulled from this one keep working. Narrow those rows to lock the endpoints down.
+Updating from before 12.2.7.0 adds API keys and every administrator with all locations once, so servers that pulled from this one keep working. Narrow those rows to lock the endpoints down.
 
 Every refused call is answered with `403` and `{ "Code": "UserNotWhitelisted", "Message": "This user is not whitelisted" }`, where `Code` is `UserNotWhitelisted`, `IpNotWhitelisted`, or `UserNotWhitelistedForIp`. It is also logged on the server that refused it, with the user, the address, and the reason.
 

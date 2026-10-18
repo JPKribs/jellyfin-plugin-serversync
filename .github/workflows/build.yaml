@@ -6,11 +6,19 @@ on:
       - master
     paths-ignore:
       - '**/*.md'
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/docs/**'
+      - '.github/workflows/docs.yaml'
   pull_request:
     branches:
       - master
     paths-ignore:
       - '**/*.md'
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/docs/**'
+      - '.github/workflows/docs.yaml'
   workflow_dispatch:
 
 permissions:

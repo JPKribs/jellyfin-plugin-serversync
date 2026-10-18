@@ -34,3 +34,6 @@ packages/
 
 # Rider
 *.sln.iml
+
+# Docs build output
+site/

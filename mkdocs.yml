@@ -1,0 +1,64 @@
+site_name: Server Sync
+site_description: A Jellyfin plugin that keeps several Jellyfin servers in step.
+site_url: https://jpkribs.github.io/jellyfin-plugin-serversync/
+repo_url: https://github.com/JPKribs/jellyfin-plugin-serversync
+repo_name: JPKribs/jellyfin-plugin-serversync
+edit_uri: edit/master/docs/
+docs_dir: docs
+exclude_docs: |
+  plans/
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/logo.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Overview: index.md
+  - Getting Started:
+      - Installation: Installation.md
+      - Setup: Setup.md
+  - Sync Types:
+      - Overview: SyncTypes.md
+      - Content: Content.md
+      - History: History.md
+      - Metadata: Metadata.md
+      - People: People.md
+      - Users: Users.md
+      - Playlists: Playlists.md
+  - Features:
+      - Live Changes: LiveChanges.md
+      - Metadata Provider: MetadataProvider.md
+  - Reference:
+      - Permissions: Permissions.md
+      - API: API.md
+      - Versioning: Versioning.md
