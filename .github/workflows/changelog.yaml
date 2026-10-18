@@ -11,6 +11,7 @@ on:
       - 'mkdocs.yml'
       - '.github/docs/**'
       - '.github/workflows/docs.yaml'
+      - '.github/**'
   workflow_dispatch:
   repository_dispatch:
     types:
