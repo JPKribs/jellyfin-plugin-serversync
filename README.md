@@ -1,6 +1,8 @@
-![Server Sync](Jellyfin.Plugin.ServerSync/Assets/Logo.png)
+<img src="docs/assets/icon.png" alt="Server Sync" width="96" align="left">
 
 A Jellyfin plugin that keeps several Jellyfin servers in step. It syncs **Content**, **Watch History**, **Metadata**, **People**, **User Settings**, and **Playlists** across servers, on a schedule and, between servers that both run the plugin, as changes happen.
+
+<br clear="left">
 
 ## Documentation
 
