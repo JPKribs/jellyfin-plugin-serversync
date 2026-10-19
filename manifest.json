@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.8.0",
+        "changelog": "\n## Developer\n- Built for Jellyfin 12.2 (target ABI 12.2.0.0). Servers on Jellyfin 12.0 or 12.1 keep the previous release.\n- Updated test dependencies (Microsoft.NET.Test.Sdk 18.11, NSubstitute 6.2, xunit 2.9.3, xunit.runner.visualstudio 4.0.1).\n- Microsoft.Data.Sqlite follows Jellyfin 12.2 at 10.0.11.\n- The integration harness runs on the jellyfin/jellyfin:12.2.20261005-225228 image.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.8.0/jellyfin-plugin-serversync-12.2.8.0.zip",
+        "checksum": "8c5830f59fb1b236f09d26d425586b32",
+        "timestamp": "2026-10-19T23:39:11Z"
+      },
+      {
         "version": "12.2.7.3",
         "changelog": "\n## Fixed\n- A download whose source stops sending is abandoned as stalled after two minutes without data and retried, instead of holding Sync Content forever\n- Deleting a file from the Sync tab deletes only that file, its companions, its thumbnails and trickplay, never another version or file in the same folder\n- With Remove empty folders on, a deleted item that leaves its folder holding only title artwork and nfo files removes those and then the folder, for deletions from the Sync tab and automatic ones alike. Any other file or subfolder keeps the folder untouched\n- Disc folders and multi part items are refused on the Sync tab with a reason, instead of being reported deleted. An item whose file is already gone has only its stale library entry removed\n- The recycling bin takes an item's thumbnails and trickplay with it and clears them out with the rest when they expire, never touching folders it did not put there\n- Image copies in Metadata, People and User sync give up after two minutes without data instead of waiting forever\n- A server that connects and has nothing to download forgets its earlier connection failures\n- The download circuit breaker counts failed downloads across runs and only resets after a download succeeds\n- The unused LastConnectionCheck setting is gone. Saved settings that still hold it load as before\n- The plugin catalog description matches the plugin\n- The multi server plan in the docs is marked historical and uses the current mode names\n- Updated Jellyfin.Sdk to the stable 2026.10.12 release\n\n## Security\n- Changing a server's address on the Servers tab drops its stored API key or sign in, so it is never sent to the new address. The page clears the key field and says to enter the key or sign in again\n- The publish workflow reads the release notes through gh and checks the downloaded checksum, so a release body can never run as a shell command\n\n## Developer\n- Updated JPKribs.Jellyfin.Base to 2026.10.19.",
         "targetAbi": "12.1.0.0",
