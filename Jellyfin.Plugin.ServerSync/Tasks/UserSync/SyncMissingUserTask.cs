@@ -482,7 +482,7 @@ public class SyncMissingUserTask
             // failures here don't touch local state.
             using (var fileStream = File.Create(tempPath))
             {
-                await imageStream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
+                await StallWatchdogStream.CopyAsync(imageStream, fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
             }
 
             string downloadedHash;

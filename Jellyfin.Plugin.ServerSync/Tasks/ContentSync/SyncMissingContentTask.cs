@@ -40,6 +40,7 @@ public class SyncMissingContentTask
     private readonly DownloadService _downloadService;
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<long, byte> _skippedByBreaker = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _downloadAttempted = new(StringComparer.OrdinalIgnoreCase);
     private string? _tempPath;
     private long _speedLimit;
     private int _successCount;
@@ -112,6 +113,7 @@ public class SyncMissingContentTask
     protected override async Task<bool> BeforeRunAsync(CancellationToken cancellationToken)
     {
         var config = ConfigManager.Configuration;
+        _downloadAttempted.Clear();
 
         if (!DiskSpaceService.HasSufficientSpace(config, out var insufficientPath))
         {
@@ -149,14 +151,13 @@ public class SyncMissingContentTask
                 continue;
             }
 
-            if (!breaker.AllowOperation(out var circuitReason))
+            if (!AdmitServer(breaker, out var circuitReason))
             {
                 Logger.LogWarning("{Task}: leaving '{Server}' out of this run: {Reason}", Name, source.Name, circuitReason);
                 source.Dispose();
                 continue;
             }
 
-            breaker.RecordSuccess();
             allowed.Add(source);
         }
 
@@ -297,6 +298,7 @@ public class SyncMissingContentTask
             return;
         }
 
+        _downloadAttempted[source.Server.Url] = 0;
         try
         {
             var result = await _downloadService.DownloadItemAsync(
@@ -374,6 +376,17 @@ public class SyncMissingContentTask
         var (deleted, _) = FileDeletionService.ProcessPendingDeletions(TypedManager, config, Logger, cancellationToken);
         Interlocked.Add(ref _deletedCount, deleted);
 
+        // A server that connected and had nothing to download has proven itself as far as this run can
+        // tell, so old connection failures are forgotten. A server that downloaded keeps whatever its
+        // downloads recorded.
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            foreach (var source in Sources)
+            {
+                SettleAfterRun(GetOrCreateCircuitBreaker(source.Server.Url), _downloadAttempted.ContainsKey(source.Server.Url));
+            }
+        }
+
         progress.Report(10);
 
         // Library refresh is conditional on actual filesystem changes
@@ -413,6 +426,39 @@ public class SyncMissingContentTask
 
 
     private ContentSyncTableManager TypedManager => (ContentSyncTableManager)Manager;
+
+    /// <summary>
+    /// Whether a connected server takes part in this run. Connecting is not a download, so it leaves
+    /// the breaker's failure count alone: only a finished download records success. Resetting it here
+    /// cleared the count at the start of every run, so failures spread over several runs never added
+    /// up, and a server whose cooldown had passed was fully closed again before a single download
+    /// proved it healthy.
+    /// </summary>
+    /// <param name="breaker">The server's breaker.</param>
+    /// <param name="reason">Why the server is left out, when it is.</param>
+    /// <returns>True when the server's downloads may run.</returns>
+    protected static bool AdmitServer(CircuitBreaker breaker, out string? reason)
+    {
+        ArgumentNullException.ThrowIfNull(breaker);
+        return breaker.AllowOperation(out reason);
+    }
+
+    /// <summary>
+    /// Settles a connected server's breaker at the end of a run. Connection failures count toward the
+    /// breaker so a server that keeps dropping off pauses, but a server that connected and then had
+    /// nothing to download clears them, so occasional failed connects do not add up over weeks. When
+    /// the run downloaded from it, the downloads already recorded success or failure and that stands.
+    /// </summary>
+    /// <param name="breaker">The server's breaker.</param>
+    /// <param name="downloadsAttempted">Whether this run downloaded anything from the server.</param>
+    protected static void SettleAfterRun(CircuitBreaker breaker, bool downloadsAttempted)
+    {
+        ArgumentNullException.ThrowIfNull(breaker);
+        if (!downloadsAttempted && breaker.ConsecutiveFailures > 0)
+        {
+            breaker.RecordSuccess();
+        }
+    }
 
     private CircuitBreaker GetOrCreateCircuitBreaker(string sourceUrl)
     {

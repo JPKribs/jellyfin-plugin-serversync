@@ -235,6 +235,7 @@ export default function (view) {
         var method = getAuthMethod();
         setVisible('authKeyPanel', method === 'key');
         setVisible('authUserPanel', method === 'user');
+        reflectAddressChange();
     }
 
     function normalizeId(id) {
@@ -359,6 +360,59 @@ export default function (view) {
         return typeof value === 'string' && value.indexOf('enc:') === 0;
     }
 
+    // Whether two server addresses name the same server, ignoring case and a trailing slash. Mirrors
+    // the server's own rule, which decides whether a saved key or token may go to an address.
+    function sameServerUrl(a, b) {
+        var left = (a || '').trim();
+        var right = (b || '').trim();
+        try {
+            var ua = new URL(left);
+            var ub = new URL(right);
+            return ua.protocol === ub.protocol
+                && ua.hostname.toLowerCase() === ub.hostname.toLowerCase()
+                && ua.port === ub.port
+                && ua.pathname.replace(/\/+$/, '').toLowerCase() === ub.pathname.replace(/\/+$/, '').toLowerCase();
+        } catch (e) {
+            return left.replace(/\/+$/, '').toLowerCase() === right.replace(/\/+$/, '').toLowerCase();
+        }
+    }
+
+    // The address saved for an entry, or null for an entry that was never saved.
+    function storedUrlFor(key) {
+        var saved = currentConfig && currentConfig.Servers
+            ? currentConfig.Servers.find(function (s) { return s.Key === key; })
+            : null;
+        return saved ? (saved.Url || '') : null;
+    }
+
+    // Whether the open entry holds a saved key or token that the edited address would lose. The server
+    // only keeps a saved secret for the address it was saved with, so a new address needs a new key
+    // or a new sign in. A token from a sign in made on this page is new and belongs to the new address.
+    function savedSecretLeftBehind(server) {
+        if (!server || !(server.ApiKey === ServerSyncShared.SECRET_KEPT || SecretLooksStored(server.ApiKey))) return false;
+        var stored = storedUrlFor(server.Key);
+        return stored !== null && !sameServerUrl(getValue('txtSourceServerUrl', ''), stored);
+    }
+
+    // Clears the kept placeholder and says what to do while the address differs from the saved one,
+    // and puts the placeholder back when the address returns to it.
+    function reflectAddressChange() {
+        var server = selectedServer();
+        var moved = savedSecretLeftBehind(server);
+        var keyField = getEl('txtSourceServerApiKey');
+        if (keyField) {
+            if (moved && keyField.value === ServerSyncShared.SECRET_KEPT) keyField.value = '';
+            if (!moved && !keyField.value && server && server.ApiKey) keyField.value = ServerSyncShared.SECRET_KEPT;
+        }
+        var note = getEl('savedSecretNote');
+        if (note) {
+            note.textContent = !moved ? '' : getAuthMethod() === 'user'
+                ? 'The saved sign in only works with ' + storedUrlFor(server.Key) + '. Sign in again for the new address.'
+                : 'The saved API key is only sent to ' + storedUrlFor(server.Key) + '. Enter the key again for the new address.';
+        }
+        setVisible('savedSecretNote', moved);
+    }
+
     // --- Mode ---
 
     function getMode() {
@@ -433,6 +487,7 @@ export default function (view) {
         setAuthMethod(server.AuthenticatedUser ? 'user' : 'key');
         reflectSignedIn(server);
         reflectAccess(server);
+        reflectAddressChange();
 
         var nameEl = getEl('txtSourceServerName');
         var idEl = getEl('txtSourceServerId');
@@ -521,6 +576,9 @@ export default function (view) {
         server.Name = getValue('txtServerName', '').trim();
         server.Mode = getMode();
         server.IsEnabled = getChecked('chkServerEnabled');
+        // Read before the address is taken from the editor. The saved secret stays with the saved
+        // address, so the entry carries no key until one is entered or signed in again.
+        var secretLeftBehind = savedSecretLeftBehind(server);
         server.Url = getValue('txtSourceServerUrl', '').trim();
         server.ExternalUrl = getValue('txtSourceServerExternalUrl', '').trim();
         server.AllowPrivateNetwork = getChecked('chkAllowPrivateNetwork');
@@ -530,8 +588,9 @@ export default function (view) {
             if (apiKey.length > ServerSyncShared.SECRET_KEPT.length && apiKey.indexOf(ServerSyncShared.SECRET_KEPT) === 0) {
                 apiKey = apiKey.substring(ServerSyncShared.SECRET_KEPT.length);
             }
-            // An empty field on an entry that has a stored key means "keep it", the same as the sentinel.
-            server.ApiKey = apiKey || (server.ApiKey ? ServerSyncShared.SECRET_KEPT : '');
+            // An empty field on an entry that has a stored key means "keep it", the same as the sentinel,
+            // unless the address changed, which the stored key may not follow.
+            server.ApiKey = apiKey || (server.ApiKey && !secretLeftBehind ? ServerSyncShared.SECRET_KEPT : '');
             // A pasted key belongs to no signed in user.
             if (apiKey && apiKey !== ServerSyncShared.SECRET_KEPT) {
                 server.AuthenticatedUser = '';
@@ -543,6 +602,15 @@ export default function (view) {
             }
         } else if (!server.ApiKey) {
             server.ApiKey = '';
+        } else if (secretLeftBehind) {
+            // The token was issued by the saved address. A new address needs a new sign in.
+            server.ApiKey = '';
+            server.AuthenticatedUser = '';
+            server.AuthenticatedUserId = '';
+            server.AccessLevel = '';
+            server.CanDownload = null;
+            server.SyncAccess = '';
+            server.SyncAccessMessage = '';
         } else {
             // Signed in: the token lives in the entry already, and the field is not in play.
             server.ApiKey = server.ApiKey === ServerSyncShared.SECRET_KEPT || SecretLooksStored(server.ApiKey) ? ServerSyncShared.SECRET_KEPT : server.ApiKey;
@@ -1352,9 +1420,11 @@ export default function (view) {
                     });
                     keyField.addEventListener('blur', function () {
                         var open = selectedServer();
-                        if (!keyField.value && open && open.ApiKey) keyField.value = ServerSyncShared.SECRET_KEPT;
+                        if (!keyField.value && open && open.ApiKey && !savedSecretLeftBehind(open)) keyField.value = ServerSyncShared.SECRET_KEPT;
                     });
                 }
+                var urlField = getEl('txtSourceServerUrl');
+                if (urlField) urlField.addEventListener('input', reflectAddressChange);
                 modeGroup = createChoiceGroup(getEl('modeChoices'), { onChange: reflectMode });
                 authGroup = createChoiceGroup(getEl('authChoices'), { onChange: reflectAuthMethod });
 

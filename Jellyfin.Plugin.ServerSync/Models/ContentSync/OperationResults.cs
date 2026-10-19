@@ -6,9 +6,10 @@ namespace Jellyfin.Plugin.ServerSync.Models.ContentSync;
 public record DownloadResult(bool Success, string? ErrorMessage = null, string? CompanionFiles = null);
 
 /// <summary>
-/// Result of a deletion operation.
+/// Result of a deletion operation. AlreadyGone means the file was not on disk any more, so only the
+/// stale library entry was removed.
 /// </summary>
-public record DeletionResult(bool Success, string? ErrorMessage = null);
+public record DeletionResult(bool Success, string? ErrorMessage = null, bool AlreadyGone = false);
 
 /// <summary>
 /// Result of a path validation check.

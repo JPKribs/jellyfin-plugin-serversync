@@ -530,9 +530,35 @@ public partial class ConfigurationController
                 continue;
             }
 
+            // The path actually deleted: the tracked one, or the Jellyfin item's own when the row tracks
+            // none. The item's path passed the library check above, and gets the symlink check here.
+            var targetPath = !string.IsNullOrEmpty(item.LocalPath) ? item.LocalPath : localItem?.Path;
+            if (string.IsNullOrEmpty(item.LocalPath) && !string.IsNullOrEmpty(targetPath))
+            {
+                var targetRoot = FileValidationService.GetContainingLibraryRoot(targetPath, config);
+                if (targetRoot != null && FileValidationService.HasSymlinkedDirectoryComponent(targetPath, targetRoot))
+                {
+                    _logger.LogWarning(
+                        "SKIPPED DELETE: {FileName} - Path traverses a symlinked directory. The physical file may live outside the library. Item path: {ItemPath}",
+                        sanitizedFileName,
+                        SanitizeForLog(targetPath));
+                    skippedCount++;
+                    continue;
+                }
+            }
+
             var result = FileDeletionService.DeleteLocalFile(item.LocalPath, localItem, _libraryManager, config, _logger);
 
-            if (result.Success)
+            if (result.Success && result.AlreadyGone)
+            {
+                _logger.LogInformation(
+                    "DELETE (external): {FileName} - The file was already gone, so only the stale library entry was removed and the row is kept as Ignored. Local path: {LocalPath}",
+                    sanitizedFileName,
+                    SanitizeForLog(targetPath));
+                KeepAsIgnored(manager, item);
+                deletedCount++;
+            }
+            else if (result.Success)
             {
                 var useRecyclingBin = config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath);
                 var action = useRecyclingBin ? "RECYCLED" : "DELETED";
@@ -545,7 +571,9 @@ public partial class ConfigurationController
             {
                 // Check if file still exists after failed deletion attempt
                 // It may have been deleted externally (manually or by another process)
-                var stillExists = !string.IsNullOrEmpty(item.LocalPath) && System.IO.File.Exists(item.LocalPath);
+                // A folder item counts too, so a refused disc structure is reported as failed, never as gone.
+                var stillExists = !string.IsNullOrEmpty(targetPath)
+                    && (System.IO.File.Exists(targetPath) || System.IO.Directory.Exists(targetPath));
                 if (!stillExists)
                 {
                     // File is gone (deleted elsewhere) - remove from tracking

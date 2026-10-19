@@ -78,7 +78,7 @@ public class UpdateSyncTablesTask
     /// overwrite: a suspicious 0 is sticky, an intentionally-empty whitelist
     /// (-1) never overrides a real answer, and positive counts accumulate.
     /// </summary>
-    private void RecordMappingSeen(string sourceLibraryId, int count)
+    protected void RecordMappingSeen(string sourceLibraryId, int count)
     {
         var hasExisting = _seenPerMapping.TryGetValue(sourceLibraryId, out var existing);
         if (hasExisting && existing == 0)

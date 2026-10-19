@@ -2,8 +2,8 @@
   {
     "guid": "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286",
     "name": "Server Sync",
-    "description": "Server Sync is a Jellyfin plugin that enables synchronization of media content between multiple Jellyfin servers. Supports parent-child relationships where children sync back to the parent, and peer-to-peer relationships for bi-directional synchronization.",
-    "overview": "Synchronize media content between Jellyfin servers",
+    "description": "Server Sync keeps a pool of Jellyfin servers in step. Each server scans the others it is told to in priority order and pulls missing or updated content, metadata, people, user settings, playlists, and watch history. Servers that both run the plugin also tell each other about changes as they happen, so an edit or a play made on one shows up on the others within seconds, and the scheduled scan remains the safety net. Watch history merges three way against what the servers last agreed on, and other values resolve on where and when they were last edited, so the newest edit always wins.",
+    "overview": "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history.",
     "imageUrl": "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png",
     "owner": "JPKribs",
     "category": "Administration",

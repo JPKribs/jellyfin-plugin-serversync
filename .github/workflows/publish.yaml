@@ -5,6 +5,11 @@ on:
     types:
       - released
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to publish (e.g. v12.2.7.2)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -23,53 +28,89 @@ jobs:
 
       - name: Get Release Info
         id: release_info
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          # Extract version and targetAbi from build.yaml
-          BUILD_VERSION=$(grep '^version:' build.yaml | sed 's/version: *"\?\([^"]*\)"\?.*/\1/' | tr -d '"')
-          TARGET_ABI=$(grep '^targetAbi:' build.yaml | sed 's/targetAbi: *"\?\([^"]*\)"\?.*/\1/' | tr -d '"')
+          set -euo pipefail
 
-          # Try to download the checksum file from the release assets
-          ASSET_URL="https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/${{ github.event.release.tag_name }}/jellyfin-plugin-serversync-${BUILD_VERSION}.zip.md5"
-          echo "Trying to download checksum from: ${ASSET_URL}"
+          # The tag is the single source of truth. A manual dispatch must name one explicitly, so a
+          # run without a tag can never hash a 404 page into the manifest every user's server fetches.
+          TAG="${RELEASE_TAG:-${INPUT_TAG:-}}"
+          if [ -z "$TAG" ]; then
+            echo "No release tag available; refusing to touch the manifest." >&2
+            exit 1
+          fi
 
-          CHECKSUM=$(curl -s "${ASSET_URL}")
+          # The version comes from the tag itself, not from build.yaml at the checked out commit, so a
+          # manual publish from master cannot pick up a version a later auto-increment wrote into build.yaml.
+          BUILD_VERSION="${TAG#v}"
 
-          # If curl failed or returned empty, calculate checksum ourselves
+          # Read targetAbi from build.yaml as it was at the tag, falling back to the checked out copy.
+          git fetch --depth 1 origin "refs/tags/${TAG}:refs/tags/${TAG}" 2>/dev/null || true
+          TARGET_ABI=$(git show "refs/tags/${TAG}:build.yaml" 2>/dev/null | sed -n 's/^targetAbi:[[:space:]]*//p' | tr -d '"' || true)
+          if [ -z "$TARGET_ABI" ]; then
+            TARGET_ABI=$(sed -n 's/^targetAbi:[[:space:]]*//p' build.yaml | tr -d '"')
+          fi
+
+          BASE_URL="https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/${TAG}"
+          ASSET="jellyfin-plugin-serversync-${BUILD_VERSION}.zip"
+
+          # -f on every download: a missing asset must fail the job rather than hashing an error page.
+          echo "Trying to download checksum from: ${BASE_URL}/${ASSET}.md5"
+          CHECKSUM=$(curl -sfL "${BASE_URL}/${ASSET}.md5" | cut -d' ' -f1 || true)
           if [ -z "$CHECKSUM" ]; then
             echo "Checksum download failed, calculating from ZIP file..."
-            ZIP_URL="https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/${{ github.event.release.tag_name }}/jellyfin-plugin-serversync-${BUILD_VERSION}.zip"
-            curl -L -o temp_plugin.zip "${ZIP_URL}"
+            curl -sfL -o temp_plugin.zip "${BASE_URL}/${ASSET}"
             CHECKSUM=$(md5sum temp_plugin.zip | cut -d' ' -f1)
             rm temp_plugin.zip
           fi
 
+          if ! echo "$CHECKSUM" | grep -Eq '^[0-9a-f]{32}$'; then
+            echo "Checksum '${CHECKSUM}' does not look like an MD5 hash; aborting." >&2
+            exit 1
+          fi
+
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+          echo "Tag: ${TAG}"
           echo "Build Version: ${BUILD_VERSION}"
           echo "Target ABI: ${TARGET_ABI}"
           echo "Checksum: ${CHECKSUM}"
 
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "build_version=${BUILD_VERSION}" >> $GITHUB_OUTPUT
           echo "target_abi=${TARGET_ABI}" >> $GITHUB_OUTPUT
           echo "checksum=${CHECKSUM}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
 
       - name: Build Manifest Entry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release_info.outputs.tag }}
+          BUILD_VERSION: ${{ steps.release_info.outputs.build_version }}
+          TARGET_ABI: ${{ steps.release_info.outputs.target_abi }}
+          CHECKSUM: ${{ steps.release_info.outputs.checksum }}
+          TIMESTAMP: ${{ steps.release_info.outputs.timestamp }}
         run: |
-          # Sanitize changelog by removing backticks
-          SANITIZED_CHANGELOG=$(echo "${{ github.event.release.body }}" | tr -d '\`')
+          set -euo pipefail
+
+          # The release body reaches the shell only through gh and env vars, never through workflow
+          # template interpolation, so quotes or $() in a changelog cannot execute or break the job.
+          RELEASE_BODY=$(gh release view "$TAG" --json body --jq '.body // ""')
+          SANITIZED_CHANGELOG=$(printf '%s' "$RELEASE_BODY" | tr -d '`')
 
           # Only the new version entry is built here. It is inserted into
           # whatever manifest.json is on master at push time (next step) —
           # editing the tag-commit's copy and pushing it wholesale could
           # clobber entries added to master after the tag was cut.
           jq -n \
-            --arg version "${{ steps.release_info.outputs.build_version }}" \
+            --arg version "$BUILD_VERSION" \
             --arg changelog "$SANITIZED_CHANGELOG" \
-            --arg targetAbi "${{ steps.release_info.outputs.target_abi }}" \
-            --arg sourceUrl "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/${{ github.event.release.tag_name }}/jellyfin-plugin-serversync-${{ steps.release_info.outputs.build_version }}.zip" \
-            --arg checksum "${{ steps.release_info.outputs.checksum }}" \
-            --arg timestamp "${{ steps.release_info.outputs.timestamp }}" \
+            --arg targetAbi "$TARGET_ABI" \
+            --arg sourceUrl "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/${TAG}/jellyfin-plugin-serversync-${BUILD_VERSION}.zip" \
+            --arg checksum "$CHECKSUM" \
+            --arg timestamp "$TIMESTAMP" \
             '{
               version: $version,
               changelog: $changelog,
@@ -80,6 +121,8 @@ jobs:
             }' > /tmp/new-version.json
 
       - name: Commit Changes
+        env:
+          TAG: ${{ steps.release_info.outputs.tag }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -103,7 +146,7 @@ jobs:
               echo "Manifest already up to date on master; nothing to push"
               exit 0
             fi
-            git commit -m "Update manifest for release ${{ github.event.release.tag_name }}"
+            git commit -m "Update manifest for release ${TAG}"
             if git push origin master; then
               exit 0
             fi

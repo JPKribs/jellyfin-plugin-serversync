@@ -26,10 +26,27 @@ public class DownloadService
     /// </summary>
     private const int DefaultNetworkRetries = 3;
 
+    /// <summary>
+    /// How long a download may go without receiving a byte before it counts as stalled.
+    /// </summary>
+    public static readonly TimeSpan DefaultStallTimeout = StallWatchdogStream.DefaultIdleTimeout;
+
+    /// <summary>
+    /// The buffer the base copy reads in. With a speed limit it sleeps after each buffer, so the
+    /// stall window has to outlast one buffer's worth of sleep at the configured rate.
+    /// </summary>
+    private const int CopyBufferBytes = 81920;
+
     public DownloadService(ILogger<DownloadService> logger)
     {
         _logger = logger;
     }
+
+    /// <summary>
+    /// Gets or sets how long a download may receive nothing before it is abandoned as stalled and
+    /// handed to the retry policy.
+    /// </summary>
+    public TimeSpan StallTimeout { get; set; } = DefaultStallTimeout;
 
     /// <summary>
     /// Downloads a single item and its companion files with retry support.
@@ -87,7 +104,7 @@ public class DownloadService
                             Stream destination = progress != null && expectedBytes.HasValue
                                 ? new ProgressReportingStream(fileStream, expectedBytes.Value, progress)
                                 : fileStream;
-                            await StreamUtilities.CopyWithSpeedLimitAsync(sourceStream, destination, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
+                            await CopyWithStallWatchdogAsync(sourceStream, destination, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
                         }
                     }
 
@@ -319,7 +336,7 @@ public class DownloadService
 
                             using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
                             {
-                                await StreamUtilities.CopyWithSpeedLimitAsync(stream, fileStream, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
+                                await CopyWithStallWatchdogAsync(stream, fileStream, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
                             }
                         },
                         networkRetries,
@@ -403,6 +420,31 @@ public class DownloadService
     public static bool ShouldSkipDownload(SyncItem item, long sizeMatchToleranceBytes, out string? skipReason)
     {
         return FileValidationService.ShouldSkipDownload(item, sizeMatchToleranceBytes, out skipReason);
+    }
+
+    /// <summary>
+    /// Copies a download under a stall watchdog, so a source that stops sending mid-body cannot hold
+    /// the copy, and the Content lock with it, forever. The stall fails with an IOException, which the
+    /// retry policy treats as transient, and a download that keeps stalling fails like any other.
+    /// </summary>
+    private async Task CopyWithStallWatchdogAsync(Stream source, Stream destination, long speedLimitBytesPerSecond, CancellationToken cancellationToken)
+    {
+        var window = StallTimeout;
+        if (speedLimitBytesPerSecond > 0)
+        {
+            var throttleSleep = TimeSpan.FromSeconds(2.0 * CopyBufferBytes / speedLimitBytesPerSecond);
+            if (throttleSleep > window)
+            {
+                window = throttleSleep;
+            }
+        }
+
+        await StallWatchdogStream.CopyAsync(
+            source,
+            destination,
+            window,
+            (watched, to, token) => StreamUtilities.CopyWithSpeedLimitAsync(watched, to, speedLimitBytesPerSecond, token),
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

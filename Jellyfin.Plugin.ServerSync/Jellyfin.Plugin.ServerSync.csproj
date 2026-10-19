@@ -24,12 +24,12 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Sdk" Version="2026.9.7-unstable.202609070505" />
+    <PackageReference Include="Jellyfin.Sdk" Version="2026.10.12" />
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.10">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.10.16" />
+    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.10.19" />
   </ItemGroup>
 
   <ItemGroup>

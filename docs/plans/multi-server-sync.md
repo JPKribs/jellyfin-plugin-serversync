@@ -2,6 +2,8 @@
 
 Plan written 2026-10-03. This describes how Server Sync grows from a single source pull into a pool of servers that keep each other current, without giving up the pull based scan that already works.
 
+> **Historical.** This is the design plan as written, kept for its reasoning. The plugin has moved on since: the modes are named Pull, Push, and Sync (saved in the configuration as Scan, Send, and Both, so older settings still load), any number of servers can be in Pull mode and are scanned in Servers tab order, and playlists sync too. The pages under docs/ describe current behavior, starting with [Setup](../Setup.md) for the modes and [Live Changes](../LiveChanges.md).
+
 ## Goals
 
 * Keep every write on the pull path. A server only ever changes its own data after reading the peer. Nothing is ever pushed into a server's library from outside.
@@ -16,9 +18,9 @@ Each configured server has one mode.
 
 | Mode | Meaning |
 | --- | --- |
-| Scan | This server pulls from it on a schedule. Today's behavior. The remote needs no plugin. Only one server can be in Pull mode. |
-| Send | This server sends hints to it when local data changes. The remote runs the plugin and pulls the change. |
-| Both | Pull and Push together. Used for a pool of equals. |
+| Pull | This server pulls from it on a schedule. Today's behavior. The remote needs no plugin. |
+| Push | This server sends hints to it when local data changes. The remote runs the plugin and pulls the change. |
+| Sync | Pull and Push together. Used for a pool of equals. |
 
 Hints are accepted from any configured server that holds a key for this one. Hints are sent to every server in Push or Sync mode.
 
@@ -44,7 +46,7 @@ All routes sit behind Jellyfin's RequiresElevation policy. The caller presents a
 
 **GET /Sync/Peer/Status.** Lists this server's inbound queue. A source consults it only for outbound rows that were sent and not completed after a grace period of one hour. If the hint id is still queued the peer is working and the source waits. If it is absent and was never completed, the work was lost and the source resends.
 
-**POST /Sync/Peer/Versions.** Returns effective versions for a batch of keys. Used by the full scan against a Both peer so that conflicts resolve on origin versions rather than saved dates.
+**POST /Sync/Peer/Versions.** Returns effective versions for a batch of keys. Used by the full scan against a Sync peer so that conflicts resolve on origin versions rather than saved dates.
 
 **Response codes seen by the sender.**
 
@@ -74,7 +76,7 @@ All routes sit behind Jellyfin's RequiresElevation policy. The caller presents a
 
 **History** keeps its negotiated merge: three way against the last agreed base, most recent play wins when both sides moved, favorites are kept when both sides moved. The base must be recorded on both servers, not only on the one that proposed the state, or the next change coming the other way is merged against a stale base and an older play outranks a newer unmark. The negotiation endpoint therefore updates the receiving server's own row for the sender whenever a proposal is applied or already held, creating the row from the sender's ids on first contact. When no base exists at all and this server knows when its own value was edited, the first contact is decided on origin versions like every other kind. With neither a base nor a local version the two way merge stands, so a play that predates versioning is never lost.
 
-**Scan only sources** keep today's rule. The source wins, since the plugin cannot read versions from a server without the plugin.
+**Pull only sources** keep today's rule. The source wins, since the plugin cannot read versions from a server without the plugin.
 
 ## Loop prevention
 

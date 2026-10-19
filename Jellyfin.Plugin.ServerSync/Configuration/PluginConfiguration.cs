@@ -302,11 +302,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MinimumFreeDiskSpaceGb { get; set; } = 10;
 
     /// <summary>
-    /// Timestamp of last successful connection check.
-    /// </summary>
-    public DateTime? LastConnectionCheck { get; set; }
-
-    /// <summary>
     /// Timestamp when the last sync started.
     /// </summary>
     public DateTime? LastSyncStartTime { get; set; }

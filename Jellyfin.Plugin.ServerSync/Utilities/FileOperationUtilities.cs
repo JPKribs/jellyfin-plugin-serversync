@@ -18,6 +18,53 @@ public static class FileOperationUtilities
     /// </summary>
     public static readonly string[] CompanionExtensions = { ".srt", ".sub", ".ass", ".ssa", ".vtt", ".nfo", ".jpg", ".png" };
 
+    private static readonly string[] ItemImageExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tbn" };
+
+    // Images Jellyfin saves next to one media file, named after it: "<name>-thumb.jpg" and the like.
+    private static readonly System.Text.RegularExpressions.Regex ItemImageSuffix = new(
+        "^-(thumb|poster|fanart|landscape|banner|logo|clearlogo|clearart|disc|backdrop|background|art)[0-9]*$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// What Jellyfin generates for one media file and names after it: its local images
+    /// ("name-thumb.jpg") and its trickplay folder ("name.trickplay"). Matching is on the exact name, so
+    /// another version in the same folder ("name - 4K.mkv") is never matched.
+    /// </summary>
+    /// <param name="mainFilePath">Path to the media file.</param>
+    /// <returns>The image files, and the trickplay folder when there is one.</returns>
+    public static (List<string> Images, string? TrickplayFolder) GetItemArtifacts(string mainFilePath)
+    {
+        var images = new List<string>();
+        var directory = Path.GetDirectoryName(mainFilePath);
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+        {
+            return (images, null);
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(mainFilePath);
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, stem + "-*"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (name.Length > stem.Length
+                    && name.StartsWith(stem, StringComparison.OrdinalIgnoreCase)
+                    && Array.Exists(ItemImageExtensions, e => string.Equals(e, Path.GetExtension(file), StringComparison.OrdinalIgnoreCase))
+                    && ItemImageSuffix.IsMatch(name[stem.Length..]))
+                {
+                    images.Add(file);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Unreadable folder: nothing is matched, so nothing extra is removed.
+        }
+
+        var trickplay = Path.Combine(directory, stem + ".trickplay");
+        return (images, Directory.Exists(trickplay) ? trickplay : null);
+    }
+
     /// <summary>
     /// Moves a file with overwrite semantics, retrying on transient IO failures. Retry waits use
     /// <see cref="Task.Delay(int, CancellationToken)"/> so they don't block thread-pool threads.

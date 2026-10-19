@@ -128,9 +128,30 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         // without the operator retyping its API key.
         foreach (var server in incoming.Servers)
         {
-            var storedServer = stored.FindServer(server.Key);
-            server.ApiKey = _secrets.Value.ResolveIncoming(server.ApiKey, storedServer?.ApiKey ?? string.Empty);
+            server.ApiKey = _secrets.Value.ResolveIncoming(server.ApiKey, KeptApiKeyFor(server, stored));
         }
+    }
+
+    /// <summary>
+    /// The stored API key an incoming entry may keep: the key of the stored entry with the same key,
+    /// and only while its address is unchanged. The page never sees the key, so an edited address
+    /// with the kept sentinel would hand the old server's key to whatever the address now names. The
+    /// key is dropped instead and has to be entered again, the same rule the endpoints apply.
+    /// </summary>
+    /// <param name="incoming">The entry being saved.</param>
+    /// <param name="stored">The configuration on disk.</param>
+    /// <returns>The stored (protected) key, or empty when there is none to keep.</returns>
+    public static string KeptApiKeyFor(SourceServer incoming, PluginConfiguration stored)
+    {
+        ArgumentNullException.ThrowIfNull(incoming);
+        ArgumentNullException.ThrowIfNull(stored);
+        var storedServer = stored.FindServer(incoming.Key);
+        if (storedServer is null || !Utilities.ConfigurationUtilities.SameServerUrl(storedServer.Url, incoming.Url))
+        {
+            return string.Empty;
+        }
+
+        return storedServer.ApiKey ?? string.Empty;
     }
 
     /// <summary>

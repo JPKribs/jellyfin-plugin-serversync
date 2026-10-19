@@ -1,6 +1,7 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using System.IO;
+using System.Linq;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
@@ -63,6 +64,41 @@ public static class RecyclingBinService
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to move file to recycling bin: {FilePath}", filePath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Moves a folder (an item's trickplay) to the recycling bin under a timestamped name, which the
+    /// retention cleanup reads to remove it once it expires.
+    /// </summary>
+    /// <param name="folderPath">The folder to move.</param>
+    /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <returns>True when it was moved.</returns>
+    public static bool MoveFolderToRecyclingBin(string folderPath, string recyclingBinPath, ILogger logger)
+    {
+        if (string.IsNullOrEmpty(folderPath) || string.IsNullOrEmpty(recyclingBinPath) || !Directory.Exists(folderPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(recyclingBinPath);
+            var destination = Path.Combine(recyclingBinPath, FileOperationUtilities.GenerateRecycledFileName(folderPath));
+            if (Directory.Exists(destination) || File.Exists(destination))
+            {
+                destination += "_" + Guid.NewGuid().ToString("N")[..8];
+            }
+
+            Directory.Move(folderPath, destination);
+            logger.LogDebug("Moved folder to recycling bin: {Folder}", Path.GetFileName(folderPath));
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Failed to move folder to recycling bin: {Folder}", folderPath);
             return false;
         }
     }
@@ -156,6 +192,18 @@ public static class RecyclingBinService
             {
                 MoveToRecyclingBin(companionFile, recyclingBinPath, logger);
             }
+
+            // Its own thumbnails and trickplay go with it, the same as when it is deleted outright.
+            var (images, trickplay) = FileOperationUtilities.GetItemArtifacts(filePath);
+            foreach (var image in images)
+            {
+                MoveToRecyclingBin(image, recyclingBinPath, logger);
+            }
+
+            if (trickplay is not null)
+            {
+                MoveFolderToRecyclingBin(trickplay, recyclingBinPath, logger);
+            }
         }
         catch (Exception ex)
         {
@@ -203,12 +251,12 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Deletes files in the recycling bin older than the retention period.
+    /// Deletes files, and the plugin's recycled trickplay folders, in the recycling bin older than the retention period.
     /// </summary>
     /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
     /// <param name="retentionDays">Number of days to retain files before deletion.</param>
     /// <param name="logger">Logger for operation output.</param>
-    /// <returns>Number of files deleted.</returns>
+    /// <returns>Number of files and recycled trickplay folders deleted.</returns>
     public static int CleanupExpiredFiles(string recyclingBinPath, int retentionDays, ILogger logger)
     {
         if (string.IsNullOrEmpty(recyclingBinPath) || !Directory.Exists(recyclingBinPath))
@@ -218,6 +266,7 @@ public static class RecyclingBinService
 
         var cutoffTime = DateTime.UtcNow.AddDays(-retentionDays);
         var deletedCount = 0;
+        var deletedFolders = 0;
         var errorCount = 0;
         long totalBytes = 0;
 
@@ -251,17 +300,43 @@ public static class RecyclingBinService
                 }
             }
 
-            if (deletedCount > 0)
+            // The only folders the plugin puts here are recycled trickplay folders, and only those expire,
+            // by the timestamp in their name. Any other folder, even one named with a timestamp, belongs
+            // to someone else and is never touched.
+            foreach (var folder in Directory.GetDirectories(recyclingBinPath))
+            {
+                if (!TryReadRecycledTrickplayTime(Path.GetFileName(folder), out var folderTime) || folderTime >= cutoffTime)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var folderSize = new DirectoryInfo(folder).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+                    Directory.Delete(folder, recursive: true);
+                    deletedFolders++;
+                    totalBytes += folderSize;
+                    logger.LogDebug("Permanently deleted folder from recycling bin: {Folder}", Path.GetFileName(folder));
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to delete recycled folder: {FolderPath}", folder);
+                    errorCount++;
+                }
+            }
+
+            if (deletedCount > 0 || deletedFolders > 0)
             {
                 logger.LogInformation(
-                    "Recycling bin cleanup: permanently deleted {Count} files ({Size})",
+                    "Recycling bin cleanup: permanently deleted {Count} files and {Folders} folders ({Size})",
                     deletedCount,
+                    deletedFolders,
                     FormatUtilities.FormatBytes(totalBytes));
             }
 
             if (errorCount > 0)
             {
-                logger.LogWarning("Failed to delete {Count} files from recycling bin", errorCount);
+                logger.LogWarning("Failed to delete {Count} items from recycling bin", errorCount);
             }
         }
         catch (Exception ex)
@@ -269,6 +344,32 @@ public static class RecyclingBinService
             logger.LogError(ex, "Failed to clean up recycling bin: {Path}", recyclingBinPath);
         }
 
-        return deletedCount;
+        return deletedCount + deletedFolders;
+    }
+
+    // A recycled trickplay folder as MoveFolderToRecyclingBin names it: the recycled name of
+    // "<name>.trickplay", "<path>.<name>_yyyy-MM-dd_HH-mm-ss.trickplay", with "_" and eight hex digits
+    // appended when that name was taken.
+    private static readonly System.Text.RegularExpressions.Regex RecycledTrickplayName = new(
+        "^.+_(?<at>[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2})\\.trickplay(_[0-9a-f]{8})?$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Reads the time a recycled trickplay folder was recycled at from its name. Only names the plugin
+    /// builds for those folders qualify.
+    /// </summary>
+    /// <param name="folderName">The folder's name.</param>
+    /// <param name="recycledAt">The UTC time it was recycled at.</param>
+    /// <returns>True when the name is one of the plugin's recycled trickplay folders.</returns>
+    public static bool TryReadRecycledTrickplayTime(string folderName, out DateTime recycledAt)
+    {
+        recycledAt = default;
+        var match = RecycledTrickplayName.Match(folderName ?? string.Empty);
+        return match.Success && DateTime.TryParseExact(
+            match.Groups["at"].Value,
+            "yyyy-MM-dd_HH-mm-ss",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out recycledAt);
     }
 }

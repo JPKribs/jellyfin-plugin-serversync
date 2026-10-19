@@ -3,6 +3,7 @@ using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
@@ -19,6 +20,16 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// </summary>
 public static class FileDeletionService
 {
+    private static readonly string[] TitleImageExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tbn" };
+
+    // Artwork Jellyfin and other tools save for a title folder as a whole.
+    private static readonly Regex TitleImageName = new(
+        "^(poster|folder|fanart|backdrop|banner|logo|clearart|thumb|landscape|disc)[0-9]*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    // Text companions of the deleted item that may be left behind ("name.en.srt", "name.txt").
+    private static readonly string[] ItemTextExtensions = { ".srt", ".sub", ".idx", ".ass", ".ssa", ".vtt", ".smi", ".txt", ".nfo" };
+
     /// <summary>
     /// Deletes a file and its companion files permanently.
     /// </summary>
@@ -53,10 +64,13 @@ public static class FileDeletionService
 
         // Delete companion files
         DeleteCompanionFiles(filePath, logger);
+        DeleteItemArtifacts(filePath, logger);
 
-        // Remove empty parent folders if enabled, bounded by library root
+        // Remove empty parent folders if enabled, bounded by library root. A folder this item leaves
+        // holding nothing but title artwork and nfo files counts as empty, so those go first.
         if (removeEmptyFolders && mainDeleted && !string.IsNullOrEmpty(parentDirectory))
         {
+            DeleteTitleArtifacts(parentDirectory, Path.GetFileNameWithoutExtension(filePath), logger, libraryRootPath);
             TryRemoveEmptyFolders(parentDirectory, logger, libraryRootPath);
         }
 
@@ -155,6 +169,120 @@ public static class FileDeletionService
     }
 
     /// <summary>
+    /// Deletes what Jellyfin generates for one media file and names after it: its local images
+    /// ("name-thumb.jpg") and its trickplay folder ("name.trickplay"). Another version in the same
+    /// folder ("name - 4K.mkv") keeps its own.
+    /// </summary>
+    /// <param name="mainFilePath">Path to the main file.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    public static void DeleteItemArtifacts(string mainFilePath, ILogger logger)
+    {
+        var (images, trickplay) = FileOperationUtilities.GetItemArtifacts(mainFilePath);
+        foreach (var image in images)
+        {
+            TryDeleteFile(image, logger);
+        }
+
+        if (trickplay is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(trickplay, recursive: true);
+            logger.LogDebug("Deleted trickplay folder: {Folder}", Path.GetFileName(trickplay));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Failed to delete trickplay folder: {Folder}", trickplay);
+        }
+    }
+
+    /// <summary>
+    /// Deletes the title artwork and nfo files a folder is left with, once the item deleted from it
+    /// was the last thing there. Anything else in the folder, a file that is not plainly title
+    /// artwork, an nfo, or a text companion of the deleted item, or any subfolder other than the
+    /// item's own trickplay, means the folder still holds something, and then nothing is deleted. That
+    /// way an unlisted media type, a disc structure, a photo, or a user's own file always keeps the
+    /// folder and its artwork. Only a folder strictly inside a known library root is considered.
+    /// </summary>
+    /// <param name="folder">The folder the deleted file was in.</param>
+    /// <param name="deletedStem">The deleted file's name without its extension.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="libraryRootPath">The library root bounding the cleanup, or null to skip it.</param>
+    public static void DeleteTitleArtifacts(string folder, string deletedStem, ILogger logger, string? libraryRootPath)
+    {
+        if (string.IsNullOrEmpty(libraryRootPath) || string.IsNullOrEmpty(deletedStem) || !Directory.Exists(folder))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = Path.GetFullPath(libraryRootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var full = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var ownTrickplay = deletedStem + ".trickplay";
+            if (Directory.EnumerateDirectories(folder).Any(d => !string.Equals(Path.GetFileName(d), ownTrickplay, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            var files = Directory.EnumerateFiles(folder).ToList();
+            if (!files.All(f => IsTitleFile(f, deletedStem)))
+            {
+                return;
+            }
+
+            foreach (var file in files)
+            {
+                TryDeleteFile(file, logger);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogDebug(ex, "Could not clean the title files in {Folder}", folder);
+        }
+    }
+
+    private static bool IsTitleFile(string file, string deletedStem)
+    {
+        var name = Path.GetFileName(file);
+        var extension = Path.GetExtension(file);
+        if (string.Equals(extension, ".nfo", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (TitleImageExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
+            && TitleImageName.IsMatch(Path.GetFileNameWithoutExtension(file)))
+        {
+            return true;
+        }
+
+        return name.StartsWith(deletedStem + ".", StringComparison.OrdinalIgnoreCase)
+            && ItemTextExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void TryDeleteFile(string file, ILogger logger)
+    {
+        try
+        {
+            File.Delete(file);
+            logger.LogDebug("Deleted file: {FileName}", Path.GetFileName(file));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Failed to delete file: {FileName}", Path.GetFileName(file));
+        }
+    }
+
+    /// <summary>
     /// Deletes a file using the recycling bin (moves file instead of permanent delete).
     /// </summary>
     /// <param name="filePath">Path to the file to recycle.</param>
@@ -233,23 +361,42 @@ public static class FileDeletionService
         // If item exists in Jellyfin library
         if (localItem != null)
         {
-            if (useRecyclingBin && !string.IsNullOrEmpty(filePath))
+            // The file is deleted here and the item is then removed from Jellyfin without touching the
+            // disk. Jellyfin's own file deletion removes the whole containing folder, recursively, for a
+            // video that is not in a mixed folder (a movie in its own folder), which takes every other
+            // file in that folder with it. The automatic deletion path deletes the same way.
+            var path = !string.IsNullOrEmpty(filePath) ? filePath : localItem.Path;
+
+            // A single file item whose file is already gone leaves only a stale entry in Jellyfin. It is
+            // removed without touching the disk, and reported as deleted elsewhere.
+            if (!string.IsNullOrEmpty(path) && !File.Exists(path) && !Directory.Exists(path) && IsSingleFileItem(localItem))
+            {
+                var removed = DeleteViaJellyfinApi(localItem, libraryManager, deleteFileLocation: false, logger);
+                return removed.Success ? new DeletionResult(true, AlreadyGone: true) : removed;
+            }
+
+            var refusal = RefuseLibraryItemDeletion(path, localItem, config);
+            if (refusal is not null)
+            {
+                return new DeletionResult(false, refusal);
+            }
+
+            if (useRecyclingBin)
             {
                 // Move to recycling bin first, then remove from Jellyfin without deleting file
-                var recycleResult = DeleteWithRecyclingBin(filePath, config.RecyclingBinPath!, logger);
+                var recycleResult = DeleteWithRecyclingBin(path!, config.RecyclingBinPath!, logger);
                 if (!recycleResult.Success)
                 {
                     return recycleResult;
                 }
-
-                // Remove from Jellyfin database only (file already moved)
-                return DeleteViaJellyfinApi(localItem, libraryManager, deleteFileLocation: false, logger);
             }
-            else
+            else if (!DeleteWithCompanions(path!, logger, config.RemoveEmptyFoldersOnDelete, FileValidationService.GetContainingLibraryRoot(path, config)))
             {
-                // Use Jellyfin's library manager to delete the item (handles companion files)
-                return DeleteViaJellyfinApi(localItem, libraryManager, deleteFileLocation: true, logger);
+                return new DeletionResult(false, "Failed to delete file");
             }
+
+            // Remove from Jellyfin database only (file already gone)
+            return DeleteViaJellyfinApi(localItem, libraryManager, deleteFileLocation: false, logger);
         }
 
         // File not in Jellyfin library but exists on disk
@@ -270,6 +417,71 @@ public static class FileDeletionService
 
         // File doesn't exist
         return new DeletionResult(true);
+    }
+
+    /// <summary>
+    /// Whether an item is one plain file: not a disc structure (DVD, Blu-ray, HD DVD folder) and not
+    /// split into stacked parts. Anything that is not a video is one file.
+    /// </summary>
+    /// <param name="localItem">The Jellyfin item.</param>
+    /// <returns>True when the item is a single file.</returns>
+    public static bool IsSingleFileItem(BaseItem localItem)
+        => localItem is not Video video
+            || (!video.IsStacked && video.VideoType is MediaBrowser.Model.Entities.VideoType.VideoFile or MediaBrowser.Model.Entities.VideoType.Iso);
+
+    /// <summary>
+    /// Why a library item cannot be deleted as a single file, or null when it can. Server Sync deletes
+    /// one file and what belongs to it. A disc structure (a folder) or a stacked multi part item has
+    /// more files than that, and a file that is not on disk has nothing to delete, so each is refused
+    /// with nothing touched and the row and the Jellyfin item stay as they were. The path that would be
+    /// deleted, which may be the item's own path when the row tracks none, must also lie inside a
+    /// library root without a symlinked folder on the way.
+    /// </summary>
+    /// <param name="path">The path that would be deleted.</param>
+    /// <param name="localItem">The Jellyfin item.</param>
+    /// <param name="config">Plugin configuration.</param>
+    /// <returns>The reason, or null.</returns>
+    public static string? RefuseLibraryItemDeletion(string? path, BaseItem localItem, PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(localItem);
+        ArgumentNullException.ThrowIfNull(config);
+        if (string.IsNullOrEmpty(path))
+        {
+            return "Deletion refused: the item has no path";
+        }
+
+        if (Directory.Exists(path))
+        {
+            return "Deletion refused: the item is a folder (a DVD or Blu-ray structure), and only single files are deleted here. Delete it from Jellyfin instead";
+        }
+
+        if (localItem is Video { IsStacked: true } stacked)
+        {
+            return $"Deletion refused: the item is split into {stacked.AdditionalParts.Length + 1} parts, and only single files are deleted here. Delete it from Jellyfin instead";
+        }
+
+        if (!IsSingleFileItem(localItem))
+        {
+            return "Deletion refused: the item is a disc structure, and only single files are deleted here. Delete it from Jellyfin instead";
+        }
+
+        if (!File.Exists(path))
+        {
+            return "Deletion refused: the file is not on disk, so nothing was deleted";
+        }
+
+        var root = FileValidationService.GetContainingLibraryRoot(path, config);
+        if (root is null)
+        {
+            return "Deletion refused: path is outside all configured library roots";
+        }
+
+        if (FileValidationService.HasSymlinkedDirectoryComponent(path, root))
+        {
+            return "Deletion refused: path traverses a symlinked directory";
+        }
+
+        return null;
     }
 
     /// <summary>

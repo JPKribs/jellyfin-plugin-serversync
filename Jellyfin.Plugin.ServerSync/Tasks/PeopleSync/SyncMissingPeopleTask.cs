@@ -528,7 +528,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                     await using (stream.ConfigureAwait(false))
                     {
                         using var fileStream = File.Create(tempPath);
-                        await stream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
+                        await StallWatchdogStream.CopyAsync(stream, fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
                     }
 
                     try { tempBytes = new FileInfo(tempPath).Length; } catch (IOException) { }

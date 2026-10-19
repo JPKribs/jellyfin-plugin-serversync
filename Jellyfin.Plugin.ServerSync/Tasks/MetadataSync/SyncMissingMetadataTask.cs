@@ -513,7 +513,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                             using (imageStream)
                             {
                                 using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 81920);
-                                await imageStream.CopyToAsync(fileStream, cancellationToken).ConfigureAwait(false);
+                                await StallWatchdogStream.CopyAsync(imageStream, fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
                             }
 
                             tempFiles.Add((i, tempPath, contentType ?? "image/jpeg"));
