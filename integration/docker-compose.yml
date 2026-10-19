@@ -3,7 +3,7 @@
 # run.py, which builds the plugin, seeds media, completes the wizards, and runs the scenarios.
 services:
   source-a:
-    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.1}
+    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.2.20261005-225228}
     container_name: serversync-it-source-a
     ports:
       - "8111:8096"
@@ -16,7 +16,7 @@ services:
       - JELLYFIN_PublishedServerUrl=http://source-a:8096
 
   source-b:
-    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.1}
+    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.2.20261005-225228}
     container_name: serversync-it-source-b
     ports:
       - "8112:8096"
@@ -29,7 +29,7 @@ services:
       - JELLYFIN_PublishedServerUrl=http://source-b:8096
 
   local:
-    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.1}
+    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.2.20261005-225228}
     container_name: serversync-it-local
     ports:
       - "8113:8096"

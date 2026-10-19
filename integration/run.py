@@ -27,7 +27,7 @@ STATE = os.path.join(HERE, ".state")
 PLUGIN_DIR = os.path.join(HERE, ".plugin")
 PUBLISH_DIR = os.path.join(HERE, ".publish")
 CREDS = os.path.join(STATE, "credentials.json")
-IMAGE = os.environ.get("JELLYFIN_IMAGE", "jellyfin/jellyfin:12.1")
+IMAGE = os.environ.get("JELLYFIN_IMAGE", "jellyfin/jellyfin:12.2.20261005-225228")
 PLUGIN_GUID = "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 
 PLUGIN_VERSION = next(

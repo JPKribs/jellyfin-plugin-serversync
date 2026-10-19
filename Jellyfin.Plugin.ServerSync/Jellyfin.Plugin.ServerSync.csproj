@@ -12,20 +12,20 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="12.1.0">
+    <PackageReference Include="Jellyfin.Controller" Version="12.2.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Database.Implementations" Version="12.1.0">
+    <PackageReference Include="Jellyfin.Database.Implementations" Version="12.2.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Model" Version="12.1.0">
+    <PackageReference Include="Jellyfin.Model" Version="12.2.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <PackageReference Include="Jellyfin.Sdk" Version="2026.10.12" />
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.10">
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.11">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>

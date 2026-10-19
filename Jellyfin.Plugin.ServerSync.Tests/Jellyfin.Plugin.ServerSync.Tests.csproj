@@ -19,16 +19,16 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageReference Include="xunit" Version="2.9.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
-    <!-- Microsoft.Data.Sqlite 10.0.10 pulls the native SQLite build 2.1.11, which carries a high severity
-         advisory (GHSA-2m69-gcr7-jv3q). The patched build is pinned here; the plugin itself uses the
-         SQLite that ships with Jellyfin. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <!-- Native SQLite builds before 2.1.12 carry a high severity advisory (GHSA-2m69-gcr7-jv3q).
+         Microsoft.Data.Sqlite 10.0.11 already pulls 2.1.12; the pin keeps it from ever resolving lower.
+         The plugin itself uses the SQLite that ships with Jellyfin. -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
 
     <!--
@@ -36,8 +36,8 @@
       from the SDK, etc.). We mirror the main project's package set without
       PrivateAssets so the types are visible at compile time here.
     -->
-    <PackageReference Include="Jellyfin.Controller" Version="12.1.0" />
-    <PackageReference Include="Jellyfin.Model" Version="12.1.0" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.2.0" />
+    <PackageReference Include="Jellyfin.Model" Version="12.2.0" />
     <PackageReference Include="Jellyfin.Sdk" Version="2026.10.12" />
   </ItemGroup>
 
