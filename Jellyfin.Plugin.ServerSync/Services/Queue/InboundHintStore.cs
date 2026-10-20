@@ -258,6 +258,23 @@ public sealed class InboundHintStore : QueueStoreBase
         });
     }
 
+    /// <summary>
+    /// Makes parked rows due now when they would otherwise wait past the park window, as rows parked under an
+    /// older, longer window do. They are applied once more and parked again with the current window, or
+    /// dropped when it has passed.
+    /// </summary>
+    /// <param name="utcNow">The current time.</param>
+    /// <param name="window">The current park window.</param>
+    /// <returns>How many rows were made due.</returns>
+    public int ShortenParked(DateTime utcNow, TimeSpan window) => Write(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE InboundHints SET NextAttempt = @now WHERE ParkedPath IS NOT NULL AND NextAttempt > @latest";
+        Add(cmd, "@now", Stamp(utcNow));
+        Add(cmd, "@latest", Stamp(utcNow + window));
+        return cmd.ExecuteNonQuery();
+    });
+
     public int WakeParked(string parkKey, DateTime utcNow) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();

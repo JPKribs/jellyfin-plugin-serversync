@@ -263,6 +263,38 @@ public sealed class HintPipelineTests : IDisposable
     }
 
     [Fact]
+    public void ParkWindow_IsSixHours()
+    {
+        Assert.Equal(TimeSpan.FromHours(6), HintProtocol.ParkWindow);
+    }
+
+    [Fact]
+    public void ShortenParked_MakesRowsFromALongerWindowDue_AndLeavesTheRestAlone()
+    {
+        var now = DateTime.UtcNow;
+        var old = InboundHint.FromHint(Hint(HintKind.Metadata, "/media/movies/old.mkv", key: Guid.NewGuid().ToString("N"), id: "old"), now.AddDays(-1));
+        old.ParkedPath = HintTriage.PathParkKey(LocalPath("old.mkv"));
+        old.NextAttempt = now.AddDays(6);
+        _inbound.Enqueue(old);
+
+        var current = InboundHint.FromHint(Hint(HintKind.Metadata, "/media/movies/current.mkv", key: Guid.NewGuid().ToString("N"), id: "current"), now);
+        current.ParkedPath = HintTriage.PathParkKey(LocalPath("current.mkv"));
+        current.NextAttempt = now + HintProtocol.ParkWindow;
+        _inbound.Enqueue(current);
+
+        var retrying = InboundHint.FromHint(Hint(HintKind.Metadata, "/media/movies/retry.mkv", key: Guid.NewGuid().ToString("N"), id: "retry"), now);
+        retrying.NextAttempt = now.AddDays(2);
+        _inbound.Enqueue(retrying);
+
+        Assert.Equal(1, _inbound.ShortenParked(now, HintProtocol.ParkWindow));
+
+        var due = Assert.Single(_inbound.GetDue(now.AddSeconds(1), 10, content: false));
+        Assert.Equal(OriginId + ":old", due.HintId);
+        Assert.NotNull(due.ParkedPath);
+        Assert.Equal(0, _inbound.ShortenParked(now, HintProtocol.ParkWindow));
+    }
+
+    [Fact]
     public void ParkedRows_DoNotCountTowardTheCap_AndKeepTheirOwnLimit()
     {
         var now = DateTime.UtcNow;
@@ -349,7 +381,7 @@ public sealed class HintPipelineTests : IDisposable
         Assert.Equal(new[] { HintCode.NotMapped, HintCode.NoLocalItem, HintCode.Queued }, answer!.Items.Select(i => i.Code).ToArray());
         var stored = _inbound.GetAll();
         Assert.Equal(2, stored.Count);
-        Assert.Contains(stored, r => r.ParkedPath == HintTriage.PathParkKey(LocalPath("missing.mkv")) && r.NextAttempt > DateTime.UtcNow.AddDays(6));
+        Assert.Contains(stored, r => r.ParkedPath == HintTriage.PathParkKey(LocalPath("missing.mkv")) && r.NextAttempt > DateTime.UtcNow.AddHours(5) && r.NextAttempt <= DateTime.UtcNow + HintProtocol.ParkWindow);
         Assert.Contains(stored, r => r.ParkedPath is null);
     }
 

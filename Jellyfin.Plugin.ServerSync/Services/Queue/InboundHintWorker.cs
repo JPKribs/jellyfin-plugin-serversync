@@ -154,6 +154,21 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _stopping = new CancellationTokenSource();
+
+        // Hints parked under an older, longer window are brought into the current one.
+        try
+        {
+            var shortened = _inbound.ShortenParked(DateTime.UtcNow, HintProtocol.ParkWindow);
+            if (shortened > 0)
+            {
+                _logger.LogDebug("{Count} parked hint(s) moved into the {Hours}-hour wait", shortened, HintProtocol.ParkWindow.TotalHours);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not shorten the wait of parked hints");
+        }
+
         _loop = Task.Run(() => RunAsync(_wake, content: false, _stopping.Token), CancellationToken.None);
         _contentLoop = Task.Run(() => RunAsync(_wakeContent, content: true, _stopping.Token), CancellationToken.None);
         return Task.CompletedTask;
@@ -232,6 +247,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         // report at the end, rather than a client and a request per row.
         var clients = new Dictionary<string, SourceServerClient>(StringComparer.OrdinalIgnoreCase);
         var completions = new Dictionary<string, (SourceServer Origin, List<CompletedHint> Done)>(StringComparer.OrdinalIgnoreCase);
+        var neverArrived = new Dictionary<string, (SourceServer Origin, int Count)>(StringComparer.OrdinalIgnoreCase);
         try
         {
             var due = _inbound.GetDue(DateTime.UtcNow, BatchSize, content);
@@ -261,7 +277,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                     continue;
                 }
 
-                var concluded = await ConcludeAsync(row, origin, result.Value).ConfigureAwait(false);
+                var concluded = await ConcludeAsync(row, origin, result.Value, neverArrived).ConfigureAwait(false);
                 if (concluded is null)
                 {
                     continue;
@@ -281,6 +297,11 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
 
                     batch.Done.Add(done);
                 }
+            }
+
+            foreach (var (origin, count) in neverArrived.Values)
+            {
+                _logger.LogInformation("Item never arrived; dropped {Count} hint(s) from '{Origin}'", count, origin.DisplayName);
             }
 
             foreach (var (origin, done) in completions.Values)
@@ -386,7 +407,10 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     // dropped after failing is worth a line on the Activity page. An applied hand made edit is worth a
     // line too. Provider work is not, since a scan on the peer would otherwise write one entry here per
     // item it refreshed.
-    private async Task<HintApplyResult?> ConcludeAsync(InboundHint row, SourceServer origin, HintApplyResult result)
+    // A parked hint whose item never arrived is routine, since the metadata provider brings a new item's
+    // metadata with it. It is counted into neverArrived for one line per origin, not logged or recorded on
+    // the Activity page one by one.
+    private async Task<HintApplyResult?> ConcludeAsync(InboundHint row, SourceServer origin, HintApplyResult result, Dictionary<string, (SourceServer Origin, int Count)> neverArrived)
     {
         if (result.Outcome == HintApplyOutcome.Retry && row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
         {
@@ -409,7 +433,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 return null;
             }
 
-            result = HintApplyResult.Dropped(HintCode.NoLocalItem, $"the local item did not arrive within {HintProtocol.ParkWindow.TotalDays:0} days: {result.Reason}");
+            _logger.LogDebug("Hint {Hint} from '{Origin}' dropped: its item never arrived", row.HintId, origin.DisplayName);
+            neverArrived[origin.Key] = (origin, neverArrived.GetValueOrDefault(origin.Key).Count + 1);
+            return HintApplyResult.Dropped(HintCode.NoLocalItem, "the item never arrived");
         }
 
         switch (result.Outcome)

@@ -117,7 +117,11 @@ public static class HintProtocol
     /// <summary>The status a receiver answers when the sender is not paired with it, so the sender pairs and tries again.</summary>
     public const int UnpairedStatus = 428;
 
-    public static readonly TimeSpan ParkWindow = TimeSpan.FromDays(7);
+    /// <summary>
+    /// How long a hint for an item this server does not have yet waits for it. A new item's metadata comes
+    /// with it through the metadata provider, so a hint that is still waiting after this is dropped.
+    /// </summary>
+    public static readonly TimeSpan ParkWindow = TimeSpan.FromHours(6);
 
     public const string VersionHeader = "X-ServerSync-Version";
 

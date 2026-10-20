@@ -107,7 +107,7 @@ The answer is one result per hint, in request order, each with a `Code` and the 
 | Code | Meaning |
 | --- | --- |
 | `Queued` | Stored, and applied in turn. |
-| `NoLocalItem` | Stored but parked: the item is not on the receiver yet. It applies when the item arrives, for up to seven days. |
+| `NoLocalItem` | Stored but parked: the item is not on the receiver yet. It applies when the item arrives, for up to six hours, then is dropped. A new item brings its metadata with it through the metadata provider. |
 | `AlreadyCurrent` | The receiver already holds that version. |
 | `Superseded` | The receiver holds a newer edit. |
 | `ModuleOff` | That module is off on the receiver. |
