@@ -505,4 +505,22 @@ public sealed class HintStoreTests : IDisposable
         Assert.Equal(0, row.Attempts);
         Assert.Single(_inbound.GetDue(now.AddSeconds(1), 10, content: false));
     }
+
+    /// <summary>
+    /// One peer that spells its id in two cases is one origin.
+    /// True: its rows coalesce and count once toward its limit, and its status finds them all.
+    /// False: a peer could slip past the per peer cap, and a sender would resend rows its status missed.
+    /// </summary>
+    [Fact]
+    public void Inbound_OriginIdsMatchWithoutRegardToCase()
+    {
+        var now = DateTime.UtcNow;
+        _inbound.Enqueue(InboundHint.FromHint(new SyncHint { HintId = "a:1", OriginServerId = "AbC", Kind = HintKind.History, Key = "u|i", VersionTimestamp = now }, now));
+        _inbound.Enqueue(InboundHint.FromHint(new SyncHint { HintId = "a:2", OriginServerId = "abc ", Kind = HintKind.History, Key = "u|i", VersionTimestamp = now.AddSeconds(1) }, now));
+
+        Assert.Single(_inbound.GetAll());
+        Assert.Equal(1, _inbound.CountForOrigin("ABC"));
+        Assert.Single(_inbound.GetForOrigin("abc"));
+        Assert.Equal(1, _inbound.DeleteForOrigin("aBc"));
+    }
 }

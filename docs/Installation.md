@@ -24,6 +24,6 @@ Restart your Jellyfin server completely and wait for it to start up.
 
 Go to **Dashboard → Plugins → Server Sync** and confirm the configuration page loads.
 
-Install the same version on every server in a pool. Servers on different versions hold their changes for each other until both match.
+Servers in a pool can run different Server Sync versions as long as their wire protocols overlap, so they can be updated one at a time. See [Versioning](Versioning.md). A server whose protocol does not overlap holds its changes until it does.
 
 Next: [Setup](Setup.md).

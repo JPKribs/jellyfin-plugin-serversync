@@ -498,6 +498,24 @@ public static class FileDeletionService
         PluginConfiguration config,
         ILogger logger,
         CancellationToken cancellationToken)
+        => ProcessPendingDeletions(manager, config, logger, null, cancellationToken);
+
+    /// <summary>
+    /// Processes pending deletions, collecting the path of every file removed so the caller can refresh
+    /// just the folders that changed.
+    /// </summary>
+    /// <param name="manager">Sync table manager.</param>
+    /// <param name="config">Plugin configuration.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="removedPaths">Receives each removed file's path, or null.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Tuple of (deleted count, failed count).</returns>
+    public static (int Deleted, int Failed) ProcessPendingDeletions(
+        ContentSyncTableManager manager,
+        PluginConfiguration config,
+        ILogger logger,
+        ICollection<string>? removedPaths,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(config);
@@ -579,6 +597,7 @@ public static class FileDeletionService
                 if (result.Success)
                 {
                     fileGone = true;
+                    removedPaths?.Add(localPath);
                     logger.LogInformation("DELETED: {FileName}", fileName);
                 }
                 else

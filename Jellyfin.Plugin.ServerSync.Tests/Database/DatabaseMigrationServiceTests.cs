@@ -89,9 +89,44 @@ public class DatabaseMigrationServiceTests
     /// False: a future bump forgot to update this test, hiding the need to think through migration paths.
     /// </summary>
     [Fact]
-    public void CurrentSchemaVersion_IsTwentySix()
+    public void CurrentSchemaVersion_IsThirtyOne()
     {
-        Assert.Equal(30, DatabaseMigrationService.CurrentSchemaVersion);
+        Assert.Equal(31, DatabaseMigrationService.CurrentSchemaVersion);
+    }
+
+    /// <summary>
+    /// The v31 step stores inbound origins in one case and keeps the newer of two rows that only
+    /// differed by the case of their origin.
+    /// True: an upgraded queue holds one row per peer and object.
+    /// False: the old duplicates would linger and apply twice.
+    /// </summary>
+    [Fact]
+    public void MigrateSchema_FromV30_NormalizesInboundOrigins()
+    {
+        using var conn = OpenConnection();
+        DatabaseMigrationService.CreateQueueTables(conn);
+        using (var seed = conn.CreateCommand())
+        {
+            seed.CommandText = @"
+                INSERT INTO InboundHints (HintId, OriginServerId, Kind, Key, VersionServerId, VersionTimestamp, ReceivedAt, NextAttempt)
+                VALUES ('old', 'ABC', 1, 'k', 'x', 't', 't', 't'), ('new', 'abc', 1, 'k', 'x', 't', 't', 't'), ('other', 'DEF', 1, 'k', 'x', 't', 't', 't');";
+            seed.ExecuteNonQuery();
+        }
+
+        Assert.True(DatabaseMigrationService.MigrateSchema(conn, fromVersion: 30, NullLogger.Instance));
+
+        using var read = conn.CreateCommand();
+        read.CommandText = "SELECT HintId || '=' || OriginServerId FROM InboundHints ORDER BY HintId";
+        var rows = new List<string>();
+        using (var reader = read.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                rows.Add(reader.GetString(0));
+            }
+        }
+
+        Assert.Equal(new[] { "new=abc", "other=def" }, rows);
     }
 
     /// <summary>

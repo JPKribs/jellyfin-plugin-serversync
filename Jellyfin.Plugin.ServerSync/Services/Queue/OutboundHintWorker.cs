@@ -409,10 +409,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
                     }
 
                     _outbound.DeleteSent(row);
-                    if (answer.Code != HintCode.NoLocalItem)
-                    {
-                        _suppression.Note(peer.Key, row.Kind, row.Key, answer.Code, revision, now);
-                    }
+                    _suppression.Note(peer.Key, row.Kind, row.Key, answer.Code, revision, now);
 
                     declined[answer.Code] = declined.GetValueOrDefault(answer.Code) + 1;
                     _logger.LogDebug("'{Peer}' answered {Code} for hint {Hint}: {Reason}", peer.DisplayName, answer.Code, row.HintId, answer.Reason);
@@ -516,16 +513,17 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         {
             using var client = _clientFactory.Create(peer);
             var capabilities = await client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
-            if (capabilities is not null && !HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion))
+            if (capabilities is not null && !HintProtocol.Compatible(capabilities, _configManager.PluginVersion))
             {
+                var reason = HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion);
                 if (!state.VersionBlocked)
                 {
-                    _logger.LogWarning("'{Peer}' runs Server Sync {Theirs} and this server runs {Ours}, so changes for it wait here until both match", peer.DisplayName, capabilities.PluginVersion, _configManager.PluginVersion);
+                    _logger.LogWarning("'{Peer}': {Reason}, so changes for it wait here until the two are compatible", peer.DisplayName, reason);
                 }
 
                 state.VersionBlocked = true;
                 state.PausedUntil = DateTime.UtcNow + HintProtocol.CapabilityRefresh;
-                state.Reason = HintProtocol.VersionMismatch(capabilities.PluginVersion, _configManager.PluginVersion);
+                state.Reason = reason;
                 return;
             }
 

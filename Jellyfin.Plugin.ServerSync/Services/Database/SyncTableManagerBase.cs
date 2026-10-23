@@ -140,27 +140,21 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         fallback: (IList<TRecord>)Array.Empty<TRecord>());
 
     /// <inheritdoc />
-    public IList<TRecord> GetAllStrict()
+    public IList<TRecord> GetAllStrict() => _database.RunRead(conn =>
     {
-        lock (WriteLock)
-        {
-            using var cmd = Connection.CreateCommand();
-            cmd.CommandText = $"SELECT * FROM {TableName}";
-            return ReadAll(cmd);
-        }
-    }
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT * FROM {TableName}";
+        return ReadAll(cmd);
+    });
 
     /// <inheritdoc />
-    public IList<TRecord> GetByStatusStrict(SyncStatus status)
+    public IList<TRecord> GetByStatusStrict(SyncStatus status) => _database.RunRead(conn =>
     {
-        lock (WriteLock)
-        {
-            using var cmd = Connection.CreateCommand();
-            cmd.CommandText = $"SELECT * FROM {TableName} WHERE Status = @Status";
-            cmd.Parameters.AddWithValue("@Status", (int)status);
-            return ReadAll(cmd);
-        }
-    }
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT * FROM {TableName} WHERE Status = @Status";
+        cmd.Parameters.AddWithValue("@Status", (int)status);
+        return ReadAll(cmd);
+    });
 
     /// <inheritdoc />
     public int Count() => ExecuteRead(
@@ -213,6 +207,117 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         cmd.Parameters.AddWithValue("@Id", id);
         cmd.ExecuteNonQuery();
     });
+
+    /// <inheritdoc />
+    public int DeleteByIds(IReadOnlyCollection<long> ids)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var deleted = 0;
+        ExecuteWrite(conn =>
+        {
+            using var transaction = conn.BeginTransaction();
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = $"DELETE FROM {TableName} WHERE Id = @Id";
+            var idParam = cmd.Parameters.Add("@Id", SqliteType.Integer);
+            foreach (var id in ids)
+            {
+                idParam.Value = id;
+                deleted += cmd.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        });
+        return deleted;
+    }
+
+    /// <summary>
+    /// Writes many records in one transaction, so a scan of a large library commits once per batch
+    /// instead of once per row. Each table's own <see cref="Upsert"/> runs unchanged inside it: the
+    /// transaction is opened with a plain BEGIN, which the commands join without carrying it. A batch
+    /// that fails is rolled back and written one record at a time, so one bad record costs only itself.
+    /// </summary>
+    /// <param name="records">The records.</param>
+    /// <param name="onFailure">Called with each record that could not be written.</param>
+    /// <returns>How many were written.</returns>
+    public int UpsertMany(IReadOnlyList<TRecord> records, Action<TRecord, Exception> onFailure)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(onFailure);
+        if (records.Count == 0)
+        {
+            return 0;
+        }
+
+        lock (WriteLock)
+        {
+            var conn = Connection;
+            Exec(conn, "BEGIN IMMEDIATE");
+            try
+            {
+                foreach (var record in records)
+                {
+                    Upsert(record);
+                }
+
+                Exec(conn, "COMMIT");
+                return records.Count;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.LogDebug(ex, "Batch of {Count} writes to {Table} failed, writing them one at a time", records.Count, TableName);
+                try
+                {
+                    Exec(conn, "ROLLBACK");
+                }
+                catch (SqliteException rollbackEx)
+                {
+                    // SQLite already rolled back on some errors, which leaves nothing to roll back.
+                    Logger.LogDebug(rollbackEx, "Rollback after a failed batch on {Table}", TableName);
+                }
+            }
+            catch
+            {
+                TryRollback(conn);
+                throw;
+            }
+
+            var written = 0;
+            foreach (var record in records)
+            {
+                try
+                {
+                    Upsert(record);
+                    written++;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    onFailure(record, ex);
+                }
+            }
+
+            return written;
+        }
+    }
+
+    private static void Exec(SqliteConnection connection, string sql)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void TryRollback(SqliteConnection connection)
+    {
+        try
+        {
+            Exec(connection, "ROLLBACK");
+        }
+        catch (SqliteException)
+        {
+            // Nothing to roll back.
+        }
+    }
 
     /// <summary>Removes every row that came from one configured server, used when the entry is removed.</summary>
     /// <param name="serverKey">The entry key the rows carry.</param>
@@ -540,7 +645,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Executes a read against the connection under the write-lock,
+    /// Executes a read on a read connection, beside any write in progress,
     /// returning <paramref name="fallback"/> on transient errors.
     /// </summary>
     protected T ExecuteRead<T>(
@@ -551,10 +656,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         ArgumentNullException.ThrowIfNull(readOperation);
         try
         {
-            lock (WriteLock)
-            {
-                return readOperation(Connection);
-            }
+            return _database.RunRead(readOperation);
         }
         catch (SqliteException ex) when (
             ex.SqliteErrorCode == 5 ||  // SQLITE_BUSY

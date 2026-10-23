@@ -51,7 +51,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // Named HttpClient for source server communication. 
         // HandlerLifetime caps DNS staleness for the long-lived plugin process.
         // A connect timeout keeps one unreachable peer from holding a worker for the operating system's
-        // own connect timeout, which runs to minutes.
+        // own connect timeout, which runs to minutes. Reads that time out or meet a busy server are
+        // tried again before the caller sees a failure.
         serviceCollection
             .AddHttpClient(SourceServerClient.HttpClientName, c =>
             {
@@ -63,6 +64,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 AllowAutoRedirect = false,
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPrivateAllowedAsync
             })
+            .AddHttpMessageHandler(() => new TransientRetryHandler())
             .AddHttpMessageHandler(() => new RedirectRefusingHandler())
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
 
@@ -79,6 +81,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 AllowAutoRedirect = false,
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPublicOnlyAsync
             })
+            .AddHttpMessageHandler(() => new TransientRetryHandler())
             .AddHttpMessageHandler(() => new RedirectRefusingHandler())
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
     }

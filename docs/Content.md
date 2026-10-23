@@ -13,12 +13,12 @@ Content syncing mirrors missing or updated media files from a source Jellyfin se
 * **Removed files** decides what happens to a local file once its item is gone from the source. **Keep** leaves it. **Delete** deletes it on the next Sync Content run, but still asks first whenever the plugin cannot be sure the file should go. **Delete After Approval** holds every deletion as Pending Deletion until you approve it. **Ignore** keeps the files and, once everything in a movie or show folder is gone from the source, writes an empty `.ignore` file in that folder so Jellyfin hides it on its next scan. A season is never hidden on its own, so a show that still has episodes on the source stays as it is. A folder that already has a `.ignore` is left alone. A hidden title shows again when it comes back on the source, or when Removed files is set to anything else. Switching away from Delete cancels deletions that were still waiting.
 * **Detect Updated Files** downloads a file again when its size on the source changes.
 * **Scheduled Speed** uses the **Scheduled** rate during the set **Hours**.
-* **Minimum Free Space** blocks downloads when free space falls below this many gigabytes.
+* **Minimum Free Space** blocks downloads when free space falls below this many gigabytes. Downloads running at the same time hold space for each other, so several large files cannot together fill a disk that each would fit on alone. A file that only fits once another download finishes waits for it.
 * **Enable Recycling Bin** moves deleted or replaced files to a recycling bin instead of removing them for good.
 * **Recycling Bin Path** sets the folder where soft deleted files are kept.
-* **Keep For** sets how many days files stay in the recycling bin before permanent removal.
+* **Keep For** sets how many days files stay in the recycling bin before permanent removal. Only files and trickplay folders the plugin put there expire. They carry the time they were recycled in their name, and anything else in the folder is left alone. A file from deep inside a library gets a shortened name, ending in its own file name and that time, so the move never fails on the filesystem's name length limit.
 * **Remove Empty Folders** deletes parent folders that become empty after a file is removed.
-* **Download Retries** sets how many times a failed download retries before it errors.
+* **Download Retries** sets how many times a failed download retries before it errors. A retry picks up where the failed attempt stopped when the source supports it, and starts over if the file changed on the source in between.
 * **Skip Items Everyone Watched** skips items already watched by every selected user.
 
 ## Collection Syncing
@@ -93,8 +93,12 @@ whitelist still reconciles normally.
 
 ## Live changes between servers
 
-When a server entry is in Push or Sync mode, a file that appears here is announced to that server as soon as this server's library has picked it up, and that server downloads it through the same code Sync Content uses, respecting its own approval mode and library mappings. When several servers offer the same file, the earliest entry in that server's list provides it. Downloads run in their own lane so a large file never delays a history or metadata change arriving at the same time, and the receiving library is asked to scan once the file is in place. Replacements and removals are not announced. Sync Content handles those on its schedule.
+When a server entry is in Push or Sync mode, a file that appears here is announced to that server as soon as this server's library has picked it up, and that server downloads it through the same code Sync Content uses, respecting its own approval mode and library mappings. When several servers offer the same file, the earliest entry in that server's list provides it. Downloads run in their own lane so a large file never delays a history or metadata change arriving at the same time, and the receiving library is asked to refresh that file's folder once the file is in place. Replacements and removals are not announced. Sync Content handles those on its schedule.
 
 ## Deleting From the Sync Tab
 
 Deleting a file from the Sync tab removes it from disk, or moves it to the recycling bin, and keeps its row as **Ignored**, so the next run does not download it again. Queue the row to download it again.
+
+## Library refresh
+
+After a Sync Content run that downloaded or removed files, Jellyfin is asked to refresh just the folders that changed, the same way its library monitor reports a change it saw. A run that touched many folders, such as a first run that copies a whole library, runs one full library scan instead.

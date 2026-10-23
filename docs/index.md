@@ -27,6 +27,6 @@ When several servers are configured, their order is their priority. If two serve
 * A library must be a single folder.
 * A renamed file on the source is usually downloaded again under its new name, and the old one is handled by **Removed files**.
 * Interrupted downloads start over, and a changed file is found by its size.
-* Every server in a pool runs the same Server Sync version. A server on another version is left alone until both match.
+* Servers in a pool need compatible Server Sync protocols, not the same version. A server whose protocol does not overlap is left alone until it does.
 
 Next: [Installation](Installation.md).

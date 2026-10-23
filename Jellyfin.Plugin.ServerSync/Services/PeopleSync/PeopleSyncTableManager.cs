@@ -98,67 +98,25 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
     public override void Upsert(PeopleSyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        ExecuteWrite(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            // Ignored is sticky: an existing Ignored row is preserved against
-            // automatic transitions from Refresh/Compare/Sync. Reason is also
-            // preserved on Ignored rows so the user-entered reason isn't blown
-            // away by the next cycle.
-            cmd.CommandText = @"
-                INSERT INTO PeopleSyncItems (
-                    PersonName, SourcePersonId, LocalPersonId,
-                    SourceMetadataValue, LocalMetadataValue,
-                    SourceMetadataHash, SyncedMetadataHash,
-                    SourceImagesValue, LocalImagesValue,
-                    SourceImagesHash, SyncedImagesHash,
-                    Status, StatusDate, LastSyncTime, Reason, RetryCount, ServerKey
-                ) VALUES (
-                    @name, @sourceId, @localId,
-                    @srcMeta, @localMeta,
-                    @srcMetaHash, @syncedMetaHash,
-                    @srcImg, @localImg,
-                    @srcImgHash, @syncedImgHash,
-                    @status, @statusDate, @lastSync, @reason, @retryCount, @serverKey
-                )
-                ON CONFLICT(PersonName) DO UPDATE SET
-                    SourcePersonId = @sourceId,
-                    LocalPersonId = @localId,
-                    SourceMetadataValue = @srcMeta,
-                    LocalMetadataValue = @localMeta,
-                    SourceMetadataHash = @srcMetaHash,
-                    SyncedMetadataHash = CASE WHEN @syncedMetaHash IS NOT NULL THEN @syncedMetaHash ELSE PeopleSyncItems.SyncedMetadataHash END,
-                    SourceImagesValue = @srcImg,
-                    LocalImagesValue = @localImg,
-                    SourceImagesHash = @srcImgHash,
-                    SyncedImagesHash = CASE WHEN @syncedImgHash IS NOT NULL THEN @syncedImgHash ELSE PeopleSyncItems.SyncedImagesHash END,
-                    Status = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
-                    StatusDate = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.StatusDate ELSE @statusDate END,
-                    LastSyncTime = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.LastSyncTime ELSE @lastSync END,
-                    Reason = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.Reason ELSE @reason END,
-                    RetryCount = CASE WHEN PeopleSyncItems.Status = @ignoredStatus THEN PeopleSyncItems.RetryCount ELSE @retryCount END,
-                    ServerKey = @serverKey";
 
-            cmd.Parameters.AddWithValue("@name", record.PersonName);
-            AddNullable(cmd, "@sourceId", record.SourcePersonId);
-            AddNullable(cmd, "@localId", record.LocalPersonId);
-            AddNullable(cmd, "@srcMeta", record.Metadata.Source);
-            AddNullable(cmd, "@localMeta", record.Metadata.Local);
-            AddNullable(cmd, "@srcMetaHash", record.Metadata.SourceHash);
-            AddNullable(cmd, "@syncedMetaHash", record.Metadata.SyncedHash);
-            AddNullable(cmd, "@srcImg", record.Images.Source);
-            AddNullable(cmd, "@localImg", record.Images.Local);
-            AddNullable(cmd, "@srcImgHash", record.Images.SourceHash);
-            AddNullable(cmd, "@syncedImgHash", record.Images.SyncedHash);
-            cmd.Parameters.AddWithValue("@status", (int)record.Status);
-            AddTimestamp(cmd, "@statusDate", record.StatusDate);
-            AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
-            AddNullable(cmd, "@reason", record.Reason);
-            cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
-            AddNullable(cmd, "@serverKey", record.ServerKey);
-            cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
-            cmd.ExecuteNonQuery();
-        });
+        // Ignored is sticky: an existing Ignored row is preserved against
+        // automatic transitions from Refresh/Compare/Sync. Reason is also
+        // preserved on Ignored rows so the user-entered reason isn't blown
+        // away by the next cycle.
+        var upsert = new UpsertBuilder(TableName)
+            .Key("PersonName", record.PersonName)
+            .Set("SourcePersonId", record.SourcePersonId)
+            .Set("LocalPersonId", record.LocalPersonId)
+            .Set("SourceMetadataValue", record.Metadata.Source)
+            .Set("LocalMetadataValue", record.Metadata.Local)
+            .Set("SourceMetadataHash", record.Metadata.SourceHash)
+            .SetUnlessNull("SyncedMetadataHash", record.Metadata.SyncedHash)
+            .Set("SourceImagesValue", record.Images.Source)
+            .Set("LocalImagesValue", record.Images.Local)
+            .Set("SourceImagesHash", record.Images.SourceHash)
+            .SetUnlessNull("SyncedImagesHash", record.Images.SyncedHash)
+            .SyncColumns(record);
+        ExecuteWrite(upsert.Execute);
     }
 
     /// <inheritdoc />

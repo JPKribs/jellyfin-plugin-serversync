@@ -12,7 +12,7 @@ curl -H 'Authorization: MediaBrowser Token="YOUR_API_KEY"' http://server:8096/Sy
 
 These are what one Server Sync installation calls on another. You will not normally call them yourself, but they are plain HTTP and can be exercised from the command line.
 
-Every server in a pool runs the same Server Sync version. Every peer route except `Capabilities` needs the header `X-ServerSync-Version` with the caller's version, and answers `426` with both versions when it differs. Check Link reports a mismatch as an error.
+Servers in a pool must speak overlapping wire protocols, not the same plugin version. Every peer route except `Capabilities` needs the headers `X-ServerSync-Version` (the caller's plugin version), `X-ServerSync-Protocol` (the protocol it speaks) and `X-ServerSync-Min-Protocol` (the oldest protocol it still speaks). A route answers `426` with the reason when neither side's protocol reaches the other's minimum. A caller that sends no protocol header predates protocol versions and is only accepted on exactly the same plugin version. `Capabilities` reports `ProtocolVersion` and `MinProtocolVersion` beside `PluginVersion`. Check Link reports a mismatch as an error.
 
 ### GET /Sync/Peer/Capabilities
 

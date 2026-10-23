@@ -61,7 +61,7 @@ public sealed class InboundHintStore : QueueStoreBase
                     ParkedPath = CASE WHEN @versionAt >= VersionTimestamp THEN @parked ELSE ParkedPath END
                 RETURNING Id";
             Add(cmd, "@hint", row.HintId);
-            Add(cmd, "@origin", row.OriginServerId);
+            Add(cmd, "@origin", OriginKey(row.OriginServerId));
             Add(cmd, "@kind", (int)row.Kind);
             Add(cmd, "@key", row.Key);
             Add(cmd, "@itemPath", row.ItemPath);
@@ -119,7 +119,7 @@ public sealed class InboundHintStore : QueueStoreBase
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT * FROM InboundHints WHERE OriginServerId = @origin ORDER BY Id";
-        Add(cmd, "@origin", originServerId);
+        Add(cmd, "@origin", OriginKey(originServerId));
         return ReadAll(cmd);
     });
 
@@ -130,7 +130,7 @@ public sealed class InboundHintStore : QueueStoreBase
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE OriginServerId = @origin AND ParkedPath IS NULL";
-        Add(cmd, "@origin", originServerId);
+        Add(cmd, "@origin", OriginKey(originServerId));
         return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
     });
 
@@ -141,7 +141,7 @@ public sealed class InboundHintStore : QueueStoreBase
             DELETE FROM InboundHints WHERE Id IN (
                 SELECT Id FROM InboundHints WHERE OriginServerId = @origin AND ParkedPath IS NOT NULL
                 ORDER BY ReceivedAt DESC LIMIT -1 OFFSET @keep)";
-        Add(cmd, "@origin", originServerId);
+        Add(cmd, "@origin", OriginKey(originServerId));
         Add(cmd, "@keep", keep);
         return cmd.ExecuteNonQuery();
     });
@@ -152,10 +152,19 @@ public sealed class InboundHintStore : QueueStoreBase
     public int DeleteForOrigin(string originServerId) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM InboundHints WHERE OriginServerId = @origin COLLATE NOCASE";
-        Add(cmd, "@origin", originServerId);
+        cmd.CommandText = "DELETE FROM InboundHints WHERE OriginServerId = @origin";
+        Add(cmd, "@origin", OriginKey(originServerId));
         return cmd.ExecuteNonQuery();
     });
+
+    /// <summary>
+    /// The form a server id is stored and looked up in. Server entries match ids without regard to
+    /// case, so the queue does too: one peer is one origin, however it spells its id, and its rows
+    /// count once toward its limit.
+    /// </summary>
+    /// <param name="originServerId">The id as received.</param>
+    /// <returns>The id, trimmed and in lower case.</returns>
+    public static string OriginKey(string? originServerId) => (originServerId ?? string.Empty).Trim().ToLowerInvariant();
 
     /// <summary>Returns the oldest rows, the next to apply, up to the limit.</summary>
     /// <param name="limit">The most rows to return.</param>

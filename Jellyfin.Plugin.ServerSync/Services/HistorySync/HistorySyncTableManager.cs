@@ -170,111 +170,42 @@ public sealed class HistorySyncTableManager
         // negotiation recorded a newer base would otherwise write its older copy over it. The base only
         // changes to one agreed at least as recently, and a write that carries no base keeps the one held.
         ArgumentNullException.ThrowIfNull(record);
-        ExecuteWrite(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-                INSERT INTO HistorySyncItems (
-                    SourceUserId, LocalUserId, SourceLibraryId, LocalLibraryId,
-                    SourceItemId, LocalItemId, ItemName, SourcePath, LocalPath,
-                    SourceIsPlayed, SourcePlayCount, SourcePlaybackPositionTicks, SourceLastPlayedDate, SourceIsFavorite,
-                    LocalIsPlayed, LocalPlayCount, LocalPlaybackPositionTicks, LocalLastPlayedDate, LocalIsFavorite,
-                    MergedIsPlayed, MergedPlayCount, MergedPlaybackPositionTicks, MergedLastPlayedDate, MergedIsFavorite,
-                    NegotiatedIsPlayed, NegotiatedPlayCount, NegotiatedPlaybackPositionTicks, NegotiatedLastPlayedDate, NegotiatedIsFavorite, NegotiatedAt,
-                    Status, StatusDate, LastSyncTime, Reason, RetryCount,
-                    SourceStateHash, SyncedStateHash, ServerKey
-                ) VALUES (
-                    @sourceUserId, @localUserId, @sourceLibraryId, @localLibraryId,
-                    @sourceItemId, @localItemId, @itemName, @sourcePath, @localPath,
-                    @srcPlayed, @srcCount, @srcPos, @srcLast, @srcFav,
-                    @locPlayed, @locCount, @locPos, @locLast, @locFav,
-                    @mrgPlayed, @mrgCount, @mrgPos, @mrgLast, @mrgFav,
-                    @negPlayed, @negCount, @negPos, @negLast, @negFav, @negAt,
-                    @status, @statusDate, @lastSync, @reason, @retryCount,
-                    @srcStateHash, @syncedStateHash, @serverKey
-                )
-                ON CONFLICT(SourceUserId, SourceItemId) DO UPDATE SET
-                    LocalUserId = @localUserId,
-                    SourceLibraryId = @sourceLibraryId,
-                    LocalLibraryId = @localLibraryId,
-                    LocalItemId = @localItemId,
-                    ItemName = @itemName,
-                    SourcePath = @sourcePath,
-                    LocalPath = @localPath,
-                    SourceIsPlayed = @srcPlayed,
-                    SourcePlayCount = @srcCount,
-                    SourcePlaybackPositionTicks = @srcPos,
-                    SourceLastPlayedDate = @srcLast,
-                    SourceIsFavorite = @srcFav,
-                    LocalIsPlayed = @locPlayed,
-                    LocalPlayCount = @locCount,
-                    LocalPlaybackPositionTicks = @locPos,
-                    LocalLastPlayedDate = @locLast,
-                    LocalIsFavorite = @locFav,
-                    MergedIsPlayed = @mrgPlayed,
-                    MergedPlayCount = @mrgCount,
-                    MergedPlaybackPositionTicks = @mrgPos,
-                    MergedLastPlayedDate = @mrgLast,
-                    MergedIsFavorite = @mrgFav,
-                    NegotiatedIsPlayed = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negPlayed ELSE NegotiatedIsPlayed END,
-                    NegotiatedPlayCount = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negCount ELSE NegotiatedPlayCount END,
-                    NegotiatedPlaybackPositionTicks = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negPos ELSE NegotiatedPlaybackPositionTicks END,
-                    NegotiatedLastPlayedDate = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negLast ELSE NegotiatedLastPlayedDate END,
-                    NegotiatedIsFavorite = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negFav ELSE NegotiatedIsFavorite END,
-                    NegotiatedAt = CASE WHEN @negAt IS NOT NULL AND (NegotiatedAt IS NULL OR @negAt >= NegotiatedAt) THEN @negAt ELSE NegotiatedAt END,
-                    Status = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
-                    StatusDate = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.StatusDate ELSE @statusDate END,
-                    LastSyncTime = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.LastSyncTime ELSE @lastSync END,
-                    Reason = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.Reason ELSE @reason END,
-                    RetryCount = CASE WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.RetryCount ELSE @retryCount END,
-                    SourceStateHash = @srcStateHash,
-                    ServerKey = @serverKey,
-                    SyncedStateHash = CASE
-                        WHEN HistorySyncItems.Status = @ignoredStatus THEN HistorySyncItems.SyncedStateHash
-                        WHEN @syncedStateHash IS NOT NULL THEN @syncedStateHash
-                        ELSE HistorySyncItems.SyncedStateHash END";
-
-            cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
-            cmd.Parameters.AddWithValue("@sourceUserId", record.SourceUserId);
-            cmd.Parameters.AddWithValue("@localUserId", record.LocalUserId);
-            cmd.Parameters.AddWithValue("@sourceLibraryId", record.SourceLibraryId);
-            cmd.Parameters.AddWithValue("@localLibraryId", record.LocalLibraryId);
-            cmd.Parameters.AddWithValue("@sourceItemId", record.SourceItemId);
-            AddNullable(cmd, "@localItemId", record.LocalItemId);
-            AddNullable(cmd, "@itemName", record.ItemName);
-            AddNullable(cmd, "@sourcePath", record.SourcePath);
-            AddNullable(cmd, "@localPath", record.LocalPath);
-            AddNullableBool(cmd, "@srcPlayed", record.SourceIsPlayed);
-            AddNullable(cmd, "@srcCount", record.SourcePlayCount);
-            AddNullable(cmd, "@srcPos", record.SourcePlaybackPositionTicks);
-            AddNullableTimestamp(cmd, "@srcLast", record.SourceLastPlayedDate);
-            AddNullableBool(cmd, "@srcFav", record.SourceIsFavorite);
-            AddNullableBool(cmd, "@locPlayed", record.LocalIsPlayed);
-            AddNullable(cmd, "@locCount", record.LocalPlayCount);
-            AddNullable(cmd, "@locPos", record.LocalPlaybackPositionTicks);
-            AddNullableTimestamp(cmd, "@locLast", record.LocalLastPlayedDate);
-            AddNullableBool(cmd, "@locFav", record.LocalIsFavorite);
-            AddNullableBool(cmd, "@mrgPlayed", record.MergedIsPlayed);
-            AddNullable(cmd, "@mrgCount", record.MergedPlayCount);
-            AddNullable(cmd, "@mrgPos", record.MergedPlaybackPositionTicks);
-            AddNullableTimestamp(cmd, "@mrgLast", record.MergedLastPlayedDate);
-            AddNullableBool(cmd, "@mrgFav", record.MergedIsFavorite);
-            AddNullableBool(cmd, "@negPlayed", record.NegotiatedIsPlayed);
-            AddNullable(cmd, "@negCount", record.NegotiatedPlayCount);
-            AddNullable(cmd, "@negPos", record.NegotiatedPlaybackPositionTicks);
-            AddNullableTimestamp(cmd, "@negLast", record.NegotiatedLastPlayedDate);
-            AddNullableBool(cmd, "@negFav", record.NegotiatedIsFavorite);
-            AddNullableTimestamp(cmd, "@negAt", record.NegotiatedAt);
-            cmd.Parameters.AddWithValue("@status", (int)record.Status);
-            AddTimestamp(cmd, "@statusDate", record.StatusDate);
-            AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
-            AddNullable(cmd, "@reason", record.Reason);
-            AddNullable(cmd, "@srcStateHash", record.SourceState.SourceHash);
-            AddNullable(cmd, "@syncedStateHash", record.SourceState.SyncedHash);
-            AddNullable(cmd, "@serverKey", record.ServerKey);
-            cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
-            cmd.ExecuteNonQuery();
-        });
+        const string NewerBase = "@p_NegotiatedAt IS NOT NULL AND (HistorySyncItems.NegotiatedAt IS NULL OR @p_NegotiatedAt >= HistorySyncItems.NegotiatedAt)";
+        var upsert = new UpsertBuilder(TableName)
+            .Key("SourceUserId", record.SourceUserId)
+            .Key("SourceItemId", record.SourceItemId)
+            .Set("LocalUserId", record.LocalUserId)
+            .Set("SourceLibraryId", record.SourceLibraryId)
+            .Set("LocalLibraryId", record.LocalLibraryId)
+            .Set("LocalItemId", record.LocalItemId)
+            .Set("ItemName", record.ItemName)
+            .Set("SourcePath", record.SourcePath)
+            .Set("LocalPath", record.LocalPath)
+            .Set("SourceIsPlayed", UpsertBuilder.Flag(record.SourceIsPlayed))
+            .Set("SourcePlayCount", record.SourcePlayCount)
+            .Set("SourcePlaybackPositionTicks", record.SourcePlaybackPositionTicks)
+            .Set("SourceLastPlayedDate", UpsertBuilder.Time(record.SourceLastPlayedDate))
+            .Set("SourceIsFavorite", UpsertBuilder.Flag(record.SourceIsFavorite))
+            .Set("LocalIsPlayed", UpsertBuilder.Flag(record.LocalIsPlayed))
+            .Set("LocalPlayCount", record.LocalPlayCount)
+            .Set("LocalPlaybackPositionTicks", record.LocalPlaybackPositionTicks)
+            .Set("LocalLastPlayedDate", UpsertBuilder.Time(record.LocalLastPlayedDate))
+            .Set("LocalIsFavorite", UpsertBuilder.Flag(record.LocalIsFavorite))
+            .Set("MergedIsPlayed", UpsertBuilder.Flag(record.MergedIsPlayed))
+            .Set("MergedPlayCount", record.MergedPlayCount)
+            .Set("MergedPlaybackPositionTicks", record.MergedPlaybackPositionTicks)
+            .Set("MergedLastPlayedDate", UpsertBuilder.Time(record.MergedLastPlayedDate))
+            .Set("MergedIsFavorite", UpsertBuilder.Flag(record.MergedIsFavorite))
+            .SetWhen("NegotiatedIsPlayed", UpsertBuilder.Flag(record.NegotiatedIsPlayed), NewerBase)
+            .SetWhen("NegotiatedPlayCount", record.NegotiatedPlayCount, NewerBase)
+            .SetWhen("NegotiatedPlaybackPositionTicks", record.NegotiatedPlaybackPositionTicks, NewerBase)
+            .SetWhen("NegotiatedLastPlayedDate", UpsertBuilder.Time(record.NegotiatedLastPlayedDate), NewerBase)
+            .SetWhen("NegotiatedIsFavorite", UpsertBuilder.Flag(record.NegotiatedIsFavorite), NewerBase)
+            .SetWhen("NegotiatedAt", UpsertBuilder.Time(record.NegotiatedAt), NewerBase)
+            .Set("SourceStateHash", record.SourceState.SourceHash)
+            .SetUnlessIgnoredOrNull("SyncedStateHash", record.SourceState.SyncedHash)
+            .SyncColumns(record);
+        ExecuteWrite(upsert.Execute);
     }
 
     /// <summary>

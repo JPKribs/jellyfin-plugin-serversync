@@ -89,14 +89,14 @@ public sealed class VersionConflictResolver
             {
                 carries = false;
             }
-            else if (HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion))
+            else if (HintProtocol.Compatible(capabilities, _configManager.PluginVersion))
             {
                 carries = true;
             }
             else
             {
                 carries = null;
-                _logger.LogWarning("'{Peer}' runs Server Sync {Theirs} and this server runs {Ours}. Rows that would overwrite an edit recorded here wait until both run the same version", source.Name, capabilities.PluginVersion, _configManager.PluginVersion);
+                _logger.LogWarning("'{Peer}': {Reason}. Rows that would overwrite an edit recorded here wait until the two are compatible", source.Name, HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion));
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

@@ -240,4 +240,105 @@ public class PaginatedFetchUtilityTests
         Assert.True(outcome.CompletedFully);
         Assert.Equal(1, outcome.ProcessedItems);
     }
+
+    /// <summary>
+    /// An HTTP timeout surfaces as a TaskCanceledException while the caller's
+    /// token is still live. It is a failed page to retry, not a cancelled run,
+    /// so one slow page does not throw away the whole server's listing.
+    /// </summary>
+    [Fact]
+    public async Task TimedOutPage_IsRetried()
+    {
+        var items = Items(3);
+        var calls = 0;
+        var outcome = await RunAsync((_, _, _) => ++calls == 1
+            ? throw new TaskCanceledException("test: request timed out")
+            : Task.FromResult<BaseItemDtoQueryResult?>(Page(3, items)));
+
+        Assert.True(outcome.CompletedFully);
+        Assert.Equal(3, outcome.ProcessedItems);
+        Assert.Equal(2, calls);
+    }
+
+    /// <summary>
+    /// A cancellation the caller asked for still ends the run at once.
+    /// </summary>
+    [Fact]
+    public async Task CallerCancellationDuringFetch_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => RunAsync(
+            (_, _, token) =>
+            {
+                cts.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult<BaseItemDtoQueryResult?>(null);
+            },
+            cancellationToken: cts.Token));
+    }
+
+    /// <summary>
+    /// A library that changed during the first pass is listed again. A clean
+    /// second pass is a consistent snapshot, so the run completes, and items
+    /// the first pass handled are not processed twice.
+    /// </summary>
+    [Fact]
+    public async Task ShiftedFirstPass_CleanSecondPass_CompletesWithoutDoubleCounting()
+    {
+        var batch = PaginatedFetchUtility.DefaultBatchSize;
+        var page1 = Items(batch);
+        var tail = Items(4);
+        var pass = 0;
+        var processed = new List<Guid>();
+        var outcome = await RunAsync(
+            (startIndex, _, _) =>
+            {
+                if (startIndex == 0)
+                {
+                    pass++;
+                }
+
+                // First pass: the total promised one item more than arrived.
+                var total = pass == 1 ? batch + 5 : batch + 4;
+                return Task.FromResult<BaseItemDtoQueryResult?>(startIndex switch
+                {
+                    0 => Page(total, page1),
+                    _ when startIndex == batch => Page(total, tail),
+                    _ => Page(total)
+                });
+            },
+            (item, _) =>
+            {
+                processed.Add(item.Id!.Value);
+                return Task.FromResult(true);
+            });
+
+        Assert.True(outcome.CompletedFully);
+        Assert.Equal(2, pass);
+        Assert.Equal(batch + 4, outcome.ProcessedItems);
+        Assert.Equal(processed.Count, processed.Distinct().Count());
+    }
+
+    /// <summary>
+    /// A library that keeps changing on every pass still reports incomplete
+    /// discovery, so nothing is pruned on a guess.
+    /// </summary>
+    [Fact]
+    public async Task ShiftedOnEveryPass_StaysIncomplete()
+    {
+        var batch = PaginatedFetchUtility.DefaultBatchSize;
+        var passes = 0;
+        var outcome = await RunAsync((startIndex, _, _) =>
+        {
+            if (startIndex == 0)
+            {
+                passes++;
+            }
+
+            return Task.FromResult<BaseItemDtoQueryResult?>(startIndex == 0 ? Page(batch + 10, Items(batch)) : Page(batch + 10, Items(4)));
+        });
+
+        Assert.False(outcome.CompletedFully);
+        Assert.Equal(PaginatedFetchUtility.MaxEnumerationPasses, passes);
+    }
 }

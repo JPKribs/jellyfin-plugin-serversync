@@ -386,73 +386,25 @@ public sealed class UserSyncTableManager
     public override void Upsert(UserSyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        ExecuteWrite(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-                INSERT INTO UserSyncItems (
-                    SourceUserId, LocalUserId, SourceUserName, LocalUserName,
-                    PropertyCategory,
-                    SourceValue, LocalValue, MergedValue,
-                    SourceValueHash, SyncedValueHash,
-                    SourceImageHash, LocalImageHash, SyncedImageHash,
-                    SourceImageSize, LocalImageSize, SyncedImageSize,
-                    Status, StatusDate, LastSyncTime, Reason, RetryCount, ServerKey
-                ) VALUES (
-                    @src, @loc, @srcName, @locName,
-                    @cat,
-                    @srcVal, @locVal, @mergedVal,
-                    @srcValHash, @syncedValHash,
-                    @srcImgHash, @locImgHash, @syncedImgHash,
-                    @srcImgSize, @locImgSize, @syncedImgSize,
-                    @status, @statusDate, @lastSync, @reason, @retryCount, @serverKey
-                )
-                ON CONFLICT(SourceUserId, LocalUserId, PropertyCategory) DO UPDATE SET
-                    SourceUserName = @srcName,
-                    LocalUserName = @locName,
-                    SourceValue = @srcVal,
-                    LocalValue = @locVal,
-                    MergedValue = @mergedVal,
-                    SourceValueHash = @srcValHash,
-                    SyncedValueHash = CASE WHEN @syncedValHash IS NOT NULL THEN @syncedValHash ELSE UserSyncItems.SyncedValueHash END,
-                    SourceImageHash = @srcImgHash,
-                    LocalImageHash = @locImgHash,
-                    SyncedImageHash = CASE WHEN @syncedImgHash IS NOT NULL THEN @syncedImgHash ELSE UserSyncItems.SyncedImageHash END,
-                    SourceImageSize = @srcImgSize,
-                    LocalImageSize = @locImgSize,
-                    SyncedImageSize = CASE WHEN @syncedImgSize IS NOT NULL THEN @syncedImgSize ELSE UserSyncItems.SyncedImageSize END,
-                    Status = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
-                    StatusDate = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.StatusDate ELSE @statusDate END,
-                    LastSyncTime = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.LastSyncTime ELSE @lastSync END,
-                    Reason = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.Reason ELSE @reason END,
-                    RetryCount = CASE WHEN UserSyncItems.Status = @ignoredStatus THEN UserSyncItems.RetryCount ELSE @retryCount END,
-                    ServerKey = @serverKey";
-
-            cmd.Parameters.AddWithValue("@src", record.SourceUserId);
-            cmd.Parameters.AddWithValue("@loc", record.LocalUserId);
-            AddNullable(cmd, "@srcName", record.SourceUserName);
-            AddNullable(cmd, "@locName", record.LocalUserName);
-            cmd.Parameters.AddWithValue("@cat", record.PropertyCategory);
-            AddNullable(cmd, "@srcVal", record.SourceValue);
-            AddNullable(cmd, "@locVal", record.LocalValue);
-            AddNullable(cmd, "@mergedVal", record.MergedValue);
-            AddNullable(cmd, "@srcValHash", record.SourceValueHash);
-            AddNullable(cmd, "@syncedValHash", record.SyncedValueHash);
-            AddNullable(cmd, "@srcImgHash", record.SourceImageHash);
-            AddNullable(cmd, "@locImgHash", record.LocalImageHash);
-            AddNullable(cmd, "@syncedImgHash", record.SyncedImageHash);
-            AddNullable(cmd, "@srcImgSize", record.SourceImageSize);
-            AddNullable(cmd, "@locImgSize", record.LocalImageSize);
-            AddNullable(cmd, "@syncedImgSize", record.SyncedImageSize);
-            cmd.Parameters.AddWithValue("@status", (int)record.Status);
-            AddTimestamp(cmd, "@statusDate", record.StatusDate);
-            AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
-            AddNullable(cmd, "@reason", record.Reason);
-            cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
-            AddNullable(cmd, "@serverKey", record.ServerKey);
-            cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
-            cmd.ExecuteNonQuery();
-        });
+        var upsert = new UpsertBuilder(TableName)
+            .Key("SourceUserId", record.SourceUserId)
+            .Key("LocalUserId", record.LocalUserId)
+            .Key("PropertyCategory", record.PropertyCategory)
+            .Set("SourceUserName", record.SourceUserName)
+            .Set("LocalUserName", record.LocalUserName)
+            .Set("SourceValue", record.SourceValue)
+            .Set("LocalValue", record.LocalValue)
+            .Set("MergedValue", record.MergedValue)
+            .Set("SourceValueHash", record.SourceValueHash)
+            .SetUnlessNull("SyncedValueHash", record.SyncedValueHash)
+            .Set("SourceImageHash", record.SourceImageHash)
+            .Set("LocalImageHash", record.LocalImageHash)
+            .SetUnlessNull("SyncedImageHash", record.SyncedImageHash)
+            .Set("SourceImageSize", record.SourceImageSize)
+            .Set("LocalImageSize", record.LocalImageSize)
+            .SetUnlessNull("SyncedImageSize", record.SyncedImageSize)
+            .SyncColumns(record);
+        ExecuteWrite(upsert.Execute);
     }
 
     /// <inheritdoc />

@@ -324,7 +324,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     }
 
     [Fact]
-    public void EveryPeerRouteButCapabilities_RequiresTheSameVersion()
+    public void EveryPeerRouteButCapabilities_RequiresACompatibleProtocol()
     {
         var actions = new[] { typeof(PeerController), typeof(PeerPairController) }
             .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
@@ -333,7 +333,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
         Assert.NotEmpty(actions);
         foreach (var action in actions)
         {
-            var guarded = action.GetCustomAttribute<RequireSameVersionAttribute>() is not null;
+            var guarded = action.GetCustomAttribute<RequireCompatibleProtocolAttribute>() is not null;
             Assert.True(guarded == (action.Name != nameof(PeerController.GetCapabilities)), $"{action.DeclaringType!.Name}.{action.Name}");
         }
     }
@@ -346,7 +346,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     {
         var context = FilterContext(presented);
 
-        new RequireSameVersionAttribute().OnActionExecuting(context);
+        new RequireCompatibleProtocolAttribute().OnActionExecuting(context);
 
         var refusal = Assert.IsType<ObjectResult>(context.Result);
         Assert.Equal(HintProtocol.VersionMismatchStatus, refusal.StatusCode);
@@ -359,7 +359,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     {
         var context = FilterContext("0.0.0-test");
 
-        new RequireSameVersionAttribute().OnActionExecuting(context);
+        new RequireCompatibleProtocolAttribute().OnActionExecuting(context);
 
         Assert.Null(context.Result);
     }
@@ -373,6 +373,69 @@ public sealed class PeerTransportSecurityTests : IDisposable
     public void SameVersion_IsExact(string? a, string? b, bool expected)
     {
         Assert.Equal(expected, HintProtocol.SameVersion(a, b));
+    }
+
+    [Fact]
+    public void VersionFilter_LetsAnotherPluginVersionOnTheSameProtocolThrough()
+    {
+        var context = FilterContext("0.0.0.1", HintProtocol.ProtocolVersion, HintProtocol.MinProtocolVersion);
+
+        new RequireCompatibleProtocolAttribute().OnActionExecuting(context);
+
+        Assert.Null(context.Result);
+    }
+
+    [Fact]
+    public void VersionFilter_RefusesAProtocolThisBuildNoLongerSpeaks()
+    {
+        var context = FilterContext("0.0.0.1", HintProtocol.MinProtocolVersion - 1, HintProtocol.MinProtocolVersion - 1);
+
+        new RequireCompatibleProtocolAttribute().OnActionExecuting(context);
+
+        var refusal = Assert.IsType<ObjectResult>(context.Result);
+        Assert.Equal(HintProtocol.VersionMismatchStatus, refusal.StatusCode);
+        Assert.Contains("protocol", (string)refusal.Value!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(1, 1, true)]
+    [InlineData(2, 1, true)]
+    [InlineData(2, 2, false)]
+    [InlineData(0, 0, false)]
+    public void Compatible_NeedsTheProtocolsToOverlap(int peerProtocol, int peerMin, bool expected)
+    {
+        // This build speaks protocol 1 down to 1.
+        Assert.Equal(1, HintProtocol.ProtocolVersion);
+        Assert.Equal(1, HintProtocol.MinProtocolVersion);
+        Assert.Equal(expected, HintProtocol.Compatible(peerProtocol, peerMin, "9.9.9.9", "12.2.5.0"));
+    }
+
+    [Theory]
+    [InlineData("12.2.5.0", true)]
+    [InlineData("12.2.5.1", false)]
+    [InlineData(null, false)]
+    public void Compatible_WithoutAProtocol_FallsBackToTheExactVersion(string? peerVersion, bool expected)
+    {
+        Assert.Equal(expected, HintProtocol.Compatible(null, null, peerVersion, "12.2.5.0"));
+    }
+
+    [Fact]
+    public async Task PeerCalls_CarryThisServersProtocol()
+    {
+        string? protocol = null;
+        string? min = null;
+        var http = new HttpClient(new StubHandler(request =>
+        {
+            protocol = request.Headers.TryGetValues(HintProtocol.ProtocolHeader, out var p) ? p.Single() : null;
+            min = request.Headers.TryGetValues(HintProtocol.MinProtocolHeader, out var m) ? m.Single() : null;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"PluginVersion\":\"0\"}", Encoding.UTF8, "application/json") };
+        }));
+        using var client = new SourceServerClient(NullLogger<SourceServerClient>.Instance, http, "https://peer.example", "key", "test", "12.2.5.0");
+
+        await client.GetPeerCapabilitiesAsync();
+
+        Assert.Equal(HintProtocol.ProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), protocol);
+        Assert.Equal(HintProtocol.MinProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), min);
     }
 
     [Fact]
@@ -438,7 +501,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
         Assert.Equal(HintProtocol.UnpairedStatus, Assert.IsType<ObjectResult>(result.Result).StatusCode);
     }
 
-    private static Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext FilterContext(string? presented)
+    private static Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext FilterContext(string? presented, int? protocol = null, int? minProtocol = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IPluginConfigurationManager>(new FakeConfigManager());
@@ -446,6 +509,16 @@ public sealed class PeerTransportSecurityTests : IDisposable
         if (presented is not null)
         {
             http.Request.Headers[HintProtocol.VersionHeader] = presented;
+        }
+
+        if (protocol is not null)
+        {
+            http.Request.Headers[HintProtocol.ProtocolHeader] = protocol.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (minProtocol is not null)
+        {
+            http.Request.Headers[HintProtocol.MinProtocolHeader] = minProtocol.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         var action = new Microsoft.AspNetCore.Mvc.ActionContext(http, new Microsoft.AspNetCore.Routing.RouteData(), new Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor());

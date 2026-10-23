@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 30;
+    public const int CurrentSchemaVersion = 31;
 
     /// <summary>
     /// The oldest schema version whose code can still work with a database at
@@ -325,6 +325,29 @@ public static class DatabaseMigrationService
         CreateV28Additions(connection);
         CreateV29Additions(connection);
         CreateV30Additions(connection);
+    }
+
+    /// <summary>
+    /// Stores every inbound hint's origin in the form <see cref="Queue.InboundHintStore.OriginKey"/>
+    /// writes. A peer that spelled its id in two cases left two rows for one object, and the newer one
+    /// is kept. Data only, so older code reads the result as before.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void NormalizeInboundOrigins(SqliteConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = @"
+            DELETE FROM InboundHints WHERE Id IN (
+                SELECT older.Id FROM InboundHints older
+                JOIN InboundHints newer
+                    ON lower(trim(newer.OriginServerId)) = lower(trim(older.OriginServerId))
+                    AND newer.Kind = older.Kind AND newer.Key = older.Key AND newer.Id > older.Id);
+            UPDATE InboundHints SET OriginServerId = lower(trim(OriginServerId))
+                WHERE OriginServerId <> lower(trim(OriginServerId));";
+        cmd.ExecuteNonQuery();
+        transaction.Commit();
     }
 
     public static void CreateV30Additions(SqliteConnection connection)
@@ -654,6 +677,12 @@ public static class DatabaseMigrationService
             {
                 logger.LogInformation("Schema upgrade to v30: adding playlist copies.");
                 CreateV30Additions(connection);
+            }
+
+            if (fromVersion < 31)
+            {
+                logger.LogInformation("Schema upgrade to v31: storing inbound hint origins in one case.");
+                NormalizeInboundOrigins(connection);
             }
 
             JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, CurrentSchemaVersion, MinReaderVersion);

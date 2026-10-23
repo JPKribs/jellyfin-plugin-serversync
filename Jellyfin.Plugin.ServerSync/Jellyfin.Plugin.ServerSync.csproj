@@ -36,6 +36,13 @@
     <!-- Sync page (main entry, default tab) -->
     <EmbeddedResource Include="Configuration\serversync_sync.html" />
     <EmbeddedResource Include="Configuration\serversync_sync.js" />
+    <EmbeddedResource Include="Configuration\serversync_sync_table.js" />
+    <EmbeddedResource Include="Configuration\serversync_sync_content.js" />
+    <EmbeddedResource Include="Configuration\serversync_sync_history.js" />
+    <EmbeddedResource Include="Configuration\serversync_sync_metadata.js" />
+    <EmbeddedResource Include="Configuration\serversync_sync_users.js" />
+    <EmbeddedResource Include="Configuration\serversync_sync_people.js" />
+    <EmbeddedResource Include="Configuration\serversync_sync_queue.js" />
     <!-- Servers page -->
     <EmbeddedResource Include="Configuration\serversync_servers.html" />
     <EmbeddedResource Include="Configuration\serversync_servers.js" />

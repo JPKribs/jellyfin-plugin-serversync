@@ -115,9 +115,9 @@ public sealed class ParentDirectory
                 return false;
             }
 
-            if (!HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion))
+            if (!HintProtocol.Compatible(capabilities, _configManager.PluginVersion))
             {
-                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: it runs Server Sync {Theirs} and this server runs {Ours}", server.DisplayName, capabilities.PluginVersion, _configManager.PluginVersion);
+                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: {Reason}", server.DisplayName, HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion));
                 return false;
             }
 

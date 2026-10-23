@@ -103,6 +103,8 @@ public class PeerController : ControllerBase
         {
             ServerId = _applicationHost.SystemId,
             PluginVersion = _configManager.PluginVersion,
+            ProtocolVersion = HintProtocol.ProtocolVersion,
+            MinProtocolVersion = HintProtocol.MinProtocolVersion,
             Accepts = HintProtocol.AcceptedKinds(_configManager.Configuration).Select(k => k.ToString()).ToList(),
             ServerTime = DateTime.UtcNow
         });
@@ -116,7 +118,7 @@ public class PeerController : ControllerBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The listing.</returns>
     [HttpGet("Link")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<PeerLinkResponse>> Link([FromQuery] string? serverId, CancellationToken cancellationToken)
     {
@@ -253,7 +255,7 @@ public class PeerController : ControllerBase
     /// <param name="request">The hints.</param>
     /// <returns>One result per hint.</returns>
     [HttpPost("Queue")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -344,7 +346,7 @@ public class PeerController : ControllerBase
     /// <param name="request">The finished hints.</param>
     /// <returns>How many rows were removed.</returns>
     [HttpPost("Complete")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<object> Complete([FromBody] CompleteRequest request)
@@ -375,7 +377,7 @@ public class PeerController : ControllerBase
     /// <param name="serverId">The asking server's id.</param>
     /// <returns>The inbound rows.</returns>
     [HttpGet("Status")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<QueueStatusResponse> Status([FromQuery] string? serverId)
@@ -399,7 +401,7 @@ public class PeerController : ControllerBase
     }
 
     [HttpGet("Interest")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -416,7 +418,7 @@ public class PeerController : ControllerBase
     }
 
     [HttpGet("Playlists")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PeerPlaylistsResponse> Playlists([FromServices] Services.Playlists.PeerPlaylistReader reader, [FromQuery] Guid? id, [FromQuery] string? serverId)
     {
@@ -430,7 +432,7 @@ public class PeerController : ControllerBase
     }
 
     [HttpPost("Lookup")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<PeerLookupResponse> Lookup([FromBody] PeerLookupRequest request, [FromServices] MediaBrowser.Controller.Library.IUserManager userManager, [FromServices] MediaBrowser.Controller.Library.ILibraryManager libraryManager)
@@ -464,7 +466,7 @@ public class PeerController : ControllerBase
     /// <param name="request">The kind and keys.</param>
     /// <returns>The versions.</returns>
     [HttpPost("Versions")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<VersionsResponse> Versions([FromBody] VersionsRequest request)
@@ -502,7 +504,7 @@ public class PeerController : ControllerBase
     /// <param name="request">The proposed writes.</param>
     /// <returns>One result per entry, in request order.</returns>
     [HttpPost("History")]
-    [RequireSameVersion]
+    [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<PeerHistoryResponse> NegotiateHistory([FromBody] PeerHistoryRequest request)

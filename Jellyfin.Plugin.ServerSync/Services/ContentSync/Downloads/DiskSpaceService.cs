@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
@@ -22,6 +24,14 @@ public static class DiskSpaceService
     // Paths already reported as unmeasurable, so a share that can never be measured logs one warning
     // instead of one per item on every run.
     private static readonly ConcurrentDictionary<string, byte> _unmeasurableReported = new(StringComparer.Ordinal);
+
+    // Bytes held by downloads in flight, per volume. Each download checks its own file against the free
+    // space, so without this several large files started together could each pass and together fill
+    // the disk. Free space shrinks as a download writes while its hold stays whole, so the count errs
+    // on the side of caution until the download ends.
+    private static readonly Dictionary<string, long> _held = new(StringComparer.Ordinal);
+    private static readonly object _heldLock = new();
+    private static TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     /// Gets or sets the logger used to report a path whose free space cannot be read. The plugin sets
@@ -136,6 +146,120 @@ public static class DiskSpaceService
     }
 
     /// <summary>
+    /// Holds space for a file about to download, on top of what other downloads already hold on the
+    /// same volume. A file that fits only once those finish waits for them. A file that would not fit
+    /// even then gets no hold. A target whose free space cannot be read passes, as in
+    /// <see cref="HasSufficientSpaceForFile"/>.
+    /// </summary>
+    /// <param name="filePath">Target file path.</param>
+    /// <param name="fileSize">Size of the file in bytes.</param>
+    /// <param name="minimumReserveGb">Minimum free space to reserve in GB.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The hold, which the caller disposes when the download ends, or null when the file does not fit.</returns>
+    public static async Task<IDisposable?> ReserveForFileAsync(string? filePath, long fileSize, int minimumReserveGb, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(filePath) || fileSize <= 0)
+        {
+            return NoHold.Instance;
+        }
+
+        var needed = fileSize + GigabytesToBytes(minimumReserveGb);
+        while (true)
+        {
+            if (!TryGetSpace(filePath, out var freeBytes, out var totalBytes, out var format))
+            {
+                return NoHold.Instance;
+            }
+
+            Task released;
+            var volume = totalBytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + format;
+            lock (_heldLock)
+            {
+                var held = _held.GetValueOrDefault(volume);
+                if (freeBytes - held >= needed)
+                {
+                    _held[volume] = held + fileSize;
+                    return new Hold(volume, fileSize);
+                }
+
+                if (held == 0 || freeBytes < needed)
+                {
+                    return null;
+                }
+
+                released = _released.Task;
+            }
+
+            // It fits once other downloads on this volume finish. Look again when one does.
+            await released.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Gets the bytes held on all volumes, for tests.</summary>
+    public static long HeldBytes
+    {
+        get
+        {
+            lock (_heldLock)
+            {
+                return _held.Values.Sum();
+            }
+        }
+    }
+
+    private static void Release(string volume, long bytes)
+    {
+        TaskCompletionSource released;
+        lock (_heldLock)
+        {
+            var left = _held.GetValueOrDefault(volume) - bytes;
+            if (left > 0)
+            {
+                _held[volume] = left;
+            }
+            else
+            {
+                _held.Remove(volume);
+            }
+
+            released = _released;
+            _released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        released.TrySetResult();
+    }
+
+    private sealed class Hold : IDisposable
+    {
+        private readonly string _volume;
+        private readonly long _bytes;
+        private int _disposed;
+
+        public Hold(string volume, long bytes)
+        {
+            _volume = volume;
+            _bytes = bytes;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                Release(_volume, _bytes);
+            }
+        }
+    }
+
+    private sealed class NoHold : IDisposable
+    {
+        public static readonly NoHold Instance = new();
+
+        public void Dispose()
+        {
+        }
+    }
+
+    /// <summary>
     /// Reads the free and total space of the filesystem that holds a path. On Linux and macOS the
     /// path root is always "/", so measuring the root would read the container's own disk in Docker
     /// instead of the mounted library. The nearest existing directory of the path is measured
@@ -147,9 +271,15 @@ public static class DiskSpaceService
     /// <param name="totalBytes">The filesystem size.</param>
     /// <returns>True when the space was read, false when it is unknown.</returns>
     private static bool TryGetSpace(string path, out long freeBytes, out long totalBytes)
+        => TryGetSpace(path, out freeBytes, out totalBytes, out _);
+
+    // The volume's format is read too, since with the total size it tells volumes apart: on Linux
+    // and macOS DriveInfo names the path it was given, not the mount that holds it.
+    private static bool TryGetSpace(string path, out long freeBytes, out long totalBytes, out string format)
     {
         freeBytes = 0;
         totalBytes = 0;
+        format = string.Empty;
         string? target = null;
         try
         {
@@ -163,6 +293,7 @@ public static class DiskSpaceService
             var drive = new DriveInfo(target);
             freeBytes = drive.AvailableFreeSpace;
             totalBytes = drive.TotalSize;
+            format = drive.DriveFormat;
             return true;
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)

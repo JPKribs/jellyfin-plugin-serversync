@@ -165,10 +165,10 @@ public class HintsController : ControllerBase
 
             result.HasPlugin = true;
             result.PluginVersion = capabilities.PluginVersion;
-            if (!HintProtocol.SameVersion(capabilities.PluginVersion, _configManager.PluginVersion))
+            if (!HintProtocol.Compatible(capabilities, _configManager.PluginVersion))
             {
                 result.Severity = "error";
-                result.Message = "Connected, but " + HintProtocol.VersionMismatch(capabilities.PluginVersion, _configManager.PluginVersion) + ".";
+                result.Message = "Connected, but " + HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion) + ".";
                 return Ok(result);
             }
 

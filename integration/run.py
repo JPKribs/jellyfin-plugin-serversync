@@ -135,7 +135,7 @@ class Api:
         auth = f'MediaBrowser Client="ServerSyncIT", Device="runner", DeviceId="{self.device}", Version="1.0"'
         if self.token:
             auth += f', Token="{self.token}"'
-        return {"Authorization": auth, "Content-Type": "application/json", "Accept": "application/json", "X-ServerSync-Version": self.version}
+        return {"Authorization": auth, "Content-Type": "application/json", "Accept": "application/json", "X-ServerSync-Version": self.version, "X-ServerSync-Protocol": "1", "X-ServerSync-Min-Protocol": "1"}
 
     def call(self, method, path, body=None, expect=None, raw=False):
         data = None if body is None else json.dumps(body).encode()

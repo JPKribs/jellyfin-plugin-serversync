@@ -104,29 +104,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </summary>
     /// <param name="serverKey">The entry key carried on a row, or null.</param>
     /// <returns>The source, or null when that server did not connect this run.</returns>
-    protected ScanSource? SourceFor(string? serverKey)
-    {
-        if (string.IsNullOrEmpty(serverKey))
-        {
-            var pullServers = _configManager.Configuration.GetPullServers();
-            if (pullServers.Count == 0)
-            {
-                return null;
-            }
-
-            serverKey = pullServers[0].Key;
-        }
-
-        foreach (var source in Sources)
-        {
-            if (string.Equals(source.Key, serverKey, StringComparison.OrdinalIgnoreCase))
-            {
-                return source;
-            }
-        }
-
-        return null;
-    }
+    protected ScanSource? SourceFor(string? serverKey) => ScanSources.Find(Sources, _configManager, serverKey);
 
     // The per module tasks run inside Sync Content and Sync Information and from the dashboard, so
     // they stay registered but leave the scheduled task list.
@@ -183,52 +161,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </summary>
     protected virtual async Task<bool> TestConnectionAsync(CancellationToken cancellationToken)
     {
-        var connected = new List<ScanSource>();
-        var servers = _configManager.Configuration.GetPullServers();
-        for (var i = 0; i < servers.Count; i++)
-        {
-            var server = servers[i];
-            SourceServerClient client;
-            try
-            {
-                client = _clientFactory.Create(server);
-            }
-            catch (ArgumentException ex)
-            {
-                Logger.LogError("{Task}: server '{Server}' rejected: {Error}", Name, server.DisplayName, ex.Message);
-                MarkSourceUnavailable($"server '{server.DisplayName}' has an invalid URL");
-                continue;
-            }
-
-            Models.Configuration.ConnectionTestResult result;
-            try
-            {
-                result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Sources is assigned only after the loop, so the run's cleanup cannot see these
-                // clients yet. Dispose them here before the failure or cancellation propagates.
-                client.Dispose();
-                foreach (var source in connected)
-                {
-                    source.Dispose();
-                }
-
-                throw;
-            }
-
-            if (!result.Success)
-            {
-                Logger.LogError("{Task}: connection to '{Server}' failed: {Error}", Name, server.DisplayName, result.ErrorMessage ?? "unknown");
-                MarkSourceUnavailable($"server '{server.DisplayName}' is unreachable");
-                client.Dispose();
-                continue;
-            }
-
-            connected.Add(new ScanSource(server, client, i));
-        }
-
+        var connected = await ScanSources.ConnectAsync(_configManager, _clientFactory, Logger, Name, MarkSourceUnavailable, cancellationToken).ConfigureAwait(false);
         Sources = connected;
         return connected.Count > 0;
     }
@@ -677,24 +610,20 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             .ToList();
 
         var pruned = 0;
-        var reportEvery = Math.Max(1, stale.Count / 100);
-        for (var i = 0; i < stale.Count; i++)
+        for (var start = 0; start < stale.Count; start += WriteBatchSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var batch = stale.Skip(start).Take(WriteBatchSize).Select(r => r.Id).ToList();
             try
             {
-                Manager.DeleteById(stale[i].Id);
-                pruned++;
+                pruned += Manager.DeleteByIds(batch);
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "{Task}: failed to prune stale record id {Id}", Name, stale[i].Id);
+                Logger.LogWarning(ex, "{Task}: failed to prune {Count} stale record(s) starting at id {Id}", Name, batch.Count, batch[0]);
             }
 
-            if ((i + 1) % reportEvery == 0)
-            {
-                progress.Report(100.0 * (i + 1) / stale.Count);
-            }
+            progress.Report(100.0 * Math.Min(start + batch.Count, stale.Count) / stale.Count);
         }
 
         progress.Report(100);
@@ -990,8 +919,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     }
 
     // Builds and stores one row per source item. When BuildRecordAsync spends most of its time on per
-    // item HTTP calls, as Metadata does, parallelism turns hours into minutes. SQLite still serializes
-    // the upserts through the manager's write lock.
+    // item HTTP calls, as Metadata does, parallelism turns hours into minutes. The rows are written in
+    // batches, one transaction each, through the manager's write lock.
     private async Task BuildAllAsync(RefreshRun run, IList<TSource> sourceItems, IProgress<double> progress, CancellationToken cancellationToken)
     {
         var parallelism = Math.Max(1, BuildRecordParallelism);
@@ -1012,7 +941,37 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 .ConfigureAwait(false);
         }
 
+        FlushWrites(run, all: true);
         run.SeenKeySet = new HashSet<TKey>(run.SeenKeys.Keys);
+    }
+
+    /// <summary>
+    /// How many built rows are written per transaction. One commit per row made a large library's
+    /// scan spend most of its time waiting on the disk.
+    /// </summary>
+    protected const int WriteBatchSize = 250;
+
+    // Writes the rows built so far in one transaction. One writer at a time, so batches stay whole
+    // while the builders keep adding behind it.
+    private void FlushWrites(RefreshRun run, bool all)
+    {
+        lock (run.FlushLock)
+        {
+            while (all ? !run.PendingWrites.IsEmpty : run.PendingWrites.Count >= WriteBatchSize)
+            {
+                var batch = new List<TRecord>(WriteBatchSize);
+                while (batch.Count < WriteBatchSize && run.PendingWrites.TryDequeue(out var record))
+                {
+                    batch.Add(record);
+                }
+
+                Manager.UpsertMany(batch, (record, ex) =>
+                {
+                    run.CountPersistFailure();
+                    Logger.LogError(ex, "{Task}: failed to upsert record for key {Key}", Name, ExtractKey(record));
+                });
+            }
+        }
     }
 
     // A single bad item never aborts the refresh. Its failure is counted so the run skips the prune and
@@ -1074,18 +1033,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 run.QueuedThisRun.Add(record);
             }
 
-            try
+            run.PendingWrites.Enqueue(record);
+            if (run.PendingWrites.Count >= WriteBatchSize)
             {
-                Manager.Upsert(record);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                run.CountPersistFailure();
-                Logger.LogError(ex, "{Task}: failed to upsert record for key {Key}", Name, key);
+                FlushWrites(run, all: false);
             }
         }
         finally
@@ -1361,17 +1312,19 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
 
         var retired = 0;
-        foreach (var kvp in candidates)
+        foreach (var batch in candidates.Chunk(WriteBatchSize))
         {
             try
             {
-                Manager.DeleteById(kvp.Value.Id);
-                seenKeySet.Add(kvp.Key);
-                retired++;
+                retired += Manager.DeleteByIds(batch.Select(kvp => kvp.Value.Id).ToList());
+                foreach (var kvp in batch)
+                {
+                    seenKeySet.Add(kvp.Key);
+                }
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "{Task}: failed to retire superseded row id {Id}", Name, kvp.Value.Id);
+                Logger.LogWarning(ex, "{Task}: failed to retire {Count} superseded row(s) starting at id {Id}", Name, batch.Length, batch[0].Value.Id);
             }
         }
 
@@ -1383,18 +1336,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// the configuration. Failures here are logged but never propagate, a
     /// failed save mustn't mask the actual run result.
     /// </summary>
-    private void RecordRunCompletedAndSave()
-    {
-        try
-        {
-            RecordRunCompleted(_configManager.Configuration, DateTime.UtcNow);
-            _configManager.SaveConfiguration();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "{Task}: failed to save run-completion timestamp", Name);
-        }
-    }
+    private void RecordRunCompletedAndSave() => ScanSources.RecordCompletedAndSave(_configManager, RecordRunCompleted, Logger, Name);
 
     /// <summary>
     /// Records the most-recent run failure for this module on the plugin
@@ -1450,6 +1392,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         public System.Collections.Concurrent.ConcurrentDictionary<string, byte> SeenPriorityKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public System.Collections.Concurrent.ConcurrentBag<TRecord> QueuedThisRun { get; } = new();
+
+        public System.Collections.Concurrent.ConcurrentQueue<TRecord> PendingWrites { get; } = new();
+
+        public object FlushLock { get; } = new();
 
         /// <summary>Gets or sets the keys the build saw, fixed once the build is done.</summary>
         public HashSet<TKey> SeenKeySet { get; set; } = new();

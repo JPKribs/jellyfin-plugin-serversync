@@ -83,36 +83,56 @@ public class DownloadService
 
         try
         {
-            // Download with retry support
+            // Download with retry support. A partial file from a failed attempt is kept and resumed,
+            // so a drop at 90% of a large file costs the last 10%, not the whole file again. The
+            // validator ties the resume to the same file on the source.
+            CleanupTempFile(tempFilePath);
+            string? validator = null;
             await RetryPolicy.ExecuteWithRetryAsync(
                 async ct =>
                 {
-                    var (sourceStream, contentLength) = await client.DownloadFileAsync(itemId, ct).ConfigureAwait(false);
-                    using (sourceStream)
+                    var kept = validator is null ? 0 : ExistingLength(tempFilePath);
+                    var download = await client.DownloadFileFromAsync(itemId, kept, validator, ct).ConfigureAwait(false);
+                    validator = download.Validator;
+                    using (download.Stream)
                     {
-                        // Ensure we don't have a partial file from previous attempt
-                        CleanupTempFile(tempFilePath);
-
-                        using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        if (download.Offset == 0)
                         {
-                            // Content-Length is authoritative. The recorded
+                            // Not resumed: nothing kept, or the source sent the whole file again.
+                            CleanupTempFile(tempFilePath);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Resuming {FileName} from {Offset} bytes", fileName, download.Offset);
+                        }
+
+                        var mode = download.Offset > 0 ? FileMode.Append : FileMode.Create;
+                        using (var fileStream = new FileStream(tempFilePath, mode, FileAccess.Write, FileShare.None))
+                        {
+                            // The total length is authoritative. The recorded
                             // SourceSize is the fallback (can be stale but is
                             // the right order of magnitude). No basis → no
                             // in-file reporting. The item still completes its
                             // share when it finishes.
-                            var expectedBytes = contentLength ?? (item.SourceSize > 0 ? item.SourceSize : (long?)null);
-                            Stream destination = progress != null && expectedBytes.HasValue
-                                ? new ProgressReportingStream(fileStream, expectedBytes.Value, progress)
+                            var expectedBytes = download.TotalLength ?? (item.SourceSize > 0 ? item.SourceSize : (long?)null);
+                            Stream destination = progress != null && expectedBytes > 0
+                                ? new ProgressReportingStream(fileStream, expectedBytes.Value, progress, download.Offset)
                                 : fileStream;
-                            await CopyWithStallWatchdogAsync(sourceStream, destination, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
+                            await CopyWithStallWatchdogAsync(download.Stream, destination, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
                         }
                     }
 
                     var downloadedInfo = new FileInfo(tempFilePath);
-                    if (contentLength.HasValue && downloadedInfo.Length != contentLength.Value)
+                    if (download.TotalLength.HasValue && downloadedInfo.Length != download.TotalLength.Value)
                     {
-                        var errorMsg = $"Truncated download: expected {contentLength.Value} bytes, got {downloadedInfo.Length} bytes";
-                        CleanupTempFile(tempFilePath);
+                        var errorMsg = $"Truncated download: expected {download.TotalLength.Value} bytes, got {downloadedInfo.Length} bytes";
+                        if (downloadedInfo.Length > download.TotalLength.Value)
+                        {
+                            // Longer than the file can be: the kept bytes do not belong to it.
+                            validator = null;
+                            CleanupTempFile(tempFilePath);
+                        }
+
                         throw new InvalidOperationException(errorMsg);
                     }
 
@@ -445,6 +465,20 @@ public class DownloadService
             window,
             (watched, to, token) => StreamUtilities.CopyWithSpeedLimitAsync(watched, to, speedLimitBytesPerSecond, token),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    // The bytes a failed attempt left behind, or 0 when there is nothing to resume from.
+    private static long ExistingLength(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists ? info.Length : 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     /// <summary>

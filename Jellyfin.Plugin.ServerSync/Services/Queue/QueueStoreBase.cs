@@ -7,9 +7,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Shared plumbing for the queue tables. Every read and write runs under the sync database's one
-/// write lock, the same way the sync table managers do, so the workers and the controllers never
-/// interleave statements on the shared connection.
+/// Shared plumbing for the queue tables. Every write runs under the sync database's one write lock,
+/// the same way the sync table managers do, so the workers and the controllers never interleave
+/// statements on the write connection. Reads use read connections of their own.
 /// </summary>
 public abstract class QueueStoreBase
 {
@@ -31,17 +31,14 @@ public abstract class QueueStoreBase
     /// <summary>Gets the logger.</summary>
     protected ILogger Logger { get; }
 
-    /// <summary>Runs a read under the write lock.</summary>
+    /// <summary>Runs a read on a read connection, beside any write in progress.</summary>
     /// <typeparam name="T">The result type.</typeparam>
     /// <param name="read">The read.</param>
     /// <returns>The result.</returns>
     protected T Read<T>(Func<SqliteConnection, T> read)
     {
         ArgumentNullException.ThrowIfNull(read);
-        lock (Database.WriteLock)
-        {
-            return read(Database.Connection);
-        }
+        return Database.RunRead(read);
     }
 
     /// <summary>Runs a write under the write lock.</summary>

@@ -170,97 +170,34 @@ public sealed class MetadataSyncTableManager
     public override void Upsert(MetadataSyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        ExecuteWrite(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-                INSERT INTO MetadataSyncItems (
-                    SourceLibraryId, LocalLibraryId, SourceItemId, LocalItemId,
-                    ItemName, SourcePath, LocalPath, ItemType, IsFolder,
-                    SourceMetadataValue, LocalMetadataValue, SourceMetadataHash, SyncedMetadataHash,
-                    SourceImagesValue, LocalImagesValue, SourceImagesHash, SyncedImagesHash,
-                    SourcePeopleValue, LocalPeopleValue, SourcePeopleHash, SyncedPeopleHash,
-                    SourceStudiosValue, LocalStudiosValue, SourceStudiosHash, SyncedStudiosHash,
-                    Status, StatusDate, LastSyncTime, Reason, RetryCount, ServerKey
-                ) VALUES (
-                    @sourceLibraryId, @localLibraryId, @sourceItemId, @localItemId,
-                    @itemName, @sourcePath, @localPath, @itemType, @isFolder,
-                    @srcMeta, @locMeta, @srcMetaHash, @syncedMetaHash,
-                    @srcImg, @locImg, @srcImgHash, @syncedImgHash,
-                    @srcPeople, @locPeople, @srcPeopleHash, @syncedPeopleHash,
-                    @srcStudios, @locStudios, @srcStudiosHash, @syncedStudiosHash,
-                    @status, @statusDate, @lastSync, @reason, @retryCount, @serverKey
-                )
-                ON CONFLICT(SourceLibraryId, SourceItemId) DO UPDATE SET
-                    LocalLibraryId = @localLibraryId,
-                    LocalItemId = @localItemId,
-                    ItemName = @itemName,
-                    SourcePath = @sourcePath,
-                    LocalPath = @localPath,
-                    ItemType = @itemType,
-                    IsFolder = @isFolder,
-                    SourceMetadataValue = @srcMeta,
-                    LocalMetadataValue = @locMeta,
-                    SourceMetadataHash = @srcMetaHash,
-                    SyncedMetadataHash = CASE WHEN @syncedMetaHash IS NOT NULL THEN @syncedMetaHash ELSE MetadataSyncItems.SyncedMetadataHash END,
-                    SourceImagesValue = @srcImg,
-                    LocalImagesValue = @locImg,
-                    SourceImagesHash = @srcImgHash,
-                    SyncedImagesHash = CASE WHEN @syncedImgHash IS NOT NULL THEN @syncedImgHash ELSE MetadataSyncItems.SyncedImagesHash END,
-                    SourcePeopleValue = @srcPeople,
-                    LocalPeopleValue = @locPeople,
-                    SourcePeopleHash = @srcPeopleHash,
-                    SyncedPeopleHash = CASE WHEN @syncedPeopleHash IS NOT NULL THEN @syncedPeopleHash ELSE MetadataSyncItems.SyncedPeopleHash END,
-                    SourceStudiosValue = @srcStudios,
-                    LocalStudiosValue = @locStudios,
-                    SourceStudiosHash = @srcStudiosHash,
-                    SyncedStudiosHash = CASE WHEN @syncedStudiosHash IS NOT NULL THEN @syncedStudiosHash ELSE MetadataSyncItems.SyncedStudiosHash END,
-                    Status = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
-                    StatusDate = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.StatusDate ELSE @statusDate END,
-                    LastSyncTime = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.LastSyncTime ELSE @lastSync END,
-                    Reason = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.Reason ELSE @reason END,
-                    RetryCount = CASE WHEN MetadataSyncItems.Status = @ignoredStatus THEN MetadataSyncItems.RetryCount ELSE @retryCount END,
-                    ServerKey = @serverKey";
-
-            cmd.Parameters.AddWithValue("@sourceLibraryId", record.SourceLibraryId);
-            cmd.Parameters.AddWithValue("@localLibraryId", record.LocalLibraryId);
-            cmd.Parameters.AddWithValue("@sourceItemId", record.SourceItemId);
-            AddNullable(cmd, "@localItemId", record.LocalItemId);
-            AddNullable(cmd, "@itemName", record.ItemName);
-            AddNullable(cmd, "@sourcePath", record.SourcePath);
-            AddNullable(cmd, "@localPath", record.LocalPath);
-            AddNullable(cmd, "@itemType", record.ItemType);
-            cmd.Parameters.AddWithValue("@isFolder", record.IsFolder ? 1 : 0);
-
-            AddNullable(cmd, "@srcMeta", record.Metadata.Source);
-            AddNullable(cmd, "@locMeta", record.Metadata.Local);
-            AddNullable(cmd, "@srcMetaHash", record.Metadata.SourceHash);
-            AddNullable(cmd, "@syncedMetaHash", record.Metadata.SyncedHash);
-
-            AddNullable(cmd, "@srcImg", record.Images.Source);
-            AddNullable(cmd, "@locImg", record.Images.Local);
-            AddNullable(cmd, "@srcImgHash", record.Images.SourceHash);
-            AddNullable(cmd, "@syncedImgHash", record.Images.SyncedHash);
-
-            AddNullable(cmd, "@srcPeople", record.People.Source);
-            AddNullable(cmd, "@locPeople", record.People.Local);
-            AddNullable(cmd, "@srcPeopleHash", record.People.SourceHash);
-            AddNullable(cmd, "@syncedPeopleHash", record.People.SyncedHash);
-
-            AddNullable(cmd, "@srcStudios", record.Studios.Source);
-            AddNullable(cmd, "@locStudios", record.Studios.Local);
-            AddNullable(cmd, "@srcStudiosHash", record.Studios.SourceHash);
-            AddNullable(cmd, "@syncedStudiosHash", record.Studios.SyncedHash);
-
-            cmd.Parameters.AddWithValue("@status", (int)record.Status);
-            AddTimestamp(cmd, "@statusDate", record.StatusDate);
-            AddNullableTimestamp(cmd, "@lastSync", record.LastSyncTime);
-            AddNullable(cmd, "@reason", record.Reason);
-            cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
-            AddNullable(cmd, "@serverKey", record.ServerKey);
-            cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
-            cmd.ExecuteNonQuery();
-        });
+        var upsert = new UpsertBuilder(TableName)
+            .Key("SourceLibraryId", record.SourceLibraryId)
+            .Key("SourceItemId", record.SourceItemId)
+            .Set("LocalLibraryId", record.LocalLibraryId)
+            .Set("LocalItemId", record.LocalItemId)
+            .Set("ItemName", record.ItemName)
+            .Set("SourcePath", record.SourcePath)
+            .Set("LocalPath", record.LocalPath)
+            .Set("ItemType", record.ItemType)
+            .Set("IsFolder", record.IsFolder ? 1 : 0)
+            .Set("SourceMetadataValue", record.Metadata.Source)
+            .Set("LocalMetadataValue", record.Metadata.Local)
+            .Set("SourceMetadataHash", record.Metadata.SourceHash)
+            .SetUnlessNull("SyncedMetadataHash", record.Metadata.SyncedHash)
+            .Set("SourceImagesValue", record.Images.Source)
+            .Set("LocalImagesValue", record.Images.Local)
+            .Set("SourceImagesHash", record.Images.SourceHash)
+            .SetUnlessNull("SyncedImagesHash", record.Images.SyncedHash)
+            .Set("SourcePeopleValue", record.People.Source)
+            .Set("LocalPeopleValue", record.People.Local)
+            .Set("SourcePeopleHash", record.People.SourceHash)
+            .SetUnlessNull("SyncedPeopleHash", record.People.SyncedHash)
+            .Set("SourceStudiosValue", record.Studios.Source)
+            .Set("LocalStudiosValue", record.Studios.Local)
+            .Set("SourceStudiosHash", record.Studios.SourceHash)
+            .SetUnlessNull("SyncedStudiosHash", record.Studios.SyncedHash)
+            .SyncColumns(record);
+        ExecuteWrite(upsert.Execute);
     }
 
     /// <summary>

@@ -142,6 +142,118 @@ public sealed class DownloadServiceTests : IDisposable
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
+    /// <summary>
+    /// Serves one file that drops after <c>dropAfter</c> bytes on its first answer, and honours a
+    /// range on later ones while the If-Range validator still matches.
+    /// </summary>
+    private sealed class RangeHandler : HttpMessageHandler
+    {
+        private readonly byte[] _file;
+        private readonly int _dropAfter;
+        private readonly string _etag;
+
+        public RangeHandler(string file, int dropAfter, string etag = "\"v1\"")
+        {
+            _file = Encoding.ASCII.GetBytes(file);
+            _dropAfter = dropAfter;
+            _etag = etag;
+        }
+
+        public System.Collections.Generic.List<string?> Ranges { get; } = new();
+
+        public string CurrentETag { get; set; } = "\"v1\"";
+
+        public byte[]? ReplacementFile { get; set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var range = request.Headers.Range?.Ranges.FirstOrDefault();
+            Ranges.Add(range?.From?.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var file = ReplacementFile ?? _file;
+            var first = Ranges.Count == 1;
+            var ifRangeMatches = request.Headers.IfRange?.EntityTag?.ToString() == CurrentETag;
+            HttpResponseMessage response;
+            if (range?.From is { } from && ifRangeMatches)
+            {
+                var rest = file.AsMemory((int)from).ToArray();
+                response = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new ByteArrayContent(rest) };
+                response.Content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(from, file.Length - 1, file.Length);
+            }
+            else
+            {
+                Stream body = first ? new ScriptedStream(file.AsMemory(0, _dropAfter).ToArray(), stallAfterPrefix: true) : new MemoryStream(file);
+                response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) };
+                response.Content.Headers.ContentLength = file.Length;
+            }
+
+            response.Headers.ETag = System.Net.Http.Headers.EntityTagHeaderValue.Parse(CurrentETag);
+            return Task.FromResult(response);
+        }
+    }
+
+    /// <summary>
+    /// A download that drops partway is resumed from the bytes already kept.
+    /// True: a failure at 90% of a large file costs the last 10%.
+    /// False: every retry starts the whole file again.
+    /// </summary>
+    [Fact]
+    public async Task DownloadItem_DroppedPartway_ResumesFromTheKeptBytes()
+    {
+        var item = Item();
+        var handler = new RangeHandler("0123456789", dropAfter: 6);
+        using var client = new SourceServerClient(NullLogger<SourceServerClient>.Instance, new HttpClient(handler), "http://source.test", "key", "test", "0");
+        var service = new DownloadService(NullLogger<DownloadService>.Instance) { StallTimeout = TimeSpan.FromMilliseconds(200) };
+
+        var result = await service.DownloadItemAsync(client, item, _downloadDir, 0, false, Config(retries: 2));
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("0123456789", File.ReadAllText(item.LocalPath!));
+        Assert.Equal(new string?[] { null, "6" }, handler.Ranges);
+    }
+
+    /// <summary>
+    /// A file that changed on the source between attempts comes back whole.
+    /// True: If-Range keeps stale kept bytes from being stitched onto a different file.
+    /// False: the result would be half of each version.
+    /// </summary>
+    [Fact]
+    public async Task DownloadItem_SourceChangedBetweenAttempts_StartsOver()
+    {
+        var item = Item();
+        var handler = new RangeHandler("0123456789", dropAfter: 6);
+        using var client = new SourceServerClient(NullLogger<SourceServerClient>.Instance, new HttpClient(new ChangeAfterFirst(handler)), "http://source.test", "key", "test", "0");
+        var service = new DownloadService(NullLogger<DownloadService>.Instance) { StallTimeout = TimeSpan.FromMilliseconds(200) };
+
+        var result = await service.DownloadItemAsync(client, item, _downloadDir, 0, false, Config(retries: 2));
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("abcdefghij", File.ReadAllText(item.LocalPath!));
+    }
+
+    // Swaps the source file and its ETag after the first request.
+    private sealed class ChangeAfterFirst : DelegatingHandler
+    {
+        private readonly RangeHandler _inner;
+        private int _calls;
+
+        public ChangeAfterFirst(RangeHandler inner)
+            : base(inner)
+        {
+            _inner = inner;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (++_calls == 2)
+            {
+                _inner.CurrentETag = "\"v2\"";
+                _inner.ReplacementFile = Encoding.ASCII.GetBytes("abcdefghij");
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+
     private static SourceServerClient Client(StubHandler handler)
         => new(NullLogger<SourceServerClient>.Instance, new HttpClient(handler), "http://source.test", "key", "test", "0");
 

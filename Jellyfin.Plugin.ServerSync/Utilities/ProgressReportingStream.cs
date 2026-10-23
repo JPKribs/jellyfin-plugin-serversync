@@ -31,14 +31,17 @@ public sealed class ProgressReportingStream : Stream
     /// <param name="inner">Destination stream. Not disposed by this wrapper.</param>
     /// <param name="expectedBytes">Total bytes expected. Must be positive.</param>
     /// <param name="progress">Receives the written fraction (0 to 1) at whole-percent steps.</param>
-    public ProgressReportingStream(Stream inner, long expectedBytes, IProgress<double> progress)
+    /// <param name="alreadyWritten">Bytes already in place before this stream, for a resumed download.</param>
+    public ProgressReportingStream(Stream inner, long expectedBytes, IProgress<double> progress, long alreadyWritten = 0)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(progress);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expectedBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(alreadyWritten);
         _inner = inner;
         _expectedBytes = expectedBytes;
         _progress = progress;
+        _written = alreadyWritten;
     }
 
     /// <inheritdoc />

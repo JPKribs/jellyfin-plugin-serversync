@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using JPKribs.Jellyfin.Base;
@@ -66,9 +67,53 @@ public interface ISyncTableManager<TRecord, TKey>
     void Upsert(TRecord record);
 
     /// <summary>
+    /// Inserts or updates many records, in one transaction where the table can. A record that fails is
+    /// handed to <paramref name="onFailure"/> and the rest are still written.
+    /// </summary>
+    /// <param name="records">The records.</param>
+    /// <param name="onFailure">Called with each record that could not be written.</param>
+    /// <returns>How many were written.</returns>
+    int UpsertMany(IReadOnlyList<TRecord> records, Action<TRecord, Exception> onFailure)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(onFailure);
+        var written = 0;
+        foreach (var record in records)
+        {
+            try
+            {
+                Upsert(record);
+                written++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                onFailure(record, ex);
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>
     /// Deletes a row by primary-key Id.
     /// </summary>
     void DeleteById(long id);
+
+    /// <summary>
+    /// Deletes many rows by primary-key Id, in one transaction where the table can.
+    /// </summary>
+    /// <param name="ids">The ids.</param>
+    /// <returns>How many rows were deleted.</returns>
+    int DeleteByIds(IReadOnlyCollection<long> ids)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        foreach (var id in ids)
+        {
+            DeleteById(id);
+        }
+
+        return ids.Count;
+    }
 
     /// <summary>
     /// Deletes a row by natural key.

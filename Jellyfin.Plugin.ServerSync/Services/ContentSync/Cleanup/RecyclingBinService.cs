@@ -251,7 +251,8 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Deletes files, and the plugin's recycled trickplay folders, in the recycling bin older than the retention period.
+    /// Deletes the files and recycled trickplay folders the plugin put in the recycling bin once they are
+    /// older than the retention period. Anything else in the folder is left alone.
     /// </summary>
     /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
     /// <param name="retentionDays">Number of days to retain files before deletion.</param>
@@ -278,12 +279,14 @@ public static class RecyclingBinService
             {
                 try
                 {
+                    // Only files the bin named expire, by the time in their name. A file named any
+                    // other way was put here by someone else and is never touched, however old.
+                    if (!FileOperationUtilities.TryReadRecycledTime(file, out var fileTime))
+                    {
+                        continue;
+                    }
+
                     var fileInfo = new FileInfo(file);
-
-                    // Check if file is older than retention period
-                    // Use the timestamp from the filename if possible, otherwise use file modification time
-                    var fileTime = FileOperationUtilities.ExtractTimestampFromFileName(file) ?? fileInfo.LastWriteTimeUtc;
-
                     if (fileTime < cutoffTime)
                     {
                         var fileSize = fileInfo.Length;

@@ -17,13 +17,14 @@ public sealed class HintSuppression
 
     public int Count => _held.Count;
 
+    // NoLocalItem is not held back: the item may still arrive after the peer stopped waiting for it,
+    // and holding the key would silence its first real edits there for a whole day.
     public static bool Suppresses(HintCode code) => code is HintCode.NotMapped
         or HintCode.Filtered
         or HintCode.Ignored
         or HintCode.ModuleOff
         or HintCode.Unsupported
-        or HintCode.Priority
-        or HintCode.NoLocalItem;
+        or HintCode.Priority;
 
     public bool Note(string peerKey, HintKind kind, string key, HintCode code, string? revision, DateTime utcNow)
     {

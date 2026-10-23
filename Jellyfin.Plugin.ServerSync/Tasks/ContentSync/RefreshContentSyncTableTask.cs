@@ -708,23 +708,25 @@ public class UpdateSyncTablesTask
         return changed;
     }
 
-    private int ShowAllTitles(ContentSyncTableManager manager)
+    private int ShowAllTitles(ContentSyncTableManager manager, IList<SyncItem> current)
     {
-        var hidden = manager.GetAllStrict().Where(IsHiddenTitle).ToList();
+        var hidden = current.Where(IsHiddenTitle).ToList();
         return hidden.Count == 0 ? 0 : ShowTitles(manager, hidden, TitleFolders(), _ => true, "since Removed files is no longer Ignore");
     }
 
-    private int StandDownDeletions(ContentSyncTableManager manager)
+    // Changes the rows in the list as well as in the table, so a later step reading the same list
+    // sees them stood down.
+    private int StandDownDeletions(ContentSyncTableManager manager, IList<SyncItem> current)
     {
-        var changed = 0;
-        foreach (var row in manager.GetAllStrict().Where(row => row.Status == SyncStatus.Deleting || (row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)))
+        var waiting = current.Where(row => row.Status == SyncStatus.Deleting || (row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)).ToList();
+        foreach (var row in waiting)
         {
             row.Status = SyncStatus.Synced;
             row.PendingType = null;
             row.StatusDate = DateTime.UtcNow;
-            manager.Upsert(row);
-            changed++;
         }
+
+        var changed = manager.UpsertMany(waiting, (row, ex) => Logger.LogWarning(ex, "Could not cancel the waiting deletion of {Path}", row.LocalPath ?? row.SourcePath));
 
         if (changed > 0)
         {
@@ -734,10 +736,9 @@ public class UpdateSyncTablesTask
         return changed;
     }
 
-    private int HideGoneTitles(ContentSyncTableManager manager, List<SyncItem> stale, HashSet<string> returned, Dictionary<string, LibraryMapping> mappingById)
+    private int HideGoneTitles(ContentSyncTableManager manager, IList<SyncItem> current, List<SyncItem> stale, HashSet<string> returned, Dictionary<string, LibraryMapping> mappingById)
     {
         var folderOf = TitleFolders();
-        var current = manager.GetAllStrict();
         var gone = stale.Where(row => !ScopeChanged(row, mappingById)).ToList();
         var goneKeys = new HashSet<string>(gone.Select(row => row.SourceItemId), StringComparer.OrdinalIgnoreCase);
         var alive = new HashSet<string>(
@@ -823,10 +824,14 @@ public class UpdateSyncTablesTask
         var action = ConfigManager.Configuration.EffectiveMissingContentAction;
         var hide = action == MissingContentAction.Ignore;
         var typedManager = (ContentSyncTableManager)Manager;
-        var settled = action == MissingContentAction.Delete ? 0 : StandDownDeletions(typedManager);
+
+        // The table as the build left it, read once for every step below. The snapshot passed in was
+        // taken before the build wrote this run's rows.
+        var current = typedManager.GetAllStrict();
+        var settled = action == MissingContentAction.Delete ? 0 : StandDownDeletions(typedManager, current);
         if (!hide)
         {
-            settled += ShowAllTitles(typedManager);
+            settled += ShowAllTitles(typedManager, current);
         }
 
         if (action != MissingContentAction.Delete && !hide)
@@ -888,7 +893,7 @@ public class UpdateSyncTablesTask
             var returned = new HashSet<string>(
                 existing.Where(kvp => seenKeys.Contains(kvp.Key) && IsHiddenTitle(kvp.Value)).Select(kvp => kvp.Value.SourceItemId),
                 StringComparer.OrdinalIgnoreCase);
-            return Task.FromResult(settled + HideGoneTitles(typedManager, stale, returned, mappingById));
+            return Task.FromResult(settled + HideGoneTitles(typedManager, current, stale, returned, mappingById));
         }
 
         var pruned = 0;

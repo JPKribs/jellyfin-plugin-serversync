@@ -16,6 +16,15 @@ public class PeerCapabilities
     public string PluginVersion { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the wire protocol the peer speaks. Null from a peer that predates protocol
+    /// versions, which is then only compatible with exactly its own plugin version.
+    /// </summary>
+    public int? ProtocolVersion { get; set; }
+
+    /// <summary>Gets or sets the oldest wire protocol the peer still speaks.</summary>
+    public int? MinProtocolVersion { get; set; }
+
+    /// <summary>
     /// Gets or sets the kinds of hint this server applies, by name: the modules that are on here. A
     /// sender only announces these kinds, so a module turned off on the receiver costs no traffic.
     /// </summary>

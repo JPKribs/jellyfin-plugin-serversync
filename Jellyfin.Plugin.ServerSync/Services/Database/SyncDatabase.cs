@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Data;
 using System.IO;
 using System.Linq;
@@ -17,9 +18,21 @@ public class SyncDatabase : IDisposable
 {
     private readonly ILogger<SyncDatabase> _logger;
     private readonly string _dbPath;
+    /// <summary>
+    /// The most read connections open at once. WAL lets readers run beside the writer, so the
+    /// dashboard's polling and the scans' lookups no longer queue behind every write.
+    /// </summary>
+    public const int MaxReadConnections = 4;
+
     private readonly object _writeLock = new();
+    private readonly ConcurrentBag<(SqliteConnection Connection, int Generation)> _idleReaders = new();
+    private readonly System.Threading.SemaphoreSlim _readerSlots = new(MaxReadConnections, MaxReadConnections);
     private SqliteConnection? _connection;
     private volatile bool _disposed;
+
+    // Bumped whenever the database file is replaced, so read connections to the old file are dropped
+    // instead of being handed out again.
+    private int _generation;
 
     public SyncDatabase(ILogger<SyncDatabase> logger, string dataPath)
     {
@@ -55,6 +68,129 @@ public class SyncDatabase : IDisposable
     /// against the same connection.
     /// </summary>
     internal object WriteLock => _writeLock;
+
+    /// <summary>
+    /// Runs a read on a read connection of its own, so it does not wait for the write lock. A read
+    /// made while this thread holds the write lock runs on the write connection instead, since only
+    /// that connection sees the rows of a transaction still open there.
+    /// </summary>
+    /// <typeparam name="T">The result type.</typeparam>
+    /// <param name="read">The read.</param>
+    /// <returns>Its result.</returns>
+    internal T RunRead<T>(Func<SqliteConnection, T> read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        if (System.Threading.Monitor.IsEntered(_writeLock))
+        {
+            return read(Connection);
+        }
+
+        ThrowIfDisposed();
+        _readerSlots.Wait();
+        SqliteConnection? reader = null;
+        var generation = System.Threading.Volatile.Read(ref _generation);
+        var healthy = false;
+        try
+        {
+            reader = RentReader(generation);
+            var result = read(reader);
+            healthy = true;
+            return result;
+        }
+        finally
+        {
+            ReturnReader(reader, generation, healthy);
+            _readerSlots.Release();
+        }
+    }
+
+    private SqliteConnection RentReader(int generation)
+    {
+        while (_idleReaders.TryTake(out var idle))
+        {
+            if (idle.Generation == generation && idle.Connection.State == ConnectionState.Open)
+            {
+                return idle.Connection;
+            }
+
+            idle.Connection.Dispose();
+        }
+
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false
+        }.ToString());
+        try
+        {
+            connection.Open();
+            using var pragma = connection.CreateCommand();
+            pragma.CommandText = "PRAGMA busy_timeout=5000; PRAGMA query_only=1;";
+            pragma.ExecuteNonQuery();
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    // A connection that failed, belongs to a replaced file, or outlived the database is closed rather
+    // than kept for the next read.
+    private void ReturnReader(SqliteConnection? reader, int generation, bool healthy)
+    {
+        if (reader is null)
+        {
+            return;
+        }
+
+        if (healthy && !_disposed && generation == System.Threading.Volatile.Read(ref _generation))
+        {
+            _idleReaders.Add((reader, generation));
+            return;
+        }
+
+        reader.Dispose();
+    }
+
+    // Waits for every read in flight to finish and holds new ones back while the file is replaced,
+    // since an open handle keeps Windows from moving or deleting it.
+    private void WithReadersDrained(Action replace)
+    {
+        var taken = 0;
+        try
+        {
+            for (; taken < MaxReadConnections; taken++)
+            {
+                if (!_readerSlots.Wait(TimeSpan.FromSeconds(30)))
+                {
+                    _logger.LogWarning("A read of the sync database is still running after 30 seconds. Replacing the file anyway");
+                    break;
+                }
+            }
+
+            replace();
+        }
+        finally
+        {
+            if (taken > 0)
+            {
+                _readerSlots.Release(taken);
+            }
+        }
+    }
+
+    // Closes every idle read connection and retires the ones in use, for when the file is replaced.
+    private void DropReaders()
+    {
+        System.Threading.Interlocked.Increment(ref _generation);
+        while (_idleReaders.TryTake(out var idle))
+        {
+            idle.Connection.Dispose();
+        }
+    }
 
     /// <summary>
     /// Throws ObjectDisposedException if the database has been disposed.
@@ -141,6 +277,7 @@ public class SyncDatabase : IDisposable
     /// </summary>
     private void CloseConnection()
     {
+        DropReaders();
         _connection?.Close();
         _connection?.Dispose();
         _connection = null;
@@ -289,8 +426,11 @@ public class SyncDatabase : IDisposable
     /// <param name="reason">The word in the backup's name, <c>corrupt</c> or <c>newer</c>.</param>
     private void RecreateDatabase(string reason)
     {
-        CloseConnection();
-        DatabaseSchema.SetAside(_dbPath, reason, 3, _logger);
+        WithReadersDrained(() =>
+        {
+            CloseConnection();
+            DatabaseSchema.SetAside(_dbPath, reason, 3, _logger);
+        });
         _connection = OpenConnection();
         OpenSchema(_connection);
         _logger.LogInformation("Database recreated with fresh schema v{Version}", DatabaseMigrationService.CurrentSchemaVersion);
@@ -343,16 +483,19 @@ public class SyncDatabase : IDisposable
         {
             _logger.LogWarning("Resetting sync database - all tracking data will be lost");
 
-            CloseConnection();
-
-            // Delete main database file with retry logic
-            if (File.Exists(_dbPath))
+            WithReadersDrained(() =>
             {
-                DeleteFileWithRetry(_dbPath);
-            }
+                CloseConnection();
 
-            // Also delete WAL and SHM files if they exist
-            DeleteWalFiles();
+                // Delete main database file with retry logic
+                if (File.Exists(_dbPath))
+                {
+                    DeleteFileWithRetry(_dbPath);
+                }
+
+                // Also delete WAL and SHM files if they exist
+                DeleteWalFiles();
+            });
 
             InitializeDatabase();
             _logger.LogInformation("Sync database has been reset with fresh schema v{Version}", DatabaseMigrationService.CurrentSchemaVersion);
@@ -379,6 +522,7 @@ public class SyncDatabase : IDisposable
 
                 try
                 {
+                    DropReaders();
                     _connection?.Close();
                     _connection?.Dispose();
                     _connection = null;

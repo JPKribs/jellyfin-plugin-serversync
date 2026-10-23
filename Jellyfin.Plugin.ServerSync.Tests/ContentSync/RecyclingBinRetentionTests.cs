@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Text;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -82,5 +84,103 @@ public sealed class RecyclingBinRetentionTests : IDisposable
 
         Assert.True(Directory.Exists(folder));
         Assert.True(File.Exists(Path.Combine(folder, "320 - 10x10", "0.jpg")));
+    }
+
+    private string FileIn(string name, DateTime? modified = null)
+    {
+        var path = Path.Combine(_bin, name);
+        File.WriteAllText(path, "12345");
+        File.SetLastWriteTimeUtc(path, modified ?? DateTime.UtcNow);
+        return path;
+    }
+
+    /// <summary>
+    /// The plugin's expired files go, including ones renamed because their name was taken, and recent
+    /// ones stay.
+    /// True: recycled files expire on schedule.
+    /// False: renamed duplicates never parse and pile up, or recent files go early.
+    /// </summary>
+    [Fact]
+    public void Cleanup_RemovesOnlyExpiredRecycledFiles()
+    {
+        var old = DateTime.UtcNow.AddDays(-60);
+        var expired = FileIn($"media.Movies.Title_{Stamp(old)}.mkv");
+        var expiredSuffixed = FileIn($"media.Movies.Title_{Stamp(old)}_0a1b2c3d.mkv");
+        var recent = FileIn($"media.Movies.Title_{Stamp(DateTime.UtcNow)}.mkv");
+
+        var deleted = RecyclingBinService.CleanupExpiredFiles(_bin, 30, NullLogger.Instance);
+
+        Assert.Equal(2, deleted);
+        Assert.False(File.Exists(expired));
+        Assert.False(File.Exists(expiredSuffixed));
+        Assert.True(File.Exists(recent));
+    }
+
+    /// <summary>
+    /// Files the plugin did not name are never touched, however old.
+    /// True: a bin shared with other tools keeps their files.
+    /// False: any old file in the folder is deleted by its modified time.
+    /// </summary>
+    [Theory]
+    [InlineData("notes.txt")]
+    [InlineData("backup.tar.gz")]
+    [InlineData("Backup_2024-01-01.zip")]
+    public void Cleanup_LeavesFilesItDidNotName(string name)
+    {
+        var file = FileIn(name, DateTime.UtcNow.AddYears(-3));
+
+        RecyclingBinService.CleanupExpiredFiles(_bin, 30, NullLogger.Instance);
+
+        Assert.True(File.Exists(file));
+    }
+
+    /// <summary>
+    /// A file deep in a library gets a recycled name the filesystem accepts, that still carries its
+    /// timestamp and extension, and two deep files in different folders keep different names.
+    /// True: recycling works for long TV paths.
+    /// False: the move fails with a name too long, and the deletion or replacement errors.
+    /// </summary>
+    [Fact]
+    public void RecycledName_ForADeepPath_FitsTheFilesystemLimit()
+    {
+        var deep = string.Join("/", new string('a', 120), new string('b', 120), new string('c', 120));
+        var at = new DateTime(2026, 10, 23, 12, 0, 0, DateTimeKind.Utc);
+
+        var one = FileOperationUtilities.GenerateRecycledFileName($"/media/{deep}/Show/Season 01/Show - S01E01 - Pilot.mkv", at);
+        var two = FileOperationUtilities.GenerateRecycledFileName($"/other/{deep}/Show/Season 01/Show - S01E01 - Pilot.mkv", at);
+
+        Assert.True(Encoding.UTF8.GetByteCount(one) <= FileOperationUtilities.MaxRecycledNameBytes);
+        Assert.EndsWith("_2026-10-23_12-00-00.mkv", one, StringComparison.Ordinal);
+        Assert.Contains("Show - S01E01 - Pilot", one, StringComparison.Ordinal);
+        Assert.NotEqual(one, two);
+        Assert.True(FileOperationUtilities.TryReadRecycledTime(one, out var read));
+        Assert.Equal(at, read);
+    }
+
+    /// <summary>
+    /// A file whose own name is near the limit still gets a name that fits, cut without splitting a
+    /// multi-byte character.
+    /// </summary>
+    [Fact]
+    public void RecycledName_ForAVeryLongFileName_IsCutToFit()
+    {
+        var name = new string('é', 200) + ".mkv";
+
+        var recycled = FileOperationUtilities.GenerateRecycledFileName("/media/Movies/" + name, DateTime.UtcNow);
+
+        Assert.True(Encoding.UTF8.GetByteCount(recycled) <= FileOperationUtilities.MaxRecycledNameBytes);
+        Assert.EndsWith(".mkv", recycled, StringComparison.Ordinal);
+        Assert.True(FileOperationUtilities.TryReadRecycledTime(recycled, out _));
+    }
+
+    /// <summary>A short path is named exactly as before.</summary>
+    [Fact]
+    public void RecycledName_ForAShortPath_IsUnchanged()
+    {
+        var at = new DateTime(2026, 1, 29, 17, 30, 45, DateTimeKind.Utc);
+
+        var recycled = FileOperationUtilities.GenerateRecycledFileName(Path.Combine("/media", "Movies", "Title.mkv"), at);
+
+        Assert.Equal("media.Movies.Title_2026-01-29_17-30-45.mkv", recycled);
     }
 }

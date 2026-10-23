@@ -16,7 +16,7 @@ public class DownloadCircuitBreakerTests
     private abstract class Probe : SyncMissingContentTask
     {
         private Probe()
-            : base(null!, null!, null!, null!, null!, null!)
+            : base(null!, null!, null!, null!, null!, null!, null!)
         {
         }
 

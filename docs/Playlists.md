@@ -35,4 +35,4 @@ Server Sync records which local playlists are copies in its database, and tags t
 
 See [Permissions](Permissions.md) for what each kind of key can read.
 
-Playlists only travel between servers running the same Server Sync version.
+Playlists only travel between servers whose Server Sync protocols are compatible.

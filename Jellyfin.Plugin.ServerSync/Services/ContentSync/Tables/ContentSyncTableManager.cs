@@ -113,55 +113,19 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     public override void Upsert(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        ExecuteWrite(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-                INSERT INTO SyncItems (
-                    SourceLibraryId, LocalLibraryId, SourceItemId, SourcePath, SourceSize,
-                    SourceCreateDate, LocalItemId, LocalPath, StatusDate, Status,
-                    PendingType, LastSyncTime, Reason, RetryCount, CompanionFiles, ServerKey
-                ) VALUES (
-                    @sourceLibraryId, @localLibraryId, @sourceItemId, @sourcePath, @sourceSize,
-                    @sourceCreateDate, @localItemId, @localPath, @statusDate, @status,
-                    @pendingType, @lastSyncTime, @reason, @retryCount, @companionFiles, @serverKey
-                )
-                ON CONFLICT(SourceItemId) DO UPDATE SET
-                    SourceLibraryId = @sourceLibraryId,
-                    LocalLibraryId = @localLibraryId,
-                    SourcePath = @sourcePath,
-                    SourceSize = @sourceSize,
-                    SourceCreateDate = @sourceCreateDate,
-                    LocalItemId = @localItemId,
-                    LocalPath = @localPath,
-                    StatusDate = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.StatusDate ELSE @statusDate END,
-                    Status = CASE WHEN SyncItems.Status = @ignoredStatus THEN @ignoredStatus ELSE @status END,
-                    PendingType = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.PendingType ELSE @pendingType END,
-                    LastSyncTime = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.LastSyncTime ELSE @lastSyncTime END,
-                    Reason = CASE WHEN SyncItems.Status = @ignoredStatus THEN SyncItems.Reason ELSE @reason END,
-                    RetryCount = @retryCount,
-                    CompanionFiles = @companionFiles,
-                    ServerKey = @serverKey";
-
-            cmd.Parameters.AddWithValue("@sourceLibraryId", record.SourceLibraryId);
-            cmd.Parameters.AddWithValue("@localLibraryId", record.LocalLibraryId);
-            cmd.Parameters.AddWithValue("@sourceItemId", record.SourceItemId);
-            cmd.Parameters.AddWithValue("@sourcePath", record.SourcePath);
-            cmd.Parameters.AddWithValue("@sourceSize", record.SourceSize);
-            AddTimestamp(cmd, "@sourceCreateDate", record.SourceCreateDate);
-            AddNullable(cmd, "@localItemId", record.LocalItemId);
-            AddNullable(cmd, "@localPath", record.LocalPath);
-            AddTimestamp(cmd, "@statusDate", record.StatusDate);
-            cmd.Parameters.AddWithValue("@status", (int)record.Status);
-            AddNullable(cmd, "@pendingType", record.PendingType.HasValue ? (int)record.PendingType.Value : (object?)null);
-            AddNullableTimestamp(cmd, "@lastSyncTime", record.LastSyncTime);
-            AddNullable(cmd, "@reason", record.Reason);
-            cmd.Parameters.AddWithValue("@retryCount", record.RetryCount);
-            AddNullable(cmd, "@companionFiles", record.CompanionFiles);
-            AddNullable(cmd, "@serverKey", record.ServerKey);
-            cmd.Parameters.AddWithValue("@ignoredStatus", (int)SyncStatus.Ignored);
-            cmd.ExecuteNonQuery();
-        });
+        var upsert = new UpsertBuilder(TableName)
+            .Key("SourceItemId", record.SourceItemId)
+            .Set("SourceLibraryId", record.SourceLibraryId)
+            .Set("LocalLibraryId", record.LocalLibraryId)
+            .Set("SourcePath", record.SourcePath)
+            .Set("SourceSize", record.SourceSize)
+            .Set("SourceCreateDate", UpsertBuilder.Time(record.SourceCreateDate))
+            .Set("LocalItemId", record.LocalItemId)
+            .Set("LocalPath", record.LocalPath)
+            .SetUnlessIgnored("PendingType", record.PendingType.HasValue ? (int)record.PendingType.Value : null)
+            .Set("CompanionFiles", record.CompanionFiles)
+            .SyncColumns(record);
+        ExecuteWrite(upsert.Execute);
     }
 
     /// <summary>

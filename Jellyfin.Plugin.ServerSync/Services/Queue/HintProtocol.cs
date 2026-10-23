@@ -125,13 +125,92 @@ public static class HintProtocol
 
     public const string VersionHeader = "X-ServerSync-Version";
 
+    /// <summary>The header carrying the wire protocol the caller speaks.</summary>
+    public const string ProtocolHeader = "X-ServerSync-Protocol";
+
+    /// <summary>The header carrying the oldest wire protocol the caller still speaks.</summary>
+    public const string MinProtocolHeader = "X-ServerSync-Min-Protocol";
+
+    /// <summary>
+    /// The wire protocol this build speaks. It is separate from the plugin version so a patch release
+    /// does not cut a pool off until every server is updated. Bump it only when a hint, a peer route, or
+    /// a decision rule changes in a way an older peer would misread.
+    /// </summary>
+    public const int ProtocolVersion = 1;
+
+    /// <summary>
+    /// The oldest wire protocol this build still speaks. Raise it when support for an older protocol is
+    /// dropped. A build that bumps <see cref="ProtocolVersion"/> while keeping this lower must still
+    /// answer the older protocol's requests the way that protocol expects.
+    /// </summary>
+    public const int MinProtocolVersion = 1;
+
     public const int VersionMismatchStatus = 426;
 
     public static bool SameVersion(string? a, string? b)
         => !string.IsNullOrWhiteSpace(a) && string.Equals(a.Trim(), b?.Trim(), StringComparison.Ordinal);
 
+    /// <summary>
+    /// Whether a peer speaks a protocol this build can talk to: each side's protocol is at least the
+    /// other's minimum. A peer from before protocol versions carries none, and is compatible only when
+    /// it runs exactly this plugin version, as it was then.
+    /// </summary>
+    /// <param name="peerProtocol">The peer's protocol, or null when it sent none.</param>
+    /// <param name="peerMinProtocol">The oldest protocol the peer speaks, or null for its own protocol.</param>
+    /// <param name="peerVersion">The peer's plugin version.</param>
+    /// <param name="thisVersion">This server's plugin version.</param>
+    /// <returns>True when the two can exchange hints.</returns>
+    public static bool Compatible(int? peerProtocol, int? peerMinProtocol, string? peerVersion, string thisVersion)
+    {
+        if (peerProtocol is not { } protocol)
+        {
+            return SameVersion(peerVersion, thisVersion);
+        }
+
+        var peerMin = peerMinProtocol ?? protocol;
+        return protocol >= MinProtocolVersion && ProtocolVersion >= peerMin;
+    }
+
+    /// <summary>Whether a peer's advertised capabilities are compatible with this build.</summary>
+    /// <param name="capabilities">The peer's capabilities.</param>
+    /// <param name="thisVersion">This server's plugin version.</param>
+    /// <returns>True when the two can exchange hints.</returns>
+    public static bool Compatible(Models.Peer.PeerCapabilities capabilities, string thisVersion)
+    {
+        ArgumentNullException.ThrowIfNull(capabilities);
+        return Compatible(capabilities.ProtocolVersion, capabilities.MinProtocolVersion, capabilities.PluginVersion, thisVersion);
+    }
+
     public static string VersionMismatch(string? peerVersion, string thisVersion)
         => $"Server Sync {(string.IsNullOrWhiteSpace(peerVersion) ? "of an unknown version" : peerVersion.Trim())} on the peer and {thisVersion} on this server differ. Update both servers to the same version";
+
+    /// <summary>Describes why a peer's protocol is not compatible with this build.</summary>
+    /// <param name="peerProtocol">The peer's protocol, or null when it sent none.</param>
+    /// <param name="peerMinProtocol">The oldest protocol the peer speaks.</param>
+    /// <param name="peerVersion">The peer's plugin version.</param>
+    /// <param name="thisVersion">This server's plugin version.</param>
+    /// <returns>The reason, for the dashboard and the log.</returns>
+    public static string ProtocolMismatch(int? peerProtocol, int? peerMinProtocol, string? peerVersion, string thisVersion)
+    {
+        if (peerProtocol is not { } protocol)
+        {
+            return VersionMismatch(peerVersion, thisVersion);
+        }
+
+        var peer = string.IsNullOrWhiteSpace(peerVersion) ? "Server Sync on the peer" : $"Server Sync {peerVersion.Trim()} on the peer";
+        var older = protocol < MinProtocolVersion ? "the peer" : "this server";
+        return $"{peer} speaks protocol {protocol} (oldest {peerMinProtocol ?? protocol}) and Server Sync {thisVersion} on this server speaks {ProtocolVersion} (oldest {MinProtocolVersion}). Update {older} so the two overlap";
+    }
+
+    /// <summary>Describes why a peer's capabilities are not compatible with this build.</summary>
+    /// <param name="capabilities">The peer's capabilities.</param>
+    /// <param name="thisVersion">This server's plugin version.</param>
+    /// <returns>The reason.</returns>
+    public static string ProtocolMismatch(Models.Peer.PeerCapabilities capabilities, string thisVersion)
+    {
+        ArgumentNullException.ThrowIfNull(capabilities);
+        return ProtocolMismatch(capabilities.ProtocolVersion, capabilities.MinProtocolVersion, capabilities.PluginVersion, thisVersion);
+    }
 
     /// <summary>
     /// Bounds a version from elsewhere to this server's clock. A timestamp in the future would beat every

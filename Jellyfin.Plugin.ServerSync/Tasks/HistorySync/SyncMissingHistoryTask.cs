@@ -157,9 +157,9 @@ public class SyncMissingHistoryTask
                 continue;
             }
 
-            if (!HintProtocol.SameVersion(capabilities.PluginVersion, ConfigManager.PluginVersion))
+            if (!HintProtocol.Compatible(capabilities, ConfigManager.PluginVersion))
             {
-                _negotiationBlocked[source.Key] = $"'{source.Name}': " + HintProtocol.VersionMismatch(capabilities.PluginVersion, ConfigManager.PluginVersion);
+                _negotiationBlocked[source.Key] = $"'{source.Name}': " + HintProtocol.ProtocolMismatch(capabilities, ConfigManager.PluginVersion);
                 continue;
             }
 

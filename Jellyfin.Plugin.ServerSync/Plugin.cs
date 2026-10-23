@@ -198,6 +198,48 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
         yield return new PluginPageInfo
         {
+            Name = "serversync_sync_table.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_table.js"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_sync_content.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_content.js"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_sync_history.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_history.js"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_sync_metadata.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_metadata.js"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_sync_users.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_users.js"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_sync_people.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_people.js"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_sync_queue.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_sync_queue.js"
+        };
+
+        yield return new PluginPageInfo
+        {
             Name = "serversync_servers",
             EmbeddedResourcePath = $"{ns}.Configuration.serversync_servers.html"
         };

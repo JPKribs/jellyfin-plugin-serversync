@@ -208,7 +208,7 @@ public sealed class HintPipelineTests : IDisposable
     [InlineData(HintCode.Filtered, true)]
     [InlineData(HintCode.Ignored, true)]
     [InlineData(HintCode.ModuleOff, true)]
-    [InlineData(HintCode.NoLocalItem, true)]
+    [InlineData(HintCode.NoLocalItem, false)]
     [InlineData(HintCode.Locked, false)]
     [InlineData(HintCode.Applied, false)]
     [InlineData(HintCode.Superseded, false)]

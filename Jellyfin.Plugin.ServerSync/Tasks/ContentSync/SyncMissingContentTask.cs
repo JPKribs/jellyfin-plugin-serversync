@@ -37,7 +37,12 @@ public class SyncMissingContentTask
     private static readonly object _circuitBreakerLock = new();
 
     private readonly ILibraryManager _libraryManager;
+    private readonly ILibraryMonitor _libraryMonitor;
     private readonly DownloadService _downloadService;
+
+    // Every file this run wrote, skipped as already present, or removed, so the refresh afterwards
+    // only looks at the folders that changed.
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _changedFiles = new();
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<long, byte> _skippedByBreaker = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _downloadAttempted = new(StringComparer.OrdinalIgnoreCase);
@@ -52,6 +57,7 @@ public class SyncMissingContentTask
     public SyncMissingContentTask(
         ILogger<SyncMissingContentTask> logger,
         ILibraryManager libraryManager,
+        ILibraryMonitor libraryMonitor,
         IPluginConfigurationManager configManager,
         ContentSyncTableManager manager,
         ISourceServerClientFactory clientFactory,
@@ -59,6 +65,7 @@ public class SyncMissingContentTask
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
+        _libraryMonitor = libraryMonitor;
         _downloadService = downloadService;
     }
 
@@ -192,15 +199,14 @@ public class SyncMissingContentTask
         return Task.FromResult(true);
     }
 
-    // A file that arrived through a hint is handed to the library through Jellyfin's own queued scan,
-    // which runs once however many files arrive close together, rather than a blocking full
-    // validation per file.
+    // A file that arrived through a hint is reported to the library as changed, the way the library
+    // monitor reports a file it saw, so Jellyfin refreshes that one folder rather than every library.
     /// <inheritdoc />
     protected override Task AfterRowAsync(bool applied, CancellationToken cancellationToken)
     {
         if (applied && _successCount > 0)
         {
-            _libraryManager.QueueLibraryScan();
+            RefreshChangedFolders();
         }
 
         _tempPath = null;
@@ -220,6 +226,28 @@ public class SyncMissingContentTask
         _speedLimit = config.GetEffectiveDownloadSpeedBytes();
         _successCount = 0;
         _deletedCount = 0;
+        _changedFiles.Clear();
+    }
+
+    /// <summary>
+    /// Tells Jellyfin which folders changed, so it refreshes those and nothing else. Returns false when
+    /// there are too many for that to be cheaper than one full scan, which the caller then runs.
+    /// </summary>
+    private bool RefreshChangedFolders()
+    {
+        var folders = ChangedFolders.For(_changedFiles);
+        if (folders.Count == 0 || folders.Count > ChangedFolders.MaxTargeted)
+        {
+            return false;
+        }
+
+        foreach (var folder in folders)
+        {
+            _libraryMonitor.ReportFileSystemChanged(folder);
+        }
+
+        Logger.LogInformation("Asked Jellyfin to refresh {Count} changed folder(s)", folders.Count);
+        return true;
     }
 
     // Weight items by file size so the run's percentage tracks bytes moved,
@@ -265,10 +293,10 @@ public class SyncMissingContentTask
         var fileName = Path.GetFileName(record.LocalPath);
         var fileSize = FormatUtilities.FormatBytes(record.SourceSize);
 
-        if (!DiskSpaceService.HasSufficientSpaceForFile(record.LocalPath, record.SourceSize, config.MinimumFreeDiskSpaceGb))
-        {
-            throw new IOException($"Insufficient disk space for {fileName} ({fileSize}). Required: {fileSize} + {config.MinimumFreeDiskSpaceGb} GB reserve");
-        }
+        // Held until this download ends, so downloads running side by side cannot together overfill
+        // the disk that each would fit on alone.
+        using var spaceHold = await DiskSpaceService.ReserveForFileAsync(record.LocalPath, record.SourceSize, config.MinimumFreeDiskSpaceGb, cancellationToken).ConfigureAwait(false)
+            ?? throw new IOException($"Insufficient disk space for {fileName} ({fileSize}). Required: {fileSize} + {config.MinimumFreeDiskSpaceGb} GB reserve");
 
         var (isValid, validationError) = DownloadService.ValidateForDownload(record, config, TypedManager);
         if (!isValid)
@@ -283,6 +311,7 @@ public class SyncMissingContentTask
         {
             Logger.LogDebug("Skipped: {FileName} ({Size}) - {Reason}", fileName, fileSize, skipReason);
             Interlocked.Increment(ref _successCount);
+            _changedFiles.Enqueue(record.LocalPath);
             return;
         }
 
@@ -310,6 +339,7 @@ public class SyncMissingContentTask
                 breaker.RecordSuccess();
                 record.CompanionFiles = result.CompanionFiles;
                 Interlocked.Increment(ref _successCount);
+                _changedFiles.Enqueue(record.LocalPath);
                 Logger.LogInformation("DOWNLOADED: {FileName} ({Size}) -> {LocalPath}", fileName, fileSize, record.LocalPath);
             }
             else
@@ -373,7 +403,13 @@ public class SyncMissingContentTask
         // were soft-deleted by the Refresh task). Always run so the user's
         // "approve deletion" action gets picked up even when nothing was
         // queued.
-        var (deleted, _) = FileDeletionService.ProcessPendingDeletions(TypedManager, config, Logger, cancellationToken);
+        var removed = new List<string>();
+        var (deleted, _) = FileDeletionService.ProcessPendingDeletions(TypedManager, config, Logger, removed, cancellationToken);
+        foreach (var path in removed)
+        {
+            _changedFiles.Enqueue(path);
+        }
+
         Interlocked.Add(ref _deletedCount, deleted);
 
         // A server that connected and had nothing to download has proven itself as far as this run can
@@ -393,7 +429,9 @@ public class SyncMissingContentTask
         // (downloads or deletions). A no-op run skips the refresh because
         // ValidateMediaLibrary is expensive on large libraries and there's
         // nothing for Jellyfin to discover when we wrote/removed nothing.
-        if (_successCount > 0 || _deletedCount > 0)
+        // A run that touched a few folders has Jellyfin refresh just those,
+        // and only a run that touched many falls back to the full scan.
+        if ((_successCount > 0 || _deletedCount > 0) && !RefreshChangedFolders())
         {
             try
             {

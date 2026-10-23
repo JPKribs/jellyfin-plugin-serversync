@@ -79,27 +79,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     protected ScanSource? SourceFor(TRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        var serverKey = record.ServerKey;
-        if (string.IsNullOrEmpty(serverKey))
-        {
-            var pullServers = _configManager.Configuration.GetPullServers();
-            if (pullServers.Count == 0)
-            {
-                return null;
-            }
-
-            serverKey = pullServers[0].Key;
-        }
-
-        foreach (var source in Sources)
-        {
-            if (string.Equals(source.Key, serverKey, StringComparison.OrdinalIgnoreCase))
-            {
-                return source;
-            }
-        }
-
-        return null;
+        return ScanSources.Find(Sources, _configManager, record.ServerKey);
     }
 
     /// <summary>
@@ -181,50 +161,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// </summary>
     protected virtual async Task<bool> BeforeRunAsync(CancellationToken cancellationToken)
     {
-        var connected = new List<ScanSource>();
-        var servers = _configManager.Configuration.GetPullServers();
-        for (var i = 0; i < servers.Count; i++)
-        {
-            var server = servers[i];
-            SourceServerClient client;
-            try
-            {
-                client = _clientFactory.Create(server);
-            }
-            catch (ArgumentException ex)
-            {
-                Logger.LogError("{Task}: server '{Server}' rejected: {Error}", Name, server.DisplayName, ex.Message);
-                continue;
-            }
-
-            Models.Configuration.ConnectionTestResult result;
-            try
-            {
-                result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Sources is assigned only after the loop, so the run's cleanup cannot see these
-                // clients yet. Dispose them here before the failure or cancellation propagates.
-                client.Dispose();
-                foreach (var source in connected)
-                {
-                    source.Dispose();
-                }
-
-                throw;
-            }
-
-            if (!result.Success)
-            {
-                Logger.LogError("{Task}: connection to '{Server}' failed: {Error}", Name, server.DisplayName, result.ErrorMessage ?? "unknown");
-                client.Dispose();
-                continue;
-            }
-
-            connected.Add(new ScanSource(server, client, i));
-        }
-
+        var connected = await ScanSources.ConnectAsync(_configManager, _clientFactory, Logger, Name, null, cancellationToken).ConfigureAwait(false);
         Sources = connected;
         if (connected.Count == 0)
         {
@@ -709,18 +646,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// the configuration. Failures here are logged but never propagate, a
     /// failed save mustn't mask the actual run result.
     /// </summary>
-    private void RecordRunCompletedAndSave()
-    {
-        try
-        {
-            RecordRunCompleted(_configManager.Configuration, DateTime.UtcNow);
-            _configManager.SaveConfiguration();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "{Task}: failed to save run-completion timestamp", Name);
-        }
-    }
+    private void RecordRunCompletedAndSave() => ScanSources.RecordCompletedAndSave(_configManager, RecordRunCompleted, Logger, Name);
 
     /// <summary>
     /// Records the most-recent run failure for this module on the plugin
