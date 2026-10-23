@@ -311,16 +311,18 @@ public sealed class DownloadServiceTests : IDisposable
     public async Task DownloadItem_SlowButSteadySource_Completes()
     {
         var item = Item();
-        var handler = new StubHandler(() => new ScriptedStream(Encoding.ASCII.GetBytes("head-"), trickleBytes: 8, trickleInterval: TimeSpan.FromMilliseconds(100)));
+        // Each gap is a twentieth of the stall window, so a loaded test runner cannot stretch one gap
+        // past it, while the whole download still takes longer than the window.
+        var handler = new StubHandler(() => new ScriptedStream(Encoding.ASCII.GetBytes("head-"), trickleBytes: 30, trickleInterval: TimeSpan.FromMilliseconds(50)));
         using var client = Client(handler);
-        var service = new DownloadService(NullLogger<DownloadService>.Instance) { StallTimeout = TimeSpan.FromMilliseconds(400) };
+        var service = new DownloadService(NullLogger<DownloadService>.Instance) { StallTimeout = TimeSpan.FromSeconds(1) };
 
         var stopwatch = Stopwatch.StartNew();
         var result = await service.DownloadItemAsync(client, item, _downloadDir, 0, false, Config());
 
         Assert.True(result.Success, result.ErrorMessage);
-        Assert.True(stopwatch.Elapsed > TimeSpan.FromMilliseconds(400));
-        Assert.Equal("head-tttttttt", File.ReadAllText(item.LocalPath!));
+        Assert.True(stopwatch.Elapsed > TimeSpan.FromSeconds(1));
+        Assert.Equal("head-" + new string('t', 30), File.ReadAllText(item.LocalPath!));
         Assert.Equal(1, handler.Requests);
     }
 
