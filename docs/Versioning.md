@@ -21,6 +21,6 @@ Releases before protocol versions, up to 12.2.8.1, only talk to exactly the same
 
 ## Links and older releases
 
-[Links](Links.md) need both servers on a release with links. The source advertises `Link` among its features, and a server with a Link mapping waits for a source that does. Releases without links ignore the feature, and matching against them works as before.
+[Links](Links.md) need both servers on 12.2.10.0 or later. The source advertises `Link` among its features, and a server with a Link mapping waits for a source that does. Releases without links ignore the feature, and matching against them works as before.
 
-Server Sync keeps its own database, which notes the oldest release that can read it. Updating to a release with links only adds a column, so a release from 12.2.2.0 on still reads it, until the server holds a link. From the first link on, written or waiting to be, the database names the first release with links as its oldest reader. An older release sets such a database aside as a `.newer-*` backup and starts fresh, rather than take a `.strm` for a broken copy and download over it.
+Server Sync keeps its own database, which notes the oldest release that can read it. Updating to 12.2.10.0 or later only adds a column, so a release from 12.2.2.0 on still reads it, until the server holds a link. From the first link on, written or waiting to be, the database names the first release with links as its oldest reader. An older release sets such a database aside as a `.newer-*` backup and starts fresh, rather than take a `.strm` for a broken copy and download over it.

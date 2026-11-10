@@ -5,7 +5,7 @@ A library mapping can hold the source's files as **links** instead of full copie
 Links suit a library you want available everywhere but do not want to store twice, such as a large archive, or a server with little disk. They need the source to be reachable whenever someone plays, and every play streams across the network.
 
 !!! info "Both servers run Server Sync"
-    Links need Server Sync on the source and on the server that holds the links, both on a release with links. A source without it, or with linking switched off, never serves a link, and a mapping set to Link waits until it does.
+    Links need Server Sync on the source and on the server that holds the links, both on 12.2.10.0 or later. A source without it, or with linking switched off, never serves a link, and a mapping set to Link waits until it does.
 
 ## Terms
 

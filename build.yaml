@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.9.0"
+version: "12.2.10.0"
 targetAbi: "12.2.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -12,7 +12,8 @@ description: >
   watch history. Servers that both run the plugin also tell each other about changes as they happen, so an
   edit or a play made on one shows up on the others within seconds, and the scheduled scan remains
   the safety net. Watch history merges three way against what the servers last agreed on, and other
-  values resolve on where and when they were last edited, so the newest edit always wins.
+  values resolve on where and when they were last edited, so the newest edit always wins. A library can
+  also hold its videos as links that stream from the source instead of full copies.
 category: "Administration"
 owner: "JPKribs"
 artifacts:
@@ -27,30 +28,21 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
+  features:
+  - Link storage. A library mapping can hold its videos as links instead of copies. Each link is a small .strm file beside a .nfo, and plays by streaming the file from the source through this server, so nothing is downloaded. Both servers need this release, and only video is linked; audio and books in a Link mapping are still copied
+  - The source decides who may stream. Turn on Allow Linking on its entry for the linking server, map users or pick a user for unmapped ones, and set Link Streams At Once and Link Streams Per User. A user's streams through every linking server count toward their per user limit, and the source can also count their own playback there and honor their remote bitrate limit
+  - Playback of a link shows on the source as a session under the client name Server Sync, lands in its activity log, and updates played state there. The source's dashboard can stop, pause, seek, and message the viewer
+  - When a link's source is down, at its limits, or refuses, another server this one pulls from that maps the same folder and holds the same file plays it instead
+  - Each new link is probed for its media info through the link, so runtime and codecs show before anyone plays it. Subtitles and fonts inside the file are read through the link too
+  - Make Copy on the Sync tab turns links into full copies. The link keeps playing until its copy is in place
+  - Matching works between Film.mkv on one server and Film.strm on another, for history, metadata, people, playlists, and live changes
   changed:
-  - Servers no longer need the same Server Sync version. Live changes, history negotiation, and conflict checks work between any two versions that speak a compatible protocol, so a pool can be updated one server at a time. Releases up to 12.2.8.1 only talk to exactly their own version, so this first update still needs every server in the pool updated
-  - Check Link and the Queue explain a protocol mismatch, naming which server to update
-  - After Sync Content downloads or removes files, Jellyfin refreshes just the folders that changed instead of scanning every library. A run that touches many folders still runs one full scan
-  - A file that arrives as a live change refreshes only its own folder
-  - The recycling bin only expires files and trickplay folders the plugin put there. Anything else in that folder is left alone, however old
+  - A first sync into a library Jellyfin has not scanned since it was empty runs a library scan, since Jellyfin drops a refresh of a folder it does not know yet. A file that arrives as a live change queues one in that case
   fixed:
-  - A source server that is slow to answer or briefly busy is asked again instead of failing the read. One timed out page no longer throws away a server's whole listing for the run
-  - A library that changes while it is being scanned is listed a second time, so pruning still runs instead of being skipped on every busy library
-  - A download that drops partway resumes from where it stopped, and starts over if the file changed on the source in between
-  - Downloads running at the same time hold disk space for each other, so several large files can no longer fill a disk together. A file that only fits once another download finishes waits for it
-  - Recycling a file from deep inside a library no longer fails on the filesystem's name length limit
-  - Recycled files renamed to avoid a name clash now expire with the rest
-  - A live change for an item the other server did not have yet no longer silences that item's changes for a day once it arrives
-  - A peer that spells its server id in a different case is one peer in the queue, so its changes count once toward its limit and are never applied twice
-  - An Ignored content row keeps its retry count through a scan, like every other table
+  - New files in a library that was empty no longer wait for the next scheduled scan to show up
+  - A pushed playlist deleted just after an edit no longer comes back. Jellyfin's refresh from the edit could save it back as it finished, so it is now deleted again when that refresh completes
   developer:
-  - The wire protocol is versioned separately from the plugin, through the X-ServerSync-Protocol and X-ServerSync-Min-Protocol headers and the ProtocolVersion and MinProtocolVersion fields on Capabilities. A peer without them is matched on its exact plugin version
-  - Reads use a small pool of read connections beside the write connection, so the dashboard and lookups no longer wait behind writes
-  - Scans write their rows in transactions of 250 instead of one commit per row, and prune and retire in batches
-  - Every sync table builds its upsert from one shared column list, so the rules for Ignored rows and synced hashes are written once
-  - Reads that time out, drop, or meet a busy server are retried up to three times with backoff and Retry-After. Writes are never retried there
-  - The source client is split by area and its paging loops share one walker that keeps each caller's own error handling
-  - The Sync dashboard script is split into modules per table and the queue
-  - The refresh and sync task bases share their server connection and run recording code
-  - Schema v31 stores inbound hint origins in one case and merges duplicates
-  - New tests cover the retry handler, resumable downloads, disk space holds, recycled names, batched writes, read connections, protocol checks, changed folders, the table manager base, the content and playlist tasks, and playlist storage
+  - Schema v32 adds StorageMode to content rows. Once a server holds a link, its database asks for a release that knows links, so an older release sets it aside instead of treating links as missing copies. Without links, releases from 12.2.2.0 on still read it
+  - The wire protocol is unchanged. Links are advertised as the Link feature on Capabilities, and Stream/Check accepts a file path so a server can fall back to another source
+  - New peer routes serve links: Stream, Stream/Check, Playback, Control, and Links. The anonymous link route answers only this server itself, from loopback, with a per link secret
+  - New tests cover link matching, storage, routes, fallback, concurrency, and fuzzing, the empty library scan, and the playlist delete. The Docker pool gains link, fallback, chaos, and full disk scenarios
