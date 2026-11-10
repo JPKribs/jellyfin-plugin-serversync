@@ -1462,7 +1462,7 @@ export default function (view) {
                 '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Local User</label><select is="emby-select" class="localUserSelect"></select></div></div>' +
             '</div>' +
             '<div class="mappingGrid userLinkCaps' + (getChecked('chkAllowLinking') ? '' : ' hidden') + '">' +
-                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Streams At Once</label><input is="emby-input" type="number" min="0" max="100" class="userLinkMaxStreams" placeholder="Server\'s per user limit" value="' + (mapping.LinkMaxStreams == null ? '' : mapping.LinkMaxStreams) + '" />' +
+                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Streams At Once</label><input is="emby-input" type="number" min="0" max="100" class="userLinkMaxStreams" placeholder="Server\'s limit" value="' + (mapping.LinkMaxStreams == null ? '' : mapping.LinkMaxStreams) + '" />' +
                     '<div class="fieldDescription">Most streams the local user may hold at once for that server\'s links. Empty uses Link Streams Per User from step 1. 0 for no limit.</div></div></div>' +
                 '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Speed (Mbps)</label><input is="emby-input" type="number" min="0" max="100000" class="userLinkSpeed" placeholder="Server\'s speed" value="' + (mapping.LinkStreamSpeedMbps == null ? '' : mapping.LinkStreamSpeedMbps) + '" />' +
                     '<div class="fieldDescription">Most each stream and cache download for this user is sent at. The lower of this and the server\'s speed applies. Empty or 0 uses the server\'s.</div></div></div>' +
