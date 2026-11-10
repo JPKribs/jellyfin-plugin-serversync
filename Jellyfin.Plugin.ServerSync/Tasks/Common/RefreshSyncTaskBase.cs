@@ -843,16 +843,35 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
     }
 
+    /// <summary>
+    /// Anything else about one server that decides what a scan of it keeps, so a change to it makes the
+    /// next scan of that server a full one. Read when the run starts and again when its watermark is
+    /// recorded. Empty by default, which leaves the scope exactly as it was before this existed.
+    /// </summary>
+    /// <param name="source">The server.</param>
+    /// <returns>A short description, or empty.</returns>
+    protected virtual string ScopeOfSource(ScanSource source) => string.Empty;
+
     private string ScopeOf(ScanSource source)
     {
         var server = source.Server;
-        var shape = JsonSerializer.Serialize(new
-        {
-            server.Url,
-            Libraries = server.GetEnabledLibraryMappings(),
-            Users = server.GetEnabledUserMappings(),
-            Settings = ScopeSettings
-        });
+        var extra = ScopeOfSource(source);
+        var shape = extra.Length == 0
+            ? JsonSerializer.Serialize(new
+            {
+                server.Url,
+                Libraries = server.GetEnabledLibraryMappings(),
+                Users = server.GetEnabledUserMappings(),
+                Settings = ScopeSettings
+            })
+            : JsonSerializer.Serialize(new
+            {
+                server.Url,
+                Libraries = server.GetEnabledLibraryMappings(),
+                Users = server.GetEnabledUserMappings(),
+                Settings = ScopeSettings,
+                Extra = extra
+            });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(shape)))[..16];
     }
 

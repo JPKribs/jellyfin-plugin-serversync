@@ -38,5 +38,9 @@ services:
       - ./.state/local/cache:/cache
       - ./.state/media/local:/media
       - ./.plugin:/config/plugins/${PLUGIN_FOLDER:-Server Sync_0.0.0.0}
+    # A small disk, so a scenario can fill the free space floor for real. The host volume reports
+    # terabytes free through Docker Desktop, so the floor can never trip on /media.
+    tmpfs:
+      - /media-tiny:size=64m,mode=0777
     environment:
       - JELLYFIN_PublishedServerUrl=http://local:8096

@@ -481,6 +481,13 @@ export default function (view) {
         setValue('txtSourceServerUrl', server.Url || '');
         setValue('txtSourceServerExternalUrl', server.ExternalUrl || '');
         setChecked('chkAllowPrivateNetwork', server.AllowPrivateNetwork !== false);
+        setChecked('chkAllowLinking', server.AllowLinking === true);
+        setValue('txtLinkMaxStreams', String(server.LinkMaxStreams || 0));
+        setValue('txtLinkMaxStreamsPerUser', String(server.LinkMaxStreamsPerUser || 0));
+        setChecked('chkLinkCountOwnSessions', server.LinkCountOwnSessions === true);
+        setChecked('chkLinkHonorBitrateLimit', server.LinkHonorBitrateLimit === true);
+        fillFallbackUsers(server.LinkFallbackUserId || '');
+        reflectLinking();
         setValue('txtSourceServerApiKey', server.ApiKey ? ServerSyncShared.SECRET_KEPT : '');
         setValue('txtAuthUsername', server.AuthenticatedUser || '');
         setValue('txtAuthPassword', '');
@@ -582,6 +589,12 @@ export default function (view) {
         server.Url = getValue('txtSourceServerUrl', '').trim();
         server.ExternalUrl = getValue('txtSourceServerExternalUrl', '').trim();
         server.AllowPrivateNetwork = getChecked('chkAllowPrivateNetwork');
+        server.AllowLinking = getChecked('chkAllowLinking');
+        server.LinkMaxStreams = Math.max(0, parseInt(getValue('txtLinkMaxStreams', '0'), 10) || 0);
+        server.LinkMaxStreamsPerUser = Math.max(0, parseInt(getValue('txtLinkMaxStreamsPerUser', '0'), 10) || 0);
+        server.LinkCountOwnSessions = getChecked('chkLinkCountOwnSessions');
+        server.LinkHonorBitrateLimit = getChecked('chkLinkHonorBitrateLimit');
+        server.LinkFallbackUserId = getValue('selLinkFallbackUser', '');
         if (getAuthMethod() === 'key') {
             var apiKey = getValue('txtSourceServerApiKey', '').trim();
             // Text typed after the kept placeholder is a new key, never the placeholder plus a suffix.
@@ -997,6 +1010,14 @@ export default function (view) {
                     '<div class="inputContainer"><label class="inputLabel">Local Root Path</label><input is="emby-input" type="text" class="localRootPath" value="' + escapeHtml(mapping.LocalRootPath || '') + '" /></div>' +
                 '</div>' +
             '</div>' +
+            '<div class="inputContainer">' +
+                '<label class="inputLabel">Storage</label>' +
+                '<select is="emby-select" class="storageModeSelect">' +
+                    '<option value="Copy">Copy</option>' +
+                    '<option value="Link">Link</option>' +
+                '</select>' +
+                '<div class="fieldDescription">Copy downloads each file. Link writes a small .strm that streams from this server, which must run Server Sync and allow linking for you. Copies already here stay copies. Switching back to Copy turns links into copies, with the same approval as new files.</div>' +
+            '</div>' +
             '<div class="filterSection">' +
                 '<h3 class="jpk-subsection-title">Library Filter</h3>' +
                 '<div class="filterHeader">' +
@@ -1113,6 +1134,8 @@ export default function (view) {
         }
 
         filterModeSelect.value = mapping.FilterMode || 'AllowAll';
+        var storageModeSelect = div.querySelector('.storageModeSelect');
+        if (storageModeSelect) storageModeSelect.value = mapping.StorageMode === 'Link' || mapping.StorageMode === 1 ? 'Link' : 'Copy';
         filterModeSelect.addEventListener('change', updateFilterVisibility);
 
         // Files/ Collections / Playlists browse toggle. Collections
@@ -1224,7 +1247,8 @@ export default function (view) {
                 LocalLibraryName: pickedName(localSelect),
                 LocalRootPath: row.querySelector('.localRootPath').value,
                 FilterMode: filterMode,
-                FilteredItems: filteredItems
+                FilteredItems: filteredItems,
+                StorageMode: row.querySelector('.storageModeSelect') ? row.querySelector('.storageModeSelect').value : 'Copy'
             });
         });
         return mappings;
@@ -1258,7 +1282,30 @@ export default function (view) {
         });
     }
 
+    // The limits only mean something while linking is allowed.
+    function reflectLinking() {
+        setVisible('linkLimits', getChecked('chkAllowLinking'));
+    }
+
+    // Refilling keeps the choice on screen unless a server's own value is given, which always wins,
+    // so opening a server with no fallback never shows the last server's.
+    function fillFallbackUsers(value) {
+        var select = getEl('selLinkFallbackUser');
+        if (!select) return;
+        var savedValue = value !== undefined ? value : select.value;
+        select.innerHTML = '<option value="">None</option>';
+        localUsers.forEach(function(user) {
+            var option = document.createElement('option');
+            option.value = user.Id;
+            option.textContent = user.Name;
+            select.appendChild(option);
+        });
+        select.value = '';
+        if (savedValue) selectLoose(select, savedValue);
+    }
+
     function updateUserSelects() {
+        fillFallbackUsers();
         view.querySelectorAll('.sourceUserSelect').forEach(function(select) {
             var savedValue = select.value || select.dataset.savedValue;
             fillSourceUserOptions(select);
@@ -1425,6 +1472,8 @@ export default function (view) {
                 }
                 var urlField = getEl('txtSourceServerUrl');
                 if (urlField) urlField.addEventListener('input', reflectAddressChange);
+                var linkingField = getEl('chkAllowLinking');
+                if (linkingField) linkingField.addEventListener('change', reflectLinking);
                 modeGroup = createChoiceGroup(getEl('modeChoices'), { onChange: reflectMode });
                 authGroup = createChoiceGroup(getEl('authChoices'), { onChange: reflectAuthMethod });
 

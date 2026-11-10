@@ -36,6 +36,10 @@ public sealed class SyncMissingContentTaskTests : IDisposable
     private readonly ContentSyncTableManager _manager;
     private readonly FakeConfigManager _config;
     private readonly InterfaceStub _monitor;
+    private readonly InterfaceStub _library;
+
+    // The folders Jellyfin has recorded. An empty library's own folder is not among them until it is scanned.
+    private readonly HashSet<string> _knownFolders = new(StringComparer.Ordinal);
     private readonly SourceServer _server;
     private readonly Probe _task;
 
@@ -62,7 +66,11 @@ public sealed class SyncMissingContentTaskTests : IDisposable
 
         var (monitor, monitorStub) = InterfaceStub.Create<ILibraryMonitor>();
         _monitor = monitorStub;
-        _task = new Probe(monitor, _config, _manager);
+        var (library, libraryStub) = InterfaceStub.Create<ILibraryManager>();
+        _library = libraryStub;
+        _knownFolders.Add(_localRoot);
+        libraryStub.Answer(nameof(ILibraryManager.FindByPath), args => _knownFolders.Contains((string)args[0]!) ? new MediaBrowser.Controller.Entities.Folder { Path = (string)args[0]! } : null);
+        _task = new Probe(library, monitor, _config, _manager);
     }
 
     public void Dispose()
@@ -121,8 +129,8 @@ public sealed class SyncMissingContentTaskTests : IDisposable
     /// </summary>
     private sealed class Probe : SyncMissingContentTask
     {
-        public Probe(ILibraryMonitor monitor, IPluginConfigurationManager config, ContentSyncTableManager manager)
-            : base(NullLogger<SyncMissingContentTask>.Instance, null!, monitor, config, manager, new FakeClientFactory(), null!)
+        public Probe(ILibraryManager library, ILibraryMonitor monitor, IPluginConfigurationManager config, ContentSyncTableManager manager)
+            : base(NullLogger<SyncMissingContentTask>.Instance, library, monitor, config, manager, new FakeClientFactory(), null!)
         {
         }
 
@@ -260,6 +268,30 @@ public sealed class SyncMissingContentTaskTests : IDisposable
         Assert.Null(stored.Reason);
         var reported = Assert.Single(_monitor.Calls, c => c.Name == nameof(ILibraryMonitor.ReportFileSystemChanged));
         Assert.Equal(Path.GetDirectoryName(localPath), (string)reported.Args[0]!);
+        Assert.DoesNotContain(_library.Calls, c => c.Name == nameof(ILibraryManager.QueueLibraryScan));
+    }
+
+    /// <summary>
+    /// A first file in an empty library, whose own folder Jellyfin has not recorded yet, queues a library
+    /// scan instead of reporting the folder.
+    /// True: the first sync into a new library shows up without waiting for the scheduled scan.
+    /// False: Jellyfin drops the report, since it refreshes a folder through the nearest one it knows, and
+    /// the file stays unseen until the next scheduled scan.
+    /// </summary>
+    [Fact]
+    public async Task ApplySuccess_InAnEmptyLibrary_QueuesAScan()
+    {
+        _knownFolders.Clear();
+        var localPath = Path.Combine(_localRoot, "Title", "a.mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+        File.WriteAllText(localPath, "abcd");
+        var row = Track("a", SyncStatus.Errored, retryCount: 2, localPath: localPath, size: 4);
+
+        var (ok, _) = await ApplyRow(row);
+
+        Assert.True(ok);
+        Assert.DoesNotContain(_monitor.Calls, c => c.Name == nameof(ILibraryMonitor.ReportFileSystemChanged));
+        Assert.Single(_library.Calls, c => c.Name == nameof(ILibraryManager.QueueLibraryScan));
     }
 
     /// <summary>

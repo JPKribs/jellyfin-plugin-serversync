@@ -47,6 +47,44 @@ public static class ChangedFolders
         return kept;
     }
 
+    /// <summary>
+    /// Whether Jellyfin knows a folder at or above each changed folder, so telling it about the folder
+    /// reaches a library. Jellyfin refreshes a reported folder through the nearest one it knows, and it
+    /// does not record a library's folder while that folder is empty. A first run into an empty library
+    /// would be reported and silently dropped, so it needs a full scan instead.
+    /// </summary>
+    /// <param name="folders">The changed folders.</param>
+    /// <param name="known">Whether Jellyfin holds a library folder at a path.</param>
+    /// <returns>True when every folder has a known folder at or above it.</returns>
+    public static bool AllReachable(IEnumerable<string> folders, Func<string, bool> known)
+    {
+        ArgumentNullException.ThrowIfNull(folders);
+        ArgumentNullException.ThrowIfNull(known);
+        foreach (var folder in folders)
+        {
+            var path = folder;
+            var found = false;
+            while (!string.IsNullOrEmpty(path))
+            {
+                if (known(path))
+                {
+                    found = true;
+                    break;
+                }
+
+                var parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(path));
+                path = string.Equals(parent, path, StringComparison.Ordinal) ? null : parent;
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool IsInside(string folder, string outer)
         => folder.Length > outer.Length
             && folder.StartsWith(outer, StringComparison.Ordinal)

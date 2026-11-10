@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
+using Jellyfin.Plugin.ServerSync.Services.Links;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller.Entities;
@@ -28,16 +30,22 @@ public class MetadataSyncTableService
 {
     private readonly ILogger<MetadataSyncTableService> _logger;
     private readonly ILibraryManager _libraryManager;
+    private readonly ILocalItems _localItems;
+    private readonly ILinkRegistry _links;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MetadataSyncTableService"/> class.
     /// </summary>
     public MetadataSyncTableService(
         ILogger<MetadataSyncTableService> logger,
-        ILibraryManager libraryManager)
+        ILibraryManager libraryManager,
+        ILocalItems localItems,
+        ILinkRegistry links)
     {
         _logger = logger;
         _libraryManager = libraryManager;
+        _localItems = localItems;
+        _links = links;
     }
 
     /// <summary>
@@ -145,6 +153,8 @@ public class MetadataSyncTableService
             }
         }
 
+        // Folders keep the same path on every server, so only files can be links.
+        LinkPaths.AddAliases(leaves, _links);
         return (leaves, folders);
     }
 
@@ -196,7 +206,7 @@ public class MetadataSyncTableService
         var sourceItemId = sourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
         var localPath = PathUtilities.TranslatePath(sourcePath, libraryMapping.SourceRootPath, libraryMapping.LocalRootPath);
 
-        var localItem = _libraryManager.FindByPath(localPath, isFolder: isFolder);
+        var localItem = _localItems.FindByPath(localPath, isFolder: isFolder);
         if (localItem == null)
         {
             // No local match, skip. If a row existed previously the base

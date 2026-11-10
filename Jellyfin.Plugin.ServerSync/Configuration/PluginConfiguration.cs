@@ -224,14 +224,20 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Returns the appropriate download speed based on current time and scheduling settings.
     /// </summary>
     /// <returns>Effective speed in bytes per second.</returns>
-    public long GetEffectiveDownloadSpeedBytes()
+    public long GetEffectiveDownloadSpeedBytes() => GetEffectiveDownloadSpeedBytes(DateTime.Now.Hour);
+
+    /// <summary>
+    /// Returns the download speed for a given local hour, so the schedule can be checked at any hour
+    /// rather than only the one it happens to be.
+    /// </summary>
+    /// <param name="currentHour">The local hour, 0 to 23.</param>
+    /// <returns>Effective speed in bytes per second.</returns>
+    public long GetEffectiveDownloadSpeedBytes(int currentHour)
     {
         if (!EnableBandwidthScheduling)
         {
             return GetMaxDownloadSpeedBytes();
         }
-
-        var currentHour = DateTime.Now.Hour;
 
         // Equal start and end reads as "all day", not "never". The general
         // same-day branch evaluates to `hour >= X && hour < X`, which is always

@@ -98,7 +98,7 @@ public partial class SourceServerClient
         try
         {
             var client = GetApiClient();
-            return await client.Items.GetAsync(
+            return await WithPeerLinksAsync(await client.Items.GetAsync(
                 config =>
                 {
                     config.QueryParameters.UserId = userId;
@@ -111,7 +111,7 @@ public partial class SourceServerClient
                         ItemFields.MediaSources
                     };
                 },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -188,7 +188,7 @@ public partial class SourceServerClient
         try
         {
             var client = GetApiClient();
-            return await client.Items.GetAsync(
+            return await WithPeerLinksAsync(await client.Items.GetAsync(
                 config =>
                 {
                     config.QueryParameters.UserId = userId;
@@ -207,7 +207,7 @@ public partial class SourceServerClient
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Collections;
@@ -42,6 +43,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly ILibraryManager _libraryManager;
     private readonly ICollectionManager _collectionManager;
+    private readonly ILocalItems _localItems;
 
     /// <summary>
     /// Initializes a new instance.
@@ -51,13 +53,15 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
         ILibraryManager libraryManager,
-        ICollectionManager collectionManager)
+        ICollectionManager collectionManager,
+        ILocalItems localItems)
     {
         _logger = logger;
         _configManager = configManager;
         _clientFactory = clientFactory;
         _libraryManager = libraryManager;
         _collectionManager = collectionManager;
+        _localItems = localItems;
     }
 
     /// <inheritdoc />
@@ -249,7 +253,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
                 }
 
                 var localPath = PathUtilities.TranslatePath(leaf.Path, mapping.SourceRootPath!, mapping.LocalRootPath);
-                var localItem = _libraryManager.FindByPath(localPath, isFolder: false);
+                var localItem = _localItems.FindByPath(localPath, isFolder: false);
                 if (localItem != null)
                 {
                     targetIds.Add(localItem.Id);

@@ -99,6 +99,7 @@ public partial class SourceServerClient
         {
             result.Add(rootItem);
             seen.Add(rootItem.Id.Value);
+            await ApplyPeerLinksAsync(result, cancellationToken).ConfigureAwait(false);
             return result;
         }
 
@@ -222,6 +223,7 @@ public partial class SourceServerClient
                 cancellationToken).ConfigureAwait(false);
         }
 
+        await ApplyPeerLinksAsync(result, cancellationToken).ConfigureAwait(false);
         return result;
     }
 
@@ -243,7 +245,7 @@ public partial class SourceServerClient
         try
         {
             var client = GetApiClient();
-            return await client.Items.GetAsync(
+            return await WithPeerLinksAsync(await client.Items.GetAsync(
                 config =>
                 {
                     config.QueryParameters.ParentId = libraryId;
@@ -260,7 +262,7 @@ public partial class SourceServerClient
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -384,6 +386,7 @@ public partial class SourceServerClient
             cancellationToken,
             stopAtTotal: false).ConfigureAwait(false);
 
+        await ApplyPeerLinksAsync(members, cancellationToken).ConfigureAwait(false);
         return members;
     }
 
@@ -607,7 +610,7 @@ public partial class SourceServerClient
             throw new InvalidOperationException($"Failed to get item paths from library {libraryId} at index {startIndex}: {ex.Message}", ex);
         }
 
-        return page ?? throw new InvalidOperationException($"Source server returned no page for library {libraryId} at index {startIndex}");
+        return await WithPeerLinksAsync(page, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException($"Source server returned no page for library {libraryId} at index {startIndex}");
     }
 
     /// <summary>
@@ -646,6 +649,7 @@ public partial class SourceServerClient
 
                 if (response?.Items != null)
                 {
+                    await ApplyPeerLinksAsync(response.Items, cancellationToken).ConfigureAwait(false);
                     result.AddRange(response.Items);
                 }
             }
@@ -694,6 +698,7 @@ public partial class SourceServerClient
                 config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources, ItemFields.MediaStreams };
             },
             cancellationToken: cancellationToken).ConfigureAwait(false);
+        await ApplyPeerLinksAsync(result?.Items, cancellationToken).ConfigureAwait(false);
         return result?.Items?.FirstOrDefault();
     }
 

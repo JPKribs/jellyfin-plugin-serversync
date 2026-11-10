@@ -12,6 +12,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
@@ -114,10 +115,68 @@ public class UpdateSyncTablesTask
         ContentSyncTableManager manager,
         ISourceServerClientFactory clientFactory,
         ILibraryManager libraryManager,
-        ScanWatermarkStore watermarks)
+        ScanWatermarkStore watermarks,
+        LinkFiles? linkFiles = null)
         : base(logger, manager, clientFactory, configManager, watermarks)
     {
         _libraryManager = libraryManager;
+        _linkFiles = linkFiles;
+    }
+
+    private readonly LinkFiles? _linkFiles;
+
+    // Whether each server offers links, asked once per run and only for a server with a Link mapping.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<bool>> _linkingOffered = new(StringComparer.OrdinalIgnoreCase);
+
+    // What each server last answered about links, kept across runs, and the copy this run started with.
+    // A server's scope carries the answer the run started with, so when a server starts offering links
+    // the run that learns it records the old answer, and the next run sees a new scope and lists the
+    // server in full. Files passed over while it offered none are then linked.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _linkingKnown = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _linkingAtStart = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    protected override string ScopeOfSource(ScanSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (!source.Server.GetEnabledLibraryMappings().Any(m => m.StorageMode == StorageMode.Link))
+        {
+            return string.Empty;
+        }
+
+        return _linkingAtStart.TryGetValue(source.Key, out var offered) && offered ? "links" : "no-links";
+    }
+
+    private Task<bool> LinkingOfferedAsync(ScanSource source, CancellationToken cancellationToken)
+        => _linkingOffered.GetOrAdd(source.Key, async _ =>
+        {
+            var offered = await AskLinkingAsync(source, cancellationToken).ConfigureAwait(false);
+            _linkingKnown[source.Key] = offered;
+            return offered;
+        });
+
+    private async Task<bool> AskLinkingAsync(ScanSource source, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var capabilities = await source.Client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
+            if (capabilities?.Features?.Contains(LinkFeature.Name, StringComparer.OrdinalIgnoreCase) == true)
+            {
+                return true;
+            }
+
+            Logger.LogWarning("{Task}: '{Server}' does not offer links, so files new to a Link mapping wait until Server Sync there allows linking for this server", Name, source.Name);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("{Task}: could not ask '{Server}' whether it offers links, so files new to a Link mapping wait: {Reason}", Name, source.Name, ex.Message);
+        }
+
+        return false;
     }
 
     protected override bool SupportsIncremental => true;
@@ -183,6 +242,8 @@ public class UpdateSyncTablesTask
     {
         _seenPerMapping.Clear();
         _blacklistExcludedByMapping.Clear();
+        _linkingOffered.Clear();
+        _linkingAtStart = new Dictionary<string, bool>(_linkingKnown, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />
@@ -368,6 +429,12 @@ public class UpdateSyncTablesTask
                             continue;
                         }
 
+                        // A link on the peer is not a file to copy. Its history and metadata still sync.
+                        if (client.IsPeerLink(item.Id) || UnknownPeerStrm(client, item))
+                        {
+                            continue;
+                        }
+
                         var hitWatched = watchedByAll != null && watchedByAll.Contains(item.Id.Value);
                         work.Add(new ContentRefreshWork(source, mapping, item, hitWatched));
                         collected++;
@@ -480,6 +547,11 @@ public class UpdateSyncTablesTask
                         return Task.FromResult(false);
                     }
 
+                    if (client.IsPeerLink(item.Id) || UnknownPeerStrm(client, item))
+                    {
+                        return Task.FromResult(false);
+                    }
+
                     var hitWatched = watchedByAll != null && item.Id.HasValue && watchedByAll.Contains(item.Id.Value);
                     work.Add(new ContentRefreshWork(source, mapping, item, hitWatched));
                     return Task.FromResult(true);
@@ -524,6 +596,12 @@ public class UpdateSyncTablesTask
             return Task.FromResult<SyncItem?>(null);
         }
 
+        // A peer's own link is not a file to copy, whichever way it arrived, by scan or by hint.
+        if (source.Source.Client.IsPeerLink(source.SourceItem.Id) || UnknownPeerStrm(source.Source.Client, source.SourceItem))
+        {
+            return Task.FromResult<SyncItem?>(null);
+        }
+
         var sourceItemId = source.SourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
         var sourceSize = MediaItemUtilities.GetItemSize(source.SourceItem);
         var sourceCreateDate = source.SourceItem.DateCreated?.DateTime ?? DateTime.UtcNow;
@@ -534,7 +612,24 @@ public class UpdateSyncTablesTask
         // Watched-by-all takes precedence: mark Ignored regardless of approval mode.
         if (source.WatchedByAll)
         {
-            return Task.FromResult(Stamp(BuildWatchedFiltered(source.Mapping, source.SourceItem, sourceItemId, sourceSize, sourceCreateDate, localPath, existingItem), source));
+            var watched = BuildWatchedFiltered(source.Mapping, source.SourceItem, sourceItemId, sourceSize, sourceCreateDate, localPath, existingItem);
+
+            // A link stays at its .strm, so hiding it never points the row at a copy that is not there.
+            if (existingItem is not null && watched is not null && existingItem.StorageMode.IsLink() && LinkPaths.LinkPathFor(localPath) is { } existingLink)
+            {
+                watched.LocalPath = existingLink;
+            }
+
+            // A file new to a Link mapping is recorded as a link, so it is linked rather than copied
+            // if it is ever wanted again.
+            if (existingItem is null && watched is not null && _linkFiles is not null
+                && source.Mapping.StorageMode == StorageMode.Link && LinkPaths.CanLink(source.SourceItem) && LinkPaths.LinkPathFor(localPath) is { } watchedLink)
+            {
+                watched.StorageMode = StorageMode.Link;
+                watched.LocalPath = watchedLink;
+            }
+
+            return Task.FromResult(Stamp(watched, source));
         }
 
         var config = ConfigManager.Configuration;
@@ -554,6 +649,27 @@ public class UpdateSyncTablesTask
                 && !System.IO.File.Exists(existingItem.LocalPath))
             {
                 return Task.FromResult<SyncItem?>(null);
+            }
+        }
+
+        // A link row stays a link and a copy row stays a copy, whatever the mapping says now, so switching
+        // a mapping never removes or replaces a file already here. Only new files follow the mapping.
+        // Only video is linked, since Jellyfin plays nothing else from a .strm. Anything else in a Link
+        // mapping is copied.
+        if (_linkFiles is not null
+            && (existingItem?.StorageMode ?? (LinkPaths.CanLink(source.SourceItem) ? source.Mapping.StorageMode : StorageMode.Copy)).IsLink()
+            && LinkPaths.LinkPathFor(localPath) is { } linkPath)
+        {
+            if (existingItem != null)
+            {
+                var promote = source.Mapping.StorageMode == StorageMode.Copy ? config.DownloadNewContentMode : (ApprovalMode?)null;
+                return Task.FromResult(Stamp(LinkStateService.ProcessExistingLink(existingItem, sourcePath, sourceSize, sourceCreateDate, linkPath, _linkFiles, Logger, promote), source));
+            }
+
+            // A real copy already at the name always wins, and is tracked as a copy.
+            if (!System.IO.File.Exists(localPath))
+            {
+                return NewLinkAsync(source, sourceItemId, sourcePath, sourceSize, sourceCreateDate, linkPath, config.DownloadNewContentMode, cancellationToken);
             }
         }
 
@@ -583,6 +699,21 @@ public class UpdateSyncTablesTask
             config.SizeMatchToleranceBytes);
         return Task.FromResult(Stamp(fresh, source));
     }
+
+    private async Task<SyncItem?> NewLinkAsync(ContentRefreshWork source, string sourceItemId, string sourcePath, long sourceSize, DateTime sourceCreateDate, string linkPath, ApprovalMode downloadMode, CancellationToken cancellationToken)
+    {
+        if (!await LinkingOfferedAsync(source.Source, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return Stamp(LinkStateService.ProcessNewLink(source.Mapping, sourceItemId, sourcePath, sourceSize, sourceCreateDate, linkPath, downloadMode, _linkFiles!), source);
+    }
+
+    // A .strm from a peer whose links could not be read may be one of its links, so it is left for a
+    // run where the peer answers.
+    private static bool UnknownPeerStrm(SourceServerClient client, BaseItemDto item)
+        => client.PeerLinksUnknown && item.Path?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true;
 
     // Every row remembers which server built it, so the apply phase downloads from the right peer.
     private static SyncItem? Stamp(SyncItem? item, ContentRefreshWork source)
@@ -617,6 +748,13 @@ public class UpdateSyncTablesTask
     protected override string? PriorityKeyOf(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
+
+        // A link is keyed by the file it stands in for, the same key a source offering that file has.
+        if (record.StorageMode.IsLink())
+        {
+            return LinkPaths.CopiedPathOf(record);
+        }
+
         return string.IsNullOrEmpty(record.LocalPath) ? null : record.LocalPath;
     }
 

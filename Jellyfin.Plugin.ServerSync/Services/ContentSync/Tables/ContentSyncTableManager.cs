@@ -85,6 +85,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         item.RetryCount = ReadNullableInt32(reader, "RetryCount") ?? 0;
         item.ServerKey = ReadNullableString(reader, "ServerKey");
         item.CompanionFiles = ReadNullableString(reader, "CompanionFiles");
+        item.StorageMode = (StorageMode)(ReadNullableInt32(reader, "StorageMode") ?? 0);
         return item;
     }
 
@@ -124,6 +125,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             .Set("LocalPath", record.LocalPath)
             .SetUnlessIgnored("PendingType", record.PendingType.HasValue ? (int)record.PendingType.Value : null)
             .Set("CompanionFiles", record.CompanionFiles)
+            .Set("StorageMode", (int)record.StorageMode)
             .SyncColumns(record);
         ExecuteWrite(upsert.Execute);
     }
@@ -147,6 +149,39 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             return reader.Read() ? MapFromReader(reader) : null;
         },
         fallback: null);
+
+    /// <summary>
+    /// Marks the database as readable only by builds that know links, once it holds one. An older build
+    /// then sets it aside instead of downloading media over a .strm it takes for a broken copy.
+    /// </summary>
+    public void RequireLinkAwareReaders() => ExecuteWrite(conn =>
+    {
+        var connection = (SqliteConnection)conn;
+        var floor = DatabaseMigrationService.MinReaderFor(connection);
+        if ((JPKribs.Jellyfin.Base.DatabaseSchema.GetMinReaderVersion(connection) ?? 0) < floor)
+        {
+            JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, Math.Max(floor, JPKribs.Jellyfin.Base.DatabaseSchema.GetVersion(connection)), floor);
+        }
+    });
+
+    /// <summary>
+    /// Returns every link row with a local path. The link registry reads this as one snapshot.
+    /// </summary>
+    public IList<SyncItem> GetLinks() => ExecuteRead<IList<SyncItem>>(
+        conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM SyncItems WHERE StorageMode IN (1, 2) AND LocalPath IS NOT NULL";
+            using var reader = cmd.ExecuteReader();
+            var links = new List<SyncItem>();
+            while (reader.Read())
+            {
+                links.Add(MapFromReader(reader));
+            }
+
+            return links;
+        },
+        fallback: new List<SyncItem>());
 
     /// <summary>
     /// Returns true if another item already uses this local path.

@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Xunit;
@@ -44,5 +46,45 @@ public class ChangedFoldersTests
     public void BlankPaths_AreIgnored()
     {
         Assert.Empty(ChangedFolders.For(new[] { string.Empty, "  " }));
+    }
+
+    /// <summary>
+    /// A folder reaches a library when Jellyfin knows it or any folder above it.
+    /// True: a new title folder inside a scanned library is refreshed on its own.
+    /// False: every new title folder, which Jellyfin cannot know yet, would force a full scan.
+    /// </summary>
+    [Fact]
+    public void AllReachable_NewFolderUnderAKnownLibrary_IsReachable()
+    {
+        var root = P("/media", "Movies");
+        Assert.True(ChangedFolders.AllReachable(new[] { P(root, "New Film (2024)") }, p => p == root));
+    }
+
+    /// <summary>
+    /// A folder with no known folder above it does not reach a library, and one such folder is enough.
+    /// True: a first run into an empty library, whose folder Jellyfin has not recorded, falls back to a scan.
+    /// False: Jellyfin is told about a folder it drops silently, and the files wait for the next scheduled scan.
+    /// </summary>
+    [Fact]
+    public void AllReachable_AnyFolderWithNoKnownParent_IsNotReachable()
+    {
+        var movies = P("/media", "Movies");
+        var shows = P("/media", "Shows");
+        var asked = new List<string>();
+        var reachable = ChangedFolders.AllReachable(new[] { P(movies, "Film"), P(shows, "Show") }, p =>
+        {
+            asked.Add(p);
+            return p == movies;
+        });
+
+        Assert.False(reachable);
+        Assert.Contains(shows, asked);
+        Assert.Contains(Path.GetPathRoot(shows)!, asked);
+    }
+
+    [Fact]
+    public void AllReachable_NoFolders_IsReachable()
+    {
+        Assert.True(ChangedFolders.AllReachable(Array.Empty<string>(), _ => false));
     }
 }

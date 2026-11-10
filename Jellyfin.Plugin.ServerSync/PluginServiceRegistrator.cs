@@ -38,6 +38,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // The shared writer for Jellyfin's activity log, from the base package.
         serviceCollection.AddActivityLogger();
 
+        // Links: the filter on Jellyfin's own playback routes, which does nothing for any item that is
+        // not one of this server's links, and the probe that gives a new link its media info.
+        serviceCollection.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.AddService<Services.Links.LinkPlaybackFilter>());
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkProbe>());
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkPlaybackReporter>());
+
         // The hint pipeline runs for the life of the server. Each worker is registered once as itself,
         // by the attribute scan above, and once more as a hosted service that resolves that same
         // instance, so the controllers and the publisher talk to the running worker.

@@ -13,6 +13,8 @@ Server Sync runs on your Local (destination) server and pulls data from one or m
 
 When a Source server also runs Server Sync, the two can keep each other current between scheduled runs. A server entry in **Push** or **Sync** mode is told about changes as they happen, from a play or a favorite to a metadata edit, a person edit, or a new file, and pulls each change within seconds. User settings travel on the scheduled task only, since Jellyfin raises no event for them. The scheduled tasks remain the safety net. See [Live Changes](LiveChanges.md).
 
+A library can also hold the source's files as **links** instead of copies: small `.strm` files that appear at once, use almost no disk, and stream from the source when played, with the source deciding who may stream and showing each play on its dashboard. See [Links](Links.md).
+
 When several servers are configured, their order is their priority. If two servers offer the same item, the server higher in the list supplies it and the lower one only contributes what the higher one lacks. Reordering the list moves an item to the new winner on the next refresh without deleting anything already downloaded.
 
 ## Before You Start

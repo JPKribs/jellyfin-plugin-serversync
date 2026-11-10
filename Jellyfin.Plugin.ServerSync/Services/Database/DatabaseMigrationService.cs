@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 31;
+    public const int CurrentSchemaVersion = 32;
 
     /// <summary>
     /// The oldest schema version whose code can still work with a database at
@@ -27,6 +27,30 @@ public static class DatabaseMigrationService
     /// database aside.
     /// </summary>
     public const int MinReaderVersion = 28;
+
+    /// <summary>
+    /// The oldest schema whose code knows links. A database that holds links names this as its oldest
+    /// reader, so an older build sets it aside rather than taking a .strm for a copy whose size is wrong
+    /// and downloading the media over it.
+    /// </summary>
+    public const int LinkReaderVersion = 32;
+
+    /// <summary>The oldest reader a database with these contents allows: <see cref="LinkReaderVersion"/> once it holds a link.</summary>
+    /// <param name="connection">Database connection.</param>
+    /// <returns>The version.</returns>
+    public static int MinReaderFor(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SyncItems'";
+        if (Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
+        {
+            return MinReaderVersion;
+        }
+
+        cmd.CommandText = "SELECT EXISTS (SELECT 1 FROM pragma_table_info('SyncItems') WHERE name = 'StorageMode') AND EXISTS (SELECT 1 FROM SyncItems WHERE StorageMode <> 0)";
+        return Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 1 ? Math.Max(MinReaderVersion, LinkReaderVersion) : MinReaderVersion;
+    }
 
     /// <summary>
     /// Creates the initial database schema including all tables for the current version.
@@ -70,6 +94,7 @@ public static class DatabaseMigrationService
             CREATE INDEX IF NOT EXISTS idx_local_path ON SyncItems(LocalPath);
         ";
         syncItemsCmd.ExecuteNonQuery();
+        CreateV32Additions(connection);
 
         // ===== History Sync (HistorySyncItems) =====
         // One row per (user, library, item). Source/Local/Merged are five
@@ -325,6 +350,28 @@ public static class DatabaseMigrationService
         CreateV28Additions(connection);
         CreateV29Additions(connection);
         CreateV30Additions(connection);
+    }
+
+    /// <summary>
+    /// Adds how each content row is held: a full copy, or a .strm link. Defaulted to copy, so every
+    /// existing row keeps its meaning and an older build still reads the table.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void CreateV32Additions(SqliteConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        using (var exists = connection.CreateCommand())
+        {
+            exists.Transaction = transaction;
+            exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SyncItems'";
+            if (Convert.ToInt64(exists.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
+            {
+                return;
+            }
+        }
+
+        AddColumnIfMissing(connection, transaction, "SyncItems", "StorageMode INTEGER NOT NULL DEFAULT 0");
+        transaction.Commit();
     }
 
     /// <summary>
@@ -685,7 +732,13 @@ public static class DatabaseMigrationService
                 NormalizeInboundOrigins(connection);
             }
 
-            JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, CurrentSchemaVersion, MinReaderVersion);
+            if (fromVersion < 32)
+            {
+                logger.LogInformation("Schema upgrade to v32: adding the content storage mode.");
+                CreateV32Additions(connection);
+            }
+
+            JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, CurrentSchemaVersion, MinReaderFor(connection));
             logger.LogInformation("Database migration completed successfully");
             return true;
         }

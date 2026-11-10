@@ -61,13 +61,17 @@ public class SyncMissingContentTask
         IPluginConfigurationManager configManager,
         ContentSyncTableManager manager,
         ISourceServerClientFactory clientFactory,
-        DownloadService downloadService)
+        DownloadService downloadService,
+        Services.Links.LinkWriter? linkWriter = null)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
         _libraryMonitor = libraryMonitor;
         _downloadService = downloadService;
+        _linkWriter = linkWriter;
     }
+
+    private readonly Services.Links.LinkWriter? _linkWriter;
 
     /// <inheritdoc />
     public override string Name => "Sync Content";
@@ -122,7 +126,7 @@ public class SyncMissingContentTask
         var config = ConfigManager.Configuration;
         _downloadAttempted.Clear();
 
-        if (!DiskSpaceService.HasSufficientSpace(config, out var insufficientPath))
+        if (!DiskSpaceService.HasSufficientSpace(config, out var insufficientPath) && !OnlyLinksQueued())
         {
             var diskInfo = DiskSpaceService.GetDiskSpaceInfo(config).FirstOrDefault(d => d.Path == insufficientPath);
             var message = diskInfo != null
@@ -135,7 +139,7 @@ public class SyncMissingContentTask
         // The base connects every scan server. A server that did not connect feeds its circuit
         // breaker, and a server whose breaker is open is left out of this run: its rows stay Queued
         // untouched, so a pause never costs them retries, while the other servers' downloads go on.
-        if (!await base.BeforeRunAsync(cancellationToken).ConfigureAwait(false))
+        if (!await base.BeforeRunAsync(cancellationToken).ConfigureAwait(false) && !OnlyLinksQueued())
         {
             return false;
         }
@@ -169,7 +173,7 @@ public class SyncMissingContentTask
         }
 
         Sources = allowed;
-        if (allowed.Count == 0)
+        if (allowed.Count == 0 && !OnlyLinksQueued())
         {
             FailPreflight("the circuit breaker is open for every reachable server");
             return false;
@@ -201,12 +205,13 @@ public class SyncMissingContentTask
 
     // A file that arrived through a hint is reported to the library as changed, the way the library
     // monitor reports a file it saw, so Jellyfin refreshes that one folder rather than every library.
+    // When Jellyfin could not take the folder, as for a first file in an empty library, a scan is queued.
     /// <inheritdoc />
     protected override Task AfterRowAsync(bool applied, CancellationToken cancellationToken)
     {
-        if (applied && _successCount > 0)
+        if (applied && _successCount > 0 && !_changedFiles.IsEmpty && !RefreshChangedFolders())
         {
-            RefreshChangedFolders();
+            _libraryManager.QueueLibraryScan();
         }
 
         _tempPath = null;
@@ -229,6 +234,13 @@ public class SyncMissingContentTask
         _changedFiles.Clear();
     }
 
+    // A library's own folder or one inside it. The roots above every library never lead a refresh anywhere.
+    private bool IsLibraryFolder(string path)
+        => _libraryManager.FindByPath(path, true) is MediaBrowser.Controller.Entities.Folder folder
+            and not MediaBrowser.Controller.Entities.AggregateFolder
+            and not MediaBrowser.Controller.Entities.UserRootFolder
+            and not MediaBrowser.Controller.Entities.CollectionFolder;
+
     /// <summary>
     /// Tells Jellyfin which folders changed, so it refreshes those and nothing else. Returns false when
     /// there are too many for that to be cheaper than one full scan, which the caller then runs.
@@ -238,6 +250,12 @@ public class SyncMissingContentTask
         var folders = ChangedFolders.For(_changedFiles);
         if (folders.Count == 0 || folders.Count > ChangedFolders.MaxTargeted)
         {
+            return false;
+        }
+
+        if (!ChangedFolders.AllReachable(folders, IsLibraryFolder))
+        {
+            Logger.LogInformation("Jellyfin has not yet scanned the library folder for a changed file, as happens on a first sync into an empty library, so the whole library is scanned");
             return false;
         }
 
@@ -269,6 +287,108 @@ public class SyncMissingContentTask
     {
         ArgumentNullException.ThrowIfNull(record);
 
+        if (_tempPath == null)
+        {
+            throw new InvalidOperationException("BeforeRunAsync did not complete. Aborting apply.");
+        }
+
+        // A link downloads nothing, so it branches off before the download steps and never touches them.
+        if (record.StorageMode == StorageMode.Link)
+        {
+            (_linkWriter ?? throw new InvalidOperationException("Links cannot be written on this server")).Write(record, TypedManager, ConfigManager.Configuration);
+            await DownloadLinkCompanionsAsync(record, cancellationToken).ConfigureAwait(false);
+            await WriteLinkNfoAsync(record, cancellationToken).ConfigureAwait(false);
+            Interlocked.Increment(ref _successCount);
+            _changedFiles.Enqueue(record.LocalPath!);
+            return;
+        }
+
+        // A link becoming a copy downloads through the copy path below, to where the copy belongs, and
+        // the .strm goes only once the copy is in place. Until then it keeps playing as a link.
+        if (record.StorageMode == StorageMode.Promoting)
+        {
+            var linkPath = record.LocalPath;
+            var copyPath = Services.Links.LinkPaths.CopiedPathOf(record) ?? throw new InvalidOperationException($"The link has no path (source: {record.SourcePath})");
+            record.LocalPath = copyPath;
+            try
+            {
+                await DownloadAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                record.LocalPath = linkPath;
+                throw;
+            }
+
+            if (!File.Exists(copyPath))
+            {
+                record.LocalPath = linkPath;
+                throw new InvalidOperationException($"The copy of {Path.GetFileName(copyPath)} did not arrive, so the link stays");
+            }
+
+            if (!string.IsNullOrEmpty(linkPath))
+            {
+                (_linkWriter ?? throw new InvalidOperationException("Links cannot be removed on this server")).Remove(linkPath);
+                _changedFiles.Enqueue(linkPath);
+            }
+
+            record.StorageMode = StorageMode.Copy;
+            record.LocalItemId = null;
+            return;
+        }
+
+        await DownloadAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Subtitles and other companions are small and Jellyfin pairs them by name, so a link gets them
+    // beside it the same way a copy does. A link is still written when they cannot be fetched.
+    private async Task DownloadLinkCompanionsAsync(SyncItem record, CancellationToken cancellationToken)
+    {
+        var config = ConfigManager.Configuration;
+        if (!config.IncludeCompanionFiles || _tempPath is null || SourceFor(record) is not { } source
+            || !Guid.TryParse(record.SourceItemId, out var itemId) || Path.GetDirectoryName(record.LocalPath) is not { Length: > 0 } folder)
+        {
+            return;
+        }
+
+        var companions = await _downloadService.DownloadCompanionFilesAsync(source.Client, itemId, folder, _tempPath, _speedLimit, config, cancellationToken).ConfigureAwait(false);
+        if (companions.Count > 0)
+        {
+            record.CompanionFiles = string.Join(",", companions);
+        }
+    }
+
+    // An .nfo beside the link tells Jellyfin what it is from the source's own details, rather than from
+    // the file name. A link is still written when the details cannot be read, and an .nfo the plugin did
+    // not write is never replaced.
+    private async Task WriteLinkNfoAsync(SyncItem record, CancellationToken cancellationToken)
+    {
+        if (SourceFor(record) is not { } source || !Guid.TryParse(record.SourceItemId, out var itemId) || string.IsNullOrEmpty(record.LocalPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var items = await source.Client.GetItemsByIdsAsync(new[] { itemId }, Services.Links.LinkNfo.Fields, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (items.FirstOrDefault() is { } item && !Services.Links.LinkNfo.Write(record.LocalPath, item))
+            {
+                Logger.LogDebug("Left the .nfo beside {Path} as it is, since Server Sync did not write it", record.LocalPath);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Wrote the link {Path} without an .nfo: {Reason}", record.LocalPath, ex.Message);
+        }
+    }
+
+    // The copy path: disk space, validation, and the download itself.
+    private async Task DownloadAsync(SyncItem record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
+    {
         if (_tempPath == null)
         {
             throw new InvalidOperationException("BeforeRunAsync did not complete. Aborting apply.");
@@ -464,6 +584,29 @@ public class SyncMissingContentTask
 
 
     private ContentSyncTableManager TypedManager => (ContentSyncTableManager)Manager;
+
+    // Writing a link reads nothing from its server, so it goes ahead when that server is down, refused
+    // by its breaker, or holds a key that may not download.
+    /// <inheritdoc />
+    protected override bool AppliesWithoutSource(SyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return record.StorageMode == StorageMode.Link
+            && ConfigManager.Configuration.FindServer(record.ServerKey) is { IsEnabled: true };
+    }
+
+    // A run with only links to write needs no disk space to speak of and no server to download from,
+    // so the checks that guard downloads do not stop it. Any copy queued keeps them in force.
+    // Rows from a server that is not set up here are left alone by every run, so they neither count as
+    // copies to guard nor as links to write.
+    private bool OnlyLinksQueued()
+    {
+        var pulling = ConfigManager.Configuration.GetPullServers().Select(s => s.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var queued = GetItemsToApply()
+            .Where(r => AppliesWithoutSource(r) || (r.ServerKey is { } key && pulling.Contains(key)) || (string.IsNullOrEmpty(r.ServerKey) && pulling.Count > 0))
+            .ToList();
+        return queued.Count > 0 && queued.All(r => r.StorageMode == StorageMode.Link);
+    }
 
     /// <summary>
     /// Whether a connected server takes part in this run. Connecting is not a download, so it leaves

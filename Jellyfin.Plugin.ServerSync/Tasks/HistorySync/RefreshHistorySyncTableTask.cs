@@ -9,6 +9,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
@@ -40,6 +41,7 @@ public class RefreshHistorySyncTableTask
 {
     private readonly HistorySyncTableService _historyService;
     private readonly ILibraryManager _libraryManager;
+    private readonly ILinkRegistry _links;
 
     /// <summary>
     /// Initializes a new instance.
@@ -50,11 +52,13 @@ public class RefreshHistorySyncTableTask
         ISourceServerClientFactory clientFactory,
         HistorySyncTableService historyService,
         ILibraryManager libraryManager,
+        ILinkRegistry links,
         HistorySyncTableManager manager)
         : base(logger, manager, clientFactory, configManager)
     {
         _historyService = historyService;
         _libraryManager = libraryManager;
+        _links = links;
     }
 
 
@@ -124,6 +128,8 @@ public class RefreshHistorySyncTableTask
                 {
                     paths[item.Path] = item;
                 }
+
+                LinkPaths.AddAliases(paths, _links);
             }
 
             localPathsByLibrary[mapping.SourceLibraryId] = paths;

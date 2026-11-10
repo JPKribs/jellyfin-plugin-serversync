@@ -109,9 +109,11 @@ public class StallWatchdogStreamTests
     {
         using var destination = new MemoryStream();
 
-        await StallWatchdogStream.CopyAsync(new QuietAfterPrefix("img-", trickle: 6, interval: TimeSpan.FromMilliseconds(100)), destination, TimeSpan.FromMilliseconds(350), CancellationToken.None);
+        // Gaps of a tenth of the window, so a busy machine cannot stretch one past it, over a copy three
+        // times as long as the window.
+        await StallWatchdogStream.CopyAsync(new QuietAfterPrefix("img-", trickle: 30, interval: TimeSpan.FromMilliseconds(100)), destination, TimeSpan.FromSeconds(1), CancellationToken.None);
 
-        Assert.Equal("img-tttttt", Encoding.ASCII.GetString(destination.ToArray()));
+        Assert.Equal("img-" + new string('t', 30), Encoding.ASCII.GetString(destination.ToArray()));
     }
 
     /// <summary>

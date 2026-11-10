@@ -99,7 +99,8 @@ public partial class ConfigurationController
                     SourceServerId = rowServer?.ServerId,
                     ServerKey = i.ServerKey,
                     ServerName = rowServer?.DisplayName,
-                    CompanionFiles = i.CompanionFiles
+                    CompanionFiles = i.CompanionFiles,
+                    StorageMode = i.StorageMode.ToString()
                 };
             }).ToList(),
             totalCount,
@@ -353,6 +354,47 @@ public partial class ConfigurationController
             _logger.LogError(ex, "Failed to queue {Count} content item(s)", request.SourceItemIds.Count);
             return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
         }
+    }
+
+    /// <summary>
+    /// Turns links into full copies. Each copy downloads on the next sync, and its .strm is removed once
+    /// the copy is in place. Rows that are not links are skipped.
+    /// </summary>
+    /// <param name="request">Bulk items request.</param>
+    /// <returns>How many links will be copied, and how many rows were skipped.</returns>
+    [HttpPost("PromoteItems")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult PromoteItems(
+        [FromServices] ContentSyncTableManager manager,
+        [FromBody] BulkItemsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(manager);
+        if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
+        {
+            return BadRequest("No items specified");
+        }
+
+        var promoted = 0;
+        var skipped = 0;
+        foreach (var id in request.SourceItemIds)
+        {
+            var row = manager.GetBySourceItemId(id);
+            if (row is not null
+                && row.Status is not (SyncStatus.Ignored or SyncStatus.Deleting)
+                && !(row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)
+                && Services.Links.LinkStateService.MarkPromoting(row, requireApproval: false))
+            {
+                manager.Upsert(row);
+                promoted++;
+            }
+            else
+            {
+                skipped++;
+            }
+        }
+
+        return Ok(new { Promoted = promoted, Skipped = skipped });
     }
 
     /// <summary>

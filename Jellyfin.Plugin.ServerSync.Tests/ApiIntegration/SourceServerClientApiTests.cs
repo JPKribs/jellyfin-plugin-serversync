@@ -228,11 +228,8 @@ public class SourceServerClientApiTests
     public async Task GetItemImageInfo_And_HeadContentLength_Work()
     {
         var withImage = _fx.SampleItems.FirstOrDefault(i => i.ImageTags?.AdditionalData?.ContainsKey("Primary") == true);
-        if (withImage == null)
-        {
-            _output.WriteLine("No sample item with a Primary image — skipping.");
-            return;
-        }
+        // A server with nothing to check fails rather than passing on nothing. The Docker pool seeds one.
+        Assert.True(withImage != null, "No sample item has a Primary image, so image info was not checked. Give one item in the first library an image.");
 
         var info = await _fx.Client.GetItemImageInfoAsync(withImage.Id!.Value);
         Assert.NotNull(info);
@@ -340,7 +337,7 @@ public class SourceServerClientApiTests
             return;
         }
 
-        _output.WriteLine($"All {attempts} sampled items are missing on the source's disk — download route not exercised on this server.");
+        Assert.Fail($"All {attempts} sampled items are missing on the source's disk, so the download route was not checked.");
     }
 
     [ApiFact]
@@ -382,7 +379,7 @@ public class SourceServerClientApiTests
             return;
         }
 
-        _output.WriteLine("No item with external subtitles in the sample — companion download not exercised on this server.");
+        Assert.Fail("No item in the sample has an external subtitle, so companion downloads were not checked. Put a .srt beside one item in the first library.");
     }
 
     // =====================================================================

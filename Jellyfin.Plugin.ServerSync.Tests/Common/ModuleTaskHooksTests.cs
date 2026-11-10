@@ -96,7 +96,7 @@ public sealed class ModuleTaskHooksTests : IDisposable
     private sealed class HistoryRefreshProbe : RefreshHistorySyncTableTask
     {
         public HistoryRefreshProbe(IPluginConfigurationManager config, HistorySyncTableManager manager)
-            : base(NullLogger<RefreshHistorySyncTableTask>.Instance, config, new FakeClientFactory(), null!, null!, manager)
+            : base(NullLogger<RefreshHistorySyncTableTask>.Instance, config, new FakeClientFactory(), null!, null!, new Jellyfin.Plugin.ServerSync.Services.Links.NoLinks(), manager)
         {
         }
 

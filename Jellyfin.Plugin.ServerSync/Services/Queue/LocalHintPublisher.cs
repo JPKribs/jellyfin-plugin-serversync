@@ -20,6 +20,7 @@ public sealed class LocalHintPublisher
     private readonly OutboundHintWorker _worker;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalHintPublisher> _logger;
+    private readonly Links.ILinkRegistry? _links;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalHintPublisher"/> class.
@@ -36,8 +37,10 @@ public sealed class LocalHintPublisher
         VersionStore versions,
         OutboundHintWorker worker,
         IServerApplicationHost applicationHost,
-        ILogger<LocalHintPublisher> logger)
+        ILogger<LocalHintPublisher> logger,
+        Links.ILinkRegistry? links = null)
     {
+        _links = links;
         _configManager = configManager;
         _outbound = outbound;
         _versions = versions;
@@ -56,6 +59,7 @@ public sealed class LocalHintPublisher
     public int PublishMetadata(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, bool recorded = true, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
+        itemPath = SentPath(itemPath);
         var key = HintProtocol.MetadataKey(localItemId);
         return Publish(
             HintKind.Metadata,
@@ -90,6 +94,11 @@ public sealed class LocalHintPublisher
             recorded);
     }
 
+    // A link goes out under the path its copy would have, so a peer matches the file it stands in for,
+    // whatever version of Server Sync it runs.
+    private string SentPath(string itemPath)
+        => _links is null || string.IsNullOrEmpty(itemPath) ? itemPath : Links.LinkPaths.RowPathFor(itemPath, _links);
+
     /// <summary>Publishes a media file that appeared here.</summary>
     /// <param name="localItemId">The local item.</param>
     /// <param name="itemPath">The local path of the file.</param>
@@ -99,6 +108,13 @@ public sealed class LocalHintPublisher
     public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
+
+        // A link is not a file a peer can copy. Its history and metadata still go out as usual.
+        if (_links?.Find(itemPath) is not null)
+        {
+            return 0;
+        }
+
         var key = HintProtocol.MetadataKey(localItemId);
         return Publish(
             HintKind.Content,
@@ -198,6 +214,7 @@ public sealed class LocalHintPublisher
     public int PublishHistory(Guid localUserId, string? userName, Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
+        itemPath = SentPath(itemPath);
 
         var key = HintProtocol.HistoryKey(localUserId, localItemId);
         var itemKey = localItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);

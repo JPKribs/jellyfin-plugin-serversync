@@ -5,6 +5,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
@@ -28,6 +29,7 @@ public sealed class HistoryAgreementRecorder
     private readonly IPluginConfigurationManager _configManager;
     private readonly HistorySyncTableManager _table;
     private readonly ILibraryManager _libraryManager;
+    private readonly ILinkRegistry _links;
     private readonly ILogger<HistoryAgreementRecorder> _logger;
 
     /// <summary>
@@ -41,11 +43,13 @@ public sealed class HistoryAgreementRecorder
         IPluginConfigurationManager configManager,
         HistorySyncTableManager table,
         ILibraryManager libraryManager,
+        ILinkRegistry links,
         ILogger<HistoryAgreementRecorder> logger)
     {
         _configManager = configManager;
         _table = table;
         _libraryManager = libraryManager;
+        _links = links;
         _logger = logger;
     }
 
@@ -134,8 +138,8 @@ public sealed class HistoryAgreementRecorder
             SourceItemId = senderItemId,
             LocalItemId = localItemId,
             ItemName = item.Name,
-            SourcePath = PathUtilities.TranslatePath(item.Path, library.LocalRootPath, library.SourceRootPath),
-            LocalPath = item.Path,
+            SourcePath = LinkPaths.SourcePathFor(item.Path, library.LocalRootPath, library.SourceRootPath, _links),
+            LocalPath = LinkPaths.RowPathFor(item.Path, _links),
             ServerKey = peer.Key
         };
     }

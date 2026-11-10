@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -58,9 +59,20 @@ public sealed class PlaylistMirror
     private readonly IServerApplicationHost _applicationHost;
     private readonly MediaBrowser.Controller.Providers.IProviderManager _providerManager;
     private readonly ApplyGuard _guard;
+    private readonly ILocalItems _localItems;
     private readonly ILogger<PlaylistMirror> _logger;
 
-    public PlaylistMirror(ILibraryManager libraryManager, IPlaylistManager playlistManager, IUserManager userManager, IServerApplicationHost applicationHost, MediaBrowser.Controller.Providers.IProviderManager providerManager, ApplyGuard guard, PlaylistCopyStore copies, ILogger<PlaylistMirror> logger)
+    // Playlists this mirror deleted, with each one's creation date, watched for a while after.
+    private readonly ConcurrentDictionary<Guid, (DateTime Created, DateTime Until)> _deleted = new();
+
+    /// <summary>
+    /// How long after a delete a refresh that saves the playlist back is undone. Jellyfin's playlist edits
+    /// queue a refresh that saves the playlist when it finishes, and one already running when the playlist
+    /// is deleted writes it back.
+    /// </summary>
+    public static readonly TimeSpan ResaveWindow = TimeSpan.FromMinutes(5);
+
+    public PlaylistMirror(ILibraryManager libraryManager, IPlaylistManager playlistManager, IUserManager userManager, IServerApplicationHost applicationHost, MediaBrowser.Controller.Providers.IProviderManager providerManager, ApplyGuard guard, PlaylistCopyStore copies, ILocalItems localItems, ILogger<PlaylistMirror> logger)
     {
         ArgumentNullException.ThrowIfNull(copies);
         _providerManager = providerManager;
@@ -69,7 +81,9 @@ public sealed class PlaylistMirror
         _userManager = userManager;
         _applicationHost = applicationHost;
         _guard = guard;
+        _localItems = localItems;
         _logger = logger;
+        _providerManager.RefreshCompleted += (_, e) => OnRefreshCompleted(e?.Argument);
     }
 
     public static string RootKey(BaseItem playlist)
@@ -262,6 +276,7 @@ public sealed class PlaylistMirror
                 }).ConfigureAwait(false);
 
                 PlaylistCopyStore.Set(Guid.Parse(created.Id), source.RootId, server.Key);
+                _deleted.TryRemove(Guid.Parse(created.Id), out _);
                 if (_libraryManager.GetItemById(Guid.Parse(created.Id)) is Playlist made)
                 {
                     made.ProviderIds[SourcePlaylistProviderKey] = source.RootId;
@@ -348,8 +363,50 @@ public sealed class PlaylistMirror
         }
 
         PlaylistCopyStore.Remove(playlist.Id);
+        _deleted[playlist.Id] = (playlist.DateCreated, DateTime.UtcNow + ResaveWindow);
 
         _logger.LogInformation("Playlists: deleted '{Name}'", playlist.Name);
+    }
+
+    /// <summary>
+    /// Called when Jellyfin finishes refreshing an item. A playlist this mirror deleted moments ago that is
+    /// in the library again, with its old creation date, was saved back by a refresh from an edit just
+    /// before the delete, so it is deleted again. A new playlist with the same name has the same id, since
+    /// Jellyfin derives it from the name, but a creation date of its own, so it is left alone.
+    /// </summary>
+    /// <param name="item">The item refreshed.</param>
+    public void OnRefreshCompleted(BaseItem? item)
+    {
+        if (item is not Playlist || !_deleted.TryGetValue(item.Id, out var deleted))
+        {
+            return;
+        }
+
+        if (DateTime.UtcNow > deleted.Until)
+        {
+            _deleted.TryRemove(item.Id, out _);
+            return;
+        }
+
+        try
+        {
+            if (_libraryManager.GetItemById(item.Id) is not Playlist back || back.DateCreated != deleted.Created)
+            {
+                return;
+            }
+
+            _deleted.TryRemove(item.Id, out _);
+            using (_guard.Enter(HintProtocol.GuardKey(HintKind.Playlists, RootKey(back))))
+            {
+                _libraryManager.DeleteItem(back, new DeleteOptions { DeleteFileLocation = true }, back.GetParent(), false);
+            }
+
+            _logger.LogInformation("Playlists: deleted '{Name}' again, since a refresh from an edit just before the delete saved it back", back.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Playlists: could not delete '{Name}' again after a refresh saved it back", item.Name);
+        }
     }
 
     public static string? CopyServer(BaseItem playlist)
@@ -386,7 +443,7 @@ public sealed class PlaylistMirror
             }
 
             var localPath = PathUtilities.TranslatePath(sourcePath, mapping.SourceRootPath!, mapping.LocalRootPath);
-            return _libraryManager.FindByPath(localPath, isFolder: false);
+            return _localItems.FindByPath(localPath, isFolder: false);
         }
 
         return null;

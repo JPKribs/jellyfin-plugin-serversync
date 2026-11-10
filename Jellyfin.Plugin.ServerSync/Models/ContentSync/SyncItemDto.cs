@@ -54,4 +54,7 @@ public class SyncItemDto
     public string? ServerName { get; set; }
 
     public string? CompanionFiles { get; set; }
+
+    /// <summary>Gets or sets how the file is held here: Copy, or Link for a .strm that streams from the source.</summary>
+    public string StorageMode { get; set; } = "Copy";
 }

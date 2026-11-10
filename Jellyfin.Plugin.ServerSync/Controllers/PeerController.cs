@@ -28,7 +28,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 [Route("Sync/Peer")]
 [PeerCallerGuard]
 [Produces(MediaTypeNames.Application.Json)]
-public class PeerController : ControllerBase
+public partial class PeerController : ControllerBase
 {
     private readonly PeerHistoryService _history;
     private readonly IPluginConfigurationManager _configManager;
@@ -106,6 +106,7 @@ public class PeerController : ControllerBase
             ProtocolVersion = HintProtocol.ProtocolVersion,
             MinProtocolVersion = HintProtocol.MinProtocolVersion,
             Accepts = HintProtocol.AcceptedKinds(_configManager.Configuration).Select(k => k.ToString()).ToList(),
+            Features = Services.Links.LinkFeature.Offered(_configManager.Configuration) ? new List<string> { Services.Links.LinkFeature.Name } : new List<string>(),
             ServerTime = DateTime.UtcNow
         });
     }

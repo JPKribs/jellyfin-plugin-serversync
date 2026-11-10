@@ -4,7 +4,7 @@ Two scheduled tasks do the work. **Sync Content** refreshes and downloads files,
 
 | Type | Matched by | Live with Push or Sync | Details |
 | :--- | :--- | :--- | :--- |
-| Content | File path under the library root | New files | [Content](Content.md) |
+| Content | File path under the library root | New files | [Content](Content.md), and [Links](Links.md) for libraries that stream instead of copy |
 | History | File path and user mapping | Yes, merged three way | [History](History.md) |
 | Metadata | File path | Yes, newest edit wins | [Metadata](Metadata.md) |
 | People | Name | Yes, newest edit wins | [People](People.md) |

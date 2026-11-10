@@ -64,6 +64,12 @@ public class SyncItem : SyncRecord
     /// </summary>
     public string? CompanionFiles { get; set; }
 
+    /// <summary>
+    /// Gets or sets how the file is held here. A link row's <see cref="LocalPath"/> is the .strm, and its
+    /// <see cref="SourcePath"/> keeps the source file's real path and extension.
+    /// </summary>
+    public StorageMode StorageMode { get; set; }
+
     /// <inheritdoc />
     public override bool HasChanges
     {

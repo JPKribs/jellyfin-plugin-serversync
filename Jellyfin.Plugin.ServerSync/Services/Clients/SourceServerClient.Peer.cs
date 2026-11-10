@@ -312,6 +312,130 @@ public partial class SourceServerClient
     }
 
     /// <summary>
+    /// Opens a stream of one of the peer's files for a link here, passing <paramref name="range"/> on.
+    /// The caller owns the response and reads the body as it arrives. A peer that no longer holds this
+    /// server's pairing is paired again once.
+    /// </summary>
+    /// <param name="sourceItemId">The peer's id of the item.</param>
+    /// <param name="callerServerId">This server's Jellyfin id.</param>
+    /// <param name="grant">Who the stream is for.</param>
+    /// <param name="sourceUserId">The peer's user this server maps the user to, or null.</param>
+    /// <param name="range">The Range header to pass on, or null.</param>
+    /// <param name="head">Whether to ask for the headers only.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's answer.</returns>
+    public async Task<HttpResponseMessage> OpenPeerStreamAsync(string sourceItemId, string callerServerId, Links.LinkGrant grant, string? sourceUserId, string? range, bool head, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(grant);
+        var path = "/Sync/Peer/Stream/" + Uri.EscapeDataString(sourceItemId)
+            + "?serverId=" + Uri.EscapeDataString(callerServerId ?? string.Empty)
+            + (grant.UserId is { } user ? "&userId=" + user.ToString("N", System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
+            + (string.IsNullOrEmpty(sourceUserId) ? string.Empty : "&sourceUserId=" + Uri.EscapeDataString(sourceUserId))
+            + (grant.Probe ? "&probe=true" : string.Empty);
+        var response = await SendPeerStreamAsync(path, range, head, cancellationToken).ConfigureAwait(false);
+        if ((int)response.StatusCode != Services.Queue.HintProtocol.UnpairedStatus || Pairing is null)
+        {
+            return response;
+        }
+
+        response.Dispose();
+        _logger.LogInformation("The peer at {Url} does not hold a pairing for this server, pairing now", FormatUtilities.SanitizeForLog(_serverUrl));
+        await GetPeerLinkAsync(Pairing.ThisServerId, cancellationToken).ConfigureAwait(false);
+        return await SendPeerStreamAsync(path, range, head, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks the peer whether a user here may stream one of its files through a link, before playback
+    /// starts. A refusal carries the peer's reason.
+    /// </summary>
+    /// <param name="request">The item and user.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's answer.</returns>
+    public async Task<LinkStreamCheckResponse> CheckLinkStreamAsync(LinkStreamCheckRequest request, CancellationToken cancellationToken = default)
+    {
+        var (status, parsed, body) = await PeerRequestAsync<LinkStreamCheckResponse>(HttpMethod.Post, "/Sync/Peer/Stream/Check", request, cancellationToken).ConfigureAwait(false);
+        if (status is < 200 or >= 300 || parsed is null)
+        {
+            return new LinkStreamCheckResponse { Allowed = false, Reason = $"the source answered {status}: {body}" };
+        }
+
+        return parsed;
+    }
+
+    /// <summary>Reports playback of a link to the peer that holds the file. Throws when the peer refuses.</summary>
+    /// <param name="report">The report.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    public async Task ReportLinkPlaybackAsync(PeerPlaybackReport report, CancellationToken cancellationToken = default)
+    {
+        var (status, _, body) = await PeerRequestAsync<object>(HttpMethod.Post, "/Sync/Peer/Playback", report, cancellationToken).ConfigureAwait(false);
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException($"The peer answered {status} to a playback report: {body}", null, (System.Net.HttpStatusCode)status);
+        }
+    }
+
+    /// <summary>Passes a remote control command to the peer for a viewer of a link there. Throws when refused.</summary>
+    /// <param name="request">The command.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    public async Task SendLinkControlAsync(PeerControlRequest request, CancellationToken cancellationToken = default)
+    {
+        var (status, _, body) = await PeerRequestAsync<object>(HttpMethod.Post, "/Sync/Peer/Control", request, cancellationToken).ConfigureAwait(false);
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException($"The peer answered {status} to a remote control command: {body}", null, (System.Net.HttpStatusCode)status);
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendPeerStreamAsync(string path, string? range, bool head, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(head ? HttpMethod.Head : HttpMethod.Get, _serverUrl + path);
+        AddAuthorizationHeader(request);
+        request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.VersionHeader, _pluginVersion);
+        request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.ProtocolHeader, Services.Queue.HintProtocol.ProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.MinProtocolHeader, Services.Queue.HintProtocol.MinProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var secret = Pairing?.CurrentSecret();
+        if (!string.IsNullOrEmpty(secret))
+        {
+            request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.PairingHeader, secret);
+        }
+
+        if (!string.IsNullOrEmpty(range))
+        {
+            request.Headers.TryAddWithoutValidation("Range", range);
+        }
+
+        return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the peer's links, each with the path its full copy would have. Null when the peer refuses or
+    /// has no such route, so a caller goes on with paths as they arrive. Throws on a server error.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's links, or null.</returns>
+    public async Task<PeerLinksResponse?> GetPeerLinksAsync(CancellationToken cancellationToken = default)
+    {
+        var (status, parsed, body) = await PeerRequestAsync<PeerLinksResponse>(HttpMethod.Get, "/Sync/Peer/Links", null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+
+        // A server error is no answer, so it is raised and asked again. A refusal or a missing route is
+        // the peer saying it lists no links for this server.
+        if (status >= 500)
+        {
+            throw new HttpRequestException($"The peer answered {status} to the links request", null, (System.Net.HttpStatusCode)status);
+        }
+
+        if (status is < 200 or >= 300)
+        {
+            _logger.LogDebug("The peer did not list its links ({Status}): {Body}", status, body);
+            return null;
+        }
+
+        return parsed ?? new PeerLinksResponse();
+    }
+
+    /// <summary>
     /// One call to the peer's Server Sync endpoints. Builds the request, signs it, sends it, and on a
     /// success parses the answer, otherwise reads the body as text. Every peer method is a short rule
     /// over this, so the transport and its error handling live in one place.

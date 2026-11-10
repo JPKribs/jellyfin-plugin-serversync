@@ -36,6 +36,7 @@ export function createContentSyncTableModule(ctx, kit) {
             { id: 'Ignore', title: 'Ignore', icon: 'block', method: 'bulkIgnore' },
             { id: 'MarkSynced', title: 'Mark Synced', icon: 'check_circle', method: 'bulkMarkSynced' },
             { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'jpk-button-submit', method: 'bulkQueue' },
+            { id: 'MakeCopy', title: 'Turn links into full copies', icon: 'file_download', method: 'bulkMakeCopy' },
             { id: 'Delete', title: 'Delete from local server only', icon: 'delete', className: 'jpk-button-destructive', method: 'bulkDelete' }
         ],
         idKey: 'SourceItemId',
@@ -226,6 +227,19 @@ export function createContentSyncTableModule(ctx, kit) {
                 }, 'Failed to mark items as synced');
             },
 
+            // Only links can become copies. The server skips anything else.
+            bulkMakeCopy: function() {
+                var ids = this.table.getSelectedIds();
+                if (ids.length === 0) return;
+                this.postSelection('PromoteItems', { SourceItemIds: ids }, function(result) {
+                    var msg = ((result && result.Promoted) || 0) + ' link(s) will be copied on the next sync';
+                    if (result && result.Skipped > 0) {
+                        msg += ', ' + result.Skipped + ' item(s) were not links';
+                    }
+                    return msg;
+                }, 'Failed to turn links into copies');
+            },
+
             bulkDelete: function() {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
@@ -238,10 +252,11 @@ export function createContentSyncTableModule(ctx, kit) {
             },
 
             getDisplayStatus: function(item) {
+                var suffix = item.StorageMode === 'Link' ? ' (Link)' : item.StorageMode === 'Promoting' ? ' (Link to Copy)' : '';
                 if (item.Status === 'Pending' && item.PendingType) {
-                    return 'Pending ' + item.PendingType;
+                    return 'Pending ' + item.PendingType + suffix;
                 }
-                return item.Status;
+                return item.Status + suffix;
             },
 
             getStatusClass: function(item) {

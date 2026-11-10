@@ -375,6 +375,14 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     protected virtual IList<TRecord> GetItemsToApply() => Manager.GetByStatusStrict(SyncStatus.Queued);
 
     /// <summary>
+    /// Whether a row is applied even when its server did not connect this run, because applying it
+    /// reads nothing from that server. Default false.
+    /// </summary>
+    /// <param name="record">The row.</param>
+    /// <returns>True to apply it anyway.</returns>
+    protected virtual bool AppliesWithoutSource(TRecord record) => false;
+
+    /// <summary>
     /// Splits the items into sequentially-applied groups: groups run in
     /// order with a full barrier between them, while items inside a group
     /// may apply in parallel (per <see cref="MaxDegreeOfParallelism"/>).
@@ -472,7 +480,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         // own sources) such a row has no server to wait for and is applied.
         var all = GetItemsToApply();
         var hasPullServers = _configManager.Configuration.GetPullServers().Count > 0;
-        var queued = all.Where(r => SourceFor(r) is not null || (string.IsNullOrEmpty(r.ServerKey) && !hasPullServers)).ToList();
+        var queued = all.Where(r => SourceFor(r) is not null || AppliesWithoutSource(r) || (string.IsNullOrEmpty(r.ServerKey) && !hasPullServers)).ToList();
         if (queued.Count < all.Count)
         {
             Logger.LogInformation("{Task}: leaving {Count} queued row(s) whose server is not configured or did not connect this run", Name, all.Count - queued.Count);

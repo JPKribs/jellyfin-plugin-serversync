@@ -449,6 +449,66 @@ public sealed class PlaylistMirrorTests : IDisposable
         Assert.Null(PlaylistCopyStore.Get(copy.Id));
     }
 
+    /// <summary>
+    /// A playlist saved back by a refresh that was running when the mirror deleted it is deleted again
+    /// when that refresh completes.
+    /// True: a delete that lands just after an edit sticks, although Jellyfin's refresh from the edit
+    /// writes the playlist back as it finishes.
+    /// False: the deleted copy reappears, as it did on the receiver in the push scenario.
+    /// </summary>
+    [Fact]
+    public void RefreshThatSavesADeletedPlaylistBack_IsUndone()
+    {
+        var copy = _h.AddPlaylist("List", _h.Owner.Id);
+        copy.DateCreated = new DateTime(2026, 11, 9, 23, 47, 24, DateTimeKind.Utc);
+        _h.Mirror.Delete(copy);
+        _h.Library.Answer(nameof(ILibraryManager.GetItemById), args => (Guid)args[0]! == copy.Id ? copy : null);
+
+        _h.Mirror.OnRefreshCompleted(copy);
+        _h.Mirror.OnRefreshCompleted(copy);
+
+        Assert.Equal(2, _h.CallsTo(_h.Library, nameof(ILibraryManager.DeleteItem)).Count());
+    }
+
+    /// <summary>
+    /// A new playlist that takes the deleted one's name, and so its id, is not deleted when it refreshes.
+    /// True: a user may make a playlist with the same name right after a sync deleted the old one.
+    /// False: the new playlist would vanish as soon as Jellyfin refreshes it.
+    /// </summary>
+    [Fact]
+    public void RefreshOfANewPlaylistWithTheSameId_IsLeftAlone()
+    {
+        var copy = _h.AddPlaylist("List", _h.Owner.Id);
+        copy.DateCreated = new DateTime(2026, 11, 9, 23, 47, 24, DateTimeKind.Utc);
+        _h.Mirror.Delete(copy);
+        var remade = new Playlist { Id = copy.Id, Name = "List", OwnerUserId = _h.Owner.Id, DateCreated = copy.DateCreated.AddSeconds(30) };
+        _h.Library.Answer(nameof(ILibraryManager.GetItemById), args => (Guid)args[0]! == copy.Id ? remade : null);
+
+        _h.Mirror.OnRefreshCompleted(remade);
+
+        Assert.Single(_h.CallsTo(_h.Library, nameof(ILibraryManager.DeleteItem)));
+    }
+
+    /// <summary>
+    /// A refresh that finds the deleted playlist still gone, or one for a playlist the mirror never
+    /// deleted, does nothing.
+    /// True: the watch only acts on a playlist that came back.
+    /// False: every refresh of every playlist would risk a delete.
+    /// </summary>
+    [Fact]
+    public void RefreshWithNothingSavedBack_DoesNothing()
+    {
+        var copy = _h.AddPlaylist("List", _h.Owner.Id);
+        var other = _h.AddPlaylist("Other", _h.Owner.Id);
+        _h.Mirror.Delete(copy);
+        _h.Library.Answer(nameof(ILibraryManager.GetItemById), args => (Guid)args[0]! == other.Id ? other : null);
+
+        _h.Mirror.OnRefreshCompleted(copy);
+        _h.Mirror.OnRefreshCompleted(other);
+
+        Assert.Single(_h.CallsTo(_h.Library, nameof(ILibraryManager.DeleteItem)));
+    }
+
     // -----------------------------------------------------------------------
     // PeerPlaylistReader, the other side of ReadAsync
     // -----------------------------------------------------------------------

@@ -109,7 +109,8 @@ public sealed class ContentHintHandler
         var scanServers = config.GetPullServers();
         var originIndex = scanServers.FindIndex(s => string.Equals(s.Key, origin.Key, StringComparison.OrdinalIgnoreCase));
         var localPath = PathUtilities.TranslatePath(dto.Path, mapping.SourceRootPath, mapping.LocalRootPath);
-        var tracked = _table.GetByLocalPath(localPath);
+        var tracked = _table.GetByLocalPath(localPath)
+            ?? (Links.LinkPaths.LinkPathFor(localPath) is { } linkPath && _table.GetByLocalPath(linkPath) is { } link && Models.ContentSync.StorageModes.IsLink(link.StorageMode) ? link : null);
         if (tracked is not null && !string.Equals(tracked.ServerKey, origin.Key, StringComparison.OrdinalIgnoreCase))
         {
             var trackedIndex = scanServers.FindIndex(s => string.Equals(s.Key, tracked.ServerKey, StringComparison.OrdinalIgnoreCase));

@@ -10,9 +10,9 @@ Servers higher in the list win when two offer the same item. Drag a server to ch
 
 | Step | What it holds |
 | :--- | :--- |
-| 1. Connection | Name, Server URL, an optional External URL for thumbnails, and whether a LAN address is allowed |
+| 1. Connection | Name, Server URL, an optional External URL for thumbnails, whether a LAN address is allowed, and whether that server may stream this server's files for its links, with limits |
 | 2. Authentication | An API key or a sign in, Test Connection, what the key can do there, and the Direction |
-| 3. Libraries | Which library there maps to which library here, their root folders, and a filter |
+| 3. Libraries | Which library there maps to which library here, their root folders, a filter, and the Storage: full copies or links |
 | 4. Users | Which user there maps to which user here, for history, user settings, and playlists |
 
 | Connection | Authentication |
@@ -34,6 +34,10 @@ Servers higher in the list win when two offer the same item. Drag a server to ch
 | Sync | Yes, listing this server as Sync | Both, for a pool of equals |
 
 **Check Link** confirms the other server is set up for the chosen direction and reports the access it holds for this one.
+
+### Links
+
+**Allow Linking** in Connection, and **Storage** set to **Link** in Libraries, hold a library as `.strm` links that stream from the source instead of full copies. The source allows linking on its entry for this server, and this server sets Storage on its entry for the source. See [Links](Links.md).
 
 ### Keys and Permissions
 

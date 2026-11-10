@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,10 +16,12 @@ public sealed class PeerItemLookup
     public const int MaxProviderIds = 16;
 
     private readonly ILibraryManager _libraryManager;
+    private readonly ILocalItems _localItems;
 
-    public PeerItemLookup(ILibraryManager libraryManager)
+    public PeerItemLookup(ILibraryManager libraryManager, ILocalItems localItems)
     {
         _libraryManager = libraryManager;
+        _localItems = localItems;
     }
 
     public static Dictionary<string, string>? CleanIds(Dictionary<string, string>? ids)
@@ -48,7 +51,7 @@ public sealed class PeerItemLookup
     {
         if (!string.IsNullOrWhiteSpace(request.Path))
         {
-            var byPath = _libraryManager.FindByPath(request.Path, null);
+            var byPath = _localItems.FindByPath(request.Path, null);
             if (byPath is not null && (string.IsNullOrEmpty(request.ItemType) || string.Equals(byPath.GetType().Name, request.ItemType, StringComparison.Ordinal)))
             {
                 return byPath;

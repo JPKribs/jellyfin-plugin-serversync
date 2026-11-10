@@ -71,6 +71,36 @@ public class SourceServer
     /// <summary>Gets or sets a value indicating whether the entry takes part in any sync.</summary>
     public bool IsEnabled { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether that server may stream this server's files for its links.
+    /// Off by default, so no file is ever served as a link until an administrator allows it here.
+    /// </summary>
+    public bool AllowLinking { get; set; }
+
+    /// <summary>Gets or sets the most link streams that server may hold at once, or 0 for no limit.</summary>
+    public int LinkMaxStreams { get; set; }
+
+    /// <summary>Gets or sets the most link streams one user may hold at once, or 0 for no limit.</summary>
+    public int LinkMaxStreamsPerUser { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a user's own playback on this server counts toward
+    /// <see cref="LinkMaxStreamsPerUser"/>.
+    /// </summary>
+    public bool LinkCountOwnSessions { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a file above a user's remote bitrate limit is refused,
+    /// since a link streams the file as it is.
+    /// </summary>
+    public bool LinkHonorBitrateLimit { get; set; }
+
+    /// <summary>
+    /// Gets or sets this server's user that streams for a user on that server with no user mapping here.
+    /// Empty refuses them.
+    /// </summary>
+    public string LinkFallbackUserId { get; set; } = string.Empty;
+
     /// <summary>Gets or sets the library mappings between this peer and the local server.</summary>
     public List<LibraryMapping> LibraryMappings { get; set; } = new();
 

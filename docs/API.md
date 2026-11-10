@@ -23,11 +23,12 @@ Which server this is and what it applies. A `404` means the plugin is not instal
   "ServerId": "2f40d5d86aba4689819184b48738d2ad",
   "PluginVersion": "12.2.1.1",
   "Accepts": ["History", "Metadata", "People", "Content"],
+  "Features": ["Link"],
   "ServerTime": "2026-10-03T19:30:47.9590000Z"
 }
 ```
 
-`Accepts` lists the kinds this server applies, which are the modules that are on. A sender announces only those kinds. `ServerTime` is the peer's clock, which Check Link compares against the caller's.
+`Accepts` lists the kinds this server applies, which are the modules that are on. A sender announces only those kinds. `Features` lists optional features this server offers: `Link` when it allows linking for at least one server, see [Links](Links.md). Older releases send no `Features`. `ServerTime` is the peer's clock, which Check Link compares against the caller's.
 
 ### GET /Sync/Peer/Link?serverId={id}
 
@@ -230,6 +231,86 @@ Negotiate watch history. Each entry proposes a merged state for one of the recei
 
 `Outcome` is `Applied`, `Unchanged`, `Stale`, `NotFound`, or `Failed`. A null field in a state means no opinion and matches anything.
 
+### Link routes
+
+These serve [links](Links.md). The source answers `Stream`, `Stream/Check`, and `Playback`. The linking server answers `Control` and `Links`. All need the protocol headers. `Stream`, `Stream/Check`, `Playback`, and `Control` also need the caller to be paired, as for `Queue`, and answer `400` when the server id or body is missing, `409` when the caller is not on the Servers tab, and `428` when it is not paired.
+
+#### GET /Sync/Peer/Stream/{itemId}?serverId={id}&userId={id}&sourceUserId={id}&probe={bool}
+
+Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted.
+
+Answers `200` or `206` with the file, or `403` with the reason as text: linking is off for the caller, the user cannot be resolved or may not play or see the item, the bitrate is over the user's limit, or a limit is reached. A file that is itself a `.strm` here is refused. A standard user's key only streams as that user.
+
+#### POST /Sync/Peer/Stream/Check
+
+The same checks without streaming, made when a user presses play so a refusal shows before playback starts.
+
+```json
+{ "ServerId": "…", "ItemId": "9c1e0f…", "UserId": "caller user id", "SourceUserId": "user here, or null" }
+```
+
+A server [falling back](Links.md#when-the-source-cannot-stream) from another source leaves `ItemId` empty and names the file by its `Path` here instead, at most 4096 characters. An item at that path that is a folder, or no item, is refused with `the file is not on this server`. `Probe: true` with no `UserId` is the calling server's media probe, checked as for `Stream`.
+
+```json
+{ "ServerId": "…", "ItemId": "", "Path": "/media/Movies/Film (2024)/Film (2024).mkv", "UserId": "caller user id", "SourceUserId": null, "Probe": false }
+```
+
+An allowed answer carries this server's id for the item and the file's size in bytes, so the caller streams by that id and can tell the file is the same. A refusal carries the reason.
+
+```json
+{ "Allowed": true, "Reason": null, "ItemId": "4b07c2…", "Size": 734003200 }
+```
+
+```json
+{ "Allowed": false, "Reason": "the source allows 2 link stream(s) at once and all are in use" }
+```
+
+A source older than fallback answers `400` to a request by path, and is listed as tried.
+
+#### POST /Sync/Peer/Playback
+
+Playback of a link, reported by the linking server. The first report opens a session here under the client name **Server Sync**, for the user the stream runs as, and later reports run Jellyfin's own progress and stop handling on it. `SessionKey` is the linking server's session id, so each viewer there is a session of its own here. `Event` is `Start`, `Progress`, or `Stop`. `SessionKey` and `ClientName` are at most 256 characters.
+
+```json
+{
+  "ServerId": "…",
+  "Event": "Progress",
+  "ItemId": "9c1e0f…",
+  "UserId": "caller user id",
+  "SourceUserId": null,
+  "SessionKey": "…",
+  "PlaySessionId": "…",
+  "PositionTicks": 145000000,
+  "IsPaused": true,
+  "PlayMethod": "DirectPlay",
+  "ClientName": "Jellyfin Web"
+}
+```
+
+Answers `204`, or `403` with the reason: linking is off, the item or user is not here, the user cannot see the item, the report names no session, or a standard user's key reports for another user.
+
+#### POST /Sync/Peer/Control
+
+A remote control command from the source's dashboard for a viewer of a link here. Only a session here that is playing one of this server's links to the caller can be controlled. `Command` is a Jellyfin playstate command such as `Stop`, `Pause`, `Unpause`, or `Seek`, with `SeekPositionTicks` for a seek. A request with `Text` and no `Command` shows a message, headed with the caller's name. `Text` is at most 1024 characters and `Header` at most 256.
+
+```json
+{ "ServerId": "…", "SessionKey": "…", "Command": "Stop" }
+```
+
+Answers `204`, `400` for an unknown command, or `404` when no session here is playing a link to the caller.
+
+#### GET /Sync/Peer/Links
+
+This server's links, each with the path its full copy would have, in this server's paths. A server that reads this server's items asks once it meets a `.strm`, matches each link by the file it stands in for, and never copies one as content. Releases before links answer `404`, which means no links.
+
+```json
+{ "Links": [ { "LinkPath": "/media/Movies/Film (2020)/Film (2020).strm", "CopiedPath": "/media/Movies/Film (2020)/Film (2020).mkv" } ] }
+```
+
+#### GET /Sync/Link/{linkId}?k={secret}
+
+The address written inside each link. Jellyfin's own ffmpeg and stream proxy call it while playing a link, with no token, so it is the one plugin route that needs no Jellyfin sign in. It only answers a request from and to this server's own loopback address that carries no proxy header, with the link's secret, while a user the source allowed, or this server's media probe, may read it. It streams the file from the source with range support, and `HEAD` answers the headers alone. Anything else is `403`, and an unknown link is `404`.
+
 ## Operator routes
 
 These back the dashboard, and are handy for scripting or for watching a pool from the outside.
@@ -294,6 +375,20 @@ The version an object carries on this server: which server last edited it and wh
 ### DELETE /Sync/Hints/Outbound/{id} and DELETE /Sync/Hints/Inbound/{id}
 
 Discard one row from either queue by its `Id`. The scheduled tasks still carry the change. Answers `204`, or `404`.
+
+### POST /Sync/PromoteItems
+
+Turns links into full copies, the **Turn links into full copies** action on the Sync tab. Each copy downloads on the next Sync Content run, and its `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped.
+
+```json
+{ "SourceItemIds": ["9c1e0f…", "77ab12…"] }
+```
+
+```json
+{ "Promoted": 2, "Skipped": 0 }
+```
+
+Content rows from `GET /Sync/Items` carry `StorageMode`: `Copy`, `Link`, or `Promoting` for a link on its way to a copy.
 
 ### DELETE /Sync/Servers/{key}/Rows
 

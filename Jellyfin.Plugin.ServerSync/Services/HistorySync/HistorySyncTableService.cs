@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller.Library;
@@ -24,6 +25,7 @@ public class HistorySyncTableService
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly IUserDataManager _userDataManager;
+    private readonly ILocalItems _localItems;
 
     /// <summary>
     /// Initializes a new instance.
@@ -32,12 +34,14 @@ public class HistorySyncTableService
         ILogger<HistorySyncTableService> logger,
         ILibraryManager libraryManager,
         IUserManager userManager,
-        IUserDataManager userDataManager)
+        IUserDataManager userDataManager,
+        ILocalItems localItems)
     {
         _logger = logger;
         _libraryManager = libraryManager;
         _userManager = userManager;
         _userDataManager = userDataManager;
+        _localItems = localItems;
     }
 
     /// <summary>
@@ -87,7 +91,7 @@ public class HistorySyncTableService
         }
 
         var localPath = PathUtilities.TranslatePath(sourcePath, libraryMapping.SourceRootPath, libraryMapping.LocalRootPath);
-        var localItem = _libraryManager.FindByPath(localPath, isFolder: false);
+        var localItem = _localItems.FindByPath(localPath, isFolder: false);
         if (localItem == null)
         {
             return null;

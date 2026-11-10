@@ -16,11 +16,16 @@ public class AuthorizationTests
 {
     private static readonly Assembly PluginAssembly = typeof(Plugin).Assembly;
 
+    // The one exemption. The URL inside a link is called by Jellyfin's own ffmpeg and static stream
+    // proxy, which send no token. It answers loopback callers only, with a per link secret, and is
+    // covered by LinkControllerTests.
+    private static readonly Type LinkRoute = typeof(Jellyfin.Plugin.ServerSync.Controllers.LinkController);
+
     [Fact]
     public void EveryController_RequiresElevation_ExceptThePeerRoutes()
     {
         var peerRoutes = new[] { typeof(Jellyfin.Plugin.ServerSync.Controllers.PeerPairController), typeof(Jellyfin.Plugin.ServerSync.Controllers.PeerController) };
-        var controllers = PluginAssembly.GetTypes().Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract && !peerRoutes.Contains(t)).ToList();
+        var controllers = PluginAssembly.GetTypes().Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract && !peerRoutes.Contains(t) && t != LinkRoute).ToList();
         Assert.NotEmpty(controllers);
         foreach (var controller in controllers)
         {
@@ -43,7 +48,7 @@ public class AuthorizationTests
     [Fact]
     public void NoAction_AllowsAnonymous()
     {
-        var controllers = PluginAssembly.GetTypes().Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract);
+        var controllers = PluginAssembly.GetTypes().Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract && t != LinkRoute);
         foreach (var controller in controllers)
         {
             Assert.False(controller.GetCustomAttributes<AllowAnonymousAttribute>(inherit: true).Any(), $"{controller.Name} allows anonymous callers");
@@ -52,5 +57,27 @@ public class AuthorizationTests
                 Assert.False(action.GetCustomAttributes<AllowAnonymousAttribute>(inherit: true).Any(), $"{controller.Name}.{action.Name} allows anonymous callers");
             }
         }
+    }
+
+    /// <summary>
+    /// The link route is the only anonymous route, and it serves nothing but GET and HEAD.
+    /// True: the exemption stays exactly one route that reads.
+    /// False: the exemption has grown, or the link route accepts writes.
+    /// </summary>
+    [Fact]
+    public void LinkRoute_IsTheOnlyAnonymousRoute_AndOnlyReads()
+    {
+        var anonymous = PluginAssembly.GetTypes()
+            .Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract && t.GetCustomAttributes<AllowAnonymousAttribute>(inherit: true).Any())
+            .ToList();
+        Assert.Equal(new[] { LinkRoute }, anonymous);
+
+        var verbs = LinkRoute.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .SelectMany(m => m.GetCustomAttributes<Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute>(inherit: true))
+            .SelectMany(a => a.HttpMethods)
+            .Distinct()
+            .OrderBy(v => v, StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(new[] { "GET", "HEAD" }, verbs);
     }
 }

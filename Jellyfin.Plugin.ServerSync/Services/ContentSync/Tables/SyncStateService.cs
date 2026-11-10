@@ -378,7 +378,7 @@ public static class SyncStateService
         return item.SourceSize != sourceSize;
     }
 
-    private static void UpdateItemMetadata(
+    internal static void UpdateItemMetadata(
         SyncItem item,
         string sourcePath,
         long sourceSize,

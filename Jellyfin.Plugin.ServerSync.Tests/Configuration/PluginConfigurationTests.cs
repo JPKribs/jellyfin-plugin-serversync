@@ -103,32 +103,33 @@ public class PluginConfigurationTests
     }
 
     /// <summary>
-    /// A normal same-day window still only applies inside its hours.
-    /// True: the equal-hours fix did not turn every schedule into all-day.
-    /// False: the unscheduled speed would never be used.
+    /// A window applies inside its hours and not outside them, including one that wraps past midnight.
+    /// True: the scheduled speed is used exactly in its window, whatever hour the test runs at.
+    /// False: the unscheduled speed would never be used, or a wrapping window would be ignored.
     /// </summary>
-    [Fact]
-    public void GetEffectiveDownloadSpeedBytes_OutsideSameDayWindow_UsesMaxSpeed()
+    [Theory]
+    [InlineData(9, 17, 8, false)]
+    [InlineData(9, 17, 9, true)]
+    [InlineData(9, 17, 16, true)]
+    [InlineData(9, 17, 17, false)]
+    [InlineData(22, 6, 23, true)]
+    [InlineData(22, 6, 3, true)]
+    [InlineData(22, 6, 6, false)]
+    [InlineData(22, 6, 12, false)]
+    public void GetEffectiveDownloadSpeedBytes_UsesTheWindowAtThatHour(int start, int end, int hour, bool scheduled)
     {
-        var hour = System.DateTime.Now.Hour;
         var config = new PluginConfiguration
         {
             EnableBandwidthScheduling = true,
-            // A one-hour window that cannot contain the current hour.
-            ScheduledStartHour = (hour + 2) % 24,
-            ScheduledEndHour = (hour + 3) % 24,
+            ScheduledStartHour = start,
+            ScheduledEndHour = end,
             ScheduledDownloadSpeed = 5,
             ScheduledDownloadSpeedUnit = "MB",
             MaxDownloadSpeed = 50,
             DownloadSpeedUnit = "MB"
         };
 
-        // Skip when the modular arithmetic produced a wrapping window that
-        // would legitimately contain the current hour.
-        if (config.ScheduledStartHour < config.ScheduledEndHour)
-        {
-            Assert.Equal(50L * 1024 * 1024, config.GetEffectiveDownloadSpeedBytes());
-        }
+        Assert.Equal((scheduled ? 5L : 50L) * 1024 * 1024, config.GetEffectiveDownloadSpeedBytes(hour));
     }
 
     /// <summary>

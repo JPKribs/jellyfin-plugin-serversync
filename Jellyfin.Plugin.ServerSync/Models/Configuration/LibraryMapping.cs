@@ -55,4 +55,15 @@ public class LibraryMapping
     /// Each item's path is used for child matching, selecting a series filters all its episodes.
     /// </summary>
     public List<FilteredItem> FilteredItems { get; set; } = new();
+
+    /// <summary>
+    /// How this library holds the source's files: a full copy, or a .strm link that streams from the
+    /// source. Link needs Server Sync on the source with linking allowed for this server.
+    /// </summary>
+    /// <remarks>
+    /// Left out of JSON while it is Copy, so a mapping that never used links hashes exactly as it did
+    /// before this setting existed, and an upgrade does not turn every scan into a full one.
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public ContentSync.StorageMode StorageMode { get; set; } = ContentSync.StorageMode.Copy;
 }

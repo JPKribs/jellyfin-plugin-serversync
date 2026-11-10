@@ -75,6 +75,46 @@
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription">Accept a loopback or LAN address.</div>
                                         </div>
+
+                                        <div class="checkboxContainer checkboxContainer-withDescription">
+                                            <label class="emby-checkbox-label">
+                                                <input type="checkbox" is="emby-checkbox" id="chkAllowLinking" />
+                                                <span class="checkboxLabel">Allow Linking</span>
+                                            </label>
+                                            <div class="fieldDescription checkboxFieldDescription">Let this server stream your files for libraries it maps as Link. Needs Server Sync there.</div>
+                                        </div>
+
+                                        <div id="linkLimits" class="hidden">
+                                            <div class="inputContainer">
+                                                <label for="txtLinkMaxStreams">Link Streams At Once:</label>
+                                                <input is="emby-input" type="number" id="txtLinkMaxStreams" min="0" max="1000" />
+                                                <div class="fieldDescription">Most streams this server may hold at once. 0 for no limit.</div>
+                                            </div>
+                                            <div class="inputContainer">
+                                                <label for="txtLinkMaxStreamsPerUser">Link Streams Per User:</label>
+                                                <input is="emby-input" type="number" id="txtLinkMaxStreamsPerUser" min="0" max="100" />
+                                                <div class="fieldDescription">Most streams one user may hold at once. 0 for no limit.</div>
+                                            </div>
+                                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                                <label class="emby-checkbox-label">
+                                                    <input type="checkbox" is="emby-checkbox" id="chkLinkCountOwnSessions" />
+                                                    <span class="checkboxLabel">Count Their Own Playback</span>
+                                                </label>
+                                                <div class="fieldDescription checkboxFieldDescription">A user's playback here counts toward their per user limit.</div>
+                                            </div>
+                                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                                <label class="emby-checkbox-label">
+                                                    <input type="checkbox" is="emby-checkbox" id="chkLinkHonorBitrateLimit" />
+                                                    <span class="checkboxLabel">Honor Remote Bitrate Limits</span>
+                                                </label>
+                                                <div class="fieldDescription checkboxFieldDescription">Refuse a file above a user's remote bitrate limit, since a link streams the file as it is.</div>
+                                            </div>
+                                            <div class="selectContainer">
+                                                <label for="selLinkFallbackUser">Stream Unmapped Users As:</label>
+                                                <select is="emby-select" id="selLinkFallbackUser"></select>
+                                                <div class="fieldDescription">Who streams for a user on that server with no user mapping here. None refuses them.</div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 

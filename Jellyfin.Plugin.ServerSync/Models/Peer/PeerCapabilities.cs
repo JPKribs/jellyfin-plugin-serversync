@@ -31,6 +31,12 @@ public class PeerCapabilities
     public List<string> Accepts { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets the optional features this server offers, by name, such as <c>Link</c>. Kept apart
+    /// from <see cref="Accepts"/>, which older peers read as hint kinds, and ignored by peers that predate it.
+    /// </summary>
+    public List<string> Features { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets the peer's clock at the time of the answer, in UTC. Conflicts between two edits made
     /// within the skew window are decided by these clocks, so Check Link reports a peer whose clock is off.
     /// </summary>

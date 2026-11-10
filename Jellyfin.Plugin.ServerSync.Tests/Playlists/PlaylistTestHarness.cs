@@ -82,7 +82,7 @@ internal sealed class PlaylistTestHarness : IDisposable
         var (providers, providerStub) = InterfaceStub.Create<IProviderManager>();
         providerStub.Answer(nameof(IProviderManager.SaveMetadataAsync), _ => Task.CompletedTask);
 
-        Mirror = new PlaylistMirror(LibraryManager, PlaylistManager, UserManager, host, providers, new ApplyGuard(), Copies, NullLogger<PlaylistMirror>.Instance);
+        Mirror = new PlaylistMirror(LibraryManager, PlaylistManager, UserManager, host, providers, new ApplyGuard(), Copies, new LocalItems(LibraryManager, new Jellyfin.Plugin.ServerSync.Services.Links.NoLinks()), NullLogger<PlaylistMirror>.Instance);
         Server = NewServer();
     }
 

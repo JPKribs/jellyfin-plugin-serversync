@@ -82,6 +82,18 @@ Every refused call is answered with `403` and `{ "Code": "UserNotWhitelisted", "
 
 Host names are looked up once and remembered for an hour. When a caller does not match a remembered address, the name is looked up again before the call is refused, at most every thirty seconds, so a dynamic DNS name that moved keeps working. A name that cannot be looked up is logged as an error and its last known addresses are kept. Behind a reverse proxy, add the proxy under **Dashboard > Networking > Known Proxies** so Jellyfin sees the real address.
 
+## Links
+
+Streaming a [link](Links.md) uses the linking server's key for the source, like every other read, and the source's whitelist must allow it. On top of that the source decides, on every play, which of its users the stream runs as and whether that user may play the item, by its own user mappings, the **Stream Unmapped Users As** user, and its limits. A source entry that holds a standard user's key streams as that user only.
+
+| Function | Standard user | Administrator or API key |
+| :--- | :--- | :--- |
+| Stream a link | Only as that user, only what that user can see and play | As the user the source maps, within the source's limits |
+| Report playback of a link | Only for that user | For the mapped user |
+| Remote control of a viewer from the source's dashboard | Works, once the source's entry for the linking server holds a key that server's whitelist allows | Works, once the source's entry for the linking server holds a key |
+
+The address inside a link, `/Sync/Link`, is the one route that needs no Jellyfin sign in, since Jellyfin's own ffmpeg calls it without a token. It answers only this server itself, from and to its loopback address with no proxy header, with the link's secret, while a user the source allowed is playing. See [Links security](Links.md#security).
+
 ## On This Server
 
-The dashboard routes on this server need an administrator. The peer routes need a signed in caller that the whitelist allows.
+The dashboard routes on this server need an administrator. The peer routes need a signed in caller that the whitelist allows. The link address needs no sign in and answers only this server, as above.

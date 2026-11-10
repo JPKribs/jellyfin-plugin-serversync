@@ -1,12 +1,13 @@
 # Content Syncing
 
-Content syncing mirrors missing or updated media files from a source Jellyfin server onto this server. Files are matched by their path under each mapped library's root folder, so both servers must keep the same folder and file structure under that root. A file renamed or moved on the source usually gets a new item id there, so it is downloaded again at its new path, and the old copy is handled by **Removed files**.
+Content syncing mirrors missing or updated media files from a source Jellyfin server onto this server. A library mapping can instead hold them as **links** that stream from the source, set by its **Storage**. See [Links](Links.md). Files are matched by their path under each mapped library's root folder, so both servers must keep the same folder and file structure under that root. A file renamed or moved on the source usually gets a new item id there, so it is downloaded again at its new path, and the old copy is handled by **Removed files**.
 
 ## Settings
 
 * **Enable Content Sync** turns content syncing on.
 * **Temporary Folder** sets the staging folder where files download before they move to the final location.
-* **Include Companion Files** also downloads external subtitle files with each media file. Other companions (NFO files, local artwork, external audio tracks) have no download route in the Jellyfin API and are skipped.
+* **Include Companion Files** also downloads external subtitle files with each media file, and beside each link. Other companions (NFO files, local artwork, external audio tracks) have no download route in the Jellyfin API and are skipped. A link gets an `.nfo` of its own, written from the source's details.
+* **Storage**, on each library mapping in the Servers tab, holds the source's files as full **Copy** files, the default, or as **Link** files that stream from the source. See [Links](Links.md).
 * **Downloads At Once** limits how many files download at once.
 * **Download Speed** sets the **Normal** rate, where 0 means unlimited.
 * **Approvals** sets an action for each kind of change: **New files** download automatically or wait for approval, and **Changed files** replace automatically or wait.
@@ -101,4 +102,4 @@ Deleting a file from the Sync tab removes it from disk, or moves it to the recyc
 
 ## Library refresh
 
-After a Sync Content run that downloaded or removed files, Jellyfin is asked to refresh just the folders that changed, the same way its library monitor reports a change it saw. A run that touched many folders, such as a first run that copies a whole library, runs one full library scan instead.
+After a Sync Content run that downloaded or removed files, Jellyfin is asked to refresh just the folders that changed, the same way its library monitor reports a change it saw. A run that touched many folders, such as a first run that copies a whole library, runs one full library scan instead. So does a run into a library Jellyfin has not scanned since it was empty, since Jellyfin does not record an empty library's folder and would drop the request. A file that arrives through a hint queues a library scan in that case.
