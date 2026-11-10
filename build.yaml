@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.10.1"
+version: "12.2.11.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -28,14 +28,18 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  important:
-  - Requires Jellyfin 12.4 or later
+  features:
+  - Link cache. A link can keep a full local copy of its file in a cache while staying a link. Playing a link caches it, episodes ahead of the one being watched are cached before they are reached, and each library can pick shows and films to always keep. A cached link plays from this server under its own rules, even while its source is down, and playback is still reported to the source. Set the cache's size, location, retention, pre-cache episodes, and removal order under Content in Settings. The cache is off until it is given a size
+  - A link takes its media info, chapters, chapter images, and trickplay images from the source instead of probing the file across the network, and a link's trickplay shows in its details
+  - Every Sync Content run checks links against the servers they stream from. A link that can no longer play shows on the Sync tab with the reason, and settles again when it can
+  - A link stream that drops or stalls partway is picked up where it stopped, from the same server or another that holds the file, so the player does not see the break
+  - A film held in several versions is checked version by version. A user refused one, such as a file above their bitrate limit, is offered the versions they may play
+  - Direct play of a link is streamed for the user who asked, so two viewers of one link are counted and limited apart
+  - A source can cap the speed of each link stream and cache download per server, with another speed during the bandwidth schedule's hours, and cap streams and speed per user on each user mapping
   changed:
-  - Built against Jellyfin 12.4 and the latest shared plugin library
+  - A server that did not answer is passed over for a minute while another holds the file, and the others are asked together, so a dead source no longer costs every play its timeout
+  - The media probe of a new link may read at most 256 MB of the file
   fixed:
-  - Values from a request, such as a link id, a path, or a user name, are cleaned before they are written to the log, so a crafted request cannot add fake lines to it
-  - A server connection opened for a scan or a Sync Content run is always closed, even when the run fails partway through checking which servers to use
+  - An .nfo beside a link that the user deleted was written again on the next sync
   developer:
-  - Jellyfin.Controller, Jellyfin.Model, and Jellyfin.Database.Implementations 12.4.0, JPKribs.Jellyfin.Base 2026.10.28, and targetAbi 12.4.0.0. The Docker pool runs Jellyfin 12.4
-  - The history merge drops two fallbacks that could never apply, with no change in behaviour
-  - Code scanning warnings from the link release are fixed
+  - New peer routes on the source, Links/Describe and Links/{itemId}/Images, and a fill flag on Stream for cache downloads. Older sources answer 404 to the new routes, and the linking server then probes its links and does not check them
