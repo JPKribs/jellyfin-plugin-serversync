@@ -35,6 +35,12 @@ public sealed class LinkGrants
     /// </summary>
     public static readonly TimeSpan ProbeWait = TimeSpan.FromHours(1);
 
+    /// <summary>
+    /// The most of a file one probe grant may read. A probe reads a file's headers and index, which is
+    /// a small part of it, so nothing else on this server reads a whole file under the probe's grant.
+    /// </summary>
+    public const long ProbeBudget = 256L * 1024 * 1024;
+
     private readonly Func<DateTime> _now;
     private readonly object _lock = new();
 
@@ -60,7 +66,7 @@ public sealed class LinkGrants
         {
             var users = UsersOf(linkId);
             var used = users.TryGetValue(userId, out var current) && Live(current) && current.Used;
-            users[userId] = new Entry(false, _now(), used, route);
+            users[userId] = new Entry(false, _now(), used, route, 0);
         }
     }
 
@@ -119,7 +125,7 @@ public sealed class LinkGrants
             var users = UsersOf(linkId);
             if (!users.Any(p => p.Key != Guid.Empty && Live(p.Value)))
             {
-                users[Guid.Empty] = new Entry(true, _now(), false, null);
+                users[Guid.Empty] = new Entry(true, _now(), false, null, 0);
             }
         }
     }
@@ -157,6 +163,24 @@ public sealed class LinkGrants
         }
     }
 
+    /// <summary>
+    /// Counts bytes read under a link's probe grant. False once the grant has read as much as a probe
+    /// may, or is gone, which ends the read.
+    /// </summary>
+    public bool SpendProbe(string linkId, long bytes)
+    {
+        lock (_lock)
+        {
+            if (!_grants.TryGetValue(linkId, out var users) || !users.TryGetValue(Guid.Empty, out var current) || !Live(current))
+            {
+                return false;
+            }
+
+            users[Guid.Empty] = current with { Spent = current.Spent + bytes };
+            return true;
+        }
+    }
+
     private Dictionary<Guid, Entry> UsersOf(string linkId)
     {
         if (!_grants.TryGetValue(linkId, out var users))
@@ -169,7 +193,8 @@ public sealed class LinkGrants
     }
 
     private bool Live(Entry entry)
-        => _now() - entry.At < (entry.Probe ? ProbeWait : entry.Used ? InUse : Unused);
+        => _now() - entry.At < (entry.Probe ? ProbeWait : entry.Used ? InUse : Unused)
+            && (!entry.Probe || entry.Spent < ProbeBudget);
 
-    private sealed record Entry(bool Probe, DateTime At, bool Used, LinkRoute? Route);
+    private sealed record Entry(bool Probe, DateTime At, bool Used, LinkRoute? Route, long Spent);
 }

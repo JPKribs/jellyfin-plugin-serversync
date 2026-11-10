@@ -62,16 +62,19 @@ public class SyncMissingContentTask
         ContentSyncTableManager manager,
         ISourceServerClientFactory clientFactory,
         DownloadService downloadService,
-        Services.Links.LinkWriter? linkWriter = null)
+        Services.Links.LinkWriter? linkWriter = null,
+        Services.Links.LinkVerifier? linkVerifier = null)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
         _libraryMonitor = libraryMonitor;
         _downloadService = downloadService;
         _linkWriter = linkWriter;
+        _linkVerifier = linkVerifier;
     }
 
     private readonly Services.Links.LinkWriter? _linkWriter;
+    private readonly Services.Links.LinkVerifier? _linkVerifier;
 
     /// <inheritdoc />
     public override string Name => "Sync Content";
@@ -309,8 +312,20 @@ public class SyncMissingContentTask
         if (record.StorageMode == StorageMode.Link)
         {
             (_linkWriter ?? throw new InvalidOperationException("Links cannot be written on this server")).Write(record, TypedManager, ConfigManager.Configuration);
+
+            // Read before the companions replace the row's list, which is where a written .nfo is recorded.
+            var nfoRecorded = Services.Links.LinkNfo.Recorded(record);
+            var nfoRemoved = Services.Links.LinkNfo.RemovedByUser(record);
             await DownloadLinkCompanionsAsync(record, cancellationToken).ConfigureAwait(false);
-            await WriteLinkNfoAsync(record, cancellationToken).ConfigureAwait(false);
+            if (nfoRemoved)
+            {
+                Services.Links.LinkNfo.Record(record);
+            }
+            else
+            {
+                await WriteLinkNfoAsync(record, nfoRecorded, cancellationToken).ConfigureAwait(false);
+            }
+
             Interlocked.Increment(ref _successCount);
             _changedFiles.Enqueue(record.LocalPath!);
             return;
@@ -374,8 +389,14 @@ public class SyncMissingContentTask
     // An .nfo beside the link tells Jellyfin what it is from the source's own details, rather than from
     // the file name. A link is still written when the details cannot be read, and an .nfo the plugin did
     // not write is never replaced.
-    private async Task WriteLinkNfoAsync(SyncItem record, CancellationToken cancellationToken)
+    private async Task WriteLinkNfoAsync(SyncItem record, bool recorded, CancellationToken cancellationToken)
     {
+        // An .nfo written on an earlier run stays recorded when this run cannot write it again.
+        if (recorded)
+        {
+            Services.Links.LinkNfo.Record(record);
+        }
+
         if (SourceFor(record) is not { } source || !Guid.TryParse(record.SourceItemId, out var itemId) || string.IsNullOrEmpty(record.LocalPath))
         {
             return;
@@ -384,7 +405,16 @@ public class SyncMissingContentTask
         try
         {
             var items = await source.Client.GetItemsByIdsAsync(new[] { itemId }, Services.Links.LinkNfo.Fields, cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (items.FirstOrDefault() is { } item && !Services.Links.LinkNfo.Write(record.LocalPath, item))
+            if (items.FirstOrDefault() is not { } item)
+            {
+                return;
+            }
+
+            if (Services.Links.LinkNfo.Write(record.LocalPath, item))
+            {
+                Services.Links.LinkNfo.Record(record);
+            }
+            else
             {
                 Logger.LogDebug("Left the .nfo beside {Path} as it is, since Server Sync did not write it", record.LocalPath);
             }
@@ -585,7 +615,84 @@ public class SyncMissingContentTask
 
         progress.Report(95);
 
+        await VerifyLinksAsync(cancellationToken).ConfigureAwait(false);
+
         _tempPath = null;
+    }
+
+    // Every run checks this server's links against the servers they stream from, so a link that can
+    // no longer play shows on the Sync tab before someone presses play, and a link still without
+    // media info takes the source's.
+    private async Task VerifyLinksAsync(CancellationToken cancellationToken)
+    {
+        if (_linkVerifier is null || cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        WarnAboutChapterImages();
+        try
+        {
+            var found = await _linkVerifier.VerifyAsync(
+                TypedManager,
+                key => Sources.FirstOrDefault(s => string.Equals(s.Key, key, StringComparison.OrdinalIgnoreCase))?.Client,
+                cancellationToken).ConfigureAwait(false);
+            if (found.Checked > 0)
+            {
+                Logger.LogInformation(
+                    "{Task}: checked {Checked} link(s): {Dead} cannot play, {Restored} can play again, {Described} took media info from the source",
+                    Name,
+                    found.Checked,
+                    found.Dead,
+                    found.Restored,
+                    found.Described);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Task}: could not check links", Name);
+        }
+    }
+
+    // Jellyfin never makes chapter images for a link, and on a refresh it drops the ones taken from the
+    // source unless the library has chapter image extraction on. So a Link mapping into a library with
+    // it off is called out, since its links would lose their chapter images.
+    private void WarnAboutChapterImages()
+    {
+        var config = ConfigManager.Configuration;
+        if (!config.TakeLinkImagesFromSource)
+        {
+            return;
+        }
+
+        try
+        {
+            var linked = config.GetPullServers()
+                .SelectMany(s => s.GetEnabledLibraryMappings())
+                .Where(m => m.StorageMode == StorageMode.Link)
+                .Select(m => m.LocalLibraryId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var library in _libraryManager.GetVirtualFolders() ?? new List<MediaBrowser.Model.Entities.VirtualFolderInfo>())
+            {
+                if (library.LibraryOptions is { EnableChapterImageExtraction: false }
+                    && Guid.TryParse(library.ItemId, out var id)
+                    && linked.Any(l => Guid.TryParse(l, out var mapped) && mapped == id))
+                {
+                    Logger.LogWarning(
+                        "{Task}: the library '{Library}' holds links and has chapter image extraction off, so Jellyfin drops the chapter images its links take from their source. Turn chapter image extraction on for that library to keep them. Jellyfin never extracts them from a link itself",
+                        Name,
+                        library.Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "{Task}: could not check the libraries that hold links", Name);
+        }
     }
 
     /// <inheritdoc />

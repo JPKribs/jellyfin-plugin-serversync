@@ -134,17 +134,29 @@ public static class LinkStateService
         }
 
         var current = !string.IsNullOrEmpty(row.LocalPath) && files.IsCurrent(row.LocalPath, row.SourceItemId);
-        if (current && row.Status is SyncStatus.Queued or SyncStatus.Errored)
+
+        // An .nfo of this plugin's from before rows recorded them is recorded now, so removing it later
+        // is seen as the user's choice.
+        var hasNfo = !string.IsNullOrEmpty(row.LocalPath) && File.Exists(LinkNfo.PathFor(row.LocalPath));
+        if (hasNfo && !LinkNfo.Recorded(row) && LinkNfo.IsOurs(LinkNfo.PathFor(row.LocalPath!)))
+        {
+            LinkNfo.Record(row);
+        }
+
+        // A link the link check found could not play is settled again by that check, not by its file
+        // being in place, which it was all along.
+        if (current && row.Status is SyncStatus.Queued or SyncStatus.Errored && !LinkVerifier.Flagged(row))
         {
             row.Status = SyncStatus.Synced;
             row.PendingType = null;
             row.StatusDate = DateTime.UtcNow;
             row.Reason = null;
         }
-        else if (row.Status == SyncStatus.Synced && (!current || !File.Exists(LinkNfo.PathFor(row.LocalPath!))))
+        else if (row.Status == SyncStatus.Synced && (!current || (!hasNfo && !LinkNfo.Recorded(row))))
         {
-            // Missing, stale, or without its .nfo, such as a link from before links had one. Writing it
-            // again is cheap, and leaves anything already right as it is.
+            // Missing, stale, or never given its .nfo, such as a link from before links had one. Writing
+            // it again is cheap, and leaves anything already right as it is. An .nfo the user removed
+            // after it was written stays removed.
             row.Status = SyncStatus.Queued;
             row.PendingType = null;
             row.StatusDate = DateTime.UtcNow;

@@ -197,6 +197,84 @@ public class LinkFallbackTests
     }
 
     /// <summary>
+    /// A server that did not answer is not asked again for a minute while another can play the file.
+    /// True: only the first play after a server goes down waits on it.
+    /// False: every play would wait out the dead server's timeout before falling back.
+    /// </summary>
+    [Fact]
+    public async Task Choose_ServerThatJustFailed_IsPassedOver()
+    {
+        var now = DateTime.UtcNow;
+        var health = new LinkHealth(() => now);
+        var peers = new Peers { ["a"] = _ => throw new HttpRequestException("connection refused"), ["b"] = _ => Allowed("bbbb") };
+        var access = Access(peers, health, LinkAccess.Hedge, Server("a", "/src/a"), Server("b", "/src/b"));
+
+        await access.ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None);
+        peers.Asked.Clear();
+        var choice = await access.ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None);
+
+        Assert.Equal(new LinkRoute("b", "bbbb"), choice.Route);
+        Assert.Equal(new[] { "b" }, peers.Asked.Select(r => r.Server));
+
+        now += LinkHealth.Remembered + TimeSpan.FromSeconds(1);
+        peers["a"] = _ => Allowed("aaaa");
+        Assert.Equal(new LinkRoute("a", "aaaa"), (await access.ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None)).Route);
+    }
+
+    /// <summary>
+    /// A server passed over for not answering is still asked when nobody else can play the file.
+    /// True: a link with one source plays again the moment that source is back.
+    /// False: a source that came back would stay refused for a minute.
+    /// </summary>
+    [Fact]
+    public async Task Choose_PassedOverServer_IsAskedWhenNobodyElseCan()
+    {
+        var health = new LinkHealth();
+        health.Failed("a");
+        var peers = new Peers { ["a"] = _ => Allowed("aaaa"), ["b"] = _ => Refused("the file is not on this server") };
+        var choice = await Access(peers, health, LinkAccess.Hedge, Server("a", "/src/a"), Server("b", "/src/b")).ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None);
+
+        Assert.Equal(new LinkRoute("a", "aaaa"), choice.Route);
+        Assert.Equal(new[] { "b", "a" }, peers.Asked.Select(r => r.Server));
+        Assert.False(health.IsDown("a"));
+    }
+
+    /// <summary>
+    /// When the link's own server is slow to answer, the others are asked alongside it, and the first
+    /// that allows the play is used.
+    /// True: a server that hangs costs a short wait, not its whole timeout.
+    /// False: play would wait the full timeout on a hung server before trying another.
+    /// </summary>
+    [Fact]
+    public async Task Choose_SlowPrimary_UsesAnotherMeanwhile()
+    {
+        var peers = new Peers { ["a"] = _ => Allowed("aaaa"), ["b"] = _ => Allowed("bbbb") };
+        peers.Delays["a"] = TimeSpan.FromSeconds(30);
+        var started = DateTime.UtcNow;
+        var choice = await Access(peers, new LinkHealth(), TimeSpan.FromMilliseconds(50), Server("a", "/src/a"), Server("b", "/src/b")).ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None);
+
+        Assert.Equal(new LinkRoute("b", "bbbb"), choice.Route);
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>
+    /// The others are asked together, and the highest in priority that allows the play wins, however
+    /// quickly a lower one answers.
+    /// True: fallback keeps the Servers tab's order.
+    /// False: whichever server answered first would be used.
+    /// </summary>
+    [Fact]
+    public async Task Choose_Alternates_AskedTogether_PriorityWins()
+    {
+        var peers = new Peers { ["a"] = _ => Refused("no"), ["b"] = _ => Allowed("bbbb"), ["c"] = _ => Allowed("cccc") };
+        peers.Delays["b"] = TimeSpan.FromMilliseconds(300);
+        var choice = await Access(peers, Server("a", "/src/a"), Server("b", "/src/b"), Server("c", "/src/c")).ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None);
+
+        Assert.Equal(new LinkRoute("b", "bbbb"), choice.Route);
+        Assert.Contains("c", peers.Asked.Select(r => r.Server));
+    }
+
+    /// <summary>
     /// A grant keeps the server it was routed to, and can be moved to another while live, never revived.
     /// True: the stream, its reports, and remote control all follow the server actually streaming.
     /// False: reads would go back to the failed server, or a lapsed grant would reopen the link.
@@ -264,10 +342,13 @@ public class LinkFallbackTests
         };
 
     private static LinkAccess Access(Peers peers, params SourceServer[] servers)
+        => Access(peers, new LinkHealth(), LinkAccess.Hedge, servers);
+
+    private static LinkAccess Access(Peers peers, LinkHealth health, TimeSpan hedge, params SourceServer[] servers)
     {
         var (host, hostStub) = InterfaceStub.Create<IServerApplicationHost>();
         hostStub.Answer("get_SystemId", _ => "local");
-        return new LinkAccess(new FakeConfig(Config(servers)), new Factory(peers), host, NullLogger<LinkAccess>.Instance);
+        return new LinkAccess(new FakeConfig(Config(servers)), new Factory(peers), host, NullLogger<LinkAccess>.Instance, health, hedge);
     }
 
     private sealed class Peers : Dictionary<string, Func<LinkStreamCheckRequest, HttpResponseMessage>>
@@ -278,6 +359,8 @@ public class LinkFallbackTests
         }
 
         public List<(string Server, LinkStreamCheckRequest Request)> Asked { get; } = new();
+
+        public Dictionary<string, TimeSpan> Delays { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed class Factory : ISourceServerClientFactory
@@ -304,7 +387,16 @@ public class LinkFallbackTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = JsonSerializer.Deserialize<LinkStreamCheckRequest>(await request.Content!.ReadAsStringAsync(cancellationToken))!;
-            _peers.Asked.Add((_key, body));
+            lock (_peers.Asked)
+            {
+                _peers.Asked.Add((_key, body));
+            }
+
+            if (_peers.Delays.TryGetValue(_key, out var delay))
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+
             return _peers[_key](body);
         }
     }

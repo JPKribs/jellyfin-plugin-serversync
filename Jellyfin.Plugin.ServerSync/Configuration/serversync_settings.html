@@ -161,6 +161,22 @@
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkTakeLinkImagesFromSource" />
+                                            <span class="checkboxLabel">Take Link Images From the Source</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Give links the trickplay and chapter images their source made. Jellyfin makes neither for a link.</div>
+                                    </div>
+
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkStreamLinksDirectly" />
+                                            <span class="checkboxLabel">Stream Direct Play of Links Per User</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Stream a link's direct play from its source for the user playing, so two viewers of one link are counted apart. Turn off if a player cannot direct play links.</div>
+                                    </div>
+
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkSkipWatchedByAllUsers" />
                                             <span class="checkboxLabel">Skip Items Everyone Watched</span>
                                         </label>

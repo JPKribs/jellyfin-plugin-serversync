@@ -167,6 +167,8 @@ export default function (view) {
         setChecked('chkDetectUpdatedFiles', config.DetectUpdatedFiles !== false);
         setChecked('chkMirrorSyncedCollections', config.MirrorSyncedCollections !== false);
         setChecked('chkIncludeCompanionFiles', config.IncludeCompanionFiles || false);
+        setChecked('chkTakeLinkImagesFromSource', config.TakeLinkImagesFromSource !== false);
+        setChecked('chkStreamLinksDirectly', config.StreamLinksDirectly !== false);
         setChecked('chkSkipWatchedByAllUsers', config.SkipWatchedByAllUsers || false);
         renderWatchedFilterUsers(config.WatchedFilterUserIds || []);
         setValue('selDownloadNewContentMode', config.DownloadNewContentMode || 'Enabled');
@@ -209,6 +211,8 @@ export default function (view) {
             config.DetectUpdatedFiles = getChecked('chkDetectUpdatedFiles');
             config.MirrorSyncedCollections = getChecked('chkMirrorSyncedCollections');
             config.IncludeCompanionFiles = getChecked('chkIncludeCompanionFiles');
+            config.TakeLinkImagesFromSource = getChecked('chkTakeLinkImagesFromSource');
+            config.StreamLinksDirectly = getChecked('chkStreamLinksDirectly');
             config.SkipWatchedByAllUsers = getChecked('chkSkipWatchedByAllUsers');
             // Only the users on screen can be judged. A saved id whose server did not answer this time is
             // kept as it was, so a failed user list never clears the filter and lets watched files back in.

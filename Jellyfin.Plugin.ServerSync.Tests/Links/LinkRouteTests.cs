@@ -133,7 +133,7 @@ public sealed class LinkRouteTests : IDisposable
         var files = Files();
         var url = files.UrlFor("abc");
         var key = rightSecret ? url[(url.IndexOf("?k=", StringComparison.Ordinal) + 3)..] : "wrong";
-        var controller = new LinkController(files, new LinkGrants(), null!, null!, null!, null!, new Access(null), NullLogger<LinkController>.Instance)
+        var controller = new LinkController(files, new LinkGrants(), null!, null!, NullLogger<LinkController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -597,6 +597,150 @@ public sealed class LinkRouteTests : IDisposable
         Assert.Equal(0, probe.Waiting);
     }
 
+    /// <summary>
+    /// A film held in two versions, where the source refuses the user one of them: the play goes ahead,
+    /// only the allowed version is granted, and the refused one is left out of what the player is offered.
+    /// True: a user over their bitrate limit for the 4K file plays the 1080p file instead of being refused.
+    /// False: one refused version would stop the whole film, or be offered and fail when chosen.
+    /// </summary>
+    [Fact]
+    public async Task Filter_RefusedVersion_IsLeftOut_AndTheOtherPlays()
+    {
+        var (filter, grants, big, small) = TwoVersions("big");
+        var user = Guid.NewGuid();
+        var action = Action("MediaInfo", user);
+        action.RouteData.Values["itemId"] = big.ToString("N");
+        var context = new ActionExecutingContext(action, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller: new object());
+        var ran = false;
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            ran = true;
+            return Task.FromResult<ActionExecutedContext>(null!);
+        });
+
+        Assert.True(ran);
+        Assert.False(grants.Refresh("big", user));
+        Assert.True(grants.Refresh("small", user));
+
+        var response = new PlaybackInfoResponse
+        {
+            MediaSources = new[]
+            {
+                new MediaSourceInfo { Id = big.ToString("N"), Path = LinkUrl, IsRemote = true, Protocol = MediaProtocol.Http },
+                new MediaSourceInfo { Id = small.ToString("N"), Path = LinkUrl, IsRemote = true, Protocol = MediaProtocol.Http }
+            }
+        };
+        await filter.OnResultExecutionAsync(
+            new ResultExecutingContext(action, new List<IFilterMetadata>(), new ObjectResult(response), controller: new object()),
+            () => Task.FromResult<ResultExecutedContext>(null!));
+
+        var offered = Assert.Single(response.MediaSources);
+        Assert.Equal(small.ToString("N"), offered.Id);
+        Assert.Null(offered.Path);
+    }
+
+    /// <summary>
+    /// When the source refuses every version, the play is refused with the reason for the first.
+    /// True: the user sees why, as for a film with one version.
+    /// False: playback would start with nothing to play.
+    /// </summary>
+    [Fact]
+    public async Task Filter_EveryVersionRefused_RefusesThePlay()
+    {
+        var (filter, _, big, _) = TwoVersions("big", "small");
+        var action = Action("MediaInfo", Guid.NewGuid());
+        action.RouteData.Values["itemId"] = big.ToString("N");
+        var context = new ActionExecutingContext(action, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller: new object());
+
+        await filter.OnActionExecutionAsync(context, () => Task.FromResult<ActionExecutedContext>(null!));
+
+        var result = Assert.IsType<ObjectResult>(context.Result);
+        Assert.Equal(StatusCodes.Status403Forbidden, result.StatusCode);
+        Assert.Contains("refused big", (string)result.Value!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A stream that names a version is held to that version's link, not the film's first.
+    /// True: the user streams the version the source allowed them, and no other.
+    /// False: a grant for one version would open another, or the allowed version would be refused.
+    /// </summary>
+    [Fact]
+    public async Task Filter_StreamOfANamedVersion_NeedsThatVersionsGrant()
+    {
+        var (filter, grants, big, small) = TwoVersions();
+        var user = Guid.NewGuid();
+        grants.Grant("small", user);
+
+        async Task<bool> Streams(Guid version)
+        {
+            var action = Action("Videos", user, "GetVideoStream");
+            action.RouteData.Values["itemId"] = big.ToString("N");
+            action.HttpContext.Request.QueryString = new QueryString("?mediaSourceId=" + version.ToString("N"));
+            var context = new ActionExecutingContext(action, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller: new object());
+            var ran = false;
+            await filter.OnActionExecutionAsync(context, () =>
+            {
+                ran = true;
+                return Task.FromResult<ActionExecutedContext>(null!);
+            });
+            return ran;
+        }
+
+        Assert.True(await Streams(small));
+        Assert.False(await Streams(big));
+    }
+
+    /// <summary>
+    /// A player's direct play of a link is answered for the user who asked, routed to the server their
+    /// own playback streams from, and anything that is not direct play goes on to Jellyfin.
+    /// True: two viewers of one link are each streamed, counted, and limited as themselves.
+    /// False: both would be streamed as whoever pressed play last.
+    /// </summary>
+    [Fact]
+    public async Task Filter_DirectPlay_IsStreamedForItsOwnUser()
+    {
+        var (library, stub) = InterfaceStub.Create<ILibraryManager>();
+        stub.Answer(nameof(ILibraryManager.GetItemById), _ => new Movie { Path = "/m/Movie.strm" });
+        var grants = new LinkGrants();
+        var streamer = new LinkStreamer(null!, null!, null!, new Access(null), grants, new LinkHealth(), NullLogger<LinkStreamer>.Instance);
+        var filter = new LinkPlaybackFilter(library, new OneLink("/m/Movie.strm"), grants, new Access(null), NullLogger<LinkPlaybackFilter>.Instance, streamer);
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var elsewhere = new LinkRoute("b", "bbbb");
+        grants.Grant("abc", first);
+        grants.Grant("abc", second, elsewhere);
+
+        async Task<IActionResult?> Stream(Guid user, string query)
+        {
+            var action = Action("Videos", user, "GetVideoStream");
+            action.HttpContext.Request.QueryString = new QueryString(query);
+            var context = new ActionExecutingContext(action, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller: new object());
+            await filter.OnActionExecutionAsync(context, () => Task.FromResult<ActionExecutedContext>(null!));
+            return context.Result;
+        }
+
+        var forFirst = Assert.IsType<LinkStreamResult>(await Stream(first, "?static=true"));
+        var forSecond = Assert.IsType<LinkStreamResult>(await Stream(second, "?Static=true"));
+        Assert.Equal(new LinkGrant(first, false, null), forFirst.Grant);
+        Assert.Equal(new LinkGrant(second, false, elsewhere), forSecond.Grant);
+
+        Assert.Null(await Stream(first, "?videoCodec=h264"));
+        Assert.IsType<ObjectResult>(await Stream(Guid.NewGuid(), "?static=true"));
+    }
+
+    // A film whose two versions are both links, "big" and "small", with a source that refuses the named ones.
+    private static (LinkPlaybackFilter Filter, LinkGrants Grants, Guid Big, Guid Small) TwoVersions(params string[] refuse)
+    {
+        var big = new Movie { Id = Guid.NewGuid(), Path = "/m/Film - 4K.strm" };
+        var small = new Movie { Id = Guid.NewGuid(), Path = "/m/Film - 1080p.strm" };
+        var (library, stub) = InterfaceStub.Create<ILibraryManager>();
+        stub.Answer(nameof(ILibraryManager.GetItemById), args => (Guid)args[0]! == small.Id ? small : big);
+        stub.Answer(nameof(ILibraryManager.GetLocalAlternateVersionIds), _ => new[] { small.Id });
+        var links = new ManyLinks { [big.Path] = "big", [small.Path] = "small" };
+        var grants = new LinkGrants();
+        return (new LinkPlaybackFilter(library, links, grants, new PickyAccess(refuse), NullLogger<LinkPlaybackFilter>.Instance), grants, big.Id, small.Id);
+    }
+
     private static async Task<bool> RunResult(LinkPlaybackFilter filter, string controllerName, MediaSourceInfo source)
     {
         var response = new PlaybackInfoResponse { MediaSources = new[] { source } };
@@ -666,6 +810,25 @@ public sealed class LinkRouteTests : IDisposable
             Calls++;
             return Task.FromResult(new LinkChoice(_refusal is null ? LinkFallback.PrimaryOf(link) : null, _refusal));
         }
+    }
+
+    private sealed class PickyAccess : ILinkAccess
+    {
+        private readonly string[] _refused;
+
+        public PickyAccess(string[] refused) => _refused = refused;
+
+        public Task<LinkChoice> ChooseAsync(LinkEntry link, Guid? userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken)
+            => Task.FromResult(_refused.Contains(link.LinkId) ? new LinkChoice(null, "refused " + link.LinkId) : new LinkChoice(LinkFallback.PrimaryOf(link), null));
+    }
+
+    private sealed class ManyLinks : Dictionary<string, string>, ILinkRegistry
+    {
+        public string? LinkPathFor(string copiedPath) => null;
+
+        public string? CopiedPathFor(string linkPath) => null;
+
+        public LinkEntry? Find(string linkPath) => TryGetValue(linkPath, out var id) ? new LinkEntry(linkPath, linkPath, id, "server") : null;
     }
 
     private sealed class OneLink : ILinkRegistry

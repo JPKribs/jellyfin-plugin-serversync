@@ -174,6 +174,19 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public bool IncludeCompanionFiles { get; set; } = true;
 
+    /// <summary>
+    /// Whether a link takes the chapter images and trickplay tiles its source made. Jellyfin makes
+    /// neither for a .strm, so without this a link has none.
+    /// </summary>
+    public bool TakeLinkImagesFromSource { get; set; } = true;
+
+    /// <summary>
+    /// Whether a player's direct play of a link is streamed from the source by this plugin, for the
+    /// user who asked. Off, Jellyfin reads the link's own address instead, which works the same but
+    /// cannot tell two viewers of one link apart.
+    /// </summary>
+    public bool StreamLinksDirectly { get; set; } = true;
+
     public int MaxConcurrentDownloads { get; set; } = 2;
 
     /// <summary>
@@ -233,21 +246,32 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <param name="currentHour">The local hour, 0 to 23.</param>
     /// <returns>Effective speed in bytes per second.</returns>
     public long GetEffectiveDownloadSpeedBytes(int currentHour)
+        => IsInBandwidthSchedule(currentHour) ? GetScheduledDownloadSpeedBytes() : GetMaxDownloadSpeedBytes();
+
+    /// <summary>Whether the bandwidth schedule's hours apply now. False while scheduling is off.</summary>
+    /// <returns>True inside the scheduled hours.</returns>
+    public bool IsInBandwidthSchedule() => IsInBandwidthSchedule(DateTime.Now.Hour);
+
+    /// <summary>
+    /// Whether the bandwidth schedule's hours apply at a given local hour. Downloads and link streams
+    /// share the schedule, each with its own scheduled speed.
+    /// </summary>
+    /// <param name="currentHour">The local hour, 0 to 23.</param>
+    /// <returns>True inside the scheduled hours.</returns>
+    public bool IsInBandwidthSchedule(int currentHour)
     {
         if (!EnableBandwidthScheduling)
         {
-            return GetMaxDownloadSpeedBytes();
+            return false;
         }
 
         // Equal start and end reads as "all day", not "never". The general
         // same-day branch evaluates to `hour >= X && hour < X`, which is always
         // false, so a schedule of 3 to 3 silently did nothing.
-        var isInScheduledWindow = ScheduledStartHour == ScheduledEndHour
+        return ScheduledStartHour == ScheduledEndHour
             || (ScheduledStartHour < ScheduledEndHour
                 ? currentHour >= ScheduledStartHour && currentHour < ScheduledEndHour
                 : currentHour >= ScheduledStartHour || currentHour < ScheduledEndHour);
-
-        return isInScheduledWindow ? GetScheduledDownloadSpeedBytes() : GetMaxDownloadSpeedBytes();
     }
 
     /// <summary>

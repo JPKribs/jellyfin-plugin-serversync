@@ -484,6 +484,8 @@ export default function (view) {
         setChecked('chkAllowLinking', server.AllowLinking === true);
         setValue('txtLinkMaxStreams', String(server.LinkMaxStreams || 0));
         setValue('txtLinkMaxStreamsPerUser', String(server.LinkMaxStreamsPerUser || 0));
+        setValue('txtLinkStreamSpeed', String(server.LinkStreamSpeedMbps || 0));
+        setValue('txtLinkScheduledStreamSpeed', String(server.LinkScheduledStreamSpeedMbps || 0));
         setChecked('chkLinkCountOwnSessions', server.LinkCountOwnSessions === true);
         setChecked('chkLinkHonorBitrateLimit', server.LinkHonorBitrateLimit === true);
         fillFallbackUsers(server.LinkFallbackUserId || '');
@@ -592,6 +594,8 @@ export default function (view) {
         server.AllowLinking = getChecked('chkAllowLinking');
         server.LinkMaxStreams = Math.max(0, parseInt(getValue('txtLinkMaxStreams', '0'), 10) || 0);
         server.LinkMaxStreamsPerUser = Math.max(0, parseInt(getValue('txtLinkMaxStreamsPerUser', '0'), 10) || 0);
+        server.LinkStreamSpeedMbps = Math.max(0, parseInt(getValue('txtLinkStreamSpeed', '0'), 10) || 0);
+        server.LinkScheduledStreamSpeedMbps = Math.max(0, parseInt(getValue('txtLinkScheduledStreamSpeed', '0'), 10) || 0);
         server.LinkCountOwnSessions = getChecked('chkLinkCountOwnSessions');
         server.LinkHonorBitrateLimit = getChecked('chkLinkHonorBitrateLimit');
         server.LinkFallbackUserId = getValue('selLinkFallbackUser', '');

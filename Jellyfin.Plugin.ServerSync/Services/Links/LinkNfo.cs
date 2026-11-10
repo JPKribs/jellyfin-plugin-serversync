@@ -42,6 +42,37 @@ public static class LinkNfo
     }
 
     /// <summary>
+    /// Whether a link's row records that its .nfo was written. A recorded .nfo that is gone was removed
+    /// by the user, to hand the metadata to Jellyfin, and is not written again.
+    /// </summary>
+    public static bool Recorded(Models.ContentSync.SyncItem row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return !string.IsNullOrEmpty(row.LocalPath)
+            && Names(row).Contains(Path.GetFileName(PathFor(row.LocalPath)), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Records on a link's row that its .nfo was written.</summary>
+    public static void Record(Models.ContentSync.SyncItem row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!string.IsNullOrEmpty(row.LocalPath) && !Recorded(row))
+        {
+            row.CompanionFiles = string.Join(",", Names(row).Append(Path.GetFileName(PathFor(row.LocalPath))));
+        }
+    }
+
+    /// <summary>Whether the user removed a link's .nfo after it was written.</summary>
+    public static bool RemovedByUser(Models.ContentSync.SyncItem row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return Recorded(row) && !File.Exists(PathFor(row.LocalPath!));
+    }
+
+    private static string[] Names(Models.ContentSync.SyncItem row)
+        => row.CompanionFiles?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
+
+    /// <summary>
     /// Writes the .nfo for a link, replacing only one this plugin wrote. Returns false when another .nfo
     /// is already there, which is left as it is.
     /// </summary>

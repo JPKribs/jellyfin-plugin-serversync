@@ -233,7 +233,7 @@ Negotiate watch history. Each entry proposes a merged state for one of the recei
 
 ### Link routes
 
-These serve [links](Links.md). The source answers `Stream`, `Stream/Check`, and `Playback`. The linking server answers `Control` and `Links`. All need the protocol headers. `Stream`, `Stream/Check`, `Playback`, and `Control` also need the caller to be paired, as for `Queue`, and answer `400` when the server id or body is missing, `409` when the caller is not on the Servers tab, and `428` when it is not paired.
+These serve [links](Links.md). The source answers `Stream`, `Stream/Check`, `Playback`, `Links/Describe`, and `Links/{itemId}/Images`. The linking server answers `Control` and `Links`. All need the protocol headers. `Stream`, `Stream/Check`, `Playback`, `Control`, `Links/Describe`, and `Links/{itemId}/Images` also need the caller to be paired, as for `Queue`, and answer `400` when the server id or body is missing, `409` when the caller is not on the Servers tab, and `428` when it is not paired.
 
 #### GET /Sync/Peer/Stream/{itemId}?serverId={id}&userId={id}&sourceUserId={id}&probe={bool}
 
@@ -298,6 +298,35 @@ A remote control command from the source's dashboard for a viewer of a link here
 ```
 
 Answers `204`, `400` for an unknown command, or `404` when no session here is playing a link to the caller.
+
+#### POST /Sync/Peer/Links/Describe
+
+Answers for files the caller holds links to: whether each is still here to stream and its size, and with `Details` its media info. The linking server asks on every content sync to [check its links](Links.md#the-link-check), and asks with `Details` to give a link its media info without probing the file. At most 200 items a request.
+
+```json
+{ "ServerId": "…", "ItemIds": [ "…" ], "Details": true }
+```
+
+```json
+{
+  "Items": [
+    {
+      "ItemId": "…", "Exists": true, "Size": 734003200, "HasDetails": true,
+      "RunTimeTicks": 72000000000, "Container": "mkv", "TotalBitrate": 8000000,
+      "Streams": [ … ], "Attachments": [ … ],
+      "Chapters": [ { "StartPositionTicks": 0, "Name": "Chapter 1", "HasImage": true } ],
+      "Trickplay": [ { "Width": 320, "Height": 180, "TileWidth": 10, "TileHeight": 10, "ThumbnailCount": 720, "Interval": 10000, "Bandwidth": 22000 } ]
+    },
+    { "ItemId": "…", "Exists": false, "Reason": "the file is no longer on the source" }
+  ]
+}
+```
+
+`Streams` and `Attachments` are Jellyfin's own media stream and attachment objects, for the streams inside the file only. Answers `403` with the reason when linking is off for the caller. A standard user's key only learns about items that user can see. Releases before this route answer `404`, and the linking server then probes its links instead and does not check them.
+
+#### GET /Sync/Peer/Links/{itemId}/Images/{kind}/{index}?serverId={id}&width={width}
+
+One image this server made for a file the caller links to. `kind` is `Chapter`, with the chapter's index, or `Trickplay`, with the tile's index and the `width` of its set. Answers the image as JPEG, `403` when linking is off for the caller, or `404` when there is no such image.
 
 #### GET /Sync/Peer/Links
 

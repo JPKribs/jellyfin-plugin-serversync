@@ -35,7 +35,9 @@ public interface ILinkAccess
 /// Asks the source whether a user here may play one of this server's links, before Jellyfin starts on
 /// it, so a refusal shows when they press play rather than partway into the stream. When the link's own
 /// server is down, full, or refuses, the other servers this one pulls from that map the same folder are
-/// asked in priority order for the same file, by its path there and its size.
+/// asked for the same file, by its path there and its size, and the highest in priority that allows it
+/// is used. A server that did not answer a moment ago is passed over, and the others are asked together
+/// once the link's own server is slow to answer, so a dead server never holds up play.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton, ServiceType = typeof(ILinkAccess))]
 public sealed class LinkAccess : ILinkAccess
@@ -46,14 +48,29 @@ public sealed class LinkAccess : ILinkAccess
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LinkAccess> _logger;
+    private readonly LinkHealth _health;
+    private readonly TimeSpan _hedge;
 
-    public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger)
+    public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health)
+        : this(configManager, clientFactory, applicationHost, logger, health, Hedge)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="LinkAccess"/> class, for tests.</summary>
+    public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health, TimeSpan hedge)
     {
         _configManager = configManager;
         _clientFactory = clientFactory;
         _applicationHost = applicationHost;
         _logger = logger;
+        _health = health;
+        _hedge = hedge;
     }
+
+    /// <summary>
+    /// How long the link's own server has to answer before the others are asked alongside it.
+    /// </summary>
+    public static TimeSpan Hedge { get; } = TimeSpan.FromSeconds(2);
 
     /// <summary>The source user this server maps a local user to on that server's entry, or null.</summary>
     public static string? SourceUserFor(SourceServer server, Guid? localUserId)
@@ -78,15 +95,87 @@ public sealed class LinkAccess : ILinkAccess
         ArgumentNullException.ThrowIfNull(link);
         var config = _configManager.Configuration;
         string? firstRefusal = null;
-        var alsoTried = new List<string>();
         var primary = ServerFor(link);
+        var primaryPassedOver = false;
+        Task<LinkStreamCheckResponse>? primaryAsk = null;
         if (primary is null)
         {
             firstRefusal = "the server this link streams from is no longer set up here";
         }
         else if (!Skipped(primary))
         {
-            var answer = await AskAsync(primary, link.LinkId, null, userId, cancellationToken).ConfigureAwait(false);
+            if (_health.IsDown(primary.Key))
+            {
+                // It did not answer a moment ago. It is asked last, when nobody else can play the file.
+                primaryPassedOver = true;
+                firstRefusal = $"{primary.DisplayName} could not be reached";
+            }
+            else
+            {
+                primaryAsk = AskAsync(primary, link.LinkId, null, userId, cancellationToken);
+                if (await Task.WhenAny(primaryAsk, Task.Delay(_hedge, cancellationToken)).ConfigureAwait(false) == primaryAsk)
+                {
+                    var answer = await primaryAsk.ConfigureAwait(false);
+                    if (answer.Allowed)
+                    {
+                        return new LinkChoice(LinkFallback.PrimaryOf(link), null);
+                    }
+
+                    firstRefusal = answer.Reason;
+                    primaryAsk = null;
+                }
+            }
+        }
+
+        // The others are asked together, and answer in priority order.
+        var alsoTried = new List<string>();
+        var alternates = LinkFallback.Alternates(config, link).Where(a => !Skipped(a.Server)).ToList();
+        var asks = alternates.Select(a => _health.IsDown(a.Server.Key)
+            ? Task.FromResult(new LinkStreamCheckResponse { Reason = $"{a.Server.DisplayName} could not be reached" })
+            : AskAlternateAsync(a, link, userId, cancellationToken)).ToList();
+        var standIn = FirstAllowedAsync();
+
+        // The link's own server is still thinking. It wins if it allows the play before another does.
+        if (primaryAsk is not null)
+        {
+            if (await Task.WhenAny(primaryAsk, standIn).ConfigureAwait(false) == primaryAsk || (await standIn.ConfigureAwait(false)) is null)
+            {
+                var answer = await primaryAsk.ConfigureAwait(false);
+                if (answer.Allowed)
+                {
+                    return new LinkChoice(LinkFallback.PrimaryOf(link), null);
+                }
+
+                firstRefusal = answer.Reason;
+            }
+            else
+            {
+                firstRefusal = $"{primary!.DisplayName} was slow to answer";
+            }
+        }
+
+        if (await standIn.ConfigureAwait(false) is { } found)
+        {
+            _logger.LogInformation(
+                "Playing the link {Path} from '{Server}' instead: {Reason}",
+                link.LinkPath,
+                found.Server.DisplayName,
+                firstRefusal ?? "the server it streamed from failed");
+            return new LinkChoice(found.Route, null);
+        }
+
+        for (var i = 0; i < alternates.Count; i++)
+        {
+            var answer = await asks[i].ConfigureAwait(false);
+            _logger.LogDebug("'{Server}' cannot stand in for the link {Path}: {Reason}", alternates[i].Server.DisplayName, link.LinkPath, answer.Reason);
+            alsoTried.Add(alternates[i].Server.DisplayName);
+            firstRefusal ??= answer.Reason;
+        }
+
+        // Nobody else can play it, so the server passed over is asked after all: it may be back.
+        if (primaryPassedOver)
+        {
+            var answer = await AskAsync(primary!, link.LinkId, null, userId, cancellationToken).ConfigureAwait(false);
             if (answer.Allowed)
             {
                 return new LinkChoice(LinkFallback.PrimaryOf(link), null);
@@ -95,42 +184,41 @@ public sealed class LinkAccess : ILinkAccess
             firstRefusal = answer.Reason;
         }
 
-        foreach (var alternate in LinkFallback.Alternates(config, link))
-        {
-            if (Skipped(alternate.Server))
-            {
-                continue;
-            }
-
-            var answer = await AskAsync(alternate.Server, string.Empty, alternate.SourcePath, userId, cancellationToken).ConfigureAwait(false);
-            if (answer.Allowed && string.IsNullOrEmpty(answer.ItemId))
-            {
-                answer = new LinkStreamCheckResponse { Reason = "it did not say which item holds the file" };
-            }
-            else if (answer.Allowed && link.Size > 0 && answer.Size > 0 && answer.Size != link.Size)
-            {
-                answer = new LinkStreamCheckResponse { Reason = "its copy of the file is a different size" };
-            }
-
-            if (answer.Allowed)
-            {
-                _logger.LogInformation(
-                    "Playing the link {Path} from '{Server}' instead: {Reason}",
-                    link.LinkPath,
-                    alternate.Server.DisplayName,
-                    firstRefusal ?? "the server it streamed from failed");
-                return new LinkChoice(new LinkRoute(alternate.Server.Key, answer.ItemId!), null);
-            }
-
-            _logger.LogDebug("'{Server}' cannot stand in for the link {Path}: {Reason}", alternate.Server.DisplayName, link.LinkPath, answer.Reason);
-            alsoTried.Add(alternate.Server.DisplayName);
-            firstRefusal ??= answer.Reason;
-        }
-
         var refusal = firstRefusal ?? "the server this link streams from failed";
         return new LinkChoice(null, alsoTried.Count == 0 ? refusal : $"{refusal} (also tried {string.Join(", ", alsoTried)})");
 
         bool Skipped(SourceServer server) => skip?.Contains(server.Key, StringComparer.OrdinalIgnoreCase) == true;
+
+        async Task<(SourceServer Server, LinkRoute Route)?> FirstAllowedAsync()
+        {
+            for (var i = 0; i < alternates.Count; i++)
+            {
+                var answer = await asks[i].ConfigureAwait(false);
+                if (answer.Allowed)
+                {
+                    return (alternates[i].Server, new LinkRoute(alternates[i].Server.Key, answer.ItemId!));
+                }
+            }
+
+            return null;
+        }
+    }
+
+    // An alternate is only used when it names the item and holds the same file, told by its size.
+    private async Task<LinkStreamCheckResponse> AskAlternateAsync(LinkAlternate alternate, LinkEntry link, Guid? userId, CancellationToken cancellationToken)
+    {
+        var answer = await AskAsync(alternate.Server, string.Empty, alternate.SourcePath, userId, cancellationToken).ConfigureAwait(false);
+        if (answer.Allowed && string.IsNullOrEmpty(answer.ItemId))
+        {
+            return new LinkStreamCheckResponse { Reason = "it did not say which item holds the file" };
+        }
+
+        if (answer.Allowed && link.Size > 0 && answer.Size != link.Size)
+        {
+            return new LinkStreamCheckResponse { Reason = answer.Size > 0 ? "its copy of the file is a different size" : "it did not say how large its copy of the file is" };
+        }
+
+        return answer;
     }
 
     private async Task<LinkStreamCheckResponse> AskAsync(SourceServer server, string itemId, string? path, Guid? userId, CancellationToken cancellationToken)
@@ -151,6 +239,7 @@ public sealed class LinkAccess : ILinkAccess
                     SourceUserId = SourceUserFor(server, userId)
                 },
                 deadline.Token).ConfigureAwait(false);
+            _health.Answered(server.Key);
             if (!answer.Allowed)
             {
                 answer.Reason = JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(answer.Reason ?? "the source refused", 300);
@@ -160,6 +249,7 @@ public sealed class LinkAccess : ILinkAccess
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            _health.Failed(server.Key);
             _logger.LogWarning("Could not ask '{Server}' whether a link may play: {Reason}", server.DisplayName, ex.Message);
             return new LinkStreamCheckResponse { Reason = $"{server.DisplayName} could not be reached" };
         }

@@ -1979,6 +1979,84 @@ def scenario_link_ranges(creds, apis):
         film.teardown()
 
 
+def scenario_link_care(creds, apis):
+    """The source gives a link its media info and trickplay images, a speed limit leaves the bytes
+    unchanged, direct play streams for the user who asked, and the content sync flags a dead link."""
+    film = LinkedFilm(creds, apis, seconds=25, size="320x240").setup(write=False)
+    a, local = film.a, film.local
+    av = creds["servers"]["source-a"]["viewerId"]
+    lv = creds["servers"]["local"]["viewerId"]
+    policy = a.get(f"/Users/{av}")["Policy"]
+    library = next(f for f in a.get("/Library/VirtualFolders") if f["Name"] == "Movies")
+    try:
+        # Source-a makes trickplay images for the film before local links it.
+        a.post("/Library/VirtualFolders/LibraryOptions", {"Id": library["ItemId"], "LibraryOptions": dict(library["LibraryOptions"], EnableTrickplayImageExtraction=True)}, expect=204)
+        source_item = find_item(a, "Movie", film.needle)
+        run_task(a, "RefreshTrickplayImages", timeout=600)
+        made = wait_until(lambda: bool(a.get(f"/Items/{source_item['Id']}?userId={creds['servers']['source-a']['userId']}&fields=Trickplay").get("Trickplay")), 120, "source-a made trickplay images for the film")
+
+        film.write()
+        wait_until(lambda: (local.get(f"/Items/{film.item['Id']}?userId={film.lu}").get("RunTimeTicks") or 0) > 0, 150, "the link gets its media info")
+        logs = run(["docker", "logs", "--since", "10m", "serversync-it-local"], capture=True, check=False)
+        expect(f"Took the media info for the link /media/Movies/{film.title}/{film.title}.strm" in logs.stdout + logs.stderr, "the media info came from the source, not from probing the file")
+        streams = local.get(f"/Items/{film.item['Id']}?userId={film.lu}").get("MediaStreams") or []
+        expect({"Video", "Audio"} <= {s.get("Type") for s in streams}, "the link lists the file's video and audio streams")
+        if made:
+            def manifest():
+                return next(iter((local.get(f"/Items/{film.item['Id']}?userId={film.lu}&fields=Trickplay").get("Trickplay") or {}).values()), {})
+            wait_until(lambda: bool(manifest()), 60, "the link has the trickplay images source-a made")
+            width = next(iter(manifest()), None)
+            if width:
+                status, _, tile = http(local, "GET", f"/Videos/{film.item['Id']}/Trickplay/{width}/0.jpg")
+                expect(status == 200 and tile[:2] == b"\xff\xd8", f"local serves a trickplay tile for the link ({status})")
+
+        # A speed limit on the source leaves every byte and range as it was.
+        config = plugin_config(a)
+        next(e for e in config["Servers"] if e["Name"] == "local")["LinkStreamSpeedMbps"] = 50
+        save_plugin_config(a, config)
+        film.play_info()
+        data = film.original()
+        base = f"/Videos/{film.item['Id']}/stream?static=true&mediaSourceId={film.source['Id']}"
+        status, _, body = http(local, "GET", base)
+        expect(status == 200 and body == data, "with a speed limit on the source, the whole file reads back unchanged")
+        status, _, body = http(local, "GET", base, {"Range": "bytes=1000-1999"})
+        expect(status == 206 and body == data[1000:2000], f"with a speed limit, a range is still the source's bytes ({status})")
+
+        # Two viewers of one link: each direct play is streamed as the user who asked. The viewer is
+        # the latest to press play and is then barred on the source, which must not stop the admin.
+        viewer = Api("local-viewer", SERVERS["local"]["port"], "viewer-device")
+        _, auth = viewer.post("/Users/AuthenticateByName", {"Username": "viewer", "Pw": ""}, expect=200)
+        viewer.token = auth["AccessToken"]
+        film.play_info()
+        status, _ = viewer.call("POST", f"/Items/{film.item['Id']}/PlaybackInfo?userId={lv}", {}, raw=True)
+        expect(status == 200, f"a second user may play the link too ({status})")
+        a.post(f"/Users/{av}/Policy", dict(policy, EnableMediaPlayback=False), expect=204)
+        status, _, body = http(local, "GET", base)
+        expect(status == 200 and body == data, f"the first user's direct play streams as them, though another pressed play last ({status})")
+        status, _, _ = http(viewer, "GET", base)
+        expect(status == 403, f"the barred user's own direct play is refused by the source ({status})")
+        a.post(f"/Users/{av}/Policy", policy, expect=204)
+
+        # The content sync checks links against the source: a file that is gone flags the link.
+        expect(film.row().get("Status") == "Synced", "the link is settled before its file goes")
+        os.remove(film.source_file)
+        rescan_until(a, "Movie", film.needle, False, "source-a no longer lists the film")
+        run_task(local, "ServerSyncDownloadContent")
+        row = film.row() or {}
+        expect(row.get("Status") == "Errored" and (row.get("ErrorMessage") or "").startswith("Link check: "), f"the content sync flags the dead link on the Sync tab ({row.get('Status')}: {row.get('ErrorMessage')})")
+        run_task(local, "ServerSyncDownloadContent")
+        row = film.row() or {}
+        expect(row.get("Status") == "Errored", "the flagged link is not retried as a failed write")
+    finally:
+        a.post(f"/Users/{av}/Policy", policy, expect=204)
+        a.post("/Library/VirtualFolders/LibraryOptions", {"Id": library["ItemId"], "LibraryOptions": library["LibraryOptions"]}, expect=204)
+        config = plugin_config(a)
+        for entry in config["Servers"]:
+            entry["LinkStreamSpeedMbps"] = 0
+        save_plugin_config(a, config)
+        film.teardown()
+
+
 def scenario_link_hls(creds, apis):
     """Transcoding a link: Jellyfin's ffmpeg reads the link under the user's grant and makes HLS segments."""
     film = LinkedFilm(creds, apis, seconds=12, size="320x240").setup()
@@ -2137,7 +2215,8 @@ def scenario_link_deleted(creds, apis):
         shutil.rmtree(film.source_folder, ignore_errors=True)
         rescan_until(film.a, "Movie", film.needle, False, "source-a no longer lists the film")
         run_task(film.local, "ServerSyncUpdateTables")
-        expect((film.row() or {}).get("Status") == "Deleting", "the link is marked for deletion")
+        row = film.row() or {}
+        expect(row.get("Status") == "Deleting", f"the link is marked for deletion ({row.get('Status')} {row.get('PendingType')}: {row.get('ErrorMessage')})")
         run_task(film.local, "ServerSyncDownloadContent")
         expect(not os.path.exists(film.link), "the Sync run removes the .strm")
         wait_until(lambda: find_item(film.local, "Movie", film.needle) is None, 150, "local no longer lists the linked film")
@@ -2841,6 +2920,7 @@ SCENARIOS = [
     ("updating keeps a 12.2.7.0 whitelist and seeds older ones", scenario_whitelist_upgrade),
     ("links stream from the source and match across servers", scenario_links),
     ("links: seeking reads exactly the bytes asked for", scenario_link_ranges),
+    ("links: media info, images, per user direct play, and the link check", scenario_link_care),
     ("links: transcoding a link to HLS", scenario_link_hls),
     ("links: hostile requests are refused", scenario_link_hostile),
     ("links: a source that is down", scenario_link_source_down),

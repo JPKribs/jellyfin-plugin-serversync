@@ -1,3 +1,10 @@
+using MediaBrowser.Model.Entities;
+using Jellyfin.Plugin.ServerSync.Models.Peer;
+using System.Threading.Tasks;
+using System.Threading;
+using System.Text;
+using System.Net.Http;
+using System.Net;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -533,6 +540,32 @@ public sealed class LinkStorageTests : IDisposable
     }
 
     /// <summary>
+    /// An .nfo the user deletes after it was written stays deleted, which is how the docs say to hand a
+    /// link's metadata to Jellyfin.
+    /// True: the next sync leaves the link settled and writes no .nfo.
+    /// False: every refresh would queue the link and put the .nfo back.
+    /// </summary>
+    [Fact]
+    public void State_NfoTheUserDeleted_StaysDeleted()
+    {
+        var path = Media("Deleted Nfo.strm");
+        _files.Write(path, "id", replace: false);
+        LinkNfo.Write(path, new Jellyfin.Sdk.Generated.Models.BaseItemDto { Name = "x" });
+        var row = Row("id", path, StorageMode.Link, status: SyncStatus.Synced);
+        row.CompanionFiles = "Deleted Nfo.en.srt";
+
+        // An .nfo from before rows recorded them is recorded on the first refresh that sees it.
+        LinkStateService.ProcessExistingLink(row, row.SourcePath, 1, DateTime.UtcNow, path, _files, NullLogger.Instance);
+        Assert.True(LinkNfo.Recorded(row));
+        Assert.Contains("Deleted Nfo.en.srt", row.CompanionFiles, StringComparison.Ordinal);
+
+        File.Delete(LinkNfo.PathFor(path));
+        LinkStateService.ProcessExistingLink(row, row.SourcePath, 1, DateTime.UtcNow, path, _files, NullLogger.Instance);
+        Assert.Equal(SyncStatus.Synced, row.Status);
+        Assert.True(LinkNfo.RemovedByUser(row));
+    }
+
+    /// <summary>
     /// An emoji in a title is kept whole, and half of a broken one is dropped.
     /// True: titles with emoji read right, and broken text from a source never stops the .nfo.
     /// False: an emoji would be mangled, or a broken one would leave the link without metadata.
@@ -567,6 +600,132 @@ public sealed class LinkStorageTests : IDisposable
             StatusDate = DateTime.UtcNow,
             ServerKey = "server"
         };
+    }
+
+    /// <summary>
+    /// The link check flags a link whose file the source no longer has, leaves a healthy one alone,
+    /// and settles a flagged one again once the source has the file.
+    /// True: a dead link shows on the Sync tab with the reason before someone presses play, and recovers on its own.
+    /// False: a dead link would only be found by playing it, or would stay flagged after the source came back.
+    /// </summary>
+    [Fact]
+    public async Task Verify_FlagsDeadLinks_AndSettlesThemAgain()
+    {
+        _table.Upsert(Row("aaaa", Media("Gone.strm"), StorageMode.Link, status: SyncStatus.Synced));
+        _table.Upsert(Row("bbbb", Media("Fine.strm"), StorageMode.Link, status: SyncStatus.Synced));
+        _table.Upsert(Row("cccc", Media("Copy.mkv"), StorageMode.Copy, status: SyncStatus.Synced));
+        var answer = "{\"Items\":[{\"ItemId\":\"aaaa\",\"Exists\":false,\"Reason\":\"the file is no longer on the source\"},{\"ItemId\":\"bbbb\",\"Exists\":true,\"Size\":4321}]}";
+        var handler = new DescribeHandler(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer, Encoding.UTF8, "application/json") });
+        using var client = new SourceServerClient(NullLogger<SourceServerClient>.Instance, new HttpClient(handler), "http://peer", "k", "test", "0");
+
+        var found = await Verifier().VerifyAsync(_table, key => key == "server" ? client : null, CancellationToken.None);
+
+        Assert.Equal(new LinkVerification(2, 1, 0, 0), found);
+        var gone = _table.GetBySourceItemId("aaaa")!;
+        Assert.Equal(SyncStatus.Errored, gone.Status);
+        Assert.Equal(LinkVerifier.Prefix + "the file is no longer on the source", gone.Reason);
+        Assert.Empty(_table.GetErroredItemsForRetry(3));
+        Assert.Equal(SyncStatus.Synced, _table.GetBySourceItemId("bbbb")!.Status);
+        Assert.Equal(4321, _table.GetBySourceItemId("bbbb")!.SourceSize);
+        Assert.Equal(SyncStatus.Synced, _table.GetBySourceItemId("cccc")!.Status);
+
+        // A refresh leaves the flag alone although the .strm is in place.
+        _files.Write(gone.LocalPath!, "aaaa", replace: false);
+        LinkStateService.ProcessExistingLink(gone, gone.SourcePath, 1, DateTime.UtcNow, gone.LocalPath!, _files, NullLogger.Instance);
+        Assert.Equal(SyncStatus.Errored, gone.Status);
+
+        answer = "{\"Items\":[{\"ItemId\":\"aaaa\",\"Exists\":true,\"Size\":1},{\"ItemId\":\"bbbb\",\"Exists\":true,\"Size\":4321}]}";
+        found = await Verifier().VerifyAsync(_table, _ => client, CancellationToken.None);
+
+        Assert.Equal(new LinkVerification(2, 0, 1, 0), found);
+        Assert.Equal(SyncStatus.Synced, _table.GetBySourceItemId("aaaa")!.Status);
+        Assert.Null(_table.GetBySourceItemId("aaaa")!.Reason);
+    }
+
+    /// <summary>
+    /// A source that refuses the check outright flags every link to it with its reason, and one that
+    /// is down or does not know the check flags nothing.
+    /// True: switching linking off on the source shows on every link, and an outage is not mistaken for dead links.
+    /// False: links would look healthy with linking off, or all be flagged whenever a source restarts.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, SyncStatus.Errored)]
+    [InlineData(HttpStatusCode.NotFound, SyncStatus.Synced)]
+    [InlineData(HttpStatusCode.BadGateway, SyncStatus.Synced)]
+    public async Task Verify_RefusalFlagsAll_OutageFlagsNone(HttpStatusCode status, SyncStatus expected)
+    {
+        _table.Upsert(Row("aaaa", Media("A.strm"), StorageMode.Link, status: SyncStatus.Synced));
+        var handler = new DescribeHandler(() => new HttpResponseMessage(status) { Content = new StringContent("linking is not allowed for local here") });
+        using var client = new SourceServerClient(NullLogger<SourceServerClient>.Instance, new HttpClient(handler), "http://peer", "k", "test", "0");
+
+        await Verifier().VerifyAsync(_table, _ => client, CancellationToken.None);
+
+        var row = _table.GetBySourceItemId("aaaa")!;
+        Assert.Equal(expected, row.Status);
+        if (expected == SyncStatus.Errored)
+        {
+            Assert.Equal(LinkVerifier.Prefix + "linking is not allowed for local here", row.Reason);
+        }
+    }
+
+    /// <summary>
+    /// The source's streams sit between this server's external audio and its other external files,
+    /// numbered in that order, and the source's own external files are left out.
+    /// True: stream numbers match what Jellyfin's own probe would save, so track selection and subtitles line up.
+    /// False: the player would pick the wrong track, or a subtitle file here would vanish.
+    /// </summary>
+    [Fact]
+    public void MediaInfo_Merge_KeepsLocalExternals_InProbeOrder()
+    {
+        var local = new[]
+        {
+            new MediaStream { Type = MediaStreamType.Subtitle, IsExternal = true, Path = "/here/Film.en.srt", Index = 0 },
+            new MediaStream { Type = MediaStreamType.Audio, IsExternal = true, Path = "/here/Film.commentary.mka", Index = 1 }
+        };
+        var shipped = new[]
+        {
+            new MediaStream { Type = MediaStreamType.Video, Codec = "hevc", Index = 0 },
+            new MediaStream { Type = MediaStreamType.Audio, Codec = "eac3", Index = 1 },
+            new MediaStream { Type = MediaStreamType.Subtitle, IsExternal = true, Path = "/there/Film.de.srt", Index = 2 }
+        };
+
+        var merged = LinkMediaInfo.Merge(local, shipped);
+
+        Assert.Equal(new[] { "/here/Film.commentary.mka", null, null, "/here/Film.en.srt" }, merged.Select(s => s.Path));
+        Assert.Equal(new[] { 0, 1, 2, 3 }, merged.Select(s => s.Index));
+        Assert.Equal("hevc", merged[1].Codec);
+    }
+
+    /// <summary>
+    /// A trickplay set's tile count is its thumbnails divided over full tiles, rounded up.
+    /// True: every tile of a set is taken, and none past the last is asked for.
+    /// False: the last tile would be missing, or a set would never count as complete.
+    /// </summary>
+    [Theory]
+    [InlineData(100, 10, 10, 1)]
+    [InlineData(101, 10, 10, 2)]
+    [InlineData(720, 10, 10, 8)]
+    [InlineData(0, 10, 10, 0)]
+    [InlineData(50, 0, 10, 0)]
+    public void Trickplay_TileCount(int thumbnails, int tileWidth, int tileHeight, int expected)
+        => Assert.Equal(expected, new PeerTrickplay { ThumbnailCount = thumbnails, TileWidth = tileWidth, TileHeight = tileHeight }.TileCount());
+
+    private static LinkVerifier Verifier()
+    {
+        var (library, _) = InterfaceStub.Create<MediaBrowser.Controller.Library.ILibraryManager>();
+        var (host, hostStub) = InterfaceStub.Create<IServerApplicationHost>();
+        hostStub.Answer("get_SystemId", _ => "local");
+        return new LinkVerifier(library, null, host, NullLogger<LinkVerifier>.Instance);
+    }
+
+    private sealed class DescribeHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpResponseMessage> _answer;
+
+        public DescribeHandler(Func<HttpResponseMessage> answer) => _answer = answer;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(_answer());
     }
 
     private static LinkFiles Files(string dataPath)

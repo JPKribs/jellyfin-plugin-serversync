@@ -388,6 +388,49 @@ public partial class SourceServerClient
         }
     }
 
+    /// <summary>
+    /// Asks the peer about files this server holds links to. Null when the peer runs a Server Sync
+    /// from before it answered this. Throws with the peer's reason when it refuses, such as when
+    /// linking is not allowed for this server there.
+    /// </summary>
+    /// <param name="request">The items.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>One answer per item, or null.</returns>
+    public async Task<PeerLinkDescribeResponse?> DescribeLinksAsync(PeerLinkDescribeRequest request, CancellationToken cancellationToken = default)
+    {
+        var (status, parsed, body) = await PeerRequestAsync<PeerLinkDescribeResponse>(HttpMethod.Post, "/Sync/Peer/Links/Describe", request, cancellationToken).ConfigureAwait(false);
+        if (status is 404 or 405)
+        {
+            return null;
+        }
+
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException(string.IsNullOrWhiteSpace(body) ? $"the source answered {status}" : body, null, (System.Net.HttpStatusCode)status);
+        }
+
+        return parsed ?? new PeerLinkDescribeResponse();
+    }
+
+    /// <summary>
+    /// Opens an image the peer made for a file this server links to: a chapter's image or a trickplay
+    /// tile. The caller disposes the response.
+    /// </summary>
+    /// <param name="sourceItemId">The peer's id of the item.</param>
+    /// <param name="kind">Chapter or Trickplay.</param>
+    /// <param name="index">The chapter's index, or the tile's.</param>
+    /// <param name="width">For a trickplay tile, the width of its set.</param>
+    /// <param name="callerServerId">This server's Jellyfin id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's response.</returns>
+    public Task<HttpResponseMessage> OpenLinkImageAsync(string sourceItemId, string kind, int index, int width, string callerServerId, CancellationToken cancellationToken = default)
+        => SendPeerStreamAsync(
+            "/Sync/Peer/Links/" + Uri.EscapeDataString(sourceItemId) + "/Images/" + Uri.EscapeDataString(kind) + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + "?serverId=" + Uri.EscapeDataString(callerServerId ?? string.Empty) + "&width=" + width.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            null,
+            false,
+            cancellationToken);
+
     private async Task<HttpResponseMessage> SendPeerStreamAsync(string path, string? range, bool head, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(head ? HttpMethod.Head : HttpMethod.Get, _serverUrl + path);

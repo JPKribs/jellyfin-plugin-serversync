@@ -19,9 +19,9 @@ Links suit a library you want available everywhere but do not want to store twic
 
 1. On the linking server, a library mapping is set to **Link**. **Sync Content** writes a `.strm` for each new video instead of downloading it, under the same name with only the extension changed: `Film (2020) - 4K.mkv` on the source becomes `Film (2020) - 4K.strm`. An `.nfo` with the source's details and any subtitle files are written beside it.
 2. The `.strm` holds one line: an address on the linking server itself, `http://127.0.0.1:{port}{base URL}/Sync/Link/{id}?k={secret}`. No credential for the source is ever written into a file.
-3. Jellyfin adds the link to the library. Server Sync then probes it through the link, so it shows its runtime, codecs, and tracks before anyone plays it.
+3. Jellyfin adds the link to the library. Server Sync then gives it the media info the source already holds for the file, so it shows its runtime, codecs, and tracks before anyone plays it.
 4. When someone presses play, the linking server asks the source whether that user may stream the file. If not, playback stops at once with the source's reason.
-5. Jellyfin plays the file through its own stream route. Each read goes to the link's address, and Server Sync fetches the bytes from the source with the linking server's own credentials, passing seeks through as byte ranges.
+5. The player reads the file through the linking server's own stream route. Server Sync fetches the bytes from the source with the linking server's own credentials, passing seeks through as byte ranges. Direct play is streamed for the user who asked. A transcode reads the link's address, as Jellyfin's ffmpeg does for any `.strm`.
 6. The source counts the stream against its limits and shows it on its dashboard as a session, for the user it streams as. Stopping updates played state there.
 
 Playback works with direct play, direct stream, and transcoding on the linking server. The client never sees the link's address.
@@ -39,7 +39,9 @@ With it on, these appear:
 * **Link Streams At Once** is the most streams that server may hold at once. 0 means no limit.
 * **Link Streams Per User** is the most streams one user here may hold at once through that server. Their link streams through every linking server count toward it. 0 means no limit.
 * **Count Their Own Playback** counts a user's playback on this server toward their per user limit.
-* **Honor Remote Bitrate Limits** refuses a file above a user's **Maximum remote streaming bitrate**, since a link streams the file as it is.
+* **Honor Remote Bitrate Limits** refuses a file above a user's **Maximum remote streaming bitrate**, since a link streams the file as it is. A film held in several versions still plays in a version under the limit. See [Versions](#versions).
+* **Link Stream Speed (Mbps)** is the most each stream to that server is sent at. Set it above the bitrate of the files you share, or playback buffers. 0 means no limit. The first few seconds of a stream are sent at full speed, so playback starts at once.
+* **Scheduled Link Stream Speed (Mbps)** is used instead during the hours of the bandwidth schedule on the Settings tab, while that schedule is on. Downloads and link streams share the schedule's hours, each with its own speed.
 * **Stream Unmapped Users As** is the user here who streams for a user on that server with no user mapping here. **None** refuses them.
 
 Save the server. The source then advertises links to servers that ask.
@@ -74,6 +76,10 @@ The source counts a stream while a request for it is open, and for 90 seconds af
 
 A user refused for a limit sees the reason when they press play, unless another server that holds the same file allows them. See [When the Source Cannot Stream](#when-the-source-cannot-stream). In the rare case that two plays race for the last stream, the one that loses fails as it starts, without the reason.
 
+## Versions
+
+When a film is held in several versions, such as `Film (2020) - 4K.mkv` and `Film (2020) - 1080p.mkv`, each version is a link of its own. Pressing play asks the source about every version. The versions it refuses the user, such as one above their bitrate limit, are left out of what their player is offered, and the film plays in a version it allows. The play is refused only when no version is allowed, with the reason for the first.
+
 ## What Gets Written
 
 ### The .strm
@@ -89,7 +95,7 @@ A comment just below the `<?xml …?>` line says it was written by Server Sync. 
 * An `.nfo` already there that Server Sync did not write is left alone.
 * Deleting that comment line keeps your own edits from then on.
 
-Jellyfin reads an `.nfo` again on a full metadata refresh. While Server Sync's `.nfo` is in place, a full refresh can put edits made on this server, or by metadata sync, back to the source's values. Delete the comment line, or the `.nfo`, to hand the metadata to Jellyfin.
+Jellyfin reads an `.nfo` again on a full metadata refresh. While Server Sync's `.nfo` is in place, a full refresh can put edits made on this server, or by metadata sync, back to the source's values. Delete the comment line, or the `.nfo`, to hand the metadata to Jellyfin. An `.nfo` you delete is not written again.
 
 ### Subtitles
 
@@ -97,20 +103,30 @@ With **Include Companion Files** on, external subtitle files are downloaded besi
 
 ### Media info
 
-Jellyfin never probes a `.strm` during a scan, so Server Sync probes each new link through the link itself, about 20 seconds after the library adds it. It checks two minutes later and probes again if the media info did not stick, up to three probes in all, since a busy library scan can save over a result. A link that still has no media info gets it the first time someone plays it.
+Jellyfin never probes a `.strm` during a scan. The source already holds the file's runtime, container, streams, attachments, and chapters, so Server Sync asks the source for them about 20 seconds after the library adds the link and saves them on the link. Nothing is read from the file itself. Two minutes later it checks that the media info stuck, and asks again if a busy library scan saved over it, up to three times.
+
+When the source cannot give it, such as a source on an older release, the file is probed through the link instead. The probe may read up to 256 MB of a file, which is far more than a probe needs and far less than a film, so nothing else on the linking server reads whole files from the source through a new link.
+
+Every **Sync Content** run also gives any link still without media info the source's, so a link missed while a server was restarting is caught on the next run. Jellyfin probes a link again each time someone plays it, as it does for any `.strm`.
+
+### Trickplay and chapter images
+
+Jellyfin makes neither for a `.strm`, whatever the library's settings say. With **Take Link Images From the Source** on in Settings, which is the default, a link takes the trickplay tiles and chapter images its source already made, along with its media info. A source that made none has none to give.
+
+* **Trickplay** works with trickplay extraction on or off in the linking server's library. Jellyfin leaves trickplay out of the details of an item whose file is remote, which a `.strm` is, so Server Sync lists a link's trickplay images in those details itself.
+* **Chapter images** are only kept while **chapter image extraction** is on for the linking server's library. With it off, Jellyfin drops them on its next refresh of the item, and **Sync Content** logs a warning naming the library. Jellyfin also resets a link's chapters when it scans the library and reads them again from the file at the next play, so chapter images can be missing between a scan and a play.
 
 ## When the Source Cannot Stream
 
 A link streams from the server that won its file in sync: the first server on the linking server's Servers tab that offers it. When two servers hold the same film in folders that map to the same place, only one row and one link are made, as for copies.
 
-When that server is down, at its limits, or refuses, the linking server tries the others it pulls from, in the Servers tab's order. A server is tried when one of its enabled library mappings covers the folder the link sits in. It is asked for the file at the matching path there, with the same checks as the link's own server, and it is used only when it allows the user and its file is the same size. The link file itself never changes, and the next play asks the link's own server first again.
+When that server is down, at its limits, or refuses, the linking server tries the others it pulls from, and uses the first in the Servers tab's order that allows the play. The others are asked together, so one slow server does not hold up the rest. When the link's own server takes more than two seconds to answer, the others are asked alongside it. A server that did not answer is passed over for the next minute while another can play the file, so only the first play after a server goes down waits on it. A server is tried when one of its enabled library mappings covers the folder the link sits in. It is asked for the file at the matching path there, with the same checks as the link's own server, and it is used only when it allows the user and its file is the same size. The link file itself never changes, and the next play asks the link's own server first again.
 
-This happens at two moments:
+This happens at three moments:
 
 * **When play is pressed.** A source that cannot be reached or refuses is passed over before playback starts.
 * **When the stream opens.** A source that fails between pressing play and the first read, or refuses as the stream opens, is passed over before any of the file is sent. Later reads of that playback stay on the server that stood in.
-
-A stream already under way is not moved. If the source stops partway, the player sees the stream end, and pressing play again falls back.
+* **Partway through.** When the source drops the stream, or sends nothing for 30 seconds while the player is waiting, the rest is asked for again from where it stopped: from the same server first, then from another that holds the same file. The player gets one unbroken file. This is tried up to three times for one read, after which the player sees the stream end, and pressing play again falls back.
 
 The server that stood in sees the playback as its own: it shows the session, records the play, applies its own limits, and may control the viewer. The link's own server may not control that viewer.
 
@@ -131,6 +147,12 @@ Progress is reported every 30 seconds, and at once on a pause or resume. The ses
 Jellyfin's own stop of a paused session on the source is not passed on, so the source's housekeeping never stops someone watching elsewhere.
 
 History sync takes the larger play count when both servers counted, so a play counted on the source by its session and on the linking server by Jellyfin stays one play.
+
+## The Link Check
+
+Every **Sync Content** run asks each connected server about the links that stream from it. A link whose file is gone from the source, or whose source no longer allows linking, shows on the Sync tab as an error starting with `Link check:` and the source's reason, before anyone presses play. The `.strm` is left in place, and the row is settled again on the first run where the source can stream the file. A source that cannot be reached flags nothing, since play falls back to another server and the next run checks again. What happens to a link whose file was removed for good is still decided by **Removed files** on the next refresh.
+
+The check also keeps each link's recorded size current, which is how another server's copy is recognized as the same file.
 
 ## Turning Links Into Copies
 
@@ -192,6 +214,7 @@ A link row that errors on the Sync tab says why:
 
 | Reason | Meaning |
 | :--- | :--- |
+| Link check: *reason* | The last content sync found the source cannot stream the file. See [The Link Check](#the-link-check) |
 | A full copy is already at *path* | A real file has that name. It is tracked as a copy instead |
 | Another source file would link to *path* | Two source files differ only by extension, so only one can be linked |
 | A .strm that Server Sync did not write is already at *path* | A `.strm` there no longer points at Server Sync, so it is left alone |
@@ -201,9 +224,9 @@ A link row that errors on the Sync tab says why:
 
 * **A source must be up.** A link cannot play while its source is unreachable, unless another server it pulls from holds the same file. Every play uses the network between the servers.
 * **Clients must ask before they stream.** Clients that open a stream without first asking Jellyfin for playback, or without a token, are refused on links. Jellyfin's own apps ask first. Some DLNA renderers and external players do not.
-* **Two viewers on one link at once** are both checked by the source, but the source counts the stream under the one seen most recently, since Jellyfin reads a link without saying who for.
+* **Two viewers transcoding one link at once** are both checked by the source, but the source counts the transcodes under the one seen most recently, since Jellyfin's ffmpeg reads a link without saying who for. Direct play is streamed, counted, and limited for each user. **Stream Direct Play of Links Per User** in Settings turns that off, should a player not direct play links with it on.
 * **No transcoding on the source.** A link streams the file as it is. A user over their bitrate limit is refused rather than transcoded on the source. The linking server can still transcode.
-* **Trickplay and chapter images** read the whole file through the link. Turn them off on linked libraries.
+* **Trickplay and chapter images** are only what the source made. Jellyfin makes none for a link.
 * **Only video is linked.** Audio and books in a Link mapping are copied.
 * **Renames on the source** give the file a new id there, so the new name is linked as a new file and the old link follows **Removed files**, as a copy would.
 

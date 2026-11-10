@@ -15,7 +15,8 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
 /// Jellyfin never probes a .strm during a library scan, so a new link would show no runtime or codecs
-/// until someone played it. When the library adds one of this server's links, this queues the same
+/// until someone played it. When the library adds one of this server's links, this gives it the media
+/// info its source already holds for the file. When the source cannot give it, this queues the same
 /// refresh Jellyfin runs before playing a .strm, which probes the file through the link.
 /// </summary>
 /// <remarks>
@@ -43,18 +44,21 @@ public sealed class LinkProbe : IHostedService, IDisposable
     private readonly LinkGrants _grants;
     private readonly ILogger<LinkProbe> _logger;
     private readonly Func<DateTime> _now;
+    private readonly LinkMediaInfo? _mediaInfo;
     private readonly ConcurrentDictionary<Guid, Pending> _pending = new();
+    private readonly SemaphoreSlim _shipping = new(2, 2);
     private Timer? _timer;
     private int _sweeping;
 
-    public LinkProbe(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, ILinkRegistry links, LinkGrants grants, ILogger<LinkProbe> logger)
-        : this(libraryManager, providerManager, fileSystem, links, grants, logger, () => DateTime.UtcNow)
+    public LinkProbe(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, ILinkRegistry links, LinkGrants grants, ILogger<LinkProbe> logger, LinkMediaInfo mediaInfo)
+        : this(libraryManager, providerManager, fileSystem, links, grants, logger, () => DateTime.UtcNow, mediaInfo)
     {
     }
 
     /// <summary>Initializes a new instance of the <see cref="LinkProbe"/> class, for tests.</summary>
-    public LinkProbe(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, ILinkRegistry links, LinkGrants grants, ILogger<LinkProbe> logger, Func<DateTime> now)
+    public LinkProbe(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, ILinkRegistry links, LinkGrants grants, ILogger<LinkProbe> logger, Func<DateTime> now, LinkMediaInfo? mediaInfo = null)
     {
+        _mediaInfo = mediaInfo;
         _libraryManager = libraryManager;
         _providerManager = providerManager;
         _fileSystem = fileSystem;
@@ -84,7 +88,11 @@ public sealed class LinkProbe : IHostedService, IDisposable
     }
 
     /// <inheritdoc />
-    public void Dispose() => _timer?.Dispose();
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _shipping.Dispose();
+    }
 
     /// <summary>Starts watching a newly added item, if it is one of this server's links.</summary>
     public void Track(BaseItem? item)
@@ -138,17 +146,18 @@ public sealed class LinkProbe : IHostedService, IDisposable
                     continue;
                 }
 
-                // Nobody is playing it, so the probe reads it on this server's own behalf.
-                _grants.GrantProbe(pending.LinkId);
-                _providerManager.QueueRefresh(
-                    itemId,
-                    new MetadataRefreshOptions(new DirectoryService(_fileSystem))
-                    {
-                        EnableRemoteContentProbe = true,
-                        MetadataRefreshMode = MetadataRefreshMode.FullRefresh
-                    },
-                    RefreshPriority.Normal);
                 _pending[itemId] = pending with { DueAt = now + CheckAfter, Attempts = pending.Attempts + 1 };
+
+                // The source already holds the file's media info, so it is asked first. The file is only
+                // probed across the network when the source cannot give it.
+                if (_mediaInfo is not null && item.Path is { } path && _links.Find(path) is { } link)
+                {
+                    _ = ShipOrProbeAsync(item, link, pending.LinkId);
+                }
+                else
+                {
+                    Probe(itemId, pending.LinkId);
+                }
             }
         }
         catch (Exception ex)
@@ -159,6 +168,50 @@ public sealed class LinkProbe : IHostedService, IDisposable
         {
             Interlocked.Exchange(ref _sweeping, 0);
         }
+    }
+
+    private async Task ShipOrProbeAsync(BaseItem item, LinkEntry link, string linkId)
+    {
+        // A large sync adds many links at once, and each may take images from the source too.
+        await _shipping.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (await _mediaInfo!.ShipAsync(item, link, CancellationToken.None).ConfigureAwait(false))
+            {
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not take the media info for the link {Path} from its source, so it is probed", link.LinkPath);
+        }
+        finally
+        {
+            _shipping.Release();
+        }
+
+        try
+        {
+            Probe(item.Id, linkId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not probe the link {Path}", link.LinkPath);
+        }
+    }
+
+    // Nobody is playing it, so the probe reads it on this server's own behalf.
+    private void Probe(Guid itemId, string linkId)
+    {
+        _grants.GrantProbe(linkId);
+        _providerManager.QueueRefresh(
+            itemId,
+            new MetadataRefreshOptions(new DirectoryService(_fileSystem))
+            {
+                EnableRemoteContentProbe = true,
+                MetadataRefreshMode = MetadataRefreshMode.FullRefresh
+            },
+            RefreshPriority.Normal);
     }
 
     private void OnItemAdded(object? sender, ItemChangeEventArgs e) => Track(e.Item);

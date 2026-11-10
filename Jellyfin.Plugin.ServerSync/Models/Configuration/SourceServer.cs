@@ -96,6 +96,24 @@ public class SourceServer
     public bool LinkHonorBitrateLimit { get; set; }
 
     /// <summary>
+    /// Gets or sets the most each link stream to that server is sent at, in megabits per second, or 0
+    /// for no limit.
+    /// </summary>
+    public int LinkStreamSpeedMbps { get; set; }
+
+    /// <summary>
+    /// Gets or sets the most each link stream is sent at during the bandwidth schedule's hours, in
+    /// megabits per second, or 0 for no limit. Only used while bandwidth scheduling is on.
+    /// </summary>
+    public int LinkScheduledStreamSpeedMbps { get; set; }
+
+    /// <summary>The most each link stream to that server is sent at, in bytes per second, or 0 for no limit.</summary>
+    /// <param name="scheduled">Whether the bandwidth schedule's hours apply now.</param>
+    /// <returns>The rate.</returns>
+    public long GetLinkStreamSpeedBytes(bool scheduled)
+        => Math.Max(0, scheduled ? LinkScheduledStreamSpeedMbps : LinkStreamSpeedMbps) * 1_000_000L / 8;
+
+    /// <summary>
     /// Gets or sets this server's user that streams for a user on that server with no user mapping here.
     /// Empty refuses them.
     /// </summary>

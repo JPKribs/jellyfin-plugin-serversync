@@ -77,7 +77,22 @@ public partial class PeerController
             HttpContext.Response.RegisterForDispose(handle);
         }
 
-        return PhysicalFile(verdict.Item.Path, MediaBrowser.Model.Net.MimeTypes.GetMimeType(verdict.Item.Path), enableRangeProcessing: true);
+        var mime = MediaBrowser.Model.Net.MimeTypes.GetMimeType(verdict.Item.Path);
+
+        // A stream for a user is held to this server's speed for that server, when one is set. The
+        // calling server's media probe is small and is never slowed.
+        var speed = verdict.UserId is null ? 0 : peer.GetLinkStreamSpeedBytes(_configManager.Configuration.IsInBandwidthSchedule());
+        if (speed <= 0)
+        {
+            return PhysicalFile(verdict.Item.Path, mime, enableRangeProcessing: true);
+        }
+
+        var file = new FileStream(verdict.Item.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return new FileStreamResult(new Utilities.ThrottledReadStream(file, speed), mime)
+        {
+            EnableRangeProcessing = true,
+            LastModified = System.IO.File.GetLastWriteTimeUtc(verdict.Item.Path)
+        };
     }
 
     /// <summary>
@@ -268,6 +283,190 @@ public partial class PeerController
         return userManager.GetUserById(scoped) is { } owner && verdict.Item?.IsVisible(owner) == true
             ? verdict
             : LinkVerdict.Refuse("the file is no longer on the source");
+    }
+
+    /// <summary>
+    /// Answers for files the calling server holds links to: whether each is still here to stream, its
+    /// size, and, when asked, its media info, chapters, and which trickplay images this server holds.
+    /// The calling server checks its links against this on every content sync, and fills in a link's
+    /// media info from it rather than probing the file across the network.
+    /// </summary>
+    /// <param name="request">The items.</param>
+    /// <param name="libraryManager">The library.</param>
+    /// <param name="userManager">The users here.</param>
+    /// <param name="mediaSources">Reads an item's streams and attachments.</param>
+    /// <param name="chapters">Reads an item's chapters.</param>
+    /// <param name="trickplay">Reads an item's trickplay sets.</param>
+    /// <returns>One answer per item.</returns>
+    [HttpPost("Links/Describe")]
+    [RequireCompatibleProtocol]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<PeerLinkDescribeResponse>> DescribeLinks(
+        [FromBody] PeerLinkDescribeRequest request,
+        [FromServices] ILibraryManager libraryManager,
+        [FromServices] IUserManager userManager,
+        [FromServices] IMediaSourceManager mediaSources,
+        [FromServices] MediaBrowser.Controller.Chapters.IChapterManager chapters,
+        [FromServices] MediaBrowser.Controller.Trickplay.ITrickplayManager trickplay)
+    {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(mediaSources);
+        ArgumentNullException.ThrowIfNull(chapters);
+        ArgumentNullException.ThrowIfNull(trickplay);
+        if (request?.ItemIds is null || request.ItemIds.Count > PeerLinkDescribeRequest.MaxItems)
+        {
+            return BadRequest($"A request body naming at most {PeerLinkDescribeRequest.MaxItems} items is required");
+        }
+
+        var (peer, refusal) = Sender(request.ServerId);
+        if (peer is null)
+        {
+            return refusal!;
+        }
+
+        if (!peer.IsEnabled || !peer.AllowLinking)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, $"linking is not allowed for {peer.DisplayName} here");
+        }
+
+        // A standard user's key only learns about what that user can see.
+        var scoped = PeerCallerGuard.ScopedUser(HttpContext) is { } scopedId ? userManager.GetUserById(scopedId) : null;
+        var response = new PeerLinkDescribeResponse();
+        foreach (var id in request.ItemIds)
+        {
+            var answer = new PeerLinkDescription { ItemId = id };
+            response.Items.Add(answer);
+            var item = Guid.TryParse(id, out var itemId) ? libraryManager.GetItemById(itemId) : null;
+            if (item is null || item is Folder || string.IsNullOrEmpty(item.Path) || (PeerCallerGuard.ScopedUser(HttpContext) is not null && (scoped is null || !item.IsVisible(scoped))))
+            {
+                answer.Reason = "the file is no longer on the source";
+                continue;
+            }
+
+            if (item.Path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase))
+            {
+                answer.Reason = "the item is a link on the source, not a file";
+                continue;
+            }
+
+            try
+            {
+                var file = new FileInfo(item.Path);
+                if (!file.Exists)
+                {
+                    answer.Reason = "the file is no longer on the source";
+                    continue;
+                }
+
+                answer.Size = file.Length;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                answer.Reason = "the source cannot read the file";
+                continue;
+            }
+
+            answer.Exists = true;
+            if (!request.Details)
+            {
+                continue;
+            }
+
+            answer.HasDetails = true;
+            answer.RunTimeTicks = item.RunTimeTicks;
+            answer.Container = item.Container;
+            answer.TotalBitrate = item.TotalBitrate;
+            answer.Streams = mediaSources.GetMediaStreams(item.Id).Where(stream => !stream.IsExternal).ToList();
+            answer.Attachments = mediaSources.GetMediaAttachments(item.Id).ToList();
+            answer.Chapters = chapters.GetChapters(item.Id)
+                .Select(chapter => new PeerChapter
+                {
+                    StartPositionTicks = chapter.StartPositionTicks,
+                    Name = chapter.Name,
+                    HasImage = !string.IsNullOrEmpty(chapter.ImagePath) && System.IO.File.Exists(chapter.ImagePath)
+                })
+                .ToList();
+            answer.Trickplay = (await trickplay.GetTrickplayResolutions(item.Id).ConfigureAwait(false))
+                .Values
+                .Select(info => new PeerTrickplay
+                {
+                    Width = info.Width,
+                    Height = info.Height,
+                    TileWidth = info.TileWidth,
+                    TileHeight = info.TileHeight,
+                    ThumbnailCount = info.ThumbnailCount,
+                    Interval = info.Interval,
+                    Bandwidth = info.Bandwidth
+                })
+                .ToList();
+        }
+
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Sends one image this server made for a file the calling server links to: a chapter's image, or a
+    /// trickplay tile. Jellyfin makes neither for a link, so the server holding the link takes them
+    /// from here.
+    /// </summary>
+    /// <param name="itemId">This server's id of the item.</param>
+    /// <param name="kind">Chapter or Trickplay.</param>
+    /// <param name="index">The chapter's index, or the tile's.</param>
+    /// <param name="serverId">The calling server's Jellyfin id.</param>
+    /// <param name="width">For a trickplay tile, the width of the set it belongs to.</param>
+    /// <param name="libraryManager">The library.</param>
+    /// <param name="userManager">The users here.</param>
+    /// <param name="chapters">Reads an item's chapters.</param>
+    /// <param name="trickplay">Finds a trickplay tile.</param>
+    /// <returns>The image.</returns>
+    [HttpGet("Links/{itemId}/Images/{kind}/{index}")]
+    [RequireCompatibleProtocol]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> LinkImage(
+        [FromRoute] Guid itemId,
+        [FromRoute] string kind,
+        [FromRoute] int index,
+        [FromQuery] string? serverId,
+        [FromQuery] int width,
+        [FromServices] ILibraryManager libraryManager,
+        [FromServices] IUserManager userManager,
+        [FromServices] MediaBrowser.Controller.Chapters.IChapterManager chapters,
+        [FromServices] MediaBrowser.Controller.Trickplay.ITrickplayManager trickplay)
+    {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(chapters);
+        ArgumentNullException.ThrowIfNull(trickplay);
+        var (peer, refusal) = Sender(serverId);
+        if (peer is null)
+        {
+            return refusal!;
+        }
+
+        if (!peer.IsEnabled || !peer.AllowLinking)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, $"linking is not allowed for {peer.DisplayName} here");
+        }
+
+        var item = libraryManager.GetItemById(itemId);
+        if (item is null || index < 0
+            || (PeerCallerGuard.ScopedUser(HttpContext) is { } scoped && (userManager.GetUserById(scoped) is not { } owner || !item.IsVisible(owner))))
+        {
+            return NotFound();
+        }
+
+        string? path = null;
+        if (string.Equals(kind, "Chapter", StringComparison.OrdinalIgnoreCase))
+        {
+            path = chapters.GetChapters(item.Id).ElementAtOrDefault(index)?.ImagePath;
+        }
+        else if (string.Equals(kind, "Trickplay", StringComparison.OrdinalIgnoreCase))
+        {
+            path = await trickplay.GetTrickplayTilePathAsync(item, width, index, libraryManager.GetLibraryOptions(item).SaveTrickplayWithMedia).ConfigureAwait(false);
+        }
+
+        return !string.IsNullOrEmpty(path) && System.IO.File.Exists(path) ? PhysicalFile(path, "image/jpeg") : NotFound();
     }
 
     /// <summary>

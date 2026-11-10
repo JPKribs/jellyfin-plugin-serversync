@@ -109,6 +109,16 @@
                                                 </label>
                                                 <div class="fieldDescription checkboxFieldDescription">Refuse a file above a user's remote bitrate limit, since a link streams the file as it is.</div>
                                             </div>
+                                            <div class="inputContainer">
+                                                <label for="txtLinkStreamSpeed">Link Stream Speed (Mbps):</label>
+                                                <input is="emby-input" type="number" id="txtLinkStreamSpeed" min="0" max="100000" />
+                                                <div class="fieldDescription">Most each stream is sent at. Set it above the bitrate of the files you share, or playback will buffer. 0 for no limit.</div>
+                                            </div>
+                                            <div class="inputContainer">
+                                                <label for="txtLinkScheduledStreamSpeed">Scheduled Link Stream Speed (Mbps):</label>
+                                                <input is="emby-input" type="number" id="txtLinkScheduledStreamSpeed" min="0" max="100000" />
+                                                <div class="fieldDescription">Used instead during the bandwidth schedule's hours, when scheduling is on in Settings. 0 for no limit.</div>
+                                            </div>
                                             <div class="selectContainer">
                                                 <label for="selLinkFallbackUser">Stream Unmapped Users As:</label>
                                                 <select is="emby-select" id="selLinkFallbackUser"></select>
