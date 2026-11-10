@@ -33,7 +33,7 @@ changelog:
   - A link takes its media info, chapters, chapter images, and trickplay images from the source instead of probing the file across the network, and a link's trickplay shows in its details
   - Every Sync Content run checks links against the servers they stream from. A link that can no longer play shows on the Sync tab with the reason, and settles again when it can
   - A link stream that drops or stalls partway is picked up where it stopped, from the same server or another that holds the file, so the player does not see the break
-  - A film held in several versions is checked version by version. A user refused one, such as a file above their bitrate limit, is offered the versions they may play
+  - A Link mapping links every version of a film, not only the first, and each is checked on its own at play. A user refused one, such as a file above their bitrate limit, is offered the versions they may play. Copy mappings still copy the first version only
   - Direct play of a link is streamed for the user who asked, so two viewers of one link are counted and limited apart
   - A source can cap the speed of each link stream and cache download per server, with another speed during the bandwidth schedule's hours, and cap streams and speed per user on each user mapping
   changed:

@@ -2262,6 +2262,91 @@ def scenario_link_speed(creds, apis):
         run_task(local, "ServerSyncUpdateTables")
 
 
+def scenario_link_versions(creds, apis):
+    """A film in two versions has a link for each, and a user the source holds to a bitrate between
+    them is offered, and plays, only the smaller."""
+    local, a = apis["local"], apis["source-a"]
+    lu, au, av, lv = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"], creds["servers"]["source-a"]["viewerId"], creds["servers"]["local"]["viewerId"]
+    needle = f"Versions {uuid.uuid4().hex[:6]}"
+    title = f"{needle} (2024)"
+    source_folder = os.path.join(STATE, "media", "source-a", "Movies", title)
+    folder = os.path.join(STATE, "media", "local", "Movies", title)
+    os.makedirs(source_folder, exist_ok=True)
+    # Noise keeps the encoder from shrinking the test pattern to nothing, so the two files differ in bitrate.
+    for label, size, rate in (("1080p", "640x480", "1500k"), ("480p", "160x120", "100k")):
+        ffmpeg(source_folder, "-f", "lavfi", "-i", f"testsrc=duration=10:size={size}:rate=10", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+               "-t", "10", "-vf", "noise=alls=60:allf=t", "-c:v", "libx264", "-b:v", rate, "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{title} - {label}.mp4")
+    policy = a.get(f"/Users/{av}")["Policy"]
+
+    def honor(on):
+        config = plugin_config(a)
+        next(e for e in config["Servers"] if e["Name"] == "local")["LinkHonorBitrateLimit"] = on
+        save_plugin_config(a, config)
+
+    def listed(api):
+        return [i for i in api.get("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path")["Items"] if needle in (i.get("Path") or "")]
+
+    try:
+        wait_scans_idle(local)
+        wait_scans_idle(a)
+        rescan_until(a, "Movie", needle, True, "source-a lists the film with two versions")
+        configure_server(creds, a, "source-a", ["local"], {"local": "Pull"})
+        set_linking(a, "local", True)
+        configure_local(creds, local, ["source-a"], FullScanIntervalHours=0, LinkCacheSizeGb=0)
+        set_storage(local, "source-a", "Movies", "Link")
+        run_task(local, "ServerSyncUpdateTables")
+        run_task(local, "ServerSyncDownloadContent")
+        links = sorted(f for f in os.listdir(folder) if f.endswith(".strm")) if os.path.isdir(folder) else []
+        expect(links == [f"{title} - 1080p.strm", f"{title} - 480p.strm"], f"each version is a link of its own ({links})")
+        wait_until(lambda: len(listed(local)) == 1, 150, "local lists the two links as one film")
+        item = listed(local)[0]
+        wait_until(lambda: len(local.get(f"/Items/{item['Id']}?userId={lu}").get("MediaSources") or []) == 2, 60, "the film on local has both versions")
+
+        viewer = Api("local-viewer", SERVERS["local"]["port"], "viewer-device")
+        _, auth = viewer.post("/Users/AuthenticateByName", {"Username": "viewer", "Pw": ""}, expect=200)
+        viewer.token = auth["AccessToken"]
+        status, body = local.call("POST", f"/Items/{item['Id']}/PlaybackInfo?userId={lu}", {}, raw=True)
+        sources = json.loads(body)["MediaSources"] if status == 200 else []
+        expect(len(sources) == 2, f"a user the source allows both is offered both versions ({status}, {len(sources)})")
+        for source in sources:
+            label = "1080p" if "1080p" in (source.get("Name") or "") else "480p"
+            status, _, got = http(local, "GET", f"/Videos/{item['Id']}/stream?static=true&mediaSourceId={source['Id']}")
+            with open(os.path.join(source_folder, f"{title} - {label}.mp4"), "rb") as f:
+                expect(status == 200 and got == f.read(), f"the {label} version plays as its own file, byte for byte ({status})")
+
+        # The source holds the viewer to a bitrate between the two versions.
+        source_item = find_item(a, "Movie", needle)
+        rates = sorted(m.get("Bitrate") or 0 for m in a.get(f"/Items/{source_item['Id']}?userId={au}").get("MediaSources") or [])
+        expect(len(rates) == 2 and rates[0] > 0 and rates[1] > rates[0] * 2, f"source-a knows the two versions' bitrates ({rates})")
+        a.post(f"/Users/{av}/Policy", dict(policy, RemoteClientBitrateLimit=(rates[0] + rates[-1]) // 2), expect=204)
+        honor(True)
+        status, body = viewer.call("POST", f"/Items/{item['Id']}/PlaybackInfo?userId={lv}", {}, raw=True)
+        offered = json.loads(body)["MediaSources"] if status == 200 else []
+        names = [m.get("Name") for m in offered]
+        expect(status == 200 and len(offered) == 1 and "480p" in (names[0] or ""), f"a user over the limit for the large version is offered only the small one ({status}, {names})")
+        if offered:
+            status, _, small = http(viewer, "GET", f"/Videos/{item['Id']}/stream?static=true&mediaSourceId={offered[0]['Id']}")
+            with open(os.path.join(source_folder, f"{title} - 480p.mp4"), "rb") as f:
+                expect(status == 200 and small == f.read(), f"and that version plays for them ({status})")
+            big = next(m for m in sources if m["Id"] != offered[0]["Id"])
+            status, _, _ = http(viewer, "GET", f"/Videos/{item['Id']}/stream?static=true&mediaSourceId={big['Id']}")
+            expect(status == 403, f"while the large version, asked for by name, is refused them ({status})")
+    finally:
+        a.post(f"/Users/{av}/Policy", policy, expect=204)
+        honor(False)
+        configure_server(creds, a, "source-a", [])
+        shutil.rmtree(source_folder, ignore_errors=True)
+        shutil.rmtree(folder, ignore_errors=True)
+        # Jellyfin drops the first version on one scan and the other on the next.
+        a.post("/Library/Refresh", None, expect=204)
+        wait_scans_idle(a)
+        a.post("/Library/Refresh", None, expect=204)
+        wait_until(lambda: not listed(a), 150, "source-a no longer lists the film")
+        local.post("/Library/Refresh", None, expect=204)
+        configure_local(creds, local, ["source-a", "source-b"], FullScanIntervalHours=24, MissingContentAction=None)
+        run_task(local, "ServerSyncUpdateTables")
+
+
 def scenario_link_hls(creds, apis):
     """Transcoding a link: Jellyfin's ffmpeg reads the link under the user's grant and makes HLS segments."""
     film = LinkedFilm(creds, apis, seconds=12, size="320x240").setup()
@@ -3133,6 +3218,7 @@ SCENARIOS = [
     ("links: a played link is cached and plays from the cache", scenario_link_cache),
     ("links: cache rules and a user's own stream limit", scenario_link_cache_rules),
     ("links: speed limits per server and per user", scenario_link_speed),
+    ("links: every version is linked, and a bitrate limit picks one", scenario_link_versions),
     ("links: transcoding a link to HLS", scenario_link_hls),
     ("links: hostile requests are refused", scenario_link_hostile),
     ("links: a source that is down", scenario_link_source_down),

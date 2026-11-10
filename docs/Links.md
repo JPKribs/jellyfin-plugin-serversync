@@ -87,7 +87,7 @@ A user streamed through **Stream Unmapped Users As** gets the server's values.
 
 ## Versions
 
-When a film is held in several versions, such as `Film (2020) - 4K.mkv` and `Film (2020) - 1080p.mkv`, each version is a link of its own. Pressing play asks the source about every version. The versions it refuses the user, such as one above their bitrate limit, are left out of what their player is offered, and the film plays in a version it allows. The play is refused only when no version is allowed, with the reason for the first.
+When the source holds a film in several versions, such as `Film (2020) - 4K.mkv` and `Film (2020) - 1080p.mkv`, a Link mapping links every one of them, and Jellyfin on the linking server shows them as one film with a version to choose. A Copy mapping copies the first version only, as it always has, so the other versions cost a Copy library nothing. A link whose mapping is set back to Copy is copied if it is the first version, and the other versions' links follow **Removed files**. Pressing play asks the source about every version. The versions it refuses the user, such as one above their bitrate limit, are left out of what their player is offered, and the film plays in a version it allows. The play is refused only when no version is allowed, with the reason for the first.
 
 ## What Gets Written
 

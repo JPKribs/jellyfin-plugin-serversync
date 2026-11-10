@@ -437,6 +437,7 @@ public class UpdateSyncTablesTask
 
                         var hitWatched = watchedByAll != null && watchedByAll.Contains(item.Id.Value);
                         work.Add(new ContentRefreshWork(source, mapping, item, hitWatched));
+                        AddOtherVersions(work, source, mapping, item, hitWatched);
                         collected++;
                         fetched++;
                         if (totalExpected > 0)
@@ -554,6 +555,7 @@ public class UpdateSyncTablesTask
 
                     var hitWatched = watchedByAll != null && item.Id.HasValue && watchedByAll.Contains(item.Id.Value);
                     work.Add(new ContentRefreshWork(source, mapping, item, hitWatched));
+                    AddOtherVersions(work, source, mapping, item, hitWatched);
                     return Task.FromResult(true);
                 },
                 libraryName: mapping.SourceLibraryName,
@@ -708,6 +710,28 @@ public class UpdateSyncTablesTask
         }
 
         return Stamp(LinkStateService.ProcessNewLink(source.Mapping, sourceItemId, sourcePath, sourceSize, sourceCreateDate, linkPath, downloadMode, _linkFiles!), source);
+    }
+
+    // A Link mapping links every version of a film, not only the first, so a user the source refuses
+    // one version, such as a file above their bitrate limit, can play another. A version outside the
+    // mapping's root is passed over, as any file outside it is. A Copy mapping copies the first version
+    // only, as it always has.
+    private static void AddOtherVersions(List<ContentRefreshWork> work, ScanSource source, LibraryMapping mapping, BaseItemDto item, bool watchedByAll)
+    {
+        if (mapping.StorageMode != StorageMode.Link)
+        {
+            return;
+        }
+
+        var root = (mapping.SourceRootPath ?? string.Empty).Replace('\\', '/').TrimEnd('/') + "/";
+        foreach (var version in LinkPaths.OtherVersions(item))
+        {
+            if (version.Path!.Replace('\\', '/').StartsWith(root, StringComparison.OrdinalIgnoreCase)
+                && !PathUtilities.IsItemFiltered(version.Path, mapping.SourceRootPath ?? string.Empty, mapping.FilterMode, mapping.FilteredItems))
+            {
+                work.Add(new ContentRefreshWork(source, mapping, version, watchedByAll));
+            }
+        }
     }
 
     // A .strm from a peer whose links could not be read may be one of its links, so it is left for a

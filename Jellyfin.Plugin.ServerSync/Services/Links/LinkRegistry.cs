@@ -70,6 +70,47 @@ public static class LinkPaths
             or Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Trailer;
 
     /// <summary>
+    /// The other versions of a source film or episode, such as a 1080p file beside a 4K one, each as
+    /// an item of its own with that version's id, path, and size. Jellyfin lists a film once, under
+    /// its first version, with the rest as further media sources. A Link mapping links every version,
+    /// which costs a small file each, so a user the source refuses one version can play another.
+    /// Copies are made of the first version only, as they always were.
+    /// </summary>
+    /// <param name="item">The source item, as Jellyfin lists it.</param>
+    /// <returns>One item per further version held as a file.</returns>
+    public static IEnumerable<Jellyfin.Sdk.Generated.Models.BaseItemDto> OtherVersions(Jellyfin.Sdk.Generated.Models.BaseItemDto item)
+    {
+        if (item?.MediaSources is not { Count: > 1 } sources || !CanLink(item))
+        {
+            yield break;
+        }
+
+        foreach (var source in sources)
+        {
+            if (source is null
+                || !Guid.TryParse(source.Id, out var versionId)
+                || versionId == item.Id
+                || string.IsNullOrEmpty(source.Path)
+                || string.Equals(source.Path, item.Path, StringComparison.OrdinalIgnoreCase)
+                || source.IsRemote == true
+                || source.Path.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            yield return new Jellyfin.Sdk.Generated.Models.BaseItemDto
+            {
+                Id = versionId,
+                Name = item.Name,
+                Type = item.Type,
+                Path = source.Path,
+                DateCreated = item.DateCreated,
+                MediaSources = new List<Jellyfin.Sdk.Generated.Models.MediaSourceInfo> { source }
+            };
+        }
+    }
+
+    /// <summary>
     /// Where a link for <paramref name="copiedPath"/> would sit, or null when the path has no extension
     /// to swap or is already a .strm.
     /// </summary>

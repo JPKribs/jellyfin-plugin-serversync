@@ -276,4 +276,45 @@ public class LinkMatchingTests
         public string? CopiedPathFor(string linkPath)
             => _links.FirstOrDefault(l => string.Equals(l.Link, linkPath, StringComparison.OrdinalIgnoreCase)).Copied;
     }
+
+    /// <summary>
+    /// A film Jellyfin lists once with two files is two versions: the first as itself, and the other
+    /// as an item of its own with that file's id, path, and size. Remote sources, links, and anything
+    /// that is not video are never offered.
+    /// True: a Link mapping links every version, so a user refused one can play another.
+    /// False: only the first version would ever be linked, and a refused user would have nothing else to play.
+    /// </summary>
+    [Fact]
+    public void OtherVersions_AreItemsOfTheirOwn()
+    {
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var film = new Jellyfin.Sdk.Generated.Models.BaseItemDto
+        {
+            Id = first,
+            Name = "Film",
+            Type = Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Movie,
+            Path = "/m/Film/Film - 4K.mkv",
+            MediaSources = new List<Jellyfin.Sdk.Generated.Models.MediaSourceInfo>
+            {
+                new() { Id = first.ToString("N"), Path = "/m/Film/Film - 4K.mkv", Size = 9000 },
+                new() { Id = second.ToString("N"), Path = "/m/Film/Film - 1080p.mkv", Size = 3000 },
+                new() { Id = Guid.NewGuid().ToString("N"), Path = "http://elsewhere/film", IsRemote = true },
+                new() { Id = Guid.NewGuid().ToString("N"), Path = "/m/Film/Film - Link.strm" }
+            }
+        };
+
+        var other = Assert.Single(LinkPaths.OtherVersions(film));
+
+        Assert.Equal(second, other.Id);
+        Assert.Equal("/m/Film/Film - 1080p.mkv", other.Path);
+        Assert.Equal(3000, Jellyfin.Plugin.ServerSync.Utilities.MediaItemUtilities.GetItemSize(other));
+        Assert.True(LinkPaths.CanLink(other));
+
+        film.Type = Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Audio;
+        Assert.Empty(LinkPaths.OtherVersions(film));
+        film.Type = Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Movie;
+        film.MediaSources.RemoveRange(1, 3);
+        Assert.Empty(LinkPaths.OtherVersions(film));
+    }
 }
