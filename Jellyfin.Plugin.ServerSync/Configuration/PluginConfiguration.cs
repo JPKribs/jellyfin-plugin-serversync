@@ -187,6 +187,35 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool StreamLinksDirectly { get; set; } = true;
 
+    /// <summary>
+    /// The most disk the link cache may use, in gigabytes, wherever its links stream from. 0 turns the
+    /// cache off, which is the default.
+    /// </summary>
+    public int LinkCacheSizeGb { get; set; }
+
+    /// <summary>
+    /// Where cached files are kept. Empty keeps them under Jellyfin's cache folder.
+    /// </summary>
+    public string LinkCachePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// How many days a cached file is kept after it was last played, or after it was cached when it
+    /// was never played. 0 keeps files until the space is needed.
+    /// </summary>
+    public int LinkCacheRetentionDays { get; set; } = 30;
+
+    /// <summary>
+    /// How many episodes after the one a user is watching are cached ahead of them. 0 caches none ahead.
+    /// </summary>
+    public int LinkCachePreCacheEpisodes { get; set; } = 2;
+
+    /// <summary>Which cached file is dropped first when the cache is full.</summary>
+    public CacheRemovalOrder LinkCacheRemovalOrder { get; set; } = CacheRemovalOrder.LastPlayed;
+
+    /// <summary>The most disk the link cache may use, in bytes, or 0 when the cache is off.</summary>
+    /// <returns>The size in bytes.</returns>
+    public long GetLinkCacheSizeBytes() => Math.Max(0, LinkCacheSizeGb) * 1024L * 1024L * 1024L;
+
     public int MaxConcurrentDownloads { get; set; } = 2;
 
     /// <summary>
@@ -888,6 +917,10 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         MaxConcurrentDownloads = Math.Clamp(MaxConcurrentDownloads, 1, 10);
         MaxDownloadSpeed = Math.Max(0, MaxDownloadSpeed);
+        LinkCacheSizeGb = Math.Clamp(LinkCacheSizeGb, 0, 1_000_000);
+        LinkCacheRetentionDays = Math.Clamp(LinkCacheRetentionDays, 0, 3650);
+        LinkCachePreCacheEpisodes = Math.Clamp(LinkCachePreCacheEpisodes, 0, 50);
+        LinkCachePath = (LinkCachePath ?? string.Empty).Trim();
         MinimumFreeDiskSpaceGb = Math.Clamp(MinimumFreeDiskSpaceGb, 0, 1000);
         ScheduledStartHour = Math.Clamp(ScheduledStartHour, 0, 23);
         ScheduledEndHour = Math.Clamp(ScheduledEndHour, 0, 24);

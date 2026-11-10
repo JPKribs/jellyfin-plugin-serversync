@@ -2057,6 +2057,46 @@ def scenario_link_care(creds, apis):
         film.teardown()
 
 
+def scenario_link_cache(creds, apis):
+    """A played link is cached, plays from the cache under local's own rules while the source refuses,
+    still reports playback, and the cache empties when it is switched off."""
+    film = LinkedFilm(creds, apis, seconds=20, size="320x240", local_flags=dict(LinkCacheSizeGb=1, LinkCacheRetentionDays=0)).setup()
+    a, local = film.a, film.local
+    try:
+        expect(local.get("/Sync/LinkCache").get("Enabled") is True, "the link cache is on")
+        film.play_info()
+        data = film.original()
+        base = f"/Videos/{film.item['Id']}/stream?static=true&mediaSourceId={film.source['Id']}"
+        play = {"ItemId": film.item["Id"], "MediaSourceId": film.source["Id"], "PlaySessionId": uuid.uuid4().hex, "PositionTicks": 0, "CanSeek": True, "PlayMethod": "DirectPlay"}
+        local.post("/Sessions/Playing", play, expect=204)
+        wait_until(lambda: local.get("/Sync/LinkCache").get("Files") == 1, 90, "playing the link caches its file")
+        expect(local.get("/Sync/LinkCache").get("UsedBytes") == len(data), "the cached file is the size of the source's")
+        expect((film.row() or {}).get("Cached") is True, "the Sync tab shows the link as cached")
+        expect(os.path.exists(film.link) and not os.path.exists(os.path.join(film.folder, f"{film.title}.mp4")), "the link is still a .strm, with no copy in the library")
+        local.post("/Sessions/Playing/Stopped", dict(play, PositionTicks=10_000_000), expect=204)
+
+        # The source now refuses this server outright. A cached link does not ask it.
+        set_linking(a, "local", False)
+        status, _ = film.play_info()
+        expect(status == 200, f"a cached link plays although the source no longer allows linking ({status})")
+        status, _, body = http(local, "GET", base)
+        expect(status == 200 and body == data, f"the cached link's bytes are the file's ({status})")
+        status, _, body = http(local, "GET", base, {"Range": "bytes=1000-1999"})
+        expect(status == 206 and body == data[1000:2000], f"a range of a cached link is the file's bytes ({status})")
+        set_linking(a, "local", True)
+
+        film.configure(LinkCacheSizeGb=0)
+        expect(local.get("/Sync/LinkCache").get("Enabled") is False, "the cache is off at size 0")
+        leftovers = run(["docker", "exec", "serversync-it-local", "sh", "-c", "ls /cache/serversync-links 2>/dev/null | wc -l"], capture=True, check=False).stdout.strip()
+        expect(leftovers == "0", f"switching the cache off empties it ({leftovers} file(s) left)")
+        film.play_info()
+        status, _, body = http(local, "GET", base)
+        expect(status == 200 and body == data, f"with the cache off the link streams from the source again ({status})")
+    finally:
+        set_linking(a, "local", True)
+        film.teardown()
+
+
 def scenario_link_hls(creds, apis):
     """Transcoding a link: Jellyfin's ffmpeg reads the link under the user's grant and makes HLS segments."""
     film = LinkedFilm(creds, apis, seconds=12, size="320x240").setup()
@@ -2921,6 +2961,7 @@ SCENARIOS = [
     ("links stream from the source and match across servers", scenario_links),
     ("links: seeking reads exactly the bytes asked for", scenario_link_ranges),
     ("links: media info, images, per user direct play, and the link check", scenario_link_care),
+    ("links: a played link is cached and plays from the cache", scenario_link_cache),
     ("links: transcoding a link to HLS", scenario_link_hls),
     ("links: hostile requests are refused", scenario_link_hostile),
     ("links: a source that is down", scenario_link_source_down),

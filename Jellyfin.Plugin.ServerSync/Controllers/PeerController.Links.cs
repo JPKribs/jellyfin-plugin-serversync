@@ -31,8 +31,10 @@ public partial class PeerController
     /// <param name="userId">The user's id on the calling server, or empty for its media probe.</param>
     /// <param name="sourceUserId">The user here the calling server maps them to, if it does.</param>
     /// <param name="probe">Whether this is the calling server's media probe.</param>
+    /// <param name="fill">Whether the calling server is downloading the file into its link cache, which is held to the speed limits and is not counted as a stream.</param>
     /// <param name="policy">The link checks.</param>
     /// <param name="sessions">The open link streams.</param>
+    /// <param name="userManager">The users here.</param>
     /// <returns>The file.</returns>
     [HttpGet("Stream/{itemId}")]
     [HttpHead("Stream/{itemId}")]
@@ -46,6 +48,7 @@ public partial class PeerController
         [FromQuery] string? userId,
         [FromQuery] string? sourceUserId,
         [FromQuery] bool probe,
+        [FromQuery] bool fill,
         [FromServices] LinkPolicy policy,
         [FromServices] LinkSessions sessions,
         [FromServices] IUserManager userManager)
@@ -65,10 +68,11 @@ public partial class PeerController
             return StatusCode(StatusCodes.Status403Forbidden, verdict.Reason);
         }
 
-        if (verdict.UserId is { } user)
+        // A cache download is nobody watching, so it takes no stream from the limits.
+        if (verdict.UserId is { } user && !fill)
         {
             // The limits again, now under one lock with opening the stream, so requests at the same moment cannot pass together.
-            var handle = sessions.TryOpen(peer.Key, user, verdict.Item.Id, peer.LinkMaxStreams, peer.LinkMaxStreamsPerUser, policy.OwnPlayback(user, peer.LinkCountOwnSessions));
+            var handle = sessions.TryOpen(peer.Key, user, verdict.Item.Id, peer.LinkMaxStreams, peer.GetLinkMaxStreamsFor(user), policy.OwnPlayback(user, peer.LinkCountOwnSessions));
             if (handle is null)
             {
                 return StatusCode(StatusCodes.Status403Forbidden, "the source's link stream limit is reached");
@@ -79,9 +83,10 @@ public partial class PeerController
 
         var mime = MediaBrowser.Model.Net.MimeTypes.GetMimeType(verdict.Item.Path);
 
-        // A stream for a user is held to this server's speed for that server, when one is set. The
-        // calling server's media probe is small and is never slowed.
-        var speed = verdict.UserId is null ? 0 : peer.GetLinkStreamSpeedBytes(_configManager.Configuration.IsInBandwidthSchedule());
+        // A stream for a user, and a download into the calling server's cache, are held to this server's
+        // speed for that server and for that user, when one is set. The calling server's media probe
+        // is small and is never slowed.
+        var speed = verdict.UserId is null && !fill ? 0 : peer.GetLinkStreamSpeedBytes(_configManager.Configuration.IsInBandwidthSchedule(), verdict.UserId);
         if (speed <= 0)
         {
             return PhysicalFile(verdict.Item.Path, mime, enableRangeProcessing: true);

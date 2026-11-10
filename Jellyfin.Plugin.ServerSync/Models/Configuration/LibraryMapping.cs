@@ -66,4 +66,22 @@ public class LibraryMapping
     /// </remarks>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public ContentSync.StorageMode StorageMode { get; set; } = ContentSync.StorageMode.Copy;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this library's links are kept out of the link cache.
+    /// Links are cached unless this is set. Only matters while the cache is on and the library holds links.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ExcludeFromLinkCache { get; set; }
+
+    /// <summary>
+    /// Gets or sets the shows and films whose links are always kept in the link cache. Retention and
+    /// the cache's removal order never drop them.
+    /// </summary>
+    /// <remarks>
+    /// Left out of JSON while empty, like <see cref="StorageMode"/>, so a mapping that never used the
+    /// cache hashes exactly as it did before the cache existed.
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public List<FilteredItem>? PermanentItems { get; set; }
 }

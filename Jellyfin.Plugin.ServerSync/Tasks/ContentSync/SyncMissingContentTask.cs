@@ -63,7 +63,8 @@ public class SyncMissingContentTask
         ISourceServerClientFactory clientFactory,
         DownloadService downloadService,
         Services.Links.LinkWriter? linkWriter = null,
-        Services.Links.LinkVerifier? linkVerifier = null)
+        Services.Links.LinkVerifier? linkVerifier = null,
+        Services.Links.LinkCacheFiller? linkCacheFiller = null)
         : base(logger, manager, clientFactory, configManager)
     {
         _libraryManager = libraryManager;
@@ -71,10 +72,12 @@ public class SyncMissingContentTask
         _downloadService = downloadService;
         _linkWriter = linkWriter;
         _linkVerifier = linkVerifier;
+        _linkCacheFiller = linkCacheFiller;
     }
 
     private readonly Services.Links.LinkWriter? _linkWriter;
     private readonly Services.Links.LinkVerifier? _linkVerifier;
+    private readonly Services.Links.LinkCacheFiller? _linkCacheFiller;
 
     /// <inheritdoc />
     public override string Name => "Sync Content";
@@ -616,6 +619,7 @@ public class SyncMissingContentTask
         progress.Report(95);
 
         await VerifyLinksAsync(cancellationToken).ConfigureAwait(false);
+        ReconcileLinkCache();
 
         _tempPath = null;
     }
@@ -655,6 +659,24 @@ public class SyncMissingContentTask
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "{Task}: could not check links", Name);
+        }
+    }
+
+    // Every run brings the link cache in line with the settings: the items to always keep are queued,
+    // files whose link is gone are dropped, and retention and the size limit are applied.
+    private void ReconcileLinkCache()
+    {
+        try
+        {
+            var queued = _linkCacheFiller?.Reconcile() ?? 0;
+            if (queued > 0)
+            {
+                Logger.LogInformation("{Task}: queued {Count} item(s) chosen to always keep for the link cache", Name, queued);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Task}: could not bring the link cache in line with its settings", Name);
         }
     }
 

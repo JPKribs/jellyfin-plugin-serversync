@@ -252,7 +252,7 @@ export function createContentSyncTableModule(ctx, kit) {
             },
 
             getDisplayStatus: function(item) {
-                var suffix = item.StorageMode === 'Link' ? ' (Link)' : item.StorageMode === 'Promoting' ? ' (Link to Copy)' : '';
+                var suffix = item.StorageMode === 'Link' ? (item.Cached ? ' (Link, Cached)' : ' (Link)') : item.StorageMode === 'Promoting' ? ' (Link to Copy)' : '';
                 if (item.Status === 'Pending' && item.PendingType) {
                     return 'Pending ' + item.PendingType + suffix;
                 }

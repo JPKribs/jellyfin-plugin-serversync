@@ -37,10 +37,10 @@ Open the Servers tab and the entry for the linking server. The entry must exist,
 With it on, these appear:
 
 * **Link Streams At Once** is the most streams that server may hold at once. 0 means no limit.
-* **Link Streams Per User** is the most streams one user here may hold at once through that server. Their link streams through every linking server count toward it. 0 means no limit.
+* **Link Streams Per User** is the most streams one user here may hold at once through that server. Their link streams through every linking server count toward it. 0 means no limit. A user mapping can set its own. See [Per User Limits](#per-user-limits).
 * **Count Their Own Playback** counts a user's playback on this server toward their per user limit.
 * **Honor Remote Bitrate Limits** refuses a file above a user's **Maximum remote streaming bitrate**, since a link streams the file as it is. A film held in several versions still plays in a version under the limit. See [Versions](#versions).
-* **Link Stream Speed (Mbps)** is the most each stream to that server is sent at. Set it above the bitrate of the files you share, or playback buffers. 0 means no limit. The first few seconds of a stream are sent at full speed, so playback starts at once.
+* **Link Stream Speed (Mbps)** is the most each stream to that server, and each download into its [link cache](#the-link-cache), is sent at. Set it above the bitrate of the files you share, or playback buffers. 0 means no limit. The first few seconds of a stream are sent at full speed, so playback starts at once.
 * **Scheduled Link Stream Speed (Mbps)** is used instead during the hours of the bandwidth schedule on the Settings tab, while that schedule is on. Downloads and link streams share the schedule's hours, each with its own speed.
 * **Stream Unmapped Users As** is the user here who streams for a user on that server with no user mapping here. **None** refuses them.
 
@@ -75,6 +75,15 @@ That user must exist, be enabled, be allowed to play media, and be able to see t
 The source counts a stream while a request for it is open, and for 90 seconds after the last one ends, so pauses and seeks never count twice. Each user and item is one stream. Limits are checked when play is pressed, and again under one lock as the stream opens, so two plays at the same moment cannot pass a limit together.
 
 A user refused for a limit sees the reason when they press play, unless another server that holds the same file allows them. See [When the Source Cannot Stream](#when-the-source-cannot-stream). In the rare case that two plays race for the last stream, the one that loses fails as it starts, without the reason.
+
+### Per User Limits
+
+On the source, each user mapping in the **Users** step of the linking server's entry can set its own limits for the local user it maps to, shown while **Allow Linking** is on:
+
+* **Link Streams At Once** replaces **Link Streams Per User** for that user. Empty uses the server's. 0 means no limit for that user.
+* **Link Speed (Mbps)** caps each of that user's streams, and each cache download made for them. The lower of this and the server's **Link Stream Speed** applies. Empty or 0 uses the server's.
+
+A user streamed through **Stream Unmapped Users As** gets the server's values.
 
 ## Versions
 
@@ -147,6 +156,45 @@ Progress is reported every 30 seconds, and at once on a pause or resume. The ses
 Jellyfin's own stop of a paused session on the source is not passed on, so the source's housekeeping never stops someone watching elsewhere.
 
 History sync takes the larger play count when both servers counted, so a play counted on the source by its session and on the linking server by Jellyfin stays one play.
+
+## The Link Cache
+
+A link can keep a full local copy of its file in the link cache. The `.strm` never changes, so Jellyfin and players notice nothing when a file is cached or dropped. While a link's file is in the cache:
+
+* It plays from the linking server, under the linking server's own rules. The source is not asked, its limits do not apply, and the link plays while the source is down.
+* Playback is still reported to the source, which shows the session and updates played state as for any link.
+* The Sync tab shows the row as **(Link, Cached)**.
+
+The cache is one folder with one size limit, whichever servers its links stream from. It is off until it is given a size.
+
+### What is cached
+
+* **A link someone plays.** Pressing play queues the file, so a resume or a second watch is local.
+* **Episodes ahead.** The next episodes after the one a user starts, in order and across a season's end, up to **Pre-cache Episodes**.
+* **Items to always keep.** Shows and films picked on a library's mapping. Every link under a picked show is kept.
+
+Files are downloaded one at a time in the background, from the link's own server. The source's speed limits for the linking server and for the user apply, and so does the linking server's own download speed and schedule. A download is not counted as a stream on the source. A file is only served once it is whole and the size the source reports.
+
+### Settings
+
+On the linking server, under **Content** in Settings:
+
+* **Cache Size (GB)** is the most disk the cache may use. 0 turns the cache off and empties it.
+* **Cache Location** is where the files are kept. Empty uses a folder under Jellyfin's cache. Changing it empties the old location.
+* **Cache Retention (days)** drops a file this many days after it was last played, or after it was cached if it was never played. 0 keeps files until the space is needed.
+* **Pre-cache Episodes** is how many episodes are cached ahead. 0 caches none ahead.
+* **Removal Order** is which file is dropped first when the cache is full: the one played longest ago, the oldest in the cache, the newest in the cache, or the largest.
+
+On each library mapping set to Link, on the Servers tab:
+
+* **Cache This Library's Links** lets that library's links into the cache. On by default.
+* **Always Keep** picks the shows and films that are always kept. Retention and the removal order never drop them, and they count toward the cache's size. When they alone fill the cache, **Sync Content** logs a warning and nothing else is cached.
+
+### Upkeep
+
+Every **Sync Content** run queues the items to always keep, drops files whose link is gone or became a copy, and applies retention and the size limit. A file that is being played is never dropped to make room.
+
+The cache is kept across restarts. At startup only downloads cut short are cleared. **Empty the Cache** in Settings deletes every cached file, and so does uninstalling the plugin. Only the cache's own files are ever removed from its folder.
 
 ## The Link Check
 

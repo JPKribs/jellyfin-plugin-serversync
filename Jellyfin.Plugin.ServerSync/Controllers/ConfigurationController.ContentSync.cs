@@ -70,6 +70,7 @@ public partial class ConfigurationController
                 g => (SourceName: g.First().SourceLibraryName, LocalName: g.First().LocalLibraryName),
                 StringComparer.OrdinalIgnoreCase);
 
+        var cache = HttpContext?.RequestServices?.GetService(typeof(Services.Links.LinkCache)) as Services.Links.LinkCache;
         return Ok(new PagedResult<SyncItemDto>(
             items.Select(i =>
             {
@@ -100,7 +101,8 @@ public partial class ConfigurationController
                     ServerKey = i.ServerKey,
                     ServerName = rowServer?.DisplayName,
                     CompanionFiles = i.CompanionFiles,
-                    StorageMode = i.StorageMode.ToString()
+                    StorageMode = i.StorageMode.ToString(),
+                    Cached = i.StorageMode == Models.ContentSync.StorageMode.Link && cache?.Holds(i.SourceItemId) == true
                 };
             }).ToList(),
             totalCount,
@@ -354,6 +356,44 @@ public partial class ConfigurationController
             _logger.LogError(ex, "Failed to queue {Count} content item(s)", request.SourceItemIds.Count);
             return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
         }
+    }
+
+    /// <summary>What the link cache holds now: how many files, how much disk, and where.</summary>
+    /// <param name="cache">The link cache.</param>
+    /// <param name="filler">Fills the cache.</param>
+    /// <returns>The cache's state.</returns>
+    [HttpGet("LinkCache")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult GetLinkCache([FromServices] Services.Links.LinkCache cache, [FromServices] Services.Links.LinkCacheFiller filler)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        ArgumentNullException.ThrowIfNull(filler);
+        var used = cache.Enabled ? cache.UsedBytes() : 0;
+        var limit = _configManager.Configuration.GetLinkCacheSizeBytes();
+        return Ok(new
+        {
+            cache.Enabled,
+            Location = cache.Root,
+            Files = cache.Enabled ? cache.List().Count : 0,
+            UsedBytes = used,
+            UsedFormatted = FormatUtilities.FormatBytes(used),
+            LimitBytes = limit,
+            LimitFormatted = FormatUtilities.FormatBytes(limit),
+            filler.Waiting
+        });
+    }
+
+    /// <summary>Empties the link cache. Links keep playing from their sources.</summary>
+    /// <param name="cache">The link cache.</param>
+    /// <returns>No content.</returns>
+    [HttpPost("LinkCache/Clear")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult ClearLinkCache([FromServices] Services.Links.LinkCache cache)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        cache.Wipe();
+        _logger.LogInformation("The link cache was emptied from the dashboard");
+        return NoContent();
     }
 
     /// <summary>

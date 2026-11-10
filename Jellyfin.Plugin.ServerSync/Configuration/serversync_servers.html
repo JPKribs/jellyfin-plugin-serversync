@@ -93,7 +93,7 @@
                                             <div class="inputContainer">
                                                 <label for="txtLinkMaxStreamsPerUser">Link Streams Per User:</label>
                                                 <input is="emby-input" type="number" id="txtLinkMaxStreamsPerUser" min="0" max="100" />
-                                                <div class="fieldDescription">Most streams one user may hold at once. 0 for no limit.</div>
+                                                <div class="fieldDescription">Most streams one user may hold at once. 0 for no limit. A user mapping in step 4 can set its own.</div>
                                             </div>
                                             <div class="checkboxContainer checkboxContainer-withDescription">
                                                 <label class="emby-checkbox-label">
@@ -112,7 +112,7 @@
                                             <div class="inputContainer">
                                                 <label for="txtLinkStreamSpeed">Link Stream Speed (Mbps):</label>
                                                 <input is="emby-input" type="number" id="txtLinkStreamSpeed" min="0" max="100000" />
-                                                <div class="fieldDescription">Most each stream is sent at. Set it above the bitrate of the files you share, or playback will buffer. 0 for no limit.</div>
+                                                <div class="fieldDescription">Most each stream, and each download into that server's link cache, is sent at. Set it above the bitrate of the files you share, or playback will buffer. 0 for no limit. A user mapping in step 4 can set a lower one.</div>
                                             </div>
                                             <div class="inputContainer">
                                                 <label for="txtLinkScheduledStreamSpeed">Scheduled Link Stream Speed (Mbps):</label>
@@ -267,7 +267,7 @@
                                     <div id="serverStepUsers" class="jpk-collapsible-content collapsed">
                                         <div id="usersLocked" class="jpk-neutral mb-md">Test the connection in step 2 to load users.</div>
                                         <div id="usersSection" class="hidden">
-                                            <div class="fieldDescription mb-md">Map that server's users to local ones.</div>
+                                            <div class="fieldDescription mb-md">Map that server's users to local ones. With Allow Linking on in step 1, each mapping can also cap the local user's link streams and speed.</div>
                                             <div id="usersLimited" class="jpk-warn hidden mb-md"></div>
                                             <div id="userMappingsContainer"></div>
                                             <div class="jpk-collapsible-actions">

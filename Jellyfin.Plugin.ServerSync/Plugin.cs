@@ -123,6 +123,21 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
         incoming.SanitizeValues();
 
+        // The link cache is one folder. Turning the cache off, or pointing it somewhere else, empties
+        // the folder it leaves, so nothing is left behind using disk.
+        var before = LinkCacheRoot(stored);
+        if (stored.LinkCacheSizeGb > 0 && (incoming.LinkCacheSizeGb <= 0 || !string.Equals(before, LinkCacheRoot(incoming), StringComparison.Ordinal)))
+        {
+            try
+            {
+                Services.Links.LinkCache.WipeFolder(before);
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning("Could not empty the link cache at {Root}: {Reason}", before, ex.Message);
+            }
+        }
+
         // The page posts the kept sentinel in place of a key it never saw. Resolve each entry
         // against the stored entry with the same key, so a server can be renamed or reordered
         // without the operator retyping its API key.
@@ -164,6 +179,30 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         {
             base.UpdateConfiguration(configuration);
         }
+    }
+
+    private string LinkCacheRoot(PluginConfiguration config)
+        => string.IsNullOrWhiteSpace(config.LinkCachePath) ? System.IO.Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder) : config.LinkCachePath;
+
+    /// <summary>
+    /// Empties the link cache when the plugin is uninstalled: the folder under Jellyfin's cache, and a
+    /// folder set in its place. Only the cache's own files are removed.
+    /// </summary>
+    public override void OnUninstalling()
+    {
+        foreach (var root in new[] { System.IO.Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder), Configuration.LinkCachePath })
+        {
+            try
+            {
+                Services.Links.LinkCache.WipeFolder(root);
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning("Could not empty the link cache at {Root} while uninstalling: {Reason}", root, ex.Message);
+            }
+        }
+
+        base.OnUninstalling();
     }
 
     /// <inheritdoc />

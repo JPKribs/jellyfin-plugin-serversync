@@ -322,16 +322,18 @@ public partial class SourceServerClient
     /// <param name="sourceUserId">The peer's user this server maps the user to, or null.</param>
     /// <param name="range">The Range header to pass on, or null.</param>
     /// <param name="head">Whether to ask for the headers only.</param>
+    /// <param name="fill">Whether this downloads the file into this server's link cache, rather than playing it.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The peer's answer.</returns>
-    public async Task<HttpResponseMessage> OpenPeerStreamAsync(string sourceItemId, string callerServerId, Links.LinkGrant grant, string? sourceUserId, string? range, bool head, CancellationToken cancellationToken = default)
+    public async Task<HttpResponseMessage> OpenPeerStreamAsync(string sourceItemId, string callerServerId, Links.LinkGrant grant, string? sourceUserId, string? range, bool head, bool fill, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(grant);
         var path = "/Sync/Peer/Stream/" + Uri.EscapeDataString(sourceItemId)
             + "?serverId=" + Uri.EscapeDataString(callerServerId ?? string.Empty)
             + (grant.UserId is { } user ? "&userId=" + user.ToString("N", System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
             + (string.IsNullOrEmpty(sourceUserId) ? string.Empty : "&sourceUserId=" + Uri.EscapeDataString(sourceUserId))
-            + (grant.Probe ? "&probe=true" : string.Empty);
+            + (grant.Probe ? "&probe=true" : string.Empty)
+            + (fill ? "&fill=true" : string.Empty);
         var response = await SendPeerStreamAsync(path, range, head, cancellationToken).ConfigureAwait(false);
         if ((int)response.StatusCode != Services.Queue.HintProtocol.UnpairedStatus || Pairing is null)
         {

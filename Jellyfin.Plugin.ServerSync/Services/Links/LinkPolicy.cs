@@ -112,9 +112,10 @@ public sealed class LinkPolicy
                 return LinkVerdict.Refuse($"the source allows {peer.LinkMaxStreams} link stream(s) at once and all are in use");
             }
 
-            if (peer.LinkMaxStreamsPerUser > 0 && StreamsOf(userId, peer.LinkCountOwnSessions) >= peer.LinkMaxStreamsPerUser)
+            var most = peer.GetLinkMaxStreamsFor(userId);
+            if (most > 0 && StreamsOf(userId, peer.LinkCountOwnSessions) >= most)
             {
-                return LinkVerdict.Refuse($"the source allows your account {peer.LinkMaxStreamsPerUser} stream(s) at once and all are in use");
+                return LinkVerdict.Refuse($"the source allows your account {most} stream(s) at once and all are in use");
             }
         }
 

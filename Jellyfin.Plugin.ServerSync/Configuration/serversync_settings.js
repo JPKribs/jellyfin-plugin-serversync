@@ -169,6 +169,12 @@ export default function (view) {
         setChecked('chkIncludeCompanionFiles', config.IncludeCompanionFiles || false);
         setChecked('chkTakeLinkImagesFromSource', config.TakeLinkImagesFromSource !== false);
         setChecked('chkStreamLinksDirectly', config.StreamLinksDirectly !== false);
+        setValue('txtLinkCacheSizeGb', config.LinkCacheSizeGb || 0);
+        setValue('txtLinkCachePath', config.LinkCachePath || '');
+        setValue('txtLinkCacheRetentionDays', config.LinkCacheRetentionDays == null ? 30 : config.LinkCacheRetentionDays);
+        setValue('txtLinkCachePreCacheEpisodes', config.LinkCachePreCacheEpisodes == null ? 2 : config.LinkCachePreCacheEpisodes);
+        setValue('selLinkCacheRemovalOrder', config.LinkCacheRemovalOrder || 'LastPlayed');
+        loadLinkCacheStatus();
         setChecked('chkSkipWatchedByAllUsers', config.SkipWatchedByAllUsers || false);
         renderWatchedFilterUsers(config.WatchedFilterUserIds || []);
         setValue('selDownloadNewContentMode', config.DownloadNewContentMode || 'Enabled');
@@ -205,6 +211,27 @@ export default function (view) {
         reflectSchedule();
     }
 
+    // What the link cache holds now, shown under its settings.
+    function loadLinkCacheStatus() {
+        var status = getEl('linkCacheStatus');
+        if (!status) return;
+        apiRequest('LinkCache', 'GET').then(function (cache) {
+            if (!cache || !cache.Enabled) {
+                status.textContent = 'The cache is off.';
+                return;
+            }
+            status.textContent = cache.Files + ' file(s), ' + cache.UsedFormatted + ' of ' + cache.LimitFormatted + ' used'
+                + (cache.Waiting ? ', ' + cache.Waiting + ' waiting to be cached' : '') + '. Kept at ' + cache.Location;
+        }).catch(function () {
+            status.textContent = '';
+        });
+    }
+
+    function clearLinkCache() {
+        if (!window.confirm('Empty the link cache? Every cached file is deleted. Links keep playing from their sources.')) return;
+        apiRequest('LinkCache/Clear', 'POST').then(loadLinkCacheStatus).catch(loadLinkCacheStatus);
+    }
+
     function saveContentSettings() {
         saveSection(function (config) {
             config.EnableContentSync = getChecked('chkEnableContentSync');
@@ -213,6 +240,11 @@ export default function (view) {
             config.IncludeCompanionFiles = getChecked('chkIncludeCompanionFiles');
             config.TakeLinkImagesFromSource = getChecked('chkTakeLinkImagesFromSource');
             config.StreamLinksDirectly = getChecked('chkStreamLinksDirectly');
+            config.LinkCacheSizeGb = Math.max(0, getIntValue('txtLinkCacheSizeGb', 0));
+            config.LinkCachePath = getValue('txtLinkCachePath') || '';
+            config.LinkCacheRetentionDays = Math.max(0, getIntValue('txtLinkCacheRetentionDays', 30));
+            config.LinkCachePreCacheEpisodes = Math.max(0, getIntValue('txtLinkCachePreCacheEpisodes', 2));
+            config.LinkCacheRemovalOrder = getValue('selLinkCacheRemovalOrder', 'LastPlayed');
             config.SkipWatchedByAllUsers = getChecked('chkSkipWatchedByAllUsers');
             // Only the users on screen can be judged. A saved id whose server did not answer this time is
             // kept as it was, so a failed user list never clears the filter and lets watched files back in.
@@ -537,6 +569,7 @@ export default function (view) {
                 bindClick('btnAddCallerGrant', function () { if (grantsLoaded) addGrantRow(); });
 
                 bindClick('btnSaveContentSettings', saveContentSettings);
+                bindClick('btnClearLinkCache', clearLinkCache);
                 bindClick('btnSaveHistorySettings', saveHistorySettings);
                 bindClick('btnSaveMetadataSettings', saveMetadataSettings);
                 bindClick('btnSavePeopleSettings', savePeopleSettings);

@@ -15,7 +15,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Streams the file a link stands in for into a response, from the server its grant is routed to. A
+/// Streams the file a link stands in for into a response: from the link cache when the file is held
+/// there, and otherwise from the server its grant is routed to. A
 /// server that is down, full, or refuses hands the read to another that holds the same file. A stream
 /// that drops or stalls partway is picked up again where it stopped, from the same server or another,
 /// so the player never sees the break.
@@ -44,6 +45,7 @@ public sealed class LinkStreamer
     private readonly LinkHealth _health;
     private readonly ILogger<LinkStreamer> _logger;
     private readonly TimeSpan _stallTimeout;
+    private readonly LinkCache? _cache;
 
     public LinkStreamer(
         IPluginConfigurationManager configManager,
@@ -52,8 +54,9 @@ public sealed class LinkStreamer
         ILinkAccess access,
         LinkGrants grants,
         LinkHealth health,
-        ILogger<LinkStreamer> logger)
-        : this(configManager, clientFactory, applicationHost, access, grants, health, logger, StallTimeout)
+        ILogger<LinkStreamer> logger,
+        LinkCache cache)
+        : this(configManager, clientFactory, applicationHost, access, grants, health, logger, StallTimeout, cache)
     {
     }
 
@@ -66,8 +69,10 @@ public sealed class LinkStreamer
         LinkGrants grants,
         LinkHealth health,
         ILogger<LinkStreamer> logger,
-        TimeSpan stallTimeout)
+        TimeSpan stallTimeout,
+        LinkCache? cache = null)
     {
+        _cache = cache;
         _configManager = configManager;
         _clientFactory = clientFactory;
         _applicationHost = applicationHost;
@@ -98,6 +103,14 @@ public sealed class LinkStreamer
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(link);
         ArgumentNullException.ThrowIfNull(grant);
+        // A link whose file is in the cache plays from here, under this server's own rules, and
+        // asks nothing of the source.
+        if (_cache?.PathFor(link.LinkId) is { } cached)
+        {
+            await Results.File(cached, MediaBrowser.Model.Net.MimeTypes.GetMimeType(cached), enableRangeProcessing: true).ExecuteAsync(context).ConfigureAwait(false);
+            return Written;
+        }
+
         var head = HttpMethods.IsHead(context.Request.Method);
         var aborted = context.RequestAborted;
         var range = context.Request.Headers.Range.ToString();
@@ -364,7 +377,7 @@ public sealed class LinkStreamer
         clients.Add(client);
         try
         {
-            var response = await client.OpenPeerStreamAsync(route.ItemId, _applicationHost.SystemId, grant, LinkAccess.SourceUserFor(server, grant.UserId), range, head, aborted).ConfigureAwait(false);
+            var response = await client.OpenPeerStreamAsync(route.ItemId, _applicationHost.SystemId, grant, LinkAccess.SourceUserFor(server, grant.UserId), range, head, false, aborted).ConfigureAwait(false);
             _health.Answered(server.Key);
             if (!response.IsSuccessStatusCode)
             {

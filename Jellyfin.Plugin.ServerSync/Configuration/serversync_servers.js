@@ -999,6 +999,7 @@ export default function (view) {
         var div = document.createElement('div');
         div.className = 'mapping libraryMapping';
         var filterTableId = 'filterTable_' + (++_filterTableSeq);
+        var permanentTableId = 'permanentTable_' + _filterTableSeq;
         div.innerHTML =
             '<div class="mappingHeader">' +
                 '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="mappingEnabled" ' + (mapping.IsEnabled ? 'checked' : '') + ' /><span class="checkboxLabel">Enabled</span></label>' +
@@ -1021,6 +1022,18 @@ export default function (view) {
                     '<option value="Link">Link</option>' +
                 '</select>' +
                 '<div class="fieldDescription">Copy downloads each file. Link writes a small .strm that streams from this server, which must run Server Sync and allow linking for you. Copies already here stay copies. Switching back to Copy turns links into copies, with the same approval as new files.</div>' +
+            '</div>' +
+            '<div class="linkCacheSection" style="display:none;">' +
+                '<h3 class="jpk-subsection-title">Link Cache</h3>' +
+                '<div class="checkboxContainer checkboxContainer-withDescription">' +
+                    '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="cacheLinks" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">Cache This Library\'s Links</span></label>' +
+                    '<div class="fieldDescription checkboxFieldDescription">Keep full local copies of links that are played, and of episodes ahead, in the link cache. The cache is switched on and sized under Content in Settings.</div>' +
+                '</div>' +
+                '<div class="permanentSection">' +
+                    '<label class="inputLabel">Always Keep</label>' +
+                    '<div class="fieldDescription mb-md">Shows and films picked here are always kept in the link cache, and never dropped to make room.</div>' +
+                    '<div class="filterTableContainer" id="' + permanentTableId + '"></div>' +
+                '</div>' +
             '</div>' +
             '<div class="filterSection">' +
                 '<h3 class="jpk-subsection-title">Library Filter</h3>' +
@@ -1060,8 +1073,8 @@ export default function (view) {
         });
 
         // Renders one source item (thumb + info + selection checkmark) into a base table cell.
-        function renderFilterItem(item) {
-            var sel = !!selectedFilterItems[item.Id];
+        function renderPickerItem(item, selected) {
+            var sel = !!selected[item.Id];
             var thumbHtml;
             if (ServerSyncShared && item.Id) {
                 var thumbId = 'ss-filter-thumb-' + (++_filterThumbSeq);
@@ -1093,14 +1106,14 @@ export default function (view) {
 
         // Toggles whitelist/blacklist membership. Selection lives in selectedFilterItems so it
         // persists across searches and pagination (the custom render reads it on every load).
-        function onFilterItemClick(item) {
-            if (selectedFilterItems[item.Id]) {
-                delete selectedFilterItems[item.Id];
+        function onPickerItemClick(item, selected, pickerContainer) {
+            if (selected[item.Id]) {
+                delete selected[item.Id];
             } else {
-                selectedFilterItems[item.Id] = { ItemId: item.Id, Name: item.Name || '', Year: item.Year, Path: item.Path || '', Type: item.Type || null };
+                selected[item.Id] = { ItemId: item.Id, Name: item.Name || '', Year: item.Year, Path: item.Path || '', Type: item.Type || null };
             }
-            var sel = !!selectedFilterItems[item.Id];
-            var rowEl = filterBrowserContainer.querySelector('.jpk-table-row[data-id="' + item.Id + '"]');
+            var sel = !!selected[item.Id];
+            var rowEl = pickerContainer.querySelector('.jpk-table-row[data-id="' + item.Id + '"]');
             if (rowEl) {
                 var wrap = rowEl.querySelector('.filterItem');
                 if (wrap) wrap.classList.toggle('selected', sel);
@@ -1108,6 +1121,9 @@ export default function (view) {
                 if (icon) icon.textContent = sel ? 'check_box' : 'check_box_outline_blank';
             }
         }
+
+        function renderFilterItem(item) { return renderPickerItem(item, selectedFilterItems); }
+        function onFilterItemClick(item) { onPickerItemClick(item, selectedFilterItems, filterBrowserContainer); }
 
         function buildFilterTable() {
             if (!createPaginatedTable || !filterCurrentLibraryId) return;
@@ -1140,6 +1156,52 @@ export default function (view) {
         filterModeSelect.value = mapping.FilterMode || 'AllowAll';
         var storageModeSelect = div.querySelector('.storageModeSelect');
         if (storageModeSelect) storageModeSelect.value = mapping.StorageMode === 'Link' || mapping.StorageMode === 1 ? 'Link' : 'Copy';
+
+        // --- Link cache: whether this library's links are cached, and the items to always keep ---
+        var linkCacheSection = div.querySelector('.linkCacheSection');
+        var permanentSection = div.querySelector('.permanentSection');
+        var cacheLinksBox = div.querySelector('.cacheLinks');
+        var selectedPermanentItems = {};
+        var permanentTable = null;
+        (mapping.PermanentItems || []).forEach(function(pi) {
+            if (pi.ItemId) {
+                selectedPermanentItems[pi.ItemId] = { ItemId: pi.ItemId, Name: pi.Name || '', Year: pi.Year, Path: pi.Path || '', Type: pi.Type || null };
+            }
+        });
+
+        function buildPermanentTable() {
+            if (!createPaginatedTable || !filterCurrentLibraryId) return;
+            if (!permanentTable) {
+                permanentTable = createPaginatedTable(view, ServerSyncShared, {
+                    containerId: permanentTableId,
+                    endpoint: 'SourceLibraryItems',
+                    pagination: { pageSize: 50, loadMore: true },
+                    search: { enabled: true, placeholder: 'Search items...' },
+                    selection: { enabled: false, idKey: 'Id' },
+                    emptyState: { message: 'No items found' },
+                    filters: { buildParams: function() { var current = selectedServer(); return { libraryId: filterCurrentLibraryId, serverKey: current ? current.Key : '', collections: false, playlists: false }; } },
+                    columns: [{ key: 'Id', type: 'custom', render: function(item) { return renderPickerItem(item, selectedPermanentItems); } }],
+                    actions: { onRowClick: function(item) { onPickerItemClick(item, selectedPermanentItems, permanentSection); } }
+                });
+            }
+            permanentTable.setFilterValue(filterCurrentLibraryId);
+            permanentTable.reload();
+        }
+
+        // The cache only holds links, so its options show for a Link library, and the picker while it is cached.
+        function updateLinkCacheVisibility() {
+            var linked = storageModeSelect && storageModeSelect.value === 'Link';
+            linkCacheSection.style.display = linked ? '' : 'none';
+            var cached = linked && cacheLinksBox.checked;
+            permanentSection.style.display = cached ? '' : 'none';
+            if (cached && filterCurrentLibraryId) {
+                buildPermanentTable();
+            }
+        }
+        if (storageModeSelect) storageModeSelect.addEventListener('change', updateLinkCacheVisibility);
+        cacheLinksBox.addEventListener('change', updateLinkCacheVisibility);
+        updateLinkCacheVisibility();
+        div._selectedPermanentItems = selectedPermanentItems;
         filterModeSelect.addEventListener('change', updateFilterVisibility);
 
         // Files/ Collections / Playlists browse toggle. Collections
@@ -1168,6 +1230,7 @@ export default function (view) {
         div._selectedFilterItems = selectedFilterItems;
         div._disconnectFilterTable = function() {
             if (filterTable && filterTable.disconnectObserver) filterTable.disconnectObserver();
+            if (permanentTable && permanentTable.disconnectObserver) permanentTable.disconnectObserver();
         };
 
         var sourceSelect = div.querySelector('.sourceLibrarySelect');
@@ -1191,6 +1254,9 @@ export default function (view) {
             filterCurrentLibraryId = this.value;
             selectedFilterItems = {};
             div._selectedFilterItems = selectedFilterItems;
+            selectedPermanentItems = {};
+            div._selectedPermanentItems = selectedPermanentItems;
+            updateLinkCacheVisibility();
             if (filterModeSelect.value !== 'AllowAll' && filterCurrentLibraryId) {
                 buildFilterTable();
             }
@@ -1242,8 +1308,17 @@ export default function (view) {
                 });
             });
 
+            var permanentItems = [];
+            var selectedPermanent = row._selectedPermanentItems || {};
+            Object.keys(selectedPermanent).forEach(function(id) {
+                var pi = selectedPermanent[id];
+                permanentItems.push({ ItemId: pi.ItemId, Name: pi.Name || '', Year: pi.Year || null, Path: pi.Path || '', Type: pi.Type || null });
+            });
+
             mappings.push({
                 IsEnabled: row.querySelector('.mappingEnabled').checked,
+                ExcludeFromLinkCache: row.querySelector('.cacheLinks') ? !row.querySelector('.cacheLinks').checked : false,
+                PermanentItems: permanentItems.length ? permanentItems : null,
                 SourceLibraryId: pickedValue(sourceSelect),
                 SourceLibraryName: pickedName(sourceSelect),
                 SourceRootPath: row.querySelector('.sourceRootPath').value,
@@ -1289,6 +1364,9 @@ export default function (view) {
     // The limits only mean something while linking is allowed.
     function reflectLinking() {
         setVisible('linkLimits', getChecked('chkAllowLinking'));
+        view.querySelectorAll('.userLinkCaps').forEach(function(caps) {
+            caps.classList.toggle('hidden', !getChecked('chkAllowLinking'));
+        });
     }
 
     // Refilling keeps the choice on screen unless a server's own value is given, which always wins,
@@ -1382,6 +1460,12 @@ export default function (view) {
             '<div class="mappingGrid">' +
                 '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Source User</label><select is="emby-select" class="sourceUserSelect"></select></div></div>' +
                 '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Local User</label><select is="emby-select" class="localUserSelect"></select></div></div>' +
+            '</div>' +
+            '<div class="mappingGrid userLinkCaps' + (getChecked('chkAllowLinking') ? '' : ' hidden') + '">' +
+                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Streams At Once</label><input is="emby-input" type="number" min="0" max="100" class="userLinkMaxStreams" placeholder="Server\'s per user limit" value="' + (mapping.LinkMaxStreams == null ? '' : mapping.LinkMaxStreams) + '" />' +
+                    '<div class="fieldDescription">Most streams the local user may hold at once for that server\'s links. Empty uses Link Streams Per User from step 1. 0 for no limit.</div></div></div>' +
+                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Speed (Mbps)</label><input is="emby-input" type="number" min="0" max="100000" class="userLinkSpeed" placeholder="Server\'s speed" value="' + (mapping.LinkStreamSpeedMbps == null ? '' : mapping.LinkStreamSpeedMbps) + '" />' +
+                    '<div class="fieldDescription">Most each stream and cache download for this user is sent at. The lower of this and the server\'s speed applies. Empty or 0 uses the server\'s.</div></div></div>' +
             '</div>';
 
         container.appendChild(div);
@@ -1409,6 +1493,13 @@ export default function (view) {
         div.querySelector('.btnRemoveUserMapping').addEventListener('click', function() { div.remove(); });
     }
 
+    // An empty box means "use the server's own value", which is stored as null.
+    function optionalNumber(input) {
+        if (!input || input.value === '') return null;
+        var value = parseInt(input.value, 10);
+        return isNaN(value) ? null : Math.max(0, value);
+    }
+
     function collectUserMappings() {
         var mappings = [];
         view.querySelectorAll('.userMapping').forEach(function(row) {
@@ -1419,7 +1510,9 @@ export default function (view) {
                 SourceUserId: pickedValue(sourceSelect),
                 SourceUserName: pickedName(sourceSelect),
                 LocalUserId: pickedValue(localSelect),
-                LocalUserName: pickedName(localSelect)
+                LocalUserName: pickedName(localSelect),
+                LinkMaxStreams: optionalNumber(row.querySelector('.userLinkMaxStreams')),
+                LinkStreamSpeedMbps: optionalNumber(row.querySelector('.userLinkSpeed'))
             });
         });
         return mappings;

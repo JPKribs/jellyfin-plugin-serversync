@@ -47,10 +47,12 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     private readonly ILogger<LinkPlaybackFilter> _logger;
     private readonly LinkStreamer? _streamer;
     private readonly IServiceProvider? _services;
+    private readonly LinkCache? _cache;
     private readonly IPluginConfigurationManager? _configManager;
 
-    public LinkPlaybackFilter(ILibraryManager libraryManager, ILinkRegistry links, LinkGrants grants, ILinkAccess access, ILogger<LinkPlaybackFilter> logger, LinkStreamer? streamer = null, IPluginConfigurationManager? configManager = null, IServiceProvider? services = null)
+    public LinkPlaybackFilter(ILibraryManager libraryManager, ILinkRegistry links, LinkGrants grants, ILinkAccess access, ILogger<LinkPlaybackFilter> logger, LinkStreamer? streamer = null, IPluginConfigurationManager? configManager = null, IServiceProvider? services = null, LinkCache? cache = null)
     {
+        _cache = cache;
         _services = services;
         _streamer = streamer;
         _configManager = configManager;
@@ -90,7 +92,11 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
 
                 // A film held in several versions is asked about version by version, so a user refused
                 // one, such as a file above their bitrate limit, is offered the versions they may play.
-                var choices = await Task.WhenAll(links.Select(l => _access.ChooseAsync(l.Link, userId.Value, null, context.HttpContext.RequestAborted))).ConfigureAwait(false);
+                // A version whose file is in the link cache plays from here under this server's own
+                // rules, so the source is not asked about it and need not be up.
+                var choices = await Task.WhenAll(links.Select(l => _cache?.Holds(l.Link.LinkId) == true
+                    ? Task.FromResult(new LinkChoice(LinkFallback.PrimaryOf(l.Link), null))
+                    : _access.ChooseAsync(l.Link, userId.Value, null, context.HttpContext.RequestAborted))).ConfigureAwait(false);
                 var refused = new HashSet<Guid>();
                 for (var i = 0; i < links.Count; i++)
                 {

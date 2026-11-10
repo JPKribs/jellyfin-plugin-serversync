@@ -159,21 +159,6 @@
                                         <div class="fieldDescription checkboxFieldDescription">Also download external subtitles.</div>
                                     </div>
 
-                                    <div class="checkboxContainer checkboxContainer-withDescription">
-                                        <label class="emby-checkbox-label">
-                                            <input type="checkbox" is="emby-checkbox" id="chkTakeLinkImagesFromSource" />
-                                            <span class="checkboxLabel">Take Link Images From the Source</span>
-                                        </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Give links the trickplay and chapter images their source made. Jellyfin makes neither for a link.</div>
-                                    </div>
-
-                                    <div class="checkboxContainer checkboxContainer-withDescription">
-                                        <label class="emby-checkbox-label">
-                                            <input type="checkbox" is="emby-checkbox" id="chkStreamLinksDirectly" />
-                                            <span class="checkboxLabel">Stream Direct Play of Links Per User</span>
-                                        </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Stream a link's direct play from its source for the user playing, so two viewers of one link are counted apart. Turn off if a player cannot direct play links.</div>
-                                    </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -277,6 +262,60 @@
                                         <div class="ssFormRow ssScheduleRow"><span class="ssFormLabel">Scheduled</span><span class="ssFormCell"><input is="emby-input" type="number" id="txtScheduledDownloadSpeed" min="0" class="ssFormInput" /><select is="emby-select" id="selScheduledDownloadSpeedUnit" class="ssUnitSelect"><option value="KB">KB/s</option><option value="MB" selected>MB/s</option><option value="GB">GB/s</option></select></span></div>
                                         <div class="ssFormRow ssScheduleRow"><span class="ssFormLabel">Hours<span class="ssFormHint">24 hour clock, 22 to 6 runs overnight</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtScheduledStartHour" min="0" max="23" class="ssFormInput" /><span class="ssUnit">to</span><input is="emby-input" type="number" id="txtScheduledEndHour" min="0" max="24" class="ssFormInput" /></span></div>
                                     </div>
+
+                                    <h3 class="jpk-subsection-title">Links</h3>
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkTakeLinkImagesFromSource" />
+                                            <span class="checkboxLabel">Take Link Images From the Source</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Give links the trickplay and chapter images their source made. Jellyfin makes neither for a link.</div>
+                                    </div>
+
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkStreamLinksDirectly" />
+                                            <span class="checkboxLabel">Stream Direct Play of Links Per User</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Stream a link's direct play from its source for the user playing, so two viewers of one link are counted apart. Turn off if a player cannot direct play links.</div>
+                                    </div>
+
+                                    <h3 class="jpk-subsection-title">Link Cache</h3>
+                                    <div class="fieldDescription mb-md">Keeps full local copies of some links: ones that are played, episodes ahead of the one being watched, and the items each library is set to always keep. A cached link plays from here, even while its source is down. The link itself never changes. Each library chooses whether its links are cached in its mapping on the Servers tab.</div>
+                                    <div class="inputContainer">
+                                        <label for="txtLinkCacheSizeGb">Cache Size (GB)</label>
+                                        <input is="emby-input" type="number" id="txtLinkCacheSizeGb" min="0" />
+                                        <div class="fieldDescription">Most disk the cache may use at its location, whichever servers the links stream from. 0 turns the cache off and empties it.</div>
+                                    </div>
+                                    <div class="inputContainer">
+                                        <label for="txtLinkCachePath">Cache Location</label>
+                                        <input is="emby-input" type="text" id="txtLinkCachePath" placeholder="(Uses default cache directory)" />
+                                        <div class="fieldDescription">Empty uses Jellyfin's cache folder. Changing it empties the old location.</div>
+                                    </div>
+                                    <div class="inputContainer">
+                                        <label for="txtLinkCacheRetentionDays">Cache Retention (days)</label>
+                                        <input is="emby-input" type="number" id="txtLinkCacheRetentionDays" min="0" max="3650" />
+                                        <div class="fieldDescription">Days a file is kept after it was last played, or after it was cached if never played. 0 keeps files until the space is needed.</div>
+                                    </div>
+                                    <div class="inputContainer">
+                                        <label for="txtLinkCachePreCacheEpisodes">Pre-cache Episodes</label>
+                                        <input is="emby-input" type="number" id="txtLinkCachePreCacheEpisodes" min="0" max="50" />
+                                        <div class="fieldDescription">Episodes cached ahead of the one a user is watching. 0 caches none ahead.</div>
+                                    </div>
+                                    <div class="selectContainer">
+                                        <label for="selLinkCacheRemovalOrder">Removal Order</label>
+                                        <select is="emby-select" id="selLinkCacheRemovalOrder">
+                                            <option value="LastPlayed">Last played, longest ago first</option>
+                                            <option value="Oldest">Oldest in the cache first</option>
+                                            <option value="Newest">Newest in the cache first</option>
+                                            <option value="Largest">Largest first</option>
+                                        </select>
+                                        <div class="fieldDescription">Which file is dropped first when the cache is full. Items set to always keep are never dropped.</div>
+                                    </div>
+                                    <div id="linkCacheStatus" class="jpk-neutral mb-md"></div>
+                                    <button is="emby-button" type="button" id="btnClearLinkCache" class="raised jpk-button-destructive jpk-button-small">
+                                        <span>Empty the Cache</span>
+                                    </button>
                                 </div>
                             </div>
 

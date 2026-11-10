@@ -114,6 +114,34 @@ public class SourceServer
         => Math.Max(0, scheduled ? LinkScheduledStreamSpeedMbps : LinkStreamSpeedMbps) * 1_000_000L / 8;
 
     /// <summary>
+    /// The most a link stream or cache download for one user here is sent at, in bytes per second, or
+    /// 0 for no limit: the lower of this entry's speed and the speed set on that user's mapping.
+    /// </summary>
+    /// <param name="scheduled">Whether the bandwidth schedule's hours apply now.</param>
+    /// <param name="localUserId">The user here the stream runs as, or null for none.</param>
+    /// <returns>The rate.</returns>
+    public long GetLinkStreamSpeedBytes(bool scheduled, Guid? localUserId)
+    {
+        var server = GetLinkStreamSpeedBytes(scheduled);
+        var user = Math.Max(0, MappingForLocalUser(localUserId)?.LinkStreamSpeedMbps ?? 0) * 1_000_000L / 8;
+        return server > 0 && user > 0 ? Math.Min(server, user) : Math.Max(server, user);
+    }
+
+    /// <summary>
+    /// The most link streams one user here may hold at once, or 0 for no limit: the limit on that
+    /// user's mapping when it sets one, otherwise this entry's per user limit.
+    /// </summary>
+    /// <param name="localUserId">The user here the stream runs as.</param>
+    /// <returns>The limit.</returns>
+    public int GetLinkMaxStreamsFor(Guid? localUserId)
+        => Math.Max(0, MappingForLocalUser(localUserId)?.LinkMaxStreams ?? LinkMaxStreamsPerUser);
+
+    private UserMapping? MappingForLocalUser(Guid? localUserId)
+        => localUserId is { } user
+            ? UserMappings?.FirstOrDefault(m => m.IsEnabled && Guid.TryParse(m.LocalUserId, out var id) && id == user)
+            : null;
+
+    /// <summary>
     /// Gets or sets this server's user that streams for a user on that server with no user mapping here.
     /// Empty refuses them.
     /// </summary>

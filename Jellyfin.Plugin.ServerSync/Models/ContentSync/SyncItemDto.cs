@@ -57,4 +57,7 @@ public class SyncItemDto
 
     /// <summary>Gets or sets how the file is held here: Copy, or Link for a .strm that streams from the source.</summary>
     public string StorageMode { get; set; } = "Copy";
+
+    /// <summary>Gets or sets a value indicating whether a link's file is held in the link cache.</summary>
+    public bool Cached { get; set; }
 }

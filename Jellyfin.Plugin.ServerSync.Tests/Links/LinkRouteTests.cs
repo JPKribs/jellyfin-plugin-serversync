@@ -702,7 +702,7 @@ public sealed class LinkRouteTests : IDisposable
         var (library, stub) = InterfaceStub.Create<ILibraryManager>();
         stub.Answer(nameof(ILibraryManager.GetItemById), _ => new Movie { Path = "/m/Movie.strm" });
         var grants = new LinkGrants();
-        var streamer = new LinkStreamer(null!, null!, null!, new Access(null), grants, new LinkHealth(), NullLogger<LinkStreamer>.Instance);
+        var streamer = new LinkStreamer(null!, null!, null!, new Access(null), grants, new LinkHealth(), NullLogger<LinkStreamer>.Instance, LinkStreamer.StallTimeout);
         var filter = new LinkPlaybackFilter(library, new OneLink("/m/Movie.strm"), grants, new Access(null), NullLogger<LinkPlaybackFilter>.Instance, streamer);
         var first = Guid.NewGuid();
         var second = Guid.NewGuid();
