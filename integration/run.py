@@ -2191,6 +2191,77 @@ def scenario_link_cache_rules(creds, apis):
         run_task(local, "ServerSyncUpdateTables")
 
 
+def scenario_link_speed(creds, apis):
+    """A speed set on the server entry, or on one user's mapping, slows that stream and leaves the
+    bytes unchanged, and another user's stream is not slowed by a limit on someone else's mapping."""
+    local, a = apis["local"], apis["source-a"]
+    lu, au, lv = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"], creds["servers"]["local"]["viewerId"]
+    needle = f"Speed {uuid.uuid4().hex[:6]}"
+    title = f"{needle} (2024)"
+    source_folder = os.path.join(STATE, "media", "source-a", "Movies", title)
+    folder = os.path.join(STATE, "media", "local", "Movies", title)
+    os.makedirs(source_folder, exist_ok=True)
+    # Noise keeps the encoder from shrinking the test pattern to nothing, so the file is a few megabytes.
+    ffmpeg(source_folder, "-f", "lavfi", "-i", "testsrc=duration=20:size=640x480:rate=10", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+           "-t", "20", "-vf", "noise=alls=60:allf=t", "-c:v", "libx264", "-b:v", "1500k", "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{title}.mp4")
+
+    def set_speed(server=0, admin=None):
+        config = plugin_config(a)
+        entry = next(e for e in config["Servers"] if e["Name"] == "local")
+        entry["LinkStreamSpeedMbps"] = server
+        next(m for m in entry["UserMappings"] if m["LocalUserId"] == au)["LinkStreamSpeedMbps"] = admin
+        save_plugin_config(a, config)
+
+    def timed(api, path):
+        started = time.time()
+        status, _, body = http(api, "GET", path, timeout=180)
+        return status, body, time.time() - started
+
+    try:
+        wait_scans_idle(local)
+        wait_scans_idle(a)
+        rescan_until(a, "Movie", needle, True, "source-a lists the film")
+        configure_server(creds, a, "source-a", ["local"], {"local": "Pull"})
+        set_linking(a, "local", True)
+        configure_local(creds, local, ["source-a"], FullScanIntervalHours=0, LinkCacheSizeGb=0)
+        set_storage(local, "source-a", "Movies", "Link")
+        run_task(local, "ServerSyncUpdateTables")
+        run_task(local, "ServerSyncDownloadContent")
+        wait_until(lambda: find_item(local, "Movie", needle) is not None, 150, "local lists the film")
+        item = find_item(local, "Movie", needle)
+        viewer = Api("local-viewer", SERVERS["local"]["port"], "viewer-device")
+        _, auth = viewer.post("/Users/AuthenticateByName", {"Username": "viewer", "Pw": ""}, expect=200)
+        viewer.token = auth["AccessToken"]
+
+        # One megabit is 125 KB a second after the opening burst.
+        with open(os.path.join(source_folder, f"{title}.mp4"), "rb") as f:
+            data = f.read()
+        owed = max(0, (len(data) - 375_000) / 125_000)
+        _, body = local.call("POST", f"/Items/{item['Id']}/PlaybackInfo?userId={lu}", {}, raw=True)
+        path = f"/Videos/{item['Id']}/stream?static=true&mediaSourceId={json.loads(body)['MediaSources'][0]['Id']}"
+        status, body, fast = timed(local, path)
+        expect(status == 200 and body == data, f"with no speed set the film streams whole ({status}, {fast:.1f}s)")
+        expect(owed > 8, f"the film is big enough for a speed limit to show ({len(data)} bytes, {owed:.0f}s at 1 Mbps)")
+        set_speed(server=1)
+        status, body, slow = timed(local, path)
+        expect(status == 200 and body == data and slow > owed * 0.7, f"a speed on the server entry slows the stream and keeps its bytes ({slow:.1f}s, at least {owed * 0.7:.0f}s expected)")
+        set_speed(server=0, admin=1)
+        status, body, slow = timed(local, path)
+        expect(status == 200 and body == data and slow > owed * 0.7, f"a speed on one user's mapping slows that user's stream ({slow:.1f}s)")
+        viewer.call("POST", f"/Items/{item['Id']}/PlaybackInfo?userId={lv}", {}, raw=True)
+        status, body, other = timed(viewer, path)
+        expect(status == 200 and body == data and other < owed * 0.5, f"and leaves another user's stream at full speed ({other:.1f}s)")
+    finally:
+        set_speed(0, None)
+        configure_server(creds, a, "source-a", [])
+        shutil.rmtree(source_folder, ignore_errors=True)
+        shutil.rmtree(folder, ignore_errors=True)
+        rescan_until(a, "Movie", needle, False, "source-a no longer lists the film")
+        local.post("/Library/Refresh", None, expect=204)
+        configure_local(creds, local, ["source-a", "source-b"], FullScanIntervalHours=24, MissingContentAction=None)
+        run_task(local, "ServerSyncUpdateTables")
+
+
 def scenario_link_hls(creds, apis):
     """Transcoding a link: Jellyfin's ffmpeg reads the link under the user's grant and makes HLS segments."""
     film = LinkedFilm(creds, apis, seconds=12, size="320x240").setup()
@@ -3057,6 +3128,7 @@ SCENARIOS = [
     ("links: media info, images, per user direct play, and the link check", scenario_link_care),
     ("links: a played link is cached and plays from the cache", scenario_link_cache),
     ("links: cache rules and a user's own stream limit", scenario_link_cache_rules),
+    ("links: speed limits per server and per user", scenario_link_speed),
     ("links: transcoding a link to HLS", scenario_link_hls),
     ("links: hostile requests are refused", scenario_link_hostile),
     ("links: a source that is down", scenario_link_source_down),
