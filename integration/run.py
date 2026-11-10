@@ -2838,7 +2838,7 @@ def scenario_chaos_tampered_links(creds, apis):
 
 
 def scenario_chaos_key_lost(creds, apis):
-    """Losing the link key invalidates every link's secret: they refuse until the next sync writes them again, and then they play."""
+    """Losing the link key invalidates every link's secret: each link's own address refuses until the next sync writes the link again, while direct play, which is streamed per user, carries on."""
     film = LinkedFilm(creds, apis).setup()
     try:
         with open(film.link, encoding="utf-8") as f:
@@ -2847,7 +2847,11 @@ def scenario_chaos_key_lost(creds, apis):
         restart_container("local", film.local)
         status, _ = film.play_info()
         streamed, _, _ = http(film.local, "GET", f"/Videos/{film.item['Id']}/stream?static=true&mediaSourceId={(film.source or {}).get('Id')}") if film.source else (0, {}, b"")
-        expect(streamed != 200 or status != 200, f"with the key gone, the old link no longer streams ({status}, {streamed})")
+        refused = in_local(before.strip())
+        expect(refused == "403", f"with the key gone, the old link's own address refuses its old secret ({refused})")
+        # Direct play is streamed for the user by the filter, so it never reads the link's address and
+        # keeps working. A transcode reads the address, and waits for the link to be written again.
+        expect(status == 200 and streamed == 200, f"direct play does not depend on the link's secret ({status}, {streamed})")
         run_task(film.local, "ServerSyncUpdateTables")
         expect(film.row()["Status"] == "Queued", "the refresh sees the link is out of date and queues it")
         run_task(film.local, "ServerSyncDownloadContent")
