@@ -58,7 +58,7 @@ public sealed class LinkConcurrencyTests : IDisposable
                 start.SignalAndWait();
                 for (var i = 0; i < 1500; i++)
                 {
-                    var handle = sessions.TryOpen("peer", users[random.Next(users.Length)], items[random.Next(items.Length)], maxForPeer: 5, maxForUser: 0, userElsewhere: 0);
+                    using var handle = sessions.TryOpen("peer", users[random.Next(users.Length)], items[random.Next(items.Length)], maxForPeer: 5, maxForUser: 0, userElsewhere: 0);
                     if (handle is null)
                     {
                         Thread.Yield();
@@ -73,7 +73,6 @@ public sealed class LinkConcurrencyTests : IDisposable
                     }
 
                     Thread.SpinWait(random.Next(200, 2000));
-                    handle.Dispose();
                 }
             },
             TaskCreationOptions.LongRunning)));
@@ -208,6 +207,7 @@ public sealed class LinkConcurrencyTests : IDisposable
         int current;
         while ((current = Volatile.Read(ref target)) < value && Interlocked.CompareExchange(ref target, value, current) != current)
         {
+            // Another thread stored a value in between, so read it and try again.
         }
     }
 

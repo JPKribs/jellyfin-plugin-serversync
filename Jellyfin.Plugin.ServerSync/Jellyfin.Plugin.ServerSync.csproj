@@ -12,15 +12,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="12.2.0">
+    <PackageReference Include="Jellyfin.Controller" Version="12.4.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Database.Implementations" Version="12.2.0">
+    <PackageReference Include="Jellyfin.Database.Implementations" Version="12.4.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Model" Version="12.2.0">
+    <PackageReference Include="Jellyfin.Model" Version="12.4.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
@@ -29,7 +29,7 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.10.19" />
+    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.10.28" />
   </ItemGroup>
 
   <ItemGroup>

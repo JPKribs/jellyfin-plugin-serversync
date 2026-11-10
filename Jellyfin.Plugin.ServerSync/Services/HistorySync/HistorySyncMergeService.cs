@@ -83,7 +83,9 @@ public static class HistorySyncMergeService
         }
         else
         {
-            item.MergedIsFavorite = item.NegotiatedIsFavorite ?? item.SourceIsFavorite ?? item.LocalIsFavorite;
+            // Neither side moved, so each holds the agreed value or nothing: with no agreed value, a side
+            // holding one would count as moved.
+            item.MergedIsFavorite = item.NegotiatedIsFavorite;
         }
 
         var sourceCountMoved = item.SourcePlayCount.HasValue && item.SourcePlayCount != item.NegotiatedPlayCount;
@@ -102,7 +104,8 @@ public static class HistorySyncMergeService
         }
         else
         {
-            item.MergedPlayCount = item.NegotiatedPlayCount ?? Math.Max(item.SourcePlayCount ?? 0, item.LocalPlayCount ?? 0);
+            // As for the favorite: with no agreed count, neither side holds one either.
+            item.MergedPlayCount = item.NegotiatedPlayCount ?? 0;
         }
 
         var sourcePlayMoved = PlayGroupMoved(

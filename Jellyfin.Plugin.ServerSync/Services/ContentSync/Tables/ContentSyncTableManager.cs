@@ -156,11 +156,10 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// </summary>
     public void RequireLinkAwareReaders() => ExecuteWrite(conn =>
     {
-        var connection = (SqliteConnection)conn;
-        var floor = DatabaseMigrationService.MinReaderFor(connection);
-        if ((JPKribs.Jellyfin.Base.DatabaseSchema.GetMinReaderVersion(connection) ?? 0) < floor)
+        var floor = DatabaseMigrationService.MinReaderFor(conn);
+        if ((JPKribs.Jellyfin.Base.DatabaseSchema.GetMinReaderVersion(conn) ?? 0) < floor)
         {
-            JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, Math.Max(floor, JPKribs.Jellyfin.Base.DatabaseSchema.GetVersion(connection)), floor);
+            JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(conn, Math.Max(floor, JPKribs.Jellyfin.Base.DatabaseSchema.GetVersion(conn)), floor);
         }
     });
 

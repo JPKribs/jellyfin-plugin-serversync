@@ -369,12 +369,13 @@ public sealed class LinkRouteTests : IDisposable
         var user = Guid.NewGuid();
         var item = Guid.NewGuid();
 
-        var first = sessions.Open("peer", user, item);
-        sessions.Open("peer", user, item).Dispose();
-        Assert.Equal(1, sessions.CountForPeer("PEER"));
-        Assert.Equal(1, sessions.CountForUser(user));
+        using (sessions.Open("peer", user, item))
+        {
+            sessions.Open("peer", user, item).Dispose();
+            Assert.Equal(1, sessions.CountForPeer("PEER"));
+            Assert.Equal(1, sessions.CountForUser(user));
+        }
 
-        first.Dispose();
         now += TimeSpan.FromSeconds(60);
         Assert.True(sessions.IsActive("peer", user, item));
         now += TimeSpan.FromSeconds(60);

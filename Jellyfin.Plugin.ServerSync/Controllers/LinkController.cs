@@ -167,7 +167,7 @@ public class LinkController : ControllerBase
 
         if (!_files.SecretMatches(linkId, key))
         {
-            _logger.LogWarning("Refused a link request for {LinkId}: the secret does not match", linkId);
+            _logger.LogWarning("Refused a link request for {LinkId}: the secret does not match", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(linkId, 64));
             return StatusCode(StatusCodes.Status403Forbidden);
         }
 

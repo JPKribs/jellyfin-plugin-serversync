@@ -144,35 +144,48 @@ public class SyncMissingContentTask
             return false;
         }
 
+        // A server left out of this run is disposed here, since the run's cleanup only sees the ones kept.
+        // That happens in the finally so a throw partway through still disposes those already left out.
         var allowed = new List<ScanSource>();
-        foreach (var server in config.GetPullServers())
+        var leftOut = new List<ScanSource>();
+        try
         {
-            var breaker = GetOrCreateCircuitBreaker(server.Url);
-            var source = Sources.FirstOrDefault(s => string.Equals(s.Key, server.Key, StringComparison.OrdinalIgnoreCase));
-            if (source is null)
+            foreach (var server in config.GetPullServers())
             {
-                breaker.RecordFailure("connection test failed");
-                continue;
+                var breaker = GetOrCreateCircuitBreaker(server.Url);
+                var source = Sources.FirstOrDefault(s => string.Equals(s.Key, server.Key, StringComparison.OrdinalIgnoreCase));
+                if (source is null)
+                {
+                    breaker.RecordFailure("connection test failed");
+                    continue;
+                }
+
+                if (server.CanDownload == false)
+                {
+                    leftOut.Add(source);
+                    Logger.LogWarning("{Task}: leaving '{Server}' out of this run: the account its key belongs to may not download media there. Allow media downloading for that user on '{Server}', or use an administrator's API key", Name, source.Name, source.Name);
+                    continue;
+                }
+
+                if (!AdmitServer(breaker, out var circuitReason))
+                {
+                    leftOut.Add(source);
+                    Logger.LogWarning("{Task}: leaving '{Server}' out of this run: {Reason}", Name, source.Name, circuitReason);
+                    continue;
+                }
+
+                allowed.Add(source);
             }
 
-            if (server.CanDownload == false)
-            {
-                Logger.LogWarning("{Task}: leaving '{Server}' out of this run: the account its key belongs to may not download media there. Allow media downloading for that user on '{Server}', or use an administrator's API key", Name, source.Name, source.Name);
-                source.Dispose();
-                continue;
-            }
-
-            if (!AdmitServer(breaker, out var circuitReason))
-            {
-                Logger.LogWarning("{Task}: leaving '{Server}' out of this run: {Reason}", Name, source.Name, circuitReason);
-                source.Dispose();
-                continue;
-            }
-
-            allowed.Add(source);
+            Sources = allowed;
         }
-
-        Sources = allowed;
+        finally
+        {
+            foreach (var source in leftOut)
+            {
+                source.Dispose();
+            }
+        }
         if (allowed.Count == 0 && !OnlyLinksQueued())
         {
             FailPreflight("the circuit breaker is open for every reachable server");

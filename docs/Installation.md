@@ -1,5 +1,7 @@
 # Installation
 
+Server Sync needs Jellyfin 12.4 or later. A server on an older Jellyfin does not see this release in its catalog and keeps the last release built for it.
+
 ## Add the Plugin Repository
 
 1. Open Jellyfin and go to **Dashboard → Plugins → Repositories**.

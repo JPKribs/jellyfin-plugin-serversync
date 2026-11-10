@@ -50,33 +50,44 @@ internal static class ScanSources
                 continue;
             }
 
-            Models.Configuration.ConnectionTestResult result;
+            // The client is this loop's until a ScanSource takes it, so every other way out disposes it.
+            var handedOff = false;
             try
             {
-                result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                // The caller has not seen these clients yet, so its cleanup cannot dispose them.
-                // Dispose them here before the failure or cancellation propagates.
-                client.Dispose();
-                foreach (var source in connected)
+                Models.Configuration.ConnectionTestResult result;
+                try
                 {
-                    source.Dispose();
+                    result = await client.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // The caller has not seen these clients yet, so its cleanup cannot dispose them.
+                    // Dispose them here before the failure or cancellation propagates.
+                    foreach (var source in connected)
+                    {
+                        source.Dispose();
+                    }
+
+                    throw;
                 }
 
-                throw;
-            }
+                if (!result.Success)
+                {
+                    logger.LogError("{Task}: connection to '{Server}' failed: {Error}", taskName, server.DisplayName, result.ErrorMessage ?? "unknown");
+                    onUnavailable?.Invoke($"server '{server.DisplayName}' is unreachable");
+                    continue;
+                }
 
-            if (!result.Success)
+                connected.Add(new ScanSource(server, client, i));
+                handedOff = true;
+            }
+            finally
             {
-                logger.LogError("{Task}: connection to '{Server}' failed: {Error}", taskName, server.DisplayName, result.ErrorMessage ?? "unknown");
-                onUnavailable?.Invoke($"server '{server.DisplayName}' is unreachable");
-                client.Dispose();
-                continue;
+                if (!handedOff)
+                {
+                    client.Dispose();
+                }
             }
-
-            connected.Add(new ScanSource(server, client, i));
         }
 
         return connected;
