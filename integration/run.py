@@ -2097,6 +2097,100 @@ def scenario_link_cache(creds, apis):
         film.teardown()
 
 
+def scenario_link_cache_rules(creds, apis):
+    """A user mapping's own stream limit applies to that user, starting an episode caches the next one
+    ahead, and a show picked to always keep is cached whole by the content sync."""
+    local, b = apis["local"], apis["source-b"]
+    lu, bu = creds["servers"]["local"]["userId"], creds["servers"]["source-b"]["userId"]
+    needle = f"Cache Show {uuid.uuid4().hex[:6]}"
+    show = f"{needle} (2024)"
+    season = os.path.join(STATE, "media", "source-b", "Shows", show, "Season 01")
+    local_show = os.path.join(STATE, "media", "local", "Shows", show)
+    os.makedirs(season, exist_ok=True)
+    for number in (1, 2, 3):
+        ffmpeg(season, "-f", "lavfi", "-i", "testsrc=duration=5:size=160x120:rate=10", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+               "-t", "5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{show} - S01E0{number} - Part {number}.mp4")
+
+    def episodes(api):
+        items = api.get("/Items?IncludeItemTypes=Episode&Recursive=true&Fields=Path")["Items"]
+        return sorted((i for i in items if needle in (i.get("Path") or "")), key=lambda i: i.get("IndexNumber") or 0)
+
+    def cached():
+        return sorted(re.search(r"S01E0\d", r["SourcePath"]).group(0) for r in all_rows(local) if needle in r["SourcePath"] and r.get("Cached"))
+
+    def set_cap(streams):
+        config = plugin_config(b)
+        mapping = next(m for e in config["Servers"] if e["Name"] == "local" for m in e["UserMappings"] if m["LocalUserId"] == bu)
+        mapping["LinkMaxStreams"] = streams
+        save_plugin_config(b, config)
+
+    def play_info(item):
+        status, body = local.call("POST", f"/Items/{item['Id']}/PlaybackInfo?userId={lu}", {}, raw=True)
+        return status, body, (json.loads(body)["MediaSources"][0] if status == 200 else None)
+
+    try:
+        wait_scans_idle(local)
+        wait_scans_idle(b)
+        b.post("/Library/Refresh", None, expect=204)
+        wait_until(lambda: len(episodes(b)) == 3, 150, "source-b lists the show's three episodes")
+        configure_server(creds, b, "source-b", ["local"], {"local": "Pull"})
+        set_linking(b, "local", True)
+        configure_local(creds, local, ["source-b"], FullScanIntervalHours=0, LinkCacheSizeGb=0)
+        set_storage(local, "source-b", "Shows", "Link")
+        run_task(local, "ServerSyncUpdateTables")
+        run_task(local, "ServerSyncDownloadContent")
+        wait_until(lambda: len(episodes(local)) == 3, 150, "local lists the three episodes as links")
+        first, second, third = episodes(local)
+
+        # A stream limit set on one user's mapping holds that user, with no per user limit on the server.
+        set_cap(1)
+        status, _, source = play_info(first)
+        expect(status == 200, f"the user's first stream is allowed under their own limit of one ({status})")
+        http(local, "GET", f"/Videos/{first['Id']}/stream?static=true&mediaSourceId={source['Id']}")
+        status, body, _ = play_info(second)
+        expect(status == 403 and b"allows your account 1 stream(s)" in body, f"a second stream is refused by the limit on the user's mapping ({status})")
+        set_cap(None)
+        status, _, _ = play_info(second)
+        expect(status == 200, f"with the mapping's limit cleared, the server's own applies again ({status})")
+
+        # Starting the first episode caches it, and the one after it.
+        configure_local(creds, local, ["source-b"], FullScanIntervalHours=0, LinkCacheSizeGb=1, LinkCachePreCacheEpisodes=1, LinkCacheRetentionDays=0)
+        set_storage(local, "source-b", "Shows", "Link")
+        status, _, source = play_info(first)
+        play = {"ItemId": first["Id"], "MediaSourceId": source["Id"], "PlaySessionId": uuid.uuid4().hex, "PositionTicks": 0, "CanSeek": True, "PlayMethod": "DirectPlay"}
+        local.post("/Sessions/Playing", play, expect=204)
+        wait_until(lambda: cached() == ["S01E01", "S01E02"], 120, "starting episode 1 caches it and episode 2 ahead")
+        expect(cached() == ["S01E01", "S01E02"], f"episode 3, which is two ahead, is not cached ({cached()})")
+        local.post("/Sessions/Playing/Stopped", dict(play, PositionTicks=10_000_000), expect=204)
+
+        # Picking the show to always keep caches the rest of it on the next content sync.
+        series = next(i for i in b.get("/Items?IncludeItemTypes=Series&Recursive=true&Fields=Path")["Items"] if needle in (i.get("Path") or ""))
+        config = plugin_config(local)
+        mapping = next(m for e in config["Servers"] if e["Name"] == "source-b" for m in e["LibraryMappings"] if m["SourceLibraryName"] == "Shows")
+        mapping["PermanentItems"] = [{"ItemId": series["Id"], "Name": series["Name"], "Path": series["Path"], "Type": "Series"}]
+        save_plugin_config(local, config)
+        run_task(local, "ServerSyncDownloadContent")
+        wait_until(lambda: cached() == ["S01E01", "S01E02", "S01E03"], 120, "a show picked to always keep is cached whole")
+
+        # Leaving the library out of the cache drops its files on the next content sync.
+        config = plugin_config(local)
+        mapping = next(m for e in config["Servers"] if e["Name"] == "source-b" for m in e["LibraryMappings"] if m["SourceLibraryName"] == "Shows")
+        mapping["ExcludeFromLinkCache"] = True
+        save_plugin_config(local, config)
+        run_task(local, "ServerSyncDownloadContent")
+        expect(cached() == [] and local.get("/Sync/LinkCache").get("Files") == 0, f"a library left out of the cache has its files dropped ({cached()})")
+    finally:
+        set_cap(None)
+        configure_server(creds, b, "source-b", [])
+        shutil.rmtree(os.path.join(STATE, "media", "source-b", "Shows", show), ignore_errors=True)
+        shutil.rmtree(local_show, ignore_errors=True)
+        b.post("/Library/Refresh", None, expect=204)
+        wait_until(lambda: len(episodes(b)) == 0, 150, "source-b no longer lists the show")
+        local.post("/Library/Refresh", None, expect=204)
+        configure_local(creds, local, ["source-a", "source-b"], FullScanIntervalHours=24, MissingContentAction=None, LinkCacheSizeGb=0)
+        run_task(local, "ServerSyncUpdateTables")
+
+
 def scenario_link_hls(creds, apis):
     """Transcoding a link: Jellyfin's ffmpeg reads the link under the user's grant and makes HLS segments."""
     film = LinkedFilm(creds, apis, seconds=12, size="320x240").setup()
@@ -2962,6 +3056,7 @@ SCENARIOS = [
     ("links: seeking reads exactly the bytes asked for", scenario_link_ranges),
     ("links: media info, images, per user direct play, and the link check", scenario_link_care),
     ("links: a played link is cached and plays from the cache", scenario_link_cache),
+    ("links: cache rules and a user's own stream limit", scenario_link_cache_rules),
     ("links: transcoding a link to HLS", scenario_link_hls),
     ("links: hostile requests are refused", scenario_link_hostile),
     ("links: a source that is down", scenario_link_source_down),
