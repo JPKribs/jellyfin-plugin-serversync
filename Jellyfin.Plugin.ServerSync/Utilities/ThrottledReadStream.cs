@@ -27,7 +27,7 @@ public sealed class SpeedBucket
     /// <summary>Initializes a new instance of the <see cref="SpeedBucket"/> class.</summary>
     /// <param name="bytesPerSecond">The rate.</param>
     public SpeedBucket(long bytesPerSecond)
-        : this(bytesPerSecond, Stopwatch.GetElapsedTime(0).Duration)
+        : this(bytesPerSecond, static () => Stopwatch.GetElapsedTime(0))
     {
     }
 

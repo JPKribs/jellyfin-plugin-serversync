@@ -39,6 +39,27 @@ public class ThrottledReadStreamTests
     }
 
     /// <summary>
+    /// A bucket on the real clock earns bytes back as time passes.
+    /// True: a stream held to a speed keeps moving at that speed.
+    /// False: once the opening burst was spent the waits would grow without end, and the stream would stall.
+    /// </summary>
+    [Fact]
+    public async Task Bucket_OnTheRealClock_RefillsWithTime()
+    {
+        const int Rate = 1_000_000;
+        var bucket = new SpeedBucket(Rate);
+        var burst = (int)(Rate * SpeedBucket.BurstSeconds);
+
+        Assert.Equal(TimeSpan.Zero, bucket.Take(burst));
+        var owed = bucket.Take(Rate / 10);
+        Assert.InRange(owed, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(110));
+
+        await Task.Delay(TimeSpan.FromMilliseconds(400));
+
+        Assert.Equal(TimeSpan.Zero, bucket.Take(Rate / 10));
+    }
+
+    /// <summary>
     /// Two requests that share a bucket share its burst and its rate.
     /// True: a player that splits its reading over several requests gets the limit once, not once for each.
     /// False: opening more requests, or asking in small ranges, would get around the limit.
