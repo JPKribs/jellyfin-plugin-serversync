@@ -13,7 +13,7 @@ description: >
   edit or a play made on one shows up on the others within seconds, and the scheduled scan remains
   the safety net. Watch history merges three way against what the servers last agreed on, and other
   values resolve on where and when they were last edited, so the newest edit always wins. A library can
-  also hold its videos as links that stream from the source instead of full copies.
+  also hold its videos as links that stream from the source instead of full copies, and a link cache can keep local copies of the links that are played.
 category: "Administration"
 owner: "JPKribs"
 artifacts:
@@ -28,18 +28,24 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
+  important:
+  - Media info from the source, the link check, and speed and per user limits need the source on this release. Links to an older source keep working as before
   features:
-  - Link cache. A link can keep a full local copy of its file in a cache while staying a link. Playing a link caches it, episodes ahead of the one being watched are cached before they are reached, and each library can pick shows and films to always keep. A cached link plays from this server under its own rules, even while its source is down, and playback is still reported to the source. Set the cache's size, location, retention, pre-cache episodes, and removal order under Content in Settings. The cache is off until it is given a size
-  - A link takes its media info, chapters, chapter images, and trickplay images from the source instead of probing the file across the network, and a link's trickplay shows in its details
+  - Link cache. A link can keep a full local copy of its file in a cache while staying a link. Playing a link caches it, episodes ahead of the one being watched are cached before they are reached, and each library can pick shows and films to always keep. A cached link plays from this server under its own rules, even while its source is down, and playback is still reported to the source. Set the cache's size, location, retention, pre-cache episodes, and removal order under Content in Settings. Each Link library has Cache This Library's Links and an Always Keep list on its mapping, the Sync tab shows a cached row as (Link, Cached), and Empty the Cache in Settings, or uninstalling the plugin, deletes every cached file. The cache is off until it is given a size
+  - A link takes its media info, chapters, chapter images, and trickplay images from the source instead of probing the file across the network, and a link's trickplay shows in its details. Take Link Images From the Source under Content in Settings, on by default, controls the chapter and trickplay images
   - Every Sync Content run checks links against the servers they stream from. A link that can no longer play shows on the Sync tab with the reason, and settles again when it can
   - A link stream that drops or stalls partway is picked up where it stopped, from the same server or another that holds the file, so the player does not see the break
   - A Link mapping links every version of a film, not only the first, and each is checked on its own at play. A user refused one, such as a file above their bitrate limit, is offered the versions they may play. Copy mappings still copy the first version only
-  - Direct play of a link is streamed for the user who asked, so two viewers of one link are counted and limited apart
+  - Direct play of a link is streamed for the user who asked, so two viewers of one link are counted and limited apart. Stream Direct Play of Links Per User under Content in Settings turns this off
   - A source can cap the speed of each link stream and cache download per server, with another speed during the bandwidth schedule's hours, and cap streams and speed per user on each user mapping
   changed:
   - A server that did not answer is passed over for a minute while another holds the file, and the others are asked together, so a dead source no longer costs every play its timeout
   - The media probe of a new link may read at most 256 MB of the file
+  - Sync Content warns when a library that holds links has chapter image extraction off, since Jellyfin then drops the chapter images taken from the source
   fixed:
   - An .nfo beside a link that the user deleted was written again on the next sync
   developer:
+  - The wire protocol and the database schema are unchanged. An older source ignores the fill flag, so a cache download for a user counts as a stream there and is not held to a speed
+  - New dashboard routes GET /Sync/LinkCache and POST /Sync/LinkCache/Clear, and content rows from GET /Sync/Items carry Cached
+  - New tests cover the link cache, the streamer's resume and fallback, media info from the source, and the speed limit. The Docker pool gains cache, per user limit, speed limit, link check, and version scenarios
   - New peer routes on the source, Links/Describe and Links/{itemId}/Images, and a fill flag on Stream for cache downloads. Older sources answer 404 to the new routes, and the linking server then probes its links and does not check them

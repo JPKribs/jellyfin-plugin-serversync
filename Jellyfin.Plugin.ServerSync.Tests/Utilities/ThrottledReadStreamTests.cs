@@ -14,19 +14,47 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 public class ThrottledReadStreamTests
 {
     /// <summary>
-    /// Reads inside the opening burst are not held back, and reads past it wait until the rate allows them.
-    /// True: a player fills its first buffer at once, and a long read settles at the rate.
+    /// Bytes inside the opening burst are not held back, bytes past it wait until the rate has made
+    /// them up, and time spent idle earns at most one burst.
+    /// True: a player fills its first buffer at once, a long read settles at the rate, and a pause does not bank unlimited speed.
     /// False: the limit would either never apply or slow the start of every play.
     /// </summary>
     [Fact]
-    public void DelayFor_LetsABurstThrough_ThenHoldsTheRate()
+    public void Bucket_LetsABurstThrough_ThenHoldsTheRate()
     {
-        const long Rate = 1000;
+        const int Rate = 1000;
+        var now = TimeSpan.Zero;
+        var bucket = new SpeedBucket(Rate, () => now);
+        var burst = (int)(Rate * SpeedBucket.BurstSeconds);
 
-        Assert.Equal(TimeSpan.Zero, ThrottledReadStream.DelayFor(0, TimeSpan.Zero, Rate));
-        Assert.Equal(TimeSpan.Zero, ThrottledReadStream.DelayFor((long)(Rate * ThrottledReadStream.BurstSeconds), TimeSpan.Zero, Rate));
-        Assert.Equal(TimeSpan.FromSeconds(2), ThrottledReadStream.DelayFor((long)(Rate * (ThrottledReadStream.BurstSeconds + 2)), TimeSpan.Zero, Rate));
-        Assert.Equal(TimeSpan.Zero, ThrottledReadStream.DelayFor((long)(Rate * (ThrottledReadStream.BurstSeconds + 2)), TimeSpan.FromSeconds(5), Rate));
+        Assert.Equal(TimeSpan.Zero, bucket.Take(burst));
+        Assert.Equal(TimeSpan.FromSeconds(2), bucket.Take(2 * Rate));
+
+        now += TimeSpan.FromSeconds(2);
+        Assert.Equal(TimeSpan.FromSeconds(1), bucket.Take(Rate));
+
+        now += TimeSpan.FromHours(1);
+        Assert.Equal(TimeSpan.Zero, bucket.Take(burst));
+        Assert.Equal(TimeSpan.FromSeconds(1), bucket.Take(Rate));
+    }
+
+    /// <summary>
+    /// Two requests that share a bucket share its burst and its rate.
+    /// True: a player that splits its reading over several requests gets the limit once, not once for each.
+    /// False: opening more requests, or asking in small ranges, would get around the limit.
+    /// </summary>
+    [Fact]
+    public void Bucket_IsSharedAcrossRequests()
+    {
+        const int Rate = 1000;
+        var now = TimeSpan.Zero;
+        var bucket = new SpeedBucket(Rate, () => now);
+        var burst = (int)(Rate * SpeedBucket.BurstSeconds);
+
+        Assert.Equal(TimeSpan.Zero, bucket.Take(burst));
+        // A second request arrives at once. It gets no burst of its own.
+        Assert.Equal(TimeSpan.FromSeconds(1), bucket.Take(Rate));
+        Assert.Equal(TimeSpan.FromSeconds(2), bucket.Take(Rate));
     }
 
     /// <summary>
@@ -39,7 +67,7 @@ public class ThrottledReadStreamTests
     {
         var data = new byte[5000];
         Random.Shared.NextBytes(data);
-        await using var stream = new ThrottledReadStream(new MemoryStream(data), 1_000_000);
+        await using var stream = new ThrottledReadStream(new MemoryStream(data), new SpeedBucket(1_000_000));
 
         Assert.True(stream.CanSeek);
         Assert.Equal(data.Length, stream.Length);

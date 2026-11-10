@@ -277,6 +277,54 @@ public sealed class LinkCacheTests : IDisposable
     }
 
     /// <summary>
+    /// Picking a film keeps every version of it, and nothing else in its library.
+    /// True: the version a user actually plays is the one kept, whichever it is.
+    /// False: only the film's first version would be kept, and the others dropped to make room.
+    /// </summary>
+    [Theory]
+    [InlineData("/src/m/Film (2020)/Film (2020) - 4K.mkv", "/src/m/Film (2020)/Film (2020) - 1080p.mkv", true)]
+    [InlineData(@"D:\m\Film (2020)\Film (2020) - 4K.mkv", @"D:\m\Film (2020)\Film (2020).mp4", true)]
+    [InlineData("/src/m/Film (2020)/Film (2020) - 4K.mkv", "/src/m/Film (2021)/Film (2021).mkv", false)]
+    [InlineData("/src/m/Loose A.mkv", "/src/m/Loose B.mkv", false)]
+    [InlineData("/src/shows/Show", "/src/shows/Show/Season 01/E01.mkv", false)]
+    public void SameFilm_IsAnotherVersionInItsFolder(string picked, string other, bool expected)
+        => Assert.Equal(expected, LinkCacheFiller.SameFilm(picked, other));
+
+    /// <summary>
+    /// Emptying a cache folder from outside the cache, as saving the settings does, is seen by the
+    /// cache, which forgets what it held there.
+    /// True: turning the cache off and on again shows it empty, with nothing counted that is not there.
+    /// False: the cache would count files that were deleted, and make room for nothing.
+    /// </summary>
+    [Fact]
+    public void WipeFolder_IsSeenByTheCache()
+    {
+        var cache = Cache();
+        Put(cache, A, 100);
+
+        LinkCache.WipeFolder(_dir);
+
+        Assert.Empty(cache.List());
+        Assert.Equal(0, cache.UsedBytes());
+    }
+
+    /// <summary>
+    /// A location the administrator chose gets a folder of the cache's own inside it, and a location
+    /// that is not a full path is not used.
+    /// True: the cache never shares a folder with other files, wherever it is pointed.
+    /// False: pointing the cache at a folder in use could delete files there that look like its own.
+    /// </summary>
+    [Fact]
+    public void Root_IsAFolderOfItsOwn()
+    {
+        var chosen = Path.Combine(Path.GetTempPath(), "somewhere");
+
+        Assert.Equal(Path.Combine(chosen, LinkCache.DefaultFolder), LinkCache.RootFor(chosen, "/default"));
+        Assert.Equal("/default", LinkCache.RootFor(string.Empty, "/default"));
+        Assert.Equal("/default", LinkCache.RootFor("relative/path", "/default"));
+    }
+
+    /// <summary>
     /// A user mapping's own stream limit and speed apply to that user, and everyone else gets the
     /// server entry's. The lower of the two speeds applies.
     /// True: one user can be held tighter, or looser, than the rest on that server.

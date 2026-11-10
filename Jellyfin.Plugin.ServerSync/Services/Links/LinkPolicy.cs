@@ -49,8 +49,9 @@ public sealed class LinkPolicy
     /// <param name="remoteUserId">The user's id on the calling server.</param>
     /// <param name="claimedUserId">The user here the calling server maps them to, if it does.</param>
     /// <param name="probe">Whether this is the calling server's media probe.</param>
+    /// <param name="watching">Whether someone is watching. A download into the calling server's cache is nobody watching, so the stream limits do not apply to it.</param>
     /// <returns>The verdict.</returns>
-    public LinkVerdict Check(SourceServer peer, Guid itemId, string? remoteUserId, string? claimedUserId, bool probe)
+    public LinkVerdict Check(SourceServer peer, Guid itemId, string? remoteUserId, string? claimedUserId, bool probe, bool watching = true)
     {
         ArgumentNullException.ThrowIfNull(peer);
         if (!peer.IsEnabled || !peer.AllowLinking)
@@ -105,7 +106,7 @@ public sealed class LinkPolicy
         }
 
         // A stream already running is not a new one, so seeking or a second request never trips a limit.
-        if (!_sessions.IsActive(peer.Key, userId, item.Id))
+        if (watching && !_sessions.IsActive(peer.Key, userId, item.Id))
         {
             if (peer.LinkMaxStreams > 0 && _sessions.CountForPeer(peer.Key) >= peer.LinkMaxStreams)
             {

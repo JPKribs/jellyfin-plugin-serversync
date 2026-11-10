@@ -23,4 +23,6 @@ Releases before protocol versions, up to 12.2.8.1, only talk to exactly the same
 
 [Links](Links.md) need both servers on 12.2.10.0 or later. The source advertises `Link` among its features, and a server with a Link mapping waits for a source that does. Releases without links ignore the feature, and matching against them works as before.
 
+12.2.11.0 adds the link cache, media info and images from the source, the link check, and speed and per user limits, with no change to the protocol or the database. A linking server on 12.2.11.0 works with a source on 12.2.10.x: its links are probed through the link, are not checked, and a cache download for a user counts as a stream on that source. The source's speed and per user limits need 12.2.11.0 on the source.
+
 Server Sync keeps its own database, which notes the oldest release that can read it. Updating to 12.2.10.0 or later only adds a column, so a release from 12.2.2.0 on still reads it, until the server holds a link. From the first link on, written or waiting to be, the database names the first release with links as its oldest reader. An older release sets such a database aside as a `.newer-*` backup and starts fresh, rather than take a `.strm` for a broken copy and download over it.

@@ -254,7 +254,10 @@ public static class SyncStateService
         // A row that is not Synced but has a file on disk is usually an earlier download whose
         // replacement failed or is still waiting. The plugin cannot be sure it wrote that file, so
         // the deletion waits for the user's approval even when deletion is otherwise automatic.
-        if (deleteMode == ApprovalMode.RequireApproval || item.Status != SyncStatus.Synced)
+        // A link the link check flagged was settled until the source stopped having the file, and its
+        // .strm is this plugin's own, so it is removed as a settled row is.
+        var settled = item.Status == SyncStatus.Synced || (item.StorageMode == StorageMode.Link && Links.LinkVerifier.Flagged(item));
+        if (deleteMode == ApprovalMode.RequireApproval || !settled)
         {
             item.Status = SyncStatus.Pending;
             item.PendingType = PendingType.Deletion;

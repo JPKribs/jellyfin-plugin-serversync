@@ -77,6 +77,11 @@ public sealed class LinkCache
     private readonly object _lock = new();
     private Dictionary<string, CacheEntry>? _entries;
     private string? _loadedRoot;
+    private int _loadedAtWipe;
+    private bool _indexUnreadable;
+
+    // Counts every folder emptied, by any caller, so an index held in memory is read again afterwards.
+    private static int _wipes;
 
     public LinkCache(IPluginConfigurationManager configManager, IApplicationPaths paths, ILogger<LinkCache> logger)
         : this(configManager, Path.Combine((paths ?? throw new ArgumentNullException(nameof(paths))).CachePath, DefaultFolder), logger, () => DateTime.UtcNow)
@@ -96,7 +101,18 @@ public sealed class LinkCache
     public bool Enabled => _configManager.Configuration.LinkCacheSizeGb > 0;
 
     /// <summary>Gets the folder the cache keeps its files in.</summary>
-    public string Root => string.IsNullOrWhiteSpace(_configManager.Configuration.LinkCachePath) ? _defaultRoot : _configManager.Configuration.LinkCachePath;
+    public string Root => RootFor(_configManager.Configuration.LinkCachePath, _defaultRoot);
+
+    /// <summary>
+    /// The folder a cache uses for a location setting. A location the administrator chose gets a folder
+    /// of the cache's own inside it, so the cache never shares a folder with anything else and never
+    /// removes a file that is not its own.
+    /// </summary>
+    /// <param name="location">The Cache Location setting, or empty.</param>
+    /// <param name="defaultRoot">The folder under Jellyfin's cache.</param>
+    /// <returns>The folder.</returns>
+    public static string RootFor(string? location, string defaultRoot)
+        => string.IsNullOrWhiteSpace(location) || !Path.IsPathFullyQualified(location) ? defaultRoot : Path.Combine(location, DefaultFolder);
 
     /// <summary>Gets the folder used when no other is set.</summary>
     public string DefaultRoot => _defaultRoot;
@@ -142,6 +158,11 @@ public sealed class LinkCache
     /// <summary>Records that a cached link was played now.</summary>
     public void Played(string linkId)
     {
+        if (!Enabled)
+        {
+            return;
+        }
+
         lock (_lock)
         {
             // A player reports often, and once a few minutes is enough to order the cache by.
@@ -342,6 +363,14 @@ public sealed class LinkCache
             }
 
             var entries = Entries();
+
+            // With an index that could not be read, every file would look unlisted. They are left for
+            // a start where the index reads.
+            if (_indexUnreadable)
+            {
+                return;
+            }
+
             var known = entries.Values.Select(e => e.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var changed = false;
             try
@@ -381,6 +410,7 @@ public sealed class LinkCache
     /// <param name="root">The folder.</param>
     public static void WipeFolder(string root)
     {
+        System.Threading.Interlocked.Increment(ref _wipes);
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
         {
             return;
@@ -456,11 +486,13 @@ public sealed class LinkCache
     private Dictionary<string, CacheEntry> Entries()
     {
         var root = Root;
-        if (_entries is not null && string.Equals(root, _loadedRoot, StringComparison.Ordinal))
+        var wipes = System.Threading.Volatile.Read(ref _wipes);
+        if (_entries is not null && string.Equals(root, _loadedRoot, StringComparison.Ordinal) && wipes == _loadedAtWipe)
         {
             return _entries;
         }
 
+        _indexUnreadable = false;
         var entries = new Dictionary<string, CacheEntry>(StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -478,11 +510,13 @@ public sealed class LinkCache
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
+            _indexUnreadable = true;
             _logger.LogWarning("Could not read the link cache's index at {Root}, so it starts empty: {Reason}", root, ex.Message);
         }
 
         _entries = entries;
         _loadedRoot = root;
+        _loadedAtWipe = wipes;
         return entries;
     }
 

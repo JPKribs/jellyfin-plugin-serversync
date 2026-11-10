@@ -47,6 +47,7 @@ public sealed class LinkProbe : IHostedService, IDisposable
     private readonly LinkMediaInfo? _mediaInfo;
     private readonly ConcurrentDictionary<Guid, Pending> _pending = new();
     private readonly SemaphoreSlim _shipping = new(2, 2);
+    private readonly ConcurrentDictionary<Guid, byte> _inFlight = new();
     private Timer? _timer;
     private int _sweeping;
 
@@ -132,6 +133,12 @@ public sealed class LinkProbe : IHostedService, IDisposable
             var now = _now();
             foreach (var (itemId, pending) in _pending.Where(p => p.Value.DueAt <= now).ToList())
             {
+                // Still waiting its turn to take its media info, which is not a failed try.
+                if (_inFlight.ContainsKey(itemId))
+                {
+                    continue;
+                }
+
                 var item = _libraryManager.GetItemById(itemId);
                 if (item is null || (pending.Attempts > 0 && item.RunTimeTicks is > 0))
                 {
@@ -150,7 +157,7 @@ public sealed class LinkProbe : IHostedService, IDisposable
 
                 // The source already holds the file's media info, so it is asked first. The file is only
                 // probed across the network when the source cannot give it.
-                if (_mediaInfo is not null && item.Path is { } path && _links.Find(path) is { } link)
+                if (_mediaInfo is not null && item.Path is { } path && _links.Find(path) is { } link && _inFlight.TryAdd(itemId, 0))
                 {
                     _ = ShipOrProbeAsync(item, link, pending.LinkId);
                 }
@@ -188,6 +195,14 @@ public sealed class LinkProbe : IHostedService, IDisposable
         finally
         {
             _shipping.Release();
+
+            // The check of whether it stuck counts from now, not from when it joined the queue.
+            if (_pending.TryGetValue(item.Id, out var waiting))
+            {
+                _pending[item.Id] = waiting with { DueAt = _now() + CheckAfter };
+            }
+
+            _inFlight.TryRemove(item.Id, out _);
         }
 
         try

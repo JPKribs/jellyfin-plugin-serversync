@@ -7,32 +7,103 @@ using System.Threading.Tasks;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// A read-through wrapper that holds reads to a rate in bytes per second. It stays seekable, so a
-/// response that serves byte ranges from it still can. A short burst is let through at the start, so a
-/// player fills its first buffer at once and a media probe is not slowed.
+/// A rate in bytes per second that several streams can share. Each read takes its bytes from the
+/// bucket, and a read that takes more than the bucket holds waits until the rate has made up the
+/// difference. A short burst is let through after the bucket has sat idle, so a player fills its first
+/// buffer at once, and it is one burst for everything that shares the bucket, however many requests
+/// a player splits its reading into.
+/// </summary>
+public sealed class SpeedBucket
+{
+    /// <summary>How many seconds of the rate may be sent at once after the bucket has sat idle.</summary>
+    public const double BurstSeconds = 3;
+
+    private readonly Func<TimeSpan> _now;
+    private readonly object _lock = new();
+    private long _bytesPerSecond;
+    private double _held;
+    private TimeSpan _at;
+
+    /// <summary>Initializes a new instance of the <see cref="SpeedBucket"/> class.</summary>
+    /// <param name="bytesPerSecond">The rate.</param>
+    public SpeedBucket(long bytesPerSecond)
+        : this(bytesPerSecond, Stopwatch.GetElapsedTime(0).Duration)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="SpeedBucket"/> class, for tests.</summary>
+    /// <param name="bytesPerSecond">The rate.</param>
+    /// <param name="now">The clock.</param>
+    public SpeedBucket(long bytesPerSecond, Func<TimeSpan> now)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bytesPerSecond);
+        ArgumentNullException.ThrowIfNull(now);
+        _now = now;
+        _bytesPerSecond = bytesPerSecond;
+        _held = bytesPerSecond * BurstSeconds;
+        _at = now();
+    }
+
+    /// <summary>Gets when the bucket was last taken from, on its own clock.</summary>
+    public TimeSpan LastUsed
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _at;
+            }
+        }
+    }
+
+    /// <summary>Changes the rate, such as when the bandwidth schedule's hours begin.</summary>
+    /// <param name="bytesPerSecond">The new rate.</param>
+    public void SetRate(long bytesPerSecond)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bytesPerSecond);
+        lock (_lock)
+        {
+            _bytesPerSecond = bytesPerSecond;
+        }
+    }
+
+    /// <summary>Takes bytes that were just read, and says how long to wait before reading more.</summary>
+    /// <param name="bytes">The bytes read.</param>
+    /// <returns>The wait, or zero while the bucket still holds bytes.</returns>
+    public TimeSpan Take(int bytes)
+    {
+        lock (_lock)
+        {
+            var now = _now();
+            _held = Math.Min(_bytesPerSecond * BurstSeconds, _held + ((now - _at).TotalSeconds * _bytesPerSecond));
+            _at = now;
+            _held -= bytes;
+            return _held < 0 ? TimeSpan.FromSeconds(-_held / _bytesPerSecond) : TimeSpan.Zero;
+        }
+    }
+}
+
+/// <summary>
+/// A read-through wrapper that holds reads to the rate of a <see cref="SpeedBucket"/>, which other
+/// streams may share. It stays seekable, so a response that serves byte ranges from it still can.
 /// <para>
 /// Owns the inner stream and disposes it.
 /// </para>
 /// </summary>
 public sealed class ThrottledReadStream : Stream
 {
-    /// <summary>How many seconds of the rate are let through before reads are held back.</summary>
-    public const double BurstSeconds = 3;
-
     private readonly Stream _inner;
-    private readonly long _bytesPerSecond;
-    private readonly Stopwatch _clock = new();
-    private long _read;
+    private readonly SpeedBucket _bucket;
 
     /// <summary>Initializes a new instance of the <see cref="ThrottledReadStream"/> class.</summary>
     /// <param name="inner">The stream to read from. Disposed with this wrapper.</param>
-    /// <param name="bytesPerSecond">The most bytes to read each second.</param>
-    public ThrottledReadStream(Stream inner, long bytesPerSecond)
+    /// <param name="bucket">The rate, shared with any other stream held to it.</param>
+    public ThrottledReadStream(Stream inner, SpeedBucket bucket)
     {
         ArgumentNullException.ThrowIfNull(inner);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bytesPerSecond);
+        ArgumentNullException.ThrowIfNull(bucket);
         _inner = inner;
-        _bytesPerSecond = bytesPerSecond;
+        _bucket = bucket;
     }
 
     /// <inheritdoc />
@@ -54,17 +125,6 @@ public sealed class ThrottledReadStream : Stream
         set => _inner.Position = value;
     }
 
-    /// <summary>How long a read must wait after <paramref name="read"/> bytes in <paramref name="elapsed"/>.</summary>
-    /// <param name="read">The bytes read so far.</param>
-    /// <param name="elapsed">The time since the first read.</param>
-    /// <param name="bytesPerSecond">The rate.</param>
-    /// <returns>The wait, or zero when the stream is within its rate.</returns>
-    public static TimeSpan DelayFor(long read, TimeSpan elapsed, long bytesPerSecond)
-    {
-        var due = TimeSpan.FromSeconds(((double)read / bytesPerSecond) - BurstSeconds);
-        return due > elapsed ? due - elapsed : TimeSpan.Zero;
-    }
-
     /// <inheritdoc />
     public override void Flush()
     {
@@ -73,13 +133,14 @@ public sealed class ThrottledReadStream : Stream
     /// <inheritdoc />
     public override int Read(byte[] buffer, int offset, int count)
     {
-        var wait = Wait();
+        var read = _inner.Read(buffer, offset, count);
+        var wait = _bucket.Take(read);
         if (wait > TimeSpan.Zero)
         {
             Thread.Sleep(wait);
         }
 
-        return Count(_inner.Read(buffer, offset, count));
+        return read;
     }
 
     /// <inheritdoc />
@@ -89,13 +150,14 @@ public sealed class ThrottledReadStream : Stream
     /// <inheritdoc />
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        var wait = Wait();
+        var read = await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        var wait = _bucket.Take(read);
         if (wait > TimeSpan.Zero)
         {
             await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
         }
 
-        return Count(await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false));
+        return read;
     }
 
     /// <inheritdoc />
@@ -123,17 +185,5 @@ public sealed class ThrottledReadStream : Stream
         }
 
         base.Dispose(disposing);
-    }
-
-    private TimeSpan Wait()
-    {
-        _clock.Start();
-        return DelayFor(_read, _clock.Elapsed, _bytesPerSecond);
-    }
-
-    private int Count(int read)
-    {
-        _read += read;
-        return read;
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Jellyfin.Data;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.MediaInfo;
@@ -94,7 +95,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                 // one, such as a file above their bitrate limit, is offered the versions they may play.
                 // A version whose file is in the link cache plays from here under this server's own
                 // rules, so the source is not asked about it and need not be up.
-                var choices = await Task.WhenAll(links.Select(l => _cache?.Holds(l.Link.LinkId) == true
+                var choices = await Task.WhenAll(links.Select(l => MayPlayFromCache(l.VersionId, userId.Value, l.Link)
                     ? Task.FromResult(new LinkChoice(LinkFallback.PrimaryOf(l.Link), null))
                     : _access.ChooseAsync(l.Link, userId.Value, null, context.HttpContext.RequestAborted))).ConfigureAwait(false);
                 var refused = new HashSet<Guid>();
@@ -253,6 +254,23 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             _ => false
         };
 
+    // A cached link plays under this server's own rules, and this filter runs before Jellyfin has
+    // applied them to the request. So they are applied here: the user may play media and may see the
+    // item. Anyone else is asked about at the source, as for a link that is not cached.
+    private bool MayPlayFromCache(Guid versionId, Guid userId, LinkEntry link)
+    {
+        if (_cache?.Holds(link.LinkId) != true)
+        {
+            return false;
+        }
+
+        var user = (_services?.GetService(typeof(IUserManager)) as IUserManager)?.GetUserById(userId);
+        return user is not null
+            && !user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.IsDisabled)
+            && user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.EnableMediaPlayback)
+            && _libraryManager.GetItemById(versionId)?.IsVisible(user) == true;
+    }
+
     // A player's direct play: the video stream route asked for the file as it is.
     private static bool IsDirectPlay(FilterContext context, string? controller)
         => string.Equals(controller, "Videos", StringComparison.Ordinal)
@@ -264,6 +282,13 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     // Jellyfin names the item differently on some routes: routeItemId for subtitles, videoId for attachments.
     private static Guid? RouteItemId(FilterContext context)
     {
+        // The subtitle route names its item routeItemId and lets a query itemId replace it.
+        if (context.RouteData.Values.ContainsKey("routeItemId")
+            && Guid.TryParse(context.HttpContext.Request.Query["itemId"].ToString(), out var queried))
+        {
+            return queried;
+        }
+
         foreach (var name in new[] { "itemId", "routeItemId", "videoId" })
         {
             if (Guid.TryParse(context.RouteData.Values[name]?.ToString(), out var id))
@@ -282,17 +307,19 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     // the posted playback request.
     private static Guid? NamedVersion(FilterContext context)
     {
+        // Jellyfin's subtitle route takes the query's value over the route's, so the same order is
+        // used here: the version checked is always the version Jellyfin goes on to read.
+        if (Guid.TryParse(context.HttpContext.Request.Query["mediaSourceId"].ToString(), out var queried))
+        {
+            return queried;
+        }
+
         foreach (var name in new[] { "mediaSourceId", "routeMediaSourceId" })
         {
             if (Guid.TryParse(context.RouteData.Values[name]?.ToString(), out var routed))
             {
                 return routed;
             }
-        }
-
-        if (Guid.TryParse(context.HttpContext.Request.Query["mediaSourceId"].ToString(), out var queried))
-        {
-            return queried;
         }
 
         if (context is ActionExecutingContext executing)
@@ -330,8 +357,19 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             }
 
             controller = descriptor.ControllerName;
+            var named = NamedVersion(context);
             var all = new List<MediaBrowser.Controller.Entities.BaseItem> { item };
-            if (item is MediaBrowser.Controller.Entities.Video video)
+
+            // A stream reads one version: the one it names, or the item's own. Only a request to play
+            // needs every version, so only it looks them up.
+            if (!PlayControllers.Contains(controller, StringComparer.Ordinal))
+            {
+                if (named is { } one && one != item.Id && _libraryManager.GetItemById(one) is { } version)
+                {
+                    all.Add(version);
+                }
+            }
+            else if (item is MediaBrowser.Controller.Entities.Video video)
             {
                 all.AddRange((_libraryManager.GetLocalAlternateVersionIds(video) ?? Enumerable.Empty<Guid>())
                     .Select(id => _libraryManager.GetItemById(id))
@@ -339,7 +377,6 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                 all.AddRange(_libraryManager.GetLinkedAlternateVersions(video) ?? Enumerable.Empty<MediaBrowser.Controller.Entities.Video>());
             }
 
-            var named = NamedVersion(context);
             var touched = named is { } wanted && all.Any(v => v.Id == wanted)
                 ? all.Where(v => v.Id == wanted).Take(1).ToList()
                 : PlayControllers.Contains(controller, StringComparer.Ordinal) ? all.DistinctBy(v => v.Id).ToList() : all.Take(1).ToList();

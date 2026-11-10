@@ -726,8 +726,11 @@ public class UpdateSyncTablesTask
         var root = (mapping.SourceRootPath ?? string.Empty).Replace('\\', '/').TrimEnd('/') + "/";
         foreach (var version in LinkPaths.OtherVersions(item))
         {
+            // A whitelist admitted the film itself, so its versions come with it. A blacklist names
+            // paths to leave out, and is applied to each version's own path.
             if (version.Path!.Replace('\\', '/').StartsWith(root, StringComparison.OrdinalIgnoreCase)
-                && !PathUtilities.IsItemFiltered(version.Path, mapping.SourceRootPath ?? string.Empty, mapping.FilterMode, mapping.FilteredItems))
+                && (mapping.FilterMode != LibraryFilterMode.Blacklist
+                    || !PathUtilities.IsItemFiltered(version.Path, mapping.SourceRootPath ?? string.Empty, mapping.FilterMode, mapping.FilteredItems)))
             {
                 work.Add(new ContentRefreshWork(source, mapping, version, watchedByAll));
             }

@@ -46,7 +46,8 @@ public sealed class LinkCacheFiller : BackgroundService
     private readonly ILogger<LinkCacheFiller> _logger;
     private readonly Channel<Fill> _queue = Channel.CreateUnbounded<Fill>(new UnboundedChannelOptions { SingleReader = true });
     private readonly ConcurrentDictionary<string, byte> _waiting = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, int> _playing = new(StringComparer.OrdinalIgnoreCase);
+    // Per link, the sessions playing it now. A file someone is watching is never dropped to make room.
+    private readonly Dictionary<string, HashSet<string>> _playing = new(StringComparer.OrdinalIgnoreCase);
 
     public LinkCacheFiller(
         LinkCache cache,
@@ -114,13 +115,43 @@ public sealed class LinkCacheFiller : BackgroundService
         foreach (var row in links)
         {
             if (MappingFor(config, row) is { ExcludeFromLinkCache: false, PermanentItems.Count: > 0 } mapping
-                && PathUtilities.IsItemFiltered(row.SourcePath, mapping.SourceRootPath ?? string.Empty, LibraryFilterMode.Blacklist, mapping.PermanentItems))
+                && (PathUtilities.IsItemFiltered(row.SourcePath, mapping.SourceRootPath ?? string.Empty, LibraryFilterMode.Blacklist, mapping.PermanentItems)
+                    || mapping.PermanentItems.Any(pick => SameFilm(pick.Path, row.SourcePath))))
             {
                 permanent.Add(row.SourceItemId);
             }
         }
 
         return permanent;
+    }
+
+    /// <summary>
+    /// Whether two files are versions of one film: in the same folder, each named after it, as in
+    /// <c>Film (2020)/Film (2020) - 4K.mkv</c> and <c>Film (2020)/Film (2020) - 1080p.mkv</c>. A film is
+    /// picked by its first version's file, and picking it keeps every version.
+    /// </summary>
+    /// <param name="pickedPath">The path of the item that was picked.</param>
+    /// <param name="path">A link's source path.</param>
+    /// <returns>True for two versions of one film.</returns>
+    public static bool SameFilm(string? pickedPath, string? path)
+    {
+        if (string.IsNullOrEmpty(pickedPath) || string.IsNullOrEmpty(path) || !Path.HasExtension(pickedPath))
+        {
+            return false;
+        }
+
+        var picked = pickedPath.Replace('\\', '/');
+        var other = path.Replace('\\', '/');
+        var cut = picked.LastIndexOf('/');
+        if (cut <= 0 || other.LastIndexOf('/') != cut || !other.StartsWith(picked[..(cut + 1)], StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var folder = picked[(picked.LastIndexOf('/', cut - 1) + 1)..cut];
+        return folder.Length > 0
+            && picked[(cut + 1)..].StartsWith(folder, StringComparison.OrdinalIgnoreCase)
+            && other[(cut + 1)..].StartsWith(folder, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The library mapping a link row came through, or null when it is no longer set up.</summary>
@@ -173,13 +204,16 @@ public sealed class LinkCacheFiller : BackgroundService
         }
 
         var config = _configManager.Configuration;
-        var rows = Table().GetLinks().Where(r => r.StorageMode == StorageMode.Link).ToList();
+        // Read so that a table that cannot be read throws. Taken for no links, it would empty the cache.
+        var rows = Table().GetLinksStrict().Where(r => r.StorageMode == StorageMode.Link).ToList();
         var byId = rows.ToDictionary(r => r.SourceItemId, StringComparer.OrdinalIgnoreCase);
         var permanent = PermanentLinks(config, rows);
         foreach (var entry in _cache.List())
         {
-            // The link was removed, became a copy, or its library left the cache.
-            if (!byId.TryGetValue(entry.LinkId, out var row) || MappingFor(config, row) is not { ExcludeFromLinkCache: false })
+            // The link was removed, became a copy, or its library left the cache. A link the link check
+            // found the source will not stream, such as with linking turned off there, is dropped too,
+            // so a cached file does not outlive the source's say for longer than one content sync.
+            if (!byId.TryGetValue(entry.LinkId, out var row) || MappingFor(config, row) is not { ExcludeFromLinkCache: false } || LinkVerifier.Flagged(row))
             {
                 _cache.Remove(entry.LinkId);
             }
@@ -255,25 +289,57 @@ public sealed class LinkCacheFiller : BackgroundService
 
     private ContentSyncTableManager Table() => _services.GetRequiredService<ContentSyncTableManager>();
 
-    private HashSet<string> Playing() => _playing.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> Playing()
+    {
+        lock (_playing)
+        {
+            return _playing.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    // The item a playback event is about. A film held in several versions reports the film, and names
+    // the version being played as its media source.
+    private BaseItem? Played(PlaybackProgressEventArgs e)
+        => Guid.TryParse(e.MediaSourceId, out var version) && version != e.Item?.Id && _libraryManager.GetItemById(version) is { } item
+            ? item
+            : e.Item;
+
+    private static string SessionOf(PlaybackProgressEventArgs e) => e.Session?.Id ?? e.DeviceId ?? e.PlaySessionId ?? string.Empty;
 
     private void OnStart(object? sender, PlaybackProgressEventArgs e)
     {
         try
         {
-            if (!_cache.Enabled || e.Item?.Path is not { } path || !path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) || _links.Find(path) is not { } link)
+            var played = Played(e);
+            if (played?.Path is not { } path || !path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) || _links.Find(path) is not { } link)
             {
                 return;
             }
 
-            _playing.AddOrUpdate(link.LinkId, 1, (_, viewers) => viewers + 1);
+            // Noted whether or not the cache is on, so a viewer who started before it was switched on
+            // is still known to be watching.
+            lock (_playing)
+            {
+                if (!_playing.TryGetValue(link.LinkId, out var sessions))
+                {
+                    _playing[link.LinkId] = sessions = new HashSet<string>(StringComparer.Ordinal);
+                }
+
+                sessions.Add(SessionOf(e));
+            }
+
+            if (!_cache.Enabled)
+            {
+                return;
+            }
+
             _cache.Played(link.LinkId);
             var user = e.Users?.FirstOrDefault();
             Enqueue(link.LinkId, CacheReason.Played, user?.Id);
 
             // The episodes after this one are cached ahead, so the next press of play is local.
             var ahead = _configManager.Configuration.LinkCachePreCacheEpisodes;
-            if (ahead > 0 && e.Item is Episode episode && episode.SeriesId != Guid.Empty)
+            if (ahead > 0 && played is Episode episode && episode.SeriesId != Guid.Empty)
             {
                 var episodes = _libraryManager.GetItemList(new InternalItemsQuery(user)
                 {
@@ -301,12 +367,15 @@ public sealed class LinkCacheFiller : BackgroundService
     {
         try
         {
-            if (e.Item?.Path is { } path && path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) && _links.Find(path) is { } link)
+            if (Played(e)?.Path is { } path && path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) && _links.Find(path) is { } link)
             {
                 _cache.Played(link.LinkId);
-                if (_playing.AddOrUpdate(link.LinkId, 0, (_, viewers) => viewers - 1) <= 0)
+                lock (_playing)
                 {
-                    _playing.TryRemove(link.LinkId, out _);
+                    if (_playing.TryGetValue(link.LinkId, out var sessions) && sessions.Remove(SessionOf(e)) && sessions.Count == 0)
+                    {
+                        _playing.Remove(link.LinkId);
+                    }
                 }
             }
         }
@@ -329,7 +398,15 @@ public sealed class LinkCacheFiller : BackgroundService
 
         var permanent = PermanentLinks(config, new[] { row }).Count > 0;
         var name = Path.GetFileName(row.SourcePath);
-        if (row.SourceSize > config.GetLinkCacheSizeBytes() || !_cache.MakeRoom(row.SourceSize, Playing()))
+        // The size is what room is made for and what the download is held to, so a file whose size
+        // the source never gave is not cached.
+        if (row.SourceSize <= 0)
+        {
+            _logger.LogInformation("Did not cache {File}: its size on the source is not known", name);
+            return;
+        }
+
+        if (row.SourceSize > config.GetLinkCacheSizeBytes())
         {
             _logger.LogInformation("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));
             return;
@@ -357,6 +434,14 @@ public sealed class LinkCacheFiller : BackgroundService
                 return;
             }
 
+            // Room is made only once the source has agreed to send the file, so a source that is down
+            // or refuses never costs the cache what it already holds.
+            if (!_cache.MakeRoom(row.SourceSize, Playing()))
+            {
+                _logger.LogInformation("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));
+                return;
+            }
+
             var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             await using (body.ConfigureAwait(false))
             {
@@ -365,7 +450,7 @@ public sealed class LinkCacheFiller : BackgroundService
                 {
                     var speed = config.GetEffectiveDownloadSpeedBytes();
                     await StallWatchdogStream.CopyAsync(
-                        body,
+                        new CappedReadStream(body, row.SourceSize),
                         file,
                         StallWatchdogStream.DefaultIdleTimeout,
                         (from, to, token) => StreamUtilities.CopyWithSpeedLimitAsync(from, to, speed, token),
@@ -373,7 +458,7 @@ public sealed class LinkCacheFiller : BackgroundService
                 }
             }
 
-            var expected = row.SourceSize > 0 ? row.SourceSize : response.Content.Headers.ContentLength ?? 0;
+            var expected = row.SourceSize;
             if (_cache.Complete(fill.LinkId, extension, expected, fill.Reason, permanent))
             {
                 _logger.LogInformation("Cached {File} ({Size}) from '{Server}'", name, FormatUtilities.FormatBytes(expected), server.DisplayName);

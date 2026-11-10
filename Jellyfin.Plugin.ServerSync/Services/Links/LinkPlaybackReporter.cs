@@ -32,6 +32,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
     private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ISessionManager _sessionManager;
+    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly ILinkRegistry _links;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ISourceServerClientFactory _clientFactory;
@@ -46,6 +47,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
 
     public LinkPlaybackReporter(
         ISessionManager sessionManager,
+        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
         ILinkRegistry links,
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
@@ -54,6 +56,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
         ILogger<LinkPlaybackReporter> logger)
     {
         _sessionManager = sessionManager;
+        _libraryManager = libraryManager;
         _links = links;
         _configManager = configManager;
         _clientFactory = clientFactory;
@@ -113,7 +116,9 @@ public sealed class LinkPlaybackReporter : BackgroundService
     {
         try
         {
-            var path = e.Item?.Path;
+            // A film held in several versions reports the film, and names the version being played as
+            // its media source. The version is what streams, so it is what the source is told about.
+            var path = (Guid.TryParse(e.MediaSourceId, out var version) && version != e.Item?.Id ? _libraryManager.GetItemById(version) : null)?.Path ?? e.Item?.Path;
             if (path is null || !path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) || _links.Find(path) is not { } link)
             {
                 return;

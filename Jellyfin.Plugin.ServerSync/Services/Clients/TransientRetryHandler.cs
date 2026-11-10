@@ -53,10 +53,17 @@ public sealed class TransientRetryHandler : DelegatingHandler
             or HttpStatusCode.ServiceUnavailable
             or HttpStatusCode.GatewayTimeout;
 
+    /// <summary>
+    /// Set on a request whose caller does its own failover, such as a link stream, which tries another
+    /// server at once rather than waiting on this one.
+    /// </summary>
+    public static readonly HttpRequestOptionsKey<bool> NoRetry = new("ServerSync.NoRetry");
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var retryable = request.Content is null && (request.Method == HttpMethod.Get || request.Method == HttpMethod.Head);
+        var retryable = request.Content is null && (request.Method == HttpMethod.Get || request.Method == HttpMethod.Head)
+            && !(request.Options.TryGetValue(NoRetry, out var once) && once);
         if (!retryable)
         {
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);

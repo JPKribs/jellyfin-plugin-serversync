@@ -280,7 +280,8 @@ public class LinkMatchingTests
     /// <summary>
     /// A film Jellyfin lists once with two files is two versions: the first as itself, and the other
     /// as an item of its own with that file's id, path, and size. Remote sources, links, and anything
-    /// that is not video are never offered.
+    /// that is not video are never offered, nor is a version whose link would have the same name as one
+    /// already offered.
     /// True: a Link mapping links every version, so a user refused one can play another.
     /// False: only the first version would ever be linked, and a refused user would have nothing else to play.
     /// </summary>
@@ -300,7 +301,9 @@ public class LinkMatchingTests
                 new() { Id = first.ToString("N"), Path = "/m/Film/Film - 4K.mkv", Size = 9000 },
                 new() { Id = second.ToString("N"), Path = "/m/Film/Film - 1080p.mkv", Size = 3000 },
                 new() { Id = Guid.NewGuid().ToString("N"), Path = "http://elsewhere/film", IsRemote = true },
-                new() { Id = Guid.NewGuid().ToString("N"), Path = "/m/Film/Film - Link.strm" }
+                new() { Id = Guid.NewGuid().ToString("N"), Path = "/m/Film/Film - Link.strm" },
+                new() { Id = Guid.NewGuid().ToString("N"), Path = "/m/Film/Film - 4K.mp4" },
+                new() { Id = Guid.NewGuid().ToString("N"), Path = "/m/Film/Film - 1080p.mp4" }
             }
         };
 
@@ -314,7 +317,7 @@ public class LinkMatchingTests
         film.Type = Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Audio;
         Assert.Empty(LinkPaths.OtherVersions(film));
         film.Type = Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Movie;
-        film.MediaSources.RemoveRange(1, 3);
+        film.MediaSources.RemoveRange(1, 5);
         Assert.Empty(LinkPaths.OtherVersions(film));
     }
 }

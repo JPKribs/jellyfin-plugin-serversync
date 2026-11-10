@@ -61,7 +61,7 @@ public partial class PeerController
             return refusal!;
         }
 
-        var verdict = HeldToScopedUser(policy.Check(peer, itemId, userId, sourceUserId, probe), userManager);
+        var verdict = HeldToScopedUser(policy.Check(peer, itemId, userId, sourceUserId, probe, watching: !fill), userManager);
         if (!verdict.Allowed || verdict.Item is null)
         {
             _logger.LogWarning("Refused a link stream to '{Server}': {Reason}", peer.DisplayName, JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(verdict.Reason, 300));
@@ -81,6 +81,19 @@ public partial class PeerController
             HttpContext.Response.RegisterForDispose(handle);
         }
 
+        // A cache download is not counted as a stream, so the flag is held to a few at once for each
+        // server. A server cannot then use it to stream as many files as it likes uncounted.
+        if (fill)
+        {
+            var filling = sessions.TryOpenFill(peer.Key);
+            if (filling is null)
+            {
+                return StatusCode(StatusCodes.Status429TooManyRequests, "this server is already sending that server as many cache downloads as it may at once");
+            }
+
+            HttpContext.Response.RegisterForDispose(filling);
+        }
+
         var mime = MediaBrowser.Model.Net.MimeTypes.GetMimeType(verdict.Item.Path);
 
         // A stream for a user, and a download into the calling server's cache, are held to this server's
@@ -93,7 +106,7 @@ public partial class PeerController
         }
 
         var file = new FileStream(verdict.Item.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        return new FileStreamResult(new Utilities.ThrottledReadStream(file, speed), mime)
+        return new FileStreamResult(new Utilities.ThrottledReadStream(file, sessions.SpeedFor(peer.Key, verdict.UserId, fill, speed)), mime)
         {
             EnableRangeProcessing = true,
             LastModified = System.IO.File.GetLastWriteTimeUtc(verdict.Item.Path)

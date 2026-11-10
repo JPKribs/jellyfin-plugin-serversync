@@ -314,11 +314,14 @@ public class SyncMissingContentTask
         // A link downloads nothing, so it branches off before the download steps and never touches them.
         if (record.StorageMode == StorageMode.Link)
         {
+            // An .nfo that is gone while its link is still there was removed by the user. One that went
+            // with its link, such as a deleted folder, was not, and is written again with the link.
+            var linkWasThere = !string.IsNullOrEmpty(record.LocalPath) && File.Exists(record.LocalPath);
             (_linkWriter ?? throw new InvalidOperationException("Links cannot be written on this server")).Write(record, TypedManager, ConfigManager.Configuration);
 
             // Read before the companions replace the row's list, which is where a written .nfo is recorded.
             var nfoRecorded = Services.Links.LinkNfo.Recorded(record);
-            var nfoRemoved = Services.Links.LinkNfo.RemovedByUser(record);
+            var nfoRemoved = linkWasThere && Services.Links.LinkNfo.RemovedByUser(record);
             await DownloadLinkCompanionsAsync(record, cancellationToken).ConfigureAwait(false);
             if (nfoRemoved)
             {

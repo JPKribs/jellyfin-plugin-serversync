@@ -164,6 +164,24 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     });
 
     /// <summary>
+    /// Returns every link row with a local path, and throws when the table cannot be read. The link
+    /// cache drops the files of links that are gone, so it must never take a failed read for no links.
+    /// </summary>
+    public IList<SyncItem> GetLinksStrict() => ReadStrict<IList<SyncItem>>(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM SyncItems WHERE StorageMode IN (1, 2) AND LocalPath IS NOT NULL";
+        using var reader = cmd.ExecuteReader();
+        var links = new List<SyncItem>();
+        while (reader.Read())
+        {
+            links.Add(MapFromReader(reader));
+        }
+
+        return links;
+    });
+
+    /// <summary>
     /// Returns every link row with a local path. The link registry reads this as one snapshot.
     /// </summary>
     public IList<SyncItem> GetLinks() => ExecuteRead<IList<SyncItem>>(

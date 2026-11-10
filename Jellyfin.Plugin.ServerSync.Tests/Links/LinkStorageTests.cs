@@ -643,6 +643,32 @@ public sealed class LinkStorageTests : IDisposable
     }
 
     /// <summary>
+    /// A link the link check flagged, whose file then leaves the source's listing, is removed the way
+    /// a settled link is, not held for approval.
+    /// True: with removals automatic, a film deleted on the source takes its link with it.
+    /// False: every removed film would wait as a pending deletion once the link check had seen it first.
+    /// </summary>
+    [Fact]
+    public void Missing_FlaggedLink_IsRemovedAsASettledOne()
+    {
+        var path = Media("Flagged.strm");
+        _files.Write(path, "id", replace: false);
+        var flagged = Row("id", path, StorageMode.Link, status: SyncStatus.Errored);
+        flagged.Reason = LinkVerifier.Prefix + "the file is no longer on the source";
+        _table.Upsert(flagged);
+        var failed = Row("other", Media("Failed.strm"), StorageMode.Link, status: SyncStatus.Errored);
+        failed.Reason = "A .strm that Server Sync did not write is already there";
+        _files.Write(failed.LocalPath!, "other", replace: false);
+        _table.Upsert(failed);
+
+        SyncStateService.ProcessMissingItem(_table, _table.GetBySourceItemId("id")!, ApprovalMode.Enabled, NullLogger.Instance);
+        SyncStateService.ProcessMissingItem(_table, _table.GetBySourceItemId("other")!, ApprovalMode.Enabled, NullLogger.Instance);
+
+        Assert.Equal(SyncStatus.Deleting, _table.GetBySourceItemId("id")!.Status);
+        Assert.Equal(SyncStatus.Pending, _table.GetBySourceItemId("other")!.Status);
+    }
+
+    /// <summary>
     /// A source that refuses the check outright flags every link to it with its reason, and one that
     /// is down or does not know the check flags nothing.
     /// True: switching linking off on the source shows on every link, and an outage is not mistaken for dead links.

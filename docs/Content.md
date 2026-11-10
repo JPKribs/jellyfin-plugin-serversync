@@ -7,6 +7,9 @@ Content syncing mirrors missing or updated media files from a source Jellyfin se
 * **Enable Content Sync** turns content syncing on.
 * **Temporary Folder** sets the staging folder where files download before they move to the final location.
 * **Include Companion Files** also downloads external subtitle files with each media file, and beside each link. Other companions (NFO files, local artwork, external audio tracks) have no download route in the Jellyfin API and are skipped. A link gets an `.nfo` of its own, written from the source's details.
+* **Take Link Images From the Source** gives links the trickplay and chapter images their source made. On by default. See [Links](Links.md#trickplay-and-chapter-images).
+* **Stream Direct Play of Links Per User** streams a link's direct play for the user playing, so two viewers of one link are counted apart. On by default.
+* **Cache Size (GB)**, **Cache Location**, **Cache Retention (days)**, **Pre-cache Episodes**, and **Removal Order** set up the link cache, which is off until it has a size. Downloads into it are held to **Download Speed** too. See [The Link Cache](Links.md#the-link-cache).
 * **Storage**, on each library mapping in the Servers tab, holds the source's files as full **Copy** files, the default, or as **Link** files that stream from the source. See [Links](Links.md).
 * **Downloads At Once** limits how many files download at once.
 * **Download Speed** sets the **Normal** rate, where 0 means unlimited.

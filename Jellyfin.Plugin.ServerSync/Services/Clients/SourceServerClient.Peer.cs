@@ -436,6 +436,9 @@ public partial class SourceServerClient
     private async Task<HttpResponseMessage> SendPeerStreamAsync(string path, string? range, bool head, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(head ? HttpMethod.Head : HttpMethod.Get, _serverUrl + path);
+
+        // A stream's caller falls back to another server itself, so this server is asked once.
+        request.Options.Set(TransientRetryHandler.NoRetry, true);
         AddAuthorizationHeader(request);
         request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.VersionHeader, _pluginVersion);
         request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.ProtocolHeader, Services.Queue.HintProtocol.ProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));

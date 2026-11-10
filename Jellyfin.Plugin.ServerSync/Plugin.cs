@@ -182,7 +182,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     }
 
     private string LinkCacheRoot(PluginConfiguration config)
-        => string.IsNullOrWhiteSpace(config.LinkCachePath) ? System.IO.Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder) : config.LinkCachePath;
+        => Services.Links.LinkCache.RootFor(config.LinkCachePath, System.IO.Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder));
 
     /// <summary>
     /// Empties the link cache when the plugin is uninstalled: the folder under Jellyfin's cache, and a
@@ -190,7 +190,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     /// </summary>
     public override void OnUninstalling()
     {
-        foreach (var root in new[] { System.IO.Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder), Configuration.LinkCachePath })
+        foreach (var root in new[] { System.IO.Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder), LinkCacheRoot(Configuration) })
         {
             try
             {

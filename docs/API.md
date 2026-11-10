@@ -237,7 +237,7 @@ These serve [links](Links.md). The source answers `Stream`, `Stream/Check`, `Pla
 
 #### GET /Sync/Peer/Stream/{itemId}?serverId={id}&userId={id}&sourceUserId={id}&probe={bool}&fill={bool}
 
-Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted. `fill=true` is a download into the calling server's [link cache](Links.md#the-link-cache): it passes the same checks, is held to the speed limits for that server and user, and is not counted as a stream.
+Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted. `fill=true` is a download into the calling server's [link cache](Links.md#the-link-cache): it passes the same checks for the user apart from the stream limits, is held to the speed limits for that server and user, and is not counted as a stream. A caller holds at most two at once, and a third answers `429`. A stream for a user is held to **Link Stream Speed**, or the user's own, after the first three seconds' worth.
 
 Answers `200` or `206` with the file, or `403` with the reason as text: linking is off for the caller, the user cannot be resolved or may not play or see the item, the bitrate is over the user's limit, or a limit is reached. A file that is itself a `.strm` here is refused. A standard user's key only streams as that user.
 
@@ -301,7 +301,7 @@ Answers `204`, `400` for an unknown command, or `404` when no session here is pl
 
 #### POST /Sync/Peer/Links/Describe
 
-Answers for files the caller holds links to: whether each is still here to stream and its size, and with `Details` its media info. The linking server asks on every content sync to [check its links](Links.md#the-link-check), and asks with `Details` to give a link its media info without probing the file. At most 200 items a request.
+Answers for files the caller holds links to: whether each is still here to stream and its size, and with `Details` its media info. The linking server asks on every content sync to [check its links](Links.md#the-link-check), and asks with `Details` to give a link its media info without probing the file. At most 200 items a request. More, or no `ItemIds`, answers `400`. A folder or an unknown id answers `Exists: false`.
 
 ```json
 { "ServerId": "…", "ItemIds": [ "…" ], "Details": true }
@@ -326,7 +326,7 @@ Answers for files the caller holds links to: whether each is still here to strea
 
 #### GET /Sync/Peer/Links/{itemId}/Images/{kind}/{index}?serverId={id}&width={width}
 
-One image this server made for a file the caller links to. `kind` is `Chapter`, with the chapter's index, or `Trickplay`, with the tile's index and the `width` of its set. Answers the image as JPEG, `403` when linking is off for the caller, or `404` when there is no such image.
+One image this server made for a file the caller links to. `kind` is `Chapter`, with the chapter's index, or `Trickplay`, with the tile's index and the `width` of its set. Answers the image as JPEG, `403` when linking is off for the caller, or `404` when there is no such image, kind, or item, or the item is one a standard user's key cannot see. `width` is ignored for `Chapter`.
 
 #### GET /Sync/Peer/Links
 
@@ -338,7 +338,7 @@ This server's links, each with the path its full copy would have, in this server
 
 #### GET /Sync/Link/{linkId}?k={secret}
 
-The address written inside each link. Jellyfin's own ffmpeg and stream proxy call it while playing a link, with no token, so it is the one plugin route that needs no Jellyfin sign in. It only answers a request from and to this server's own loopback address that carries no proxy header, with the link's secret, while a user the source allowed, or this server's media probe, may read it. It streams the file from the source with range support, and `HEAD` answers the headers alone. Anything else is `403`, and an unknown link is `404`.
+The address written inside each link. Jellyfin's own ffmpeg and stream proxy call it while playing a link, with no token, so it is the one plugin route that needs no Jellyfin sign in. It only answers a request from and to this server's own loopback address that carries no proxy header, with the link's secret, while a user who was allowed at play, or this server's media probe, may read it. It sends the file from the link cache when it is there, and otherwise streams it from the source, with range support, and `HEAD` answers the headers alone. The probe's read ends after 256 MB. Direct play does not come through here unless **Stream Direct Play of Links Per User** is off. Anything else is `403`, an unknown link is `404`, and a source that cannot be reached or is no longer set up is `502` or `503`.
 
 ## Operator routes
 
@@ -417,7 +417,21 @@ Turns links into full copies, the **Turn links into full copies** action on the 
 { "Promoted": 2, "Skipped": 0 }
 ```
 
-Content rows from `GET /Sync/Items` carry `StorageMode`: `Copy`, `Link`, or `Promoting` for a link on its way to a copy.
+Content rows from `GET /Sync/Items` carry `StorageMode`: `Copy`, `Link`, or `Promoting` for a link on its way to a copy, and `Cached`, true for a link whose file is in the link cache.
+
+### GET /Sync/LinkCache
+
+What the [link cache](Links.md#the-link-cache) holds now. The Settings tab shows it under the cache's settings.
+
+```json
+{ "Enabled": true, "Location": "/cache/serversync-links", "Files": 12, "UsedBytes": 48318382080, "UsedFormatted": "45 GB", "LimitBytes": 107374182400, "LimitFormatted": "100 GB", "Waiting": 2 }
+```
+
+`Waiting` counts files queued to be cached. With the cache off, `Enabled` is false and the counts are 0.
+
+### POST /Sync/LinkCache/Clear
+
+Deletes every cached file, as **Empty the Cache** does. Links keep playing from their sources. Answers `204`.
 
 ### DELETE /Sync/Servers/{key}/Rows
 

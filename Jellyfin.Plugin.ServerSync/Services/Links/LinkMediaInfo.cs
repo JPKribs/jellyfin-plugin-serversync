@@ -33,6 +33,14 @@ public sealed class LinkMediaInfo
     // The most one image from the source may weigh. A trickplay tile is a few hundred kilobytes.
     private const long MaxImageBytes = 32L * 1024 * 1024;
 
+    // The most of each kind a source's answer is taken for. A real file is far inside these, so an
+    // answer past them is cut off rather than followed.
+    private const int MaxStreams = 200;
+    private const int MaxChapters = 500;
+    private const int MaxTrickplaySets = 8;
+    private const int MaxTilesPerSet = 5000;
+    private const int MaxTextLength = 400;
+
     private readonly IServiceProvider _services;
     private readonly ILibraryManager _libraryManager;
     private readonly IPluginConfigurationManager _configManager;
@@ -77,8 +85,22 @@ public sealed class LinkMediaInfo
     {
         ArgumentNullException.ThrowIfNull(local);
         ArgumentNullException.ThrowIfNull(shipped);
+        // A stream from the source names nothing on this server: it is a track inside the file, so any
+        // path or address it carries is dropped rather than saved for Jellyfin to open later.
+        var inside = shipped.Where(s => s is not null && !s.IsExternal).Take(MaxStreams).ToList();
+        foreach (var stream in inside)
+        {
+            stream.Path = null;
+            stream.DeliveryUrl = null;
+            stream.IsExternalUrl = null;
+            stream.Codec = Short(stream.Codec);
+            stream.Language = Short(stream.Language);
+            stream.Title = Short(stream.Title);
+            stream.Comment = Short(stream.Comment);
+        }
+
         var merged = local.Where(s => s.IsExternal && s.Type == MediaStreamType.Audio)
-            .Concat(shipped.Where(s => !s.IsExternal))
+            .Concat(inside)
             .Concat(local.Where(s => s.IsExternal && s.Type != MediaStreamType.Audio))
             .ToList();
         for (var i = 0; i < merged.Count; i++)
@@ -88,6 +110,9 @@ public sealed class LinkMediaInfo
 
         return merged;
     }
+
+    private static string? Short(string? text)
+        => text is { Length: > MaxTextLength } ? text[..MaxTextLength] : text;
 
     /// <summary>
     /// Asks a link's own server for the file's media info and saves it on the link's item. False when
@@ -160,7 +185,7 @@ public sealed class LinkMediaInfo
 
         var takeImages = client is not null && _configManager.Configuration.TakeLinkImagesFromSource;
         var chapters = new List<ChapterInfo>();
-        for (var i = 0; i < (description.Chapters?.Count ?? 0); i++)
+        for (var i = 0; i < Math.Min(description.Chapters?.Count ?? 0, MaxChapters); i++)
         {
             var from = description.Chapters![i];
             if (from.StartPositionTicks >= video.RunTimeTicks)
@@ -168,7 +193,7 @@ public sealed class LinkMediaInfo
                 continue;
             }
 
-            var chapter = new ChapterInfo { StartPositionTicks = from.StartPositionTicks, Name = from.Name };
+            var chapter = new ChapterInfo { StartPositionTicks = from.StartPositionTicks, Name = Short(from.Name) };
             if (takeImages && from.HasImage)
             {
                 var path = stores.Paths.GetChapterImagePath(video, from.StartPositionTicks);
@@ -222,9 +247,13 @@ public sealed class LinkMediaInfo
 
         var held = await trickplay.GetTrickplayResolutions(video.Id).ConfigureAwait(false);
         var withMedia = _libraryManager.GetLibraryOptions(video)?.SaveTrickplayWithMedia ?? false;
-        foreach (var set in description.Trickplay)
+        foreach (var set in description.Trickplay.Take(MaxTrickplaySets))
         {
-            if (set.Width <= 0 || set.TileCount() == 0 || held?.ContainsKey(set.Width) == true)
+            // The source's numbers decide how many images are fetched, so numbers no real set has are
+            // passed over rather than followed.
+            if (set is null || set.Width is <= 0 or > 4096 || set.Height is <= 0 or > 4096
+                || set.TileWidth is <= 0 or > 100 || set.TileHeight is <= 0 or > 100 || set.Interval <= 0
+                || set.TileCount() is 0 or > MaxTilesPerSet || held?.ContainsKey(set.Width) == true)
             {
                 continue;
             }
@@ -279,7 +308,7 @@ public sealed class LinkMediaInfo
                 var file = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
                 await using (file.ConfigureAwait(false))
                 {
-                    await StallWatchdogStream.CopyAsync(body, file, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
+                    await StallWatchdogStream.CopyAsync(new CappedReadStream(body, MaxImageBytes), file, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
                     if (file.Length == 0 || file.Length > MaxImageBytes)
                     {
                         return false;

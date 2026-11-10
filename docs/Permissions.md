@@ -84,15 +84,16 @@ Host names are looked up once and remembered for an hour. When a caller does not
 
 ## Links
 
-Streaming a [link](Links.md) uses the linking server's key for the source, like every other read, and the source's whitelist must allow it. On top of that the source decides, on every play, which of its users the stream runs as and whether that user may play the item, by its own user mappings, the **Stream Unmapped Users As** user, and its limits. A source entry that holds a standard user's key streams as that user only.
+Streaming a [link](Links.md) uses the linking server's key for the source, like every other read, and the source's whitelist must allow it. On top of that the source decides, on every play that streams from it, which of its users the stream runs as and whether that user may play the item, by its own user mappings, the **Stream Unmapped Users As** user, and its limits. A source entry that holds a standard user's key streams as that user only. A link whose file is in the link cache plays under the linking server's rules alone.
 
 | Function | Standard user | Administrator or API key |
 | :--- | :--- | :--- |
 | Stream a link | Only as that user, only what that user can see and play | As the user the source maps, within the source's limits |
 | Report playback of a link | Only for that user | For the mapped user |
+| Check links and take their media info and images | Only items that user can see | Every linked item |
 | Remote control of a viewer from the source's dashboard | Works, once the source's entry for the linking server holds a key that server's whitelist allows | Works, once the source's entry for the linking server holds a key |
 
-The address inside a link, `/Sync/Link`, is the one route that needs no Jellyfin sign in, since Jellyfin's own ffmpeg calls it without a token. It answers only this server itself, from and to its loopback address with no proxy header, with the link's secret, while a user the source allowed is playing. See [Links security](Links.md#security).
+The address inside a link, `/Sync/Link`, is the one route that needs no Jellyfin sign in, since Jellyfin's own ffmpeg calls it without a token. It answers only this server itself, from and to its loopback address with no proxy header, with the link's secret, while a user who was allowed at play is playing. See [Links security](Links.md#security).
 
 ## On This Server
 

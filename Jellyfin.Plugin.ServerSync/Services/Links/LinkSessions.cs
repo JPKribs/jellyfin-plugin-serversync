@@ -19,6 +19,14 @@ public sealed class LinkSessions
     private readonly Func<DateTime> _now;
     private readonly object _lock = new();
     private readonly Dictionary<(string Peer, Guid User, Guid Item), Stream> _streams = new();
+    private readonly Dictionary<string, int> _fills = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Utilities.SpeedBucket> _speeds = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The most cache downloads one server may hold open at once. A linking server downloads one file
+    /// at a time, so this only stops a server from using the download flag to stream uncounted.
+    /// </summary>
+    public const int MaxFillsPerPeer = 2;
 
     public LinkSessions()
         : this(() => DateTime.UtcNow)
@@ -80,6 +88,63 @@ public sealed class LinkSessions
         }
     }
 
+    /// <summary>
+    /// Opens a download into that server's link cache, when it holds fewer than it may. Null when it
+    /// is at the limit.
+    /// </summary>
+    /// <param name="peerKey">The calling server's entry key.</param>
+    /// <returns>The handle, or null.</returns>
+    public IDisposable? TryOpenFill(string peerKey)
+    {
+        var peer = peerKey.ToUpperInvariant();
+        lock (_lock)
+        {
+            _fills.TryGetValue(peer, out var open);
+            if (open >= MaxFillsPerPeer)
+            {
+                return null;
+            }
+
+            _fills[peer] = open + 1;
+        }
+
+        return new FillHandle(this, peer);
+    }
+
+    /// <summary>
+    /// The speed everything sent to one server for one user shares: every request of a stream, however
+    /// many a player opens at once, or the downloads into that server's cache made for that user. So a
+    /// limit holds for the user as a whole, not for each request on its own.
+    /// </summary>
+    /// <param name="peerKey">The calling server's entry key.</param>
+    /// <param name="userId">The user streamed as, or null for none.</param>
+    /// <param name="fill">Whether this is a cache download, which has a speed of its own beside the user's streams.</param>
+    /// <param name="bytesPerSecond">The rate now.</param>
+    /// <returns>The shared speed.</returns>
+    public Utilities.SpeedBucket SpeedFor(string peerKey, Guid? userId, bool fill, long bytesPerSecond)
+    {
+        var key = peerKey.ToUpperInvariant() + "|" + (userId?.ToString("N") ?? string.Empty) + (fill ? "|fill" : string.Empty);
+        lock (_lock)
+        {
+            if (_speeds.Count > 256)
+            {
+                var idle = System.Diagnostics.Stopwatch.GetElapsedTime(0) - TimeSpan.FromMinutes(10);
+                foreach (var old in _speeds.Where(p => p.Value.LastUsed < idle).Select(p => p.Key).ToList())
+                {
+                    _speeds.Remove(old);
+                }
+            }
+
+            if (_speeds.TryGetValue(key, out var bucket))
+            {
+                bucket.SetRate(bytesPerSecond);
+                return bucket;
+            }
+
+            return _speeds[key] = new Utilities.SpeedBucket(bytesPerSecond);
+        }
+    }
+
     /// <summary>Whether this user already streams this item to that server, so a new request is not a new stream.</summary>
     public bool IsActive(string peerKey, Guid userId, Guid itemId)
     {
@@ -129,6 +194,43 @@ public sealed class LinkSessions
         foreach (var key in _streams.Where(p => p.Value.Open == 0 && p.Value.LastSeen < cutoff).Select(p => p.Key).ToList())
         {
             _streams.Remove(key);
+        }
+    }
+
+    private sealed class FillHandle : IDisposable
+    {
+        private readonly LinkSessions _owner;
+        private readonly string _peer;
+        private bool _disposed;
+
+        public FillHandle(LinkSessions owner, string peer)
+        {
+            _owner = owner;
+            _peer = peer;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            lock (_owner._lock)
+            {
+                if (_owner._fills.TryGetValue(_peer, out var open))
+                {
+                    if (open <= 1)
+                    {
+                        _owner._fills.Remove(_peer);
+                    }
+                    else
+                    {
+                        _owner._fills[_peer] = open - 1;
+                    }
+                }
+            }
         }
     }
 

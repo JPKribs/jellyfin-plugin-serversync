@@ -85,6 +85,14 @@ public static class LinkPaths
             yield break;
         }
 
+        // Two versions that differ only by extension would be the same .strm, so only the first is
+        // linked, as when Jellyfin lists such files as one item.
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (LinkPathFor(item.Path) is { } own)
+        {
+            taken.Add(own);
+        }
+
         foreach (var source in sources)
         {
             if (source is null
@@ -93,7 +101,8 @@ public static class LinkPaths
                 || string.IsNullOrEmpty(source.Path)
                 || string.Equals(source.Path, item.Path, StringComparison.OrdinalIgnoreCase)
                 || source.IsRemote == true
-                || source.Path.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+                || LinkPathFor(source.Path) is not { } link
+                || !taken.Add(link))
             {
                 continue;
             }

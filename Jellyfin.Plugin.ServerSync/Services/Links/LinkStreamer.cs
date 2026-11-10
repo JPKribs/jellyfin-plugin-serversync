@@ -107,8 +107,15 @@ public sealed class LinkStreamer
         // asks nothing of the source.
         if (_cache?.PathFor(link.LinkId) is { } cached)
         {
-            await Results.File(cached, MediaBrowser.Model.Net.MimeTypes.GetMimeType(cached), enableRangeProcessing: true).ExecuteAsync(context).ConfigureAwait(false);
-            return Written;
+            try
+            {
+                await Results.File(cached, MediaBrowser.Model.Net.MimeTypes.GetMimeType(cached), enableRangeProcessing: true).ExecuteAsync(context).ConfigureAwait(false);
+                return Written;
+            }
+            catch (IOException) when (!context.Response.HasStarted)
+            {
+                // Dropped from the cache between the lookup and the read, so it streams from the source.
+            }
         }
 
         var head = HttpMethods.IsHead(context.Request.Method);
@@ -154,7 +161,9 @@ public sealed class LinkStreamer
 
             var http = context.Response;
             http.StatusCode = (int)response.StatusCode;
-            http.ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+            // The type comes from the file's own name here, never from what the other server sent.
+            http.ContentType = MediaBrowser.Model.Net.MimeTypes.GetMimeType(string.IsNullOrEmpty(link.CopiedPath) ? sourcePath : link.CopiedPath);
+            http.Headers["X-Content-Type-Options"] = "nosniff";
             http.ContentLength = response.Content.Headers.ContentLength;
             foreach (var name in PassedHeaders)
             {
@@ -245,22 +254,24 @@ public sealed class LinkStreamer
         => status is HttpStatusCode.Forbidden or HttpStatusCode.NotFound or HttpStatusCode.TooManyRequests || (int)status >= 500;
 
     // The bytes of the file a response carries: where they start and end, or null when it does not say.
-    private static (long Start, long End)? WindowOf(HttpResponseMessage response)
+    private static (long Start, long End, long? Total)? WindowOf(HttpResponseMessage response)
     {
         if (response.StatusCode == HttpStatusCode.PartialContent)
         {
-            return response.Content.Headers.ContentRange is { From: { } from, To: { } to } ? (from, to) : null;
+            return response.Content.Headers.ContentRange is { From: { } from, To: { } to } range ? (from, to, range.Length) : null;
         }
 
-        return response.Content.Headers.ContentLength is > 0 and var length ? (0, length - 1) : null;
+        return response.Content.Headers.ContentLength is > 0 and var length ? (0, length - 1, length) : null;
     }
 
-    // Whether a reopened response carries exactly the bytes still owed.
-    private static bool Continues(HttpResponseMessage? response, (long Start, long End) window, long sent)
+    // Whether a reopened response carries exactly the bytes still owed, of a file the same length as
+    // the one the stream began from.
+    private static bool Continues(HttpResponseMessage? response, (long Start, long End, long? Total) window, long sent)
         => response is { StatusCode: HttpStatusCode.PartialContent }
-            && response.Content.Headers.ContentRange is { From: { } from, To: { } to }
+            && response.Content.Headers.ContentRange is { From: { } from, To: { } to } range
             && from == window.Start + sent
-            && to == window.End;
+            && to == window.End
+            && (window.Total is null || range.Length is null || range.Length == window.Total);
 
     private static async Task<string> ReadReasonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {

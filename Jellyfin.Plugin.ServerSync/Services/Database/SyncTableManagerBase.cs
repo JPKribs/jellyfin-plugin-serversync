@@ -148,6 +148,15 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     });
 
     /// <inheritdoc />
+    /// <summary>
+    /// Runs a read that throws when the database cannot be read, rather than answering as if it held
+    /// nothing. For a caller that would delete on an empty answer.
+    /// </summary>
+    /// <typeparam name="T">What the read returns.</typeparam>
+    /// <param name="read">The read.</param>
+    /// <returns>What it read.</returns>
+    protected T ReadStrict<T>(Func<SqliteConnection, T> read) => _database.RunRead(read);
+
     public IList<TRecord> GetByStatusStrict(SyncStatus status) => _database.RunRead(conn =>
     {
         using var cmd = conn.CreateCommand();

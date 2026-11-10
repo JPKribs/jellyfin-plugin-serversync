@@ -142,7 +142,7 @@ public sealed class LinkVerifier
                         continue;
                     }
 
-                    var reason = Prefix + (refusal ?? found?.Reason ?? "the file is no longer on the source");
+                    var reason = Prefix + (refusal ?? (string.IsNullOrWhiteSpace(found?.Reason) ? "the file is no longer on the source" : JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(found!.Reason, 300)));
                     if (!Flagged(row) || !string.Equals(row.Reason, reason, StringComparison.Ordinal))
                     {
                         _logger.LogWarning("The link {Path} cannot play: {Reason}", row.LocalPath, reason[Prefix.Length..]);
