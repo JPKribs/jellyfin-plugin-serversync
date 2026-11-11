@@ -61,7 +61,7 @@ A peer hands this server the secret it must present on requests that name it as 
 { "ServerId": "…", "Secret": "…" }
 ```
 
-Answers `{ "Paired": true }`, or `409` when the issuing server is not listed here.
+Answers `{ "Paired": true }`. A secret is only taken while this server is asking the issuing server's `Link` route, so a call at any other time answers `409`, as does an issuing server that is not listed here. `Secret` is 32 to 256 letters, digits, `-` or `_`, and anything else answers `400`.
 
 #### The pairing header
 
@@ -118,7 +118,7 @@ The answer is one result per hint, in request order, each with a `Code` and the 
 | `FutureVersion` | The version is dated more than five minutes ahead of the receiver's clock. |
 | `Unsupported` | The receiver does not apply that kind live. |
 
-Completions add the codes an apply can end with: `Applied`, `Unchanged`, `Locked`, `AwaitingApproval`, `Ignored`, `SourceGone`, `Unreadable` when the sender did not say where a file is, `Priority` when another server provides the file, and `GaveUp` after a day of failed attempts. `NotMapped`, `Filtered`, `Ignored`, `ModuleOff`, `Unsupported`, `Priority`, and a final `NoLocalItem` hold that object back from the receiver for a day.
+Completions add the codes an apply can end with: `Applied`, `Unchanged`, `Locked`, `AwaitingApproval`, `Ignored`, `SourceGone`, `Unreadable` when the sender did not say where a file is, `Priority` when another server provides the file, and `GaveUp` after a day of failed attempts. `NotMapped`, `Filtered`, `Ignored`, `ModuleOff`, `Unsupported`, and `Priority` hold that object back from the receiver for a day. `NoLocalItem` holds nothing back.
 
 | Status | Meaning on the sender |
 | --- | --- |
@@ -126,7 +126,8 @@ Completions add the codes an apply can end with: `Applied`, `Unchanged`, `Locked
 | `400` | The request itself is malformed, such as a hint with no `HintId`. Permanent for those rows, and written once to the activity log. A problem with one hint is declined for that hint alone in a `200` answer. |
 | `401` or `403` | The key is refused, or the sender is not on the receiver's whitelist. The peer is paused for fifteen minutes, set by **First wait** in the **Refused** column of the Retries table under Settings > Processing. |
 | `404` | No Server Sync behind that URL. The peer is paused. |
-| `409` | The receiver does not list the sender as Pull or Sync. The peer is paused with the reason. |
+| `409` | The receiver does not list the sender as Pull or Sync, or its entry for the sender is disabled. The peer is paused with the reason. |
+| `426` | The two servers' protocols do not overlap. The peer is paused with the reason. |
 | `428` | The sender is not paired. The sender pairs through `Link` and sends once more. If that still answers `428`, the peer is paused with the reason. |
 | `503` | The receiver already holds ten thousand hints from this sender. Retried with backoff, nothing is lost. |
 | anything else | Retried after thirty seconds, doubling up to one hour, forever. The Retries table under Settings > Processing changes these, and a hint out of **Max tries** is marked failed. |
@@ -361,7 +362,7 @@ Both queues on this server and the delivery state of every peer it sends to.
 }
 ```
 
-`Pending` counts local edits still gathering before they become hints, and `Gathering` names them with when each goes out. `Unmatched` counts local changes since start that no Push or Sync server mapped, with the last one described in `LastUnmatched`, which is the first thing to check when nothing is being sent. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. `Sends` lists the kinds this server sends to that peer, which are the modules selected there, or is null until the peer has said. The lists hold at most five hundred rows each. `OutboundCounts` by state name and `InboundCount` cover the whole table.
+`Pending` counts local edits still gathering before they become hints, and `Gathering` names them with when each goes out. `Unmatched` counts local changes since start that no Push or Sync server mapped, with the last one described in `LastUnmatched`, which is the first thing to check when nothing is being sent. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. `Sends` lists the kinds this server sends to that peer, which are the modules selected there, or is null until the peer has said. The lists hold at most five hundred rows each. `OutboundCounts` by state name and `InboundCount` cover the whole table, and `InboundFailingCount` counts the inbound rows whose apply has failed at least once.
 
 ### POST /Sync/Hints/Run
 
@@ -401,9 +402,13 @@ The version an object carries on this server: which server last edited it and wh
 { "ServerId": "…", "ServerName": "source-a", "Timestamp": "2026-10-03T19:30:47Z", "IsThisServer": false }
 ```
 
+### POST /Sync/Hints/Failed/Retry and DELETE /Sync/Hints/Failed
+
+Every failed row at once, the **Retry Failed** and **Dismiss Failed** buttons on the Queue tab. A failed row is an outbound row in the `Failed` state, or an inbound row whose apply has failed at least once and waits to be tried again. Retry clears each row's attempts, then delivers the outbound rows and applies the inbound rows now, and answers `{ "Retried": 1200, "Outbound": 1150, "Inbound": 50 }`. Delete discards them, and answers `{ "Removed": 1200, "Outbound": 1150, "Inbound": 50 }`. A discarded inbound row is reported to its sender as finished, so it is not sent again. The scheduled tasks still carry the changes either way.
+
 ### DELETE /Sync/Hints/Outbound/{id} and DELETE /Sync/Hints/Inbound/{id}
 
-Discard one row from either queue by its `Id`. The scheduled tasks still carry the change. Answers `204`, or `404`.
+Discard one row from either queue by its `Id`. A discarded inbound row is reported to its sender as finished, so it is not sent again. The scheduled tasks still carry the change. Answers `204`, or `404`.
 
 ### POST /Sync/PromoteItems
 

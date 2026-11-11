@@ -59,6 +59,9 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         // (file based, safe to share).
         _secrets = new Lazy<SecretProtector>(() => StableSecretProtection.CreateProtector(applicationPaths, SecretsName, logger));
 
+        // The history merge is static too, and reads which parts to copy from the live settings.
+        Services.HistorySyncMergeService.EnabledFields = () => Configuration.GetHistoryFields();
+
         // The disk space checks are static and called from places with no logger of their own.
         Services.DiskSpaceService.Logger = logger;
 
@@ -143,7 +146,10 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         // without the operator retyping its API key.
         foreach (var server in incoming.Servers)
         {
-            server.ApiKey = _secrets.Value.ResolveIncoming(server.ApiKey, KeptApiKeyFor(server, stored));
+            // A key posted in its protected form is the stored key coming back from the page. It is
+            // kept under the same rule as the sentinel, so it cannot be saved against a new address.
+            var incomingKey = SecretProtector.IsProtected(server.ApiKey) ? SecretProtector.KeptSentinel : server.ApiKey;
+            server.ApiKey = _secrets.Value.ResolveIncoming(incomingKey, KeptApiKeyFor(server, stored));
         }
     }
 
@@ -212,7 +218,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     public override Guid Id => Guid.Parse("ebd650b5-6f4c-4ccb-b10d-23dffb3a7286");
 
     /// <inheritdoc />
-    public override string Description => "Sync media from a source Jellyfin server to this server.";
+    public override string Description => "Sync media, watch history, metadata, people, user settings, and playlists between Jellyfin servers.";
 
     /// <inheritdoc />
     public override IEnumerable<PluginPageInfo> GetPages()

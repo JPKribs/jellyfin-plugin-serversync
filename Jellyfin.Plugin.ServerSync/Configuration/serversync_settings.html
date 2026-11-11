@@ -34,7 +34,7 @@
                             <h3 class="jpk-subsection-title">Retries</h3>
                             <div class="ssFormTable ssFormTable3 mb-md">
                                 <div class="ssFormRow ssFormHead"><span>Setting</span><span>No Answer</span><span>Refused</span></div>
-                                <div class="ssFormRow"><span class="ssFormLabel">First wait<span class="ssFormHint">Doubles each try</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRetrySeconds" min="5" max="3600" class="ssFormInput" /><span class="ssUnit">sec</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRefusedRetryMinutes" min="1" max="1440" class="ssFormInput" /><span class="ssUnit">min</span></span></div>
+                                <div class="ssFormRow"><span class="ssFormLabel">First wait<span class="ssFormHint">No Answer doubles each try</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRetrySeconds" min="5" max="3600" class="ssFormInput" /><span class="ssUnit">sec</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRefusedRetryMinutes" min="1" max="1440" class="ssFormInput" /><span class="ssUnit">min</span></span></div>
                                 <div class="ssFormRow"><span class="ssFormLabel">Longest wait</span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRetryMaxMinutes" min="1" max="1440" class="ssFormInput" /><span class="ssUnit">min</span></span><span class="ssFormCell ssFormNone">Fixed</span></div>
                                 <div class="ssFormRow"><span class="ssFormLabel">Max tries<span class="ssFormHint">0 retries forever</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintMaxRetries" min="0" max="1000" class="ssFormInput" /><span class="ssUnit"></span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRefusedMaxRetries" min="0" max="1000" class="ssFormInput" /><span class="ssUnit"></span></span></div>
                             </div>
@@ -117,7 +117,7 @@
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableContentSync" />
                                         <span class="checkboxLabel">Enable Content Sync</span>
                                     </label>
-                                    <div class="fieldDescription checkboxFieldDescription">Copies the media files of mapped libraries to this server.</div>
+                                    <div class="fieldDescription checkboxFieldDescription">Copies or links the media files of mapped libraries to this server.</div>
                                 </div>
                                 <div class="ssRoleTable">
                                     <div class="ssRoleRow ssRoleHead"><span>Permission</span><span>User</span><span>Admin</span></div>
@@ -140,7 +140,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkDetectUpdatedFiles" />
                                             <span class="checkboxLabel">Detect Updated Files</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Download again when the source file changes.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Check each synced file against the source's size, and download it again when it differs or is missing.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -189,7 +189,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkEnableRecyclingBin" />
                                             <span class="checkboxLabel">Enable Recycling Bin</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Move removed files to a bin instead of deleting them.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Move deleted and replaced files to a bin instead of deleting them.</div>
                                     </div>
 
                                     <div id="recyclingBinSettings" class="jpk-indent hidden">
@@ -221,31 +221,31 @@
                                     <div class="inputContainer">
                                         <label for="txtMaxConcurrentDownloads">Downloads At Once</label>
                                         <input is="emby-input" type="number" id="txtMaxConcurrentDownloads" min="1" max="10" />
-                                        <div class="fieldDescription">1 to 10.</div>
+                                        <div class="fieldDescription">Files downloaded at the same time. 1 to 10.</div>
                                     </div>
 
                                     <div class="inputContainer">
                                         <label for="txtMaxRetryCount">Download Retries</label>
                                         <input is="emby-input" type="number" id="txtMaxRetryCount" min="1" max="10" />
-                                        <div class="fieldDescription">1 to 10.</div>
+                                        <div class="fieldDescription">Tries for a failed download. Also the runs that retry an errored item of any sync type. 1 to 10.</div>
                                     </div>
 
                                     <div class="inputContainer">
                                         <label for="txtSizeMatchToleranceBytes">Size Tolerance (bytes)</label>
                                         <input is="emby-input" type="number" id="txtSizeMatchToleranceBytes" min="0" />
-                                        <div class="fieldDescription">Bytes a size may differ. Default 0.</div>
+                                        <div class="fieldDescription">A local file within this many bytes of the source's size counts as the same file. Default 0.</div>
                                     </div>
 
                                     <div class="inputContainer">
                                         <label for="txtTempDownloadPath">Temporary Folder</label>
-                                        <input is="emby-input" type="text" id="txtTempDownloadPath" placeholder="(Uses default cache directory)" />
-                                        <div class="fieldDescription">Empty uses Jellyfin's cache folder.</div>
+                                        <input is="emby-input" type="text" id="txtTempDownloadPath" placeholder="Default" />
+                                        <div class="fieldDescription">Empty uses a serversync folder in Jellyfin's cache folder.</div>
                                     </div>
 
                                     <div class="inputContainer">
                                         <label for="txtMinFreeDiskSpace">Minimum Free Space (GB)</label>
                                         <input is="emby-input" type="number" id="txtMinFreeDiskSpace" min="1" max="1000" />
-                                        <div class="fieldDescription">Downloads pause below this.</div>
+                                        <div class="fieldDescription">Free space kept on the library's disk. A file that would leave less is not downloaded.</div>
                                     </div>
 
                                     <h3 class="jpk-subsection-title">Download Speed</h3>
@@ -258,9 +258,9 @@
                                     </div>
                                     <div class="ssFormTable ssFormTable2 mb-md">
                                         <div class="ssFormRow ssFormHead"><span>When</span><span>Speed, 0 for unlimited</span></div>
-                                        <div class="ssFormRow"><span class="ssFormLabel">Normal</span><span class="ssFormCell"><input is="emby-input" type="number" id="txtMaxDownloadSpeed" min="0" class="ssFormInput" /><select is="emby-select" id="selDownloadSpeedUnit" class="ssUnitSelect"><option value="KB">KB/s</option><option value="MB" selected>MB/s</option><option value="GB">GB/s</option></select></span></div>
+                                        <div class="ssFormRow"><span class="ssFormLabel">Normal<span class="ssFormHint">Shared by all downloads, 0 for no limit</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtMaxDownloadSpeed" min="0" class="ssFormInput" /><select is="emby-select" id="selDownloadSpeedUnit" class="ssUnitSelect"><option value="KB">KB/s</option><option value="MB" selected>MB/s</option><option value="GB">GB/s</option></select></span></div>
                                         <div class="ssFormRow ssScheduleRow"><span class="ssFormLabel">Scheduled</span><span class="ssFormCell"><input is="emby-input" type="number" id="txtScheduledDownloadSpeed" min="0" class="ssFormInput" /><select is="emby-select" id="selScheduledDownloadSpeedUnit" class="ssUnitSelect"><option value="KB">KB/s</option><option value="MB" selected>MB/s</option><option value="GB">GB/s</option></select></span></div>
-                                        <div class="ssFormRow ssScheduleRow"><span class="ssFormLabel">Hours<span class="ssFormHint">24 hour clock, 22 to 6 runs overnight</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtScheduledStartHour" min="0" max="23" class="ssFormInput" /><span class="ssUnit">to</span><input is="emby-input" type="number" id="txtScheduledEndHour" min="0" max="24" class="ssFormInput" /></span></div>
+                                        <div class="ssFormRow ssScheduleRow"><span class="ssFormLabel">Hours<span class="ssFormHint">Server time, 24 hour clock. 22 to 6 runs overnight</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtScheduledStartHour" min="0" max="23" class="ssFormInput" /><span class="ssUnit">to</span><input is="emby-input" type="number" id="txtScheduledEndHour" min="0" max="24" class="ssFormInput" /></span></div>
                                     </div>
 
                                     <h3 class="jpk-subsection-title">Links</h3>
@@ -343,7 +343,7 @@
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableHistorySync" />
                                         <span class="checkboxLabel">Enable History Sync</span>
                                     </label>
-                                    <div class="fieldDescription checkboxFieldDescription">Copies played state, progress, play count, and favorites.</div>
+                                    <div class="fieldDescription checkboxFieldDescription">Copies played state, progress, play count, last played date, and favorites.</div>
                                 </div>
                                 <div class="ssRoleTable">
                                     <div class="ssRoleRow ssRoleHead"><span>Permission</span><span>User</span><span>Admin</span></div>
@@ -506,7 +506,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncFolderItems" />
                                             <span class="checkboxLabel">Folder Items</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Also sync shows, seasons, and albums.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Also sync shows, seasons, albums, artists, and collections.</div>
                                     </div>
                                 </div>
                             </div>

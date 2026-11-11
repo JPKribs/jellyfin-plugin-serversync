@@ -240,7 +240,12 @@ export default function (view) {
             config.IncludeCompanionFiles = getChecked('chkIncludeCompanionFiles');
             config.TakeLinkImagesFromSource = getChecked('chkTakeLinkImagesFromSource');
             config.StreamLinksDirectly = getChecked('chkStreamLinksDirectly');
-            config.LinkCacheSizeGb = Math.max(0, getIntValue('txtLinkCacheSizeGb', 0));
+            // Saving a size of 0 empties the cache, so only a typed 0 does. An empty or unreadable
+            // field keeps the saved size, and a fraction of a gigabyte rounds up to one.
+            var cacheSize = parseFloat(getValue('txtLinkCacheSizeGb'));
+            if (!isNaN(cacheSize)) {
+                config.LinkCacheSizeGb = cacheSize > 0 ? Math.max(1, Math.floor(cacheSize)) : 0;
+            }
             config.LinkCachePath = getValue('txtLinkCachePath') || '';
             config.LinkCacheRetentionDays = Math.max(0, getIntValue('txtLinkCacheRetentionDays', 30));
             config.LinkCachePreCacheEpisodes = Math.max(0, getIntValue('txtLinkCachePreCacheEpisodes', 2));
@@ -538,7 +543,7 @@ export default function (view) {
     function resetEntireDatabase() {
         confirmReset([
             'Are you sure you want to reset the ENTIRE sync database?',
-            'This will delete ALL tracking data across all sync types (Content, History, Metadata, Users). You will need to re-sync everything from scratch. This cannot be undone.'
+            'This will delete ALL tracking data across all sync types (Content, History, Metadata, People, Users). You will need to re-sync everything from scratch. This cannot be undone.'
         ]).then(function (confirmed) {
             if (!confirmed) return;
 

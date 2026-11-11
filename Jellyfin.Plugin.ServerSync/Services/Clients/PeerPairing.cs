@@ -30,4 +30,8 @@ public sealed class PeerPairing
     /// <summary>The secret the peer issued to this server, or null when it never did.</summary>
     /// <returns>The secret.</returns>
     public string? CurrentSecret() => _store.GetOutbound(_peerKey);
+
+    /// <summary>Notes that this server is asking the peer to pair, until the result is disposed.</summary>
+    /// <returns>Ends the wait when disposed.</returns>
+    public System.IDisposable Expect() => _store.Expect(_peerKey);
 }

@@ -26,6 +26,8 @@ public static class SyncStateService
     /// <summary>
     /// Builds a record for a new item discovered on the source server.
     /// Returns null when downloads are disabled. The caller persists.
+    /// A file already at the local path with the source's size is taken as the same file. Any other
+    /// file there was not written by this plugin, so replacing it follows the changed files setting.
     /// </summary>
     public static SyncItem? ProcessNewItem(
         LibraryMapping mapping,
@@ -35,6 +37,7 @@ public static class SyncStateService
         DateTime sourceCreateDate,
         string localPath,
         ApprovalMode downloadMode,
+        ApprovalMode replaceMode,
         long sizeMatchToleranceBytes)
     {
         ArgumentNullException.ThrowIfNull(mapping);
@@ -65,6 +68,15 @@ public static class SyncStateService
             {
                 syncItem.Status = SyncStatus.Synced;
                 syncItem.PendingType = null;
+            }
+            else if (replaceMode == ApprovalMode.Disabled)
+            {
+                return null;
+            }
+            else if (replaceMode == ApprovalMode.RequireApproval || requiresApproval)
+            {
+                syncItem.Status = SyncStatus.Pending;
+                syncItem.PendingType = PendingType.Replacement;
             }
         }
 

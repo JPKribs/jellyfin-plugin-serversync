@@ -96,10 +96,28 @@ public partial class PeerController
 
         var mime = MediaBrowser.Model.Net.MimeTypes.GetMimeType(verdict.Item.Path);
 
+        // A probe is for no user, so nothing above counted or limited it. It is held to an allowance
+        // for each file instead, enough to read a file's media info and not enough to copy the file.
+        if (verdict.UserId is null && !fill)
+        {
+            var probed = verdict.Item.Id;
+            if (!sessions.TakeProbe(peer.Key, probed, 0))
+            {
+                return StatusCode(StatusCodes.Status429TooManyRequests, "that server has read as much of this file as a probe may. A stream for a user is not limited this way");
+            }
+
+            var probeFile = new FileStream(verdict.Item.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            return new FileStreamResult(new Utilities.MeteredReadStream(probeFile, bytes => sessions.TakeProbe(peer.Key, probed, bytes)), mime)
+            {
+                EnableRangeProcessing = true,
+                LastModified = System.IO.File.GetLastWriteTimeUtc(verdict.Item.Path)
+            };
+        }
+
         // A stream for a user, and a download into the calling server's cache, are held to this server's
         // speed for that server and for that user, when one is set. The calling server's media probe
         // is small and is never slowed.
-        var speed = verdict.UserId is null && !fill ? 0 : peer.GetLinkStreamSpeedBytes(_configManager.Configuration.IsInBandwidthSchedule(), verdict.UserId);
+        var speed = peer.GetLinkStreamSpeedBytes(_configManager.Configuration.IsInBandwidthSchedule(), verdict.UserId);
         if (speed <= 0)
         {
             return PhysicalFile(verdict.Item.Path, mime, enableRangeProcessing: true);
@@ -496,10 +514,22 @@ public partial class PeerController
     [HttpGet("Links")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PeerLinksResponse> Links([FromServices] ContentSyncTableManager table)
+    public ActionResult<PeerLinksResponse> Links([FromServices] ContentSyncTableManager table, [FromServices] IUserManager userManager, [FromServices] ILibraryManager libraryManager)
     {
         ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+
+        // A standard user learns of the links it can see as items here, and of no other path.
+        var owner = PeerCallerGuard.ScopedUser(HttpContext) is { } scoped ? userManager.GetUserById(scoped) : null;
+        if (owner is null && PeerCallerGuard.ScopedUser(HttpContext) is not null)
+        {
+            return Ok(new PeerLinksResponse());
+        }
+
         var links = table.GetLinks()
+            .Where(row => owner is null
+                || (Guid.TryParse(row.LocalItemId, out var localId) && libraryManager.GetItemById(localId) is { } local && local.IsVisible(owner)))
             .Select(row => LinkPaths.CopiedPathOf(row) is { } copied ? new PeerLink { LinkPath = row.LocalPath!, CopiedPath = copied } : null)
             .Where(link => link is not null)
             .Select(link => link!)

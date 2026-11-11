@@ -385,7 +385,7 @@ public class SyncMissingContentTask
             return;
         }
 
-        var companions = await _downloadService.DownloadCompanionFilesAsync(source.Client, itemId, folder, _tempPath, _speedLimit, config, cancellationToken).ConfigureAwait(false);
+        var companions = await _downloadService.DownloadCompanionFilesAsync(source.Client, itemId, folder, Path.GetFileNameWithoutExtension(record.LocalPath) ?? string.Empty, _tempPath, _speedLimit, config, cancellationToken).ConfigureAwait(false);
         if (companions.Count > 0)
         {
             record.CompanionFiles = string.Join(",", companions);

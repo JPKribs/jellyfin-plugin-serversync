@@ -50,7 +50,7 @@ A standard user's key works in every direction, limited to what that user can se
 | Section | What it holds |
 | :--- | :--- |
 | Processing | How long changes wait before they are sent, retries, parallelism, and how often a full scan runs |
-| Whitelist | Who may call this server's sync endpoints. Administrators and API keys from servers on the Servers tab always may. Add users with the locations they may call from |
+| Whitelist | Who may call this server's sync endpoints. Administrators and API keys calling from an enabled server on the Servers tab always may. Add users with the locations they may call from |
 | Synchronization | One section per sync type, each with a table of what a standard user and an administrator can do |
 | Troubleshooting | Table resets, which forget tracking but never touch media |
 

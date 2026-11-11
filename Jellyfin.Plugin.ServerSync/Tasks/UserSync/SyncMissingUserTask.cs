@@ -325,6 +325,7 @@ public class SyncMissingUserTask
             localUser,
             item,
             categoryLabel: "Policy",
+            maySync: UserSyncMergeService.ShouldSyncPolicyProperty,
             getTarget: dto => dto.Policy,
             persistAsync: (id, policy) => _userManager.UpdatePolicyAsync(id, policy));
 
@@ -333,6 +334,7 @@ public class SyncMissingUserTask
             localUser,
             item,
             categoryLabel: "Configuration",
+            maySync: UserSyncMergeService.ShouldSyncConfigurationProperty,
             getTarget: dto => dto.Configuration,
             persistAsync: (id, config) => _userManager.UpdateConfigurationAsync(id, config));
 
@@ -347,6 +349,7 @@ public class SyncMissingUserTask
         User localUser,
         UserSyncItem item,
         string categoryLabel,
+        Func<System.Reflection.PropertyInfo, bool> maySync,
         Func<MediaBrowser.Model.Dto.UserDto, T?> getTarget,
         Func<Guid, T, Task> persistAsync)
         where T : class
@@ -378,7 +381,9 @@ public class SyncMissingUserTask
             try
             {
                 var property = targetType.GetProperty(kvp.Key);
-                if (property == null || !property.CanWrite)
+                // The merged value is read back from the table, so the rule for what may be copied is
+                // applied again here. A row may hold a property that is not copied.
+                if (property == null || !property.CanWrite || !maySync(property))
                 {
                     skippedProperties.Add(kvp.Key);
                     continue;
@@ -482,7 +487,7 @@ public class SyncMissingUserTask
             // failures here don't touch local state.
             using (var fileStream = File.Create(tempPath))
             {
-                await StallWatchdogStream.CopyAsync(imageStream, fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
+                await StallWatchdogStream.CopyAsync(new CappedReadStream(imageStream, CappedReadStream.MaxSyncedImageBytes), fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
             }
 
             string downloadedHash;

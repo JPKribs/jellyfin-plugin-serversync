@@ -26,7 +26,7 @@ public class EmptyRecyclingBinTask : IScheduledTask
 
     public string Key => "ServerSyncEmptyRecyclingBin";
 
-    public string Description => "Permanently deletes files that have been in the recycling bin longer than the configured retention period.";
+    public string Description => "Deletes files kept in the recycling bin longer than Keep For (days).";
 
     public string Category => "Server Sync";
 

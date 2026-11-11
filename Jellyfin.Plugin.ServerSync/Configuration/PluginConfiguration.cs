@@ -452,6 +452,15 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool HistorySyncFavorites { get; set; } = true;
 
+    /// <summary>The parts of watch history the History settings allow to be copied.</summary>
+    /// <returns>The enabled parts.</returns>
+    public Models.HistorySync.HistoryFields GetHistoryFields()
+        => (HistorySyncPlayedStatus ? Models.HistorySync.HistoryFields.Played : 0)
+            | (HistorySyncPlaybackPosition ? Models.HistorySync.HistoryFields.Position : 0)
+            | (HistorySyncPlayCount ? Models.HistorySync.HistoryFields.PlayCount : 0)
+            | (HistorySyncLastPlayedDate ? Models.HistorySync.HistoryFields.LastPlayed : 0)
+            | (HistorySyncFavorites ? Models.HistorySync.HistoryFields.Favorite : 0);
+
     /// <summary>
     /// Timestamp when the last history sync completed.
     /// </summary>

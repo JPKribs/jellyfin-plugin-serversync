@@ -42,7 +42,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
     public string Key => "ServerSyncInformation";
 
     /// <inheritdoc />
-    public string Description => "Runs the full metadata, people, user, watch history, and playlist comparison with every scan server, refresh then apply, as the safety net under change hints.";
+    public string Description => "Compares metadata, people, user settings, watch history, and playlists with each Pull or Sync server and applies the differences.";
 
     /// <inheritdoc />
     public string Category => "Server Sync";

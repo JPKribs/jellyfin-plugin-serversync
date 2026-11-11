@@ -43,6 +43,12 @@ export function createQueueModule(ctx) {
                 this._bound = true;
                 view.querySelector('#btnQueueRefresh').addEventListener('click', function() { self.load(true); });
                 view.querySelector('#btnQueueRun').addEventListener('click', function() { self.runNow(); });
+                view.querySelector('#btnQueueRetryFailed').addEventListener('click', function() { self.failedAction('Hints/Failed/Retry', 'POST', 'Retried', 'failed change(s) tried again'); });
+                view.querySelector('#btnQueueDismissFailed').addEventListener('click', function() {
+                    if (window.confirm('Discard every failed change, sent and received? The scheduled tasks still carry them.')) {
+                        self.failedAction('Hints/Failed', 'DELETE', 'Removed', 'failed change(s) dismissed');
+                    }
+                });
                 view.querySelector('#btnQueueUnmatchedDismiss').addEventListener('click', function() { self.dismissUnmatched(); });
                 view.querySelector('#queueList').addEventListener('click', function(e) { self._onDiscard(e); });
                 view.querySelectorAll('.qCards .qCard').forEach(function(card) {
@@ -137,6 +143,22 @@ export function createQueueModule(ctx) {
             });
         },
 
+        // Every failed row at once: sent again, or discarded.
+        failedAction: function(route, method, countKey, done) {
+            var self = this;
+            var buttons = [view.querySelector('#btnQueueRetryFailed'), view.querySelector('#btnQueueDismissFailed')];
+            buttons.forEach(function(b) { b.disabled = true; });
+            ServerSyncShared.apiRequest(route, method).then(function(result) {
+                return self.load(true).then(function() {
+                    ServerSyncShared.showAlert(((result && result[countKey]) || 0) + ' ' + done);
+                });
+            }).catch(function() {
+                ServerSyncShared.showAlert('That did not work. See the server log');
+            }).then(function() {
+                buttons.forEach(function(b) { b.disabled = false; });
+            });
+        },
+
         dismissUnmatched: function() {
             var self = this;
             var btn = view.querySelector('#btnQueueUnmatchedDismiss');
@@ -163,6 +185,7 @@ export function createQueueModule(ctx) {
             view.querySelector('#queuePendingCount').textContent = count('Pending');
             view.querySelector('#queueSentCount').textContent = count('Sent');
             view.querySelector('#queueFailedCount').textContent = count('Failed');
+            view.querySelector('#queueFailedActions').classList.toggle('hidden', !(count('Failed') > 0 || data.InboundFailingCount > 0));
             view.querySelector('#queueInboundCount').textContent = data.InboundCount !== undefined ? data.InboundCount : inbound.length;
             view.querySelector('#queueGatheringCount').textContent = (data.Gathering || []).length || data.Pending || 0;
 

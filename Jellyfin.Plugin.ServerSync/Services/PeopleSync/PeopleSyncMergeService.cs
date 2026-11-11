@@ -53,7 +53,7 @@ public static class PeopleSyncMergeService
         // permanent IMDB desync in the modal.
         var sourceProviderIds = sourcePerson.ProviderIds?.AdditionalData?
             .Select(kvp => (kvp.Key, Value: MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value)))
-            .Where(kvp => !string.IsNullOrEmpty(kvp.Value))
+            .Where(kvp => !string.IsNullOrEmpty(kvp.Value) && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))
             .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(kvp => kvp.Key, kvp => kvp.Value!);
 
@@ -103,7 +103,7 @@ public static class PeopleSyncMergeService
         ArgumentNullException.ThrowIfNull(localPerson);
 
         var localProviderIds = localPerson.ProviderIds?
-            .Where(kvp => !string.IsNullOrEmpty(kvp.Value))
+            .Where(kvp => !string.IsNullOrEmpty(kvp.Value) && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))
             .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 

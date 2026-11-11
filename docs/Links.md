@@ -120,7 +120,7 @@ With **Include Companion Files** on, external subtitle files are downloaded besi
 
 Jellyfin never probes a `.strm` during a scan. The source already holds the file's runtime, container, streams, attachments, and chapters, so Server Sync asks the source for them about 20 seconds after the library adds the link and saves them on the link. Nothing is read from the file itself. Two minutes later it checks that the media info stuck, and asks again if a busy library scan saved over it, up to three times.
 
-When the source cannot give it, such as a source on an older release, the file is probed through the link instead. The probe may read up to 256 MB of a file, which is far more than a probe needs and far less than a film, so nothing else on the linking server reads whole files from the source through a new link.
+When the source cannot give it, such as a source on an older release, the file is probed through the link instead. The probe may read up to 256 MB of a file, which is far more than a probe needs and far less than a film, so nothing else on the linking server reads whole files from the source through a new link. The source holds probes to an allowance of its own, 512 MB of each file an hour for each server, and answers `429` past it, so the probe cannot be used to copy files around the stream and speed limits.
 
 Every **Sync Content** run also gives any link still without media info the source's, so a link missed while a server was restarting is caught on the next run. Jellyfin probes a link again each time someone plays it, as it does for any `.strm`.
 

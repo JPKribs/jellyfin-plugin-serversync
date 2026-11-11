@@ -191,6 +191,9 @@ public partial class SourceServerClient
     /// <returns>The listing, or null when the peer has no Server Sync that can answer.</returns>
     public async Task<Models.Peer.PeerLinkResponse?> GetPeerLinkAsync(string thisServerId, CancellationToken cancellationToken = default)
     {
+        // The peer answers this by handing over its secret before it returns, so the secret is only
+        // taken while this call is open.
+        using var expecting = Pairing?.Expect();
         var (_, parsed, _) = await PeerRequestAsync<Models.Peer.PeerLinkResponse>(HttpMethod.Get, "/Sync/Peer/Link?serverId=" + Uri.EscapeDataString(thisServerId ?? string.Empty), null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         return parsed;
     }
@@ -563,7 +566,7 @@ public partial class SourceServerClient
         var content = await ReadCappedAsync(response, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            return (status, null, System.Text.Encoding.UTF8.GetString(content));
+            return (status, null, RefusalText(content));
         }
 
         if (content.Length == 0)
@@ -572,6 +575,26 @@ public partial class SourceServerClient
         }
 
         return (status, System.Text.Json.JsonSerializer.Deserialize<TResponse>(content, PeerJsonOptions), null);
+    }
+
+    // A refusal's body ends up in logs, row reasons and the dashboard, and the peer wrote it. It is
+    // cut to a short single line, which still holds every refusal Server Sync itself sends.
+    private static string RefusalText(byte[] content)
+    {
+        const int Most = 2048;
+        var text = System.Text.Encoding.UTF8.GetString(content, 0, Math.Min(content.Length, Most * 4));
+        var line = new System.Text.StringBuilder(Math.Min(text.Length, Most));
+        foreach (var c in text)
+        {
+            if (line.Length >= Most)
+            {
+                break;
+            }
+
+            line.Append(char.IsControl(c) ? ' ' : c);
+        }
+
+        return line.ToString();
     }
 
     private static async Task<byte[]> ReadCappedAsync(HttpResponseMessage response, CancellationToken cancellationToken)

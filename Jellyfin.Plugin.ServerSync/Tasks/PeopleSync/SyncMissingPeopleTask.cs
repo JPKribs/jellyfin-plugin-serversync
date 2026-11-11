@@ -366,7 +366,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             var sourceIds = JsonFieldHelpers.ReadProviderIds(providerIdsValue);
             if (localPerson.ProviderIds != null)
             {
-                var toRemove = localPerson.ProviderIds.Keys.Where(k => !sourceIds.ContainsKey(k)).ToList();
+                var toRemove = localPerson.ProviderIds.Keys.Where(k => !sourceIds.ContainsKey(k) && !JsonFieldHelpers.IsOwnProviderKey(k)).ToList();
                 foreach (var key in toRemove)
                 {
                     localPerson.ProviderIds.Remove(key);
@@ -528,7 +528,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
                     await using (stream.ConfigureAwait(false))
                     {
                         using var fileStream = File.Create(tempPath);
-                        await StallWatchdogStream.CopyAsync(stream, fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
+                        await StallWatchdogStream.CopyAsync(new CappedReadStream(stream, CappedReadStream.MaxSyncedImageBytes), fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
                     }
 
                     try { tempBytes = new FileInfo(tempPath).Length; } catch (IOException) { }

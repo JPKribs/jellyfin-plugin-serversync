@@ -611,6 +611,16 @@ public class UpdateSyncTablesTask
 
         existing.TryGetValue(sourceItemId, out var existingItem);
 
+        // Rows are keyed by the source's item id, and two servers can report the same id. When the
+        // row belongs to another server and names a different local file, this server's item is not
+        // that file, so it is left alone. Taken as the same row, the other server's file would be
+        // moved to this server's path and handed to it.
+        if (existingItem is not null && BelongsToAnotherServer(existingItem, source.Source.Key, localPath))
+        {
+            Logger.LogDebug("Skipped {Path}: its id is already tracked for another server at {LocalPath}", sourcePath, existingItem.LocalPath);
+            return Task.FromResult<SyncItem?>(null);
+        }
+
         // Watched-by-all takes precedence: mark Ignored regardless of approval mode.
         if (source.WatchedByAll)
         {
@@ -698,6 +708,7 @@ public class UpdateSyncTablesTask
             sourceCreateDate,
             localPath,
             config.DownloadNewContentMode,
+            config.ReplaceExistingContentMode,
             config.SizeMatchToleranceBytes);
         return Task.FromResult(Stamp(fresh, source));
     }
@@ -743,6 +754,20 @@ public class UpdateSyncTablesTask
         => client.PeerLinksUnknown && item.Path?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true;
 
     // Every row remembers which server built it, so the apply phase downloads from the right peer.
+    private bool BelongsToAnotherServer(SyncItem row, string serverKey, string localPath)
+    {
+        if (string.IsNullOrEmpty(row.ServerKey)
+            || string.Equals(row.ServerKey, serverKey, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrEmpty(row.LocalPath)
+            || ConfigManager.Configuration.FindServer(row.ServerKey) is not { IsEnabled: true })
+        {
+            return false;
+        }
+
+        return !string.Equals(row.LocalPath, localPath, StringComparison.Ordinal)
+            && !string.Equals(row.LocalPath, LinkPaths.LinkPathFor(localPath), StringComparison.Ordinal);
+    }
+
     private static SyncItem? Stamp(SyncItem? item, ContentRefreshWork source)
     {
         if (item != null)

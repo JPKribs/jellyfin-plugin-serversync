@@ -198,11 +198,13 @@ public static class PeerHistoryNegotiator
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(state);
-        item.SourceIsPlayed = state.Played;
-        item.SourcePlayCount = state.PlayCount;
-        item.SourcePlaybackPositionTicks = state.PlaybackPositionTicks;
-        item.SourceLastPlayedDate = state.LastPlayedDate;
-        item.SourceIsFavorite = state.IsFavorite;
+        // A part the state does not carry, such as one switched off in the History settings, leaves
+        // the row's reading of it as it was.
+        item.SourceIsPlayed = state.Played ?? item.SourceIsPlayed;
+        item.SourcePlayCount = state.PlayCount ?? item.SourcePlayCount;
+        item.SourcePlaybackPositionTicks = state.PlaybackPositionTicks ?? item.SourcePlaybackPositionTicks;
+        item.SourceLastPlayedDate = DateOf(state, item.SourceLastPlayedDate);
+        item.SourceIsFavorite = state.IsFavorite ?? item.SourceIsFavorite;
     }
 
     /// <summary>Builds the state this server holds, as the history row records it.</summary>
@@ -244,11 +246,11 @@ public static class PeerHistoryNegotiator
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(state);
-        item.LocalIsPlayed = state.Played;
-        item.LocalPlayCount = state.PlayCount;
-        item.LocalPlaybackPositionTicks = state.PlaybackPositionTicks;
-        item.LocalLastPlayedDate = state.LastPlayedDate;
-        item.LocalIsFavorite = state.IsFavorite;
+        item.LocalIsPlayed = state.Played ?? item.LocalIsPlayed;
+        item.LocalPlayCount = state.PlayCount ?? item.LocalPlayCount;
+        item.LocalPlaybackPositionTicks = state.PlaybackPositionTicks ?? item.LocalPlaybackPositionTicks;
+        item.LocalLastPlayedDate = DateOf(state, item.LocalLastPlayedDate);
+        item.LocalIsFavorite = state.IsFavorite ?? item.LocalIsFavorite;
     }
 
     /// <summary>Writes a state as the merged result of a history row.</summary>
@@ -263,6 +265,38 @@ public static class PeerHistoryNegotiator
         item.MergedPlaybackPositionTicks = state.PlaybackPositionTicks;
         item.MergedLastPlayedDate = state.LastPlayedDate;
         item.MergedIsFavorite = state.IsFavorite;
+        HistorySyncMergeService.KeepEnabledFields(item);
+    }
+
+    /// <summary>A copy of a state with every part that is switched off in the History settings removed.</summary>
+    /// <param name="state">The state.</param>
+    /// <returns>The state this server may write or propose.</returns>
+    public static PeerHistoryState EnabledPartOf(PeerHistoryState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        var fields = HistorySyncMergeService.CurrentFields();
+        return new PeerHistoryState
+        {
+            Played = fields.HasFlag(HistoryFields.Played) ? state.Played : null,
+            PlayCount = fields.HasFlag(HistoryFields.PlayCount) ? state.PlayCount : null,
+            PlaybackPositionTicks = fields.HasFlag(HistoryFields.Position) ? state.PlaybackPositionTicks : null,
+            LastPlayedDate = fields.HasFlag(HistoryFields.LastPlayed) ? state.LastPlayedDate : null,
+            IsFavorite = fields.HasFlag(HistoryFields.Favorite) ? state.IsFavorite : null
+        };
+    }
+
+    // The date a state gives a row. A state with a date gives that date. One without gives no date
+    // when it really has none: the date is in use and the state carries a played mark, or the item
+    // is unplayed. Otherwise it says nothing about the date and the row keeps its own.
+    private static DateTime? DateOf(PeerHistoryState state, DateTime? kept)
+    {
+        if (state.LastPlayedDate.HasValue)
+        {
+            return state.LastPlayedDate;
+        }
+
+        var dated = HistorySyncMergeService.CurrentFields().HasFlag(HistoryFields.LastPlayed) && state.Played.HasValue;
+        return dated || state.Played == false ? null : kept;
     }
 
     private static bool Same<T>(T? a, T? b)

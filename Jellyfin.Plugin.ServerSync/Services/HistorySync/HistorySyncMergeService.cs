@@ -27,6 +27,7 @@ public static class HistorySyncMergeService
         if (item.HasNegotiatedBase)
         {
             MergeAgainstBase(item);
+            KeepEnabledFields(item);
             return;
         }
 
@@ -56,6 +57,76 @@ public static class HistorySyncMergeService
 
         // Played, Position, and LastPlayedDate: Negotiated based on most recent LastPlayedDate
         MergeNegotiatedHistory(item);
+        KeepEnabledFields(item);
+    }
+
+    /// <summary>
+    /// Reads which parts of history may be copied, from the History settings. Every merge, every
+    /// comparison and every state proposed to another server goes by it.
+    /// </summary>
+    public static Func<HistoryFields> EnabledFields { get; set; } = static () => HistoryFields.All;
+
+    private static readonly System.Threading.AsyncLocal<HistoryFields?> ScopedFields = new();
+
+    /// <summary>The parts of history that may be copied right now.</summary>
+    /// <returns>The enabled parts.</returns>
+    public static HistoryFields CurrentFields() => ScopedFields.Value ?? EnabledFields();
+
+    /// <summary>
+    /// Holds the enabled parts to a given set for the calling flow until the result is disposed, so
+    /// one piece of work sees one answer whatever the settings do meanwhile.
+    /// </summary>
+    /// <param name="fields">The parts to copy.</param>
+    /// <returns>Restores the previous answer when disposed.</returns>
+    public static IDisposable WithFields(HistoryFields fields)
+    {
+        var before = ScopedFields.Value;
+        ScopedFields.Value = fields;
+        return new FieldScope(before);
+    }
+
+    private sealed class FieldScope : IDisposable
+    {
+        private readonly HistoryFields? _before;
+
+        public FieldScope(HistoryFields? before) => _before = before;
+
+        public void Dispose() => ScopedFields.Value = _before;
+    }
+
+    /// <summary>
+    /// Clears the merged value of every part that is switched off. A merged value that is empty is
+    /// written nowhere and compared with nothing, on this server and on the other.
+    /// </summary>
+    /// <param name="item">The history row.</param>
+    public static void KeepEnabledFields(HistorySyncItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var fields = CurrentFields();
+        if (!fields.HasFlag(HistoryFields.Played))
+        {
+            item.MergedIsPlayed = null;
+        }
+
+        if (!fields.HasFlag(HistoryFields.Position))
+        {
+            item.MergedPlaybackPositionTicks = null;
+        }
+
+        if (!fields.HasFlag(HistoryFields.PlayCount))
+        {
+            item.MergedPlayCount = null;
+        }
+
+        if (!fields.HasFlag(HistoryFields.LastPlayed))
+        {
+            item.MergedLastPlayedDate = null;
+        }
+
+        if (!fields.HasFlag(HistoryFields.Favorite))
+        {
+            item.MergedIsFavorite = null;
+        }
     }
 
     /// <summary>
@@ -108,12 +179,20 @@ public static class HistorySyncMergeService
             item.MergedPlayCount = item.NegotiatedPlayCount ?? 0;
         }
 
+        // A part that is switched off has no agreed value, since it is never written to either side.
+        // It is left out of the question of which side moved, or every such part would read as moved
+        // on both sides and a change made on one server alone could never win.
+        var fields = CurrentFields();
+        bool? Mark(bool? played) => fields.HasFlag(HistoryFields.Played) ? played : null;
+        long? Spot(long? position) => fields.HasFlag(HistoryFields.Position) ? position : null;
+        DateTime? Date(DateTime? lastPlayed) => fields.HasFlag(HistoryFields.LastPlayed) ? lastPlayed : null;
+
         var sourcePlayMoved = PlayGroupMoved(
-            item.SourceIsPlayed, item.SourcePlaybackPositionTicks, item.SourceLastPlayedDate,
-            item.NegotiatedIsPlayed, item.NegotiatedPlaybackPositionTicks, item.NegotiatedLastPlayedDate);
+            Mark(item.SourceIsPlayed), Spot(item.SourcePlaybackPositionTicks), Date(item.SourceLastPlayedDate),
+            Mark(item.NegotiatedIsPlayed), Spot(item.NegotiatedPlaybackPositionTicks), Date(item.NegotiatedLastPlayedDate));
         var localPlayMoved = PlayGroupMoved(
-            item.LocalIsPlayed, item.LocalPlaybackPositionTicks, item.LocalLastPlayedDate,
-            item.NegotiatedIsPlayed, item.NegotiatedPlaybackPositionTicks, item.NegotiatedLastPlayedDate);
+            Mark(item.LocalIsPlayed), Spot(item.LocalPlaybackPositionTicks), Date(item.LocalLastPlayedDate),
+            Mark(item.NegotiatedIsPlayed), Spot(item.NegotiatedPlaybackPositionTicks), Date(item.NegotiatedLastPlayedDate));
 
         if (sourcePlayMoved && localPlayMoved)
         {
@@ -306,6 +385,14 @@ public static class HistorySyncMergeService
 
         // Only compare dates when the source has a reading of the item at all. A source with a
         // played flag but no date really has no date, so a merged date counts as a difference.
+        // With the date switched off the merged date is empty by design, which says nothing about the
+        // source's. Only an item merged to unplayed still asks the source to drop its date, since
+        // that is part of the unplayed mark.
+        if (!CurrentFields().HasFlag(HistoryFields.LastPlayed))
+        {
+            return item.MergedIsPlayed == false && item.SourceLastPlayedDate.HasValue;
+        }
+
         return item.SourceIsPlayed.HasValue && !SameInstantToSecond(item.MergedLastPlayedDate, item.SourceLastPlayedDate);
     }
 

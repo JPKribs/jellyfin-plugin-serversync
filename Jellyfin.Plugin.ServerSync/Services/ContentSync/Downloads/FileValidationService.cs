@@ -16,7 +16,8 @@ public static class FileValidationService
     /// <summary>
     /// Returns true if a local file's byte count is close enough to the recorded source size
     /// to be considered the same file. Use this instead of strict equality whenever the
-    /// "source size" comes from Jellyfin metadata rather than an HTTP Content-Length.
+    /// "source size" comes from Jellyfin metadata rather than an HTTP Content-Length. A source size
+    /// that is not known proves nothing about the local file, so it never counts as a match.
     /// </summary>
     /// <param name="localSize">Actual size of the local file in bytes.</param>
     /// <param name="sourceSize">Recorded source size in bytes.</param>
@@ -26,7 +27,7 @@ public static class FileValidationService
     {
         if (sourceSize <= 0)
         {
-            return true;
+            return false;
         }
 
         return Math.Abs(localSize - sourceSize) <= Math.Max(0, toleranceBytes);
@@ -175,9 +176,7 @@ public static class FileValidationService
 
             if (IsSizeWithinDriftTolerance(localInfo.Length, item.SourceSize, sizeMatchToleranceBytes))
             {
-                skipReason = item.SourceSize == 0
-                    ? $"Local file already exists (source size unknown, local size: {FormatUtilities.FormatBytes(localInfo.Length)})"
-                    : $"Local file already exists with matching size ({FormatUtilities.FormatBytes(localInfo.Length)})";
+                skipReason = $"Local file already exists with matching size ({FormatUtilities.FormatBytes(localInfo.Length)})";
                 return true;
             }
 

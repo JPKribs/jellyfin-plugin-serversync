@@ -104,7 +104,7 @@ public static class MetadataFieldWriter
             if (localItem.ProviderIds != null)
             {
                 var toRemove = localItem.ProviderIds.Keys
-                    .Where(k => !sourceIds.ContainsKey(k))
+                    .Where(k => !sourceIds.ContainsKey(k) && !JsonFieldHelpers.IsOwnProviderKey(k))
                     .ToList();
                 foreach (var key in toRemove)
                 {

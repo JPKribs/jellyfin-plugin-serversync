@@ -66,10 +66,33 @@ public sealed class HintTriage
             && PathUtilities.IsItemFiltered(path, mapping.SourceRootPath, mapping.FilterMode, mapping.FilteredItems);
     }
 
+    /// <summary>The longest id, type or user name a hint may carry.</summary>
+    public const int MaxIdLength = 256;
+
+    /// <summary>The longest key or path a hint may carry. A key is an id or a person's name.</summary>
+    public const int MaxPathLength = 4096;
+
+    private static bool TooLong(SyncHint hint)
+        => hint.Key.Length > MaxPathLength
+            || hint.ItemPath?.Length > MaxPathLength
+            || hint.ItemId?.Length > MaxIdLength
+            || hint.ItemType?.Length > MaxIdLength
+            || hint.UserId?.Length > MaxIdLength
+            || hint.UserName?.Length > MaxIdLength
+            || hint.OriginServerId?.Length > MaxIdLength
+            || hint.VersionServerId?.Length > MaxIdLength;
+
     public HintAssessment Assess(SourceServer origin, SyncHint hint, string senderServerId, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(origin);
         ArgumentNullException.ThrowIfNull(hint);
+
+        // A hint is stored as it arrives, so one field of any length would let a sender fill the
+        // queue's disk with a handful of rows.
+        if (hint.Key is not null && TooLong(hint))
+        {
+            return new(HintCode.Invalid, "a field of the hint is longer than this server accepts");
+        }
 
         if (string.IsNullOrWhiteSpace(hint.Key))
         {

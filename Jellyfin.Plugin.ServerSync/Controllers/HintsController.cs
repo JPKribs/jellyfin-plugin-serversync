@@ -355,7 +355,8 @@ public class HintsController : ControllerBase
             Unmatched = _observer.UnmatchedCount,
             LastUnmatched = _observer.LastUnmatched,
             Inbound = _inbound.GetRecent(OverviewRows).Select(InboundHintDto.From).ToList(),
-            InboundCount = _inbound.Count()
+            InboundCount = _inbound.Count(),
+            InboundFailingCount = _inbound.CountFailing()
         };
         foreach (var (state, count) in _outbound.CountByState())
         {
@@ -498,6 +499,48 @@ public class HintsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Tries every failed row again now, with its attempts cleared: outbound rows that were given up
+    /// on are delivered, and inbound rows whose apply kept failing are applied. For a server that was
+    /// down, or a fault that is fixed, long enough ago that its changes stopped being tried.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>How many rows were put back, in all and each way.</returns>
+    [HttpPost("Failed/Retry")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult> RetryFailed(CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var outbound = _outbound.RetryFailed(now);
+        var inbound = _inbound.RetryFailing(now);
+        if (outbound > 0)
+        {
+            _outboundWorker.LiftPauses();
+            await _outboundWorker.DeliverAsync(cancellationToken, refreshCapabilities: true).ConfigureAwait(false);
+        }
+
+        if (inbound > 0)
+        {
+            await _inboundWorker.ApplyNowAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return Ok(new { Retried = outbound + inbound, Outbound = outbound, Inbound = inbound });
+    }
+
+    /// <summary>
+    /// Discards every failed row: outbound rows that were given up on, and inbound rows whose apply
+    /// has failed. The scheduled tasks still carry the changes.
+    /// </summary>
+    /// <returns>How many rows were removed, in all and each way.</returns>
+    [HttpDelete("Failed")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult DismissFailed()
+    {
+        var outbound = _outbound.DeleteFailed();
+        var inbound = _inboundWorker.DismissFailing();
+        return Ok(new { Removed = outbound + inbound, Outbound = outbound, Inbound = inbound });
+    }
+
     /// <summary>Discards one outbound row.</summary>
     /// <param name="id">The row id.</param>
     /// <returns>No content, or not found.</returns>
@@ -512,7 +555,7 @@ public class HintsController : ControllerBase
     [HttpDelete("Inbound/{id}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult RemoveInbound([FromRoute] long id) => _inbound.Delete(id) ? NoContent() : NotFound();
+    public ActionResult RemoveInbound([FromRoute] long id) => _inboundWorker.Dismiss(id) ? NoContent() : NotFound();
 }
 
 /// <summary>The version an object carries, as the detail modals show it.</summary>
@@ -557,6 +600,9 @@ public class HintsOverview
 
     /// <summary>Gets or sets how many inbound rows exist.</summary>
     public int InboundCount { get; set; }
+
+    /// <summary>Gets or sets how many inbound rows have failed to apply at least once and wait to be tried again.</summary>
+    public int InboundFailingCount { get; set; }
 
     /// <summary>Gets or sets the delivery state of every server this one sends to.</summary>
     public List<PeerHintStateDto> Peers { get; set; } = new();

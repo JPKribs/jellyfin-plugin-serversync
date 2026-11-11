@@ -77,6 +77,12 @@ public class RefreshHistorySyncTableTask
     /// <inheritdoc />
     protected override string ModuleMutexKey => "History";
 
+    // A change to which parts of history are copied changes what every row merges to, so the next
+    // scan reads everything again.
+    /// <inheritdoc />
+    protected override string ScopeSettings
+        => ((int)ConfigManager.Configuration.GetHistoryFields()).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     /// <inheritdoc />
     protected override bool IsEnabled()
     {

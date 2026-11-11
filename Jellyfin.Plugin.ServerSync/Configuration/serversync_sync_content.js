@@ -470,7 +470,7 @@ export function createContentSyncTableModule(ctx, kit) {
                 var showAnyPending = showPendingDownload || showPendingReplace || showPendingDelete;
                 var pendingRow = view.querySelector('#pendingStatusRow');
                 if (pendingRow) {
-                    pendingRow.style.display = showAnyPending ? 'flex' : 'none';
+                    pendingRow.classList.toggle('hidden', !showAnyPending);
                 }
             },
         }

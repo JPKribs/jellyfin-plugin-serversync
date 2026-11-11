@@ -86,9 +86,11 @@ export function createUserSyncTableModule(ctx, kit) {
             ];
         },
         loadHealth: function() {
+            ServerSyncShared.getConfig().then(function(config) {
+                setHealthLastSync('userHealthLastSync', config.LastUserSyncTime);
+            });
             return ServerSyncShared.apiRequest('UserStatus', 'GET').then(function(status) {
                 if (!status) return;
-                setHealthLastSync('userHealthLastSync', status.LastSyncTime);
                 setHealthCount('userHealthUserCount', (status.Synced || 0) + (status.Queued || 0) + (status.Errored || 0) + (status.Ignored || 0));
             });
         },

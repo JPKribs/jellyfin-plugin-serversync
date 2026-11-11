@@ -42,7 +42,7 @@ public class CleanupTempFilesTask : IScheduledTask
 
     public string Key => "ServerSyncCleanupTempFiles";
 
-    public string Description => "Removes orphaned temporary files from failed sync downloads.";
+    public string Description => "Deletes leftover files from failed downloads.";
 
     public string Category => "Server Sync";
 

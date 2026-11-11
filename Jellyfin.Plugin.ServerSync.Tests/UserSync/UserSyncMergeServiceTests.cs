@@ -109,7 +109,7 @@ public class UserSyncMergeServiceTests
     [Fact]
     public void ShouldSyncPolicyProperty_IncludesGenericPolicyFields()
     {
-        Assert.True(UserSyncMergeService.ShouldSyncPolicyProperty("IsAdministrator"));
+        Assert.True(UserSyncMergeService.ShouldSyncPolicyProperty("IsDisabled"));
         Assert.True(UserSyncMergeService.ShouldSyncPolicyProperty("EnabledFolders"));
     }
 
@@ -121,6 +121,7 @@ public class UserSyncMergeServiceTests
     [Fact]
     public void ShouldSyncPolicyProperty_ExcludesServerSpecificFields()
     {
+        Assert.False(UserSyncMergeService.ShouldSyncPolicyProperty("IsAdministrator"));
         Assert.False(UserSyncMergeService.ShouldSyncPolicyProperty("EnabledChannels"));
         Assert.False(UserSyncMergeService.ShouldSyncPolicyProperty("EnabledDevices"));
         Assert.False(UserSyncMergeService.ShouldSyncPolicyProperty("InvalidLoginAttemptCount"));
@@ -379,7 +380,7 @@ public class UserSyncMergeServiceTests
         }
 
         // Ordinary settings still come across.
-        Assert.True(props.ContainsKey("IsAdministrator"));
+        Assert.False(props.ContainsKey("IsAdministrator"), "administrator rights must not be synced");
         Assert.True(props.ContainsKey("EnableContentDeletion"));
     }
 

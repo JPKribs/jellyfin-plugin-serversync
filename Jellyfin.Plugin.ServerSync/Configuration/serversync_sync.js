@@ -279,7 +279,7 @@ export default function (view) {
             var descEl = view.querySelector('#syncTypeDescription');
             if (descEl) {
                 var descriptions = {
-                    content: 'Content sync downloads media files from the source server and mirrors them here. It matches libraries by your mappings, queues missing or updated files, includes companion files like subtitles, and can delete items removed on the source.',
+                    content: 'Content sync copies or links media files from your Pull and Sync servers into mapped libraries. It queues missing or updated files, includes subtitles beside them, and can remove files a source no longer has.',
                     history: 'History sync copies watch state to your mapped users. It syncs played status, play counts, resume positions, last played dates, and favorites, keeping the highest play count and the most recent activity from either server.',
                     metadata: 'Metadata sync copies item metadata onto matching items, matched by file path. It updates titles, overviews, ratings, genres, tags, studios, people, and images, and you enable each category on the Settings tab.',
                     people: 'People sync copies person metadata onto matching people, matched by name. It updates biographies, provider IDs, and profile images.',

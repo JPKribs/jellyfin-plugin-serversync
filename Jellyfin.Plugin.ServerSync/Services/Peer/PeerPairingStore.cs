@@ -39,6 +39,47 @@ public sealed class PeerPairingStore : QueueStoreBase
         _secrets = secrets;
     }
 
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _expected = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Notes that this server is asking an entry to pair, until the result is disposed. The entry
+    /// answers by handing over its secret while the question is still open, so a secret that arrives
+    /// at any other time was not asked for and is refused.
+    /// </summary>
+    /// <param name="peerKey">The server entry's key.</param>
+    /// <returns>Ends the wait when disposed.</returns>
+    public IDisposable Expect(string peerKey)
+    {
+        _expected.AddOrUpdate(peerKey, 1, (_, open) => open + 1);
+        return new Expectation(this, peerKey);
+    }
+
+    /// <summary>Whether this server is asking an entry to pair right now.</summary>
+    /// <param name="peerKey">The server entry's key.</param>
+    /// <returns>True while a question to it is open.</returns>
+    public bool Expecting(string peerKey) => _expected.TryGetValue(peerKey, out var open) && open > 0;
+
+    /// <summary>Whether a value has the shape of a secret from <see cref="NewSecret"/>: URL safe text, which is also all a header can carry.</summary>
+    /// <param name="secret">The value.</param>
+    /// <returns>True when it could be a pairing secret.</returns>
+    public static bool WellFormed(string? secret)
+    {
+        if (secret is null || secret.Length is < 32 or > 256)
+        {
+            return false;
+        }
+
+        foreach (var c in secret)
+        {
+            if (!(char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>Makes a fresh secret.</summary>
     /// <returns>The secret, URL safe.</returns>
     public static string NewSecret() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -88,6 +129,27 @@ public sealed class PeerPairingStore : QueueStoreBase
         Add(cmd, "@peer", peerKey);
         cmd.ExecuteNonQuery();
     });
+
+    private sealed class Expectation : IDisposable
+    {
+        private readonly PeerPairingStore _store;
+        private readonly string _peerKey;
+        private int _done;
+
+        public Expectation(PeerPairingStore store, string peerKey)
+        {
+            _store = store;
+            _peerKey = peerKey;
+        }
+
+        public void Dispose()
+        {
+            if (System.Threading.Interlocked.Exchange(ref _done, 1) == 0)
+            {
+                _store._expected.AddOrUpdate(_peerKey, 0, (_, open) => Math.Max(0, open - 1));
+            }
+        }
+    }
 
     // A secret that can no longer be decrypted, after the protection key changed, reads as no secret, so
     // the next pairing issues a fresh one rather than sending an empty one forever.

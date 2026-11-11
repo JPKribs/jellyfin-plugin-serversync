@@ -12,17 +12,17 @@ Content syncing mirrors missing or updated media files from a source Jellyfin se
 * **Cache Size (GB)**, **Cache Location**, **Cache Retention (days)**, **Pre-cache Episodes**, and **Removal Order** set up the link cache, which is off until it has a size. Downloads into it are held to **Download Speed** too. See [The Link Cache](Links.md#the-link-cache).
 * **Storage**, on each library mapping in the Servers tab, holds the source's files as full **Copy** files, the default, or as **Link** files that stream from the source. See [Links](Links.md).
 * **Downloads At Once** limits how many files download at once.
-* **Download Speed** sets the **Normal** rate, where 0 means unlimited.
-* **Approvals** sets an action for each kind of change: **New files** download automatically or wait for approval, and **Changed files** replace automatically or wait.
-* **Removed files** decides what happens to a local file once its item is gone from the source. **Keep** leaves it. **Delete** deletes it on the next Sync Content run, but still asks first whenever the plugin cannot be sure the file should go. **Delete After Approval** holds every deletion as Pending Deletion until you approve it. **Ignore** keeps the files and, once everything in a movie or show folder is gone from the source, writes an empty `.ignore` file in that folder so Jellyfin hides it on its next scan. A season is never hidden on its own, so a show that still has episodes on the source stays as it is. A folder that already has a `.ignore` is left alone. A hidden title shows again when it comes back on the source, or when Removed files is set to anything else. Switching away from Delete cancels deletions that were still waiting.
-* **Detect Updated Files** downloads a file again when its size on the source changes.
-* **Scheduled Speed** uses the **Scheduled** rate during the set **Hours**.
-* **Minimum Free Space** blocks downloads when free space falls below this many gigabytes. Downloads running at the same time hold space for each other, so several large files cannot together fill a disk that each would fit on alone. A file that only fits once another download finishes waits for it.
+* **Download Speed** sets the **Normal** rate, where 0 means unlimited. The rate is the total across every download running at once.
+* **Approvals** sets an action for each kind of change: **New files** download automatically (Enabled), wait for approval (Require Approval), or are left alone (Disabled), and **Changed files** replace the same three ways. A file already in the library at the path a new item would take is kept as the synced copy when it is the source's size. Any other file there is not this plugin's, so replacing it follows **Changed files**.
+* **Removed files** decides what happens to a local file once its item is gone from the source. **Keep** leaves it. **Delete** deletes it on the next Sync Content run that does a full scan (**Full Scan Every (hours)** under Processing, 24 by default), but still asks first whenever the plugin cannot be sure the file should go. **Delete After Approval** holds every deletion as Pending Deletion until you approve it. **Ignore** keeps the files and, once everything in a movie or show folder is gone from the source, writes an empty `.ignore` file in that folder so Jellyfin hides it on its next scan. A season is never hidden on its own, so a show that still has episodes on the source stays as it is. A folder that already has a `.ignore` is left alone. A hidden title shows again when it comes back on the source, or when Removed files is set to anything else. Switching away from Delete cancels deletions that were still waiting.
+* **Detect Updated Files** checks each synced file on disk against the source's size on a full scan, and downloads it again when it differs or is missing. A size change on the source is always picked up and follows **Changed files**.
+* **Scheduled Speed** uses the **Scheduled** rate during the set **Hours**, in the server's time. A download already running follows the hours as they begin and end.
+* **Minimum Free Space (GB)** blocks downloads when free space falls below this many gigabytes. Downloads running at the same time hold space for each other, so several large files cannot together fill a disk that each would fit on alone. A file that only fits once another download finishes waits for it.
 * **Enable Recycling Bin** moves deleted or replaced files to a recycling bin instead of removing them for good.
 * **Recycling Bin Path** sets the folder where soft deleted files are kept.
-* **Keep For** sets how many days files stay in the recycling bin before permanent removal. Only files and trickplay folders the plugin put there expire. They carry the time they were recycled in their name, and anything else in the folder is left alone. A file from deep inside a library gets a shortened name, ending in its own file name and that time, so the move never fails on the filesystem's name length limit.
+* **Keep For (days)** sets how many days files stay in the recycling bin before permanent removal. Only files and trickplay folders the plugin put there expire. They carry the time they were recycled in their name, and anything else in the folder is left alone. A file from deep inside a library gets a shortened name, ending in its own file name and that time, so the move never fails on the filesystem's name length limit.
 * **Remove Empty Folders** deletes parent folders that become empty after a file is removed.
-* **Download Retries** sets how many times a failed download retries before it errors. A retry picks up where the failed attempt stopped when the source supports it, and starts over if the file changed on the source in between.
+* **Download Retries** sets how many times a failed download retries before it errors, and how many later runs retry an errored item of any sync type. A retry picks up where the failed attempt stopped when the source supports it, and starts over if the file changed on the source in between.
 * **Skip Items Everyone Watched** skips items already watched by every selected user.
 
 ## Collection Syncing
@@ -38,13 +38,13 @@ on:
 * Anyone with collection-management permission on the source can add or remove
   items from the collection in the normal Jellyfin UI, no plugin access
   needed. Removing an item removes it from the whitelist, and its local
-  copy waits for deletion approval unless **Removed files** is
-  Disabled, since a membership change is not a removal from the source.
+  copy waits for deletion approval when **Removed files** is Delete or
+  Delete After Approval, since a membership change is not a removal from the source.
 * A collection can span libraries (movies + shows). Each mapping syncs only
   the members that live under its own source root, whitelist the same
   collection under a mapping for each library it draws from.
-* With **Mirror Synced Collections** enabled (default), the *Sync Collections*
-  task recreates the collection on this server containing the local copies of
+* With **Mirror Synced Collections** enabled (default), the last step of
+  **Sync Content** recreates the collection on this server containing the local copies of
   its synced members, so it appears in your local UI just like on the source.
   Mirrored collections are tagged and their membership tracks the source. A
   collection that disappears from the source stops being updated but is never
@@ -57,10 +57,9 @@ playlist to sync its members, blacklist one to exclude them. Membership is
 re-resolved every refresh. Two differences from collections:
 
 * Playlists are user-scoped on the source. Member resolution uses the
-  account from the plugin's **Generate Token** flow, so that user must be
-  able to see the playlist (own it or have it shared). If you configured the
-  plugin with a pasted API key instead, sharing the playlist with the
-  authenticating user or re-running token generation gives it a user context.
+  account from the server entry's **Sign In**, so that user must be
+  able to see the playlist (own it or have it shared). An entry set up with a
+  pasted API key has no user. Switch it to **Sign In** to give it one.
 * Playlists are not mirrored locally (they have owners, which a mirror can't
   faithfully reproduce). Use a collection when you want the container to
   appear on this server too.
@@ -71,7 +70,7 @@ In **Blacklist** mode a selected collection excludes its members: the library
 syncs everything *except* what's in the collection (membership is re-resolved
 every refresh, so adding an item to the collection excludes it on the next
 run). Items dropped by a blacklist edit go through **deletion approval** even
-when Delete Missing Content is set to automatic, narrowing scope is a config
+when **Removed files** is Delete. Narrowing scope is a config
 change, not a source-side removal. If the collection can't be read during a
 refresh, that mapping's discovery is skipped for the run rather than syncing
 the excluded items.
@@ -82,7 +81,7 @@ another enabled mapping still syncs there.
 
 ### Interaction with the watched-by-all filter
 
-**Skip Items Watched by All Selected Users** composes with every filter mode,
+**Skip Items Everyone Watched** composes with every filter mode,
 including collections. Whitelisted collection members (episodes included) that
 every selected user has played are marked Ignored instead of downloading.
 blacklisted-collection exclusions take precedence (excluded items are never

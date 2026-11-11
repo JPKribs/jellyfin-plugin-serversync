@@ -14,6 +14,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 [Authorize]
 [Route("Sync/Peer")]
 [PeerCallerGuard]
+[RequestSizeLimit(64 * 1024)]
 [Produces(MediaTypeNames.Application.Json)]
 public class PeerPairController : ControllerBase
 {
@@ -35,15 +36,24 @@ public class PeerPairController : ControllerBase
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public ActionResult<object> Pair([FromBody] PairRequest request)
     {
-        if (request is null || string.IsNullOrWhiteSpace(request.ServerId) || string.IsNullOrWhiteSpace(request.Secret) || request.Secret.Length > 256)
+        if (request is null || string.IsNullOrWhiteSpace(request.ServerId) || !PeerPairingStore.WellFormed(request.Secret))
         {
-            return BadRequest("A request body with ServerId and a Secret of at most 256 characters is required");
+            return BadRequest("A request body with ServerId and a Secret of 32 to 256 letters, digits, - or _ is required");
         }
 
         var entry = _configManager.Configuration.FindServerById(request.ServerId);
         if (entry is null)
         {
             return Conflict($"server {request.ServerId} is not configured on this server, so it cannot pair");
+        }
+
+        // A secret is only taken while this server is asking that entry for one. Any whitelisted caller
+        // can name an entry, and taken at any time its secret would replace the real one and cut this
+        // server off from that entry until the two paired again.
+        if (!_pairings.Expecting(entry.Key))
+        {
+            _logger.LogWarning("Refused a pairing secret for '{Peer}' that this server did not ask for", entry.DisplayName);
+            return Conflict("this server is not asking that server to pair right now. Check the link from this server to pair");
         }
 
         _pairings.SetOutbound(entry.Key, request.Secret);

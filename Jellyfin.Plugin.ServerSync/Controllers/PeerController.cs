@@ -27,6 +27,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 [Authorize]
 [Route("Sync/Peer")]
 [PeerCallerGuard]
+[RequestSizeLimit(MaxRequestBytes)]
 [Produces(MediaTypeNames.Application.Json)]
 public partial class PeerController : ControllerBase
 {
@@ -43,6 +44,12 @@ public partial class PeerController : ControllerBase
     private readonly HintTriage _triage;
     private readonly PeerItemLookup _lookup;
     private readonly Microsoft.Extensions.Logging.ILogger<PeerController> _logger;
+
+    /// <summary>
+    /// The largest body a peer route reads. The fullest request allowed, a batch of hints with every
+    /// field at its longest, fits with room to spare.
+    /// </summary>
+    public const long MaxRequestBytes = 4 * 1024 * 1024;
 
     // A pairing call is one small request, so a peer that cannot answer it promptly is treated as unreachable.
     private static readonly TimeSpan PairTimeout = TimeSpan.FromSeconds(15);
@@ -238,6 +245,12 @@ public partial class PeerController : ControllerBase
             return (null, Conflict($"server {senderServerId} is not configured on this server"));
         }
 
+        // A disabled entry is skipped by this server, so nothing is taken from it either.
+        if (!entry.IsEnabled)
+        {
+            return (null, Conflict($"server {senderServerId} is disabled on this server"));
+        }
+
         var presented = Request.Headers[HintProtocol.PairingHeader].FirstOrDefault();
         if (!PeerPairingStore.Matches(presented, _pairings.GetInbound(entry.Key)))
         {
@@ -286,9 +299,9 @@ public partial class PeerController : ControllerBase
         // A hint with no id cannot be answered, since the sender matches answers by id, so it fails the
         // request. Every other problem with one hint is declined for that hint alone, so one bad row
         // never takes the rest of the batch down with it.
-        if (request.Items.Any(h => string.IsNullOrWhiteSpace(h.HintId)))
+        if (request.Items.Any(h => h is null || string.IsNullOrWhiteSpace(h.HintId) || h.HintId.Length > HintTriage.MaxIdLength))
         {
-            return BadRequest("Every hint needs a HintId");
+            return BadRequest($"Every hint needs a HintId of at most {HintTriage.MaxIdLength} characters");
         }
 
         // One origin cannot fill the queue without bound. A full queue answers "busy" so the sender waits
@@ -363,9 +376,9 @@ public partial class PeerController : ControllerBase
             return refusal!;
         }
 
-        if (request.Items.Count > HintProtocol.MaxHintsPerRequest)
+        if (request.Items.Count > HintProtocol.MaxHintsPerRequest || request.Items.Any(i => i is null))
         {
-            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} completions per request");
+            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} completions per request, none of them null");
         }
 
         // Only the rows queued for the peer that reports them, and never past this server's clock, so a
@@ -477,9 +490,9 @@ public partial class PeerController : ControllerBase
             return BadRequest("A request body with Keys is required");
         }
 
-        if (request.Keys.Count > HintProtocol.MaxHintsPerRequest)
+        if (request.Keys.Count > HintProtocol.MaxHintsPerRequest || request.Keys.Any(k => k is null))
         {
-            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} keys per request");
+            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} keys per request, none of them null");
         }
 
         var keys = request.Keys;
@@ -515,9 +528,9 @@ public partial class PeerController : ControllerBase
             return BadRequest("A request body with Items is required");
         }
 
-        if (request.Items.Count > PeerHistoryNegotiator.MaxEntriesPerRequest)
+        if (request.Items.Count > PeerHistoryNegotiator.MaxEntriesPerRequest || request.Items.Any(e => e is null))
         {
-            return BadRequest($"At most {PeerHistoryNegotiator.MaxEntriesPerRequest} entries per request");
+            return BadRequest($"At most {PeerHistoryNegotiator.MaxEntriesPerRequest} entries per request, none of them null");
         }
 
         // A sender this server lists is recorded against its own rows, so it has to prove it is that

@@ -15,6 +15,12 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 /// </summary>
 public sealed class CappedReadStream : Stream
 {
+    /// <summary>
+    /// The most one image copied from another server may weigh. Posters and backdrops run to a few
+    /// megabytes, so this only stops a body that is not an image at all.
+    /// </summary>
+    public const long MaxSyncedImageBytes = 64L * 1024 * 1024;
+
     private readonly Stream _inner;
     private readonly long _most;
     private long _read;

@@ -37,6 +37,37 @@ public class DownloadService
     /// </summary>
     private const int CopyBufferBytes = 81920;
 
+    // The most downloads that can share the speed at once: the top of Downloads At Once.
+    private const int MaxSharers = 10;
+
+    private static readonly TimeSpan RateCheckEvery = TimeSpan.FromSeconds(30);
+    private static readonly object SpeedLock = new();
+    private static SpeedBucket? _sharedSpeed;
+
+    /// <summary>
+    /// The most a subtitle from the source may weigh. Image based subtitles run to tens of megabytes,
+    /// and nothing a source calls a subtitle is larger than this.
+    /// </summary>
+    public const long MaxCompanionBytes = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// How far past its announced size a body with no stated length may run, as a fraction of that
+    /// size plus a fixed floor, to allow for source metadata that has gone stale.
+    /// </summary>
+    private const long UnstatedLengthSlackBytes = 64L * 1024 * 1024;
+
+    // Marks a download staged beside its target while it waits to be renamed into place.
+    private const string StagedMarker = ".syncing.";
+
+    /// <summary>
+    /// The external subtitle formats Jellyfin reads beside a video. A companion from the source is
+    /// only written under one of these, so a source cannot name a video, an .nfo or a .ignore file.
+    /// </summary>
+    private static readonly HashSet<string> SubtitleExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".smi", ".sami", ".sup", ".pgs", ".mks", ".ttml", ".dfxp", ".lrc"
+    };
+
     public DownloadService(ILogger<DownloadService> logger)
     {
         _logger = logger;
@@ -107,7 +138,8 @@ public class DownloadService
                         }
 
                         var mode = download.Offset > 0 ? FileMode.Append : FileMode.Create;
-                        using (var fileStream = new FileStream(tempFilePath, mode, FileAccess.Write, FileShare.None))
+                        var most = MostBytesToAccept(download.TotalLength, download.Offset, item, tempFilePath, config);
+                        using (var fileStream = OpenForDownload(tempFilePath, mode))
                         {
                             // The total length is authoritative. The recorded
                             // SourceSize is the fallback (can be stale but is
@@ -118,7 +150,7 @@ public class DownloadService
                             Stream destination = progress != null && expectedBytes > 0
                                 ? new ProgressReportingStream(fileStream, expectedBytes.Value, progress, download.Offset)
                                 : fileStream;
-                            await CopyWithStallWatchdogAsync(download.Stream, destination, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
+                            await CopyWithStallWatchdogAsync(new CappedReadStream(download.Stream, most), destination, speedLimitBytesPerSecond, config, ct).ConfigureAwait(false);
                         }
                     }
 
@@ -133,7 +165,8 @@ public class DownloadService
                             CleanupTempFile(tempFilePath);
                         }
 
-                        throw new InvalidOperationException(errorMsg);
+                        // An IOException is retried, and the retry resumes from the bytes kept.
+                        throw new IOException(errorMsg);
                     }
 
                     if (item.SourceSize > 0 && downloadedInfo.Length != item.SourceSize)
@@ -170,6 +203,21 @@ public class DownloadService
             //      lists stay with the new file instead of being thrown away.
             // If step 2 throws, the catch block restores the sidecars so the
             // user's previous version stays intact at item.LocalPath.
+            // The temp folder is usually on another volume, where a move is a copy. That copy is made
+            // under a staged name beside the target, so the library never sees a partial file under
+            // the real name and a crash mid copy leaves the previous file untouched.
+            RemoveStaleStaged(item.LocalPath);
+            var stagedPath = item.LocalPath + StagedMarker + Guid.NewGuid().ToString("N");
+            try
+            {
+                await FileOperationUtilities.MoveFileWithOverwriteAsync(tempFilePath, stagedPath, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                CleanupTempFile(stagedPath);
+                throw;
+            }
+
             string? backupMain = null;
             var backupCompanions = new List<(string Original, string Backup)>();
             var existingFile = File.Exists(item.LocalPath);
@@ -198,10 +246,12 @@ public class DownloadService
                     }
                 }
 
-                await FileOperationUtilities.MoveFileWithOverwriteAsync(tempFilePath, item.LocalPath, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await FileOperationUtilities.MoveFileWithOverwriteAsync(stagedPath, item.LocalPath, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
             catch
             {
+                CleanupTempFile(stagedPath);
+
                 // Roll back so the user keeps their previous version.
                 try
                 {
@@ -247,6 +297,7 @@ public class DownloadService
                         client,
                         itemId,
                         targetDir ?? Path.GetDirectoryName(item.LocalPath) ?? string.Empty,
+                        Path.GetFileNameWithoutExtension(item.LocalPath),
                         tempPath,
                         speedLimitBytesPerSecond,
                         config,
@@ -288,6 +339,7 @@ public class DownloadService
     /// <param name="client">Source server client.</param>
     /// <param name="itemId">Item ID.</param>
     /// <param name="targetDir">Target directory for companion files.</param>
+    /// <param name="mainStem">The video's file name without its extension. Every companion's name starts with it.</param>
     /// <param name="tempPath">Temporary download path.</param>
     /// <param name="speedLimitBytesPerSecond">Download speed limit in bytes per second.</param>
     /// <param name="config">Plugin configuration.</param>
@@ -297,6 +349,7 @@ public class DownloadService
         SourceServerClient client,
         Guid itemId,
         string targetDir,
+        string mainStem,
         string tempPath,
         long speedLimitBytesPerSecond,
         PluginConfiguration config,
@@ -318,11 +371,16 @@ public class DownloadService
 
             foreach (var companion in companions)
             {
-                // Validate companion file name to prevent path traversal from remote server
-                var companionFileName = Path.GetFileName(companion.FileName);
-                if (string.IsNullOrEmpty(companionFileName) || companionFileName != companion.FileName)
+                // The name comes from the other server. It is cut to its last part on either kind of
+                // separator, since a Windows source sends backslashes a Linux server does not split on,
+                // and it must be a subtitle of this video and nothing else.
+                var companionFileName = CompanionNameFor(companion.FileName, mainStem);
+                if (companionFileName is null)
                 {
-                    _logger.LogWarning("Skipping companion file with suspicious name: {FileName}", companion.FileName);
+                    _logger.LogWarning(
+                        "Skipping companion file {FileName}: it is not a subtitle named after {Stem}",
+                        FormatUtilities.SanitizeForLog(companion.FileName ?? string.Empty, 300),
+                        mainStem);
                     continue;
                 }
 
@@ -333,7 +391,7 @@ public class DownloadService
                 // Verify the resolved target path is still within the target directory
                 var resolvedTargetPath = Path.GetFullPath(targetPath);
                 var resolvedTargetDir = Path.GetFullPath(targetDir);
-                if (!resolvedTargetPath.StartsWith(resolvedTargetDir, StringComparison.Ordinal))
+                if (!string.Equals(Path.GetDirectoryName(resolvedTargetPath), resolvedTargetDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.Ordinal))
                 {
                     _logger.LogWarning("Companion file path traversal blocked: {FileName} resolved to {Resolved}", companion.FileName, resolvedTargetPath);
                     continue;
@@ -354,9 +412,9 @@ public class DownloadService
                             // Clean up any partial file from previous attempt
                             CleanupTempFile(tempFilePath);
 
-                            using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                            using (var fileStream = OpenForDownload(tempFilePath, FileMode.Create))
                             {
-                                await CopyWithStallWatchdogAsync(stream, fileStream, speedLimitBytesPerSecond, ct).ConfigureAwait(false);
+                                await CopyWithStallWatchdogAsync(new CappedReadStream(stream, MaxCompanionBytes), fileStream, speedLimitBytesPerSecond, config, ct).ConfigureAwait(false);
                             }
                         },
                         networkRetries,
@@ -365,8 +423,8 @@ public class DownloadService
                         cancellationToken).ConfigureAwait(false);
 
                     await FileOperationUtilities.MoveFileWithOverwriteAsync(tempFilePath, targetPath, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
-                    downloadedFiles.Add(companion.FileName);
-                    _logger.LogDebug("Downloaded companion file {FileName}", companion.FileName);
+                    downloadedFiles.Add(companionFileName);
+                    _logger.LogDebug("Downloaded companion file {FileName}", companionFileName);
                 }
                 catch (OperationCanceledException)
                 {
@@ -447,12 +505,22 @@ public class DownloadService
     /// the copy, and the Content lock with it, forever. The stall fails with an IOException, which the
     /// retry policy treats as transient, and a download that keeps stalling fails like any other.
     /// </summary>
-    private async Task CopyWithStallWatchdogAsync(Stream source, Stream destination, long speedLimitBytesPerSecond, CancellationToken cancellationToken)
+    private async Task CopyWithStallWatchdogAsync(Stream source, Stream destination, long speedLimitBytesPerSecond, PluginConfiguration config, CancellationToken cancellationToken)
     {
-        var window = StallTimeout;
-        if (speedLimitBytesPerSecond > 0)
+        // The speed in force now: the configured one for this hour, or the caller's when none is configured.
+        long Rate()
         {
-            var throttleSleep = TimeSpan.FromSeconds(2.0 * CopyBufferBytes / speedLimitBytesPerSecond);
+            var live = config.GetEffectiveDownloadSpeedBytes();
+            return live > 0 || config.EnableBandwidthScheduling ? live : speedLimitBytesPerSecond;
+        }
+
+        var window = StallTimeout;
+        var rate = Rate();
+        if (rate > 0)
+        {
+            // Every download waits its turn on one shared speed, so the pause between two reads of one
+            // download can be as long as a buffer from each of the others takes.
+            var throttleSleep = TimeSpan.FromSeconds(2.0 * CopyBufferBytes * MaxSharers / rate);
             if (throttleSleep > window)
             {
                 window = throttleSleep;
@@ -463,8 +531,173 @@ public class DownloadService
             source,
             destination,
             window,
-            (watched, to, token) => StreamUtilities.CopyWithSpeedLimitAsync(watched, to, speedLimitBytesPerSecond, token),
+            (watched, to, token) => CopyAtSharedSpeedAsync(watched, to, Rate, token),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    // Copies under the one speed all content downloads share, so the limit is the total across
+    // Downloads At Once and not a limit for each file. The speed is read again as the copy runs, so a
+    // long download follows the scheduled hours as they begin and end.
+    private static async Task CopyAtSharedSpeedAsync(Stream source, Stream destination, Func<long> rate, CancellationToken cancellationToken)
+    {
+        var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(CopyBufferBytes);
+        try
+        {
+            var bucket = SharedSpeed(rate());
+            var readAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            int read;
+            while ((read = await source.ReadAsync(buffer.AsMemory(0, CopyBufferBytes), cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                if (System.Diagnostics.Stopwatch.GetElapsedTime(readAt) > RateCheckEvery)
+                {
+                    bucket = SharedSpeed(rate());
+                    readAt = System.Diagnostics.Stopwatch.GetTimestamp();
+                }
+
+                if (bucket is not null && bucket.Take(read) is { } wait && wait > TimeSpan.Zero)
+                {
+                    await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static SpeedBucket? SharedSpeed(long bytesPerSecond)
+    {
+        if (bytesPerSecond <= 0)
+        {
+            return null;
+        }
+
+        lock (SpeedLock)
+        {
+            if (_sharedSpeed is null)
+            {
+                _sharedSpeed = new SpeedBucket(bytesPerSecond);
+            }
+            else
+            {
+                _sharedSpeed.SetRate(bytesPerSecond);
+            }
+
+            return _sharedSpeed;
+        }
+    }
+
+    /// <summary>
+    /// The name a companion from the source is written under, or null when it must not be written.
+    /// It is the last part of the name the source gave, it carries a subtitle extension, and it
+    /// starts with the video's own name, which is also what makes Jellyfin attach it to the video.
+    /// </summary>
+    /// <param name="remoteName">The name or path the source gave.</param>
+    /// <param name="mainStem">The video's file name without its extension.</param>
+    /// <returns>The safe file name, or null.</returns>
+    public static string? CompanionNameFor(string? remoteName, string mainStem)
+    {
+        if (string.IsNullOrWhiteSpace(remoteName) || string.IsNullOrEmpty(mainStem))
+        {
+            return null;
+        }
+
+        var cut = Math.Max(remoteName.LastIndexOf('/'), remoteName.LastIndexOf('\\'));
+        var name = cut >= 0 ? remoteName[(cut + 1)..] : remoteName;
+        if (name.Length == 0
+            || name is "." or ".."
+            || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || name.Contains(':', StringComparison.Ordinal)
+            || !SubtitleExtensions.Contains(Path.GetExtension(name))
+            || !name.StartsWith(mainStem, StringComparison.OrdinalIgnoreCase)
+            || name.Length == mainStem.Length)
+        {
+            return null;
+        }
+
+        // What follows the video's name is a tag such as ".en" or ".forced", never more of a title.
+        return name[mainStem.Length] is '.' or '-' or '_' or ' ' ? name : null;
+    }
+
+    // Async sequential writes without a second buffer: the copy already hands over large blocks.
+    private static FileStream OpenForDownload(string path, FileMode mode) => new(path, new FileStreamOptions
+    {
+        Mode = mode,
+        Access = FileAccess.Write,
+        Share = FileShare.None,
+        BufferSize = 0,
+        Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+    });
+
+    // The most bytes one attempt may write. The source's stated length is the limit when it gives one.
+    // Without one the recorded size plus some slack is, and with neither the free space is. A body
+    // longer than the free space in the temp folder, or than the library has room for, is refused
+    // before a byte is written, so a source cannot fill a disk by sending more than it announced.
+    private static long MostBytesToAccept(long? totalLength, long offset, SyncItem item, string tempFilePath, PluginConfiguration config)
+    {
+        long most;
+        if (totalLength.HasValue)
+        {
+            most = Math.Max(0, totalLength.Value - offset);
+            if (totalLength.Value > item.SourceSize + Math.Max(0, config.SizeMatchToleranceBytes)
+                && !DiskSpaceService.HasSufficientSpaceForFile(item.LocalPath, totalLength.Value, config.MinimumFreeDiskSpaceGb))
+            {
+                throw new InvalidOperationException(
+                    $"The source sends {FormatUtilities.FormatBytes(totalLength.Value)}, more than the {FormatUtilities.FormatBytes(item.SourceSize)} it listed, and the library has no room for it");
+            }
+        }
+        else if (item.SourceSize > 0)
+        {
+            most = Math.Max(0, item.SourceSize - offset) + (item.SourceSize / 10) + UnstatedLengthSlackBytes;
+        }
+        else
+        {
+            most = long.MaxValue;
+        }
+
+        if (DiskSpaceService.TryGetFreeBytes(tempFilePath, out var tempFree))
+        {
+            if (most == long.MaxValue)
+            {
+                most = tempFree;
+            }
+            else if (most > tempFree)
+            {
+                throw new InvalidOperationException(
+                    $"The temporary download folder has {FormatUtilities.FormatBytes(tempFree)} free, less than the {FormatUtilities.FormatBytes(most)} still to download");
+            }
+        }
+
+        return most;
+    }
+
+    // Staged copies a crashed run left beside this target. No run is writing them: one download per
+    // item runs at a time.
+    private void RemoveStaleStaged(string localPath)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(localPath);
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            {
+                return;
+            }
+
+            var prefix = Path.GetFileName(localPath) + StagedMarker;
+            foreach (var stale in Directory.EnumerateFiles(directory))
+            {
+                if (Path.GetFileName(stale).StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    CleanupTempFile(stale);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not look for staged downloads beside {Path}", localPath);
+        }
     }
 
     // The bytes a failed attempt left behind, or 0 when there is nothing to resume from.

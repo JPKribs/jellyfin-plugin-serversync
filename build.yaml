@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.11.0"
+version: "12.2.11.1"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -10,7 +10,7 @@ description: >
   Server Sync keeps a pool of Jellyfin servers in step. Each server scans the others it is told to in
   priority order and pulls missing or updated content, metadata, people, user settings, playlists, and
   watch history. Servers that both run the plugin also tell each other about changes as they happen, so an
-  edit or a play made on one shows up on the others within seconds, and the scheduled scan remains
+  edit or a play made on one shows up on the others within about a minute, and the scheduled scan remains
   the safety net. Watch history merges three way against what the servers last agreed on, and other
   values resolve on where and when they were last edited, so the newest edit always wins. A library can
   also hold its videos as links that stream from the source instead of full copies, and a link cache can keep local copies of the links that are played.
@@ -29,23 +29,36 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   important:
-  - Media info from the source, the link check, and speed and per user limits need the source on this release. Links to an older source keep working as before
-  features:
-  - Link cache. A link can keep a full local copy of its file in a cache while staying a link. Playing a link caches it, episodes ahead of the one being watched are cached before they are reached, and each library can pick shows and films to always keep. A cached link plays from this server under its own rules, even while its source is down, and playback is still reported to the source. Set the cache's size, location, retention, pre-cache episodes, and removal order under Content in Settings. Each Link library has Cache This Library's Links and an Always Keep list on its mapping, the Sync tab shows a cached row as (Link, Cached), and Empty the Cache in Settings, or uninstalling the plugin, deletes every cached file. The cache is off until it is given a size
-  - A link takes its media info, chapters, chapter images, and trickplay images from the source instead of probing the file across the network, and a link's trickplay shows in its details. Take Link Images From the Source under Content in Settings, on by default, controls the chapter and trickplay images
-  - Every Sync Content run checks links against the servers they stream from. A link that can no longer play shows on the Sync tab with the reason, and settles again when it can
-  - A link stream that drops or stalls partway is picked up where it stopped, from the same server or another that holds the file, so the player does not see the break
-  - A Link mapping links every version of a film, not only the first, and each is checked on its own at play. A user refused one, such as a file above their bitrate limit, is offered the versions they may play. Copy mappings still copy the first version only
-  - Direct play of a link is streamed for the user who asked, so two viewers of one link are counted and limited apart. Stream Direct Play of Links Per User under Content in Settings turns this off
-  - A source can cap the speed of each link stream and cache download per server, with another speed during the bandwidth schedule's hours, and cap streams and speed per user on each user mapping
-  changed:
-  - A server that did not answer is passed over for a minute while another holds the file, and the others are asked together, so a dead source no longer costs every play its timeout
-  - The media probe of a new link may read at most 256 MB of the file
-  - Sync Content warns when a library that holds links has chapter image extraction off, since Jellyfin then drops the chapter images taken from the source
+  - User Sync does not copy administrator rights. Each server's own administrator grants them. A mapped user who is an administrator on a source and should be one here is made one here by hand
+  - A file already in a library at the path a new item would take is only replaced as Changed files allows. It is kept as the synced copy when it is the source's size, waits for approval under Require Approval, and is left alone under Disabled
+  - The Download Speed limit is the total across every download running at once, not a limit for each file. A setup that relied on several files each running at the limit downloads more slowly until the limit is raised
   fixed:
-  - An .nfo beside a link that the user deleted was written again on the next sync
+  - Security. A source could have a local file it never provided taken as its own, and so deleted when it later dropped the item, by listing an item with no size. A file is only taken as the source's when the sizes match
+  - Security. The name of a subtitle came from the source unchecked and could overwrite another file in the folder. A subtitle is only written under a subtitle extension and the video's own name, and is held to 256 MB
+  - Security. A download is held to the size the source states, and is refused when the temporary folder or the library has no room for it, so a source cannot fill a disk by sending more than it listed
+  - Security. A stored server key in its encrypted form could be tested against, or saved with, an address other than its own, which sent the key there. It is held to the address saved for it
+  - Security. Any allowed caller could replace the pairing secret this server presents to another, which cut the two off until they paired again. A secret is only taken while this server is asking for one
+  - Security. A paired server could read whole files through the media probe, past every stream, user, and speed limit. A probe is held to 512 MB of each file an hour
+  - Security. Requests between servers are held to 4 MB and each field of a change to a set length. A disabled server entry is refused as a sender. A standard user's key lists only the links that user can see. A link's address is cleared from movie recommendations. A link is only granted to a user this server lets see the item. An image copied from another server is held to 64 MB
+  - One server can no longer take over a content row that belongs to another server and move its file
+  - The five History switches, Played / Unplayed Status, Playback Position, Play Count, Last Played Date, and Favorites, are honored. A part switched off is not written here, not written back to the source, and not taken from another server. Changing them makes the next scan read everything again
+  - A metadata or people sync removed the server an item was pinned to with Identify, and the tags that tie a mirrored collection to its source
+  - A database that holds links kept its mark for older releases only until the next restart, so a downgrade could open it and download over the links
+  - A deletion that failed was retried as a download. It waits for approval with its reason
+  - Deleting, replacing, or renaming a file also took the subtitles and artwork of another title in the folder whose name began with the same words, such as Avatar and Avatar The Way of Water
+  - A download is copied into the library under a temporary name and renamed when complete, so a crash partway never leaves a partial file under the real name
+  - A long download follows the Scheduled Speed hours as they begin and end, instead of keeping the speed it started with
+  - A change discarded from the Queue was sent again by its sender about fifteen minutes later. The sender is told it is finished
+  - The live change workers paused for no time between failed passes after a full batch, and could fill the log
+  - The Sync tab did not show the Pending Download, Pending Replace, Pending Delete, and Deleting cards, and the Users view always showed Never for its last run
+  - Clearing the Cache Size (GB) field, or typing a fraction, emptied the link cache on save
+  features:
+  - Retry Failed and Dismiss Failed on the Queue. They show when a change has failed in either direction, and try every failed change again with its attempts cleared, or discard them all, in one press. A retry is tried at once, even while the server it goes to is paused
+  changed:
+  - Setting descriptions say what the setting does. Detect Updated Files, Minimum Free Space (GB), Download Retries, Size Tolerance (bytes), Temporary Folder, External URL, the Download Speed rows, and the scheduled task descriptions are corrected
+  - The documentation is corrected where it disagreed with the plugin, in Content, History, Users, Metadata, People, Links, Live Changes, Setup, Sync Types, and the API reference
   developer:
-  - The wire protocol and the database schema are unchanged. An older source ignores the fill flag, so a cache download for a user counts as a stream there and is not held to a speed
-  - New dashboard routes GET /Sync/LinkCache and POST /Sync/LinkCache/Clear, and content rows from GET /Sync/Items carry Cached
-  - New tests cover the link cache, the streamer's resume and fallback, media info from the source, and the speed limit. The Docker pool gains cache, per user limit, speed limit, link check, and version scenarios
-  - New peer routes on the source, Links/Describe and Links/{itemId}/Images, and a fill flag on Stream for cache downloads. Older sources answer 404 to the new routes, and the linking server then probes its links and does not check them
+  - The wire protocol and the database schema are unchanged, so this release works alongside 12.2.11.0 one server at a time
+  - POST /Sync/Peer/Pair answers 409 unless this server has a Link call open to the issuing server, and 400 for a secret that is not 32 to 256 letters, digits, - or _. A request from a disabled entry answers 409. A probe past its allowance answers 429
+  - New dashboard routes POST /Sync/Hints/Failed/Retry and DELETE /Sync/Hints/Failed, and GET /Sync/Hints carries InboundFailingCount
+  - New tests cover what a source may cause on disk, the pairing rules, the probe allowance, the History switches, and the failed queue rows. The Docker pool gains scenarios for a History switch turned off and for the failed queue rows, and checks the pairing rules

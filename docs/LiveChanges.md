@@ -10,4 +10,4 @@ Servers that both run Server Sync tell each other about changes as they happen. 
 * **Conflicts.** History merges three way against what the two servers last agreed on. Everything else goes to the newest edit.
 * **Pairing.** Servers that list each other share a secret, so one server cannot pretend to be another.
 * **Only what is wanted.** A server only announces what the other side maps and has turned on.
-* **Same version only.** Changes for a server on another Server Sync version wait in the queue until both match.
+* **Compatible versions only.** Servers on different Server Sync versions exchange changes while their protocols overlap. Changes for a server whose protocol does not overlap wait in the queue until it does. See [Versioning](Versioning.md).

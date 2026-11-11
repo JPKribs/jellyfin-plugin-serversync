@@ -41,7 +41,7 @@ public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
     public string Key => "ServerSyncContent";
 
     /// <inheritdoc />
-    public string Description => "Refreshes the content table from every scan server, downloads queued files, processes deletions, and syncs collections.";
+    public string Description => "Finds added, changed, and removed files on each Pull or Sync server, then downloads, removes, and updates collections to match.";
 
     /// <inheritdoc />
     public string Category => "Server Sync";

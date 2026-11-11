@@ -95,9 +95,13 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                 // one, such as a file above their bitrate limit, is offered the versions they may play.
                 // A version whose file is in the link cache plays from here under this server's own
                 // rules, so the source is not asked about it and need not be up.
-                var choices = await Task.WhenAll(links.Select(l => MayPlayFromCache(l.VersionId, userId.Value, l.Link)
-                    ? Task.FromResult(new LinkChoice(LinkFallback.PrimaryOf(l.Link), null))
-                    : _access.ChooseAsync(l.Link, userId.Value, null, context.HttpContext.RequestAborted))).ConfigureAwait(false);
+                // This runs before Jellyfin has checked the user against the item, so that check is made
+                // here first. The source only knows the user it maps them to, who may see more.
+                var choices = await Task.WhenAll(links.Select(l => !MaySeeHere(l.VersionId, userId.Value)
+                    ? Task.FromResult(new LinkChoice(null, "this server does not let you play this item"))
+                    : MayPlayFromCache(l.VersionId, userId.Value, l.Link)
+                        ? Task.FromResult(new LinkChoice(LinkFallback.PrimaryOf(l.Link), null))
+                        : _access.ChooseAsync(l.Link, userId.Value, null, context.HttpContext.RequestAborted))).ConfigureAwait(false);
                 var refused = new HashSet<Guid>();
                 for (var i = 0; i < links.Count; i++)
                 {
@@ -158,8 +162,21 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         ArgumentNullException.ThrowIfNull(next);
         try
         {
-            if (context.Result is ObjectResult { Value: { } value })
+            if (context.Result is ObjectResult { Value: { } value } result)
             {
+                // A list still being built would be built again when it is written, and the copy
+                // written would be one nothing here had touched. It is held as a list instead.
+                if (value is IEnumerable<BaseItemDto> lazyItems and not ICollection<BaseItemDto>)
+                {
+                    value = lazyItems.ToList();
+                    result.Value = value;
+                }
+                else if (value is IEnumerable<RecommendationDto> lazyGroups and not ICollection<RecommendationDto>)
+                {
+                    value = lazyGroups.ToList();
+                    result.Value = value;
+                }
+
                 // The versions the source refused this user are not offered to their player.
                 if (value is PlaybackInfoResponse playback
                     && playback.MediaSources is not null
@@ -198,6 +215,9 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             BaseItemDto item => new[] { item },
             QueryResult<BaseItemDto> page => page.Items ?? Enumerable.Empty<BaseItemDto>(),
             IEnumerable<BaseItemDto> items => items,
+            IEnumerable<RecommendationDto> groups => groups.Where(g => g?.Items is not null).SelectMany(g => g.Items),
+            AllThemeMediaResult themes => new[] { themes.ThemeVideosResult, themes.ThemeSongsResult, themes.SoundtrackSongsResult }
+                .Where(t => t?.Items is not null).SelectMany(t => t.Items),
             _ => Enumerable.Empty<BaseItemDto>()
         };
 
@@ -271,6 +291,22 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             && _libraryManager.GetItemById(versionId)?.IsVisible(user) == true;
     }
 
+    // This server's own rules for a user and an item: the user is enabled, may play media and may see
+    // the item. With no user manager to ask, which is only so outside a running server, nothing is refused.
+    private bool MaySeeHere(Guid versionId, Guid userId)
+    {
+        if (_services?.GetService(typeof(IUserManager)) is not IUserManager users)
+        {
+            return true;
+        }
+
+        var user = users.GetUserById(userId);
+        return user is not null
+            && !user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.IsDisabled)
+            && user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.EnableMediaPlayback)
+            && _libraryManager.GetItemById(versionId)?.IsVisible(user) == true;
+    }
+
     // A player's direct play: the video stream route asked for the file as it is.
     private static bool IsDirectPlay(FilterContext context, string? controller)
         => string.Equals(controller, "Videos", StringComparison.Ordinal)
@@ -309,7 +345,10 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     {
         // Jellyfin's subtitle route takes the query's value over the route's, so the same order is
         // used here: the version checked is always the version Jellyfin goes on to read.
-        if (Guid.TryParse(context.HttpContext.Request.Query["mediaSourceId"].ToString(), out var queried))
+        // Its attachment route reads the route's value only, so a query value there names nothing
+        // Jellyfin reads and must not decide which version is checked.
+        var routeOnly = string.Equals(context.RouteData.Values["controller"]?.ToString(), "VideoAttachments", StringComparison.OrdinalIgnoreCase);
+        if (!routeOnly && Guid.TryParse(context.HttpContext.Request.Query["mediaSourceId"].ToString(), out var queried))
         {
             return queried;
         }

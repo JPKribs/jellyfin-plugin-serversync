@@ -1,6 +1,7 @@
 #pragma warning disable CA2100 // SQL is internal and parameterized.
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -110,6 +111,49 @@ public sealed class InboundHintStore : QueueStoreBase
         cmd.CommandText = "SELECT * FROM InboundHints ORDER BY Id DESC LIMIT @limit";
         Add(cmd, "@limit", limit);
         return ReadAll(cmd);
+    });
+
+    /// <summary>Returns one row, or null when it is gone.</summary>
+    /// <param name="id">The row id.</param>
+    /// <returns>The row.</returns>
+    public InboundHint? Get(long id) => Read(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM InboundHints WHERE Id = @id";
+        Add(cmd, "@id", id);
+        return ReadAll(cmd).FirstOrDefault();
+    });
+
+    /// <summary>Returns every row whose apply has failed at least once and is waiting to be tried again.</summary>
+    /// <returns>The rows, oldest first.</returns>
+    public IList<InboundHint> GetFailing() => Read(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM InboundHints WHERE Attempts > 0 ORDER BY Id";
+        return ReadAll(cmd);
+    });
+
+    /// <summary>Counts the rows whose apply has failed at least once, for the dashboard.</summary>
+    /// <returns>How many rows.</returns>
+    public int CountFailing() => Read(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE Attempts > 0";
+        return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+    });
+
+    /// <summary>
+    /// Makes every row whose apply has failed due now with its attempts cleared, so each is tried
+    /// again at once and with its full allowance. Used by the operator once what blocked them is fixed.
+    /// </summary>
+    /// <param name="utcNow">Now.</param>
+    /// <returns>How many rows were made due.</returns>
+    public int RetryFailing(DateTime utcNow) => Write(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE InboundHints SET Attempts = 0, NextAttempt = @now WHERE Attempts > 0";
+        Add(cmd, "@now", Stamp(utcNow));
+        return cmd.ExecuteNonQuery();
     });
 
     /// <summary>Returns every row from one origin, for the status that origin reads.</summary>

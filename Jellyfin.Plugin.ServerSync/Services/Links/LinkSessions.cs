@@ -21,6 +21,16 @@ public sealed class LinkSessions
     private readonly Dictionary<(string Peer, Guid User, Guid Item), Stream> _streams = new();
     private readonly Dictionary<string, int> _fills = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Utilities.SpeedBucket> _speeds = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Peer, Guid Item), (DateTime Since, long Spent)> _probes = new();
+
+    /// <summary>
+    /// The most of one file a server may read in an hour to probe it, with no user and no stream
+    /// counted. A probe reads the start and end of a file, so this is twice what a calling server
+    /// spends on one, and far less than a film.
+    /// </summary>
+    public const long ProbeAllowance = 2 * LinkGrants.ProbeBudget;
+
+    private static readonly TimeSpan ProbeWindow = TimeSpan.FromHours(1);
 
     /// <summary>
     /// The most cache downloads one server may hold open at once. A linking server downloads one file
@@ -94,6 +104,44 @@ public sealed class LinkSessions
     /// </summary>
     /// <param name="peerKey">The calling server's entry key.</param>
     /// <returns>The handle, or null.</returns>
+    /// <summary>
+    /// Charges bytes of a file to the calling server's probe allowance for it. A probe is served
+    /// without a user, a stream count or a speed, so the allowance is what keeps the probe flag from
+    /// being a way to copy whole files past every limit.
+    /// </summary>
+    /// <param name="peerKey">The calling server's entry key.</param>
+    /// <param name="itemId">The file probed.</param>
+    /// <param name="bytes">The bytes about to be sent, or 0 to ask whether any are left.</param>
+    /// <returns>True while the allowance holds.</returns>
+    public bool TakeProbe(string peerKey, Guid itemId, int bytes)
+    {
+        var key = (peerKey.ToUpperInvariant(), itemId);
+        var now = _now();
+        lock (_lock)
+        {
+            if (_probes.Count > 4096)
+            {
+                foreach (var old in _probes.Where(p => now - p.Value.Since > ProbeWindow).Select(p => p.Key).ToList())
+                {
+                    _probes.Remove(old);
+                }
+            }
+
+            if (!_probes.TryGetValue(key, out var spent) || now - spent.Since > ProbeWindow)
+            {
+                spent = (now, 0);
+            }
+
+            if (spent.Spent >= ProbeAllowance)
+            {
+                return false;
+            }
+
+            _probes[key] = (spent.Since, spent.Spent + bytes);
+            return true;
+        }
+    }
+
     public IDisposable? TryOpenFill(string peerKey)
     {
         var peer = peerKey.ToUpperInvariant();

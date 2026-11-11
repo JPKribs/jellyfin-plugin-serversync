@@ -11,7 +11,7 @@ Server Sync is a Jellyfin plugin that keeps several Jellyfin servers in step. It
 
 Server Sync runs on your Local (destination) server and pulls data from one or more Source servers using standard Jellyfin APIs. You configure each server with its own library and user mappings, then two scheduled tasks, **Sync Content** and **Sync Information**, handle the synchronization. Content is matched by file path, so the plugin can track what needs to be downloaded, updated, or removed. No changes are required on a Source server that is only scanned.
 
-When a Source server also runs Server Sync, the two can keep each other current between scheduled runs. A server entry in **Push** or **Sync** mode is told about changes as they happen, from a play or a favorite to a metadata edit, a person edit, or a new file, and pulls each change within seconds. User settings travel on the scheduled task only, since Jellyfin raises no event for them. The scheduled tasks remain the safety net. See [Live Changes](LiveChanges.md).
+When a Source server also runs Server Sync, the two can keep each other current between scheduled runs. A server entry in **Push** or **Sync** mode is told about changes as they happen, from a play or a favorite to a metadata edit, a person edit, or a new file, and pulls each change shortly after it settles, a minute by default (**Send Changes After (seconds)**). User settings travel on the scheduled task only, since Jellyfin raises no event for them. The scheduled tasks remain the safety net. See [Live Changes](LiveChanges.md).
 
 A library can also hold the source's files as **links** instead of copies: small `.strm` files that appear at once, use almost no disk, and stream from the source when played, with the source deciding who may stream and showing each play on its dashboard. See [Links](Links.md).
 
@@ -28,7 +28,7 @@ When several servers are configured, their order is their priority. If two serve
 
 * A library must be a single folder.
 * A renamed file on the source is usually downloaded again under its new name, and the old one is handled by **Removed files**.
-* Interrupted downloads start over, and a changed file is found by its size.
+* A download that drops partway resumes on retry when the source supports it. One cut off by a cancelled run or a restart starts over. A changed file is found by its size.
 * Servers in a pool need compatible Server Sync protocols, not the same version. A server whose protocol does not overlap is left alone until it does.
 
 Next: [Installation](Installation.md).

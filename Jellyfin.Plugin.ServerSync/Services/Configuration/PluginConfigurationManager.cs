@@ -39,7 +39,10 @@ public class PluginConfigurationManager : IPluginConfigurationManager
     /// <inheritdoc />
     public string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl)
     {
-        if (!string.Equals(requestApiKey, JPKribs.Jellyfin.Base.SecretProtector.KeptSentinel, StringComparison.Ordinal))
+        // The stored key in its protected form reaches the page with the configuration, so it is held
+        // to the same rule as the sentinel. Taken as typed, it would be decrypted and sent to any address.
+        if (!string.Equals(requestApiKey, JPKribs.Jellyfin.Base.SecretProtector.KeptSentinel, StringComparison.Ordinal)
+            && !JPKribs.Jellyfin.Base.SecretProtector.IsProtected(requestApiKey))
         {
             return requestApiKey ?? string.Empty;
         }

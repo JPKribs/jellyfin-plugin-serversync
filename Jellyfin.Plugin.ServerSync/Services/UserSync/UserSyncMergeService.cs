@@ -78,6 +78,10 @@ public static class UserSyncMergeService
         // translating them silently drops any library without a mapping , 
         // which revokes local deletion rights the operator never touched.
         "EnableContentDeletionFromFolders",
+        // Administrator rights are granted on each server by its own administrator. Copied, an
+        // administrator of one server, or anyone who can change what that server answers, would
+        // make a mapped user an administrator of this one.
+        "IsAdministrator",
         "InvalidLoginAttemptCount", // Runtime state
         "AuthenticationProviderId", // Provider-specific
         "PasswordResetProviderId"   // Provider-specific

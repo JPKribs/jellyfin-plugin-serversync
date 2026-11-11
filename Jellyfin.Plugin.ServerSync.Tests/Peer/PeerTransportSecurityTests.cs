@@ -276,10 +276,45 @@ public sealed class PeerTransportSecurityTests : IDisposable
         config.Configuration.Servers.Add(origin);
         var controller = new PeerPairController(config, _pairings, NullLogger<PeerPairController>.Instance);
 
-        var result = controller.Pair(new Models.Peer.PairRequest { ServerId = OriginId, Secret = "issued" });
+        var secret = PeerPairingStore.NewSecret();
+        using var asking = _pairings.Expect(origin.Key);
+        var result = controller.Pair(new Models.Peer.PairRequest { ServerId = OriginId, Secret = secret });
 
         Assert.IsType<OkObjectResult>(result.Result);
-        Assert.Equal("issued", _pairings.GetOutbound(origin.Key));
+        Assert.Equal(secret, _pairings.GetOutbound(origin.Key));
+    }
+
+    [Fact]
+    public void Pair_RefusesASecretThisServerDidNotAskFor()
+    {
+        var config = new FakeConfigManager();
+        var origin = Origin();
+        config.Configuration.Servers.Add(origin);
+        var controller = new PeerPairController(config, _pairings, NullLogger<PeerPairController>.Instance);
+        var secret = PeerPairingStore.NewSecret();
+
+        // No link check to that entry is open, so any whitelisted caller naming it is turned away.
+        Assert.IsType<ConflictObjectResult>(controller.Pair(new Models.Peer.PairRequest { ServerId = OriginId, Secret = secret }).Result);
+
+        // The wait ends with the link check, and a secret after it is refused again.
+        _pairings.Expect(origin.Key).Dispose();
+        Assert.IsType<ConflictObjectResult>(controller.Pair(new Models.Peer.PairRequest { ServerId = OriginId, Secret = secret }).Result);
+        Assert.Null(_pairings.GetOutbound(origin.Key));
+    }
+
+    [Theory]
+    [InlineData("short")]
+    [InlineData("has a space in it, and is long enough to pass on length")]
+    [InlineData("n\u00f6t-ascii-but-long-enough-to-pass-on-length-alone")]
+    public void Pair_RefusesAMalformedSecret(string secret)
+    {
+        var config = new FakeConfigManager();
+        var origin = Origin();
+        config.Configuration.Servers.Add(origin);
+        var controller = new PeerPairController(config, _pairings, NullLogger<PeerPairController>.Instance);
+        using var asking = _pairings.Expect(origin.Key);
+
+        Assert.IsType<BadRequestObjectResult>(controller.Pair(new Models.Peer.PairRequest { ServerId = OriginId, Secret = secret }).Result);
     }
 
     [Fact]
@@ -287,7 +322,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     {
         var controller = new PeerPairController(new FakeConfigManager(), _pairings, NullLogger<PeerPairController>.Instance);
 
-        var result = controller.Pair(new Models.Peer.PairRequest { ServerId = OriginId, Secret = "issued" });
+        var result = controller.Pair(new Models.Peer.PairRequest { ServerId = OriginId, Secret = PeerPairingStore.NewSecret() });
 
         Assert.IsType<ConflictObjectResult>(result.Result);
     }

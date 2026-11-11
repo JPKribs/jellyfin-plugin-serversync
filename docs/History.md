@@ -10,6 +10,8 @@ History syncing copies watch state from a source Jellyfin server onto this serve
 * **Play Count** syncs how many times each item was played.
 * **Last Played Date** syncs the date each item was last played.
 * **Favorites** syncs which items are marked as favorites.
+
+A part that is switched off is left alone in both directions. It is not written on this server, not written back to the Source Server, and not taken from another server that negotiates or sends live changes here. It is still read, so the parts left on merge as they otherwise would. Changing these switches makes the next scan read everything again. An item marked unplayed loses its last played date even with **Last Played Date** off, since clearing the date is how Jellyfin records the mark.
 * **Negotiate With Source Server** writes the merged history back to the Source Server as well. See below.
 
 ## Two Way History
@@ -26,7 +28,7 @@ Turning the setting off leaves the remembered base in place but stops writing to
 
 ## Live changes between servers
 
-When a server entry is in Push or Sync mode, a change made here is announced to that server as it happens instead of waiting for the next scan. This server watches its own user data for plays, resume positions, and favorites, gathers a few seconds of edits to one item into one notice, and queues a hint for every Push or Sync server whose mappings cover that user and that library. A hint says what changed and where, never the value. The other server runs Server Sync too, lists this server as a Pull or Sync server, and pulls the change from here through the same code the scan uses, including the negotiation above, so hints and scans can never disagree.
+When a server entry is in Push or Sync mode, a change made here is announced to that server as it happens instead of waiting for the next scan. This server watches its own user data for plays, resume positions, and favorites, gathers the edits to one item into one notice once it has gone untouched for **Send Changes After (seconds)**, 60 by default, and queues a hint for every Push or Sync server whose mappings cover that user and that library. A hint says what changed and where, never the value. The other server runs Server Sync too, lists this server as a Pull or Sync server, and pulls the change from here through the same code the scan uses, including the negotiation above, so hints and scans can never disagree.
 
 Hints are stored on both ends until the work is done. A server that is down, refuses the key, or lacks the plugin is retried with backoff and shown on the dashboard with the reason, and a hint the other server accepted but never finished is checked and sent again. A hint is given up only after the retry limits under Settings > Processing, and the scheduled Sync Information task still runs the full comparison as the safety net for anything the hints missed.
 

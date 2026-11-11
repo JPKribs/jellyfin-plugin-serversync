@@ -639,15 +639,14 @@ public static class FileDeletionService
         {
             try
             {
-                // One batch per reason, so each row keeps the reason it failed for. A refusal (outside
-                // every library root, a symlinked folder) asks the user for a different fix than a
-                // file that could not be removed, and a single generic reason hid which was which.
-                foreach (var group in failedItems.GroupBy(f => f.Error, StringComparer.Ordinal))
+                // A deletion that failed waits for approval with its reason, so each row says why: a
+                // refusal (outside every library root, a symlinked folder) asks for a different fix
+                // than a file that could not be removed. It is not marked Errored, since errored rows
+                // are retried as downloads, and this file is one the source no longer has.
+                foreach (var (sourceItemId, error) in failedItems)
                 {
-                    failed += manager.BatchUpdateStatus(
-                        group.Select(f => f.SourceItemId),
-                        SyncStatus.Errored,
-                        group.Key);
+                    manager.UpdateStatus(sourceItemId, SyncStatus.Pending, PendingType.Deletion, errorMessage: error);
+                    failed++;
                 }
             }
             catch (Exception ex)

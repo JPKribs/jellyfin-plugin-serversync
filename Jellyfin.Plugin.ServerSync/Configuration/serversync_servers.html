@@ -65,7 +65,7 @@
                                         <div class="inputContainer">
                                             <label for="txtSourceServerExternalUrl">External URL (optional):</label>
                                             <input is="emby-input" type="text" id="txtSourceServerExternalUrl" placeholder="https://media.example.com" />
-                                            <div class="fieldDescription">URL your browser loads thumbnails from. Empty uses the Server URL.</div>
+                                            <div class="fieldDescription">Another address for that server, such as its public one. Its calls are accepted from this address too, and images offered by the metadata provider load from it. Empty uses the Server URL.</div>
                                         </div>
 
                                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -81,14 +81,14 @@
                                                 <input type="checkbox" is="emby-checkbox" id="chkAllowLinking" />
                                                 <span class="checkboxLabel">Allow Linking</span>
                                             </label>
-                                            <div class="fieldDescription checkboxFieldDescription">Let this server stream your files for libraries it maps as Link. Needs Server Sync there.</div>
+                                            <div class="fieldDescription checkboxFieldDescription">Let that server stream files from here for libraries it maps as Link. Needs Server Sync there.</div>
                                         </div>
 
                                         <div id="linkLimits" class="hidden">
                                             <div class="inputContainer">
                                                 <label for="txtLinkMaxStreams">Link Streams At Once:</label>
                                                 <input is="emby-input" type="number" id="txtLinkMaxStreams" min="0" max="1000" />
-                                                <div class="fieldDescription">Most streams this server may hold at once. 0 for no limit.</div>
+                                                <div class="fieldDescription">Most streams that server may run at once. 0 for no limit.</div>
                                             </div>
                                             <div class="inputContainer">
                                                 <label for="txtLinkMaxStreamsPerUser">Link Streams Per User:</label>

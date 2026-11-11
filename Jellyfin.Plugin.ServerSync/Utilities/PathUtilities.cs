@@ -53,7 +53,7 @@ public static class PathUtilities
                 if (!normalizedResult.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(normalizedResult, Path.GetFullPath(localRoot), StringComparison.OrdinalIgnoreCase))
                 {
-                    return Path.Combine(localRoot, Path.GetFileName(sourcePath));
+                    return CombineWithLastPart(localRoot, sourcePath);
                 }
 
                 return result;
@@ -62,8 +62,16 @@ public static class PathUtilities
             return localRoot;
         }
 
-        var fileName = Path.GetFileName(sourcePath);
-        return Path.Combine(localRoot, fileName);
+        return CombineWithLastPart(localRoot, sourcePath);
+    }
+
+    // The local root plus the last part of a source path, cut on either kind of separator. A last
+    // part that names no file, such as "..", leaves the root itself, which no caller writes to.
+    private static string CombineWithLastPart(string localRoot, string sourcePath)
+    {
+        var parts = sourcePath.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries);
+        var last = parts.Length > 0 ? parts[^1] : string.Empty;
+        return last.Length == 0 || last is "." or ".." ? localRoot : Path.Combine(localRoot, last);
     }
 
     /// <summary>

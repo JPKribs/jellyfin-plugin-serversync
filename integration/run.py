@@ -656,6 +656,57 @@ def scenario_history_negotiation(creds, apis):
     configure_local(creds, local, ["source-a", "source-b"])
 
 
+def scenario_history_field_off(creds, apis):
+    """A part of history that is switched off is left alone on both servers, while the parts left on
+    still travel both ways."""
+    local, a = apis["local"], apis["source-a"]
+    lu, au = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"]
+    li, ai = movie_id(local, "Only A"), movie_id(a, "Only A")
+
+    def favorite(api, user, item, on):
+        api.call("POST" if on else "DELETE", f"/UserFavoriteItems/{item}?userId={user}", expect=200)
+
+    def sync():
+        run_task(local, "ServerSyncRefreshHistoryTable")
+        run_task(local, "ServerSyncMissingHistory")
+
+    # Both servers agree first, with everything on: unplayed, and not a favorite.
+    configure_local(creds, local, ["source-a", "source-b"], EnableHistorySync=True, HistorySyncNegotiate=True, HistorySyncFavorites=True)
+    for api, user, item in ((local, lu, li), (a, au, ai)):
+        favorite(api, user, item, False)
+        api.call("DELETE", f"/UserPlayedItems/{item}?userId={user}", expect=200)
+    sync()
+    expect(not user_data(local, lu, li)["IsFavorite"] and not user_data(a, au, ai)["IsFavorite"], "both servers start without the favorite")
+
+    # Favorites off. The source gains a favorite and a play. Only the play may arrive.
+    configure_local(creds, local, ["source-a", "source-b"], EnableHistorySync=True, HistorySyncNegotiate=True, HistorySyncFavorites=False)
+    favorite(a, au, ai, True)
+    a.post(f"/UserPlayedItems/{ai}?userId={au}&datePlayed=2026-11-01T10:00:00Z", expect=200)
+    sync()
+    ud_l, ud_a = user_data(local, lu, li), user_data(a, au, ai)
+    expect(ud_l["Played"], "with Favorites off, a play made on the source still reaches local")
+    expect(not ud_l["IsFavorite"], "with Favorites off, a favorite made on the source is not written locally")
+    expect(ud_a["IsFavorite"], "with Favorites off, the source's favorite is not taken away by local's value")
+
+    # A second pass finds nothing to do: the favorite that differs is not work.
+    run_task(local, "ServerSyncRefreshHistoryTable")
+    status = local.get("/Sync/HistoryStatus")
+    expect(status.get("Queued", 0) == 0, f"with Favorites off, a favorite that differs alone queues nothing ({status.get('Queued')})")
+
+    # The other way: the source drops its favorite and local gains one. Neither crosses.
+    favorite(a, au, ai, False)
+    favorite(local, lu, li, True)
+    sync()
+    expect(user_data(local, lu, li)["IsFavorite"], "with Favorites off, local keeps the favorite it set")
+    expect(not user_data(a, au, ai)["IsFavorite"], "with Favorites off, a favorite made locally is not written to the source")
+
+    # Favorites back on: the two sides merge as on a first sync, so the favorite reaches the source.
+    configure_local(creds, local, ["source-a", "source-b"], EnableHistorySync=True, HistorySyncNegotiate=True, HistorySyncFavorites=True)
+    sync()
+    expect(user_data(a, au, ai)["IsFavorite"] and user_data(local, lu, li)["IsFavorite"], "with Favorites back on, the favorite reaches the source")
+    configure_local(creds, local, ["source-a", "source-b"])
+
+
 def restamp_seeds(apis):
     """Saves the seeded values again on the sources, so each carries an edit newer than any local edit
     an earlier run left behind. The pool keeps its databases between runs, and a scenario that expects a
@@ -1299,8 +1350,13 @@ def scenario_peer_endpoint_auth(creds, apis):
     expect(status == 400, f"a lookup with neither a path nor a name is malformed ({status})")
     status, caps = other.call("GET", "/Sync/Peer/Capabilities")
     expect(status == 200 and caps.get("PluginVersion") == PLUGIN_VERSION, "capabilities still answer another version, so Check Link can name both versions")
-    status, body = admin.call("POST", "/Sync/Peer/Pair", {"ServerId": "not-a-configured-server", "Secret": "x"})
+    secret = "A" * 43
+    status, body = admin.call("POST", "/Sync/Peer/Pair", {"ServerId": "not-a-configured-server", "Secret": secret})
     expect(status == 409, f"a pairing from a server this one does not list is refused ({status})")
+    status, body = admin.call("POST", "/Sync/Peer/Pair", {"ServerId": a_id, "Secret": secret})
+    expect(status == 409, f"a pairing secret this server did not ask source-a for is refused ({status})")
+    status, body = admin.call("POST", "/Sync/Peer/Pair", {"ServerId": a_id, "Secret": "x"})
+    expect(status == 400, f"a malformed pairing secret is refused ({status})")
 
     # A name is held to the same rule as an address when private networks are disallowed.
     status, v = admin.call("POST", "/Sync/TestConnection", {"ServerUrl": "https://localhost:8096", "ApiKey": "x", "AllowPrivateNetwork": False})
@@ -1360,6 +1416,63 @@ def scenario_push_responses(creds, apis):
     for n in ("source-a", "source-b"):
         configure_server(creds, apis[n], n, [])
     configure_local(creds, local, ["source-a", "source-b"])
+
+
+def scenario_queue_failed_rows(creds, apis):
+    """Retry Failed and Dismiss Failed on the Queue act on every failed change at once, received and
+    sent: a received change whose apply keeps failing, and a sent change that was given up on."""
+    local, a = apis["local"], apis["source-a"]
+
+    def failing():
+        return local.get("/Sync/Hints").get("InboundFailingCount", 0)
+
+    def failed():
+        return (local.get("/Sync/Hints").get("OutboundCounts") or {}).get("Failed", 0)
+
+    def cut_off(**flags):
+        config = plugin_config(local)
+        for srv in config["Servers"]:
+            if srv["Name"] == "source-a":
+                srv["AllowPrivateNetwork"] = False
+        config.update(flags)
+        save_plugin_config(local, config)
+
+    configure_server(creds, a, "source-a", ["local"], {"local": "Sync"}, **INFO_FLAGS)
+    configure_server(creds, local, "local", ["source-a"], {"source-a": "Sync"}, **INFO_FLAGS)
+    set_overview(a, "Movie", "Shared Movie", f"Queue test one {time.strftime('%H:%M:%S')}")
+    a.post("/Sync/Hints/Run", None, expect=204)
+    wait_until(lambda: not hints(a)["Outbound"] and not hints(local)["Inbound"], 90, "a change from source-a is applied while local can reach it")
+
+    # Received: local still accepts source-a's changes, and can no longer reach it to pull them.
+    cut_off()
+    set_overview(a, "Movie", "Shared Movie", f"Queue test two {time.strftime('%H:%M:%S')}")
+    a.post("/Sync/Hints/Run", None, expect=204)
+    wait_until(lambda: failing() >= 1, 90, "a received change that cannot be applied is counted as failing")
+    status, body = local.call("POST", "/Sync/Hints/Failed/Retry")
+    expect(status == 200 and body and body.get("Inbound", 0) >= 1, f"Retry Failed tries the received change again ({status}, {body})")
+    wait_until(lambda: failing() >= 1, 60, "the change fails again while the server is still out of reach, and is counted again")
+    status, body = local.call("DELETE", "/Sync/Hints/Failed")
+    expect(status == 200 and body and body.get("Inbound", 0) >= 1, f"Dismiss Failed discards the received change ({status}, {body})")
+    expect(failing() == 0 and not hints(local)["Inbound"], "no received change is left failing")
+
+    # Sent: with one try allowed, a change local cannot deliver is given up on.
+    cut_off(HintMaxRetries=1, HintRefusedMaxRetries=1)
+    set_overview(local, "Movie", "Shared Movie", f"Queue test three {time.strftime('%H:%M:%S')}")
+    local.post("/Sync/Hints/Run", None, expect=204)
+    time.sleep(3)
+    local.post("/Sync/Hints/Run", None, expect=204)
+    wait_until(lambda: failed() >= 1, 90, "a sent change out of tries is marked failed")
+    status, body = local.call("POST", "/Sync/Hints/Failed/Retry")
+    expect(status == 200 and body and body.get("Outbound", 0) >= 1, f"Retry Failed sends the failed change again ({status}, {body})")
+    wait_until(lambda: failed() >= 1, 30, "the retry is tried at once, pause or not, and fails again while the server is still out of reach")
+    status, body = local.call("DELETE", "/Sync/Hints/Failed")
+    expect(status == 200 and body and body.get("Outbound", 0) >= 1, f"Dismiss Failed discards the failed change ({status}, {body})")
+    expect(failed() == 0, "no sent change is left failed")
+
+    for r in hints(a)["Outbound"]:
+        a.call("DELETE", f"/Sync/Hints/Outbound/{r['Id']}", expect=204)
+    configure_server(creds, a, "source-a", [])
+    configure_local(creds, local, ["source-a", "source-b"], HintMaxRetries=0, HintRefusedMaxRetries=0)
 
 
 def scenario_check_link_by_direction(creds, apis):
@@ -3192,6 +3305,7 @@ SCENARIOS = [
     ("content priority across two sources, movies and a show", scenario_content_priority),
     ("reordering re-homes a shared item without deleting", scenario_reorder_rehomes),
     ("history negotiates both ways with the source", scenario_history_negotiation),
+    ("history: a part switched off is left alone both ways", scenario_history_field_off),
     ("metadata, images, and people carry over by type", scenario_metadata_by_type),
     ("people sync carries bios and images", scenario_people_sync),
     ("user sync carries policy, configuration, and avatar", scenario_user_sync),
@@ -3202,6 +3316,7 @@ SCENARIOS = [
     ("peer and operator endpoints require Jellyfin authentication", scenario_peer_endpoint_auth),
     ("check link judges the pairing by direction", scenario_check_link_by_direction),
     ("push responses: paused peers, declined hints, activity entries", scenario_push_responses),
+    ("queue: failed changes are retried or dismissed together", scenario_queue_failed_rows),
     ("a standard user's key still receives every category", scenario_non_admin_peer_key),
     ("dashboard bulk and status endpoints", scenario_dashboard_endpoints),
     ("playlist changes and deletions travel by hints", scenario_playlist_hints),

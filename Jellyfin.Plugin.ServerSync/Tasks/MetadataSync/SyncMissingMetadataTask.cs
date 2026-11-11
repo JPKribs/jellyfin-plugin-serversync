@@ -512,8 +512,14 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                         {
                             using (imageStream)
                             {
+                                // What is saved is named by its type, so only an image type is taken.
+                                if (contentType is not null && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    throw new InvalidOperationException($"the source answered {contentType}, which is not an image");
+                                }
+
                                 using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 81920);
-                                await StallWatchdogStream.CopyAsync(imageStream, fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
+                                await StallWatchdogStream.CopyAsync(new CappedReadStream(imageStream, CappedReadStream.MaxSyncedImageBytes), fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
                             }
 
                             tempFiles.Add((i, tempPath, contentType ?? "image/jpeg"));

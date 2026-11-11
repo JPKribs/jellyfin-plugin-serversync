@@ -122,6 +122,30 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Discards one row at the operator's word. It is remembered as finished, so the server that sent
+    /// it hears that it is done and does not send it again.
+    /// </summary>
+    /// <param name="id">The row id.</param>
+    /// <returns>True when the row was there and is gone.</returns>
+    public bool Dismiss(long id) => _inbound.Get(id) is { } row && Dismiss(row);
+
+    /// <summary>Discards every row whose apply has failed at least once, as <see cref="Dismiss(long)"/> does one.</summary>
+    /// <returns>How many rows were discarded.</returns>
+    public int DismissFailing() => _inbound.GetFailing().Count(Dismiss);
+
+    // Only the version read is removed. A newer hint that arrived meanwhile stays and is applied.
+    private bool Dismiss(InboundHint row)
+    {
+        if (!_inbound.Remove(row.Id, row.VersionTimestamp))
+        {
+            return false;
+        }
+
+        Remember(new CompletedHint { HintId = row.HintId, VersionTimestamp = row.VersionTimestamp, Code = HintCode.GaveUp, Reason = "dismissed on the receiving server" });
+        return true;
+    }
+
     /// <summary>Asks the worker to apply now rather than at its next idle tick.</summary>
     public void Wake()
     {
@@ -350,6 +374,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
+                // A failed pass waits like an idle one. Left set, a full batch before the failure would
+                // have the loop go again at once, and keep failing without a pause.
+                more = false;
                 _logger.LogError(ex, "Inbound hint worker pass failed");
             }
         }

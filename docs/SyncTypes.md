@@ -1,6 +1,6 @@
 # Sync Types
 
-Two scheduled tasks do the work. **Sync Content** refreshes and downloads files, handles removed files, and mirrors collections. **Sync Information** compares and applies metadata, people, user settings, and history, then copies playlists.
+Two scheduled tasks do the work, and two daily housekeeping tasks, **Empty Recycling Bin** and **Clean Temporary Directory**, tidy up after them. **Sync Content** refreshes and downloads files, handles removed files, and mirrors collections. **Sync Information** compares and applies metadata, people, user settings, and history, then copies playlists.
 
 | Type | Matched by | Live with Push or Sync | Details |
 | :--- | :--- | :--- | :--- |
@@ -11,7 +11,7 @@ Two scheduled tasks do the work. **Sync Content** refreshes and downloads files,
 | Users | User mapping | No, scheduled only | [Users](Users.md) |
 | Playlists | Owner mapping, items by file path | Yes, including deletions | [Playlists](Playlists.md) |
 
-Each type has its own table on the **Sync** tab, and each row opens to show what was found and what happens next.
+Content, History, Metadata, People, and Users each have a table on the **Sync** tab, and each row opens to show what was found and what happens next. Playlists have no table. Their live changes show on the **Queue** view.
 
 | Sync Table | Item Detail |
 | :--- | :--- |

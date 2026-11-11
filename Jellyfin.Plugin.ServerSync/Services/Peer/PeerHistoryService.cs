@@ -111,6 +111,9 @@ public sealed class PeerHistoryService
                 return result;
             }
 
+            // Only the parts History Sync copies on this server are taken from the caller. The rest of
+            // what it proposes is neither written here nor held against it.
+            entry.Proposed = PeerHistoryNegotiator.EnabledPartOf(entry.Proposed);
             result.Current = current;
             result.Outcome = PeerHistoryNegotiator.Decide(current, entry.Expected, entry.Proposed);
 

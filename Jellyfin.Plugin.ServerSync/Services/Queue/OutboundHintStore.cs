@@ -403,6 +403,29 @@ public sealed class OutboundHintStore : QueueStoreBase
         return cmd.ExecuteNonQuery() > 0;
     });
 
+    /// <summary>
+    /// Puts every failed row back to pending with its attempts cleared, so it is sent again now. Used
+    /// by the operator after a peer that was down for a long while is back.
+    /// </summary>
+    /// <param name="utcNow">Now.</param>
+    /// <returns>How many rows were put back.</returns>
+    public int RetryFailed(DateTime utcNow) => Write(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE OutboundHints SET State = 0, Attempts = 0, NextAttempt = @now, SentAt = NULL WHERE State = 2";
+        Add(cmd, "@now", Stamp(utcNow));
+        return cmd.ExecuteNonQuery();
+    });
+
+    /// <summary>Removes every failed row, used by the operator to discard them all at once.</summary>
+    /// <returns>How many rows were removed.</returns>
+    public int DeleteFailed() => Write(conn =>
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM OutboundHints WHERE State = 2";
+        return cmd.ExecuteNonQuery();
+    });
+
     /// <summary>Counts rows per state for the dashboard.</summary>
     /// <returns>Counts by state.</returns>
     public Dictionary<OutboundState, int> CountByState() => Read(conn =>

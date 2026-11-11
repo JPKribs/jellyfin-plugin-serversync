@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -251,28 +252,40 @@ public static class FileOperationUtilities
         var fileNameWithoutExt = Path.GetFileNameWithoutExtension(mainFilePath);
         var prefix = fileNameWithoutExt + ".";
 
-        foreach (var ext in CompanionExtensions)
+        try
         {
-            try
+            // One listing of the folder. Files that share the prefix but are not companions are other
+            // titles: beside "Avatar.mkv", "Avatar.The.Way.of.Water.mkv" is one, and its subtitles and
+            // artwork start with this title's prefix too. A candidate named after such a title is its
+            // companion, not this one's.
+            var sharing = Directory.EnumerateFiles(directory, fileNameWithoutExt + ".*")
+                .Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(path, mainFilePath, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var otherTitles = sharing
+                .Where(path => !IsCompanionExtension(path) && !Path.GetFileName(path).Contains(".replacing.", StringComparison.Ordinal))
+                .Select(path => Path.GetFileNameWithoutExtension(path) + ".")
+                .ToList();
+
+            foreach (var candidate in sharing.Where(IsCompanionExtension))
             {
-                foreach (var candidate in Directory.EnumerateFiles(directory, fileNameWithoutExt + "*" + ext))
+                var name = Path.GetFileName(candidate);
+                if (!otherTitles.Exists(other => name.StartsWith(other, StringComparison.OrdinalIgnoreCase)))
                 {
-                    var name = Path.GetFileName(candidate);
-                    if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                        && name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                    {
-                        companions.Add(candidate);
-                    }
+                    companions.Add(candidate);
                 }
             }
-            catch (IOException)
-            {
-                // Skip this extension on directory-access failure.
-            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An unreadable folder matches nothing, so nothing extra is moved or removed.
         }
 
         return companions;
     }
+
+    private static bool IsCompanionExtension(string path)
+        => Array.Exists(CompanionExtensions, ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Probes a directory for write permission by creating and deleting a sentinel file.

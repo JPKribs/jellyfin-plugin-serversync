@@ -465,11 +465,7 @@ public class SyncMissingHistoryTask
     protected override void OnApplySucceeded(HistorySyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        record.LocalIsPlayed = record.MergedIsPlayed;
-        record.LocalPlayCount = record.MergedPlayCount;
-        record.LocalPlaybackPositionTicks = record.MergedPlaybackPositionTicks;
-        record.LocalLastPlayedDate = record.MergedLastPlayedDate;
-        record.LocalIsFavorite = record.MergedIsFavorite;
+        PeerHistoryNegotiator.ApplyLocalState(record, PeerHistoryNegotiator.MergedStateOf(record));
 
         // Both servers now hold the merged state, so it becomes the base the next merge compares
         // against, and the row's picture of the source is brought up to date so the table and any

@@ -765,6 +765,14 @@
                                 <span>Run Now</span>
                             </button>
                         </div>
+                        <div id="queueFailedActions" class="syncActionButtonRow hidden">
+                            <button is="emby-button" type="button" id="btnQueueRetryFailed" class="raised jpk-button-submit syncActionButton" title="Try every failed change again now, sent and received, with its attempts cleared">
+                                <span>Retry Failed</span>
+                            </button>
+                            <button is="emby-button" type="button" id="btnQueueDismissFailed" class="raised jpk-button-destructive syncActionButton" title="Discard every failed change, sent and received. The scheduled tasks still carry them">
+                                <span>Dismiss Failed</span>
+                            </button>
+                        </div>
 
                         <div class="syncSectionSeparator"></div>
 

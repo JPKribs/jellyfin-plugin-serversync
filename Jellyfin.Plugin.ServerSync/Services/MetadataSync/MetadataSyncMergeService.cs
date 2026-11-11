@@ -48,7 +48,7 @@ public static class MetadataSyncMergeService
         // instead of the wrapped value, producing permanent IMDB/TMDB desyncs.
         var sourceProviderIds = sourceItem.ProviderIds?.AdditionalData?
             .Select(kvp => (kvp.Key, Value: MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value)))
-            .Where(kvp => !string.IsNullOrEmpty(kvp.Value))
+            .Where(kvp => !string.IsNullOrEmpty(kvp.Value) && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))
             .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
@@ -321,7 +321,7 @@ public static class MetadataSyncMergeService
             ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.EndDate),
             ["ProductionYear"] = localItem.ProductionYear,
             ["ProviderIds"] = localItem.ProviderIds?
-                .Where(kvp => kvp.Value != null)
+                .Where(kvp => kvp.Value != null && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))
                 .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             ["IndexNumber"] = localItem.IndexNumber,

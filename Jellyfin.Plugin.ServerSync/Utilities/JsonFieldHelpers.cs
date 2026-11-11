@@ -118,6 +118,16 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
+    /// Whether a provider id is one of this plugin's own marks on an item: the Identify pin, and the
+    /// tags on mirrored playlists and collections. Each names something on this server only, so it is
+    /// never compared with, copied from, or removed to match another server.
+    /// </summary>
+    /// <param name="key">The provider id's name.</param>
+    /// <returns>True for this plugin's own keys.</returns>
+    public static bool IsOwnProviderKey(string? key)
+        => key is not null && key.StartsWith("ServerSync", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Reads a Jellyfin-style ProviderIds object as a case-insensitive string dictionary.
     /// Empty-string values are dropped.
     /// </summary>
@@ -129,7 +139,7 @@ public static class JsonFieldHelpers
             return result;
         }
 
-        foreach (var prop in v.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String))
+        foreach (var prop in v.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String && !IsOwnProviderKey(p.Name)))
         {
             var pv = prop.Value.GetString();
             if (!string.IsNullOrEmpty(pv))

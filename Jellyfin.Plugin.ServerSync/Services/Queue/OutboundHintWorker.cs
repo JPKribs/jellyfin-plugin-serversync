@@ -162,6 +162,22 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Lifts every pause, so the next pass tries each server at once. For the operator's retry: a
+    /// server that failed often enough to have changes given up on is usually still paused, and a
+    /// retry that waited out the pause would not be one. A server on an incompatible version stays held.
+    /// </summary>
+    public void LiftPauses()
+    {
+        foreach (var state in _peers.Values)
+        {
+            if (!state.VersionBlocked)
+            {
+                state.PausedUntil = null;
+            }
+        }
+    }
+
     /// <summary>One delivery pass over every peer. Public so the dashboard and tests can run it on demand.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="refreshCapabilities">Re-read what every peer accepts now, rather than only when the last answer is old.</param>
@@ -256,6 +272,9 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
+                // A failed pass waits like an idle one. Left set, a full batch before the failure would
+                // have the loop go again at once, and keep failing without a pause.
+                more = false;
                 _logger.LogError(ex, "Outbound hint worker pass failed");
             }
         }

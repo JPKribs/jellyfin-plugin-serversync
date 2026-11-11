@@ -143,6 +143,75 @@ public sealed class HintStoreTests : IDisposable
     }
 
     /// <summary>
+    /// Every failed row is put back to pending with its attempts cleared, or removed, in one go, and
+    /// rows in other states are left alone.
+    /// True: after a peer was down for a day, its given up changes are sent again with one press.
+    /// False: each failed row would have to be dismissed by hand, thousands of times.
+    /// </summary>
+    [Fact]
+    public void Failed_AreRetriedOrRemovedTogether()
+    {
+        var first = Row(key: "u|1");
+        var second = Row(key: "u|2");
+        var pending = Row(key: "u|3");
+        foreach (var row in new[] { first, second, pending })
+        {
+            _outbound.Enqueue(row, "me");
+        }
+
+        _outbound.Defer(new[] { first }, DateTime.UtcNow.AddHours(1), "no answer");
+        _outbound.MarkFailed(first, "gave up");
+        _outbound.MarkFailed(second, "gave up");
+
+        Assert.Equal(2, _outbound.RetryFailed(DateTime.UtcNow));
+        var due = _outbound.GetDue("peer-a", DateTime.UtcNow.AddSeconds(1), 10);
+        Assert.Equal(3, due.Count);
+        Assert.All(due, row => Assert.Equal(0, row.Attempts));
+        Assert.Equal(0, _outbound.RetryFailed(DateTime.UtcNow));
+
+        _outbound.MarkFailed(second, "gave up again");
+        Assert.Equal(1, _outbound.DeleteFailed());
+        Assert.Equal(2, _outbound.GetAll().Count);
+        Assert.All(_outbound.GetAll(), row => Assert.Equal(OutboundState.Pending, row.State));
+    }
+
+    /// <summary>
+    /// Inbound rows whose apply has failed are counted, and made due at once with their attempts
+    /// cleared, while rows that never failed are left as they are.
+    /// True: once what blocked a batch of received changes is fixed, one press applies them all.
+    /// False: each would sit out its backoff, up to an hour, and count down toward being dropped.
+    /// </summary>
+    [Fact]
+    public void Inbound_FailingRowsAreRetriedTogether()
+    {
+        var now = DateTime.UtcNow;
+        InboundHint Add(string id)
+        {
+            _inbound.Enqueue(InboundHint.FromHint(new SyncHint { HintId = id, OriginServerId = "a", Kind = HintKind.Metadata, Key = id, VersionTimestamp = now }, now));
+            return _inbound.GetAll().Single(r => r.HintId == id);
+        }
+
+        var failing = Add("a:1");
+        var alsoFailing = Add("a:2");
+        Add("a:3");
+        _inbound.Defer(failing, now.AddHours(1), "the source did not answer");
+        _inbound.Defer(alsoFailing, now.AddHours(1), "the source did not answer");
+
+        Assert.Equal(2, _inbound.CountFailing());
+        Assert.Equal(new[] { "a:1", "a:2" }, _inbound.GetFailing().Select(r => r.HintId).ToArray());
+        Assert.Single(_inbound.GetDue(now.AddSeconds(1), 10, content: false));
+
+        Assert.Equal(2, _inbound.RetryFailing(now));
+
+        Assert.Equal(0, _inbound.CountFailing());
+        var due = _inbound.GetDue(now.AddSeconds(1), 10, content: false);
+        Assert.Equal(3, due.Count);
+        Assert.All(due, row => Assert.Equal(0, row.Attempts));
+        Assert.NotNull(_inbound.Get(failing.Id));
+        Assert.Null(_inbound.Get(long.MaxValue));
+    }
+
+    /// <summary>
     /// Sent rows older than the grace period are found, and a resend puts them back to pending.
     /// True: work a peer lost is recovered through its queue status.
     /// False: a crash on the peer after accepting would lose the hint until the next scan.

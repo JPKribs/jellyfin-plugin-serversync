@@ -7,7 +7,7 @@ An entry that holds a standard user's key only syncs that user's own settings. M
 ## Settings
 
 * **Enable User Sync** turns user settings syncing on.
-* **User Policy** syncs each user's permissions and access policy.
+* **User Policy** syncs each user's permissions and access policy, including whether the account is disabled. Administrator rights are never copied: each server's administrator grants them there. Library, channel, and device access lists stay local too.
 * **User Configuration** syncs each user's display and playback preferences.
 * **Profile Image** syncs each user's profile picture.
 

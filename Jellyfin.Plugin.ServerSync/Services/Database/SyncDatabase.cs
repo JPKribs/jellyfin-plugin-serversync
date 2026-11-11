@@ -413,7 +413,9 @@ public class SyncDatabase : IDisposable
         => DatabaseSchema.Open(
             connection,
             DatabaseMigrationService.CurrentSchemaVersion,
-            DatabaseMigrationService.MinReaderVersion,
+            // The floor follows what the file holds. A database with links keeps the higher floor
+            // across restarts, so a release that cannot read links never opens it as usable.
+            DatabaseMigrationService.MinReaderFor(connection),
             c => DatabaseMigrationService.CreateInitialSchema((SqliteConnection)c),
             (c, fromVersion) => DatabaseMigrationService.MigrateSchema((SqliteConnection)c, fromVersion, _logger));
 
