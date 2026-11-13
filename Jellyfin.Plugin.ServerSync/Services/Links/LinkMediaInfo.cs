@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Entities;
@@ -262,7 +264,7 @@ public sealed class LinkMediaInfo
             var complete = true;
             for (var tile = 0; tile < set.TileCount() && complete; tile++)
             {
-                complete = await FetchImageAsync(client, description.ItemId, "Trickplay", tile, set.Width, Path.Combine(folder, tile.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".jpg"), cancellationToken).ConfigureAwait(false);
+                complete = await FetchImageAsync(client, description.ItemId, "Trickplay", tile, set.Width, Path.Combine(folder, tile.ToString(CultureInfo.InvariantCulture) + ".jpg"), cancellationToken).ConfigureAwait(false);
             }
 
             if (!complete)
@@ -319,7 +321,7 @@ public sealed class LinkMediaInfo
             File.Move(temp, path, overwrite: true);
             return true;
         }
-        catch (Exception ex) when (ex is IOException or System.Net.Http.HttpRequestException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or HttpRequestException or UnauthorizedAccessException)
         {
             _logger.LogDebug(ex, "Could not take a {Kind} image from the source", kind);
             return false;

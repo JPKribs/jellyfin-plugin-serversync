@@ -1,10 +1,12 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Session;
@@ -29,8 +31,8 @@ public sealed class LinkPlaybackSessions
     private readonly IUserManager _userManager;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ISourceServerClientFactory _clientFactory;
-    private readonly MediaBrowser.Controller.IServerApplicationHost _applicationHost;
-    private readonly Microsoft.Extensions.Logging.ILogger<LinkSessionController> _controllerLogger;
+    private readonly IServerApplicationHost _applicationHost;
+    private readonly ILogger<LinkSessionController> _controllerLogger;
 
     public LinkPlaybackSessions(
         ISessionManager sessionManager,
@@ -38,8 +40,8 @@ public sealed class LinkPlaybackSessions
         IUserManager userManager,
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
-        MediaBrowser.Controller.IServerApplicationHost applicationHost,
-        Microsoft.Extensions.Logging.ILogger<LinkSessionController> controllerLogger)
+        IServerApplicationHost applicationHost,
+        ILogger<LinkSessionController> controllerLogger)
     {
         _clientFactory = clientFactory;
         _applicationHost = applicationHost;
@@ -114,7 +116,7 @@ public sealed class LinkPlaybackSessions
             });
         }
 
-        var mediaSourceId = item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        var mediaSourceId = item.Id.ToString("N", CultureInfo.InvariantCulture);
         // This server only sends the file, so a transcode reported by an older linking server shows as
         // the direct stream it is here.
         var method = Enum.Parse<PlayMethod>(LinkPlaybackReporter.ReportedMethod(report.PlayMethod));

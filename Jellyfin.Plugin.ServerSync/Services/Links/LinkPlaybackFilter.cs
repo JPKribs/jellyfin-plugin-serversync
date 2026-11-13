@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Jellyfin.Data;
+using Jellyfin.Database.Implementations.Enums;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Trickplay;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.MediaInfo;
 using MediaBrowser.Model.Querying;
@@ -21,11 +24,12 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// asks the source whether they may, or another server that holds the same file when the source will
 /// not, refuses at once if none will, and records the user and that server so the link route streams
 /// as them from it. A film held in several versions is asked about version by version, and the versions
-/// the source refuses, such as one above the user's bitrate limit, are left out of what the player is offered. It clears the link's loopback URL from every response, so clients play through this
+/// the source refuses, such as one above the user's bitrate limit, are left out of what the player is
+/// offered. It clears the link's loopback URL from every response, so clients play through this
 /// server's own stream route and never see the link's secret, and stops universal audio from
 /// redirecting a client to it. A player's direct play is answered here, streamed from the source for
-/// that user, so two viewers of one link are each streamed, counted, and limited as themselves. Every other request passes through untouched, and a failure in the link
-/// lookup never breaks playback.
+/// that user, so two viewers of one link are each streamed, counted, and limited as themselves. Every
+/// other request passes through untouched, and a failure in the link lookup never breaks playback.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
@@ -77,7 +81,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             // reached through the audio routes is refused outright. Only video is linked, so this only
             // guards against a link made some other way.
             if (string.Equals(controller, "Library", StringComparison.Ordinal)
-                || (controller is "Audio" or "UniversalAudio" && _libraryManager.GetItemById(LinkItemId(context)) is not MediaBrowser.Controller.Entities.Video))
+                || (controller is "Audio" or "UniversalAudio" && _libraryManager.GetItemById(LinkItemId(context)) is not Video))
             {
                 context.Result = new ObjectResult("This item streams from another server and cannot be downloaded from here") { StatusCode = StatusCodes.Status403Forbidden };
                 return;
@@ -235,7 +239,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     // link took from its source are listed here, the way Jellyfin lists them for a file.
     private async Task ListTrickplayAsync(BaseItemDto item)
     {
-        if (_services?.GetService<MediaBrowser.Controller.Trickplay.ITrickplayManager>() is not { } trickplay)
+        if (_services?.GetService<ITrickplayManager>() is not { } trickplay)
         {
             return;
         }
@@ -284,10 +288,10 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             return false;
         }
 
-        var user = (_services?.GetService(typeof(IUserManager)) as IUserManager)?.GetUserById(userId);
+        var user = _services?.GetService<IUserManager>()?.GetUserById(userId);
         return user is not null
-            && !user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.IsDisabled)
-            && user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.EnableMediaPlayback)
+            && !user.HasPermission(PermissionKind.IsDisabled)
+            && user.HasPermission(PermissionKind.EnableMediaPlayback)
             && _libraryManager.GetItemById(versionId)?.IsVisible(user) == true;
     }
 
@@ -295,15 +299,15 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     // the item. With no user manager to ask, which is only so outside a running server, nothing is refused.
     private bool MaySeeHere(Guid versionId, Guid userId)
     {
-        if (_services?.GetService(typeof(IUserManager)) is not IUserManager users)
+        if (_services?.GetService<IUserManager>() is not { } users)
         {
             return true;
         }
 
         var user = users.GetUserById(userId);
         return user is not null
-            && !user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.IsDisabled)
-            && user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.EnableMediaPlayback)
+            && !user.HasPermission(PermissionKind.IsDisabled)
+            && user.HasPermission(PermissionKind.EnableMediaPlayback)
             && _libraryManager.GetItemById(versionId)?.IsVisible(user) == true;
     }
 
@@ -397,7 +401,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
 
             controller = descriptor.ControllerName;
             var named = NamedVersion(context);
-            var all = new List<MediaBrowser.Controller.Entities.BaseItem> { item };
+            var all = new List<BaseItem> { item };
 
             // A stream reads one version: the one it names, or the item's own. Only a request to play
             // needs every version, so only it looks them up.
@@ -408,12 +412,12 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                     all.Add(version);
                 }
             }
-            else if (item is MediaBrowser.Controller.Entities.Video video)
+            else if (item is Video video)
             {
                 all.AddRange((_libraryManager.GetLocalAlternateVersionIds(video) ?? Enumerable.Empty<Guid>())
                     .Select(id => _libraryManager.GetItemById(id))
                     .Where(version => version is not null)!);
-                all.AddRange(_libraryManager.GetLinkedAlternateVersions(video) ?? Enumerable.Empty<MediaBrowser.Controller.Entities.Video>());
+                all.AddRange(_libraryManager.GetLinkedAlternateVersions(video) ?? Enumerable.Empty<Video>());
             }
 
             var touched = named is { } wanted && all.Any(v => v.Id == wanted)

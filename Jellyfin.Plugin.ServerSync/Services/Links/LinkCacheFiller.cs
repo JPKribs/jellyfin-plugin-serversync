@@ -29,9 +29,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// Decides what goes into the link cache and downloads it, one file at a time, in the background.
 /// Two things put a link's file in the cache: someone plays the link, or it is an episode ahead of the
 /// one a user is watching. Items picked to always keep are full copies in the library instead, see
-/// <see cref="AlwaysKeep"/>. Each download reads the
-/// file from the link's own server through the route links stream from, so that server's speed limits
-/// apply, and this server's own download speed limit applies as well.
+/// <see cref="AlwaysKeep"/>. Each download reads the file from the link's own server through the route
+/// links stream from, so that server's speed limits apply, and this server's own download speed limit
+/// applies as well.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkCacheFiller : BackgroundService
@@ -385,10 +385,9 @@ public sealed class LinkCacheFiller : BackgroundService
                 }
             }
 
-            var expected = row.SourceSize;
-            if (_cache.Complete(fill.LinkId, extension, expected, fill.Reason))
+            if (_cache.Complete(fill.LinkId, extension, row.SourceSize, fill.Reason))
             {
-                _logger.LogInformation("Cached {File} ({Size}) from '{Server}'", name, FormatUtilities.FormatBytes(expected), server.DisplayName);
+                _logger.LogInformation("Cached {File} ({Size}) from '{Server}'", name, FormatUtilities.FormatBytes(row.SourceSize), server.DisplayName);
             }
             else
             {

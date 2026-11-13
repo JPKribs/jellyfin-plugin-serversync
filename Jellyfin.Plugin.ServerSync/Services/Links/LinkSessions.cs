@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
@@ -20,7 +22,7 @@ public sealed class LinkSessions
     private readonly object _lock = new();
     private readonly Dictionary<(string Peer, Guid User, Guid Item), Stream> _streams = new();
     private readonly Dictionary<string, int> _fills = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Utilities.SpeedBucket> _speeds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SpeedBucket> _speeds = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Peer, Guid Item), (DateTime Since, long Spent)> _probes = new();
 
     /// <summary>
@@ -99,12 +101,6 @@ public sealed class LinkSessions
     }
 
     /// <summary>
-    /// Opens a download into that server's link cache, when it holds fewer than it may. Null when it
-    /// is at the limit.
-    /// </summary>
-    /// <param name="peerKey">The calling server's entry key.</param>
-    /// <returns>The handle, or null.</returns>
-    /// <summary>
     /// Charges bytes of a file to the calling server's probe allowance for it. A probe is served
     /// without a user, a stream count or a speed, so the allowance is what keeps the probe flag from
     /// being a way to copy whole files past every limit.
@@ -142,6 +138,12 @@ public sealed class LinkSessions
         }
     }
 
+    /// <summary>
+    /// Opens a download into that server's link cache, when it holds fewer than it may. Null when it
+    /// is at the limit.
+    /// </summary>
+    /// <param name="peerKey">The calling server's entry key.</param>
+    /// <returns>The handle, or null.</returns>
     public IDisposable? TryOpenFill(string peerKey)
     {
         var peer = peerKey.ToUpperInvariant();
@@ -169,14 +171,14 @@ public sealed class LinkSessions
     /// <param name="fill">Whether this is a cache download, which has a speed of its own beside the user's streams.</param>
     /// <param name="bytesPerSecond">The rate now.</param>
     /// <returns>The shared speed.</returns>
-    public Utilities.SpeedBucket SpeedFor(string peerKey, Guid? userId, bool fill, long bytesPerSecond)
+    public SpeedBucket SpeedFor(string peerKey, Guid? userId, bool fill, long bytesPerSecond)
     {
         var key = peerKey.ToUpperInvariant() + "|" + (userId?.ToString("N") ?? string.Empty) + (fill ? "|fill" : string.Empty);
         lock (_lock)
         {
             if (_speeds.Count > 256)
             {
-                var idle = System.Diagnostics.Stopwatch.GetElapsedTime(0) - TimeSpan.FromMinutes(10);
+                var idle = Stopwatch.GetElapsedTime(0) - TimeSpan.FromMinutes(10);
                 foreach (var old in _speeds.Where(p => p.Value.LastUsed < idle).Select(p => p.Key).ToList())
                 {
                     _speeds.Remove(old);
@@ -189,7 +191,7 @@ public sealed class LinkSessions
                 return bucket;
             }
 
-            return _speeds[key] = new Utilities.SpeedBucket(bytesPerSecond);
+            return _speeds[key] = new SpeedBucket(bytesPerSecond);
         }
     }
 

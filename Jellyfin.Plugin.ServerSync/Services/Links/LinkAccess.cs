@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -242,7 +243,7 @@ public sealed class LinkAccess : ILinkAccess
             _health.Answered(server.Key);
             if (!answer.Allowed)
             {
-                answer.Reason = JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(answer.Reason ?? "the source refused", 300);
+                answer.Reason = FormatUtilities.SanitizeForLog(answer.Reason ?? "the source refused", 300);
             }
 
             return answer;

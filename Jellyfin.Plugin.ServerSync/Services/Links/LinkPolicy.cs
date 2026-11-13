@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Enums;
@@ -24,7 +25,7 @@ public sealed record LinkVerdict(bool Allowed, string? Reason, BaseItem? Item, G
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPolicy
 {
-    // The client name Server Sync reports link playback under, so its sessions are not counted twice.
+    /// <summary>The client name Server Sync reports link playback under, so its sessions are not counted twice.</summary>
     public const string ClientName = "Server Sync";
 
     private readonly ILibraryManager _libraryManager;
@@ -60,7 +61,7 @@ public sealed class LinkPolicy
         }
 
         var item = _libraryManager.GetItemById(itemId);
-        if (item is null || item is Folder || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
+        if (item is null || item is Folder || string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path))
         {
             return LinkVerdict.Refuse("the file is no longer on the source");
         }

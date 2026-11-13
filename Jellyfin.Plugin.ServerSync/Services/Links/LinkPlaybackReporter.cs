@@ -11,6 +11,7 @@ using Jellyfin.Plugin.ServerSync.Models.Peer;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.Session;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -35,7 +36,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
     private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ISessionManager _sessionManager;
-    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
+    private readonly ILibraryManager _libraryManager;
     private readonly ILinkRegistry _links;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ISourceServerClientFactory _clientFactory;
@@ -58,7 +59,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
 
     public LinkPlaybackReporter(
         ISessionManager sessionManager,
-        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
+        ILibraryManager libraryManager,
         ILinkRegistry links,
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
@@ -114,9 +115,9 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// <param name="method">How the viewer here plays it.</param>
     /// <returns>DirectPlay, or DirectStream for anything else.</returns>
     public static string ReportedMethod(string? method)
-        => string.Equals(method, nameof(MediaBrowser.Model.Session.PlayMethod.DirectPlay), StringComparison.OrdinalIgnoreCase)
-            ? nameof(MediaBrowser.Model.Session.PlayMethod.DirectPlay)
-            : nameof(MediaBrowser.Model.Session.PlayMethod.DirectStream);
+        => string.Equals(method, nameof(PlayMethod.DirectPlay), StringComparison.OrdinalIgnoreCase)
+            ? nameof(PlayMethod.DirectPlay)
+            : nameof(PlayMethod.DirectStream);
 
     /// <summary>
     /// Whether a viewer's playback stays off the source. A viewer whose link is in the cache when they

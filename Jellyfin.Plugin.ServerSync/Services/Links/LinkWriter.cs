@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -28,7 +29,7 @@ public sealed class LinkWriter
     /// <summary>
     /// Writes the link, or throws with a reason the Sync tab shows when the path is taken.
     /// </summary>
-    public void Write(SyncItem row, ContentSyncTableManager table, Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    public void Write(SyncItem row, ContentSyncTableManager table, PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(table);
@@ -83,6 +84,7 @@ public sealed class LinkWriter
             table.RequireLinkAwareReaders();
             _floorRaised = true;
         }
+
         _logger.LogInformation("LINKED: {FileName} -> {LocalPath}", Path.GetFileName(row.SourcePath), path);
     }
 

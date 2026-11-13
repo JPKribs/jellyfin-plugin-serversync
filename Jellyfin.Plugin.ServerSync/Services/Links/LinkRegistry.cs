@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller.Entities;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
@@ -62,12 +62,12 @@ public static class LinkPaths
     /// an audio or book .strm as a plain file, which would hand a player the link's text, secret and
     /// all, so only video is ever linked.
     /// </summary>
-    public static bool CanLink(Jellyfin.Sdk.Generated.Models.BaseItemDto item)
-        => item?.Type is Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Movie
-            or Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Episode
-            or Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Video
-            or Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.MusicVideo
-            or Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Trailer;
+    public static bool CanLink(BaseItemDto item)
+        => item?.Type is BaseItemDto_Type.Movie
+            or BaseItemDto_Type.Episode
+            or BaseItemDto_Type.Video
+            or BaseItemDto_Type.MusicVideo
+            or BaseItemDto_Type.Trailer;
 
     /// <summary>
     /// The other versions of a source film or episode, such as a 1080p file beside a 4K one, each as
@@ -78,7 +78,7 @@ public static class LinkPaths
     /// </summary>
     /// <param name="item">The source item, as Jellyfin lists it.</param>
     /// <returns>One item per further version held as a file.</returns>
-    public static IEnumerable<Jellyfin.Sdk.Generated.Models.BaseItemDto> OtherVersions(Jellyfin.Sdk.Generated.Models.BaseItemDto item)
+    public static IEnumerable<BaseItemDto> OtherVersions(BaseItemDto item)
     {
         if (item?.MediaSources is not { Count: > 1 } sources || !CanLink(item))
         {
@@ -107,14 +107,14 @@ public static class LinkPaths
                 continue;
             }
 
-            yield return new Jellyfin.Sdk.Generated.Models.BaseItemDto
+            yield return new BaseItemDto
             {
                 Id = versionId,
                 Name = item.Name,
                 Type = item.Type,
                 Path = source.Path,
                 DateCreated = item.DateCreated,
-                MediaSources = new List<Jellyfin.Sdk.Generated.Models.MediaSourceInfo> { source }
+                MediaSources = new List<MediaSourceInfo> { source }
             };
         }
     }

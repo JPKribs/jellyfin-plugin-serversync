@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
@@ -91,13 +94,13 @@ public sealed class LinkVerifier
                         break;
                     }
                 }
-                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Forbidden)
                 {
                     // The source answered and refused every link at once, such as with linking switched off.
                     answer = new PeerLinkDescribeResponse();
-                    refusal = JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(ex.Message, 300);
+                    refusal = FormatUtilities.SanitizeForLog(ex.Message, 300);
                 }
-                catch (Exception ex) when (ex is HttpRequestException or System.IO.IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+                catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
                 {
                     // A source that is down is not a dead link: play falls back, and the next run checks again.
                     _logger.LogDebug("Could not check links against '{Server}': {Reason}", server.Key, ex.Message);
@@ -142,7 +145,7 @@ public sealed class LinkVerifier
                         continue;
                     }
 
-                    var reason = Prefix + (refusal ?? (string.IsNullOrWhiteSpace(found?.Reason) ? "the file is no longer on the source" : JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(found!.Reason, 300)));
+                    var reason = Prefix + (refusal ?? (string.IsNullOrWhiteSpace(found?.Reason) ? "the file is no longer on the source" : FormatUtilities.SanitizeForLog(found!.Reason, 300)));
                     if (!Flagged(row) || !string.Equals(row.Reason, reason, StringComparison.Ordinal))
                     {
                         _logger.LogWarning("The link {Path} cannot play: {Reason}", row.LocalPath, reason[Prefix.Length..]);
@@ -193,7 +196,7 @@ public sealed class LinkVerifier
                     }
                 }
             }
-            catch (Exception ex) when (ex is HttpRequestException or System.IO.IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
             {
                 _logger.LogDebug("Could not take media info for links: {Reason}", ex.Message);
                 break;

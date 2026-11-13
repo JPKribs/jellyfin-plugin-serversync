@@ -4,10 +4,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
+using MediaBrowser.Model.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -16,10 +19,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
 /// Streams the file a link stands in for into a response: from the link cache when the file is held
-/// there, and otherwise from the server its grant is routed to. A
-/// server that is down, full, or refuses hands the read to another that holds the same file. A stream
-/// that drops or stalls partway is picked up again where it stopped, from the same server or another,
-/// so the player never sees the break.
+/// there, and otherwise from the server its grant is routed to. A server that is down, full, or refuses
+/// hands the read to another that holds the same file. A stream that drops or stalls partway is picked
+/// up again where it stopped, from the same server or another, so the player never sees the break.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkStreamer
@@ -96,7 +98,7 @@ public sealed class LinkStreamer
     /// <param name="context">The request to answer.</param>
     /// <param name="link">The link.</param>
     /// <param name="grant">Who the link is read for, and the server it is routed to.</param>
-    /// <param name="sourcePath">The file's path on the source, for the log.</param>
+    /// <param name="sourcePath">The file's path, for the log: its path on the source, or where its copy would sit here.</param>
     /// <returns><see cref="Written"/>, or a status code.</returns>
     public async Task<int> StreamAsync(HttpContext context, LinkEntry link, LinkGrant grant, string sourcePath)
     {
@@ -109,7 +111,7 @@ public sealed class LinkStreamer
         {
             try
             {
-                await Results.File(cached, MediaBrowser.Model.Net.MimeTypes.GetMimeType(cached), enableRangeProcessing: true).ExecuteAsync(context).ConfigureAwait(false);
+                await Results.File(cached, MimeTypes.GetMimeType(cached), enableRangeProcessing: true).ExecuteAsync(context).ConfigureAwait(false);
                 return Written;
             }
             catch (IOException) when (!context.Response.HasStarted)
@@ -162,7 +164,7 @@ public sealed class LinkStreamer
             var http = context.Response;
             http.StatusCode = (int)response.StatusCode;
             // The type comes from the file's own name here, never from what the other server sent.
-            http.ContentType = MediaBrowser.Model.Net.MimeTypes.GetMimeType(string.IsNullOrEmpty(link.CopiedPath) ? sourcePath : link.CopiedPath);
+            http.ContentType = MimeTypes.GetMimeType(string.IsNullOrEmpty(link.CopiedPath) ? sourcePath : link.CopiedPath);
             http.Headers["X-Content-Type-Options"] = "nosniff";
             http.ContentLength = response.Content.Headers.ContentLength;
             foreach (var name in PassedHeaders)
@@ -282,7 +284,7 @@ public sealed class LinkStreamer
             await using (stream.ConfigureAwait(false))
             {
                 var read = await stream.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
-                return System.Text.Encoding.UTF8.GetString(buffer, 0, read);
+                return Encoding.UTF8.GetString(buffer, 0, read);
             }
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException)
@@ -393,7 +395,7 @@ public sealed class LinkStreamer
             if (!response.IsSuccessStatusCode)
             {
                 var reason = await ReadReasonAsync(response, aborted).ConfigureAwait(false);
-                _logger.LogWarning("'{Server}' refused to stream {Path} ({Status}): {Reason}", server.DisplayName, sourcePath, (int)response.StatusCode, JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(reason, 300));
+                _logger.LogWarning("'{Server}' refused to stream {Path} ({Status}): {Reason}", server.DisplayName, sourcePath, (int)response.StatusCode, FormatUtilities.SanitizeForLog(reason, 300));
             }
 
             return (response, (int)response.StatusCode);

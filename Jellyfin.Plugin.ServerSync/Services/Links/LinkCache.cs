@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using Jellyfin.Plugin.ServerSync.Configuration;
+using System.Threading;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -453,7 +453,7 @@ public sealed class LinkCache
     /// <param name="root">The folder.</param>
     public static void WipeFolder(string root)
     {
-        System.Threading.Interlocked.Increment(ref _wipes);
+        Interlocked.Increment(ref _wipes);
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
         {
             return;
@@ -529,7 +529,7 @@ public sealed class LinkCache
     private Dictionary<string, CacheEntry> Entries()
     {
         var root = Root;
-        var wipes = System.Threading.Volatile.Read(ref _wipes);
+        var wipes = Volatile.Read(ref _wipes);
         if (_entries is not null && string.Equals(root, _loadedRoot, StringComparison.Ordinal) && wipes == _loadedAtWipe)
         {
             return _entries;
