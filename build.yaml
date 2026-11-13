@@ -28,7 +28,6 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  fixed:
-  - The arrows on collapsible sections are back to their usual size
-  developer:
-  - Uses JPKribs.Jellyfin.Base 2026.11.13.3
+  changed:
+  - A link whose file no server offers any more is always removed on the next full scan, whatever Removed files says. Its .strm goes with the files beside it and each folder that leaves holding only artwork and nfo files, with no approval and no recycling bin
+  - A full copy in a Link library, a link the library filter leaves out, and a .strm that no longer points at Server Sync still follow Removed files
