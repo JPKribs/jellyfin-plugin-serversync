@@ -6,14 +6,8 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
-using Jellyfin.Plugin.ServerSync.Models.Peer;
-using Jellyfin.Plugin.ServerSync.Utilities;
-using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
-using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -98,7 +92,6 @@ public partial class SourceServerClient
         if (leafTypes.Contains(rootItem.Type))
         {
             result.Add(rootItem);
-            seen.Add(rootItem.Id.Value);
             await ApplyPeerLinksAsync(result, cancellationToken).ConfigureAwait(false);
             return result;
         }
@@ -168,9 +161,8 @@ public partial class SourceServerClient
                     {
                         // Any 4xx/5xx: bubble up. Ending the list here would silently
                         // truncate the leaf list, which the caller can't tell
-                        // apart from "this folder really has no more children" , 
-                        // exactly the kind of silent partial result that drives
-                        // the prune massacre.
+                        // apart from "this folder really has no more children",
+                        // and the prune would read the missing leaves as removed.
                         _logger.LogWarning(ex, "Source server {Status} listing whitelist children of {ParentId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, parentId);
                         throw;
                     }
@@ -233,6 +225,7 @@ public partial class SourceServerClient
     /// <param name="libraryId">Library ID.</param>
     /// <param name="startIndex">Starting index for pagination.</param>
     /// <param name="limit">Maximum items to return.</param>
+    /// <param name="changedSince">Only items saved since this time, or null for all.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Query result with items.</returns>
     public async Task<BaseItemDtoQueryResult?> GetLibraryItemsAsync(
@@ -551,10 +544,9 @@ public partial class SourceServerClient
     /// Lightweight discovery fetch, returns only Id and Path for items in a
     /// library. Used by Metadata refresh to determine which source items have
     /// a local correlate before paying for the full metadata payload. The
-    /// per-page response is dramatically smaller than a full metadata page
-    /// (no Genres/Studios/
-    /// Tags/People/Overview/etc.), so the discovery scan is cheap even on
-    /// huge libraries.
+    /// per-page response is far smaller than a full metadata page (no
+    /// Genres/Studios/Tags/People/Overview/etc.), so the discovery scan is
+    /// cheap even on huge libraries.
     /// Every failure throws rather than answering null. Callers page until a short or empty page, so
     /// a null read as the end of the library would make every item past a failed page look removed
     /// from the source and be pruned.
@@ -563,6 +555,7 @@ public partial class SourceServerClient
     /// <param name="includeTypes">Item kinds to list.</param>
     /// <param name="startIndex">Starting index for pagination.</param>
     /// <param name="limit">Maximum items to return.</param>
+    /// <param name="changedSince">Only items saved since this time, or null for all.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The page the server answered with.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the server could not be asked or gave no answer.</exception>
@@ -616,8 +609,8 @@ public partial class SourceServerClient
     /// <summary>
     /// Batch-fetches full metadata for a specific set of item IDs. Used by
     /// Metadata refresh after the discovery pass: only items that exist
-    /// locally are fetched with their heavy <see cref="ItemFields"/>, so we
-    /// don't pay for source items the user doesn't have.
+    /// locally are fetched with their heavy <see cref="ItemFields"/>, so the
+    /// refresh doesn't pay for source items the user doesn't have.
     /// </summary>
     public async Task<List<BaseItemDto>> GetItemsByIdsAsync(
         IReadOnlyList<Guid> ids,
@@ -659,10 +652,10 @@ public partial class SourceServerClient
             }
             catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
             {
-                // Any 4xx/5xx means the source didn't give us a real answer , 
-                // not that the requested items don't exist. Letting this
-                // swallow returns a partial result and downstream pruning
-                // then deletes every local row that "wasn't seen this run."
+                // Any 4xx/5xx means the source gave no real answer, not that
+                // the requested items don't exist. Swallowing it returns a
+                // partial result and downstream pruning then deletes every
+                // local row that "wasn't seen this run."
                 // Bubble up so the refresh aborts before the prune step.
                 _logger.LogWarning(ex, "Source server {Status} fetching items batch at index {Index}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, i);
                 throw;
@@ -746,7 +739,7 @@ public partial class SourceServerClient
             AddAuthorizationHeader(request);
             if (resume)
             {
-                request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(from, null);
+                request.Headers.Range = new RangeHeaderValue(from, null);
                 request.Headers.IfRange = ifRange;
             }
 
@@ -811,9 +804,9 @@ public partial class SourceServerClient
     /// subtitle streams: they are the only external stream type Jellyfin
     /// exposes a download route for
     /// (<c>/Videos/{item}/{mediaSource}/Subtitles/{index}/Stream.{format}</c>).
-    /// External audio tracks are skipped with a log, the previous
-    /// path-parameter approach silently served the item's main video file in
-    /// their place, corrupting the companion on disk.
+    /// External audio tracks are skipped with a log, since a path-parameter
+    /// route would serve the item's main video file in their place and
+    /// corrupt the companion on disk.
     /// A failure to read the item throws instead of answering an empty list. An empty list means the
     /// source has no external subtitles, and a caller replacing a file needs to tell that apart from
     /// a source it could not ask.
@@ -876,12 +869,10 @@ public partial class SourceServerClient
     /// <summary>
     /// Downloads an external subtitle via the canonical
     /// <c>/Videos/{item}/{mediaSource}/Subtitles/{index}/Stream.{format}</c>
-    /// route. The previously used
-    /// <c>/Videos/{id}/Subtitles/Stream?path=…</c> shape returns 405 on
-    /// Jellyfin 10.11, and its <c>/Items/{id}/File?path=…</c> fallback
-    /// ignores the path parameter and serves the item's main media file , 
-    /// verified against a live 10.11 server, which wrote video bytes into
-    /// <c>.srt</c> companions.
+    /// route. The <c>/Videos/{id}/Subtitles/Stream?path=…</c> shape returns
+    /// 405 on Jellyfin 10.11, and <c>/Items/{id}/File?path=…</c> ignores the
+    /// path parameter and serves the item's main media file, which writes
+    /// video bytes into <c>.srt</c> companions.
     /// </summary>
     /// <param name="itemId">Item ID.</param>
     /// <param name="companion">Companion stream to download.</param>
@@ -964,8 +955,8 @@ public partial class SourceServerClient
     /// <param name="describeShift">Describes a changed listing from the expected and fetched counts, or null to skip the check.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="stopAtTotal">Whether reaching the reported total ends the walk before a short page does.</param>
-    /// <returns>How many items were fetched.</returns>
-    private static async Task<int> PageThroughAsync(
+    /// <returns>A task that completes when the walk ends.</returns>
+    private static async Task PageThroughAsync(
         Func<int, int, CancellationToken, Task<BaseItemDtoQueryResult?>> fetchPage,
         int pageSize,
         Action<BaseItemDto> onItem,
@@ -1011,7 +1002,5 @@ public partial class SourceServerClient
         {
             throw new InvalidOperationException(describeShift(expectedTotal.Value, rawFetched));
         }
-
-        return rawFetched;
     }
 }

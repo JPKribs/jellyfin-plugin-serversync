@@ -1,17 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
-using Jellyfin.Plugin.ServerSync.Utilities;
-using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
@@ -496,6 +489,7 @@ public partial class SourceServerClient
     /// <param name="pathAndQuery">The path under the server URL.</param>
     /// <param name="body">The request body to send as JSON, or null for none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="pairOnRefusal">Whether a "not paired" answer leads to pairing and one more try.</param>
     /// <returns>The status, the parsed answer on success, and the body text on failure.</returns>
     // A peer that answers "not paired" is asked to pair, which lands the new secret here before the
     // link call returns, and the request goes once more. Reads are capped so a peer cannot hand back

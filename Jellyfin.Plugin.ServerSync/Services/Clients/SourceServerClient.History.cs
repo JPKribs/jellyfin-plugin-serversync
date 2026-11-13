@@ -1,19 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync;
-using Jellyfin.Plugin.ServerSync.Models.Peer;
-using Jellyfin.Plugin.ServerSync.Utilities;
-using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
-using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -80,10 +69,9 @@ public partial class SourceServerClient
 
     /// <summary>
     /// Batch-fetches items by ID with the specified user's UserData populated.
-    /// Used by the History refresh task after the local-first discovery pass , 
-    /// only items whose translated path exists locally get user-data fetched,
-    /// rather than the prior approach of pulling every user-played item per
-    /// (user × library) and discarding most on path mismatch.
+    /// Used by the History refresh task after the local-first discovery pass,
+    /// so only items whose translated path exists locally get user data
+    /// fetched, rather than every played item per user and library.
     /// </summary>
     public async Task<BaseItemDtoQueryResult?> GetItemsWithUserDataByIdsAsync(
         Guid userId,

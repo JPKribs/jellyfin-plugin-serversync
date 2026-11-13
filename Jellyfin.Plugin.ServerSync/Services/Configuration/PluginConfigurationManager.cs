@@ -41,8 +41,8 @@ public class PluginConfigurationManager : IPluginConfigurationManager
     {
         // The stored key in its protected form reaches the page with the configuration, so it is held
         // to the same rule as the sentinel. Taken as typed, it would be decrypted and sent to any address.
-        if (!string.Equals(requestApiKey, JPKribs.Jellyfin.Base.SecretProtector.KeptSentinel, StringComparison.Ordinal)
-            && !JPKribs.Jellyfin.Base.SecretProtector.IsProtected(requestApiKey))
+        if (!string.Equals(requestApiKey, SecretProtector.KeptSentinel, StringComparison.Ordinal)
+            && !SecretProtector.IsProtected(requestApiKey))
         {
             return requestApiKey ?? string.Empty;
         }
@@ -74,7 +74,6 @@ public class PluginConfigurationManager : IPluginConfigurationManager
         // the config XML.
         lock (ConfigurationSaveLock.Sync)
         {
-            // Sanitize values before saving to prevent invalid configuration from persisting
             plugin.Configuration.SanitizeValues();
 
             // Encrypt every server's API key at rest. Protect() no-ops on already-encrypted or empty,

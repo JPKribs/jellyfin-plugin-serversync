@@ -1,19 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync;
-using Jellyfin.Plugin.ServerSync.Models.Peer;
-using Jellyfin.Plugin.ServerSync.Utilities;
-using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
-using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -59,8 +48,8 @@ public partial class SourceServerClient
                         ItemFields.SortName,
                         ItemFields.DateCreated,
                         ItemFields.ProductionLocations,
-                        // Settings populates LockData + LockedFields.
-                        // without it those come back null while local has
+                        // Settings populates LockData and LockedFields.
+                        // Without it those come back null while local has
                         // them populated, producing a perpetual false diff.
                         ItemFields.Settings
                     };
@@ -69,8 +58,8 @@ public partial class SourceServerClient
 
             if (result?.Items == null)
             {
-                // A null response is a failure, not an empty catalog , 
-                // treating it as empty would prune every tracking row.
+                // A null response is a failure, not an empty catalog.
+                // Treating it as empty would prune every tracking row.
                 throw new InvalidOperationException(
                     "Source server returned no response fetching the Persons catalog");
             }
@@ -83,10 +72,10 @@ public partial class SourceServerClient
         }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx isn't "source has no persons", it's "source didn't
-            // give us a real answer." Returning empty here makes the People
-            // refresh prune every local tracking row. Bubble up so the refresh
-            // aborts before prune.
+            // Any 4xx/5xx means the source gave no real answer, not that it
+            // has no persons. Returning empty here makes the People refresh
+            // prune every local tracking row. Bubble up so the refresh aborts
+            // before prune.
             _logger.LogWarning(ex, "Source server {Status} bulk-fetching Persons. Aborting refresh to protect tracking rows", ex.ResponseStatusCode);
             throw;
         }

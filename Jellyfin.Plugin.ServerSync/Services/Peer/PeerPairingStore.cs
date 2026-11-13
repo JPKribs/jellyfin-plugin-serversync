@@ -1,6 +1,9 @@
 #pragma warning disable CA2100 // SQL is internal and parameterized.
 using System;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,7 +20,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 public sealed class PeerPairingStore : QueueStoreBase
 {
     private readonly SecretProtector _secrets;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> _pairing = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _pairing = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// The lock that keeps pairings with one entry from running at once. Two at once would each mint a
@@ -25,7 +28,7 @@ public sealed class PeerPairingStore : QueueStoreBase
     /// </summary>
     /// <param name="peerKey">The server entry's key.</param>
     /// <returns>The entry's lock.</returns>
-    public System.Threading.SemaphoreSlim PairingLock(string peerKey) => _pairing.GetOrAdd(peerKey, _ => new System.Threading.SemaphoreSlim(1, 1));
+    public SemaphoreSlim PairingLock(string peerKey) => _pairing.GetOrAdd(peerKey, _ => new SemaphoreSlim(1, 1));
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerPairingStore"/> class.
@@ -39,7 +42,7 @@ public sealed class PeerPairingStore : QueueStoreBase
         _secrets = secrets;
     }
 
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _expected = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _expected = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Notes that this server is asking an entry to pair, until the result is disposed. The entry
@@ -95,9 +98,7 @@ public sealed class PeerPairingStore : QueueStoreBase
             return false;
         }
 
-        var a = System.Text.Encoding.UTF8.GetBytes(presented);
-        var b = System.Text.Encoding.UTF8.GetBytes(expected);
-        return CryptographicOperations.FixedTimeEquals(a, b);
+        return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(presented), Encoding.UTF8.GetBytes(expected));
     }
 
     /// <summary>The secret a peer must present when it names itself as the sender, or null when it was never issued one.</summary>
@@ -144,7 +145,7 @@ public sealed class PeerPairingStore : QueueStoreBase
 
         public void Dispose()
         {
-            if (System.Threading.Interlocked.Exchange(ref _done, 1) == 0)
+            if (Interlocked.Exchange(ref _done, 1) == 0)
             {
                 _store._expected.AddOrUpdate(_peerKey, 0, (_, open) => Math.Max(0, open - 1));
             }

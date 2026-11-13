@@ -1,7 +1,7 @@
 using System;
 using System.Net.Http;
-using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -46,7 +46,7 @@ public class SourceServerClientFactory : ISourceServerClientFactory
 
         // Only a saved entry can hold a pairing, and its secret only goes to the address saved on it. A
         // check of an edited address is a new server as far as pairing goes.
-        if (_configManager.Configuration.FindServer(server.Key) is { } saved && Utilities.ConfigurationUtilities.SameServerUrl(saved.Url, server.Url))
+        if (_configManager.Configuration.FindServer(server.Key) is { } saved && ConfigurationUtilities.SameServerUrl(saved.Url, server.Url))
         {
             client.Pairing = new PeerPairing(_pairings, server.Key, _applicationHost.SystemId);
         }

@@ -1,3 +1,5 @@
+using System;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,11 +18,11 @@ public sealed class RedirectRefusingHandler : DelegatingHandler
         }
 
         var location = response.Headers.Location;
-        var target = location.IsAbsoluteUri ? location : new System.Uri(request.RequestUri!, location);
+        var target = location.IsAbsoluteUri ? location : new Uri(request.RequestUri!, location);
         response.Dispose();
         throw new HttpRequestException(
-            $"The server at {request.RequestUri?.GetLeftPart(System.UriPartial.Authority)} redirected to {target.GetLeftPart(System.UriPartial.Path)}. Server Sync does not follow redirects, so set the server URL to the address it redirects to",
+            $"The server at {request.RequestUri?.GetLeftPart(UriPartial.Authority)} redirected to {target.GetLeftPart(UriPartial.Path)}. Server Sync does not follow redirects, so set the server URL to the address it redirects to",
             null,
-            (System.Net.HttpStatusCode)status);
+            (HttpStatusCode)status);
     }
 }

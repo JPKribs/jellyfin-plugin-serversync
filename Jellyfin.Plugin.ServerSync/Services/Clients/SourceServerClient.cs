@@ -6,11 +6,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync;
-using Jellyfin.Plugin.ServerSync.Models.Peer;
-using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
 using JPKribs.Jellyfin.Base;
@@ -158,9 +154,9 @@ public partial class SourceServerClient : IDisposable
             // Propagate rather than reporting a failed connection. Both task
             // bases treat a false result as "unreachable or credentials
             // invalid" and pin that on the dashboard until a clean run clears
-            // it, so cancelling a task from Scheduled Tasks used to tell the
-            // user their API key was bad. The genuine-timeout case is caught
-            // by the TaskCanceledException/TimeoutException clause above.
+            // it, so a cancelled task would tell the user their API key was
+            // bad. The genuine-timeout case is caught by the
+            // TaskCanceledException/TimeoutException clause above.
             throw;
         }
         catch (HttpRequestException ex)
@@ -218,7 +214,6 @@ public partial class SourceServerClient : IDisposable
         // resolved address too, the same choice the client factory makes.
         var httpClient = httpClientFactory.CreateClient(allowPrivateNetwork ? HttpClientName : PublicHttpClientName);
 
-        // Build the authentication request
         var authRequest = new
         {
             Username = username,
@@ -229,12 +224,12 @@ public partial class SourceServerClient : IDisposable
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
         // Per Jellyfin auth spec, AuthenticateByName requires client
-        // identification via the Authorization header (no Token yet, we're
-        // about to obtain it). Format must be the canonical
-        // `MediaBrowser key="value", ...` scheme. The previous code used
-        // `X-Emby-Authorization` which is deprecated and rejected when
-        // `EnableLegacyAuthorization=false`. Header lives on the request,
-        // not on Content (Authorization is not a content-level header).
+        // identification via the Authorization header, with no Token since
+        // this call is what obtains it. Format must be the canonical
+        // `MediaBrowser key="value", ...` scheme. `X-Emby-Authorization` is
+        // deprecated and rejected when `EnableLegacyAuthorization=false`.
+        // Header lives on the request, not on Content (Authorization is not a
+        // content-level header).
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{serverUrl}/Users/AuthenticateByName")
         {
             Content = content
@@ -262,11 +257,10 @@ public partial class SourceServerClient : IDisposable
             using var authResponse = System.Text.Json.JsonDocument.Parse(responseJson);
 
             var accessToken = authResponse.RootElement.GetProperty("AccessToken").GetString();
-            var serverName = authResponse.RootElement.TryGetProperty("ServerId", out var serverIdProp)
+            var serverId = authResponse.RootElement.TryGetProperty("ServerId", out var serverIdProp)
                 ? serverIdProp.GetString()
                 : null;
 
-            // Get user info
             string? authenticatedUsername = null;
             string? authenticatedUserId = null;
             bool? isAdministrator = null;
@@ -307,7 +301,7 @@ public partial class SourceServerClient : IDisposable
                 UserId = authenticatedUserId,
                 IsAdministrator = isAdministrator,
                 CanDownload = canDownload,
-                ServerId = serverName
+                ServerId = serverId
             };
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
@@ -554,10 +548,8 @@ public partial class SourceServerClient : IDisposable
     {
         // The parameter passed to AuthenticationHeaderValue must NOT start
         // with the scheme name. `AuthenticationHeaderValue("MediaBrowser", x)`
-        // emits `Authorization: MediaBrowser <x>`. Earlier code prefixed
-        // "MediaBrowser " into the parameter too, yielding a double-scheme
-        // header that some Jellyfin endpoints (notably Download) reject
-        // with 400 Bad Request.
+        // emits `Authorization: MediaBrowser <x>`, and a double-scheme header
+        // is rejected by some Jellyfin endpoints (notably Download) with 400.
         // The device name is this server's name, which may hold characters a header cannot carry.
         var authValue = $"Client=\"{DefaultClientName}\", Device=\"{HeaderSafe(_localServerName)}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{_pluginVersion}\", Token=\"{_apiKey}\"";
         request.Headers.Authorization = new AuthenticationHeaderValue("MediaBrowser", authValue);
@@ -748,7 +740,7 @@ public partial class SourceServerClient : IDisposable
         {
             // Wrap the inner read with a cancellation registration that
             // forcibly disposes the response. Without this, a hung server can
-            // keep an inner HttpConnection read blocked past cancellation , 
+            // keep an inner HttpConnection read blocked past cancellation, as
             // HttpClient.Timeout doesn't apply once response headers are in.
             using var registration = cancellationToken.Register(static state => DisposeQuiet((HttpResponseMessage)state!), _response);
             return await _inner.ReadAsync(buffer.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
@@ -758,18 +750,6 @@ public partial class SourceServerClient : IDisposable
         {
             using var registration = cancellationToken.Register(static state => DisposeQuiet((HttpResponseMessage)state!), _response);
             return await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-        }
-
-        private static void DisposeQuiet(HttpResponseMessage response)
-        {
-            try
-            {
-                response.Dispose();
-            }
-            catch
-            {
-                // Already disposed or in shutdown, nothing useful to do here.
-            }
         }
     }
 }

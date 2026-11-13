@@ -1,19 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync;
-using Jellyfin.Plugin.ServerSync.Models.Peer;
-using Jellyfin.Plugin.ServerSync.Utilities;
-using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
-using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
@@ -82,7 +73,6 @@ public partial class SourceServerClient
             {
                 if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
-                    // User has no profile image
                     return null;
                 }
 
@@ -249,10 +239,7 @@ public partial class SourceServerClient
         HttpRequestMessage? request = null;
 
         // Ownership flips to the returned stream wrapper only on the success
-        // path. The finally cleans up every other exit. The previous
-        // per-branch `response.Dispose(); request.Dispose();` pairs leaked the
-        // request whenever the first disposal (or the log call before it)
-        // threw.
+        // path. The finally cleans up every other exit.
         var ownershipTransferred = false;
         try
         {
@@ -285,10 +272,8 @@ public partial class SourceServerClient
         }
         catch (Exception ex)
         {
-            // Bumped from LogDebug, failures here were invisible at the
-            // default Jellyfin log level and made "verify says local empty,
-            // source non-empty" failures impossible to root-cause without
-            // turning on plugin debug logs.
+            // Warning, not Debug: at the default log level a failure here
+            // would otherwise leave an empty local image with no trace of why.
             _logger.LogWarning(ex, "Failed to download image {ImageType}/{Index} for item {ItemId}", imageType, imageIndex, itemId);
             return (null, null);
         }

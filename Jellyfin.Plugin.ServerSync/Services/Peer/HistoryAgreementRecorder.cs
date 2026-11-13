@@ -7,7 +7,6 @@ using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
-using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +37,7 @@ public sealed class HistoryAgreementRecorder
     /// <param name="configManager">Plugin configuration.</param>
     /// <param name="table">The history table.</param>
     /// <param name="libraryManager">Library manager.</param>
+    /// <param name="links">The link registry, so a row for a link records the path its copy would have.</param>
     /// <param name="logger">Logger.</param>
     public HistoryAgreementRecorder(
         IPluginConfigurationManager configManager,

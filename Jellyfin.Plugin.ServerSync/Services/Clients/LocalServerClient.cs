@@ -187,7 +187,6 @@ public class LocalServerClient
                 return false;
             }
 
-            // Apply updates
             if (played.HasValue)
             {
                 userData.Played = played.Value;
@@ -217,7 +216,6 @@ public class LocalServerClient
                 userData.IsFavorite = isFavorite.Value;
             }
 
-            // Save the updated data - SaveUserData takes User, not Guid
             _userDataManager.SaveUserData(user, item, userData, UserDataSaveReason.UpdateUserData, default);
 
             _logger.LogDebug(
@@ -330,8 +328,7 @@ public class LocalServerClient
     {
         try
         {
-            var folder = _libraryManager.GetItemById(libraryId) as Folder;
-            if (folder == null)
+            if (_libraryManager.GetItemById(libraryId) is not Folder folder)
             {
                 return new List<BaseItem>();
             }
@@ -365,11 +362,9 @@ public class LocalServerClient
                 return result;
             }
 
-            var items = GetLibraryItems(libraryId);
-            foreach (var item in items)
+            foreach (var item in GetLibraryItems(libraryId))
             {
-                var userData = _userDataManager.GetUserData(user, item);
-                result.Add((item, userData));
+                result.Add((item, _userDataManager.GetUserData(user, item)));
             }
         }
         catch (Exception ex)

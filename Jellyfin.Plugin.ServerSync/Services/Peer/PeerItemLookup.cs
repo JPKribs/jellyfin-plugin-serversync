@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
@@ -44,7 +45,7 @@ public sealed class PeerItemLookup
         var item = FindItem(request);
         return item is null
             ? new PeerLookupResponse()
-            : new PeerLookupResponse { Found = true, ItemId = item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture), ItemType = item.GetType().Name };
+            : new PeerLookupResponse { Found = true, ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture), ItemType = item.GetType().Name };
     }
 
     private BaseItem? FindItem(PeerLookupRequest request)
