@@ -75,7 +75,7 @@ public static class UserSyncMergeService
         "EnableAllDevices",
         // Library IDs held as strings, so the type walker can't see them.
         // Untranslated they name libraries that don't exist locally, and
-        // translating them silently drops any library without a mapping , 
+        // translating them silently drops any library without a mapping,
         // which revokes local deletion rights the operator never touched.
         "EnableContentDeletionFromFolders",
         // Administrator rights are granted on each server by its own administrator. Copied, an

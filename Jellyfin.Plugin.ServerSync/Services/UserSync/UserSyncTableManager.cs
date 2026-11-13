@@ -13,8 +13,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// Per-table manager for <see cref="UserSyncItem"/>. Replaces the old
-/// <c>SyncDatabase.UserSync.cs</c> partial-class methods. Natural key is the
+/// Per-table manager for <see cref="UserSyncItem"/>. Natural key is the
 /// composite (SourceUserId, LocalUserId, PropertyCategory), three rows per
 /// user mapping (one each for Policy, Configuration, ProfileImage).
 /// </summary>
@@ -166,7 +165,7 @@ public sealed class UserSyncTableManager
             cmd.Parameters.AddWithValue("@loc", localUserId);
             return ReadAll(cmd);
         },
-        fallback: (IList<UserSyncItem>)Array.Empty<UserSyncItem>());
+        fallback: Array.Empty<UserSyncItem>());
 
     /// <summary>
     /// Returns one page of distinct user mappings, each with its grouped
@@ -194,18 +193,17 @@ public sealed class UserSyncTableManager
     {
         skip = Math.Max(0, skip);
         var pageSize = Math.Clamp(take, 1, 200);
-        var request = new PaginationRequest { SearchTerm = searchTerm, StatusFilter = status };
 
         return ExecuteRead(
             conn =>
             {
                 var conditions = new List<string>();
-                if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+                if (!string.IsNullOrWhiteSpace(searchTerm))
                 {
                     conditions.Add("(SourceUserName LIKE @search OR LocalUserName LIKE @search)");
                 }
 
-                if (request.StatusFilter.HasValue)
+                if (status.HasValue)
                 {
                     conditions.Add("Status = @status");
                 }
@@ -219,14 +217,14 @@ public sealed class UserSyncTableManager
                         SELECT COUNT(DISTINCT SourceUserId || '|' || LocalUserId)
                         FROM UserSyncItems
                         {whereClause}";
-                    if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+                    if (!string.IsNullOrWhiteSpace(searchTerm))
                     {
-                        countCmd.Parameters.AddWithValue("@search", $"%{request.SearchTerm}%");
+                        countCmd.Parameters.AddWithValue("@search", $"%{searchTerm}%");
                     }
 
-                    if (request.StatusFilter.HasValue)
+                    if (status.HasValue)
                     {
-                        countCmd.Parameters.AddWithValue("@status", (int)request.StatusFilter.Value);
+                        countCmd.Parameters.AddWithValue("@status", (int)status.Value);
                     }
 
                     totalCount = Convert.ToInt32(countCmd.ExecuteScalar(), CultureInfo.InvariantCulture);
@@ -242,14 +240,14 @@ public sealed class UserSyncTableManager
                         GROUP BY SourceUserId, LocalUserId
                         ORDER BY MIN(SourceUserName), MIN(LocalUserName), SourceUserId, LocalUserId
                         LIMIT @take OFFSET @skip";
-                    if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+                    if (!string.IsNullOrWhiteSpace(searchTerm))
                     {
-                        dataCmd.Parameters.AddWithValue("@search", $"%{request.SearchTerm}%");
+                        dataCmd.Parameters.AddWithValue("@search", $"%{searchTerm}%");
                     }
 
-                    if (request.StatusFilter.HasValue)
+                    if (status.HasValue)
                     {
-                        dataCmd.Parameters.AddWithValue("@status", (int)request.StatusFilter.Value);
+                        dataCmd.Parameters.AddWithValue("@status", (int)status.Value);
                     }
 
                     dataCmd.Parameters.AddWithValue("@take", pageSize);
@@ -263,8 +261,8 @@ public sealed class UserSyncTableManager
                 }
 
                 // Fetch all rows for the entire page in one query, then group
-                // in memory. Avoids the previous N+1 (one GetByUserMapping per
-                // mapping = up to 200 SELECTs holding the global write-lock).
+                // in memory, rather than one GetByUserMapping per mapping (up
+                // to 200 SELECTs holding the global write-lock).
                 var groups = new List<UserMappingGroup>();
                 if (mappings.Count == 0)
                 {
@@ -419,7 +417,7 @@ public sealed class UserSyncTableManager
     /// <summary>
     /// Returns the rows starting at an offset, filtered in the query. Every filter is applied before
     /// paging, so the total counts the rows that match and each page is full. Filtering a page
-    /// afterwards shrank pages and left the total counting rows the filter excluded.
+    /// afterwards would shrink pages and leave the total counting rows the filter excluded.
     /// </summary>
     /// <param name="searchTerm">Optional user name search.</param>
     /// <param name="status">Optional status filter.</param>

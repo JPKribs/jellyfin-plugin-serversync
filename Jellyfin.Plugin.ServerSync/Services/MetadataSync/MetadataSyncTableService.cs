@@ -67,7 +67,6 @@ public class MetadataSyncTableService
         bool syncTags)
     {
         ArgumentNullException.ThrowIfNull(item);
-        if (string.IsNullOrEmpty(item.LocalItemId)) return;
         if (!Guid.TryParse(item.LocalItemId, out var localId)) return;
 
         var localItem = _libraryManager.GetItemById(localId);

@@ -5,7 +5,6 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
-using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

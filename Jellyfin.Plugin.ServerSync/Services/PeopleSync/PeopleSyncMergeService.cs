@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
 using JPKribs.Jellyfin.Base;
@@ -47,10 +46,9 @@ public static class PeopleSyncMergeService
     {
         ArgumentNullException.ThrowIfNull(sourcePerson);
 
-        // Unwrap Kiota's UntypedNode wrappers, calling .ToString() directly on
+        // Unwrap Kiota's UntypedNode wrappers. Calling .ToString() directly on
         // an AdditionalData entry yields the type name, not the wrapped value,
-        // which made every ProviderId look like "UntypedString" and produced a
-        // permanent IMDB desync in the modal.
+        // so every provider id would read as "UntypedString" and never match.
         var sourceProviderIds = sourcePerson.ProviderIds?.AdditionalData?
             .Select(kvp => (kvp.Key, Value: MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value)))
             .Where(kvp => !string.IsNullOrEmpty(kvp.Value) && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))

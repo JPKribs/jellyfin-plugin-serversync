@@ -66,7 +66,7 @@ public static class MetadataSyncMergeService
             ["ForcedSortName"] = sourceItem.ForcedSortName,
             ["Overview"] = sourceItem.Overview,
 
-            // Tagline - source has array but we take first one (local is singular)
+            // Tagline: the source has an array, but only the first is kept since local is singular
             ["Tagline"] = sourceItem.Taglines?.FirstOrDefault(),
 
             // Ratings
@@ -111,7 +111,7 @@ public static class MetadataSyncMergeService
         {
             // Normalize collapses null / [] / [""] into a single canonical
             // null on both sides so Jellyfin's storage normalization (which
-            // can return [""] for what we wrote as []) doesn't produce a
+            // can return [""] for what was written as []) doesn't produce a
             // permanent verification mismatch.
             sourceMetadata["Genres"] = StringNormalizationUtility.NormalizeStringArray(sourceItem.Genres);
         }
@@ -296,7 +296,7 @@ public static class MetadataSyncMergeService
 
     /// <summary>
     /// Rebuilds the local-side metadata blob on <paramref name="item"/> from
-    /// the live <paramref name="localItem"/>. Used by RefreshLocalSnapshot to
+    /// the live <paramref name="localItem"/>. Also used by RefreshLocalSnapshot to
     /// show fresh local state in the modal after a sync apply without re-
     /// running the full Refresh task.
     /// </summary>

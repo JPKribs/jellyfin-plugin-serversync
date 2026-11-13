@@ -1,23 +1,21 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// Service for merging watch history data from source and local servers.
-/// Implements merge logic with the following strategy:
-/// - IsFavorite: Always taken from Source Server
-/// - PlayCount: MAX(source, local)
-/// - Played, Position, LastPlayedDate: Negotiated based on most recent LastPlayedDate
+/// Merges watch history from the source and local servers. Before the two servers have agreed on
+/// a state, the favorite comes from the source when it has one, the play count is the higher of the
+/// two, and the played group follows the side played most recently. Once they have agreed, each part
+/// is merged against that agreed base instead.
 /// </summary>
 public static class HistorySyncMergeService
 {
     /// <summary>
-    /// Merges source and local history data to produce the target merged state.
-    /// Merge strategy:
-    /// - IsFavorite: Always from Source Server
-    /// - PlayCount: MAX(source, local)
-    /// - Played, Position, LastPlayedDate: From whichever server has more recent LastPlayedDate
+    /// Merges source and local history data to produce the target merged state, then clears every
+    /// part that is switched off.
     /// </summary>
     /// <param name="item">History sync item to update with merged values.</param>
     public static void MergeHistoryData(HistorySyncItem item)
@@ -32,10 +30,8 @@ public static class HistorySyncMergeService
         }
 
         // IsFavorite: take source when it has an opinion, otherwise keep
-        // local. The previous unconditional `?? false` conflated two cases
-        // for a null source value, "explicitly unfavorited" and "UserData
-        // not available in the response", silently wiping local favorites
-        // on the latter.
+        // local. A null source value can mean the response carried no user
+        // data, which must not wipe a local favorite.
         if (item.NegotiateWithSource && (item.SourceIsFavorite.HasValue || item.LocalIsFavorite.HasValue))
         {
             // Before the servers have agreed once there is no way to tell which side changed, and
@@ -66,7 +62,7 @@ public static class HistorySyncMergeService
     /// </summary>
     public static Func<HistoryFields> EnabledFields { get; set; } = static () => HistoryFields.All;
 
-    private static readonly System.Threading.AsyncLocal<HistoryFields?> ScopedFields = new();
+    private static readonly AsyncLocal<HistoryFields?> ScopedFields = new();
 
     /// <summary>The parts of history that may be copied right now.</summary>
     /// <returns>The enabled parts.</returns>
@@ -327,12 +323,9 @@ public static class HistorySyncMergeService
 
         // Second resolution, not exact equality. Jellyfin does not round-trip
         // sub-second precision through its user-data store, so an exact
-        // comparison reports a difference on the very value we just wrote and
-        // the row requeues on every run forever. The post-apply verifier has
-        // always truncated to seconds for this reason. The change detector has
-        // to agree with it, or "changed" and "applied correctly" contradict.
-        // Previously masked by the SourceHash short-circuit, which stopped this
-        // check from running at all once a row had been synced.
+        // comparison reports a difference on the value just written and the
+        // row requeues on every run forever. The post-apply verifier truncates
+        // to seconds for the same reason, and the two have to agree.
         if (item.MergedLastPlayedDate.HasValue
             && !SameInstantToSecond(item.MergedLastPlayedDate, item.LocalLastPlayedDate))
         {
@@ -434,7 +427,7 @@ public static class HistorySyncMergeService
     /// <returns>Human-readable summary of changes.</returns>
     public static string GetChangeSummary(HistorySyncItem item)
     {
-        var changes = new System.Collections.Generic.List<string>();
+        var changes = new List<string>();
 
         if (item.MergedIsPlayed != item.LocalIsPlayed && item.MergedIsPlayed.HasValue)
         {

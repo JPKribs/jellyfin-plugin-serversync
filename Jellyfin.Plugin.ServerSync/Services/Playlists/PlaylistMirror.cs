@@ -10,7 +10,6 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
-using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -275,9 +274,10 @@ public sealed class PlaylistMirror
                     Public = openAccess ?? false
                 }).ConfigureAwait(false);
 
-                PlaylistCopyStore.Set(Guid.Parse(created.Id), source.RootId, server.Key);
-                _deleted.TryRemove(Guid.Parse(created.Id), out _);
-                if (_libraryManager.GetItemById(Guid.Parse(created.Id)) is Playlist made)
+                var createdId = Guid.Parse(created.Id);
+                PlaylistCopyStore.Set(createdId, source.RootId, server.Key);
+                _deleted.TryRemove(createdId, out _);
+                if (_libraryManager.GetItemById(createdId) is Playlist made)
                 {
                     made.ProviderIds[SourcePlaylistProviderKey] = source.RootId;
                     made.ProviderIds[SourceServerProviderKey] = server.Key;

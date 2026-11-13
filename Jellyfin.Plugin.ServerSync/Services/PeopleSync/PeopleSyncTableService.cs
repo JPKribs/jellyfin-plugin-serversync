@@ -82,7 +82,6 @@ public class PeopleSyncTableService
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(record);
-        if (string.IsNullOrEmpty(record.SourcePersonId)) return;
         if (!Guid.TryParse(record.SourcePersonId, out var sourcePersonId)) return;
 
         record.Images.Source = await ImageManifestEnricher.EnrichAsync(

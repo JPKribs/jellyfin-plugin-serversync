@@ -15,14 +15,13 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// Builder helpers for <see cref="HistorySyncItem"/> records. Translates a
 /// source <see cref="BaseItemDto"/> + (user, library) mapping context into
 /// a fully-populated record with merged target state. Used by the Refresh
-/// task. The Sync task calls the record's <see cref="HistorySyncMergeService"/>
-/// directly and applies the merged values via <see cref="LocalServerClient"/>.
+/// task and by inbound history hints. The Sync task applies the merged values
+/// via <see cref="LocalServerClient"/>.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public class HistorySyncTableService
 {
     private readonly ILogger<HistorySyncTableService> _logger;
-    private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly IUserDataManager _userDataManager;
     private readonly ILocalItems _localItems;
@@ -38,7 +37,6 @@ public class HistorySyncTableService
         ILocalItems localItems)
     {
         _logger = logger;
-        _libraryManager = libraryManager;
         _userManager = userManager;
         _userDataManager = userDataManager;
         _localItems = localItems;

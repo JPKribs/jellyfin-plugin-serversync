@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Linq;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
-using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;

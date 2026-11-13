@@ -6,15 +6,14 @@ using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using JPKribs.Jellyfin.Base;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// Per-table manager for <see cref="PeopleSyncItem"/>. Replaces the old
-/// <c>SyncDatabase.PeopleSync.cs</c> partial-class methods.
+/// Per-table manager for <see cref="PeopleSyncItem"/>. Natural key is the
+/// person's name.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem, string>
@@ -55,7 +54,7 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
         item.LocalPersonId = ReadNullableString(reader, "LocalPersonId");
 
         // Bridge property setters are skipped to avoid recomputing hashes from
-        // stored values. We set the underlying SyncableValue fields directly.
+        // stored values, so the underlying SyncableValue fields are set directly.
         item.Metadata.Source = ReadNullableString(reader, "SourceMetadataValue");
         item.Metadata.Local = ReadNullableString(reader, "LocalMetadataValue");
         item.Metadata.SourceHash = ReadNullableString(reader, "SourceMetadataHash");
@@ -141,18 +140,17 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
     {
         skip = Math.Max(0, skip);
         var pageSize = Math.Clamp(take, 1, 200);
-        var request = new PaginationRequest { SearchTerm = searchTerm, StatusFilter = status };
 
         return ExecuteRead(
             conn =>
             {
                 var conditions = new List<string>();
-                if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+                if (!string.IsNullOrWhiteSpace(searchTerm))
                 {
                     conditions.Add("PersonName LIKE @search");
                 }
 
-                if (request.StatusFilter.HasValue)
+                if (status.HasValue)
                 {
                     conditions.Add("Status = @status");
                 }
@@ -163,14 +161,14 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
                 using (var countCmd = conn.CreateCommand())
                 {
                     countCmd.CommandText = $"SELECT COUNT(*) FROM PeopleSyncItems {whereClause}";
-                    if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+                    if (!string.IsNullOrWhiteSpace(searchTerm))
                     {
-                        countCmd.Parameters.AddWithValue("@search", $"%{request.SearchTerm}%");
+                        countCmd.Parameters.AddWithValue("@search", $"%{searchTerm}%");
                     }
 
-                    if (request.StatusFilter.HasValue)
+                    if (status.HasValue)
                     {
-                        countCmd.Parameters.AddWithValue("@status", (int)request.StatusFilter.Value);
+                        countCmd.Parameters.AddWithValue("@status", (int)status.Value);
                     }
 
                     totalCount = Convert.ToInt32(countCmd.ExecuteScalar(), CultureInfo.InvariantCulture);
@@ -184,14 +182,14 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
                         {whereClause}
                         ORDER BY {StatusPriorityOrderBy}, PersonName ASC, Id ASC
                         LIMIT @take OFFSET @skip";
-                    if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+                    if (!string.IsNullOrWhiteSpace(searchTerm))
                     {
-                        dataCmd.Parameters.AddWithValue("@search", $"%{request.SearchTerm}%");
+                        dataCmd.Parameters.AddWithValue("@search", $"%{searchTerm}%");
                     }
 
-                    if (request.StatusFilter.HasValue)
+                    if (status.HasValue)
                     {
-                        dataCmd.Parameters.AddWithValue("@status", (int)request.StatusFilter.Value);
+                        dataCmd.Parameters.AddWithValue("@status", (int)status.Value);
                     }
 
                     dataCmd.Parameters.AddWithValue("@take", pageSize);

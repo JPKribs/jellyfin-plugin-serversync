@@ -4,10 +4,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
-using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -17,7 +15,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// <summary>
 /// Per-record build helpers for User Sync. Builds one
 /// <see cref="UserSyncItem"/> for one (mapping, category) tuple, preserving
-/// LastSyncTime and Ignored status from any existing record. No DB writes , 
+/// LastSyncTime and Ignored status from any existing record. No DB writes:
 /// the caller (the Refresh task base) upserts.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
@@ -88,7 +86,7 @@ public class UserSyncTableService
         item.LocalUserName = localUserDto.Name;
         item.SourceValue = sourcePolicy;
         item.LocalValue = localPolicy;
-        // UpdateMergedValue stores MergedValue (the value we'd apply) on the
+        // UpdateMergedValue stores MergedValue (the value to apply) on the
         // backing SyncableValue and recomputes the source-hash via the
         // comparator. SyncedHash matches that format after a successful sync,
         // so the fast-path skip on the next Refresh stays consistent.

@@ -242,13 +242,9 @@ public sealed class MetadataSyncTableManager
             }
 
             using var dataCmd = conn.CreateCommand();
-            // SELECT * like every other query that feeds MapFromReader. This
-            // was a hand-written column list, and when RetryCount was added
-            // to the schema the list wasn't updated, GetOrdinal then threw
-            // ArgumentOutOfRangeException on every row, Jellyfin's exception
-            // middleware turned that into a 400, and the Metadata tab
-            // rendered empty. A projection here can never drift from the
-            // mapper. The mapper defines what it needs.
+            // SELECT * like every other query that feeds MapFromReader. A
+            // hand-written column list drifts from the mapper when the schema
+            // grows, and GetOrdinal then throws on every row.
             dataCmd.CommandText = $@"
                 SELECT * FROM MetadataSyncItems
                 {whereClause}
@@ -284,10 +280,8 @@ public sealed class MetadataSyncTableManager
     /// Updates the status of many items by primary-key Id in one transaction.
     /// When transitioning to <see cref="SyncStatus.Queued"/>, also clears all
     /// four <c>Synced*Hash</c> columns so the next Sync run is forced to
-    /// re-apply each category.
-    /// Reports the
-    /// per-call breakdown: rows updated, plus the input IDs that didn't
-    /// match (typically: row was deleted between the user's click and the
+    /// re-apply each category. Reports the per-call breakdown: rows updated,
+    /// plus the input IDs that didn't match (typically: row was deleted between the user's click and the
     /// request landing). Bulk endpoints call this so the UI can surface
     /// "5 of 10 items updated. 5 not found" instead of silently swallowing
     /// the partial failure.

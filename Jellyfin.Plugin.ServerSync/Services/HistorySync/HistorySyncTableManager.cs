@@ -239,7 +239,7 @@ public sealed class HistorySyncTableManager
             cmd.Parameters.AddWithValue("@local", localUserId);
             return ReadAll(cmd);
         },
-        fallback: (IList<HistorySyncItem>)Array.Empty<HistorySyncItem>());
+        fallback: Array.Empty<HistorySyncItem>());
 
     /// <summary>
     /// Searches history items with optional filters. Adds a SourceUserId
@@ -309,9 +309,6 @@ public sealed class HistorySyncTableManager
         var ord = reader.GetOrdinal(column);
         return reader.IsDBNull(ord) ? null : reader.GetInt32(ord) == 1;
     }
-
-    private static void AddNullableBool(SqliteCommand cmd, string name, bool? value)
-        => cmd.Parameters.AddWithValue(name, value.HasValue ? (value.Value ? 1 : 0) : (object)DBNull.Value);
 
     private static void BindFilters(SqliteCommand cmd, string? searchTerm, SyncStatus? status, string? sourceUserId)
     {
