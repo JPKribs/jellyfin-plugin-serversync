@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.11.3",
+        "changelog": "\n## Important\n- Always Keep makes full copies in the library, synced like any copy, instead of holding files in the link cache. On the next refresh the links of picked shows and films become copies under the New files approval, every episode of a picked show and every version of a picked film. Their copies count toward the library's disk and Minimum Free Space, not Cache Size. A copy stays when its pick is removed\n\n## Features\n- A Cached filter on the Sync tab's Content table lists the links whose file is in the link cache\n- A link that becomes a copy takes its file from the link cache when the cache holds all of it, instead of downloading it again. Turn links into full copies starts a sync at once when any selected link is cached\n\n## Changed\n- The source shows a link session as Direct Play or Direct Stream. The source only sends the file, and any transcode runs on the server holding the link\n- Playback from the link cache is not reported to the source, which sends nothing for it. History sync carries its played state there\n- The link cache no longer keeps files for good. Files an earlier release kept for Always Keep are ordinary cached files, dropped by retention and the size limit\n\n## Developer\n- The wire protocol and the database schema are unchanged, so this release works alongside 12.2.11.x one server at a time\n- GET /Sync/Items takes cached=true, and POST /Sync/PromoteItems answers FromCache and starts Sync Content when it is above 0\n- New tests cover Always Keep, moving a cached file into place, the Cached filter, the reported play method, and cached playback staying off the source",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.11.3/jellyfin-plugin-serversync-12.2.11.3.zip",
+        "checksum": "280bc0162227e7793b805540991d7730",
+        "timestamp": "2026-11-13T05:36:30Z"
+      },
+      {
         "version": "12.2.11.2",
         "changelog": "## Fixed\r\n- A viewer of a link stayed listed on the source's dashboard after their stream ended, until the source restarted, whenever the stop report from the server holding the link did not arrive. The source now ends a link session ten minutes after the last report it had, and stops its playback first so played state and the resume position are kept\r\n- A stop report that fails is tried again, and a player that quits without naming what it played still ends its session on the source\r\n\r\n## Developer\r\n- The wire protocol and the database schema are unchanged, so this release works alongside 12.2.11.0 and 12.2.11.1 one server at a time\r\n- New tests cover how a link session ends on the source",
         "targetAbi": "12.4.0.0",
