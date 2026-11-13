@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Xunit;
@@ -322,5 +323,71 @@ public class JsonFieldHelpersTests
         Red,
         Blue,
         Green
+    }
+
+    // -----------------------------------------------------------------------
+    // Provider ids that differ only by case
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// An id held twice under two spellings compares as one id, so an item holding both
+    /// "TvdbCollection" and "tvdbcollection" matches a server that holds it once. Empty values and
+    /// this plugin's own keys are left out.
+    /// True: a doubled id is not a difference, so the row verifies.
+    /// False: the row fails verification on every run with a divergent ProviderIds field.
+    /// </summary>
+    [Fact]
+    public void CollapseProviderIds_TakesCaseVariantsAsOneId()
+    {
+        var local = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["tvdbcollection"] = "6287;",
+            ["TvdbCollection"] = "6287;",
+            ["Imdb"] = "tt0086837",
+            ["Empty"] = string.Empty,
+            ["ServerSyncPin"] = "x"
+        };
+        var source = new Dictionary<string, string>(StringComparer.Ordinal) { ["Imdb"] = "tt0086837", ["TvdbCollection"] = "6287;" };
+
+        var collapsed = JsonFieldHelpers.CollapseProviderIds(local)!;
+
+        Assert.Equal(new[] { "Imdb", "TvdbCollection" }, collapsed.Keys);
+        Assert.Equal(JsonSerializer.Serialize(JsonFieldHelpers.CollapseProviderIds(source)), JsonSerializer.Serialize(collapsed));
+        Assert.Null(JsonFieldHelpers.CollapseProviderIds(null));
+    }
+
+    /// <summary>
+    /// Applying the source's ids removes a local key that differs from a source key only by case and
+    /// leaves the id once under the source's spelling, whether Jellyfin handed over a dictionary that
+    /// tells the spellings apart or one that does not. A local only id goes, a changed value is
+    /// written, and this plugin's own key stays.
+    /// True: the doubled id is cleaned up, and the item ends up holding exactly the source's ids.
+    /// False: the lowercase copy stays for good, or the id is left under the wrong spelling.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReconcileProviderIds_LeavesTheSourceSpellingOnce(bool ignoreCase)
+    {
+        var local = new Dictionary<string, string>(ignoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+        {
+            ["tvdbcollection"] = "6287;",
+            ["Imdb"] = "old",
+            ["LocalOnly"] = "1",
+            ["ServerSyncPin"] = "x"
+        };
+        if (!ignoreCase)
+        {
+            local["TvdbCollection"] = "6287;";
+        }
+
+        var source = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Imdb"] = "tt0086837", ["TvdbCollection"] = "6287;" };
+
+        Assert.True(JsonFieldHelpers.ReconcileProviderIds(local, source));
+
+        Assert.Equal(new[] { "Imdb", "ServerSyncPin", "TvdbCollection" }, local.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        Assert.Equal("tt0086837", local["Imdb"]);
+        Assert.Equal("6287;", local["TvdbCollection"]);
+        Assert.False(JsonFieldHelpers.ReconcileProviderIds(local, source));
     }
 }

@@ -49,11 +49,8 @@ public static class PeopleSyncMergeService
         // Unwrap Kiota's UntypedNode wrappers. Calling .ToString() directly on
         // an AdditionalData entry yields the type name, not the wrapped value,
         // so every provider id would read as "UntypedString" and never match.
-        var sourceProviderIds = sourcePerson.ProviderIds?.AdditionalData?
-            .Select(kvp => (kvp.Key, Value: MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value)))
-            .Where(kvp => !string.IsNullOrEmpty(kvp.Value) && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))
-            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value!);
+        var sourceProviderIds = JsonFieldHelpers.CollapseProviderIds(sourcePerson.ProviderIds?.AdditionalData?
+            .Select(kvp => new KeyValuePair<string, string>(kvp.Key, MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value) ?? string.Empty)));
 
         // Sort all order-insensitive arrays so source and local serialize
         // identically. The JSON comparator compares element-by-element and
@@ -100,10 +97,7 @@ public static class PeopleSyncMergeService
     {
         ArgumentNullException.ThrowIfNull(localPerson);
 
-        var localProviderIds = localPerson.ProviderIds?
-            .Where(kvp => !string.IsNullOrEmpty(kvp.Value) && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))
-            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        var localProviderIds = JsonFieldHelpers.CollapseProviderIds(localPerson.ProviderIds);
 
         var metadata = new Dictionary<string, object?>
         {

@@ -100,24 +100,8 @@ public static class MetadataFieldWriter
         if (metadata.TryGetValue("ProviderIds", out var providerIdsValue))
         {
             var sourceIds = JsonFieldHelpers.ReadProviderIds(providerIdsValue);
-            // Remove local-only entries first.
-            if (localItem.ProviderIds != null)
-            {
-                var toRemove = localItem.ProviderIds.Keys
-                    .Where(k => !sourceIds.ContainsKey(k) && !JsonFieldHelpers.IsOwnProviderKey(k))
-                    .ToList();
-                foreach (var key in toRemove)
-                {
-                    localItem.ProviderIds.Remove(key);
-                    hasChanges = true;
-                }
-            }
-
-            foreach (var kvp in sourceIds.Where(id => localItem.GetProviderId(id.Key) != id.Value))
-            {
-                localItem.SetProviderId(kvp.Key, kvp.Value);
-                hasChanges = true;
-            }
+            localItem.ProviderIds ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            hasChanges |= JsonFieldHelpers.ReconcileProviderIds(localItem.ProviderIds, sourceIds);
         }
 
         // Video-specific fields. Settable only when local is a Video.

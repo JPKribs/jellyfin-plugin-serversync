@@ -157,7 +157,10 @@ public static class LinkNfo
                 }
 
                 writer.WriteStartElement("uniqueid");
-                writer.WriteAttributeString("type", name.ToLowerInvariant());
+                // The id's name as the source spells it. Jellyfin reads the names it knows whatever
+                // their case, and stores any other exactly as written here, so a lowered name would
+                // leave the item holding the id twice, once under each spelling.
+                writer.WriteAttributeString("type", name);
                 if (first)
                 {
                     writer.WriteAttributeString("default", "true");

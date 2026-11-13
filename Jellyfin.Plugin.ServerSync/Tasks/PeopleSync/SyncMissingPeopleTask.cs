@@ -362,21 +362,8 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         if (metadata.TryGetValue("ProviderIds", out var providerIdsValue))
         {
             var sourceIds = JsonFieldHelpers.ReadProviderIds(providerIdsValue);
-            if (localPerson.ProviderIds != null)
-            {
-                var toRemove = localPerson.ProviderIds.Keys.Where(k => !sourceIds.ContainsKey(k) && !JsonFieldHelpers.IsOwnProviderKey(k)).ToList();
-                foreach (var key in toRemove)
-                {
-                    localPerson.ProviderIds.Remove(key);
-                    hasChanges = true;
-                }
-            }
-
-            foreach (var kvp in sourceIds.Where(id => localPerson.GetProviderId(id.Key) != id.Value))
-            {
-                localPerson.SetProviderId(kvp.Key, kvp.Value);
-                hasChanges = true;
-            }
+            localPerson.ProviderIds ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            hasChanges |= JsonFieldHelpers.ReconcileProviderIds(localPerson.ProviderIds, sourceIds);
         }
 
         // LockedFields, empty source clears local.

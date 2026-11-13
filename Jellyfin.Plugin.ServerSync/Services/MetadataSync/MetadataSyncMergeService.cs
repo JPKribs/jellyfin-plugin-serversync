@@ -46,11 +46,8 @@ public static class MetadataSyncMergeService
         // UnwrapKiotaPrimitive is required: AdditionalData values are Kiota
         // UntypedNode wrappers, and a naive .ToString() yields the type name
         // instead of the wrapped value, producing permanent IMDB/TMDB desyncs.
-        var sourceProviderIds = sourceItem.ProviderIds?.AdditionalData?
-            .Select(kvp => (kvp.Key, Value: MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value)))
-            .Where(kvp => !string.IsNullOrEmpty(kvp.Value) && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))
-            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        var sourceProviderIds = JsonFieldHelpers.CollapseProviderIds(sourceItem.ProviderIds?.AdditionalData?
+            .Select(kvp => new KeyValuePair<string, string>(kvp.Key, MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value) ?? string.Empty)));
 
         // Extract only simple metadata fields that can be directly copied.
         // Excluded fields that can't be synced:
@@ -320,10 +317,7 @@ public static class MetadataSyncMergeService
             ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.PremiereDate),
             ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.EndDate),
             ["ProductionYear"] = localItem.ProductionYear,
-            ["ProviderIds"] = localItem.ProviderIds?
-                .Where(kvp => kvp.Value != null && !JsonFieldHelpers.IsOwnProviderKey(kvp.Key))
-                .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            ["ProviderIds"] = JsonFieldHelpers.CollapseProviderIds(localItem.ProviderIds),
             ["IndexNumber"] = localItem.IndexNumber,
             ["ParentIndexNumber"] = localItem.ParentIndexNumber,
             ["PreferredMetadataCountryCode"] = localItem.PreferredMetadataCountryCode,

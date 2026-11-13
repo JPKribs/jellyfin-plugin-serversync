@@ -467,7 +467,7 @@ public sealed class LinkStorageTests : IDisposable
             Genres = new List<string> { "Comedy", "Family" },
             RunTimeTicks = TimeSpan.FromMinutes(101).Ticks,
             OfficialRating = "PG",
-            ProviderIds = new Jellyfin.Sdk.Generated.Models.BaseItemDto_ProviderIds { AdditionalData = new Dictionary<string, object> { ["Imdb"] = "tt1361336", ["Tmdb"] = "587807" } }
+            ProviderIds = new Jellyfin.Sdk.Generated.Models.BaseItemDto_ProviderIds { AdditionalData = new Dictionary<string, object> { ["Imdb"] = "tt1361336", ["Tmdb"] = "587807", ["TvdbCollection"] = "6287;" } }
         };
 
         var xml = System.Xml.Linq.XDocument.Parse(LinkNfo.Build(item));
@@ -480,7 +480,9 @@ public sealed class LinkStorageTests : IDisposable
         Assert.Equal(new[] { "Comedy", "Family" }, movie.Elements("genre").Select(e => e.Value));
         Assert.DoesNotContain("\u0001", movie.Element("plot")!.Value, StringComparison.Ordinal);
         var ids = movie.Elements("uniqueid").ToList();
-        Assert.Equal(new[] { "imdb", "tmdb" }, ids.Select(e => e.Attribute("type")!.Value));
+        // Each id keeps the source's spelling. Jellyfin stores a name it does not know exactly as
+        // written, so a lowered "tvdbcollection" would sit beside the "TvdbCollection" metadata sync writes.
+        Assert.Equal(new[] { "Imdb", "Tmdb", "TvdbCollection" }, ids.Select(e => e.Attribute("type")!.Value));
         Assert.Equal("true", ids[0].Attribute("default")?.Value);
         Assert.Null(ids[1].Attribute("default"));
     }

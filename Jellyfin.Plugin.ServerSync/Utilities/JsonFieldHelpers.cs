@@ -144,4 +144,50 @@ public static class JsonFieldHelpers
 
         return result;
     }
+
+    /// <summary>
+    /// The provider ids of an item as they are compared between servers: without empty values or this
+    /// plugin's own keys, sorted, and with keys that differ only by case taken as one id. Jellyfin
+    /// stores provider ids by exact name, so an item can hold "TvdbCollection" and "tvdbcollection"
+    /// side by side, which is one id written twice and not a difference from a server that holds it
+    /// once. Of such keys the first in ordinal order is kept, on both servers alike.
+    /// </summary>
+    /// <param name="ids">The ids as the item holds them.</param>
+    /// <returns>The ids to compare, or null when there are none to read.</returns>
+    public static Dictionary<string, string>? CollapseProviderIds(IEnumerable<KeyValuePair<string, string>>? ids)
+        => ids?
+            .Where(id => !string.IsNullOrEmpty(id.Value) && !IsOwnProviderKey(id.Key))
+            .GroupBy(id => id.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderBy(id => id.Key, StringComparer.Ordinal).First())
+            .OrderBy(id => id.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(id => id.Key, id => id.Value);
+
+    /// <summary>
+    /// Makes an item's provider ids match the source's: the same keys, spelled the same, with the same
+    /// values. A local key that differs from a source key only by case is removed, so the id is left
+    /// once under the source's spelling. This plugin's own keys are left alone.
+    /// </summary>
+    /// <param name="local">The item's provider ids, changed in place.</param>
+    /// <param name="source">The source's provider ids.</param>
+    /// <returns>True when anything changed.</returns>
+    public static bool ReconcileProviderIds(IDictionary<string, string> local, IReadOnlyDictionary<string, string> source)
+    {
+        ArgumentNullException.ThrowIfNull(local);
+        ArgumentNullException.ThrowIfNull(source);
+        var changed = false;
+        var spelled = new HashSet<string>(source.Keys, StringComparer.Ordinal);
+        foreach (var key in local.Keys.Where(k => !spelled.Contains(k) && !IsOwnProviderKey(k)).ToList())
+        {
+            local.Remove(key);
+            changed = true;
+        }
+
+        foreach (var id in source.Where(id => !local.TryGetValue(id.Key, out var held) || held != id.Value))
+        {
+            local[id.Key] = id.Value;
+            changed = true;
+        }
+
+        return changed;
+    }
 }

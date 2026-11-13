@@ -30,3 +30,5 @@ artifacts:
 changelog:
   fixed:
   - The dashed arrows on the Servers map pointed the wrong way. Every arrow now points the way things travel, so a server whose files this one streams has its arrow pointing here, and a Stream server has its arrow pointing out
+  - A provider id held twice under two spellings, such as TvdbCollection and tvdbcollection, no longer fails metadata or people sync with a divergent ProviderIds error. The two count as one id, and applying the source's ids leaves it once under the source's spelling
+  - The .nfo written for a link names each provider id as the source spells it, so Jellyfin no longer stores a second, lowercase copy of an id it does not know
