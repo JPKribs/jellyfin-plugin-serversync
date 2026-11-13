@@ -124,7 +124,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                         errorSection.classList.add('hidden');
                     }
 
-                    var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail && detail.ServerKey);
+                    var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail.ServerKey);
                     var localServerName = ServerSyncShared.localServerName || 'Local';
                     view.querySelector('#peopleSyncModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
                     view.querySelector('#peopleSyncModalSourceHeader').textContent = sourceServerName;

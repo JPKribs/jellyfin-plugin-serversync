@@ -85,7 +85,7 @@ export function createQueueModule(ctx) {
 
         load: function(force) {
             var self = this;
-            if (!ServerSyncShared || (self._loading && !force)) return Promise.resolve();
+            if (self._loading && !force) return Promise.resolve();
             self._loading = true;
             // A forced load can start while a poll is still in flight, and the poll's older reply must not
             // land last and put back a picture the forced load already replaced.

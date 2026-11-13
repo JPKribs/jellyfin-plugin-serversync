@@ -65,7 +65,7 @@ export default function (view) {
         return Promise.all(scanServers.map(function (server) {
             return apiRequest('GetSourceUsers', 'POST', requestFor(server)).then(function (users) {
                 return (users || []).map(function (u) {
-                    return { Id: u.Id, Name: u.Name, ServerName: server.Name || server.ServerName || server.Url, ServerKey: server.Key };
+                    return { Id: u.Id, Name: u.Name, ServerName: ServerSyncShared.serverDisplayName(server), ServerKey: server.Key };
                 });
             }).catch(function () { return []; });
         })).then(function (lists) {
@@ -93,7 +93,7 @@ export default function (view) {
 
         container.innerHTML = '';
 
-        if (!watchedFilterUsers || watchedFilterUsers.length === 0) {
+        if (watchedFilterUsers.length === 0) {
             container.innerHTML = '<div class="filterBrowserStatus">No source users available. Add a server and connect to it to load users.</div>';
             return;
         }
@@ -109,7 +109,7 @@ export default function (view) {
             itemEl.dataset.userId = user.Id;
 
             var thumbHtml;
-            if (ServerSyncShared && user.Id) {
+            if (user.Id) {
                 var userThumbId = 'ss-user-thumb-' + escapeHtml(String(user.Id));
                 ServerSyncShared.scheduleProxyImage(userThumbId, user.Id, true, 120, user.ServerKey);
                 thumbHtml = '<img id="' + userThumbId + '" class="filterItemThumb filterItemThumbSquare" />' +
@@ -136,14 +136,9 @@ export default function (view) {
     }
 
     function toggleWatchedFilterUser(itemEl) {
+        var selected = itemEl.classList.toggle('selected');
         var icon = itemEl.querySelector('.filterItemCheck .material-icons');
-        if (itemEl.classList.contains('selected')) {
-            itemEl.classList.remove('selected');
-            if (icon) icon.textContent = 'check_box_outline_blank';
-        } else {
-            itemEl.classList.add('selected');
-            if (icon) icon.textContent = 'check_box';
-        }
+        if (icon) icon.textContent = selected ? 'check_box' : 'check_box_outline_blank';
     }
 
     function collectWatchedFilterUsers() {
@@ -254,7 +249,7 @@ export default function (view) {
             // Only the users on screen can be judged. A saved id whose server did not answer this time is
             // kept as it was, so a failed user list never clears the filter and lets watched files back in.
             var shown = {};
-            (watchedFilterUsers || []).forEach(function (u) { shown[u.Id] = true; });
+            watchedFilterUsers.forEach(function (u) { shown[u.Id] = true; });
             var unseen = (config.WatchedFilterUserIds || []).filter(function (id) { return !shown[id]; });
             config.WatchedFilterUserIds = collectWatchedFilterUsers().concat(unseen);
             config.DownloadNewContentMode = getValue('selDownloadNewContentMode', 'Enabled');
@@ -278,7 +273,6 @@ export default function (view) {
             config.ScheduledEndHour = getIntValue('txtScheduledEndHour', 6);
             config.ScheduledDownloadSpeed = getIntValue('txtScheduledDownloadSpeed', 0);
             config.ScheduledDownloadSpeedUnit = getValue('selScheduledDownloadSpeedUnit', 'MB');
-
         }, 'Content settings saved', 'Failed to save content settings');
     }
 
@@ -303,7 +297,6 @@ export default function (view) {
             config.HistorySyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
             config.HistorySyncFavorites = getChecked('chkHistorySyncFavorites');
             config.HistorySyncNegotiate = getChecked('chkHistorySyncNegotiate');
-
         }, 'History settings saved', 'Failed to save history settings');
     }
 
@@ -330,7 +323,6 @@ export default function (view) {
             config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
             config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
             config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
-
         }, 'Metadata settings saved', 'Failed to save metadata settings');
     }
 
@@ -345,7 +337,6 @@ export default function (view) {
         saveSection(function (config) {
             config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
             config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
-
         }, 'People settings saved', 'Failed to save people settings');
     }
 
@@ -364,7 +355,6 @@ export default function (view) {
             config.UserSyncPolicy = getChecked('chkUserSyncPolicy');
             config.UserSyncConfiguration = getChecked('chkUserSyncConfiguration');
             config.UserSyncProfileImage = getChecked('chkUserSyncProfileImage');
-
         }, 'User sync settings saved', 'Failed to save user sync settings');
     }
 
@@ -404,7 +394,7 @@ export default function (view) {
         setValue('txtHintRefusedRetryMinutes', config.HintRefusedRetryMinutes || 15);
         setValue('txtHintRefusedMaxRetries', config.HintRefusedMaxRetries || 0);
         setValue('txtRefreshParallelism', config.RefreshParallelism || 8);
-        setValue('txtFullScanIntervalHours', config.FullScanIntervalHours === undefined || config.FullScanIntervalHours === null ? 24 : config.FullScanIntervalHours);
+        setValue('txtFullScanIntervalHours', config.FullScanIntervalHours == null ? 24 : config.FullScanIntervalHours);
         setChecked('chkDeepImageVerification', config.DeepImageVerification === true);
     }
 
@@ -419,7 +409,6 @@ export default function (view) {
             config.RefreshParallelism = Math.min(16, Math.max(1, getIntValue('txtRefreshParallelism', 8)));
             config.FullScanIntervalHours = Math.min(720, Math.max(0, getIntValue('txtFullScanIntervalHours', 24)));
             config.DeepImageVerification = getChecked('chkDeepImageVerification');
-
         }, 'Processing settings saved', 'Failed to save processing settings');
     }
 

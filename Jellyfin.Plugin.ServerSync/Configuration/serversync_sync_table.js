@@ -202,7 +202,7 @@ export function createSyncTableKit(ctx) {
                 });
 
                 var retryBtn = view.querySelector('#' + ids.retry);
-                if (retryBtn) retryBtn.classList.toggle('hidden', !((status.Errored || 0) > 0));
+                if (retryBtn) retryBtn.classList.toggle('hidden', !(status.Errored > 0));
             },
 
             loadHealthStats: function() {
@@ -444,7 +444,6 @@ export function createSyncTableKit(ctx) {
         setHealthCount: setHealthCount,
         parseJsonSafe: parseJsonSafe,
         formatImageDisplay: formatImageDisplay,
-        retryAllErrored: retryAllErrored,
         showObjectVersion: showObjectVersion
     };
 }

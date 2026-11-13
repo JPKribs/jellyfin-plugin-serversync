@@ -111,7 +111,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                     statusBadge.textContent = item.Status;
                     statusBadge.className = 'itemModal-statusBadge ' + item.Status;
 
-                    var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item && item.ServerKey);
+                    var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                     var localServerName = ServerSyncShared.localServerName || 'Local';
                     view.querySelector('#metadataSyncModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
 
@@ -269,7 +269,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
 
                 if (imagesEnabled) {
                     html += '<tr class="metadataSyncModal-sectionHeader"><td colspan="4">Images</td></tr>';
-                    html += self.buildImagesRows(sourceImages, localImages, item);
+                    html += self.buildImagesRows(sourceImages, localImages);
                     if (item.HasImagesChanges) {
                         html += self.buildChangeDetailRow(item.ImagesChangesDetail);
                     }
@@ -329,13 +329,11 @@ export function createMetadataSyncTableModule(ctx, kit) {
                     var isChanged = self.normalizeForComparison(sourceVal, field) !== self.normalizeForComparison(localVal, field);
                     var rowClass = isChanged ? 'metadataSyncModal-changedRow' : '';
 
-                    var mergedDisplay = sourceDisplay;
-
                     html += '<tr class="' + rowClass + '">';
                     html += '<td class="historyCompareTable-property">' + ServerSyncShared.escapeHtml(field.label) + '</td>';
                     html += '<td class="historyCompareTable-value">' + sourceDisplay + '</td>';
                     html += '<td class="historyCompareTable-value">' + localDisplay + '</td>';
-                    html += '<td class="historyCompareTable-value historyCompareTable-merged">' + mergedDisplay + '</td>';
+                    html += '<td class="historyCompareTable-value historyCompareTable-merged">' + sourceDisplay + '</td>';
                     html += '</tr>';
                 });
 
@@ -530,8 +528,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 return false;
             },
 
-            buildImagesRows: function(sourceImages, localImages, item) {
-                var self = this;
+            buildImagesRows: function(sourceImages, localImages) {
                 var html = '';
 
                 var allTypes = new Set();

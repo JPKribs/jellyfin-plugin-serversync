@@ -1,7 +1,7 @@
 /* ============================================ */
 /* SERVER SYNC PLUGIN - SHARED STYLES           */
 /* ============================================ */
-/* Shared CSS for the Sync and Settings views.  */
+/* Shared CSS for the Sync, Servers, and Settings pages. */
 
 /* ===== Status Color Variables ===== */
 :root {
@@ -139,7 +139,7 @@
 .itemModal-statusBadge.Pending-Deletion { background: var(--status-pending-deletion-bg); color: var(--status-pending-deletion-color); border: 1px solid var(--status-pending-deletion-border); }
 .itemModal-statusBadge.Deleting { background: var(--status-deleting-bg); color: var(--status-deleting-color); border: 1px solid var(--status-deleting-border); }
 
-/* ===== Comparison Table (used by History, Metadata, Users views) ===== */
+/* ===== Comparison Table (used by the History, Metadata, Users, and People views) ===== */
 .historyCompareTable {
     width: 100%;
     border-collapse: collapse;
@@ -265,7 +265,7 @@
     }
 }
 
-/* Files <-> Collections toggle in the whitelist picker */
+/* Files / Collections / Playlists toggle in the library filter picker */
 .filterBrowseToggle {
     display: flex;
     gap: 0.6em;

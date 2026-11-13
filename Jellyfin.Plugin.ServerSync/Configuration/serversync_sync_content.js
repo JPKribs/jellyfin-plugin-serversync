@@ -311,7 +311,7 @@ export function createContentSyncTableModule(ctx, kit) {
                 statusBadge.textContent = displayStatus;
                 statusBadge.className = 'itemModal-statusBadge ' + statusClass;
 
-                var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item && item.ServerKey);
+                var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';
                 view.querySelector('#modalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
 
@@ -392,7 +392,6 @@ export function createContentSyncTableModule(ctx, kit) {
                 }
 
                 var btnQueue = view.querySelector('#btnModalQueue');
-                var btnIgnore = view.querySelector('#btnModalIgnore');
                 var btnMarkSynced = view.querySelector('#btnModalMarkSynced');
                 var modalDeleteBtn = view.querySelector('#btnModalDelete');
                 var isPendingDeletion = item.Status === 'Pending' && item.PendingType === 'Deletion';
@@ -400,14 +399,8 @@ export function createContentSyncTableModule(ctx, kit) {
                 var isSynced = item.Status === 'Synced';
                 var isQueuedOrErrored = item.Status === 'Queued' || item.Status === 'Errored';
 
-                var queueBtnSpan = btnQueue.querySelector('span');
-                if (isSynced) {
-                    queueBtnSpan.textContent = 'Resync';
-                } else {
-                    queueBtnSpan.textContent = 'Queue';
-                }
+                btnQueue.querySelector('span').textContent = isSynced ? 'Resync' : 'Queue';
 
-                // Show Mark Synced only for Queued/Errored items
                 btnMarkSynced.style.display = isQueuedOrErrored ? 'inline-block' : 'none';
 
                 // Only a link can be kept as a copy, and not one already on its way or on its way out.

@@ -35,17 +35,14 @@ export default function (view) {
 
     view.addEventListener('viewshow', onViewShow);
     view.addEventListener('viewhide', function () {
-        // Stop any running pollTaskProgress handles
         _activePollIntervals.forEach(function(handle) {
             if (handle && typeof handle.cancel === 'function') handle.cancel();
         });
         _activePollIntervals.length = 0;
 
-        // Disconnect IntersectionObservers on all PaginatedTable instances
-        var modules = [SyncTableModule, HistorySyncTableModule, MetadataSyncTableModule, UserSyncTableModule, PeopleSyncTableModule];
         // The page's modules are built once their imports land, so a hide before then has nothing to stop.
         if (QueueModule) QueueModule.stopAutoRefresh();
-        modules.forEach(function(mod) {
+        [SyncTableModule, HistorySyncTableModule, MetadataSyncTableModule, UserSyncTableModule, PeopleSyncTableModule].forEach(function(mod) {
             if (mod && mod.table && mod.table.disconnectObserver) {
                 mod.table.disconnectObserver();
             }
@@ -193,10 +190,8 @@ export default function (view) {
             if (this.currentView) {
                 var currentOpt = dropdown.querySelector('option[value="' + this.currentView + '"]');
                 if (currentOpt && !currentOpt.disabled) {
-                    // Current view is still valid, just ensure dropdown matches
                     dropdown.value = this.currentView;
-                    // Re-trigger switchView in case it wasn't initialized yet
-                    // (reset currentView to force re-entry)
+                    // A view that was never initialized is entered again, which needs currentView cleared.
                     var cv = this.currentView;
                     if (!this.initialized[cv]) {
                         this.currentView = null;
@@ -206,7 +201,7 @@ export default function (view) {
                 }
             }
 
-            // Current view is disabled or not set, find first enabled option
+            // The current view is disabled or not set, so the first enabled option opens.
             var firstEnabled = null;
             for (var i = 0; i < dropdown.options.length; i++) {
                 if (!dropdown.options[i].disabled) {
@@ -330,8 +325,8 @@ export default function (view) {
     // ============================================
     // INITIAL PAGE SETUP
     // ============================================
-    // viewshow may have already fired before we got here,
-    // so set tabs and trigger init immediately on first load.
+    // viewshow may have fired before this module ran, so the first load sets the tabs and
+    // initializes right away.
 
     _pageReady = true;
     LibraryMenu.setTabs('serversync', 0, getTabs);

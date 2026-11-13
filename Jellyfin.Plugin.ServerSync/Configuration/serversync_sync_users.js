@@ -129,13 +129,12 @@ export function createUserSyncTableModule(ctx, kit) {
                     statusBadge.textContent = detail.OverallStatus || 'Unknown';
                     statusBadge.className = 'itemModal-statusBadge ' + (detail.OverallStatus || 'unknown');
 
-                    var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail && detail.ServerKey);
+                    var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail.ServerKey);
                     var localServerName = ServerSyncShared.localServerName || 'Local';
                     view.querySelector('#userSyncModalServerMapping').textContent =
                         sourceServerName + ' \u2192 ' + localServerName;
 
-                    var infoGrid = view.querySelector('#userSyncModalInfoGrid');
-                    infoGrid.classList.remove('hidden');
+                    view.querySelector('#userSyncModalInfoGrid').classList.remove('hidden');
                     view.querySelector('#userSyncModalLastSync').textContent = detail.LastSyncTime
                         ? ServerSyncShared.formatRelativeTime(new Date(detail.LastSyncTime))
                         : '-';
@@ -298,9 +297,7 @@ export function createUserSyncTableModule(ctx, kit) {
 
             _addProfileImageRow: function(tbody, item) {
                 var row = document.createElement('tr');
-                var isChanged = item.HasChanges;
-
-                if (isChanged) {
+                if (item.HasChanges) {
                     row.className = 'userSyncModal-changedRow';
                 }
 
@@ -310,7 +307,6 @@ export function createUserSyncTableModule(ctx, kit) {
 
                 var sourceDisplay = item.SourceImageSizeFormatted || (item.SourceImageSize > 0 ? item.SourceImageSize + ' bytes' : 'None');
                 var localDisplay = item.LocalImageSizeFormatted || (item.LocalImageSize > 0 ? item.LocalImageSize + ' bytes' : 'None');
-                var mergedDisplay = sourceDisplay;
 
                 var sourceCell = document.createElement('td');
                 sourceCell.className = 'historyCompareTable-value';
@@ -322,7 +318,7 @@ export function createUserSyncTableModule(ctx, kit) {
 
                 var mergedCell = document.createElement('td');
                 mergedCell.className = 'historyCompareTable-value historyCompareTable-merged';
-                mergedCell.textContent = mergedDisplay;
+                mergedCell.textContent = sourceDisplay;
 
                 row.appendChild(propCell);
                 row.appendChild(sourceCell);

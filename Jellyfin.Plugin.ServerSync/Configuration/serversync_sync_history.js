@@ -111,7 +111,7 @@ export function createHistorySyncTableModule(ctx, kit) {
                 statusBadge.textContent = item.Status;
                 statusBadge.className = 'itemModal-statusBadge ' + item.Status;
 
-                var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item && item.ServerKey);
+                var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';
                 view.querySelector('#historyModalServerMapping').textContent = sourceServerName + ' \u2192 ' + localServerName;
 
@@ -200,7 +200,7 @@ export function createHistorySyncTableModule(ctx, kit) {
             },
 
             formatPosition: function(ticks) {
-                if (!ticks || ticks === 0) return '-';
+                if (!ticks) return '-';
                 var seconds = Math.floor(ticks / 10000000);
                 var minutes = Math.floor(seconds / 60);
                 var hours = Math.floor(minutes / 60);
@@ -229,13 +229,7 @@ export function createHistorySyncTableModule(ctx, kit) {
                 var merged = (mergedValue === null || mergedValue === undefined) ? null : mergedValue;
                 var local = (localValue === null || localValue === undefined) ? null : localValue;
 
-                var isChanged = merged !== local;
-
-                if (isChanged) {
-                    row.classList.add('historySyncModal-changedRow');
-                } else {
-                    row.classList.remove('historySyncModal-changedRow');
-                }
+                row.classList.toggle('historySyncModal-changedRow', merged !== local);
             },
 
             // Finds the user mapping a row was synced through. Only the mappings of the row's own server are

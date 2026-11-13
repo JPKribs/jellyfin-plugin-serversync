@@ -469,8 +469,8 @@ export default function (view) {
         });
     }
 
-    // Fills the editor from the selected entry. The stored key is never shown.
-    // the sentinel round-trips and the server keeps the existing secret.
+    // Fills the editor from the selected entry. The stored key is never shown. The sentinel
+    // round-trips and the server keeps the existing secret.
     function loadServerEditor() {
         var server = selectedServer();
         if (!server) return;
@@ -983,8 +983,6 @@ export default function (view) {
     }
 
     function renderLibraryMappings(mappings) {
-        var container = view.querySelector('#libraryMappingsContainer');
-        if (!container) return;
         clearMappingContainer('libraryMappingsContainer');
         (mappings || []).forEach(function(mapping) {
             addLibraryMappingRow(mapping);
@@ -1076,9 +1074,10 @@ export default function (view) {
         function renderPickerItem(item, selected) {
             var sel = !!selected[item.Id];
             var thumbHtml;
-            if (ServerSyncShared && item.Id) {
+            if (item.Id) {
                 var thumbId = 'ss-filter-thumb-' + (++_filterThumbSeq);
-                ServerSyncShared.scheduleProxyImage(thumbId, item.Id, false, 120, selectedServer() ? selectedServer().Key : '');
+                var current = selectedServer();
+                ServerSyncShared.scheduleProxyImage(thumbId, item.Id, false, 120, current ? current.Key : '');
                 thumbHtml = '<img id="' + thumbId + '" class="filterItemThumb" />' +
                     '<div class="filterItemThumbPlaceholder" style="display:none"><span class="material-icons">movie</span></div>';
             } else {
@@ -1201,7 +1200,7 @@ export default function (view) {
         div._selectedPermanentItems = selectedPermanentItems;
         filterModeSelect.addEventListener('change', updateFilterVisibility);
 
-        // Files/ Collections / Playlists browse toggle. Collections
+        // Files / Collections / Playlists browse toggle. Collections
         // and playlists are sync selectors: whitelisting one syncs its
         // members (membership re-resolved every refresh), blacklisting one
         // excludes them. button-submit is Jellyfin's accent (primary) button
@@ -1434,8 +1433,6 @@ export default function (view) {
     }
 
     function renderUserMappings(mappings) {
-        var container = view.querySelector('#userMappingsContainer');
-        if (!container) return;
         clearMappingContainer('userMappingsContainer');
         (mappings || []).forEach(function(mapping) {
             addUserMappingRow(mapping);
