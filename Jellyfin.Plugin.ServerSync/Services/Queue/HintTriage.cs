@@ -145,6 +145,21 @@ public sealed class HintTriage
             return new(HintCode.Invalid, "a hint's origin must be the sender, since hints are never forwarded");
         }
 
+        // A server only ever announces its own edits, under its own id. A version naming another server
+        // would let one peer stand in for a third: its values recorded as that server's edit, and that
+        // server's real edit then turned away as already applied.
+        if (!string.Equals(hint.VersionServerId, senderServerId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new(HintCode.Invalid, "a hint's version must be the sender's own edit");
+        }
+
+        // Hint ids carry the id of the server that made them, and completions are remembered by id, so a
+        // peer may only use ids of its own.
+        if (hint.HintId?.StartsWith(senderServerId + ":", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            return new(HintCode.Invalid, "a hint's id must be one the sender made");
+        }
+
         if (HintProtocol.IsFutureVersion(hint.VersionTimestamp, utcNow))
         {
             return new(HintCode.FutureVersion, $"the hint's version is dated more than {HintProtocol.MaxVersionLead.TotalMinutes:0} minutes ahead of this server's clock. Check the clock on the sender");

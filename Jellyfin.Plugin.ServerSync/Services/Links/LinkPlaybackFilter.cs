@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -73,6 +74,16 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
+
+        // A download of a link hands out its .strm, and with it the link's address and secret. The check
+        // reads the file itself rather than the link table, so it holds while the table cannot be read
+        // and for a version named in place of the route's item.
+        if (DownloadsALink(context))
+        {
+            context.Result = new ObjectResult("This item streams from another server and cannot be downloaded from here") { StatusCode = StatusCodes.Status403Forbidden };
+            return;
+        }
+
         var links = FindLinks(context, out var controller, out var versions);
         if (links.Count > 0)
         {
@@ -318,6 +329,42 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             && asIs;
 
     private static Guid LinkItemId(FilterContext context) => RouteItemId(context) ?? Guid.Empty;
+
+    // Whether a request for Jellyfin's download or file route reaches a .strm that points at the link
+    // route: the route's item, or a version the request names. A file that cannot be read is refused,
+    // since it cannot be shown not to be a link.
+    private bool DownloadsALink(ActionExecutingContext context)
+    {
+        if (context.ActionDescriptor is not ControllerActionDescriptor { ControllerName: "Library" } descriptor
+            || !FileActions.Contains(descriptor.ActionName, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var id in new[] { RouteItemId(context), NamedVersion(context) })
+        {
+            if (id is not { } itemId || _libraryManager.GetItemById(itemId)?.Path is not { } path
+                || !path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (_links.Find(path) is not null || LinkFiles.PointsAtLinkRoute(LinkFiles.ReadUrl(path)))
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogDebug(ex, "Could not read {Path} to tell whether it is a link, so its download is refused", path);
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // Jellyfin names the item differently on some routes: routeItemId for subtitles, videoId for attachments.
     private static Guid? RouteItemId(FilterContext context)

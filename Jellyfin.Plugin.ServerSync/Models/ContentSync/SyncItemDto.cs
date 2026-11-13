@@ -60,4 +60,7 @@ public class SyncItemDto
 
     /// <summary>Gets or sets a value indicating whether a link's file is held in the link cache.</summary>
     public bool Cached { get; set; }
+
+    /// <summary>Gets or sets why a copy in a Link mapping is a copy: Pick, Hand, or Unknown.</summary>
+    public string? Kept { get; set; }
 }

@@ -12,8 +12,15 @@
 // helpers the pages rely on (item/user/person thumbnails, local server name).
 //
 // Note: getTabs() is defined locally in each page controller (sync, servers,
-// settings) because LibraryMenu.setTabs() must be called synchronously during
-// the viewshow event.
+// storage, settings) because LibraryMenu.setTabs() must be called synchronously
+// during the viewshow event.
+//
+// The Storage tab shows only while content sync is on. A page cannot wait for
+// the config before setting its tabs, so the last known value of
+// EnableContentSync is kept per browser under STORAGE_TAB_KEY ('1' shown, '0'
+// hidden, missing means shown). Every config this module loads or saves
+// refreshes it, and when it changes the page's onTabsChanged callback runs so
+// the page can set its tabs again.
 // ============================================
 
 import {
@@ -36,10 +43,62 @@ export { createPaginatedTable, createSortableCardList, createChoiceGroup, genera
 
 var PLUGIN_ID = 'ebd650b5-6f4c-4ccb-b10d-23dffb3a7286';
 
+// Mirrors the inline readers in each page controller, which run before this module loads.
+export var STORAGE_TAB_KEY = 'serversync.storageTab';
+
+function readStorageTabFlag() {
+    try {
+        return window.localStorage.getItem(STORAGE_TAB_KEY);
+    } catch (e) {
+        return null;
+    }
+}
+
+function writeStorageTabFlag(value) {
+    try {
+        window.localStorage.setItem(STORAGE_TAB_KEY, value);
+    } catch (e) {
+        // Storage blocked: the tab keeps its default of shown.
+    }
+}
+
 export function createServerSyncShared(view) {
     var shared = baseCreateShared(view, PLUGIN_ID, 'Sync');
 
     shared.SECRET_KEPT = SECRET_KEPT;
+
+    // Set by a page to set its tabs again when the Storage tab appears or disappears.
+    shared.onTabsChanged = null;
+
+    // Records whether content sync is on, and tells the page when that changed the tab list.
+    shared.rememberContentSync = function (config) {
+        if (!config || typeof config !== 'object' || !('EnableContentSync' in config)) return;
+        // The Storage tab holds the library filter, which content, history, and metadata sync all apply.
+        var value = config.EnableContentSync || config.EnableHistorySync || config.EnableMetadataSync ? '1' : '0';
+        var before = readStorageTabFlag();
+        if (before === value) return;
+        writeStorageTabFlag(value);
+        // A missing flag already showed the tab, so only a change of what shows reruns setTabs.
+        var shownBefore = before !== '0';
+        if (shownBefore !== (value === '1') && typeof shared.onTabsChanged === 'function') {
+            shared.onTabsChanged();
+        }
+    };
+
+    var baseGetConfig = shared.getConfig;
+    var baseSaveConfig = shared.saveConfig;
+    shared.getConfig = function () {
+        return baseGetConfig.apply(shared, arguments).then(function (config) {
+            shared.rememberContentSync(config);
+            return config;
+        });
+    };
+    shared.saveConfig = function (config) {
+        return baseSaveConfig.apply(shared, arguments).then(function (result) {
+            shared.rememberContentSync(config);
+            return result;
+        });
+    };
 
     // Local server name (fetched once via fetchLocalServerName).
     shared.localServerName = null;

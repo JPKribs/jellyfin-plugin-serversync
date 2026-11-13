@@ -478,6 +478,16 @@ def server_entry(creds, name, key=None, local="local", mode="Pull"):
     }
 
 
+def apply_negotiation(servers, negotiate):
+    """History negotiation is chosen per library and only a Sync server negotiates, so turning it on
+    makes each Pull entry Sync and ticks Negotiate History on every library mapping."""
+    for entry in servers:
+        if negotiate and entry.get("Mode") in ("Pull", 0):
+            entry["Mode"] = "Sync"
+        for mapping in entry.get("LibraryMappings", []):
+            mapping["NegotiateHistory"] = bool(negotiate)
+
+
 def configure_server(creds, api, local, order, modes=None, **flags):
     """Writes one server's peer list in priority order, keeping stored entries so keys round trip, and sets
     each peer's mode. All modules are off unless a flag turns one on."""
@@ -491,6 +501,8 @@ def configure_server(creds, api, local, order, modes=None, **flags):
         entry = server_entry(creds, n, local=local, key=(existing.get(n) or {}).get("Key"))
         entry["Mode"] = modes.get(n, "Pull")
         servers.append(entry)
+    negotiate = flags.pop("HistorySyncNegotiate", False)
+    apply_negotiation(servers, negotiate)
     config["Servers"] = servers
     config.update({
         "EnableContentSync": False, "EnableMetadataSync": False, "EnableHistorySync": False,
@@ -513,6 +525,8 @@ def configure_local(creds, api, order, **flags):
     servers = [server_entry(creds, n, key=(existing.get(n) or {}).get("Key")) for n in order]
     for entry in servers:
         entry["Mode"] = "Pull"
+    negotiate = flags.pop("HistorySyncNegotiate", False)
+    apply_negotiation(servers, negotiate)
     config["Servers"] = servers
     config.update({
         "EnableContentSync": True, "DownloadNewContentMode": "Enabled", "ReplaceExistingContentMode": "Enabled",
@@ -828,7 +842,7 @@ def scenario_hints_three_servers(creds, apis):
     time.sleep(12)
     expect(queues_empty(), "no hint was raised by an apply, so the pool is loop free")
     expect(all(played(n) and favorite(n) for n in names), "all three servers hold the same state")
-    expect(all(len(activity(apis[n], "watch history for Shared Movie")) >= 1 for n in names), "every server wrote activity entries for the hints it applied")
+    wait_until(lambda: all(len(activity(apis[n], " synced from ")) >= 1 for n in names), 60, "every server wrote one summary entry for the changes it applied")
 
     # A later edit on source-b reverses the play everywhere, through the three way merge.
     apis["source-b"].call("DELETE", f"/UserPlayedItems/{ids['source-b'][1]}?userId={ids['source-b'][0]}", expect=200)
@@ -1262,6 +1276,17 @@ def scenario_content_and_user_hints(creds, apis):
     configure_local(creds, apis["local"], ["source-a", "source-b"])
 
 
+def synced_count(api, server, limit=100):
+    """How many changes from a server the activity log's summaries say were synced."""
+    total = 0
+    for e in api.get(f"/System/ActivityLog/Entries?limit={limit}")["Items"]:
+        if (e.get("Type") or "") == "ServerSync.HintsApplied":
+            m = re.search(re.escape(server) + r" \((\d+)\)", e.get("ShortOverview") or e.get("Overview") or "")
+            if m:
+                total += int(m.group(1))
+    return total
+
+
 def activity(api, needle, limit=40):
     """Server Sync activity log entries whose name contains the needle, newest first."""
     items = api.get(f"/System/ActivityLog/Entries?limit={limit}")["Items"]
@@ -1397,7 +1422,7 @@ def scenario_push_responses(creds, apis):
     expect("not installed" in (peers.get("no-plugin", {}).get("Reason") or ""), "a URL with no Server Sync behind it pauses as not installed (404)")
     paused_rows = [r for r in h["Outbound"] if r["PeerName"] in ("source-a", "source-b", "no-plugin")]
     expect(paused_rows and all(r["State"] == "Pending" and r["Attempts"] >= 1 for r in paused_rows), "paused rows stay pending with an attempt recorded, nothing is lost")
-    expect(len(activity(local, "paused changes to")) >= 3, "each pause wrote an activity entry")
+    expect(len(activity(local, "changes paused for")) >= 3, "each pause wrote an activity entry")
 
     # Clear the pauses, give source-a its real key, list local on source-b, and send a metadata hint that
     # source-a declines because its metadata module is off while source-b applies it.
@@ -1407,11 +1432,12 @@ def scenario_push_responses(creds, apis):
     # The rows deferred by the pauses above wait fifteen minutes; discard them so only the new hint counts.
     for r in hints(local)["Outbound"]:
         local.call("DELETE", f"/Sync/Hints/Outbound/{r['Id']}", expect=204)
-    applied_before = len(activity(apis["source-a"], "metadata for Shared Movie"))
+    applied_before = synced_count(apis["source-a"], "local")
     set_overview(local, "Movie", "Shared Movie", f"Declined test {time.strftime('%H:%M:%S')}")
     wait_until(lambda: not [r for r in hints(local)["Outbound"] if r["PeerName"] == "source-a"], 60, "a hint for a module the receiver has off is never owed to it, or is dropped once it declines")
     wait_until(lambda: not hints(local)["Outbound"], 60, "the same hint was accepted and completed by the peer whose module is on")
-    expect(len(activity(apis["source-a"], "metadata for Shared Movie")) == applied_before, "the declining receiver applied nothing")
+    time.sleep(35)
+    expect(synced_count(apis["source-a"], "local") == applied_before, "the declining receiver applied nothing")
 
     for n in ("source-a", "source-b"):
         configure_server(creds, apis[n], n, [])
@@ -1561,23 +1587,21 @@ def scenario_non_admin_peer_key(creds, apis):
     a.call("DELETE", f"/UserPlayedItems/{ai}?userId={ea['viewerId']}", expect=200)
     local.call("DELETE", f"/UserPlayedItems/{li}?userId={el['viewerId']}", expect=200)
     wait_until(queues_empty, 60, "queues are quiet before the history check")
+    synced_before = synced_count(local, "source-a")
     a.post(f"/UserPlayedItems/{ai}?userId={ea['viewerId']}&datePlayed={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}", expect=200)
     wait_until(lambda: user_data(local, el["viewerId"], li)["Played"], 90, "history: a play by the viewer on source-a reached local with the viewer's key")
     wait_until(lambda: not hints(local)["Inbound"], 60, "history: local finished the hint")
     wait_until(lambda: not hints(a)["Outbound"], 60, "history: local reported completion with the whitelisted viewer's key")
-    wait_until(lambda: len(activity(local, "watch history for Shared Movie")) >= 1, 15, "history: local wrote an activity entry")
 
     # Metadata.
     stamp = f"Non admin metadata {time.strftime('%H:%M:%S')}"
     set_overview(a, "Movie", "Only A", stamp)
     wait_until(lambda: overview(local, "Movie", "Only A") == stamp, 90, "metadata: an edit on source-a reached local with the viewer's key")
-    wait_until(lambda: len(activity(local, "metadata for Only A")) >= 1, 15, "metadata: local wrote an activity entry")
 
     # People.
     bio = f"Alice non admin {time.strftime('%H:%M:%S')}"
     set_overview(a, "Person", "Alice Actor", bio)
     wait_until(lambda: overview(local, "Person", "Alice Actor") == bio, 90, "people: an edit on source-a reached local with the viewer's key")
-    wait_until(lambda: len(activity(local, "person Alice Actor")) >= 1, 15, "people: local wrote an activity entry")
 
     # Content: a new film on source-a, downloaded with the viewer's key.
     # A fresh title each run, so a reused pool still has to download something.
@@ -1589,7 +1613,7 @@ def scenario_non_admin_peer_key(creds, apis):
     a.post("/Library/Refresh", None, expect=204)
     target = os.path.join(STATE, "media", "local", "Movies", title, f"{title}.mp4")
     wait_until(lambda: os.path.exists(target), 150, "content: a file added on source-a was downloaded by local with the viewer's key")
-    wait_until(lambda: len(activity(local, f"file Only A Three {title.split(' ')[3]}")) >= 1, 15, "content: local wrote an activity entry")
+    wait_until(lambda: synced_count(local, "source-a") >= synced_before + 4, 90, "local summed the history, metadata, people, and content changes it applied into summary entries")
 
     configure_server(creds, a, "source-a", [])
     configure_local(creds, local, ["source-a", "source-b"])
@@ -1773,11 +1797,16 @@ def scenario_whitelist_upgrade(creds, apis):
 
 
 def set_linking(api, peer, allow):
-    """Turns Allow Linking on or off on one server's entry for a peer."""
+    """Lets a peer link here or stops it. A Pull entry may never link, so allowing it makes the entry
+    Stream, and stopping a Stream entry makes it Pull again. Push and Sync use Allow Linking."""
     config = plugin_config(api)
     for entry in config["Servers"]:
         if entry["Name"] == peer:
             entry["AllowLinking"] = allow
+            if allow and entry.get("Mode") in ("Pull", 0):
+                entry["Mode"] = "Stream"
+            elif not allow and entry.get("Mode") in ("Stream", 3):
+                entry["Mode"] = "Pull"
     save_plugin_config(api, config)
 
 
@@ -2250,8 +2279,9 @@ def scenario_link_cache(creds, apis):
 
 def scenario_link_cache_rules(creds, apis):
     """A user mapping's own stream limit applies to that user, starting an episode caches the next one
-    ahead, a library left out of the cache has its files dropped, and a show picked to always keep
-    becomes full copies in the library."""
+    ahead, a library left out of the cache has its files dropped, a show picked to always keep becomes
+    full copies in the library, removing the pick turns them back into links with each copy moved into
+    the cache, and a copy kept by hand stays until it is turned back from the Storage tab."""
     local, b = apis["local"], apis["source-b"]
     lu, bu = creds["servers"]["local"]["userId"], creds["servers"]["source-b"]["userId"]
     needle = f"Cache Show {uuid.uuid4().hex[:6]}"
@@ -2337,6 +2367,47 @@ def scenario_link_cache_rules(creds, apis):
         files = sorted(os.listdir(os.path.join(local_show, "Season 01")))
         expect(sum(f.endswith(".mp4") for f in files) == 3 and not any(f.endswith(".strm") for f in files),
                f"the episodes are files in the library, with no links left ({files})")
+        expect(all(r.get("Kept") == "Pick" for r in rows), f"each copy is recorded as kept by the pick ({[r.get('Kept') for r in rows]})")
+        key = next(e["Key"] for e in plugin_config(local)["Servers"] if e["Name"] == "source-b")
+        listed = local.get(f"/Sync/KeptCopies?serverKey={key}&take=200")["Items"]
+        expect(sorted(r["Id"] for r in listed if needle in r["SourcePath"]) == sorted(r["Id"] for r in rows) and all(r["Kept"] == "Pick" for r in listed if needle in r["SourcePath"]),
+               "the Storage tab lists the three copies as kept by the pick")
+        status, body = local.post("/Sync/KeptCopies/Unkeep", {"Ids": [rows[0]["Id"]]}, expect=200)
+        expect(body["Queued"] == 0 and "Always Keep pick" in (body["Skipped"][0]["Reason"] if body["Skipped"] else ""),
+               "a copy the pick still covers is not turned back by hand, and says to remove the pick")
+
+        # Removing the pick turns the copies back into links, and each copy moves into the cache.
+        config = plugin_config(local)
+        mapping = next(m for e in config["Servers"] if e["Name"] == "source-b" for m in e["LibraryMappings"] if m["SourceLibraryName"] == "Shows")
+        mapping["PermanentItems"] = []
+        mapping["ExcludeFromLinkCache"] = False
+        config["LinkCacheSizeGb"] = 1
+        save_plugin_config(local, config)
+        run_task(local, "ServerSyncUpdateTables")
+        rows = [r for r in all_rows(local) if needle in r["SourcePath"]]
+        expect(all(r["StorageMode"] == "Unkeeping" and r["Status"] == "Queued" for r in rows),
+               f"removing the pick queues its copies to go back to links ({[(r['StorageMode'], r['Status']) for r in rows]})")
+        run_task(local, "ServerSyncDownloadContent")
+        rows = [r for r in all_rows(local) if needle in r["SourcePath"]]
+        expect(len(rows) == 3 and all(r["StorageMode"] == "Link" and r["Status"] == "Synced" and r.get("Kept") is None for r in rows),
+               f"each episode is a link again ({[(r['StorageMode'], r['Status'], r.get('Kept')) for r in rows]})")
+        files = sorted(os.listdir(os.path.join(local_show, "Season 01")))
+        expect(sum(f.endswith(".strm") for f in files) == 3 and not any(f.endswith(".mp4") for f in files),
+               f"the library holds links and no copies ({files})")
+        expect(cached() == ["S01E01", "S01E02", "S01E03"], f"each copy moved into the link cache ({cached()})")
+
+        # A copy kept by hand stays when no pick covers it, and is turned back by hand from the Storage tab.
+        status, body = local.post("/Sync/PromoteItems", {"SourceItemIds": [rows[0]["SourceItemId"]]}, expect=200)
+        run_task(local, "ServerSyncDownloadContent")
+        run_task(local, "ServerSyncUpdateTables")
+        kept = next(r for r in all_rows(local) if r["Id"] == rows[0]["Id"])
+        expect(kept["StorageMode"] == "Copy" and kept["Status"] == "Synced" and kept.get("Kept") == "Hand",
+               f"Keep Local Copy makes a copy kept by hand, which a refresh leaves alone ({kept['StorageMode']}, {kept['Status']}, {kept.get('Kept')})")
+        status, body = local.post("/Sync/KeptCopies/Unkeep", {"Ids": [kept["Id"]]}, expect=200)
+        expect(body["Queued"] == 1, f"turning it back by hand queues it ({body})")
+        run_task(local, "ServerSyncDownloadContent")
+        back = next(r for r in all_rows(local) if r["Id"] == kept["Id"])
+        expect(back["StorageMode"] == "Link" and back["Status"] == "Synced" and back.get("Cached"), f"it is a cached link again ({back['StorageMode']}, {back['Status']}, {back.get('Cached')})")
     finally:
         set_cap(None)
         configure_server(creds, b, "source-b", [])
@@ -2502,6 +2573,236 @@ def scenario_link_versions(creds, apis):
         wait_until(lambda: not listed(a), 150, "source-a no longer lists the film")
         local.post("/Library/Refresh", None, expect=204)
         configure_local(creds, local, ["source-a", "source-b"], FullScanIntervalHours=24, MissingContentAction=None)
+        run_task(local, "ServerSyncUpdateTables")
+
+
+def scenario_link_hints(creds, apis):
+    """A film that appears on a source reaches a Link mapping on a hint alone, as a link for every
+    version and with the disk under its reserve, and a source that does not offer links leaves it for
+    later with that reason."""
+    local, a = apis["local"], apis["source-a"]
+    tag = uuid.uuid4().hex[:6]
+    refused, wanted = f"Hint Refused {tag}", f"Hint Linked {tag}"
+    refused_title, wanted_title = f"{refused} (2024)", f"{wanted} (2024)"
+    made = [os.path.join(STATE, "media", "source-a", "Movies", t) for t in (refused_title, wanted_title)]
+    local_folders = [os.path.join(STATE, "media", "local", "Movies", t) for t in (refused_title, wanted_title)]
+
+    def queues_empty():
+        return all(not hints(api)["Outbound"] and not hints(api)["Inbound"] and hints(api)["Pending"] == 0 for api in (local, a))
+
+    def local_log(since):
+        result = run(["docker", "logs", "--since", since, "serversync-it-local"], capture=True, check=False)
+        return result.stdout + result.stderr
+
+    def listed(api, needle):
+        return [i for i in api.get("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path")["Items"] if needle in (i.get("Path") or "")]
+
+    try:
+        wait_scans_idle(local)
+        wait_scans_idle(a)
+        configure_server(creds, a, "source-a", ["local"], {"local": "Sync"})
+        configure_server(creds, local, "local", ["source-a"], {"source-a": "Sync"},
+                         EnableContentSync=True, DownloadNewContentMode="Enabled", ReplaceExistingContentMode="Enabled",
+                         DeleteMissingContentMode="Disabled", LinkCacheSizeGb=0,
+                         # A reserve no disk meets: links need no space, so a hint still writes them.
+                         MinimumFreeDiskSpaceGb=100000)
+        set_storage(local, "source-a", "Movies", "Link")
+        wait_until(queues_empty, 60, "the pool is quiet before the test")
+
+        # Linking is off on source-a. The hint is dropped with that reason, and nothing is written.
+        since = f"{int(time.time()) - 2}"
+        make_film("source-a", refused_title)
+        rescan_until(a, "Movie", refused, True, "source-a lists the film it does not offer as a link")
+        wait_until(lambda: "does not offer links to this server" in local_log(since), 90,
+                   "a hint for a Link mapping from a source that does not offer links is dropped with that reason")
+        wait_until(queues_empty, 60, "every queue drained after the refused hint")
+        expect(not os.path.exists(local_folders[0]), "nothing is linked or downloaded for the refused film")
+        expect(f"{refused_title}.mp4" not in content_rows(local), "and no row is made for it")
+
+        # Linking is allowed. A film in two versions arrives as a link for each, with no task run.
+        set_linking(a, "local", True)
+        since = f"{int(time.time()) - 2}"
+        os.makedirs(made[1], exist_ok=True)
+        for label, size in (("1080p", "128x96"), ("480p", "64x48")):
+            ffmpeg(made[1], "-f", "lavfi", "-i", f"testsrc=duration=2:size={size}:rate=10", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+                   "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{wanted_title} - {label}.mp4")
+        a.post("/Library/Refresh", None, expect=204)
+        expected = [f"{wanted_title} - 1080p.strm", f"{wanted_title} - 480p.strm"]
+
+        def links():
+            return sorted(f for f in os.listdir(local_folders[1]) if f.endswith(".strm")) if os.path.isdir(local_folders[1]) else []
+
+        wait_until(lambda: links() == expected, 150, "both versions of a film added on source-a are linked by local on a hint alone")
+        expect(not any(f.endswith(".mp4") for f in os.listdir(local_folders[1])) if os.path.isdir(local_folders[1]) else False,
+               "nothing is downloaded for the linked film")
+        rows = {k: v for k, v in content_rows(local).items() if wanted in k}
+        expect(len(rows) == 2 and all(r["StorageMode"] == "Link" and r["Status"] == "Synced" for r in rows.values()),
+               f"each version has a synced link row ({[(r['StorageMode'], r['Status']) for r in rows.values()]})")
+        expect("Linked " in local_log(since) and "on a hint from 'source-a'" in local_log(since), "the log says the hint linked the film rather than downloaded it")
+        wait_until(queues_empty, 60, "every queue drained after the links")
+    finally:
+        configure_server(creds, a, "source-a", [])
+        for folder in made + local_folders:
+            shutil.rmtree(folder, ignore_errors=True)
+        # Jellyfin drops the first version on one scan and the other on the next.
+        a.post("/Library/Refresh", None, expect=204)
+        wait_scans_idle(a)
+        a.post("/Library/Refresh", None, expect=204)
+        wait_until(lambda: not listed(a, tag), 150, "source-a no longer lists the hinted films")
+        local.post("/Library/Refresh", None, expect=204)
+        configure_local(creds, local, ["source-a", "source-b"])
+        run_task(local, "ServerSyncUpdateTables")
+
+
+def scenario_link_hints_pool(creds, apis):
+    """With two sources sending to a Link mapping on local, a new episode arrives as a link on a hint
+    alone, and a film both sources add is linked once, from the source local lists first, with the
+    other's hint dropped for priority."""
+    local, a, b = apis["local"], apis["source-a"], apis["source-b"]
+    tag = uuid.uuid4().hex[:6]
+    show = f"Hinted Show {tag} (2024)"
+    film = f"Hinted Both {tag} (2024)"
+    b_season = os.path.join(STATE, "media", "source-b", "Shows", show, "Season 01")
+    local_show = os.path.join(STATE, "media", "local", "Shows", show)
+    a_film, b_film = (os.path.join(STATE, "media", n, "Movies", film) for n in ("source-a", "source-b"))
+    local_film = os.path.join(STATE, "media", "local", "Movies", film)
+    names = ("local", "source-a", "source-b")
+
+    def queues_empty():
+        return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
+
+    def local_log(since):
+        result = run(["docker", "logs", "--since", since, "serversync-it-local"], capture=True, check=False)
+        return result.stdout + result.stderr
+
+    def strms(folder):
+        return sorted(os.path.relpath(os.path.join(d, f), folder) for d, _, fs in os.walk(folder) for f in fs if f.endswith(".strm")) if os.path.isdir(folder) else []
+
+    def videos(folder):
+        return [f for _, _, fs in os.walk(folder) for f in fs if f.endswith(".mp4")] if os.path.isdir(folder) else []
+
+    try:
+        for api in (local, a, b):
+            wait_scans_idle(api)
+        for n, api in (("source-a", a), ("source-b", b)):
+            configure_server(creds, api, n, ["local"], {"local": "Sync"})
+            set_linking(api, "local", True)
+        configure_server(creds, local, "local", ["source-a", "source-b"], {"source-a": "Sync", "source-b": "Sync"},
+                         EnableContentSync=True, DownloadNewContentMode="Enabled", ReplaceExistingContentMode="Enabled",
+                         DeleteMissingContentMode="Disabled", MinimumFreeDiskSpaceGb=0, LinkCacheSizeGb=0)
+        for server, library in (("source-a", "Movies"), ("source-b", "Movies"), ("source-b", "Shows")):
+            set_storage(local, server, library, "Link")
+        keys = {e["Name"]: e["Key"] for e in plugin_config(local)["Servers"]}
+        wait_until(queues_empty, 60, "the pool is quiet before the test")
+
+        # Two new episodes of a new show land on source-b. Each is its own item and its own hint.
+        os.makedirs(b_season, exist_ok=True)
+        for number in (1, 2):
+            ffmpeg(b_season, "-f", "lavfi", "-i", "testsrc=duration=2:size=64x48:rate=10", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+                   "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{show} - S01E0{number} - Part {number}.mp4")
+        b.post("/Library/Refresh", None, expect=204)
+        expected = [os.path.join("Season 01", f"{show} - S01E0{n} - Part {n}.strm") for n in (1, 2)]
+        wait_until(lambda: strms(local_show) == expected, 150, "both new episodes on source-b are linked by local on hints alone")
+        expect(not videos(local_show), "nothing is downloaded for the linked episodes")
+        rows = [r for r in all_rows(local) if show in r["SourcePath"]]
+        expect(len(rows) == 2 and all(r["StorageMode"] == "Link" and r["Status"] == "Synced" and r.get("ServerKey") == keys["source-b"] for r in rows),
+               f"each episode is a synced link to source-b ({[(r['StorageMode'], r['Status']) for r in rows]})")
+        wait_until(queues_empty, 60, "every queue drained after the episodes")
+
+        # The same film lands on source-a, which local lists first, and then on source-b.
+        since = f"{int(time.time()) - 2}"
+        make_film("source-a", film)
+        a.post("/Library/Refresh", None, expect=204)
+        wait_until(lambda: strms(local_film) == [f"{film}.strm"], 150, "a film added on source-a is linked by local on a hint")
+        make_film("source-b", film, seconds=3)
+        b.post("/Library/Refresh", None, expect=204)
+        wait_until(lambda: "has priority for this file" in local_log(since), 120, "source-b's hint for the same film is dropped, since source-a comes first")
+        wait_until(queues_empty, 60, "every queue drained after both hints")
+        row = content_rows(local).get(f"{film}.mp4") or {}
+        expect(row.get("StorageMode") == "Link" and row.get("ServerKey") == keys["source-a"], f"the film stays one link, to source-a ({row.get('StorageMode')}, {row.get('ServerKey') == keys['source-a']})")
+        expect(strms(local_film) == [f"{film}.strm"] and not videos(local_film), "with one .strm and no copy")
+    finally:
+        for n, api in (("source-a", a), ("source-b", b)):
+            configure_server(creds, api, n, [])
+        for folder in (os.path.join(STATE, "media", "source-b", "Shows", show), local_show, a_film, b_film, local_film):
+            shutil.rmtree(folder, ignore_errors=True)
+        for api in (a, b):
+            api.post("/Library/Refresh", None, expect=204)
+            wait_scans_idle(api)
+            api.post("/Library/Refresh", None, expect=204)
+        local.post("/Library/Refresh", None, expect=204)
+        configure_local(creds, local, ["source-a", "source-b"])
+        run_task(local, "ServerSyncUpdateTables")
+
+
+def scenario_link_not_reshared(creds, apis):
+    """A link is not the linking server's file to share. A third server that connects to it gets no
+    hint for the link, no copy of it, and no link to it, whether its mapping copies or links."""
+    local, a, b = apis["local"], apis["source-a"], apis["source-b"]
+    needle = f"Not Reshared {uuid.uuid4().hex[:6]}"
+    title = f"{needle} (2024)"
+    local_folder = os.path.join(STATE, "media", "local", "Movies", title)
+    b_folder = os.path.join(STATE, "media", "source-b", "Movies", title)
+    source_folder = None
+
+    def b_rows():
+        return [k for k in content_rows(b) if needle in k]
+
+    def content_hints_to_b():
+        return [r for r in hints(local)["Outbound"]
+                if needle in (r.get("ItemPath") or "") and str(r.get("Kind")) in ("Content", "3") and r.get("PeerName") == "source-b"]
+
+    try:
+        wait_scans_idle(local)
+        wait_scans_idle(a)
+        wait_scans_idle(b)
+        configure_server(creds, a, "source-a", ["local"], {"local": "Pull"})
+        set_linking(a, "local", True)
+        # Local sends changes to source-b, so a link that went out as a file would show as a content hint.
+        configure_server(creds, local, "local", ["source-a", "source-b"], {"source-a": "Pull", "source-b": "Sync"},
+                         EnableContentSync=True, DownloadNewContentMode="Enabled", ReplaceExistingContentMode="Enabled",
+                         DeleteMissingContentMode="Disabled", MinimumFreeDiskSpaceGb=0, LinkCacheSizeGb=0)
+        set_storage(local, "source-a", "Movies", "Link")
+        set_linking(local, "source-b", True)
+        configure_server(creds, b, "source-b", ["local"], {"local": "Sync"},
+                         EnableContentSync=True, DownloadNewContentMode="Enabled", ReplaceExistingContentMode="Enabled",
+                         DeleteMissingContentMode="Disabled", MinimumFreeDiskSpaceGb=0, LinkCacheSizeGb=0)
+
+        source_folder = make_film("source-a", title)
+        rescan_until(a, "Movie", needle, True, "source-a lists the film local links")
+        run_task(local, "ServerSyncUpdateTables")
+        run_task(local, "ServerSyncDownloadContent")
+        expect(os.path.exists(os.path.join(local_folder, f"{title}.strm")), "local holds the film as a link to source-a")
+        wait_until(lambda: find_item(local, "Movie", needle) is not None, 150, "local's library lists the link")
+
+        # The link reached local's library, which sends a new file to its peers. A link is not sent.
+        time.sleep(15)
+        expect(not content_hints_to_b(), "local sends source-b no content hint for its link")
+        expect(not os.path.exists(b_folder), "nothing of the link reaches source-b on a hint")
+
+        # A Copy mapping on source-b passes the link over, so nothing is copied.
+        run_task(b, "ServerSyncUpdateTables")
+        run_task(b, "ServerSyncDownloadContent")
+        expect(not b_rows(), f"a Copy mapping on source-b makes no row for local's link ({b_rows()})")
+        expect(not os.path.exists(b_folder), "and copies nothing")
+
+        # A Link mapping on source-b, with local allowing it to link, passes it over too, so source-b
+        # never links to a file local does not hold.
+        set_storage(b, "local", "Movies", "Link")
+        run_task(b, "ServerSyncUpdateTables")
+        run_task(b, "ServerSyncDownloadContent")
+        expect(not b_rows(), f"a Link mapping on source-b makes no row for local's link ({b_rows()})")
+        expect(not os.path.exists(b_folder), "and writes no .strm for it")
+    finally:
+        configure_server(creds, b, "source-b", [])
+        configure_server(creds, a, "source-a", [])
+        for folder in (source_folder, local_folder, b_folder):
+            if folder:
+                shutil.rmtree(folder, ignore_errors=True)
+        rescan_until(a, "Movie", needle, False, "source-a no longer lists the film")
+        b.post("/Library/Refresh", None, expect=204)
+        local.post("/Library/Refresh", None, expect=204)
+        configure_local(creds, local, ["source-a", "source-b"])
         run_task(local, "ServerSyncUpdateTables")
 
 
@@ -3379,6 +3680,9 @@ SCENARIOS = [
     ("links: cache rules and a user's own stream limit", scenario_link_cache_rules),
     ("links: speed limits per server and per user", scenario_link_speed),
     ("links: every version is linked, and a bitrate limit picks one", scenario_link_versions),
+    ("links: a film added on the source arrives as links on a hint", scenario_link_hints),
+    ("links: hints across a pool of three link episodes and respect priority", scenario_link_hints_pool),
+    ("links: a link is not passed on to a third server", scenario_link_not_reshared),
     ("links: transcoding a link to HLS", scenario_link_hls),
     ("links: hostile requests are refused", scenario_link_hostile),
     ("links: a source that is down", scenario_link_source_down),

@@ -254,7 +254,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         try
         {
             Sources = new[] { source };
-            if (!await BeforeRowAsync(cancellationToken).ConfigureAwait(false))
+            if (!await BeforeRowAsync(record, cancellationToken).ConfigureAwait(false))
             {
                 record.Status = SyncStatus.Errored;
                 record.StatusDate = DateTime.UtcNow;
@@ -280,9 +280,10 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// source. Modules with checks beyond the connection, such as disk space, override. Call
     /// <see cref="FailPreflight"/> with the reason before returning false.
     /// </summary>
+    /// <param name="record">The row about to be applied.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns><c>true</c> to go ahead.</returns>
-    protected virtual Task<bool> BeforeRowAsync(CancellationToken cancellationToken)
+    protected virtual Task<bool> BeforeRowAsync(TRecord record, CancellationToken cancellationToken)
     {
         _preflightFailureReason = null;
         return Task.FromResult(true);

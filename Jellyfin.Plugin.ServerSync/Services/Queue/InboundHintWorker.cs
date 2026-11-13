@@ -487,7 +487,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 _logger.LogInformation("Hint {Hint} from '{Origin}' dropped as {Code}: {Reason}", row.HintId, origin.DisplayName, result.Code, result.Reason);
                 if (row.Attempts > 0)
                 {
-                    await _activity.DroppedAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
+                    await _activity.DroppedAsync(row, origin.DisplayName, result.Code).ConfigureAwait(false);
                 }
 
                 return result;

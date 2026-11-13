@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json.Serialization;
 using System.Xml.Serialization;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using MediaBrowser.Model.Plugins;
 
@@ -223,48 +224,31 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxConcurrentDownloads { get; set; } = 2;
 
     /// <summary>
-    /// Maximum download speed value (0 = unlimited).
+    /// Gets or sets the most every download to this server together may use, in Mbps, like every other
+    /// speed in the plugin. 0 is no limit.
     /// </summary>
     public int MaxDownloadSpeed { get; set; } = 0;
 
     /// <summary>
-    /// Unit for MaxDownloadSpeed (KB, MB, GB).
+    /// Gets or sets the unit <see cref="MaxDownloadSpeed"/> is in. Always <see cref="Mbps"/> once the
+    /// configuration is loaded: a value from before 12.4.12.0 in KB, MB, or GB per second is converted.
     /// </summary>
-    public string DownloadSpeedUnit { get; set; } = "MB";
+    public string DownloadSpeedUnit { get; set; } = Mbps;
+
+    /// <summary>The unit every speed is kept in.</summary>
+    public const string Mbps = "Mbps";
 
     /// <summary>
     /// Calculates the max download speed in bytes per second.
     /// </summary>
     /// <returns>Speed in bytes per second.</returns>
-    public long GetMaxDownloadSpeedBytes()
-    {
-        if (MaxDownloadSpeed == 0) return 0;
-
-        return DownloadSpeedUnit switch
-        {
-            "KB" => MaxDownloadSpeed * 1024L,
-            "MB" => MaxDownloadSpeed * 1024L * 1024L,
-            "GB" => MaxDownloadSpeed * 1024L * 1024L * 1024L,
-            _ => MaxDownloadSpeed * 1024L * 1024L // Default to MB
-        };
-    }
+    public long GetMaxDownloadSpeedBytes() => RateUtilities.MbpsToBytesPerSecond(MaxDownloadSpeed);
 
     /// <summary>
     /// Calculates the scheduled download speed in bytes per second.
     /// </summary>
     /// <returns>Speed in bytes per second.</returns>
-    public long GetScheduledDownloadSpeedBytes()
-    {
-        if (ScheduledDownloadSpeed == 0) return 0;
-
-        return ScheduledDownloadSpeedUnit switch
-        {
-            "KB" => ScheduledDownloadSpeed * 1024L,
-            "MB" => ScheduledDownloadSpeed * 1024L * 1024L,
-            "GB" => ScheduledDownloadSpeed * 1024L * 1024L * 1024L,
-            _ => ScheduledDownloadSpeed * 1024L * 1024L // Default to MB
-        };
-    }
+    public long GetScheduledDownloadSpeedBytes() => RateUtilities.MbpsToBytesPerSecond(ScheduledDownloadSpeed);
 
     /// <summary>
     /// Returns the appropriate download speed based on current time and scheduling settings.
@@ -327,7 +311,32 @@ public class PluginConfiguration : BasePluginConfiguration
     [XmlIgnore]
     [JsonIgnore]
     public MissingContentAction EffectiveMissingContentAction
-        => MissingContentAction ?? (DeleteMissingContentMode == ApprovalMode.Disabled ? Models.ContentSync.Configuration.MissingContentAction.Keep : Models.ContentSync.Configuration.MissingContentAction.Delete);
+        => MissingContentAction switch
+        {
+            null => DeleteMissingContentMode switch
+            {
+                ApprovalMode.Disabled => Models.ContentSync.Configuration.MissingContentAction.Keep,
+                ApprovalMode.RequireApproval => Models.ContentSync.Configuration.MissingContentAction.DeleteAfterApproval,
+                _ => Models.ContentSync.Configuration.MissingContentAction.Delete
+            },
+            Models.ContentSync.Configuration.MissingContentAction.Delete when DeleteMissingContentMode == ApprovalMode.RequireApproval
+                => Models.ContentSync.Configuration.MissingContentAction.DeleteAfterApproval,
+            { } action => action
+        };
+
+    /// <summary>
+    /// Gets how a deletion of a removed file is approved, from <see cref="EffectiveMissingContentAction"/>:
+    /// at once for Delete, after approval for Delete After Approval, and never otherwise.
+    /// </summary>
+    public ApprovalMode DeletionApproval => EffectiveMissingContentAction switch
+    {
+        Models.ContentSync.Configuration.MissingContentAction.Delete => ApprovalMode.Enabled,
+        Models.ContentSync.Configuration.MissingContentAction.DeleteAfterApproval => ApprovalMode.RequireApproval,
+        _ => ApprovalMode.Disabled
+    };
+
+    /// <summary>Gets a value indicating whether a removed file is deleted, at once or after approval.</summary>
+    public bool DeletesMissing => DeletionApproval != ApprovalMode.Disabled;
 
     /// <summary>
     /// Re-queue files with size or date mismatches when enabled.
@@ -350,14 +359,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public int ScheduledEndHour { get; set; } = 6;
 
     /// <summary>
-    /// Download speed during scheduled hours.
+    /// Gets or sets the download speed during scheduled hours, in Mbps. 0 is no limit.
     /// </summary>
     public int ScheduledDownloadSpeed { get; set; } = 0;
 
-    /// <summary>
-    /// Unit for scheduled download speed (KB, MB, GB).
-    /// </summary>
-    public string ScheduledDownloadSpeedUnit { get; set; } = "MB";
+    /// <summary>Gets or sets the unit of <see cref="ScheduledDownloadSpeed"/>, as <see cref="DownloadSpeedUnit"/>.</summary>
+    public string ScheduledDownloadSpeedUnit { get; set; } = Mbps;
 
     /// <summary>
     /// Minimum free disk space required before downloads (in GB).
@@ -401,28 +408,19 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxRetryCount { get; set; } = 3;
 
     /// <summary>
-    /// When enabled, items watched by every user in <see cref="WatchedFilterUserIds"/>
-    /// are skipped during content sync (not queued for download). If at least one selected
-    /// user has not watched the item, it is still eligible to sync.
-    /// Has no effect when <see cref="WatchedFilterUserIds"/> is empty.
+    /// Gets or sets a value indicating whether items watched by every user in
+    /// <see cref="WatchedFilterUserIds"/> are skipped during content sync. It follows the list: on
+    /// while any user is picked, off while none is. A list kept from before 12.4.12.0 with the switch
+    /// off is cleared, so nothing starts skipping on the update.
     /// </summary>
     public bool SkipWatchedByAllUsers { get; set; }
 
     /// <summary>
-    /// Source-server user IDs whose watched status determines whether an item is skipped
-    /// when <see cref="SkipWatchedByAllUsers"/> is enabled.
+    /// Source-server user IDs whose watched status decides whether an item is skipped. Empty skips
+    /// nothing.
     /// </summary>
     public List<string> WatchedFilterUserIds { get; set; } = new();
 
-    /// <summary>
-    /// Tolerance in bytes for treating a local file as matching the source's recorded size.
-    /// 0 (default) means strict equality. Non-zero values allow minor drift between Jellyfin's
-    /// MediaSources.Size and the actual on-disk file size (e.g., after tag rewrites or remux)
-    /// without re-queueing the file for download.
-    /// Post-download integrity is always validated against the HTTP Content-Length, so this
-    /// setting only affects skip decisions on existing local files.
-    /// </summary>
-    public long SizeMatchToleranceBytes { get; set; }
 
     // ===== History Sync Configuration =====
 
@@ -471,9 +469,10 @@ public class PluginConfiguration : BasePluginConfiguration
     public DateTime? LastHistorySyncTime { get; set; }
 
     /// <summary>
-    /// Negotiate watch history with the source server instead of only pulling it. The merged state is
-    /// written to both servers through the Server Sync plugin on the source, which must be installed
-    /// there. Requires an API key the source accepts, the same one the other modules use.
+    /// Gets or sets the history negotiation switch from before 12.4.12.0, which applied to every
+    /// server. It is read once, when the configuration loads, and moved onto every library mapping
+    /// (see <see cref="Models.Configuration.LibraryMapping.NegotiateHistory"/>), which negotiates only
+    /// for a Sync server. Always false afterwards.
     /// </summary>
     public bool HistorySyncNegotiate { get; set; }
 
@@ -628,6 +627,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool PeerCallerWhitelistSeeded { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the linking rules of 12.4.12.0 were applied to entries
+    /// made before them: a Pull entry allowed to link that maps no libraries becomes Stream.
+    /// </summary>
+    public bool LinkRulesUpgraded { get; set; }
+
+    /// <summary>
     /// Verify source image sizes with live HTTP calls on every refresh, even
     /// for images whose tag hasn't changed. Applies to all sync modules.
     /// Catches the rare case of an image file replaced on the source's disk
@@ -739,28 +744,9 @@ public class PluginConfiguration : BasePluginConfiguration
             errors.Add("Max download speed cannot be negative");
         }
 
-        // Validate speed units
-        var validUnits = new[] { "KB", "MB", "GB" };
-        if (!string.IsNullOrEmpty(DownloadSpeedUnit) &&
-            !Array.Exists(validUnits, u => u.Equals(DownloadSpeedUnit, StringComparison.OrdinalIgnoreCase)))
-        {
-            errors.Add("Download speed unit must be KB, MB, or GB");
-        }
-
-        if (!string.IsNullOrEmpty(ScheduledDownloadSpeedUnit) &&
-            !Array.Exists(validUnits, u => u.Equals(ScheduledDownloadSpeedUnit, StringComparison.OrdinalIgnoreCase)))
-        {
-            errors.Add("Scheduled download speed unit must be KB, MB, or GB");
-        }
-
         if (MinimumFreeDiskSpaceGb < 0 || MinimumFreeDiskSpaceGb > 1000)
         {
             errors.Add("Minimum free disk space must be between 0 and 1000 GB");
-        }
-
-        if (SizeMatchToleranceBytes < 0)
-        {
-            errors.Add("Size match tolerance cannot be negative");
         }
 
         // Validate bandwidth scheduling
@@ -937,7 +923,6 @@ public class PluginConfiguration : BasePluginConfiguration
         ScheduledDownloadSpeed = Math.Max(0, ScheduledDownloadSpeed);
         RecyclingBinRetentionDays = Math.Clamp(RecyclingBinRetentionDays, 1, 365);
         MaxRetryCount = Math.Clamp(MaxRetryCount, 1, 10);
-        SizeMatchToleranceBytes = Math.Max(0, SizeMatchToleranceBytes);
         RefreshParallelism = Math.Clamp(RefreshParallelism, 1, 16);
         HintDebounceSeconds = Math.Clamp(HintDebounceSeconds, 1, 3600);
         FullScanIntervalHours = Math.Clamp(FullScanIntervalHours, 0, 720);
@@ -951,17 +936,61 @@ public class PluginConfiguration : BasePluginConfiguration
         // reader walks these lists without checking, so they are repaired here before anything else runs.
         Servers ??= new List<SourceServer>();
         Servers.RemoveAll(entry => entry is null);
+        foreach (var server in Servers)
+        {
+            server.LinkMaxStreams = Math.Clamp(server.LinkMaxStreams, 0, 1000);
+            // A per user limit is set on each user mapping now. The old server wide one is copied onto
+            // the mappings that set none, so no user gets more streams than before.
+            if (server.LinkMaxStreamsPerUser > 0)
+            {
+                foreach (var mapping in server.UserMappings ?? new List<UserMapping>())
+                {
+                    mapping.LinkMaxStreams ??= Math.Min(server.LinkMaxStreamsPerUser, 1000);
+                }
+
+                server.LinkMaxStreamsPerUser = 0;
+            }
+            server.LinkStreamSpeedMbps = Math.Clamp(server.LinkStreamSpeedMbps, 0, 100_000);
+            server.LinkScheduledStreamSpeedMbps = Math.Clamp(server.LinkScheduledStreamSpeedMbps, 0, 100_000);
+        }
         LastRunFailures ??= new List<SyncRunFailure>();
         WatchedFilterUserIds ??= new List<string>();
+
+        // Every speed is in Mbps. One kept in KB, MB, or GB per second before 12.4.12.0 is converted.
+        MaxDownloadSpeed = RateUtilities.ToMbps(MaxDownloadSpeed, DownloadSpeedUnit);
+        ScheduledDownloadSpeed = RateUtilities.ToMbps(ScheduledDownloadSpeed, ScheduledDownloadSpeedUnit);
+        DownloadSpeedUnit = Mbps;
+        ScheduledDownloadSpeedUnit = Mbps;
+
+        // Skipping watched items is on exactly while users are picked.
+        if (!SkipWatchedByAllUsers)
+        {
+            WatchedFilterUserIds.Clear();
+        }
+
+        SkipWatchedByAllUsers = WatchedFilterUserIds.Count > 0;
+
+        // History negotiation is chosen per library now. The old switch, when on, turns it on for every
+        // library, where it applies to Sync servers.
+        if (HistorySyncNegotiate)
+        {
+            foreach (var mapping in Servers.SelectMany(s => s.LibraryMappings ?? new List<LibraryMapping>()))
+            {
+                mapping.NegotiateHistory = true;
+            }
+
+            HistorySyncNegotiate = false;
+        }
+
+        // What happens to a removed file is one value. A configuration from before 12.4.12.0 kept
+        // deleting after approval as Delete plus an approval mode, and an older one only the mode.
         MissingContentAction = EffectiveMissingContentAction;
-        if (MissingContentAction != Models.ContentSync.Configuration.MissingContentAction.Delete)
+        DeleteMissingContentMode = MissingContentAction switch
         {
-            DeleteMissingContentMode = ApprovalMode.Disabled;
-        }
-        else if (DeleteMissingContentMode == ApprovalMode.Disabled)
-        {
-            DeleteMissingContentMode = ApprovalMode.Enabled;
-        }
+            Models.ContentSync.Configuration.MissingContentAction.Delete => ApprovalMode.Enabled,
+            Models.ContentSync.Configuration.MissingContentAction.DeleteAfterApproval => ApprovalMode.RequireApproval,
+            _ => ApprovalMode.Disabled
+        };
 
         PeerCallerGrants = (PeerCallerGrants ?? new List<PeerCallerGrant>())
             .Where(g => g is not null && !string.IsNullOrWhiteSpace(g.UserId))
@@ -1009,10 +1038,6 @@ public class PluginConfiguration : BasePluginConfiguration
             }
         }
 
-        // Normalize and validate speed units
-        DownloadSpeedUnit = NormalizeSpeedUnit(DownloadSpeedUnit);
-        ScheduledDownloadSpeedUnit = NormalizeSpeedUnit(ScheduledDownloadSpeedUnit);
-
         // Normalize filesystem paths to remove traversal sequences. An
         // unparseable path (embedded NUL, absurd length) is dropped rather
         // than allowed to throw: SanitizeValues runs inside every save,
@@ -1049,14 +1074,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Normalizes a speed unit string to one of the valid values (KB, MB, GB).
     /// Returns "MB" for unrecognized values.
     /// </summary>
-    private static string NormalizeSpeedUnit(string unit) => unit?.Trim().ToUpperInvariant() switch
-    {
-        "KB" => "KB",
-        "MB" => "MB",
-        "GB" => "GB",
-        _ => "MB"
-    };
-
     /// <summary>
     /// Most-recent run failure per module, surfaced in the dashboard.
     /// Stored as a list (not a dictionary) because Jellyfin's XML serialization
@@ -1128,6 +1145,26 @@ public static class PluginConfigurationExtensions
     /// <param name="config">The configuration.</param>
     /// <param name="key">The entry key carried on a sync row.</param>
     /// <returns>The entry, or null when no entry has that key.</returns>
+    /// <summary>
+    /// Whether watch history for a row of this server and library is negotiated: written back to that
+    /// server as well. Only a Sync server negotiates, and only for a library mapping that chose to.
+    /// </summary>
+    /// <param name="config">The configuration.</param>
+    /// <param name="serverKey">The row's server.</param>
+    /// <param name="sourceLibraryId">The row's library on that server.</param>
+    /// <returns><c>true</c> when negotiated.</returns>
+    public static bool NegotiatesHistory(this PluginConfiguration config, string? serverKey, string? sourceLibraryId)
+        => config.FindServer(serverKey) is { IsEnabled: true, Mode: ServerMode.Sync } server
+            && (server.LibraryMappings ?? new List<LibraryMapping>()).Any(m => m.IsEnabled && m.NegotiateHistory
+                && string.Equals(m.SourceLibraryId, sourceLibraryId, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Whether any library of any Sync server negotiates watch history.</summary>
+    /// <param name="config">The configuration.</param>
+    /// <returns><c>true</c> when one does.</returns>
+    public static bool NegotiatesAnyHistory(this PluginConfiguration config)
+        => (config.Servers ?? new List<SourceServer>()).Any(s => s.IsEnabled && s.Mode == ServerMode.Sync
+            && (s.LibraryMappings ?? new List<LibraryMapping>()).Any(m => m.IsEnabled && m.NegotiateHistory));
+
     public static SourceServer? FindServer(this PluginConfiguration config, string? key)
     {
         ArgumentNullException.ThrowIfNull(config);

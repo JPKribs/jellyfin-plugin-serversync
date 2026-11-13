@@ -37,6 +37,7 @@ public partial class ConfigurationController
         [FromQuery] string? status = null,
         [FromQuery] string? pendingType = null,
         [FromQuery] bool cached = false,
+        [FromQuery] string? storage = null,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
@@ -60,7 +61,10 @@ public partial class ConfigurationController
         }
 
         var cachedIds = cached ? cache?.List().Select(e => e.LinkId).ToList() ?? new List<string>() : null;
-        var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take, cachedIds);
+        bool? links = string.Equals(storage, "Link", StringComparison.OrdinalIgnoreCase) ? true
+            : string.Equals(storage, "Copy", StringComparison.OrdinalIgnoreCase) ? false
+            : null;
+        var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take, cachedIds, links);
 
         var libraryMappings = config.GetAllLibraryMappings();
         var libraryNameLookup = libraryMappings
@@ -101,7 +105,8 @@ public partial class ConfigurationController
                     ServerName = rowServer?.DisplayName,
                     CompanionFiles = i.CompanionFiles,
                     StorageMode = i.StorageMode.ToString(),
-                    Cached = i.StorageMode == Models.ContentSync.StorageMode.Link && cache?.Holds(i.SourceItemId) == true
+                    Cached = i.StorageMode == Models.ContentSync.StorageMode.Link && cache?.Holds(i.SourceItemId) == true,
+                    Kept = i.Kept == Models.ContentSync.KeptReason.None ? null : i.Kept.ToString()
                 };
             }).ToList(),
             totalCount,
@@ -430,6 +435,8 @@ public partial class ConfigurationController
                 && !(row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)
                 && Services.Links.LinkStateService.MarkPromoting(row, requireApproval: false))
             {
+                // Kept by hand, so removing an Always Keep pick never turns it back into a link.
+                row.Kept = Models.ContentSync.KeptReason.Hand;
                 manager.Upsert(row);
                 promoted++;
                 if (cache.HoldsWhole(id, row.SourceSize))
@@ -452,6 +459,139 @@ public partial class ConfigurationController
 
         return Ok(new { Promoted = promoted, FromCache = fromCache, Skipped = skipped });
     }
+
+    /// <summary>
+    /// The full copies one server's Link mappings hold, for the Storage tab, with why each is a copy:
+    /// Pick for an Always Keep pick, Hand for Keep Local Copy, Unknown for a copy from before this was
+    /// recorded. Copies already going back to links are listed too.
+    /// </summary>
+    /// <param name="manager">The content table.</param>
+    /// <param name="serverKey">The server's entry key.</param>
+    /// <param name="search">Text to find in the paths.</param>
+    /// <param name="skip">Rows to skip.</param>
+    /// <param name="take">Rows to return, at most 200.</param>
+    /// <returns>A page of rows.</returns>
+    [HttpGet("KeptCopies")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<PagedResult<SyncItemDto>> GetKeptCopies(
+        [FromServices] ContentSyncTableManager manager,
+        [FromQuery] string? serverKey = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int skip = 0,
+        [FromQuery] int take = 50)
+    {
+        ArgumentNullException.ThrowIfNull(manager);
+        take = Math.Clamp(take, 1, 200);
+        skip = Math.Max(0, skip);
+        var server = string.IsNullOrEmpty(serverKey) ? null : _configManager.Configuration.FindServer(serverKey);
+        var libraries = server?.LibraryMappings?
+            .Where(m => m.StorageMode == Models.ContentSync.StorageMode.Link && !string.IsNullOrEmpty(m.SourceLibraryId))
+            .Select(m => m.SourceLibraryId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? new List<string>();
+        var (items, total) = server is null ? (Array.Empty<SyncItem>(), 0) : manager.SearchKeptCopies(server.Key, libraries, search, skip, take);
+        var names = (server?.LibraryMappings ?? new List<Models.Configuration.LibraryMapping>())
+            .GroupBy(m => m.SourceLibraryId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        return Ok(new PagedResult<SyncItemDto>(
+            items.Select(i =>
+            {
+                names.TryGetValue(i.SourceLibraryId, out var mapping);
+                return new SyncItemDto
+                {
+                    Id = i.Id,
+                    SourceItemId = i.SourceItemId,
+                    SourceLibraryId = i.SourceLibraryId,
+                    SourceLibraryName = mapping?.SourceLibraryName,
+                    LocalLibraryId = i.LocalLibraryId,
+                    LocalLibraryName = mapping?.LocalLibraryName,
+                    SourcePath = i.SourcePath,
+                    LocalPath = i.LocalPath,
+                    SourceSize = i.SourceSize,
+                    SourceSizeFormatted = FormatUtilities.FormatBytes(i.SourceSize),
+                    SourceCreateDate = i.SourceCreateDate,
+                    LocalItemId = i.LocalItemId,
+                    Status = i.Status.ToString(),
+                    StatusDate = i.StatusDate,
+                    LastSyncTime = i.LastSyncTime,
+                    ErrorMessage = i.Reason,
+                    ServerKey = i.ServerKey,
+                    ServerName = server?.DisplayName,
+                    StorageMode = i.StorageMode.ToString(),
+                    Kept = i.Kept == Models.ContentSync.KeptReason.None ? "Unknown" : i.Kept.ToString()
+                };
+            }).ToList(),
+            total,
+            skip,
+            take));
+    }
+
+    /// <summary>
+    /// Turns kept copies in Link mappings back into links. Each is queued, and the next sync checks the
+    /// source still has the file, writes the link, and moves the copy into the link cache, or removes it
+    /// when the cache is off or cannot take it. A copy an Always Keep pick still covers is skipped, since
+    /// the next refresh would only copy it again: the pick is removed instead.
+    /// </summary>
+    /// <param name="manager">The content table.</param>
+    /// <param name="request">The row ids.</param>
+    /// <returns>How many were queued, and why any were skipped.</returns>
+    [HttpPost("KeptCopies/Unkeep")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult UnkeepCopies([FromServices] ContentSyncTableManager manager, [FromBody] Models.ContentSync.UnkeepRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(manager);
+        if (request?.Ids is not { Count: > 0 })
+        {
+            return BadRequest("No items specified");
+        }
+
+        var config = _configManager.Configuration;
+        var queued = 0;
+        var skipped = new List<object>();
+        foreach (var id in request.Ids.Distinct())
+        {
+            var row = manager.GetById(id);
+            var mapping = row is null ? null : config.FindServer(row.ServerKey ?? string.Empty)?.LibraryMappings?
+                .Where(m => string.Equals(m.SourceLibraryId, row.SourceLibraryId, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(m => UnderRoot(row.SourcePath, m.SourceRootPath))
+                .FirstOrDefault();
+            string? reason = row is null ? "the row no longer exists"
+                : row.StorageMode != Models.ContentSync.StorageMode.Copy ? "it is not a copy"
+                : row.Status != SyncStatus.Synced ? "it is not a synced copy yet"
+                : mapping is null || mapping.StorageMode != Models.ContentSync.StorageMode.Link ? "its library is not mapped as Link"
+                : Services.Links.AlwaysKeep.Covers(mapping, row.SourcePath) ? "an Always Keep pick covers it. Remove the pick on the Storage tab instead"
+                : Services.Links.LinkPaths.LinkPathFor(row.LocalPath ?? string.Empty) is null ? "it cannot be a link"
+                : !System.IO.File.Exists(row.LocalPath) ? "its file is not here"
+                : null;
+            if (reason is not null)
+            {
+                skipped.Add(new { Id = id, Reason = reason });
+                continue;
+            }
+
+            row!.StorageMode = Models.ContentSync.StorageMode.Unkeeping;
+            row.Status = SyncStatus.Queued;
+            row.PendingType = null;
+            row.StatusDate = DateTime.UtcNow;
+            row.RetryCount = 0;
+            row.Reason = null;
+            manager.Upsert(row);
+            queued++;
+        }
+
+        if (queued > 0 && _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncDownloadContent") is { } sync)
+        {
+            _taskManager.QueueScheduledTask(sync.ScheduledTask, new TaskOptions());
+        }
+
+        return Ok(new { Queued = queued, Skipped = skipped });
+    }
+
+    private static bool UnderRoot(string? path, string? root)
+        => !string.IsNullOrEmpty(path) && !string.IsNullOrEmpty(root)
+            && path.Replace('\\', '/').StartsWith(root.Replace('\\', '/').TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase);
+
 
     /// <summary>
     /// Marks items as synced after verifying the local file exists.

@@ -29,7 +29,11 @@ public sealed class LinkWriter
     /// <summary>
     /// Writes the link, or throws with a reason the Sync tab shows when the path is taken.
     /// </summary>
-    public void Write(SyncItem row, ContentSyncTableManager table, PluginConfiguration config)
+    /// <param name="row">The link's row.</param>
+    /// <param name="table">The content table, for path collisions.</param>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="replacing">A kept copy this link takes over from, which may stay beside it until the link is in place.</param>
+    public void Write(SyncItem row, ContentSyncTableManager table, PluginConfiguration config, string? replacing = null)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(table);
@@ -47,7 +51,8 @@ public sealed class LinkWriter
         }
 
         // A real copy at the same name always wins over a link.
-        if (LinkPaths.CopiedPathOf(row) is { } copied && File.Exists(copied))
+        if (LinkPaths.CopiedPathOf(row) is { } copied && File.Exists(copied)
+            && !string.Equals(replacing, copied, StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"A full copy is already at {copied}, so no link is written beside it");
         }

@@ -29,7 +29,7 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.10.28" />
+    <PackageReference Include="JPKribs.Jellyfin.Base" Version="2026.11.13.2" />
   </ItemGroup>
 
   <ItemGroup>
@@ -46,6 +46,9 @@
     <!-- Servers page -->
     <EmbeddedResource Include="Configuration\serversync_servers.html" />
     <EmbeddedResource Include="Configuration\serversync_servers.js" />
+    <!-- Storage page -->
+    <EmbeddedResource Include="Configuration\serversync_storage.html" />
+    <EmbeddedResource Include="Configuration\serversync_storage.js" />
     <!-- Settings page -->
     <EmbeddedResource Include="Configuration\serversync_settings.html" />
     <EmbeddedResource Include="Configuration\serversync_settings.js" />

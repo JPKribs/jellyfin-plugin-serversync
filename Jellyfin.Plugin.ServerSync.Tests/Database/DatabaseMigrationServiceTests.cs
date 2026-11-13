@@ -89,9 +89,9 @@ public class DatabaseMigrationServiceTests
     /// False: a future bump forgot to update this test, hiding the need to think through migration paths.
     /// </summary>
     [Fact]
-    public void CurrentSchemaVersion_IsThirtyTwo()
+    public void CurrentSchemaVersion_IsThirtyThree()
     {
-        Assert.Equal(32, DatabaseMigrationService.CurrentSchemaVersion);
+        Assert.Equal(33, DatabaseMigrationService.CurrentSchemaVersion);
     }
 
     /// <summary>

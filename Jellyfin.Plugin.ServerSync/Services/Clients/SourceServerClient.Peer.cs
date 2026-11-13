@@ -463,17 +463,18 @@ public partial class SourceServerClient
     {
         var (status, parsed, body) = await PeerRequestAsync<PeerLinksResponse>(HttpMethod.Get, "/Sync/Peer/Links", null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
 
-        // A server error is no answer, so it is raised and asked again. A refusal or a missing route is
-        // the peer saying it lists no links for this server.
-        if (status >= 500)
+        // Only a missing route says the peer has no links: it runs a version from before them. A refusal,
+        // a protocol mismatch, or a server error is no answer, so it is raised and asked again, and until
+        // then the peer's .strm files are left alone.
+        if (status == 404)
         {
-            throw new HttpRequestException($"The peer answered {status} to the links request", null, (System.Net.HttpStatusCode)status);
+            _logger.LogDebug("The peer has no links route: {Body}", body);
+            return null;
         }
 
         if (status is < 200 or >= 300)
         {
-            _logger.LogDebug("The peer did not list its links ({Status}): {Body}", status, body);
-            return null;
+            throw new HttpRequestException($"The peer answered {status} to the links request", null, (System.Net.HttpStatusCode)status);
         }
 
         return parsed ?? new PeerLinksResponse();

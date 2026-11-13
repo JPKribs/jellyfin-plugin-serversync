@@ -25,7 +25,7 @@ Give each entry the least access that covers what you want it to do. A standard 
 | Metadata, images, people | Only items in the libraries that user can see | Everything |
 | Collections | Only collections in the libraries that user can see | Everything |
 | Playlist whitelists | Only playlists that user owns or that are shared with them | Playlists the account can open |
-| Watched by all filter | Only that user's own plays | Every selected user |
+| Skip Items Watched By | Only that user's own plays | Every selected user |
 | Watch history | Only that user's own history | Every mapped user |
 | User settings | Only that user's own settings and profile image | Every mapped user |
 | Playlists | Only the playlists that user can see, all owned by that user here | Every playlist owned by a mapped user. Exact owners and shares need Server Sync there |
@@ -84,7 +84,7 @@ Host names are looked up once and remembered for an hour. When a caller does not
 
 ## Links
 
-Streaming a [link](Links.md) uses the linking server's key for the source, like every other read, and the source's whitelist must allow it. On top of that the source decides, on every play that streams from it, which of its users the stream runs as and whether that user may play the item, by its own user mappings, the **Stream Unmapped Users As** user, and its limits. A source entry that holds a standard user's key streams as that user only. A link whose file is in the link cache plays under the linking server's rules alone.
+Streaming a [link](Links.md) uses the linking server's key for the source, like every other read, and the source's whitelist must allow it. On top of that the source decides, on every play that streams from it, which of its users the stream runs as and whether that user may play the item, by its own user mappings, the **Unmapped Users** choice, and its limits. A source entry that holds a standard user's key streams as that user only. A link whose file is in the link cache plays under the linking server's rules alone.
 
 | Function | Standard user | Administrator or API key |
 | :--- | :--- | :--- |

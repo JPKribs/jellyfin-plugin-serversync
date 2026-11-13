@@ -1,6 +1,8 @@
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using MediaBrowser.Controller.Entities;
 
+using JPKribs.Jellyfin.Base;
+
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>How an inbound hint ended.</summary>
@@ -38,7 +40,7 @@ public readonly record struct HintApplyResult(HintApplyOutcome Outcome, HintCode
     /// <param name="item">The local item, or null when it is not known.</param>
     /// <returns>The result.</returns>
     public static HintApplyResult AppliedTo(BaseItem? item)
-        => item is null ? Applied : new(HintApplyOutcome.Applied, HintCode.Applied, null, HintActivityLog.TitleOf(item), HintActivityLog.LineOf(item));
+        => item is null ? Applied : new(HintApplyOutcome.Applied, HintCode.Applied, null, ItemTitles.TitleOf(item), ItemTitles.LineOf(item));
 
     /// <summary>Nothing to write.</summary>
     public static HintApplyResult Unchanged => new(HintApplyOutcome.Unchanged, HintCode.Unchanged, null);

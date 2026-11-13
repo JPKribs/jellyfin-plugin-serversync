@@ -387,8 +387,8 @@ public sealed class LinkRouteTests : IDisposable
     }
 
     /// <summary>
-    /// The source's own mapping decides who streams. Without one it trusts the caller's mapping, and
-    /// otherwise falls back to the configured user, or no one.
+    /// The source's own mapping decides who streams. An unmapped user is refused unless the source
+    /// chose a user for them. The user the caller claims is never taken.
     /// True: an administrator on the source controls which of its users each remote user streams as.
     /// False: a remote user could stream as anyone, or a mapped user could be refused.
     /// </summary>
@@ -401,7 +401,7 @@ public sealed class LinkRouteTests : IDisposable
         var fallback = Guid.NewGuid();
         var peer = new SourceServer();
 
-        Assert.Equal(claimed, LinkPolicy.UserFor(peer, remote.ToString(), claimed.ToString()));
+        Assert.Null(LinkPolicy.UserFor(peer, remote.ToString(), claimed.ToString()));
 
         peer.LinkFallbackUserId = fallback.ToString();
         Assert.Equal(fallback, LinkPolicy.UserFor(peer, remote.ToString(), claimed.ToString()));
@@ -768,6 +768,67 @@ public sealed class LinkRouteTests : IDisposable
         }
 
         return new ActionContext(http, route, new ControllerActionDescriptor { ControllerName = controllerName, ActionName = actionName });
+    }
+
+    /// <summary>
+    /// A .strm in this server's library, its own link to another server or a user's own, is never
+    /// streamed to a peer: it is not this server's file to share, and following it would chain one
+    /// server's stream through another. The file itself, at the same place, is.
+    /// True: a server linking to this one gets only files this server holds.
+    /// False: a third server could link to a film this server only links to.
+    /// </summary>
+    /// <param name="name">The file's name.</param>
+    /// <param name="allowed">Whether the stream is allowed.</param>
+    [Theory]
+    [InlineData("Movie.strm", false)]
+    [InlineData("Movie.STRM", false)]
+    [InlineData("Movie.mkv", true)]
+    public void Policy_LinkHere_IsNeverStreamedOn(string name, bool allowed)
+    {
+        var path = Path.Combine(_dir, name);
+        File.WriteAllText(path, "http://127.0.0.1:8096/Sync/Link/x?k=y");
+        var (library, stub) = InterfaceStub.Create<ILibraryManager>();
+        stub.Answer(nameof(ILibraryManager.GetItemById), _ => new Movie { Path = path });
+        var (users, _) = InterfaceStub.Create<IUserManager>();
+        var (sessions, _) = InterfaceStub.Create<MediaBrowser.Controller.Session.ISessionManager>();
+        var policy = new LinkPolicy(library, users, sessions, new LinkSessions());
+        var peer = new SourceServer { Name = "third", IsEnabled = true, Mode = ServerMode.Stream, AllowLinking = true };
+
+        var verdict = policy.Check(peer, Guid.NewGuid(), null, null, probe: true);
+
+        Assert.Equal(allowed, verdict.Allowed);
+        if (!allowed)
+        {
+            Assert.Contains("is a link on the source", verdict.Reason, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Stream, Push, and Sync servers link only with Allow Linking on, and a Pull server never does.
+    /// True: a Stream server kept for downloads cannot link, and a Pull server cannot link at all.
+    /// False: a server could stream files here that it was only meant to download, or read from.
+    /// </summary>
+    /// <param name="mode">The entry's mode.</param>
+    /// <param name="allowLinking">Whether Allow Linking is on.</param>
+    /// <param name="allowed">Whether a stream is allowed.</param>
+    [Theory]
+    [InlineData(ServerMode.Stream, true, true)]
+    [InlineData(ServerMode.Stream, false, false)]
+    [InlineData(ServerMode.Sync, true, true)]
+    [InlineData(ServerMode.Push, false, false)]
+    [InlineData(ServerMode.Pull, true, false)]
+    public void Policy_StreamMode_AllowsLinking(ServerMode mode, bool allowLinking, bool allowed)
+    {
+        var path = Path.Combine(_dir, "Film.mkv");
+        File.WriteAllText(path, "video");
+        var (library, stub) = InterfaceStub.Create<ILibraryManager>();
+        stub.Answer(nameof(ILibraryManager.GetItemById), _ => new Movie { Path = path });
+        var (users, _) = InterfaceStub.Create<IUserManager>();
+        var (sessions, _) = InterfaceStub.Create<MediaBrowser.Controller.Session.ISessionManager>();
+        var policy = new LinkPolicy(library, users, sessions, new LinkSessions());
+        var peer = new SourceServer { Name = "friend", IsEnabled = true, Mode = mode, AllowLinking = allowLinking };
+
+        Assert.Equal(allowed, policy.Check(peer, Guid.NewGuid(), null, null, probe: true).Allowed);
     }
 
     private static LinkPlaybackFilter Filter(string path, bool isLink, LinkGrants? grants = null, ILinkAccess? access = null)

@@ -76,6 +76,13 @@ public class LibraryMapping
     public bool ExcludeFromLinkCache { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether watch history in this library is negotiated with a Sync
+    /// server: the merged state is written to both servers. Has no effect for any other direction,
+    /// since only Sync writes back.
+    /// </summary>
+    public bool NegotiateHistory { get; set; }
+
+    /// <summary>
     /// Gets or sets the shows and films picked to always keep on a Link mapping. Their files are full
     /// copies in the library instead of links. See <see cref="Services.Links.AlwaysKeep"/>.
     /// </summary>

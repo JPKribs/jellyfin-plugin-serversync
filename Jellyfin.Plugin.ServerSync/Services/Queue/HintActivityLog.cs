@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using JPKribs.Jellyfin.Base;
@@ -14,15 +15,16 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Writes one line to Jellyfin's activity log for each hint that reaches a conclusion, so an operator
-/// can see individual changes arriving and leaving on the dashboard's Activity page without opening
-/// the server log. A hint that was already satisfied writes nothing, since nothing happened.
+/// Writes the change queue's events to Jellyfin's activity log. Changes from peers are summed into one
+/// entry per outcome, as "12 Items Synced", so a busy sync never floods the log. Every entry follows one
+/// shape: a short title case name, and an overview sentence naming the servers. A change that was
+/// already satisfied writes nothing, since nothing happened.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
-public sealed class HintActivityLog
+public sealed class HintActivityLog : IDisposable
 {
-    private const string Prefix = "Server Sync: ";
     private readonly ActivityLogger _activity;
+    private readonly ActivitySummary _summary;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HintActivityLog"/> class.
@@ -31,6 +33,7 @@ public sealed class HintActivityLog
     public HintActivityLog(ActivityLogger activity)
     {
         _activity = activity;
+        _summary = new ActivitySummary(activity);
     }
 
     /// <summary>A short description of what a hint concerns, for logs and the dashboard.</summary>
@@ -79,49 +82,6 @@ public sealed class HintActivityLog
         _ => name
     };
 
-    /// <summary>
-    /// Jellyfin's own title for an item: an episode as its series and episode number, a season as its
-    /// series and season, anything else by its name. "Season 1" alone names nothing.
-    /// </summary>
-    /// <param name="item">The item.</param>
-    /// <returns>The title.</returns>
-    public static string TitleOf(BaseItem item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        if (item is Episode episode)
-        {
-            var series = string.IsNullOrEmpty(episode.SeriesName) ? null : episode.SeriesName;
-            var code = EpisodeCode(episode);
-            return series is null ? (code is null ? item.Name : $"{code} {item.Name}") : (code is null ? $"{series} {item.Name}" : $"{series} {code}");
-        }
-
-        if (item is Season season && !string.IsNullOrEmpty(season.SeriesName))
-        {
-            return $"{season.SeriesName} {item.Name}";
-        }
-
-        return item.Name;
-    }
-
-    /// <summary>The title with the episode's own name after it, for the line of detail.</summary>
-    /// <param name="item">The item.</param>
-    /// <returns>The line.</returns>
-    public static string LineOf(BaseItem item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        return item is Episode episode && EpisodeCode(episode) is not null && !string.IsNullOrEmpty(episode.SeriesName)
-            ? $"{TitleOf(item)} - {item.Name}"
-            : TitleOf(item);
-    }
-
-    /// <summary>The episode's season and number, as S01E02, or null when either is unknown.</summary>
-    /// <param name="episode">The episode.</param>
-    /// <returns>The code.</returns>
-    public static string? EpisodeCode(Episode episode)
-        => episode.ParentIndexNumber.HasValue && episode.IndexNumber.HasValue
-            ? string.Format(CultureInfo.InvariantCulture, "S{0:D2}E{1:D2}", episode.ParentIndexNumber.Value, episode.IndexNumber.Value)
-            : null;
-
     /// <summary>The bare name of what a hint concerns: the file, the person, or the user.</summary>
     /// <param name="kind">The kind.</param>
     /// <param name="itemPath">The item's path, when the kind concerns an item.</param>
@@ -139,68 +99,55 @@ public sealed class HintActivityLog
     }
 
     /// <summary>
-    /// Records that a hint from a peer was applied here. The entry reads "Synced [title]" and its detail
-    /// "[type] [title] was updated from [peer]", with an episode titled by its series and number and
-    /// named after it, as "Synced The Show S01E02" over "Metadata for The Show S01E02 - Pilot was
-    /// updated from source-a". No full stops, as Jellyfin's own entries have none.
+    /// Records that a hint from a peer was applied here. Applied hints are written together, as
+    /// "12 Items Synced" over "12 items were synced from source-a (9), source-b (3)", once the queue has
+    /// been quiet for a while, so a busy sync leaves one entry rather than one per item.
     /// </summary>
     /// <param name="hint">The hint.</param>
     /// <param name="originName">The peer's display name.</param>
-    /// <param name="result">The apply result, which names the local item when the handler knew it.</param>
-    /// <returns>A task.</returns>
+    /// <param name="result">The apply result.</param>
+    /// <returns>A completed task.</returns>
     public Task AppliedAsync(InboundHint hint, string originName, HintApplyResult result = default)
     {
         ArgumentNullException.ThrowIfNull(hint);
-        var fallback = NameOf(hint.Kind, hint.ItemPath, hint.UserName, hint.Key);
-        return WriteAsync(
-            $"Synced {result.ItemTitle ?? fallback}",
-            "ServerSync.HintApplied",
-            $"{SubjectOf(hint.Kind, result.ItemLine ?? fallback, hint.UserName)} was updated from {originName}",
-            LogLevel.Information);
+        _summary.Add(Synced, originName);
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Records that a hint from a peer could not apply here and was dropped. The entry reads "Skipped
-    /// sync for [name]" and its detail names the type, as "Metadata for Only A (2021) could not be
-    /// updated from source-a because the row is ignored on this server". A reason that already names
-    /// the type and the name is used as it is.
+    /// Records that a hint from a peer could not apply here and was dropped, written together with the
+    /// others as "3 Items Not Synced" over "3 items from source-a (2) and source-b (1) were not synced:
+    /// filtered out (2), ignored here (1)".
     /// </summary>
     /// <param name="hint">The hint.</param>
     /// <param name="originName">The peer's display name.</param>
-    /// <param name="reason">Why.</param>
-    /// <returns>A task.</returns>
-    public Task DroppedAsync(InboundHint hint, string originName, string? reason)
+    /// <param name="code">Why it was dropped.</param>
+    /// <returns>A completed task.</returns>
+    public Task DroppedAsync(InboundHint hint, string originName, HintCode code)
     {
         ArgumentNullException.ThrowIfNull(hint);
-        var name = NameOf(hint.Kind, hint.ItemPath, hint.UserName, hint.Key);
-        var subject = SubjectOf(hint.Kind, name, hint.UserName);
-        var overview = !string.IsNullOrEmpty(reason) && reason.StartsWith(subject, StringComparison.Ordinal)
-            ? reason
-            : $"{subject} could not be updated from {originName} because {reason ?? "it could not be applied"}";
-        return WriteAsync($"Skipped sync for {name}", "ServerSync.HintDropped", overview, LogLevel.Information);
+        _summary.Add(NotSynced, originName, ReasonOf(code));
+        return Task.CompletedTask;
     }
 
-    /// <summary>Records that a hint from a peer keeps failing here.</summary>
+    /// <summary>
+    /// Records that a hint from a peer keeps failing here, on its second and sixth try, written together
+    /// with the others as "4 Items Retrying". The first failure is often a passing one, and giving up
+    /// writes its own line.
+    /// </summary>
     /// <param name="hint">The hint.</param>
     /// <param name="originName">The peer's display name.</param>
-    /// <param name="reason">Why.</param>
-    /// <returns>A task.</returns>
+    /// <param name="reason">Why, for the server log only.</param>
+    /// <returns>A completed task.</returns>
     public Task RetryingAsync(InboundHint hint, string originName, string? reason)
     {
         ArgumentNullException.ThrowIfNull(hint);
-
-        // The first failure is often a passing one. The second and the sixth are worth a line. The rest
-        // would repeat the same line hourly, and giving up writes its own.
-        if (hint.Attempts is not (1 or 5))
+        if (hint.Attempts is 1 or 5)
         {
-            return Task.CompletedTask;
+            _summary.Add(Retrying, originName);
         }
 
-        return WriteAsync(
-            Prefix + $"could not apply {Describe(hint.Kind, hint.ItemPath, hint.UserName, hint.Key)} from {originName}, will retry",
-            "ServerSync.HintRetry",
-            reason,
-            LogLevel.Warning);
+        return Task.CompletedTask;
     }
 
     /// <summary>Records that delivery to a peer is paused.</summary>
@@ -212,11 +159,11 @@ public sealed class HintActivityLog
     public Task PausedAsync(string peerName, string reason, IReadOnlyList<OutboundHint> waiting, DateTime until)
     {
         ArgumentNullException.ThrowIfNull(waiting);
-        var held = waiting.Count == 0 ? string.Empty : $" Waiting to go: {Changes(waiting)}.";
+        var held = waiting.Count == 0 ? string.Empty : $". {ActivityText.Count(waiting.Count, "change")} wait to go";
         return WriteAsync(
-            Prefix + $"paused changes to {peerName}",
+            $"Changes Paused for {peerName}",
             "ServerSync.PeerPaused",
-            $"{Sentence(reason)?.TrimEnd('.')}. Changes to {peerName} wait until {until.ToLocalTime():t} and are then sent again.{held}",
+            $"{ActivityText.Sentence(reason)}. Changes are sent to {peerName} again at {until.ToLocalTime():t}{held}",
             LogLevel.Warning);
     }
 
@@ -229,9 +176,9 @@ public sealed class HintActivityLog
     {
         ArgumentNullException.ThrowIfNull(rows);
         return WriteAsync(
-            Prefix + $"{peerName} rejected {rows.Count} change(s)",
+            $"Changes Rejected by {peerName}",
             "ServerSync.HintRejected",
-            $"{peerName} rejected the request as malformed: {reason}. The changes were {Changes(rows)}, and they are marked failed.",
+            $"{peerName} rejected {ActivityText.Count(rows.Count, "change")} as malformed and they are marked failed: {reason}",
             LogLevel.Error);
     }
 
@@ -243,11 +190,56 @@ public sealed class HintActivityLog
     {
         ArgumentNullException.ThrowIfNull(rows);
         return WriteAsync(
-            Prefix + $"sent {rows.Count} change(s) to {peerName} again",
+            $"Changes Resent to {peerName}",
             "ServerSync.HintResent",
-            $"{peerName} had accepted {Changes(rows)} but no longer held them, which happens when it restarts before reporting them done",
+            $"{ActivityText.Count(rows.Count, "change")} {(rows.Count == 1 ? "was" : "were")} sent to {peerName} again after it lost them, as happens when it restarts before reporting them done",
             LogLevel.Warning);
     }
+
+    // ===== Summaries =====
+
+    // Changes from peers are summed by Base's ActivitySummary: one entry per outcome once the queue is
+    // quiet, at least every few minutes during a long burst, and whatever is waiting on shutdown.
+    private static readonly ActivityOutcome Synced = new(
+        "ServerSync.HintsApplied",
+        "Synced",
+        t => $"{ActivityText.Count(t.Total, "item")} {ActivityText.WasOrWere(t.Total)} synced from {ActivityText.CountedList(t.Sources)}");
+
+    private static readonly ActivityOutcome NotSynced = new(
+        "ServerSync.HintsDropped",
+        "Not Synced",
+        t => $"{ActivityText.Count(t.Total, "item")} from {ActivityText.CountedList(t.Sources)} {ActivityText.WasOrWere(t.Total)} not synced: {ActivityText.CountedList(t.Reasons)}");
+
+    private static readonly ActivityOutcome Retrying = new(
+        "ServerSync.HintsRetrying",
+        "Retrying",
+        t => $"{ActivityText.Count(t.Total, "item")} from {ActivityText.CountedList(t.Sources)} could not be applied yet and will be retried",
+        LogLevel.Warning);
+
+    /// <inheritdoc />
+    public void Dispose() => _summary.Dispose();
+
+    /// <summary>Writes whatever summaries are waiting. Called on its own once the queue is quiet.</summary>
+    public void Flush() => _summary.Flush();
+
+    /// <summary>A short reason a change was not synced, for the summary.</summary>
+    /// <param name="code">The code it was dropped with.</param>
+    /// <returns>The reason.</returns>
+    public static string ReasonOf(HintCode code) => code switch
+    {
+        HintCode.Filtered => "filtered out",
+        HintCode.NotMapped => "not in a mapped library",
+        HintCode.Ignored => "ignored here",
+        HintCode.ModuleOff => "sync type off",
+        HintCode.Priority => "another server provides it",
+        HintCode.SourceGone => "gone from the source",
+        HintCode.Unreadable => "path not given",
+        HintCode.NoLocalItem => "never arrived here",
+        HintCode.GaveUp => "failed too often",
+        HintCode.Unsupported => "not supported",
+        HintCode.Invalid => "invalid",
+        _ => "could not apply"
+    };
 
     /// <summary>Lists the subjects of some changes in a sentence, naming at most a few and counting the rest.</summary>
     /// <param name="rows">The changes.</param>
@@ -272,21 +264,7 @@ public sealed class HintActivityLog
         return names.Count > shown ? $"{string.Join(", ", listed)}, and {names.Count - shown} more" : text;
     }
 
-    /// <summary>The text with surrounding space removed and its first letter capitalized.</summary>
-    /// <param name="text">The text.</param>
-    /// <returns>The sentence, or the text itself when it is blank.</returns>
-    public static string? Sentence(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return text;
-        }
-
-        var trimmed = text.Trim();
-        return char.ToUpperInvariant(trimmed[0]) + trimmed[1..];
-    }
-
     // Never throws, and cuts the text to what the activity log keeps.
     private Task WriteAsync(string name, string type, string? overview, LogLevel severity)
-        => _activity.LogAndWaitAsync(name, type, Sentence(overview), severity);
+        => _activity.LogAndWaitAsync(name, type, ActivityText.Sentence(overview), severity);
 }

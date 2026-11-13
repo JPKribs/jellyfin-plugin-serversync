@@ -48,7 +48,7 @@ export function createSyncTableKit(ctx) {
         if (!el) return;
         if (time) {
             el.textContent = ServerSyncShared.formatRelativeTime(new Date(time));
-            el.className = 'healthValue success';
+            el.className = 'healthValue';
         } else {
             el.textContent = 'Never';
             el.className = 'healthValue';

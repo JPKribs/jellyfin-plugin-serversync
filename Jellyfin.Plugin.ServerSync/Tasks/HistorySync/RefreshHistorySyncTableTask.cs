@@ -343,7 +343,7 @@ public class RefreshHistorySyncTableTask
             source.LibraryMapping,
             source.SourceItem,
             sourceItemId,
-            negotiateWithSource: ConfigManager.Configuration.HistorySyncNegotiate);
+            negotiateWithSource: source.Source.Server.Mode == ServerMode.Sync && source.LibraryMapping.NegotiateHistory);
 
         if (record != null)
         {

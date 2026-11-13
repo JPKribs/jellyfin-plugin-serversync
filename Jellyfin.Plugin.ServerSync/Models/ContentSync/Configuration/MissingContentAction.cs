@@ -6,5 +6,7 @@ public enum MissingContentAction
 
     Delete = 1,
 
-    Ignore = 2
+    Ignore = 2,
+
+    DeleteAfterApproval = 3
 }

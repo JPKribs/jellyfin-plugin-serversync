@@ -507,7 +507,7 @@ public static class FileDeletionService
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(logger);
-        if (config.EffectiveMissingContentAction != MissingContentAction.Delete)
+        if (!config.DeletesMissing)
         {
             return (0, 0);
         }

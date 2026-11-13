@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using JPKribs.Jellyfin.Base;
@@ -39,7 +40,6 @@ public sealed class HistorySyncTableManager
     // Whether rows should count a source that is behind as work. Not stored on the row, since it is
     // a property of the current configuration, so every row read from the database is stamped with
     // the live setting. The dashboard and the sync task then see the same answer the refresh did.
-    private bool Negotiating => _configManager is not null && Plugin.Instance is not null && _configManager.Configuration.HistorySyncNegotiate;
 
     private static SyncDatabase GetDatabase(ISyncDatabaseProvider provider)
     {
@@ -112,12 +112,13 @@ public sealed class HistorySyncTableManager
         item.NegotiatedLastPlayedDate = ReadNullableDateTime(reader, "NegotiatedLastPlayedDate");
         item.NegotiatedIsFavorite = ReadNullableBool(reader, "NegotiatedIsFavorite");
         item.NegotiatedAt = ReadNullableDateTime(reader, "NegotiatedAt");
-        item.NegotiateWithSource = Negotiating;
 
         item.LastSyncTime = ReadNullableDateTime(reader, "LastSyncTime");
         item.Reason = ReadNullableString(reader, "Reason");
         item.RetryCount = ReadNullableInt32(reader, "RetryCount") ?? 0;
         item.ServerKey = ReadNullableString(reader, "ServerKey");
+        item.NegotiateWithSource = _configManager is not null && Plugin.Instance is not null
+            && _configManager.Configuration.NegotiatesHistory(item.ServerKey, item.SourceLibraryId);
         item.SourceState.SourceHash = ReadNullableString(reader, "SourceStateHash");
         item.SourceState.SyncedHash = ReadNullableString(reader, "SyncedStateHash");
         return item;

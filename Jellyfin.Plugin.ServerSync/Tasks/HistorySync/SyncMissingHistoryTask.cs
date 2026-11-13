@@ -80,7 +80,12 @@ public class SyncMissingHistoryTask
     // way it was before negotiation existed, and no base is recorded.
     private readonly HashSet<string> _oneWay = new(StringComparer.OrdinalIgnoreCase);
 
-    private bool Negotiating => ConfigManager.Configuration.HistorySyncNegotiate;
+    // Whether any library negotiates, which decides whether servers are asked about it at all. Each
+    // row then negotiates only when its own library does.
+    private bool Negotiating => ConfigManager.Configuration.NegotiatesAnyHistory();
+
+    private bool NegotiatesFor(HistorySyncItem record)
+        => ConfigManager.Configuration.NegotiatesHistory(record.ServerKey, record.SourceLibraryId);
 
     /// <inheritdoc />
     public override string Name => "Sync History";
@@ -187,7 +192,7 @@ public class SyncMissingHistoryTask
 
         var (localUserId, localItemId) = ParseLocalIds(record);
 
-        if (Negotiating)
+        if (NegotiatesFor(record))
         {
             await NegotiateWithSourceAsync(record, cancellationToken).ConfigureAwait(false);
         }
@@ -219,7 +224,7 @@ public class SyncMissingHistoryTask
     {
         ArgumentNullException.ThrowIfNull(group);
 
-        if (!Negotiating || group.Count == 0)
+        if (group.Count == 0 || !group.Any(NegotiatesFor))
         {
             return;
         }
@@ -375,7 +380,7 @@ public class SyncMissingHistoryTask
         Logger.LogInformation("Apply History verified for {ItemName}: {Changes}{Peer}",
             record.ItemName,
             HistorySyncMergeService.GetChangeSummary(record),
-            Negotiating ? " (source updated as well)" : string.Empty);
+            NegotiatesFor(record) ? " (source updated as well)" : string.Empty);
 
         return Task.CompletedTask;
     }
@@ -471,7 +476,7 @@ public class SyncMissingHistoryTask
         // against, and the row's picture of the source is brought up to date so the table and any
         // manual retry before the next refresh describe the source as it now is. Only recorded when
         // negotiating, so a one way install keeps its old merge rules.
-        if (Negotiating && !_oneWay.Contains(record.ServerKey ?? string.Empty))
+        if (NegotiatesFor(record) && !_oneWay.Contains(record.ServerKey ?? string.Empty))
         {
             PeerHistoryNegotiator.ApplySourceState(record, PeerHistoryNegotiator.MergedStateOf(record));
             record.UpdateSourceStateBundle();

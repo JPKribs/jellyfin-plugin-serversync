@@ -148,6 +148,12 @@ public class UpdateSyncTablesTask
         return _linkingAtStart.TryGetValue(source.Key, out var offered) && offered ? "links" : "no-links";
     }
 
+    /// <summary>Whether this run asked a server for links and was told no, or got no answer.</summary>
+    /// <param name="sourceKey">The server's entry key.</param>
+    /// <returns><c>true</c> when the server did not offer links.</returns>
+    internal bool LinkingRefusedBy(string sourceKey)
+        => _linkingKnown.TryGetValue(sourceKey, out var offered) && !offered;
+
     private Task<bool> LinkingOfferedAsync(ScanSource source, CancellationToken cancellationToken)
         => _linkingOffered.GetOrAdd(source.Key, async _ =>
         {
@@ -195,9 +201,8 @@ public class UpdateSyncTablesTask
                 config.WatchedFilterUserIds,
                 config.DownloadNewContentMode,
                 config.ReplaceExistingContentMode,
-                config.DeleteMissingContentMode,
-                config.DetectUpdatedFiles,
-                config.SizeMatchToleranceBytes
+                config.DeletionApproval,
+                config.DetectUpdatedFiles
             });
         }
     }
@@ -430,7 +435,7 @@ public class UpdateSyncTablesTask
                         }
 
                         // A link on the peer is not a file to copy. Its history and metadata still sync.
-                        if (client.IsPeerLink(item.Id) || UnknownPeerStrm(client, item))
+                        if (client.IsPeerLink(item.Id) || IsStrm(item))
                         {
                             continue;
                         }
@@ -548,7 +553,7 @@ public class UpdateSyncTablesTask
                         return Task.FromResult(false);
                     }
 
-                    if (client.IsPeerLink(item.Id) || UnknownPeerStrm(client, item))
+                    if (client.IsPeerLink(item.Id) || IsStrm(item))
                     {
                         return Task.FromResult(false);
                     }
@@ -599,7 +604,7 @@ public class UpdateSyncTablesTask
         }
 
         // A peer's own link is not a file to copy, whichever way it arrived, by scan or by hint.
-        if (source.Source.Client.IsPeerLink(source.SourceItem.Id) || UnknownPeerStrm(source.Source.Client, source.SourceItem))
+        if (source.Source.Client.IsPeerLink(source.SourceItem.Id) || IsStrm(source.SourceItem))
         {
             return Task.FromResult<SyncItem?>(null);
         }
@@ -611,6 +616,7 @@ public class UpdateSyncTablesTask
 
         // An item picked to always keep is copied, even in a Link mapping.
         var storage = AlwaysKeep.StorageFor(source.Mapping, sourcePath);
+        var picked = source.Mapping.StorageMode == StorageMode.Link && storage == StorageMode.Copy;
 
         existing.TryGetValue(sourceItemId, out var existingItem);
 
@@ -660,7 +666,7 @@ public class UpdateSyncTablesTask
             // gone, otherwise the row is dropped and the item re-downloads.
             TryRestoreReplacingSidecar(existingItem.LocalPath);
 
-            if (config.DeleteMissingContentMode != ApprovalMode.Disabled
+            if (config.DeletesMissing
                 && !File.Exists(existingItem.LocalPath))
             {
                 return Task.FromResult<SyncItem?>(null);
@@ -678,7 +684,13 @@ public class UpdateSyncTablesTask
             if (existingItem != null)
             {
                 var promote = storage == StorageMode.Copy ? config.DownloadNewContentMode : (ApprovalMode?)null;
-                return Task.FromResult(Stamp(LinkStateService.ProcessExistingLink(existingItem, sourcePath, sourceSize, sourceCreateDate, linkPath, _linkFiles, Logger, promote), source));
+                var link = LinkStateService.ProcessExistingLink(existingItem, sourcePath, sourceSize, sourceCreateDate, linkPath, _linkFiles, Logger, promote);
+                if (link.StorageMode == StorageMode.Promoting && picked && link.Kept != KeptReason.Hand)
+                {
+                    link.Kept = KeptReason.Pick;
+                }
+
+                return Task.FromResult(Stamp(link, source));
             }
 
             // A real copy already at the name always wins, and is tracked as a copy.
@@ -686,6 +698,20 @@ public class UpdateSyncTablesTask
             {
                 return NewLinkAsync(source, sourceItemId, sourcePath, sourceSize, sourceCreateDate, linkPath, config.DownloadNewContentMode, cancellationToken);
             }
+        }
+
+        // A kept copy on its way back to a link waits for the download run, unless its pick came back.
+        if (existingItem is { StorageMode: StorageMode.Unkeeping })
+        {
+            if (picked)
+            {
+                existingItem.StorageMode = StorageMode.Copy;
+                existingItem.Kept = KeptReason.Pick;
+                existingItem.Status = SyncStatus.Synced;
+                existingItem.StatusDate = DateTime.UtcNow;
+            }
+
+            return Task.FromResult(Stamp(existingItem, source));
         }
 
         if (existingItem != null)
@@ -698,8 +724,13 @@ public class UpdateSyncTablesTask
                 localPath,
                 config.ReplaceExistingContentMode,
                 config.DetectUpdatedFiles,
-                config.SizeMatchToleranceBytes,
+                0,
                 Logger);
+            if (updated is not null)
+            {
+                Unkeep(updated, source, picked, localPath);
+            }
+
             return Task.FromResult(Stamp(updated, source));
         }
 
@@ -712,8 +743,50 @@ public class UpdateSyncTablesTask
             localPath,
             config.DownloadNewContentMode,
             config.ReplaceExistingContentMode,
-            config.SizeMatchToleranceBytes);
+            0);
+        if (fresh is not null && picked)
+        {
+            fresh.Kept = KeptReason.Pick;
+        }
+
         return Task.FromResult(Stamp(fresh, source));
+    }
+
+    // A copy in a Link mapping that a pick covers is recorded as kept by that pick. Once no pick covers
+    // it, it goes back to being a link: the download run writes the link and moves the copy into the
+    // link cache. A copy kept by hand, or one from before this was recorded, stays until it is turned
+    // back by hand.
+    private void Unkeep(SyncItem row, ContentRefreshWork source, bool picked, string localPath)
+    {
+        if (source.Mapping.StorageMode != StorageMode.Link || row.StorageMode != StorageMode.Copy)
+        {
+            return;
+        }
+
+        if (picked)
+        {
+            if (row.Kept == KeptReason.None)
+            {
+                row.Kept = KeptReason.Pick;
+            }
+
+            return;
+        }
+
+        if (row.Kept == KeptReason.Pick
+            && row.Status == SyncStatus.Synced
+            && _linkFiles is not null
+            && LinkPaths.CanLink(source.SourceItem)
+            && LinkPaths.LinkPathFor(localPath) is not null
+            && File.Exists(localPath))
+        {
+            row.StorageMode = StorageMode.Unkeeping;
+            row.Status = SyncStatus.Queued;
+            row.PendingType = null;
+            row.StatusDate = DateTime.UtcNow;
+            row.RetryCount = 0;
+            row.Reason = null;
+        }
     }
 
     private async Task<SyncItem?> NewLinkAsync(ContentRefreshWork source, string sourceItemId, string sourcePath, long sourceSize, DateTime sourceCreateDate, string linkPath, ApprovalMode downloadMode, CancellationToken cancellationToken)
@@ -730,7 +803,7 @@ public class UpdateSyncTablesTask
     // one version, such as a file above their bitrate limit, can play another. A version outside the
     // mapping's root is passed over, as any file outside it is. A Copy mapping copies the first version
     // only, as it always has.
-    private static void AddOtherVersions(List<ContentRefreshWork> work, ScanSource source, LibraryMapping mapping, BaseItemDto item, bool watchedByAll)
+    internal static void AddOtherVersions(List<ContentRefreshWork> work, ScanSource source, LibraryMapping mapping, BaseItemDto item, bool watchedByAll)
     {
         if (mapping.StorageMode != StorageMode.Link)
         {
@@ -751,10 +824,10 @@ public class UpdateSyncTablesTask
         }
     }
 
-    // A .strm from a peer whose links could not be read may be one of its links, so it is left for a
-    // run where the peer answers.
-    private static bool UnknownPeerStrm(SourceServerClient client, BaseItemDto item)
-        => client.PeerLinksUnknown && item.Path?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true;
+    // A .strm on a peer is never a file to copy or link, whether it is one of the peer's links or one its
+    // users made: either way it points at someone else's file, so passing it on would be a second hop.
+    internal static bool IsStrm(BaseItemDto item)
+        => item.Path?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true;
 
     // Every row remembers which server built it, so the apply phase downloads from the right peer.
     private bool BelongsToAnotherServer(SyncItem row, string serverKey, string localPath)
@@ -1013,21 +1086,22 @@ public class UpdateSyncTablesTask
     {
         ArgumentNullException.ThrowIfNull(progress);
 
-        var deleteMode = ConfigManager.Configuration.DeleteMissingContentMode;
+        var deleteMode = ConfigManager.Configuration.DeletionApproval;
         var action = ConfigManager.Configuration.EffectiveMissingContentAction;
+        var deletes = ConfigManager.Configuration.DeletesMissing;
         var hide = action == MissingContentAction.Ignore;
         var typedManager = (ContentSyncTableManager)Manager;
 
         // The table as the build left it, read once for every step below. The snapshot passed in was
         // taken before the build wrote this run's rows.
         var current = typedManager.GetAllStrict();
-        var settled = action == MissingContentAction.Delete ? 0 : StandDownDeletions(typedManager, current);
+        var settled = deletes ? 0 : StandDownDeletions(typedManager, current);
         if (!hide)
         {
             settled += ShowAllTitles(typedManager, current);
         }
 
-        if (action != MissingContentAction.Delete && !hide)
+        if (!deletes && !hide)
         {
             progress.Report(100);
             return Task.FromResult(settled);

@@ -24,6 +24,7 @@ public sealed class LocalHintPublisher
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalHintPublisher> _logger;
     private readonly ILinkRegistry? _links;
+    private readonly ContentSyncTableManager? _content;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalHintPublisher"/> class.
@@ -35,6 +36,7 @@ public sealed class LocalHintPublisher
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="logger">Logger.</param>
     /// <param name="links">The link registry, so a link goes out under its copy's path, or null.</param>
+    /// <param name="content">The content table, so a file synced from a peer is not announced as new, or null.</param>
     public LocalHintPublisher(
         IPluginConfigurationManager configManager,
         OutboundHintStore outbound,
@@ -42,9 +44,11 @@ public sealed class LocalHintPublisher
         OutboundHintWorker worker,
         IServerApplicationHost applicationHost,
         ILogger<LocalHintPublisher> logger,
-        ILinkRegistry? links = null)
+        ILinkRegistry? links = null,
+        ContentSyncTableManager? content = null)
     {
         _links = links;
+        _content = content;
         _configManager = configManager;
         _outbound = outbound;
         _versions = versions;
@@ -115,8 +119,16 @@ public sealed class LocalHintPublisher
     {
         ArgumentNullException.ThrowIfNull(version);
 
-        // A link is not a file a peer can copy. Its history and metadata still go out as usual.
-        if (_links?.Find(itemPath) is not null)
+        // A link is not a file a peer can copy, and neither is any other .strm, which points at a file
+        // elsewhere. Their history and metadata still go out as usual.
+        if (itemPath?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true || _links?.Find(itemPath!) is not null)
+        {
+            return 0;
+        }
+
+        // A file the sync downloaded from a peer is that peer's to announce, not this server's. The
+        // in-memory mark of the sync's writes is gone after a restart, so the content table is asked too.
+        if (!string.IsNullOrEmpty(itemPath) && _content?.GetByLocalPath(itemPath) is not null)
         {
             return 0;
         }

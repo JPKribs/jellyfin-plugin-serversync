@@ -13,12 +13,13 @@
                     <div class="sectionTitleContainer flex align-items-center">
                         <h1 class="sectionTitle">Servers</h1>
                     </div>
+                    <div id="poolMap" class="ssPoolMap hidden" role="img"></div>
+                    <div class="fieldDescription mb-md">Higher servers win when two offer the same item. Drag to reorder.</div>
 
                     <!-- SECTION: Servers -->
 
                     <div class="jpk-section">
                         <div id="serversConfigContent" class="jpk-section-content">
-                            <div class="fieldDescription mb-md">Higher servers win when two offer the same item. Drag to reorder.</div>
 
                             <!-- Server list, in priority order -->
                             <div id="serverList" class="jpk-card-list"></div>
@@ -65,7 +66,7 @@
                                         <div class="inputContainer">
                                             <label for="txtSourceServerExternalUrl">External URL (optional):</label>
                                             <input is="emby-input" type="text" id="txtSourceServerExternalUrl" placeholder="https://media.example.com" />
-                                            <div class="fieldDescription">Another address for that server, such as its public one. Its calls are accepted from this address too, and images offered by the metadata provider load from it. Empty uses the Server URL.</div>
+                                            <div class="fieldDescription">Its public address, if different. Empty uses the Server URL.</div>
                                         </div>
 
                                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -76,55 +77,6 @@
                                             <div class="fieldDescription checkboxFieldDescription">Accept a loopback or LAN address.</div>
                                         </div>
 
-                                        <div class="checkboxContainer checkboxContainer-withDescription">
-                                            <label class="emby-checkbox-label">
-                                                <input type="checkbox" is="emby-checkbox" id="chkAllowLinking" />
-                                                <span class="checkboxLabel">Allow Linking</span>
-                                            </label>
-                                            <div class="fieldDescription checkboxFieldDescription">Let that server stream files from here for libraries it maps as Link. Needs Server Sync there.</div>
-                                        </div>
-
-                                        <div id="linkLimits" class="hidden">
-                                            <div class="inputContainer">
-                                                <label for="txtLinkMaxStreams">Link Streams At Once:</label>
-                                                <input is="emby-input" type="number" id="txtLinkMaxStreams" min="0" max="1000" />
-                                                <div class="fieldDescription">Most streams that server may run at once. 0 for no limit.</div>
-                                            </div>
-                                            <div class="inputContainer">
-                                                <label for="txtLinkMaxStreamsPerUser">Link Streams Per User:</label>
-                                                <input is="emby-input" type="number" id="txtLinkMaxStreamsPerUser" min="0" max="100" />
-                                                <div class="fieldDescription">Most streams one user may hold at once. 0 for no limit. A user mapping in step 4 can set its own.</div>
-                                            </div>
-                                            <div class="checkboxContainer checkboxContainer-withDescription">
-                                                <label class="emby-checkbox-label">
-                                                    <input type="checkbox" is="emby-checkbox" id="chkLinkCountOwnSessions" />
-                                                    <span class="checkboxLabel">Count Their Own Playback</span>
-                                                </label>
-                                                <div class="fieldDescription checkboxFieldDescription">A user's playback here counts toward their per user limit.</div>
-                                            </div>
-                                            <div class="checkboxContainer checkboxContainer-withDescription">
-                                                <label class="emby-checkbox-label">
-                                                    <input type="checkbox" is="emby-checkbox" id="chkLinkHonorBitrateLimit" />
-                                                    <span class="checkboxLabel">Honor Remote Bitrate Limits</span>
-                                                </label>
-                                                <div class="fieldDescription checkboxFieldDescription">Refuse a file above a user's remote bitrate limit, since a link streams the file as it is.</div>
-                                            </div>
-                                            <div class="inputContainer">
-                                                <label for="txtLinkStreamSpeed">Link Stream Speed (Mbps):</label>
-                                                <input is="emby-input" type="number" id="txtLinkStreamSpeed" min="0" max="100000" />
-                                                <div class="fieldDescription">Most each stream, and each download into that server's link cache, is sent at. Set it above the bitrate of the files you share, or playback will buffer. 0 for no limit. A user mapping in step 4 can set a lower one.</div>
-                                            </div>
-                                            <div class="inputContainer">
-                                                <label for="txtLinkScheduledStreamSpeed">Scheduled Link Stream Speed (Mbps):</label>
-                                                <input is="emby-input" type="number" id="txtLinkScheduledStreamSpeed" min="0" max="100000" />
-                                                <div class="fieldDescription">Used instead during the bandwidth schedule's hours, when scheduling is on in Settings. 0 for no limit.</div>
-                                            </div>
-                                            <div class="selectContainer">
-                                                <label for="selLinkFallbackUser">Stream Unmapped Users As:</label>
-                                                <select is="emby-select" id="selLinkFallbackUser"></select>
-                                                <div class="fieldDescription">Who streams for a user on that server with no user mapping here. None refuses them.</div>
-                                            </div>
-                                        </div>
                                     </div>
                                 </div>
 
@@ -210,6 +162,11 @@
 
                                         <h3 class="jpk-subsection-title">Direction</h3>
                                         <div class="jpk-choice-group" id="modeChoices" role="radiogroup" aria-label="Mode">
+                                            <label class="jpk-choice" data-mode="Stream">
+                                                <input type="radio" name="serverMode" value="Stream" />
+                                                <span class="jpk-choice-name">Stream</span>
+                                                <span class="jpk-choice-text">Let it download from here, and stream with Allow Linking. Nothing else.</span>
+                                            </label>
                                             <label class="jpk-choice" data-mode="Pull">
                                                 <input type="radio" name="serverMode" value="Pull" />
                                                 <span class="jpk-choice-name">Pull</span>
@@ -227,6 +184,7 @@
                                             </label>
                                         </div>
                                         <div id="modeLimited" class="jpk-warn hidden" style="margin-top: 8px;">A standard user must be on that server's whitelist.</div>
+
                                         <div id="peerCheckArea" class="hidden">
                                             <div class="jpk-collapsible-actions" style="margin-top: 8px;">
                                                 <button is="emby-button" type="button" id="btnCheckPeer" class="raised jpk-button-small">
@@ -238,16 +196,61 @@
                                     </div>
                                 </div>
 
-                                <!-- Step 3: Libraries -->
-                                <div class="jpk-collapsible-section">
+                                <!-- Step 3: Stream. Only for Stream, Push, and Sync servers, since a Pull server may never link here. -->
+                                <div class="jpk-collapsible-section hidden" id="serverStepStreamSection">
+                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepStream">
+                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">3</span> Stream</span>
+                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                    </button>
+                                    <div id="serverStepStream" class="jpk-collapsible-content collapsed">
+                                        <div class="checkboxContainer checkboxContainer-withDescription" id="allowLinkingContainer">
+                                            <label class="emby-checkbox-label">
+                                                <input type="checkbox" is="emby-checkbox" id="chkAllowLinking" />
+                                                <span class="checkboxLabel">Allow Linking</span>
+                                            </label>
+                                            <div class="fieldDescription checkboxFieldDescription" id="allowLinkingDescription">Let that server stream files from here for libraries it maps as Link.</div>
+                                        </div>
+                                        <div id="linkingNeedsPlugin" class="jpk-warn hidden mb-md"></div>
+
+                                        <div id="linkLimits" class="hidden">
+                                            <div class="inputContainer">
+                                                <label for="txtLinkMaxStreams">Link Streams At Once:</label>
+                                                <input is="emby-input" type="number" id="txtLinkMaxStreams" min="0" max="1000" />
+                                                <div class="fieldDescription">Most streams that server may run at once. 0 for no limit.</div>
+                                            </div>
+                                            <div class="checkboxContainer checkboxContainer-withDescription" id="countOwnSessionsContainer">
+                                                <label class="emby-checkbox-label">
+                                                    <input type="checkbox" is="emby-checkbox" id="chkLinkCountOwnSessions" />
+                                                    <span class="checkboxLabel">Count Their Own Playback</span>
+                                                </label>
+                                                <div class="fieldDescription checkboxFieldDescription">A user's own playback here counts toward the limit on their user mapping.</div>
+                                            </div>
+                                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                                <label class="emby-checkbox-label">
+                                                    <input type="checkbox" is="emby-checkbox" id="chkLinkHonorBitrateLimit" />
+                                                    <span class="checkboxLabel">Honor Remote Bitrate Limits</span>
+                                                </label>
+                                                <div class="fieldDescription checkboxFieldDescription">Links are never transcoded here. A version above the user's Maximum remote streaming bitrate is refused, so they get a smaller version when the film has one.</div>
+                                            </div>
+                                            <div class="selectContainer">
+                                                <label for="selLinkFallbackUser">Unmapped Users</label>
+                                                <select is="emby-select" id="selLinkFallbackUser"></select>
+                                                <div class="fieldDescription">Who streams for a user on that server with no user mapping here.</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Step 4: Libraries. A Stream server maps none, so the step is hidden for it. -->
+                                <div class="jpk-collapsible-section" id="serverStepLibrariesSection">
                                     <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepLibraries">
-                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">3</span> Libraries</span>
+                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">4</span> Libraries</span>
                                         <span class="jpk-collapsible-icon">&#9660;</span>
                                     </button>
                                     <div id="serverStepLibraries" class="jpk-collapsible-content collapsed">
                                         <div id="librariesLocked" class="jpk-neutral mb-md">Test the connection in step 2 to load libraries.</div>
                                         <div id="librariesSection" class="hidden">
-                                            <div class="fieldDescription mb-md">Map that server's libraries to local ones.</div>
+                                            <div class="fieldDescription mb-md">Map that server's libraries to local ones. Storage mode, Always Keep, and filters are on the Storage tab.</div>
                                             <div id="libraryMappingsContainer"></div>
                                             <div class="jpk-collapsible-actions">
                                                 <button is="emby-button" type="button" id="btnAddMapping" class="raised jpk-secondary jpk-button-small">
@@ -261,13 +264,13 @@
                                 <!-- Step 4: Users -->
                                 <div class="jpk-collapsible-section">
                                     <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepUsers">
-                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">4</span> Users</span>
+                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">5</span> Users</span>
                                         <span class="jpk-collapsible-icon">&#9660;</span>
                                     </button>
                                     <div id="serverStepUsers" class="jpk-collapsible-content collapsed">
                                         <div id="usersLocked" class="jpk-neutral mb-md">Test the connection in step 2 to load users.</div>
                                         <div id="usersSection" class="hidden">
-                                            <div class="fieldDescription mb-md">Map that server's users to local ones. With Allow Linking on in step 1, each mapping can also cap the local user's link streams and speed.</div>
+                                            <div class="fieldDescription mb-md">Map that server's users to local ones. With Allow Linking on, each mapping can also cap the local user's link streams and speed.</div>
                                             <div id="usersLimited" class="jpk-warn hidden mb-md"></div>
                                             <div id="userMappingsContainer"></div>
                                             <div class="jpk-collapsible-actions">
@@ -341,95 +344,6 @@
         .mappingColumn {
             display: flex;
             flex-direction: column;
-        }
-
-        /* ===== Library Filter ===== */
-        .filterSection {
-            margin-top: 1em;
-            padding-top: 0.75em;
-        }
-        .filterSection .filterHeader {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 0.5em;
-        }
-        .filterSection .filterHeader label {
-            font-weight: bold;
-            white-space: nowrap;
-        }
-        .filterSection .filterModeSelect {
-            max-width: 200px;
-        }
-        .filterItem {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 12px;
-            border-bottom: 1px solid rgba(85, 85, 85, 0.15);
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        .filterItem:hover {
-            background: rgba(255, 255, 255, 0.05);
-        }
-        .filterItem.selected {
-            background: rgba(82, 181, 219, 0.12);
-        }
-        /* In the base paginated table the row already provides padding/border/hover,
-           so flatten the inner item (no nested box) and tint the whole row when selected. */
-        .jpk-table-cell .filterItem { padding: 0; border-bottom: none; }
-        .jpk-table-cell .filterItem:hover,
-        .jpk-table-cell .filterItem.selected { background: transparent; }
-        .jpk-table-row:has(.filterItem.selected) { background: rgba(82, 181, 219, 0.12); }
-        .filterItemThumb {
-            flex: 0 0 40px;
-            width: 40px;
-            height: 60px;
-            border-radius: 3px;
-            object-fit: cover;
-            background: rgba(255, 255, 255, 0.05);
-        }
-        .filterItemThumbPlaceholder {
-            flex: 0 0 40px;
-            width: 40px;
-            height: 60px;
-            border-radius: 3px;
-            background: rgba(255, 255, 255, 0.05);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: rgba(255, 255, 255, 0.2);
-            font-size: 18px;
-        }
-        .filterItemInfo {
-            flex: 1;
-            min-width: 0;
-            overflow: hidden;
-        }
-        .filterItemName {
-            font-weight: 500;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .filterItemMeta {
-            font-size: 0.8em;
-            color: rgba(255, 255, 255, 0.5);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .filterItemOverview {
-            font-size: 0.75em;
-            color: rgba(255, 255, 255, 0.35);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            margin-top: 2px;
-        }
-        .filterItemCheck {
-            flex: 0 0 auto;
         }
 
         /* ===== Additional Utility Classes ===== */

@@ -64,6 +64,26 @@ public sealed class HintPipelineTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A peer may only announce its own edits under its own hint ids.
+    /// True: one peer cannot record its values as a third server's edit, or finish a third server's hint.
+    /// False: a peer could stand in for another server, and that server's real edit would be turned away.
+    /// </summary>
+    [Fact]
+    public void Triage_RefusesAVersionOrIdOfAnotherServer()
+    {
+        var triage = Triage();
+        var origin = Origin();
+        var borrowedVersion = Hint(HintKind.Metadata, "/media/movies/a.mkv");
+        borrowedVersion.VersionServerId = "third-server";
+        var borrowedId = Hint(HintKind.Metadata, "/media/movies/a.mkv");
+        borrowedId.HintId = "third-server:1";
+
+        Assert.Equal(HintCode.Invalid, triage.Assess(origin, borrowedVersion, OriginId, DateTime.UtcNow).Code);
+        Assert.Equal(HintCode.Invalid, triage.Assess(origin, borrowedId, OriginId, DateTime.UtcNow).Code);
+        Assert.NotEqual(HintCode.Invalid, triage.Assess(origin, Hint(HintKind.Metadata, "/media/movies/a.mkv"), OriginId, DateTime.UtcNow).Code);
+    }
+
     [Fact]
     public void Triage_TurnsAwayWhatThisServerCannotUse()
     {

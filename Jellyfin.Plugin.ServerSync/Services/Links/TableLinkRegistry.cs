@@ -63,8 +63,15 @@ public sealed class TableLinkRegistry : ILinkRegistry
                 return loaded.ByLinkPath;
             }
 
+            // A failed read keeps the last snapshot, or none, and is tried again on the next lookup. It is
+            // never stored as a table with no links.
+            if (_services.GetRequiredService<ContentSyncTableManager>().TryGetLinks() is not { } rows)
+            {
+                return _snapshot?.ByLinkPath ?? new Dictionary<string, LinkEntry>(StringComparer.OrdinalIgnoreCase);
+            }
+
             var byLinkPath = new Dictionary<string, LinkEntry>(StringComparer.OrdinalIgnoreCase);
-            foreach (var row in _services.GetRequiredService<ContentSyncTableManager>().GetLinks())
+            foreach (var row in rows)
             {
                 if (LinkPaths.CopiedPathOf(row) is { } copied)
                 {

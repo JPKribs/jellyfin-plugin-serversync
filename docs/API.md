@@ -238,7 +238,7 @@ These serve [links](Links.md). The source answers `Stream`, `Stream/Check`, `Pla
 
 #### GET /Sync/Peer/Stream/{itemId}?serverId={id}&userId={id}&sourceUserId={id}&probe={bool}&fill={bool}
 
-Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted. `fill=true` is a download into the calling server's [link cache](Links.md#the-link-cache): it passes the same checks for the user apart from the stream limits, is held to the speed limits for that server and user, and is not counted as a stream. A caller holds at most two at once, and a third answers `429`. A stream for a user is held to **Link Stream Speed**, or the user's own, after the first three seconds' worth.
+Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted. `fill=true` is a download into the calling server's [link cache](Links.md#the-link-cache): it passes the same checks for the user apart from the stream limits, is held to the speed limits for that server and user, and is not counted as a stream. A caller holds at most two at once, and a third answers `429`. A stream for a user is held to that server's speed under **Settings > Bandwidth**, or the user's own, after the first three seconds' worth.
 
 Answers `200` or `206` with the file, or `403` with the reason as text: linking is off for the caller, the user cannot be resolved or may not play or see the item, the bitrate is over the user's limit, or a limit is reached. A file that is itself a `.strm` here is refused. A standard user's key only streams as that user.
 
@@ -377,7 +377,7 @@ What the Servers tab's Check Link button calls. Judges a server entry against th
 { "ServerUrl": "http://source-a:8096", "ApiKey": "…", "ServerKey": "entry key", "AllowPrivateNetwork": true, "Mode": "Sync" }
 ```
 
-`ApiKey` may be the stored key's sentinel `__JPK_SECRET_KEPT__` with `ServerKey` naming the entry, so a key never has to be re-entered. `Mode` is `Pull`, `Push`, or `Sync`.
+`ApiKey` may be the stored key's sentinel `__JPK_SECRET_KEPT__` with `ServerKey` naming the entry, so a key never has to be re-entered. `Mode` is `Stream`, `Pull`, `Push`, or `Sync`.
 
 ```json
 {
@@ -413,7 +413,7 @@ Discard one row from either queue by its `Id`. A discarded inbound row is report
 
 ### POST /Sync/PromoteItems
 
-Turns links into full copies, the **Keep a full local copy** action on the Sync tab. A link whose whole file is in the link cache, at the size the source reports, has the cached file moved into place by a Sync Content run that starts now, or right after the one already running. Any other copy downloads on the next Sync Content run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
+Turns links into full copies, the **Keep a full local copy** action on the Sync tab and **Download** in an item's details. A link whose whole file is in the link cache, at the size the source reports, has the cached file moved into place by a Sync Content run that starts now, or right after the one already running. Any other copy downloads on the next Sync Content run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
 
 ```json
 { "SourceItemIds": ["9c1e0f…", "77ab12…"] }
@@ -423,7 +423,23 @@ Turns links into full copies, the **Keep a full local copy** action on the Sync 
 { "Promoted": 2, "FromCache": 1, "Skipped": 0 }
 ```
 
-Content rows from `GET /Sync/Items` carry `StorageMode`: `Copy`, `Link`, or `Promoting` for a link on its way to a copy, and `Cached`, true for a link whose file is in the link cache. `cached=true` on `GET /Sync/Items` lists only those.
+Content rows from `GET /Sync/Items` carry `StorageMode`: `Copy`, `Link`, `Promoting` for a link on its way to a copy, or `Unkeeping` for a copy on its way back to a link, and `Cached`, true for a link whose file is in the link cache. On `GET /Sync/Items`, `cached=true` lists only those, and `storage=Copy` or `storage=Link` lists only copies or links.
+
+### GET /Sync/KeptCopies?serverKey={key}&search={text}&skip={n}&take={n}
+
+The full copies held in one server entry's Link mappings, the Storage tab's **Permanent Copies**, as content rows, including copies already on their way back to links. `Kept` says why each is a copy: `Pick` for an Always Keep pick, `Hand` for one kept from the Sync tab, or `Unknown` for one from before Server Sync recorded why. `take` is at most 200.
+
+### POST /Sync/KeptCopies/Unkeep
+
+Turns copies back into links, as **Turn Back Into Links** does, and starts a Sync Content run. That run checks the source still has the file, writes the link, and moves the copy into the link cache, or removes it when the cache is off or cannot take it. A copy an Always Keep pick covers is skipped, since the next refresh would copy it again, as is a row that is not a synced copy in a Link mapping or whose file is not here.
+
+```json
+{ "Ids": [ 812, 813 ] }
+```
+
+```json
+{ "Queued": 1, "Skipped": [ { "Id": 813, "Reason": "an Always Keep pick covers it. Remove the pick on the Storage tab instead" } ] }
+```
 
 ### GET /Sync/LinkCache
 

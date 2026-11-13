@@ -69,7 +69,7 @@ public sealed class LinkPlaybackSessions
     {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentNullException.ThrowIfNull(report);
-        if (!peer.IsEnabled || !peer.AllowLinking)
+        if (!peer.OffersLinks)
         {
             return $"linking is not allowed for {peer.DisplayName} here";
         }

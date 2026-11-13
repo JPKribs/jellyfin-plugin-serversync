@@ -37,6 +37,15 @@ public sealed class WhitelistUpgrade : IHostedService
             _logger.LogError(ex, "Could not prepare the Whitelist after updating");
         }
 
+        try
+        {
+            UpgradeLinkRules();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not apply the linking rules to existing servers after updating");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -67,6 +76,48 @@ public sealed class WhitelistUpgrade : IHostedService
         }
 
         config.PeerCallerWhitelistSeeded = true;
+        _configManager.SaveConfiguration();
+    }
+
+    // Before 12.4.12.0 a Pull entry could allow linking, and an entry with no user mappings and no
+    // fallback streamed as whichever user the linking server named. Now only Stream, Push, and Sync link,
+    // and that user is never trusted. A Pull entry that maps no libraries, so reads nothing from its
+    // peer, becomes Stream. An entry left with no way to name a user is warned about.
+    private void UpgradeLinkRules()
+    {
+        var config = _configManager.Configuration;
+        if (config.LinkRulesUpgraded)
+        {
+            return;
+        }
+
+        foreach (var server in config.Servers ?? new List<SourceServer>())
+        {
+            if (!server.AllowLinking)
+            {
+                continue;
+            }
+
+            if (server.Mode == ServerMode.Pull)
+            {
+                if (server.LibraryMappings?.Any(m => m.IsEnabled) == true)
+                {
+                    _logger.LogWarning("'{Server}' is a Pull server allowed to link here, which is no longer possible, since Pull only reads from it. Set it to Sync, or to Stream if this server reads nothing from it", server.DisplayName);
+                }
+                else
+                {
+                    server.Mode = ServerMode.Stream;
+                    _logger.LogInformation("'{Server}' was a Pull server allowed to link here that maps no libraries, so it is now a Stream server", server.DisplayName);
+                }
+            }
+
+            if (string.IsNullOrEmpty(server.LinkFallbackUserId) && server.UserMappings?.Any(m => m.IsEnabled) != true)
+            {
+                _logger.LogWarning("'{Server}' maps no users, and the user a linking server names is no longer trusted, so its streams are refused. Map its users, or choose a user under Unmapped Users in its Stream step", server.DisplayName);
+            }
+        }
+
+        config.LinkRulesUpgraded = true;
         _configManager.SaveConfiguration();
     }
 }

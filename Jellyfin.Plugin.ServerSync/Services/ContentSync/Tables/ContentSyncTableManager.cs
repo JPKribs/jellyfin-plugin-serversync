@@ -87,6 +87,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         item.ServerKey = ReadNullableString(reader, "ServerKey");
         item.CompanionFiles = ReadNullableString(reader, "CompanionFiles");
         item.StorageMode = (StorageMode)(ReadNullableInt32(reader, "StorageMode") ?? 0);
+        item.Kept = (KeptReason)(ReadNullableInt32(reader, "Kept") ?? 0);
         return item;
     }
 
@@ -127,6 +128,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             .SetUnlessIgnored("PendingType", record.PendingType.HasValue ? (int)record.PendingType.Value : null)
             .Set("CompanionFiles", record.CompanionFiles)
             .Set("StorageMode", (int)record.StorageMode)
+            .Set("Kept", (int)record.Kept)
             .SyncColumns(record);
         ExecuteWrite(upsert.Execute);
     }
@@ -188,6 +190,20 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: new List<SyncItem>());
 
     /// <summary>
+    /// Returns every link row with a local path, or null when the table could not be read. A failed read
+    /// is not an empty list: a caller that took it for one would treat every link as a plain file.
+    /// </summary>
+    /// <returns>The link rows, or null.</returns>
+    public IList<SyncItem>? TryGetLinks() => ExecuteRead<IList<SyncItem>?>(
+        conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM SyncItems WHERE StorageMode IN (1, 2) AND LocalPath IS NOT NULL";
+            return ReadAll(cmd);
+        },
+        fallback: null);
+
+    /// <summary>
     /// Returns true if another item already uses this local path.
     /// </summary>
     /// <param name="localPath">Path to check.</param>
@@ -228,7 +244,8 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         PendingType? pendingType = null,
         int skip = 0,
         int take = 50,
-        IReadOnlyList<string>? sourceItemIds = null) => ExecuteRead<(IList<SyncItem> Items, int TotalCount)>(
+        IReadOnlyList<string>? sourceItemIds = null,
+        bool? links = null) => ExecuteRead<(IList<SyncItem> Items, int TotalCount)>(
         conn =>
         {
             var conditions = new List<string>();
@@ -245,6 +262,12 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             if (pendingType.HasValue)
             {
                 conditions.Add("PendingType = @pendingType");
+            }
+
+            // Links, including those on their way to copies, or copies, including those on their way back.
+            if (links is { } wantLinks)
+            {
+                conditions.Add(wantLinks ? "StorageMode IN (1, 2)" : "StorageMode IN (0, 3)");
             }
 
             if (sourceItemIds is not null)
@@ -274,6 +297,66 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             return (ReadAll(dataCmd), totalCount);
         },
         fallback: (Array.Empty<SyncItem>(), 0));
+
+    /// <summary>
+    /// The copies one server's Link mappings hold, kept by a pick, by hand, or from before, and those on
+    /// their way back to links, a page at a time.
+    /// </summary>
+    /// <param name="serverKey">The server's entry key.</param>
+    /// <param name="sourceLibraryIds">The server's libraries mapped as Link.</param>
+    /// <param name="searchTerm">Text to find in the paths, or null.</param>
+    /// <param name="skip">Rows to skip.</param>
+    /// <param name="take">Rows to return.</param>
+    /// <returns>The page and the total.</returns>
+    public (IList<SyncItem> Items, int TotalCount) SearchKeptCopies(string serverKey, IReadOnlyList<string> sourceLibraryIds, string? searchTerm, int skip, int take)
+    {
+        ArgumentNullException.ThrowIfNull(sourceLibraryIds);
+        if (sourceLibraryIds.Count == 0)
+        {
+            return (Array.Empty<SyncItem>(), 0);
+        }
+
+        return ExecuteRead<(IList<SyncItem> Items, int TotalCount)>(
+            conn =>
+            {
+                var libraries = string.Join(", ", sourceLibraryIds.Select((_, i) => "@lib" + i.ToString(CultureInfo.InvariantCulture)));
+                var where = $"WHERE StorageMode IN (0, 3) AND Status IN (@synced, @queued, @errored) AND ServerKey = @server AND SourceLibraryId IN ({libraries})"
+                    + (string.IsNullOrWhiteSpace(searchTerm) ? string.Empty : " AND (SourcePath LIKE @search OR LocalPath LIKE @search)");
+
+                void Bind(SqliteCommand cmd)
+                {
+                    cmd.Parameters.AddWithValue("@server", serverKey);
+                    cmd.Parameters.AddWithValue("@synced", (int)SyncStatus.Synced);
+                    cmd.Parameters.AddWithValue("@queued", (int)SyncStatus.Queued);
+                    cmd.Parameters.AddWithValue("@errored", (int)SyncStatus.Errored);
+                    for (var i = 0; i < sourceLibraryIds.Count; i++)
+                    {
+                        cmd.Parameters.AddWithValue("@lib" + i.ToString(CultureInfo.InvariantCulture), sourceLibraryIds[i]);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(searchTerm))
+                    {
+                        cmd.Parameters.AddWithValue("@search", "%" + searchTerm + "%");
+                    }
+                }
+
+                int total;
+                using (var count = conn.CreateCommand())
+                {
+                    count.CommandText = $"SELECT COUNT(*) FROM SyncItems {where}";
+                    Bind(count);
+                    total = Convert.ToInt32(count.ExecuteScalar(), CultureInfo.InvariantCulture);
+                }
+
+                using var data = conn.CreateCommand();
+                data.CommandText = $"SELECT * FROM SyncItems {where} ORDER BY LocalPath ASC, Id ASC LIMIT @take OFFSET @skip";
+                Bind(data);
+                data.Parameters.AddWithValue("@take", take);
+                data.Parameters.AddWithValue("@skip", skip);
+                return (ReadAll(data), total);
+            },
+            fallback: (Array.Empty<SyncItem>(), 0));
+    }
 
     /// <inheritdoc />
     public override PagedResult<SyncItem> Paginate(PaginationRequest request)

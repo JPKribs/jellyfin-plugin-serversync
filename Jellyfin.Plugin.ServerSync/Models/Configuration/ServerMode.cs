@@ -18,5 +18,13 @@ public enum ServerMode
 
     /// <summary>Pull and Push together, for a pool of equals.</summary>
     [XmlEnum("Both")]
-    Sync = 2
+    Sync = 2,
+
+    /// <summary>
+    /// The other server may download this server's files, and link to and stream them when linking is
+    /// allowed, and nothing else: this server never reads from it, never sends it changes, and turns away
+    /// its hints. It maps no libraries here. Needs the plugin there, where this server is a Pull server.
+    /// </summary>
+    [XmlEnum("Stream")]
+    Stream = 3
 }

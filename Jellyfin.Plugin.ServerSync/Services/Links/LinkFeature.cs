@@ -13,5 +13,5 @@ public static class LinkFeature
 
     /// <summary>Whether this server offers links to anyone.</summary>
     public static bool Offered(PluginConfiguration config)
-        => config?.Servers?.Any(server => server.IsEnabled && server.AllowLinking) == true;
+        => config?.Servers?.Any(server => server.OffersLinks) == true;
 }

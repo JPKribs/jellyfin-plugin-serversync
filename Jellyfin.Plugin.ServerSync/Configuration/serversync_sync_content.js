@@ -52,7 +52,8 @@ export function createContentSyncTableModule(ctx, kit) {
         emptyMessage: 'No content items found. Run a refresh to scan for content.',
         filters: {
             options: [
-                { value: 'Synced', label: 'Synced' },
+                { value: 'Downloaded', label: 'Downloaded' },
+                { value: 'Linked', label: 'Linked' },
                 { value: 'Queued', label: 'Queued' },
                 { value: 'Errored', label: 'Errored' },
                 { value: 'Ignored', label: 'Ignored' },
@@ -66,6 +67,13 @@ export function createContentSyncTableModule(ctx, kit) {
             buildParams: function(filterValue) {
                 if (filterValue === 'Cached') {
                     return { cached: true };
+                }
+                // A synced row is a downloaded file or a written link, so the two are filtered apart.
+                if (filterValue === 'Downloaded') {
+                    return { status: 'Synced', storage: 'Copy' };
+                }
+                if (filterValue === 'Linked') {
+                    return { status: 'Synced', storage: 'Link' };
                 }
                 if (filterValue.indexOf(':') > -1) {
                     var parts = filterValue.split(':');
@@ -277,7 +285,14 @@ export function createContentSyncTableModule(ctx, kit) {
             },
 
             getDisplayStatus: function(item) {
-                var suffix = item.StorageMode === 'Link' ? (item.Cached ? ' (Link, Cached)' : ' (Link)') : item.StorageMode === 'Promoting' ? ' (Link to Copy)' : '';
+                var linked = item.StorageMode === 'Link' || item.StorageMode === 'Promoting';
+                if (item.Status === 'Synced') {
+                    if (!linked) return 'Downloaded';
+                    return item.StorageMode === 'Promoting' ? 'Linked (Copy Next)' : item.Cached ? 'Linked (Cached)' : 'Linked';
+                }
+                var suffix = item.StorageMode === 'Link' ? (item.Cached ? ' (Link, Cached)' : ' (Link)')
+                    : item.StorageMode === 'Promoting' ? ' (Link to Copy)'
+                    : item.StorageMode === 'Unkeeping' ? ' (Copy to Link)' : '';
                 if (item.Status === 'Pending' && item.PendingType) {
                     return 'Pending ' + item.PendingType + suffix;
                 }

@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.11.7"
+version: "12.4.12.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -28,8 +28,34 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
+  added:
+  - A Stream direction for a server that may download this server's files, and stream them with Allow Linking on, and nothing else. It maps no libraries and is sent no changes
+  - A Storage tab, shown while content, history, or metadata sync is on, for how each library keeps its files, Always Keep, the library filter, history negotiation, and the copies held in Link libraries, which can be turned back into links
+  - A Stream step on each Stream, Push, or Sync server for linking, its limits, and who unmapped users stream as, with a warning when that server does not run Server Sync
+  - A map of the pool at the top of the Servers tab, grouping each server by relationship around this one, with its status
+  - A Bandwidth section in Settings holding every speed, downloads and each server's streams, with the schedule, all in Mbps
+  - Removing an Always Keep pick turns its copies back into links, each copy moved into the link cache, once the source still has the file
+  - Downloaded and Linked filters, and status cards in one row, on the Sync tab
   changed:
-  - The version follows Jellyfin 12.4, which Server Sync has been built for since 12.2.10.1. Nothing in what the plugin does changes, and it mixes freely with 12.2.11.x servers in a pool
-  - The documentation is cleaned up
+  - A Pull server can no longer link to this server. A Pull entry that allowed linking and maps no libraries becomes Stream on the update. One that maps libraries keeps Pull and loses linking, with a warning in the log
+  - An unmapped user streams only as the user chosen under Unmapped Users, or is refused. The user a linking server names is never taken. An entry left with no user mapping and no choice is warned about in the log
+  - The per user stream limit is set only on each user mapping. A server wide one is copied onto the mappings that set none
+  - History negotiation is chosen per library, and only Sync servers negotiate. The old switch turns it on for every library
+  - Download speeds are in Mbps. A speed in KB, MB, or GB per second is converted on the update
+  - Skip Items Watched By is a list of users, where none skips nothing
+  - Removed files is one setting, with Delete After Approval as its own choice
+  - Size Tolerance is removed, so a local file must match the source's size exactly
+  - Settings are grouped and ordered, options that do not apply are hidden, and descriptions are shorter and correct
+  - The activity log sums changes from other servers into one entry per outcome, such as 12 Items Synced, instead of one entry per item, and every entry has the same shape
+  fixed:
+  - A server never copies, links, or announces any .strm, whether one of its links or one a user made, and never hands out a link's .strm through Jellyfin's download routes, so a link is never passed on to a third server
+  - A peer's links list that cannot be read is treated as unknown, never as an empty list
+  - A peer can no longer send a change as another server's edit, or with another server's hint id
+  - Chapter images and trickplay tiles of a link are not handed on to other servers, and a link cache placed inside a library is moved back under Jellyfin's cache
+  - A file synced from a peer is never announced as this server's own new file after a restart
+  - A new film hinted to a Link mapping on a server below Minimum Free Space was not linked. Links need no space, so a hint writes them
+  - A film in more than one version arrived on a hint as a link for its first version only. Every version is linked, and each is held to server priority
+  - A hint dropped because the source does not offer links names that reason
   developer:
-  - The old design notes under docs/plans, which the documentation site never published, are removed
+  - Database schema 33 records why a copy in a Link mapping is kept
+  - The Docker pool checks hinted links across three servers, that a link is never passed on to a third server, and turning kept copies back into links

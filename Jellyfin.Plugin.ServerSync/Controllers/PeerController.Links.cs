@@ -360,7 +360,7 @@ public partial class PeerController
             return refusal!;
         }
 
-        if (!peer.IsEnabled || !peer.AllowLinking)
+        if (!peer.OffersLinks)
         {
             return StatusCode(StatusCodes.Status403Forbidden, $"linking is not allowed for {peer.DisplayName} here");
         }
@@ -480,7 +480,7 @@ public partial class PeerController
             return refusal!;
         }
 
-        if (!peer.IsEnabled || !peer.AllowLinking)
+        if (!peer.OffersLinks)
         {
             return StatusCode(StatusCodes.Status403Forbidden, $"linking is not allowed for {peer.DisplayName} here");
         }
@@ -488,6 +488,13 @@ public partial class PeerController
         var item = libraryManager.GetItemById(itemId);
         if (item is null || index < 0
             || (PeerCallerGuard.ScopedUser(HttpContext) is { } scoped && (userManager.GetUserById(scoped) is not { } owner || !item.IsVisible(owner))))
+        {
+            return NotFound();
+        }
+
+        // A link's chapter images and trickplay tiles were taken from the server it links to, so they are
+        // not this server's to hand on, as Describe refuses a link.
+        if (item.Path?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true)
         {
             return NotFound();
         }
@@ -530,7 +537,14 @@ public partial class PeerController
             return Ok(new PeerLinksResponse());
         }
 
-        var links = table.GetLinks()
+        // A table that cannot be read is no answer. An empty list would tell the peer this server holds
+        // no links, and it would take every .strm here for a file.
+        if (table.TryGetLinks() is not { } rows)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "this server could not read its links");
+        }
+
+        var links = rows
             .Where(row => owner is null
                 || (Guid.TryParse(row.LocalItemId, out var localId) && libraryManager.GetItemById(localId) is { } local && local.IsVisible(owner)))
             .Select(row => LinkPaths.CopiedPathOf(row) is { } copied ? new PeerLink { LinkPath = row.LocalPath!, CopiedPath = copied } : null)

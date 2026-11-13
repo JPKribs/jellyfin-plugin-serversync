@@ -3,6 +3,7 @@ using Jellyfin.Plugin.ServerSync.Services.Queue;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using Xunit;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Queue;
 
@@ -17,8 +18,8 @@ public class HintActivityLogTests
     public void Episode_IsTitledBySeriesAndNumber()
     {
         var episode = new Episode { Name = "Pilot", SeriesName = "The Show", ParentIndexNumber = 1, IndexNumber = 2 };
-        Assert.Equal("The Show S01E02", HintActivityLog.TitleOf(episode));
-        Assert.Equal("The Show S01E02 - Pilot", HintActivityLog.LineOf(episode));
+        Assert.Equal("The Show S01E02", ItemTitles.TitleOf(episode));
+        Assert.Equal("The Show S01E02 - Pilot", ItemTitles.LineOf(episode));
     }
 
     /// <summary>
@@ -30,8 +31,8 @@ public class HintActivityLogTests
     public void Season_IsTitledBySeries()
     {
         var season = new Season { Name = "Season 1", SeriesName = "The Show" };
-        Assert.Equal("The Show Season 1", HintActivityLog.TitleOf(season));
-        Assert.Equal("The Show Season 1", HintActivityLog.LineOf(season));
+        Assert.Equal("The Show Season 1", ItemTitles.TitleOf(season));
+        Assert.Equal("The Show Season 1", ItemTitles.LineOf(season));
     }
 
     /// <summary>
@@ -43,8 +44,8 @@ public class HintActivityLogTests
     public void Movie_GoesByName()
     {
         var movie = new Movie { Name = "Only A (2021)" };
-        Assert.Equal("Only A (2021)", HintActivityLog.TitleOf(movie));
-        Assert.Equal("Metadata for Only A (2021)", HintActivityLog.SubjectOf(HintKind.Metadata, HintActivityLog.LineOf(movie), null));
-        Assert.Equal("Watch history for Only A (2021) (viewer)", HintActivityLog.SubjectOf(HintKind.History, HintActivityLog.LineOf(movie), "viewer"));
+        Assert.Equal("Only A (2021)", ItemTitles.TitleOf(movie));
+        Assert.Equal("Metadata for Only A (2021)", HintActivityLog.SubjectOf(HintKind.Metadata, ItemTitles.LineOf(movie), null));
+        Assert.Equal("Watch history for Only A (2021) (viewer)", HintActivityLog.SubjectOf(HintKind.History, ItemTitles.LineOf(movie), "viewer"));
     }
 }

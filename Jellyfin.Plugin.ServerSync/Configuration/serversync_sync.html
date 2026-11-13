@@ -38,7 +38,7 @@
 
                         <!-- Status Summary Cards -->
                         <div id="syncStatusSummary">
-                            <div class="jpk-cards" id="mainStatusRow">
+                            <div class="jpk-cards jpk-cards-rows" id="mainStatusRow">
                                 <div class="jpk-card green" id="statusGroupSynced" title="">
                                     <span class="jpk-card-count" id="syncedCount">0</span>
                                     <span class="jpk-card-label">Synced</span>
@@ -59,21 +59,19 @@
                                     <span class="jpk-card-count" id="ignoredCount">0</span>
                                     <span class="jpk-card-label">Ignored</span>
                                 </div>
-                            </div>
-                            <div class="jpk-cards hidden" id="pendingStatusRow">
-                                <div class="jpk-card purple hidden" id="statusGroupPendingDownload" title="">
+                                <div class="jpk-card blue hidden" id="statusGroupPendingDownload" title="">
                                     <span class="jpk-card-count" id="pendingDownloadCount">0</span>
                                     <span class="jpk-card-label">Pending Download</span>
                                 </div>
-                                <div class="jpk-card blue hidden" id="statusGroupPendingReplacement" title="">
+                                <div class="jpk-card yellow hidden" id="statusGroupPendingReplacement" title="">
                                     <span class="jpk-card-count" id="pendingReplacementCount">0</span>
                                     <span class="jpk-card-label">Pending Replace</span>
                                 </div>
-                                <div class="jpk-card red hidden" id="statusGroupPendingDeletion" title="">
+                                <div class="jpk-card pink hidden" id="statusGroupPendingDeletion" title="">
                                     <span class="jpk-card-count" id="pendingDeletionCount">0</span>
                                     <span class="jpk-card-label">Pending Delete</span>
                                 </div>
-                                <div class="jpk-card red hidden" id="statusGroupDeleting" title="">
+                                <div class="jpk-card teal hidden" id="statusGroupDeleting" title="">
                                     <span class="jpk-card-count" id="deletingCount">0</span>
                                     <span class="jpk-card-label">Deleting</span>
                                 </div>
@@ -180,7 +178,7 @@
                                         <span>Mark Synced</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnModalKeep" class="raised jpk-modal-button" title="Keep a full local copy. A cached file is moved into place" style="display:none;">
-                                        <span>Keep Local Copy</span>
+                                        <span>Download</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnModalQueue" class="raised jpk-button-submit jpk-modal-button">
                                         <span>Queue</span>

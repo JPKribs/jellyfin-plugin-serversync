@@ -216,10 +216,14 @@ public class SyncMissingContentTask
     // A single row from a hint: the same disk check and download setup as a run, without connecting
     // every server, since the hint already names the one to pull from.
     /// <inheritdoc />
-    protected override Task<bool> BeforeRowAsync(CancellationToken cancellationToken)
+    protected override Task<bool> BeforeRowAsync(SyncItem record, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(record);
+
+        // A link needs no disk space to speak of, so a full disk stops it no more than it stops a run
+        // with only links queued.
         var config = ConfigManager.Configuration;
-        if (!DiskSpaceService.HasSufficientSpace(config, out var insufficientPath))
+        if (record.StorageMode != StorageMode.Link && !DiskSpaceService.HasSufficientSpace(config, out var insufficientPath))
         {
             FailPreflight($"insufficient disk space on {insufficientPath}");
             return Task.FromResult(false);
@@ -321,26 +325,14 @@ public class SyncMissingContentTask
         // A link downloads nothing, so it branches off before the download steps and never touches them.
         if (record.StorageMode == StorageMode.Link)
         {
-            // An .nfo that is gone while its link is still there was removed by the user. One that went
-            // with its link, such as a deleted folder, was not, and is written again with the link.
-            var linkWasThere = !string.IsNullOrEmpty(record.LocalPath) && File.Exists(record.LocalPath);
-            (_linkWriter ?? throw new InvalidOperationException("Links cannot be written on this server")).Write(record, TypedManager, ConfigManager.Configuration);
+            await WriteLinkAsync(record, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
-            // Read before the companions replace the row's list, which is where a written .nfo is recorded.
-            var nfoRecorded = LinkNfo.Recorded(record);
-            var nfoRemoved = linkWasThere && LinkNfo.RemovedByUser(record);
-            await DownloadLinkCompanionsAsync(record, cancellationToken).ConfigureAwait(false);
-            if (nfoRemoved)
-            {
-                LinkNfo.Record(record);
-            }
-            else
-            {
-                await WriteLinkNfoAsync(record, nfoRecorded, cancellationToken).ConfigureAwait(false);
-            }
-
-            Interlocked.Increment(ref _successCount);
-            _changedFiles.Enqueue(record.LocalPath!);
+        // A kept copy going back to a link: the link is written, then the copy moves into the cache.
+        if (record.StorageMode == StorageMode.Unkeeping)
+        {
+            await UnkeepAsync(record, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -383,6 +375,90 @@ public class SyncMissingContentTask
         }
 
         await DownloadAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task WriteLinkAsync(SyncItem record, CancellationToken cancellationToken, string? replacing = null)
+    {
+        // An .nfo that is gone while its link is still there was removed by the user. One that went
+        // with its link, such as a deleted folder, was not, and is written again with the link.
+        var linkWasThere = !string.IsNullOrEmpty(record.LocalPath) && File.Exists(record.LocalPath);
+        (_linkWriter ?? throw new InvalidOperationException("Links cannot be written on this server")).Write(record, TypedManager, ConfigManager.Configuration, replacing);
+
+        // Read before the companions replace the row's list, which is where a written .nfo is recorded.
+        var nfoRecorded = LinkNfo.Recorded(record);
+        var nfoRemoved = linkWasThere && LinkNfo.RemovedByUser(record);
+        await DownloadLinkCompanionsAsync(record, cancellationToken).ConfigureAwait(false);
+        if (nfoRemoved)
+        {
+            LinkNfo.Record(record);
+        }
+        else
+        {
+            await WriteLinkNfoAsync(record, nfoRecorded, cancellationToken).ConfigureAwait(false);
+        }
+
+        Interlocked.Increment(ref _successCount);
+        _changedFiles.Enqueue(record.LocalPath!);
+    }
+
+    // The copy is the only one this server holds, so it is let go only when the source still has the
+    // file as it was and offers it as a link. Then the link is written beside the copy, and the copy
+    // moves into the link cache, or is removed when the cache is off or cannot take it. Until the link
+    // is in place the copy stays and plays.
+    private async Task UnkeepAsync(SyncItem record, CancellationToken cancellationToken)
+    {
+        var copyPath = record.LocalPath ?? throw new InvalidOperationException($"The copy has no path (source: {record.SourcePath})");
+        var name = Path.GetFileName(copyPath);
+        var linkPath = LinkPaths.LinkPathFor(copyPath) ?? throw new InvalidOperationException($"{name} cannot be a link, so the copy stays");
+        var source = RequireSource(record);
+        if (!Guid.TryParse(record.SourceItemId, out var itemId))
+        {
+            throw new InvalidOperationException($"{name} has no source item, so the copy stays");
+        }
+
+        var item = await source.Client.FindItemDetailsAsync(itemId, cancellationToken).ConfigureAwait(false);
+        if (item is null || string.IsNullOrEmpty(item.Path) || source.Client.IsPeerLink(item.Id)
+            || item.Path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase)
+            || MediaItemUtilities.GetItemSize(item) != record.SourceSize)
+        {
+            throw new InvalidOperationException($"'{source.Name}' no longer has {name} as it was, so the copy stays");
+        }
+
+        var capabilities = await source.Client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
+        if (capabilities?.Features?.Contains(LinkFeature.Name, StringComparer.OrdinalIgnoreCase) != true)
+        {
+            throw new InvalidOperationException($"'{source.Name}' does not offer links to this server, so the copy of {name} stays");
+        }
+
+        record.StorageMode = StorageMode.Link;
+        record.LocalPath = linkPath;
+        record.LocalItemId = null;
+        try
+        {
+            await WriteLinkAsync(record, cancellationToken, copyPath).ConfigureAwait(false);
+        }
+        catch
+        {
+            record.StorageMode = StorageMode.Unkeeping;
+            record.LocalPath = copyPath;
+            throw;
+        }
+
+        record.Kept = KeptReason.None;
+        if (File.Exists(copyPath))
+        {
+            if (_linkCache is not null && await Task.Run(() => _linkCache.Adopt(record.SourceItemId, copyPath, record.SourceSize), cancellationToken).ConfigureAwait(false))
+            {
+                Logger.LogInformation("{File} is a link again, and its copy moved into the link cache", name);
+            }
+            else
+            {
+                File.Delete(copyPath);
+                Logger.LogInformation("{File} is a link again, and its copy was removed, since the link cache could not take it", name);
+            }
+
+            _changedFiles.Enqueue(copyPath);
+        }
     }
 
     // Subtitles and other companions are small and Jellyfin pairs them by name, so a link gets them
@@ -528,7 +604,7 @@ public class SyncMissingContentTask
                 $"Validation failed for {fileName}: {validationError ?? "unknown reason"} (source: {record.SourcePath ?? record.SourceItemId})");
         }
 
-        if (DownloadService.ShouldSkipDownload(record, config.SizeMatchToleranceBytes, out var skipReason))
+        if (DownloadService.ShouldSkipDownload(record, 0, out var skipReason))
         {
             Logger.LogDebug("Skipped: {FileName} ({Size}) - {Reason}", fileName, fileSize, skipReason);
             Interlocked.Increment(ref _successCount);

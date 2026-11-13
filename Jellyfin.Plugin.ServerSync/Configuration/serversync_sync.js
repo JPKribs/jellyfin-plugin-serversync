@@ -9,12 +9,25 @@ export default function (view) {
     // TAB NAVIGATION (local copy for synchronous access)
     // ============================================
 
+    // The Storage tab shows only while content sync is on. The last known answer is kept per browser
+    // and refreshed whenever the shared module loads or saves the config (see serversync_shared.js).
+    // An unknown answer shows the tab.
+    function storageTabShown() {
+        try {
+            return window.localStorage.getItem('serversync.storageTab') !== '0';
+        } catch (e) {
+            return true;
+        }
+    }
+
     function getTabs() {
-        return [
+        var tabs = [
             { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
-            { href: 'configurationpage?name=serversync_servers', name: 'Servers' },
-            { href: 'configurationpage?name=serversync_settings', name: 'Settings' }
+            { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
         ];
+        if (storageTabShown()) tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
+        tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
+        return tabs;
     }
 
     // ============================================
@@ -79,6 +92,11 @@ export default function (view) {
     ]).then(function(loaded) {
         var shared = loaded[0];
         ServerSyncShared = shared.createServerSyncShared(view);
+        // A config load that turns content sync on or off adds or drops the Storage tab. A page the
+        // dashboard keeps hidden leaves the tabs to the page on screen.
+        ServerSyncShared.onTabsChanged = function () {
+            if (!view.classList.contains('hide')) LibraryMenu.setTabs('serversync', 0, getTabs);
+        };
 
         var ctx = {
             view: view,
@@ -274,12 +292,12 @@ export default function (view) {
             var descEl = view.querySelector('#syncTypeDescription');
             if (descEl) {
                 var descriptions = {
-                    content: 'Content sync copies or links media files from your Pull and Sync servers into mapped libraries. It queues missing or updated files, includes subtitles beside them, and can remove files a source no longer has.',
-                    history: 'History sync copies watch state to your mapped users. It syncs played status, play counts, resume positions, last played dates, and favorites, keeping the highest play count and the most recent activity from either server.',
-                    metadata: 'Metadata sync copies item metadata onto matching items, matched by file path. It updates titles, overviews, ratings, genres, tags, studios, people, and images, and you enable each category on the Settings tab.',
-                    people: 'People sync copies person metadata onto matching people, matched by name. It updates biographies, provider IDs, and profile images.',
-                    users: 'User sync copies user settings to your mapped users. It covers permissions, playback and display preferences, and profile images, and translates library permissions through your library mappings.',
-                    queue: 'Changes travelling between servers as they happen. Outbound rows are owed to a peer in Push or Sync mode until it reports them done. Inbound rows came from a peer and wait to be applied here. A paused peer shows why, and the scheduled tasks still catch anything the queue misses.'
+                    content: 'Media files copied or linked into mapped libraries from your Pull and Sync servers.',
+                    history: 'Watch state of mapped users: played status, play count, resume position, last played date, and favorites.',
+                    metadata: 'Item metadata and images, copied onto local items matched by file path.',
+                    people: 'Biographies, provider IDs, and photos of people, matched by name.',
+                    users: 'Permissions, preferences, and profile images of mapped users. Library permissions follow your library mappings.',
+                    queue: 'Changes sent between servers as they happen. Outbound rows wait for a Push or Sync server to finish them; inbound rows wait to be applied here.'
                 };
                 descEl.textContent = descriptions[viewName] || '';
             }

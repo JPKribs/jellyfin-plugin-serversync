@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Links;
 
@@ -380,7 +381,7 @@ public sealed class LinkCacheTests : IDisposable
         var other = Guid.NewGuid();
         var server = new SourceServer
         {
-            LinkMaxStreamsPerUser = 2,
+            LinkMaxStreams = 2,
             LinkStreamSpeedMbps = 80,
             UserMappings = new List<UserMapping> { new() { LocalUserId = capped.ToString(), SourceUserId = Guid.NewGuid().ToString(), LinkMaxStreams = 1, LinkStreamSpeedMbps = 8 } }
         };
@@ -398,6 +399,52 @@ public sealed class LinkCacheTests : IDisposable
     }
 
     private LinkCache Cache() => new(new FakeConfig(_config), _dir, NullLogger<LinkCache>.Instance, () => _now);
+
+    /// <summary>
+    /// A kept copy going back to a link moves into the cache when it fits, and stays where it is when
+    /// the cache is off or too small.
+    /// True: the film still plays from this server until the cache needs the room.
+    /// False: a copy would be lost, or the cache emptied for a file it can never hold.
+    /// </summary>
+    [Fact]
+    public void Adopt_MovesACopyInWhenItFits()
+    {
+        var cache = Cache();
+        Put(cache, B, 100);
+        var copy = Path.Combine(_dir, "library", "Film.mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        File.WriteAllBytes(copy, new byte[300]);
+
+        Assert.False(cache.Adopt(A, copy, 299));
+        Assert.True(File.Exists(copy));
+
+        Assert.True(cache.Adopt(A, copy, 300));
+        Assert.False(File.Exists(copy));
+        Assert.True(cache.HoldsWhole(A, 300));
+        Assert.Equal(CacheReason.Unkept, cache.List().Single(e => e.LinkId == A).Reason);
+        Assert.NotNull(cache.PathFor(B));
+
+        File.WriteAllBytes(copy, new byte[300]);
+        _config.LinkCacheSizeGb = 0;
+        Assert.False(cache.Adopt(C, copy, 300));
+        Assert.True(File.Exists(copy));
+    }
+
+    /// <summary>
+    /// A cache folder is inside a library when it is a library folder or below one, and not when it
+    /// only shares the start of a name.
+    /// True: a cache set inside a library is moved back under Jellyfin's cache.
+    /// False: cached files would become items a peer can stream, or a sound folder would be refused.
+    /// </summary>
+    [Theory]
+    [InlineData("/media/movies/cache", true)]
+    [InlineData("/media/movies", true)]
+    [InlineData("/media/movies-cache", false)]
+    [InlineData("/cache", false)]
+    public void IsUnderAny_MatchesWholeFolders(string folder, bool inside)
+    {
+        Assert.Equal(inside, PathContainment.IsUnderAny(folder, new[] { "/media/movies/", "/media/shows" }));
+    }
 
     private static void Put(LinkCache cache, string linkId, int size)
     {

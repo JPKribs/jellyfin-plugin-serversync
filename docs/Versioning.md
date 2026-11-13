@@ -19,6 +19,17 @@ The protocol number changes only when a hint, a peer route, or a conflict rule c
 
 Releases before protocol versions, up to 12.2.8.1, only talk to exactly the same version, so the first update to a protocol aware release still needs every server in the pool updated.
 
+## Updating to 12.4.12.0
+
+12.4.12.0 changes nothing in the protocol, and mixes freely with 12.4.11.7. The update converts the settings once:
+
+* A Pull entry that allowed linking and maps no libraries becomes **Stream**. One that maps libraries keeps Pull and loses linking, with a warning in the log, since a Pull server can no longer link here.
+* A server wide per user stream limit is copied onto that entry's user mappings that set none.
+* The old history negotiation switch, when on, turns on **Negotiate History** for every library. It applies to Sync servers only.
+* Download speeds set in KB, MB, or GB per second are converted to Mbps.
+
+Its database adds a column for why a copy in a Link mapping is kept. While a copy is on its way back to a link, the database names 12.4.12.0 as its oldest reader, so an older release sets it aside rather than take that row for a copy still to download.
+
 ## Links and older releases
 
 [Links](Links.md) need both servers on 12.2.10.0 or later. The source advertises `Link` among its features, and a server with a Link mapping waits for a source that does. Releases without links ignore the feature, and matching against them works as before.

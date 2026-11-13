@@ -82,12 +82,16 @@ public class SourceServer
     /// <summary>Gets or sets the most link streams that server may hold at once, or 0 for no limit.</summary>
     public int LinkMaxStreams { get; set; }
 
-    /// <summary>Gets or sets the most link streams one user may hold at once, or 0 for no limit.</summary>
+    /// <summary>
+    /// Gets or sets the server wide per user limit from before 12.4.12.0. It is read once, when the
+    /// configuration loads, and copied onto every user mapping that sets none, since a per user limit
+    /// is now set only on a user mapping. Always 0 afterwards.
+    /// </summary>
     public int LinkMaxStreamsPerUser { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether a user's own playback on this server counts toward
-    /// <see cref="LinkMaxStreamsPerUser"/>.
+    /// Gets or sets a value indicating whether a user's own playback on this server counts toward the
+    /// limit their user mapping sets.
     /// </summary>
     public bool LinkCountOwnSessions { get; set; }
 
@@ -136,7 +140,13 @@ public class SourceServer
     /// <param name="localUserId">The user here the stream runs as.</param>
     /// <returns>The limit.</returns>
     public int GetLinkMaxStreamsFor(Guid? localUserId)
-        => Math.Max(0, MappingForLocalUser(localUserId)?.LinkMaxStreams ?? LinkMaxStreamsPerUser);
+    {
+        // One user never gets more than the whole server, so a per user limit above the server's total
+        // is held to the total.
+        var perUser = Math.Max(0, MappingForLocalUser(localUserId)?.LinkMaxStreams ?? 0);
+        var total = Math.Max(0, LinkMaxStreams);
+        return total > 0 && (perUser == 0 || perUser > total) ? total : perUser;
+    }
 
     private UserMapping? MappingForLocalUser(Guid? localUserId)
         => localUserId is { } user
@@ -145,7 +155,7 @@ public class SourceServer
 
     /// <summary>
     /// Gets or sets this server's user that streams for a user on that server with no user mapping here.
-    /// Empty refuses them.
+    /// Empty refuses them. The linking server never chooses the user.
     /// </summary>
     public string LinkFallbackUserId { get; set; } = string.Empty;
 
@@ -177,6 +187,16 @@ public class SourceServer
     [XmlIgnore]
     [JsonIgnore]
     public bool Pushes => IsEnabled && IsConfigured && Mode is ServerMode.Push or ServerMode.Sync;
+
+    /// <summary>
+    /// Gets a value indicating whether the peer may link to this server's files: linking is allowed for
+    /// it, and it is a Stream, Push, or Sync server. A Pull server only gives this server things to read,
+    /// so it may never link here. A Stream server may be there only to download, so it needs the switch
+    /// too.
+    /// </summary>
+    [XmlIgnore]
+    [JsonIgnore]
+    public bool OffersLinks => IsEnabled && AllowLinking && Mode is ServerMode.Stream or ServerMode.Push or ServerMode.Sync;
 
     /// <summary>Gets the URL the browser should use for images from this peer.</summary>
     [XmlIgnore]

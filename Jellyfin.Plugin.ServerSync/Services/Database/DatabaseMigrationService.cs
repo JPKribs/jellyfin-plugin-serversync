@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 32;
+    public const int CurrentSchemaVersion = 33;
 
     /// <summary>
     /// The oldest schema version whose code can still work with a database at
@@ -35,6 +35,12 @@ public static class DatabaseMigrationService
     /// </summary>
     public const int LinkReaderVersion = 32;
 
+    /// <summary>
+    /// The oldest schema whose code knows a kept copy going back to a link. A database holding one names
+    /// this as its oldest reader, so an older build never takes that row for a copy still to download.
+    /// </summary>
+    public const int UnkeepReaderVersion = 33;
+
     /// <summary>The oldest reader a database with these contents allows: <see cref="LinkReaderVersion"/> once it holds a link.</summary>
     /// <param name="connection">Database connection.</param>
     /// <returns>The version.</returns>
@@ -49,7 +55,9 @@ public static class DatabaseMigrationService
         }
 
         cmd.CommandText = "SELECT EXISTS (SELECT 1 FROM pragma_table_info('SyncItems') WHERE name = 'StorageMode') AND EXISTS (SELECT 1 FROM SyncItems WHERE StorageMode <> 0)";
-        return Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 1 ? Math.Max(MinReaderVersion, LinkReaderVersion) : MinReaderVersion;
+        var reader = Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 1 ? Math.Max(MinReaderVersion, LinkReaderVersion) : MinReaderVersion;
+        cmd.CommandText = "SELECT EXISTS (SELECT 1 FROM pragma_table_info('SyncItems') WHERE name = 'StorageMode') AND EXISTS (SELECT 1 FROM SyncItems WHERE StorageMode = 3)";
+        return Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 1 ? Math.Max(reader, UnkeepReaderVersion) : reader;
     }
 
     /// <summary>
@@ -95,6 +103,7 @@ public static class DatabaseMigrationService
         ";
         syncItemsCmd.ExecuteNonQuery();
         CreateV32Additions(connection);
+        CreateV33Additions(connection);
 
         // ===== History Sync (HistorySyncItems) =====
         // One row per (user, library, item). Source/Local/Merged are five
@@ -371,6 +380,29 @@ public static class DatabaseMigrationService
         }
 
         AddColumnIfMissing(connection, transaction, "SyncItems", "StorageMode INTEGER NOT NULL DEFAULT 0");
+        transaction.Commit();
+    }
+
+    /// <summary>
+    /// Adds the reason a copy in a Link mapping is kept, so removing an Always Keep pick can turn its
+    /// copies back into links while copies kept by hand stay.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void CreateV33Additions(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        using var transaction = connection.BeginTransaction();
+        using (var exists = connection.CreateCommand())
+        {
+            exists.Transaction = transaction;
+            exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SyncItems'";
+            if (Convert.ToInt64(exists.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
+            {
+                return;
+            }
+        }
+
+        AddColumnIfMissing(connection, transaction, "SyncItems", "Kept INTEGER NOT NULL DEFAULT 0");
         transaction.Commit();
     }
 
@@ -736,6 +768,12 @@ public static class DatabaseMigrationService
             {
                 logger.LogInformation("Schema upgrade to v32: adding the content storage mode.");
                 CreateV32Additions(connection);
+            }
+
+            if (fromVersion < 33)
+            {
+                logger.LogInformation("Schema upgrade to v33: recording why a copy in a Link mapping is kept.");
+                CreateV33Additions(connection);
             }
 
             JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, CurrentSchemaVersion, MinReaderFor(connection));

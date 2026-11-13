@@ -1,19 +1,24 @@
 # Setup
 
-The plugin has three tabs. **Sync** shows each module's table and the change queue. **Servers** holds the servers this one syncs with. **Settings** holds the options.
+The plugin has four tabs. **Sync** shows each module's table and the change queue. **Servers** holds the one time setup of the servers this one syncs with. **Storage**, shown while content, history, or metadata sync is on, holds how each mapped library keeps its files and which items it syncs. **Settings** holds the options.
 
 ## Servers
 
 ![Servers](screenshots/settings/Servers.png)
 
-Servers higher in the list win when two offer the same item. Drag a server to change the order. Each server has four steps.
+The map at the top shows this server, by its own name, and every server it is set up with, grouped by relationship. The arrows give the relationship: Pull points here, Push points out, Sync both ways, Stream is dashed toward here, and a dashed arrow out marks the servers whose files this one streams. Each server's dot is green when it runs Server Sync, orange when it answers without it, red when it cannot be reached, and grey when it is disabled.
+
+Servers higher in the list win when two offer the same item. Drag a server to change the order. Each server has these steps.
 
 | Step | What it holds |
 | :--- | :--- |
-| 1. Connection | Name, Server URL, an optional External URL for thumbnails, whether a LAN address is allowed, and whether that server may stream this server's files for its links, with stream limits and speeds |
+| 1. Connection | Name, Server URL, an optional External URL, and whether a LAN address is allowed |
 | 2. Authentication | An API key or a sign in, Test Connection, what the key can do there, and the Direction |
-| 3. Libraries | Which library there maps to which library here, their root folders, a filter, and the Storage: full copies or links. A Link library also chooses whether its links are cached and which items are always kept |
-| 4. Users | Which user there maps to which user here, for history, user settings, and playlists, and, with Allow Linking on, that user's own link stream limit and speed |
+| 3. Stream | For Stream, Push, and Sync servers: Allow Linking, the stream limit, bitrate limits, and who unmapped users stream as. A warning shows when that server does not run Server Sync |
+| 4. Libraries | Which library there maps to which library here, and their root folders. Hidden for a Stream server. How each one keeps its files is set on the [Storage](#storage) tab |
+| 5. Users | Which user there maps to which user here, for history, user settings, and playlists, and, with Allow Linking on, that user's own link stream limit and speed |
+
+Steps are numbered in the order they show, so a Pull server's Libraries is step 3 and a Stream server's Users is step 4.
 
 | Connection | Authentication |
 | :--- | :--- |
@@ -22,6 +27,8 @@ Servers higher in the list win when two offer the same item. Drag a server to ch
 | Library Mapping | User Mapping |
 | :--- | :--- |
 | ![Library Mapping](screenshots/settings/Library%20Mapping.png) | ![User Mapping](screenshots/settings/User%20Mapping.png) |
+
+![Stream](screenshots/settings/Stream.png)
 
 **Test Connection** shows who the key belongs to, whether it may download, whether Server Sync there lets it in, and what each module can do with it.
 
@@ -32,16 +39,33 @@ Servers higher in the list win when two offer the same item. Drag a server to ch
 | Pull | No | This server reads from that one on a schedule. Changes also arrive as they happen when that server pushes to this one |
 | Push | Yes, listing this server as Pull or Sync | Changes made here are sent to that server as they happen |
 | Sync | Yes, listing this server as Sync | Both, for a pool of equals |
+| Stream | Yes, listing this server as Pull | That server may download this server's files, and link to them with **Allow Linking** on, and nothing else. This server never reads from it or sends it changes, and turns away its hints. The Libraries step is hidden |
 
 **Check Link** confirms the other server is set up for the chosen direction and reports the access it holds for this one.
 
 ### Links
 
-**Allow Linking** in Connection, and **Storage** set to **Link** in Libraries, hold a library as `.strm` links that stream from the source instead of full copies. The source allows linking on its entry for this server, and this server sets Storage on its entry for the source. Links that are played can also be kept in a link cache, set under Content in Settings. See [Links](Links.md).
+**Allow Linking** in the Stream step, and **Storage** set to **Link** on the Storage tab, hold a library as `.strm` links that stream from the source instead of full copies. The source allows linking on its entry for this server, and this server sets Storage on its entry for the source. Links that are played can also be kept in a link cache, set under Content in Settings. A Pull server can never link here. See [Links](Links.md).
 
 ### Keys and Permissions
 
 A standard user's key works in every direction, limited to what that user can see and that user's own history, settings, and playlists. An administrator's key or an API key reaches everything. See [Permissions](Permissions.md) for each function.
+
+## Storage
+
+![Storage](screenshots/settings/Storage.png)
+
+The Storage tab shows while content, history, or metadata sync is on. Pick a server, and each of its enabled library mappings has a card. With content sync off, only the filter and history settings show:
+
+| Setting | What it holds |
+| :--- | :--- |
+| Storage | Full **Copy** files, the default, or **Link** files that stream from the source. See [Links](Links.md) |
+| Link Cache | For a Link library, whether its played links are kept in the link cache |
+| Always Keep | For a Link library, the shows and films that are full copies instead of links |
+| Library Filter | **Allow All**, or a **Whitelist** or **Blacklist** of files, collections, and playlists. It applies to content, history, and metadata. See [Content](Content.md#collection-syncing) |
+| Negotiate History | For a Sync server, while history sync is on, whether merged watch history is written back to that server. See [History](History.md) |
+
+Below the cards, **Permanent Copies** lists the full copies held in that server's Link libraries and why each is a copy. **Turn Back Into Links** makes the selected copies links again: the link is written, then the copy moves into the link cache, or is removed when the cache is off or full. The source must still have the file. A copy covered by an Always Keep pick stays a copy until the pick is removed.
 
 ## Settings
 
@@ -49,9 +73,10 @@ A standard user's key works in every direction, limited to what that user can se
 
 | Section | What it holds |
 | :--- | :--- |
+| Bandwidth | Every speed limit, in Mbps, where 0 is no limit: **Downloads**, shared by every download to this server, and a **Streams to** row for each server allowed to link. Each has a **Normal** and a **Scheduled** speed. **Scheduled Speed** uses the second during the set hours, in server time, where equal hours run all day |
 | Processing | How long changes wait before they are sent, retries, parallelism, and how often a full scan runs |
 | Whitelist | Who may call this server's sync endpoints. Administrators and API keys calling from an enabled server on the Servers tab always may. Add users with the locations they may call from |
-| Synchronization | One section per sync type, each with a table of what a standard user and an administrator can do |
+| Content, History, Metadata, People, Playlists, Users | One section per sync type, each with a table of what a standard user and an administrator can do. Options that do not apply are hidden |
 | Troubleshooting | Table resets, which forget tracking but never touch media |
 
 !!! note "Updating from before 12.2.7.0"

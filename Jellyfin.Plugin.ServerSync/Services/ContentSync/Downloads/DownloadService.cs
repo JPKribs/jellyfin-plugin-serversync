@@ -637,7 +637,7 @@ public class DownloadService
         if (totalLength.HasValue)
         {
             most = Math.Max(0, totalLength.Value - offset);
-            if (totalLength.Value > item.SourceSize + Math.Max(0, config.SizeMatchToleranceBytes)
+            if (totalLength.Value > item.SourceSize
                 && !DiskSpaceService.HasSufficientSpaceForFile(item.LocalPath, totalLength.Value, config.MinimumFreeDiskSpaceGb))
             {
                 throw new InvalidOperationException(

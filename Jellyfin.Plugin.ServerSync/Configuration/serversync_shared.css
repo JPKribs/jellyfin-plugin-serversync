@@ -55,6 +55,8 @@
 
 /* ===== Layout Utility Classes ===== */
 .jpk-collapsible-actions { border-top: none; padding-top: 0; }
+/* Base 2026.11.13.2 ships this arrow at 1.4em; this keeps its earlier size until Base is fixed. */
+.jpk-collapsible-icon { font-size: 0.8em; }
 
 .modal-relative { position: relative; }
 
@@ -501,3 +503,22 @@
         display: none;
     }
 }
+
+#mainStatusRow .jpk-card.hidden { display: none; }
+
+/* Bandwidth: a row per direction, with a normal and a scheduled speed. The scheduled column is
+   hidden while scheduling is off. */
+.ssBandwidth .ssFormRow { grid-template-columns: 1fr 11em 11em; }
+.ssBandwidth.ssNoSchedule .ssScheduleCell { visibility: hidden; }
+@media (max-width: 640px) {
+    .ssBandwidth .ssFormRow { grid-template-columns: 1fr 8.5em 8.5em; }
+}
+
+/* The pool map on the Servers tab: a web with this server in the middle. */
+.ssPoolMap { margin: 0.5em 0 1.25em; }
+.ssPoolMap svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.ssPoolMap .ssPoolName { font-size: 12px; fill: #e6e6e6; }
+.ssPoolMap .ssPoolSelf { font-size: 12px; font-weight: 600; fill: #fff; text-anchor: middle; }
+.ssPoolLegend { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4em 1.2em; margin-top: 0.6em; font-size: 0.8em; color: var(--jpk-gray-fg, #999); }
+.ssPoolLegend span { display: inline-flex; align-items: center; gap: 0.4em; }
+.ssPoolLegend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }

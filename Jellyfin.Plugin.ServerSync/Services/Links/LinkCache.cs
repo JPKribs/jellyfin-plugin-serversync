@@ -5,7 +5,9 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -18,7 +20,10 @@ public enum CacheReason
     Played = 0,
 
     /// <summary>It is an episode ahead of the one a user is watching.</summary>
-    Ahead = 1
+    Ahead = 1,
+
+    /// <summary>It was a kept copy, moved here when it went back to being a link.</summary>
+    Unkept = 2
 }
 
 /// <summary>One file in the link cache.</summary>
@@ -68,6 +73,9 @@ public sealed class LinkCache
     private const string IndexFile = "index.json";
 
     private readonly IPluginConfigurationManager _configManager;
+    private readonly ILibraryManager? _libraryManager;
+    private volatile LibraryRoots? _libraryRoots;
+    private bool _warnedInsideLibrary;
     private readonly string _defaultRoot;
     private readonly ILogger<LinkCache> _logger;
     private readonly Func<DateTime> _now;
@@ -80,9 +88,10 @@ public sealed class LinkCache
     // Counts every folder emptied, by any caller, so an index held in memory is read again afterwards.
     private static int _wipes;
 
-    public LinkCache(IPluginConfigurationManager configManager, IApplicationPaths paths, ILogger<LinkCache> logger)
+    public LinkCache(IPluginConfigurationManager configManager, IApplicationPaths paths, ILogger<LinkCache> logger, ILibraryManager? libraryManager = null)
         : this(configManager, Path.Combine((paths ?? throw new ArgumentNullException(nameof(paths))).CachePath, DefaultFolder), logger, () => DateTime.UtcNow)
     {
+        _libraryManager = libraryManager;
     }
 
     /// <summary>Initializes a new instance of the <see cref="LinkCache"/> class, for tests.</summary>
@@ -98,7 +107,61 @@ public sealed class LinkCache
     public bool Enabled => _configManager.Configuration.LinkCacheSizeGb > 0;
 
     /// <summary>Gets the folder the cache keeps its files in.</summary>
-    public string Root => RootFor(_configManager.Configuration.LinkCachePath, _defaultRoot);
+    public string Root
+    {
+        get
+        {
+            var root = RootFor(_configManager.Configuration.LinkCachePath, _defaultRoot);
+            return root == _defaultRoot || !InsideALibrary(root) ? root : _defaultRoot;
+        }
+    }
+
+    // A cache folder inside a library would have its files scanned in as items, and a peer could then
+    // stream or copy them like any file here. They are another server's files, so such a folder is not
+    // used and the cache stays under Jellyfin's own cache. The library folders are read at most once a
+    // minute.
+    private bool InsideALibrary(string root)
+    {
+        if (_libraryManager is null)
+        {
+            return false;
+        }
+
+        var now = _now();
+        var known = _libraryRoots;
+        if (known is null || now - known.ReadAt > TimeSpan.FromMinutes(1))
+        {
+            try
+            {
+                var roots = _libraryManager.GetVirtualFolders()
+                    .SelectMany(folder => folder.Locations ?? Array.Empty<string>())
+                    .Where(location => !string.IsNullOrWhiteSpace(location))
+                    .ToList();
+                known = new LibraryRoots(roots, now);
+                _libraryRoots = known;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger.LogDebug(ex, "Could not read the library folders to check the cache location");
+                return false;
+            }
+        }
+
+        if (PathContainment.IsUnderAny(root, known.Roots))
+        {
+            if (!_warnedInsideLibrary)
+            {
+                _warnedInsideLibrary = true;
+                _logger.LogWarning("The link cache location {Root} is inside a library, so the cache uses {Default} instead. Cached files are another server's and must not become items here", root, _defaultRoot);
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private sealed record LibraryRoots(List<string> Roots, DateTime ReadAt);
 
     /// <summary>
     /// The folder a cache uses for a location setting. A location the administrator chose gets a folder
@@ -292,6 +355,47 @@ public sealed class LinkCache
 
             return false;
         }
+    }
+
+    /// <summary>
+    /// Takes a kept copy into the cache when it goes back to being a link, so it still plays from this
+    /// server until the cache needs the room. False, with the file left where it was, when the cache is
+    /// off, the file is larger than the whole cache, room cannot be made, or the move fails.
+    /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="file">The copy.</param>
+    /// <param name="size">The size the source reports for the file.</param>
+    /// <returns>True when the file is now in the cache.</returns>
+    public bool Adopt(string linkId, string file, long size)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(file);
+        if (!Enabled || size <= 0 || size > _configManager.Configuration.GetLinkCacheSizeBytes()
+            || !File.Exists(file) || new FileInfo(file).Length != size
+            || !MakeRoom(size, new HashSet<string>(StringComparer.Ordinal) { linkId }))
+        {
+            return false;
+        }
+
+        // Moved under the cache's download name first, which between two disks is a copy, so a move cut
+        // short is cleared as an unfinished download and the copy is still where it was.
+        var extension = Path.GetExtension(file);
+        var part = PartPathFor(linkId, extension);
+        try
+        {
+            File.Move(file, part, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Could not move {File} into the link cache: {Reason}", Path.GetFileName(file), ex.Message);
+            if (File.Exists(file))
+            {
+                Delete(part);
+            }
+
+            return false;
+        }
+
+        return Complete(linkId, extension, size, CacheReason.Unkept);
     }
 
     /// <summary>Drops a link's file from the cache.</summary>

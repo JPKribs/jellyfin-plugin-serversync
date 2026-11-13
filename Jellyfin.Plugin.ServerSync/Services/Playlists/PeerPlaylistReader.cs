@@ -9,6 +9,8 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;
 using Microsoft.Extensions.DependencyInjection;
 
+using Jellyfin.Plugin.ServerSync.Services.Links;
+
 namespace Jellyfin.Plugin.ServerSync.Services.Playlists;
 
 [PluginService(ServiceLifetime.Singleton)]
@@ -16,11 +18,13 @@ public sealed class PeerPlaylistReader
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
+    private readonly ILinkRegistry? _links;
 
-    public PeerPlaylistReader(ILibraryManager libraryManager, IUserManager userManager)
+    public PeerPlaylistReader(ILibraryManager libraryManager, IUserManager userManager, ILinkRegistry? links = null)
     {
         _libraryManager = libraryManager;
         _userManager = userManager;
+        _links = links;
     }
 
     public PeerPlaylistsResponse ReadAll(Guid? onlyId = null, Guid? scopedUserId = null, IReadOnlyCollection<Guid>? owners = null)
@@ -56,11 +60,16 @@ public sealed class PeerPlaylistReader
                     .ToList(),
                 Entries = playlist.GetManageableItems()
                     .Where(e => scoped is null || e.Item2.IsVisible(scoped))
-                    .Select(e => new PeerPlaylistEntry { ItemId = e.Item2.Id.ToString("N", CultureInfo.InvariantCulture), Path = e.Item2.Path })
+                    .Select(e => new PeerPlaylistEntry { ItemId = e.Item2.Id.ToString("N", CultureInfo.InvariantCulture), Path = SentPath(e.Item2.Path) })
                     .ToList()
             });
         }
 
         return response;
     }
+
+    // A link goes out under the path of the file it stands in for, as metadata and history do, so a peer
+    // matches its own copy of the film and never this server's .strm.
+    private string SentPath(string path)
+        => _links is null || string.IsNullOrEmpty(path) ? path : LinkPaths.RowPathFor(path, _links);
 }

@@ -9,12 +9,25 @@ export default function (view) {
     // TAB NAVIGATION (local copy for synchronous access)
     // ============================================
 
+    // The Storage tab shows only while content sync is on. The last known answer is kept per browser
+    // and refreshed whenever the shared module loads or saves the config (see serversync_shared.js).
+    // An unknown answer shows the tab.
+    function storageTabShown() {
+        try {
+            return window.localStorage.getItem('serversync.storageTab') !== '0';
+        } catch (e) {
+            return true;
+        }
+    }
+
     function getTabs() {
-        return [
+        var tabs = [
             { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
-            { href: 'configurationpage?name=serversync_servers', name: 'Servers' },
-            { href: 'configurationpage?name=serversync_settings', name: 'Settings' }
+            { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
         ];
+        if (storageTabShown()) tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
+        tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
+        return tabs;
     }
 
     // ============================================
@@ -22,9 +35,6 @@ export default function (view) {
     // ============================================
 
     var ServerSyncShared = null;
-    var createPaginatedTable = null;
-    var _filterTableSeq = 0;
-    var _filterThumbSeq = 0;
     var createSortableCardList = null;
     var createChoiceGroup = null;
     var confirmDialog = null;
@@ -36,7 +46,11 @@ export default function (view) {
     // Relative specifier so a server hosted under a base URL still resolves it.
     var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
-        createPaginatedTable = shared.createPaginatedTable;
+        // A config load that turns content sync on or off adds or drops the Storage tab. A page the
+        // dashboard keeps hidden leaves the tabs to the page on screen.
+        ServerSyncShared.onTabsChanged = function () {
+            if (!view.classList.contains('hide')) LibraryMenu.setTabs('serversync', 1, getTabs);
+        };
         createSortableCardList = shared.createSortableCardList;
         createChoiceGroup = shared.createChoiceGroup;
         confirmDialog = shared.confirmDialog;
@@ -130,7 +144,7 @@ export default function (view) {
     }
 
     function modeBadgeClass(mode) {
-        return mode === 'Sync' ? 'purple' : mode === 'Push' ? 'blue' : 'green';
+        return mode === 'Sync' ? 'purple' : mode === 'Push' ? 'blue' : mode === 'Stream' ? 'orange' : 'green';
     }
 
     function cardSpec(server) {
@@ -172,11 +186,180 @@ export default function (view) {
     function renderServerList() {
         ensureCards().setItems(servers);
         setVisible('serverEmpty', servers.length === 0);
+        renderPoolMap();
+    }
+
+    // ============================================
+    // POOL MAP
+    // ============================================
+
+    var POOL_COLORS = { ok: '#5cb85c', noPlugin: '#f0ad4e', down: '#d9534f', disabled: '#999999', pending: '#555555' };
+
+    function modeOf(server) {
+        var mode = server.Mode;
+        return mode === 1 ? 'Push' : mode === 2 ? 'Sync' : mode === 3 ? 'Stream' : (typeof mode === 'string' ? mode : 'Pull');
+    }
+
+    // A server's colour: green runs Server Sync and answers, orange answers without it, red does not
+    // answer, grey is disabled. One still being checked is drawn dim until the answer comes.
+    function poolState(server) {
+        if (server.IsEnabled === false) return 'disabled';
+        // A server with no address or key cannot be reached, so it is shown as unreachable.
+        if (!server.Url || !server.ApiKey) return 'down';
+        var health = serverHealth[server.Key];
+        var plugin = peerPlugin[server.Key];
+        if (health === 'bad' || plugin === 'unreachable') return 'down';
+        if (plugin === 'no') return 'noPlugin';
+        if (plugin === 'yes') return 'ok';
+        return 'pending';
+    }
+
+    // Asks each server once whether it runs Server Sync, so the map can colour it.
+    function checkPoolPlugins() {
+        servers.forEach(function (server) {
+            if (!server.Url || !server.ApiKey || server.IsEnabled === false || peerPlugin[server.Key] !== undefined) return;
+            var key = server.Key;
+            var request = requestFor(server);
+            request.Mode = modeOf(server);
+            peerPlugin[key] = 'checking';
+            apiRequest('Hints/CheckPeer', 'POST', request).then(function (result) {
+                peerPlugin[key] = result && result.Reachable ? (result.HasPlugin ? 'yes' : 'no') : 'unreachable';
+            }).catch(function () {
+                peerPlugin[key] = 'unreachable';
+            }).then(renderPoolMap);
+        });
+    }
+
+    function hasLinkLibraries(server) {
+        return (server.LibraryMappings || []).some(function (m) { return m.IsEnabled !== false && (m.StorageMode === 'Link' || m.StorageMode === 1); });
+    }
+
+    // This server in the middle, and one box per relationship around it, each listing its servers with
+    // their status. The arrows say the relationship, so the boxes carry no label: Pull points here,
+    // Push points out, Sync both ways, Stream is dashed toward here, since those servers stream from
+    // this one, and a dashed line out marks the servers whose files this one streams.
+    var POOL_GROUPS = [
+        { key: 'Sync', toward: 'both' },
+        { key: 'Push', toward: 'there' },
+        { key: 'Links', toward: 'there', dashed: true },
+        { key: 'Stream', toward: 'here', dashed: true },
+        { key: 'Pull', toward: 'here' }
+    ];
+
+    // This server's own name, for the middle of the map, read once.
+    var localServerName = '';
+    var localNameAsked = false;
+
+    function askLocalServerName() {
+        if (localNameAsked) return;
+        localNameAsked = true;
+        Promise.resolve(ApiClient.getSystemInfo()).then(function (info) {
+            localServerName = (info && info.ServerName) || '';
+            renderPoolMap();
+        }).catch(function () { /* the map keeps its fallback */ });
+    }
+
+    function renderPoolMap() {
+        askLocalServerName();
+        var host = getEl('poolMap');
+        if (!host) return;
+        if (!servers.length) {
+            host.innerHTML = '';
+            setVisible('poolMap', false);
+            return;
+        }
+        setVisible('poolMap', true);
+
+        var members = {};
+        servers.forEach(function (server) {
+            var mode = modeOf(server);
+            (members[mode] = members[mode] || []).push(server);
+            if (mode !== 'Stream' && hasLinkLibraries(server)) (members.Links = members.Links || []).push(server);
+        });
+        var groups = POOL_GROUPS.filter(function (g) { return members[g.key] && members[g.key].length; });
+
+        var rowH = 19;
+        var maxRows = 8;
+        var hereName = localServerName || 'This Server';
+        if (hereName.length > 16) hereName = hereName.substring(0, 15) + '\u2026';
+        var hereR = Math.max(30, hereName.length * 3.6 + 12);
+        var ring = (groups.length <= 2 ? 150 : 175) + hereR - 30;
+        var parts = ['<defs><marker id="poolArrowHead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#9aa4ab"/></marker></defs>'];
+        var bounds = [[-hereR, -hereR], [hereR, hereR]];
+        var labels = [];
+        var boxes = [];
+
+        groups.forEach(function (group, gi) {
+            var list = members[group.key];
+            var columns = Math.ceil(list.length / maxRows);
+            var rows = Math.min(list.length, maxRows);
+            var longest = Math.max.apply(null, list.map(function (s) { return Math.min(serverTitle(s).length, 18); }));
+            var colW = longest * 6.9 + 30;
+            var w = columns * colW + 8;
+            var h = rows * rowH + 14;
+            // Two boxes sit left and right; more spread round the circle from the top.
+            var angle = groups.length === 1 ? 0 : groups.length === 2 ? (gi === 0 ? Math.PI : 0) : -Math.PI / 2 + 2 * Math.PI * gi / groups.length;
+            var ux = Math.cos(angle);
+            var uy = Math.sin(angle);
+            var cx = ux * (ring + w / 2 * Math.abs(ux) * 0.6);
+            var cy = uy * (ring * 0.72 + h / 2 * Math.abs(uy) * 0.6);
+            var x0 = cx - w / 2;
+            var y0 = cy - h / 2;
+
+            // The line meets the box's edge where the spoke enters it.
+            var dx = cx;
+            var dy = cy;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var vx = dx / len;
+            var vy = dy / len;
+            var tBox = Math.min(Math.abs(vx) > 1e-6 ? (w / 2) / Math.abs(vx) : Infinity, Math.abs(vy) > 1e-6 ? (h / 2) / Math.abs(vy) : Infinity);
+            var sx = vx * (hereR + 3);
+            var sy = vy * (hereR + 3);
+            var ex = cx - vx * (tBox + 3);
+            var ey = cy - vy * (tBox + 3);
+            var here = group.toward === 'here' || group.toward === 'both';
+            var there = group.toward === 'there' || group.toward === 'both';
+            parts.push('<line x1="' + sx.toFixed(1) + '" y1="' + sy.toFixed(1) + '" x2="' + ex.toFixed(1) + '" y2="' + ey.toFixed(1) + '" stroke="#9aa4ab" stroke-width="1.8"' +
+                (group.dashed ? ' stroke-dasharray="5 4"' : '') + (here ? ' marker-start="url(#poolArrowHead)"' : '') + (there ? ' marker-end="url(#poolArrowHead)"' : '') + ' />');
+
+            var box = '<rect x="' + x0.toFixed(1) + '" y="' + y0.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="8" fill="#1c1c1c" stroke="#444" stroke-width="1" />';
+            list.forEach(function (server, si) {
+                var col = Math.floor(si / maxRows);
+                var row = si % maxRows;
+                var px = x0 + 4 + col * colW + 12;
+                var py = y0 + 7 + row * rowH + rowH / 2;
+                var state = poolState(server);
+                var name = serverTitle(server);
+                if (name.length > 18) name = name.substring(0, 17) + '\u2026';
+                box += '<g><title>' + escapeHtml(serverTitle(server) + ', ' + modeOf(server)) + '</title>' +
+                    '<circle cx="' + px.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="4" fill="' + POOL_COLORS[state] + '" />' +
+                    '<text class="ssPoolName" x="' + (px + 10).toFixed(1) + '" y="' + py.toFixed(1) + '" dominant-baseline="middle">' + escapeHtml(name) + '</text></g>';
+                if (group.key !== 'Links') labels.push(serverTitle(server) + ' ' + modeOf(server));
+            });
+            boxes.push(box);
+            bounds.push([x0, y0], [x0 + w, y0 + h]);
+        });
+
+        parts = parts.concat(boxes);
+        parts.push('<circle cx="0" cy="0" r="' + hereR + '" fill="#52b5db" fill-opacity="0.15" stroke="#52b5db" stroke-width="1.6"><title>' + escapeHtml((localServerName || 'This server') + ', this server') + '</title></circle>');
+        parts.push('<text class="ssPoolSelf" x="0" y="4">' + escapeHtml(hereName) + '</text>');
+
+        var minX = Math.min.apply(null, bounds.map(function (b) { return b[0]; })) - 6;
+        var minY = Math.min.apply(null, bounds.map(function (b) { return b[1]; })) - 6;
+        var maxX = Math.max.apply(null, bounds.map(function (b) { return b[0]; })) + 6;
+        var maxY = Math.max.apply(null, bounds.map(function (b) { return b[1]; })) + 6;
+        var legendDot = function (state, text) { return '<span><i style="background:' + POOL_COLORS[state] + '"></i>' + text + '</span>'; };
+        host.setAttribute('aria-label', 'Servers this one is set up with: ' + labels.join(', '));
+        host.innerHTML = '<svg viewBox="' + minX.toFixed(0) + ' ' + minY.toFixed(0) + ' ' + (maxX - minX).toFixed(0) + ' ' + (maxY - minY).toFixed(0) + '" style="max-width:' + Math.round(maxX - minX) + 'px" xmlns="http://www.w3.org/2000/svg">' + parts.join('') + '</svg>' +
+            '<div class="ssPoolLegend">' +
+                legendDot('ok', 'Runs Server Sync') + legendDot('noPlugin', 'No Server Sync') + legendDot('down', 'Unreachable') + legendDot('disabled', 'Disabled') +
+            '</div>';
     }
 
     // Updates each card's dot in place. A full render rebuilds the cards and moves the open editor,
     // which takes the cursor out of whatever field the operator is typing in.
     function updateHealthDots() {
+        renderPoolMap();
         view.querySelectorAll('#serverList .jpk-card-item').forEach(function (card) {
             var server = servers[parseInt(card.getAttribute('data-index'), 10)];
             var dot = card.querySelector('.jpk-card-item-dot');
@@ -333,7 +516,7 @@ export default function (view) {
     }
 
     function reflectModeLimits(server) {
-        setVisible('modeLimited', isStandardUser(server) && getMode() !== 'Pull');
+        setVisible('modeLimited', isStandardUser(server) && getMode() !== 'Pull' && getMode() !== 'Stream');
     }
 
     function reflectUserLimits(server) {
@@ -398,6 +581,8 @@ export default function (view) {
     // and puts the placeholder back when the address returns to it.
     function reflectAddressChange() {
         var server = selectedServer();
+        // A new address may be another server, so whether it runs Server Sync is asked again.
+        if (server) delete peerPlugin[server.Key];
         var moved = savedSecretLeftBehind(server);
         var keyField = getEl('txtSourceServerApiKey');
         if (keyField) {
@@ -426,6 +611,7 @@ export default function (view) {
 
     function reflectMode() {
         setVisible('peerCheckArea', true);
+        reflectStream();
         reflectModeLimits(selectedServer());
         var statusEl = getEl('peerCheckStatus');
         if (statusEl) statusEl.textContent = '';
@@ -446,6 +632,8 @@ export default function (view) {
         var request = requestFor(server);
         request.Mode = getMode();
         ServerSyncShared.apiRequest('Hints/CheckPeer', 'POST', request).then(function (result) {
+            peerPlugin[key] = result && result.Reachable ? (result.HasPlugin ? 'yes' : 'no') : 'unreachable';
+            if (stillSelected(key)) reflectLinkingPlugin();
             if (result && result.Reachable) {
                 serverHealth[key] = 'ok';
                 var current = serverByKey(key);
@@ -483,13 +671,11 @@ export default function (view) {
         setChecked('chkAllowPrivateNetwork', server.AllowPrivateNetwork !== false);
         setChecked('chkAllowLinking', server.AllowLinking === true);
         setValue('txtLinkMaxStreams', String(server.LinkMaxStreams || 0));
-        setValue('txtLinkMaxStreamsPerUser', String(server.LinkMaxStreamsPerUser || 0));
-        setValue('txtLinkStreamSpeed', String(server.LinkStreamSpeedMbps || 0));
-        setValue('txtLinkScheduledStreamSpeed', String(server.LinkScheduledStreamSpeedMbps || 0));
         setChecked('chkLinkCountOwnSessions', server.LinkCountOwnSessions === true);
         setChecked('chkLinkHonorBitrateLimit', server.LinkHonorBitrateLimit === true);
         fillFallbackUsers(server.LinkFallbackUserId || '');
         reflectLinking();
+        clampUserStreams();
         setValue('txtSourceServerApiKey', server.ApiKey ? ServerSyncShared.SECRET_KEPT : '');
         setValue('txtAuthUsername', server.AuthenticatedUser || '');
         setValue('txtAuthPassword', '');
@@ -554,14 +740,10 @@ export default function (view) {
         });
     }
 
-    // Empties a mapping container, stopping any filter table observers its rows hold, and shows a note
-    // in their place when one is given.
+    // Empties a mapping container and shows a note in place of its rows when one is given.
     function clearMappingContainer(containerId, note) {
         var container = getEl(containerId);
         if (!container) return;
-        container.querySelectorAll('.libraryMapping').forEach(function (row) {
-            if (row._disconnectFilterTable) row._disconnectFilterTable();
-        });
         container.innerHTML = '';
         if (note) {
             var noteEl = document.createElement('div');
@@ -592,10 +774,8 @@ export default function (view) {
         server.ExternalUrl = getValue('txtSourceServerExternalUrl', '').trim();
         server.AllowPrivateNetwork = getChecked('chkAllowPrivateNetwork');
         server.AllowLinking = getChecked('chkAllowLinking');
+        clampUserStreams();
         server.LinkMaxStreams = Math.max(0, parseInt(getValue('txtLinkMaxStreams', '0'), 10) || 0);
-        server.LinkMaxStreamsPerUser = Math.max(0, parseInt(getValue('txtLinkMaxStreamsPerUser', '0'), 10) || 0);
-        server.LinkStreamSpeedMbps = Math.max(0, parseInt(getValue('txtLinkStreamSpeed', '0'), 10) || 0);
-        server.LinkScheduledStreamSpeedMbps = Math.max(0, parseInt(getValue('txtLinkScheduledStreamSpeed', '0'), 10) || 0);
         server.LinkCountOwnSessions = getChecked('chkLinkCountOwnSessions');
         server.LinkHonorBitrateLimit = getChecked('chkLinkHonorBitrateLimit');
         server.LinkFallbackUserId = getValue('selLinkFallbackUser', '');
@@ -729,6 +909,7 @@ export default function (view) {
     function saveServers(successMessage, failureMessage, list) {
         var snapshot = JSON.parse(JSON.stringify(list || servers));
         return saveSection(function (config) {
+            keepStoredStorageFields(config.Servers, snapshot);
             config.Servers = snapshot;
         }, successMessage || 'Servers saved', failureMessage || 'Failed to save servers').then(function (saved) {
             // The saved list becomes the page's list. Its entries are fresh copies, which is why answers
@@ -989,6 +1170,45 @@ export default function (view) {
         });
     }
 
+    // The fields of a library mapping edited on the Storage tab. This page never shows them, and a save
+    // here carries them through from the stored mapping so it never drops them.
+    var STORAGE_FIELDS = ['StorageMode', 'ExcludeFromLinkCache', 'PermanentItems', 'FilterMode', 'FilteredItems', 'NegotiateHistory'];
+
+    function sameId(a, b) {
+        return !!a && !!b && String(a).replace(/-/g, '').toLowerCase() === String(b).replace(/-/g, '').toLowerCase();
+    }
+
+    // The stored mapping a mapping on screen stands for: the same source and local library, else the
+    // same source library alone.
+    function storedMappingFor(storedMappings, mapping) {
+        var list = storedMappings || [];
+        return list.find(function (m) { return sameId(m.SourceLibraryId, mapping.SourceLibraryId) && sameId(m.LocalLibraryId, mapping.LocalLibraryId); })
+            || list.find(function (m) { return sameId(m.SourceLibraryId, mapping.SourceLibraryId); })
+            || null;
+    }
+
+    function copyStorageFields(from, to) {
+        STORAGE_FIELDS.forEach(function (field) {
+            if (from[field] !== undefined) to[field] = from[field];
+        });
+    }
+
+    // Puts the Storage tab's fields of the stored config onto each mapping about to be saved, so a
+    // change made on the Storage tab since this page loaded survives a save here.
+    function keepStoredStorageFields(storedServers, list) {
+        (list || []).forEach(function (server) {
+            var stored = (storedServers || []).find(function (s) { return s.Key === server.Key; });
+            if (!stored) return;
+            // A server's stream speeds are set under Settings > Bandwidth, so the stored ones are kept.
+            if (stored.LinkStreamSpeedMbps !== undefined) server.LinkStreamSpeedMbps = stored.LinkStreamSpeedMbps;
+            if (stored.LinkScheduledStreamSpeedMbps !== undefined) server.LinkScheduledStreamSpeedMbps = stored.LinkScheduledStreamSpeedMbps;
+            (server.LibraryMappings || []).forEach(function (mapping) {
+                var match = storedMappingFor(stored.LibraryMappings, mapping);
+                if (match) copyStorageFields(match, mapping);
+            });
+        });
+    }
+
     function addLibraryMappingRow(mapping) {
         mapping = mapping || { IsEnabled: true };
         var container = view.querySelector('#libraryMappingsContainer');
@@ -996,8 +1216,6 @@ export default function (view) {
 
         var div = document.createElement('div');
         div.className = 'mapping libraryMapping';
-        var filterTableId = 'filterTable_' + (++_filterTableSeq);
-        var permanentTableId = 'permanentTable_' + _filterTableSeq;
         div.innerHTML =
             '<div class="mappingHeader">' +
                 '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="mappingEnabled" ' + (mapping.IsEnabled ? 'checked' : '') + ' /><span class="checkboxLabel">Enabled</span></label>' +
@@ -1012,222 +1230,12 @@ export default function (view) {
                     '<div class="inputContainer"><label class="inputLabel">Local Library</label><select is="emby-select" class="localLibrarySelect"></select></div>' +
                     '<div class="inputContainer"><label class="inputLabel">Local Root Path</label><input is="emby-input" type="text" class="localRootPath" value="' + escapeHtml(mapping.LocalRootPath || '') + '" /></div>' +
                 '</div>' +
-            '</div>' +
-            '<div class="inputContainer">' +
-                '<label class="inputLabel">Storage</label>' +
-                '<select is="emby-select" class="storageModeSelect">' +
-                    '<option value="Copy">Copy</option>' +
-                    '<option value="Link">Link</option>' +
-                '</select>' +
-                '<div class="fieldDescription">Copy downloads each file. Link writes a small .strm that streams from this server, which must run Server Sync and allow linking for you. Copies already here stay copies. Switching back to Copy turns links into copies, with the same approval as new files.</div>' +
-            '</div>' +
-            '<div class="linkCacheSection" style="display:none;">' +
-                '<h3 class="jpk-subsection-title">Link Cache</h3>' +
-                '<div class="checkboxContainer checkboxContainer-withDescription">' +
-                    '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="cacheLinks" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">Cache This Library\'s Links</span></label>' +
-                    '<div class="fieldDescription checkboxFieldDescription">Keep full local copies of links that are played, and of episodes ahead, in the link cache. The cache is switched on and sized under Content in Settings.</div>' +
-                '</div>' +
-            '</div>' +
-            '<div class="permanentSection" style="display:none;">' +
-                '<h3 class="jpk-subsection-title">Always Keep</h3>' +
-                '<div class="fieldDescription mb-md">Shows and films picked here are full copies in this library, synced like any copy, instead of links. Every version of a picked film is copied. Removing a pick leaves its copies here.</div>' +
-                '<div class="filterTableContainer" id="' + permanentTableId + '"></div>' +
-            '</div>' +
-            '<div class="filterSection">' +
-                '<h3 class="jpk-subsection-title">Library Filter</h3>' +
-                '<div class="filterHeader">' +
-                    '<label>Filter Mode</label>' +
-                    '<select is="emby-select" class="filterModeSelect">' +
-                        '<option value="AllowAll">Allow All</option>' +
-                        '<option value="Whitelist">Whitelist</option>' +
-                        '<option value="Blacklist">Blacklist</option>' +
-                    '</select>' +
-                '</div>' +
-                '<div class="filterBrowserContainer" style="display:none;">' +
-                    '<div class="filterBrowseToggle">' +
-                        '<button is="emby-button" type="button" class="raised button-submit filterBrowseItems" data-browse="items">Files</button>' +
-                        '<button is="emby-button" type="button" class="raised filterBrowseCollections" data-browse="collections">Collections</button>' +
-                        '<button is="emby-button" type="button" class="raised filterBrowsePlaylists" data-browse="playlists">Playlists</button>' +
-                    '</div>' +
-                    '<div class="filterTableContainer" id="' + filterTableId + '"></div>' +
-                '</div>' +
             '</div>';
 
         container.appendChild(div);
 
-        // --- Filter Mode + Item Picker (base paginated table) ---
-        var filterModeSelect = div.querySelector('.filterModeSelect');
-        var filterBrowserContainer = div.querySelector('.filterBrowserContainer');
-
-        var selectedFilterItems = {};
-        var filterCurrentLibraryId = mapping.SourceLibraryId || '';
-        var filterTable = null;
-        var filterBrowseMode = 'items';
-
-        (mapping.FilteredItems || []).forEach(function(fi) {
-            if (fi.ItemId) {
-                selectedFilterItems[fi.ItemId] = { ItemId: fi.ItemId, Name: fi.Name || '', Year: fi.Year, Path: fi.Path || '', Type: fi.Type || null };
-            }
-        });
-
-        // Renders one source item (thumb + info + selection checkmark) into a base table cell.
-        function renderPickerItem(item, selected) {
-            var sel = !!selected[item.Id];
-            var thumbHtml;
-            if (item.Id) {
-                var thumbId = 'ss-filter-thumb-' + (++_filterThumbSeq);
-                var current = selectedServer();
-                ServerSyncShared.scheduleProxyImage(thumbId, item.Id, false, 120, current ? current.Key : '');
-                thumbHtml = '<img id="' + thumbId + '" class="filterItemThumb" />' +
-                    '<div class="filterItemThumbPlaceholder" style="display:none"><span class="material-icons">movie</span></div>';
-            } else {
-                thumbHtml = '<div class="filterItemThumbPlaceholder"><span class="material-icons">movie</span></div>';
-            }
-            var metaParts = [];
-            if (item.Year) metaParts.push(item.Year);
-            if (item.Type) metaParts.push(item.Type);
-            var overviewHtml = '';
-            if (item.Overview) {
-                var snippet = item.Overview.substring(0, 120);
-                if (item.Overview.length > 120) snippet += '...';
-                overviewHtml = '<div class="filterItemOverview">' + escapeHtml(snippet) + '</div>';
-            }
-            return '<div class="filterItem' + (sel ? ' selected' : '') + '">' +
-                thumbHtml +
-                '<div class="filterItemInfo">' +
-                    '<div class="filterItemName">' + escapeHtml(item.Name || '') + '</div>' +
-                    '<div class="filterItemMeta">' + escapeHtml(metaParts.join(' \u2022 ')) + '</div>' +
-                    overviewHtml +
-                '</div>' +
-                '<div class="filterItemCheck"><span class="material-icons">' + (sel ? 'check_box' : 'check_box_outline_blank') + '</span></div>' +
-            '</div>';
-        }
-
-        // Toggles whitelist/blacklist membership. Selection lives in selectedFilterItems so it
-        // persists across searches and pagination (the custom render reads it on every load).
-        function onPickerItemClick(item, selected, pickerContainer) {
-            if (selected[item.Id]) {
-                delete selected[item.Id];
-            } else {
-                selected[item.Id] = { ItemId: item.Id, Name: item.Name || '', Year: item.Year, Path: item.Path || '', Type: item.Type || null };
-            }
-            var sel = !!selected[item.Id];
-            var rowEl = pickerContainer.querySelector('.jpk-table-row[data-id="' + item.Id + '"]');
-            if (rowEl) {
-                var wrap = rowEl.querySelector('.filterItem');
-                if (wrap) wrap.classList.toggle('selected', sel);
-                var icon = rowEl.querySelector('.filterItemCheck .material-icons');
-                if (icon) icon.textContent = sel ? 'check_box' : 'check_box_outline_blank';
-            }
-        }
-
-        function renderFilterItem(item) { return renderPickerItem(item, selectedFilterItems); }
-        function onFilterItemClick(item) { onPickerItemClick(item, selectedFilterItems, filterBrowserContainer); }
-
-        function buildFilterTable() {
-            if (!createPaginatedTable || !filterCurrentLibraryId) return;
-            if (!filterTable) {
-                filterTable = createPaginatedTable(view, ServerSyncShared, {
-                    containerId: filterTableId,
-                    endpoint: 'SourceLibraryItems',
-                    pagination: { pageSize: 50, loadMore: true },
-                    search: { enabled: true, placeholder: 'Search items...' },
-                    selection: { enabled: false, idKey: 'Id' },
-                    emptyState: { message: 'No items found' },
-                    filters: { buildParams: function() { var current = selectedServer(); return { libraryId: filterCurrentLibraryId, serverKey: current ? current.Key : '', collections: filterBrowseMode === 'collections', playlists: filterBrowseMode === 'playlists' }; } },
-                    columns: [{ key: 'Id', type: 'custom', render: renderFilterItem }],
-                    actions: { onRowClick: onFilterItemClick }
-                });
-            }
-            // Seed a (non-empty) filter value so the table sends libraryId via buildParams, then load.
-            filterTable.setFilterValue(filterCurrentLibraryId);
-            filterTable.reload();
-        }
-
-        function updateFilterVisibility() {
-            var show = (filterModeSelect.value !== 'AllowAll');
-            filterBrowserContainer.style.display = show ? '' : 'none';
-            if (show && filterCurrentLibraryId) {
-                buildFilterTable();
-            }
-        }
-
-        filterModeSelect.value = mapping.FilterMode || 'AllowAll';
-        var storageModeSelect = div.querySelector('.storageModeSelect');
-        if (storageModeSelect) storageModeSelect.value = mapping.StorageMode === 'Link' || mapping.StorageMode === 1 ? 'Link' : 'Copy';
-
-        // --- Link cache: whether this library's links are cached. Always Keep: the items copied instead of linked ---
-        var linkCacheSection = div.querySelector('.linkCacheSection');
-        var permanentSection = div.querySelector('.permanentSection');
-        var selectedPermanentItems = {};
-        var permanentTable = null;
-        (mapping.PermanentItems || []).forEach(function(pi) {
-            if (pi.ItemId) {
-                selectedPermanentItems[pi.ItemId] = { ItemId: pi.ItemId, Name: pi.Name || '', Year: pi.Year, Path: pi.Path || '', Type: pi.Type || null };
-            }
-        });
-
-        function buildPermanentTable() {
-            if (!createPaginatedTable || !filterCurrentLibraryId) return;
-            if (!permanentTable) {
-                permanentTable = createPaginatedTable(view, ServerSyncShared, {
-                    containerId: permanentTableId,
-                    endpoint: 'SourceLibraryItems',
-                    pagination: { pageSize: 50, loadMore: true },
-                    search: { enabled: true, placeholder: 'Search items...' },
-                    selection: { enabled: false, idKey: 'Id' },
-                    emptyState: { message: 'No items found' },
-                    filters: { buildParams: function() { var current = selectedServer(); return { libraryId: filterCurrentLibraryId, serverKey: current ? current.Key : '', collections: false, playlists: false }; } },
-                    columns: [{ key: 'Id', type: 'custom', render: function(item) { return renderPickerItem(item, selectedPermanentItems); } }],
-                    actions: { onRowClick: function(item) { onPickerItemClick(item, selectedPermanentItems, permanentSection); } }
-                });
-            }
-            permanentTable.setFilterValue(filterCurrentLibraryId);
-            permanentTable.reload();
-        }
-
-        // The cache and Always Keep only apply to links, so they show for a Link library.
-        function updateLinkCacheVisibility() {
-            var linked = storageModeSelect && storageModeSelect.value === 'Link';
-            linkCacheSection.style.display = linked ? '' : 'none';
-            permanentSection.style.display = linked ? '' : 'none';
-            if (linked && filterCurrentLibraryId) {
-                buildPermanentTable();
-            }
-        }
-        if (storageModeSelect) storageModeSelect.addEventListener('change', updateLinkCacheVisibility);
-        updateLinkCacheVisibility();
-        div._selectedPermanentItems = selectedPermanentItems;
-        filterModeSelect.addEventListener('change', updateFilterVisibility);
-
-        // Files / Collections / Playlists browse toggle. Collections
-        // and playlists are sync selectors: whitelisting one syncs its
-        // members (membership re-resolved every refresh), blacklisting one
-        // excludes them. button-submit is Jellyfin's accent (primary) button
-        // style. Unselected sides stay plain raised (secondary) buttons.
-        var browseButtons = div.querySelectorAll('.filterBrowseToggle > button');
-        function setBrowseMode(mode) {
-            filterBrowseMode = mode;
-            browseButtons.forEach(function (btn) {
-                btn.classList.toggle('button-submit', btn.dataset.browse === mode);
-            });
-            if (filterTable) {
-                filterTable.reload();
-            }
-        }
-        browseButtons.forEach(function (btn) {
-            btn.addEventListener('click', function () { setBrowseMode(btn.dataset.browse); });
-        });
-
-        updateFilterVisibility();
-
-        // Stored on the div so collectLibraryMappings can read them back.
-        div._filterModeSelect = filterModeSelect;
-        div._selectedFilterItems = selectedFilterItems;
-        div._disconnectFilterTable = function() {
-            if (filterTable && filterTable.disconnectObserver) filterTable.disconnectObserver();
-            if (permanentTable && permanentTable.disconnectObserver) permanentTable.disconnectObserver();
-        };
+        // The mapping as loaded. Its Storage tab fields go back out with the save.
+        div._storedMapping = mapping;
 
         var sourceSelect = div.querySelector('.sourceLibrarySelect');
         if (mapping.SourceLibraryId) sourceSelect.dataset.savedValue = mapping.SourceLibraryId;
@@ -1246,15 +1254,6 @@ export default function (view) {
             if (option && option.dataset.locations) {
                 var locations = JSON.parse(option.dataset.locations);
                 if (locations.length > 0) div.querySelector('.sourceRootPath').value = locations[0];
-            }
-            filterCurrentLibraryId = this.value;
-            selectedFilterItems = {};
-            div._selectedFilterItems = selectedFilterItems;
-            selectedPermanentItems = {};
-            div._selectedPermanentItems = selectedPermanentItems;
-            updateLinkCacheVisibility();
-            if (filterModeSelect.value !== 'AllowAll' && filterCurrentLibraryId) {
-                buildFilterTable();
             }
         });
 
@@ -1279,7 +1278,6 @@ export default function (view) {
         });
 
         div.querySelector('.btnRemoveMapping').addEventListener('click', function() {
-            if (div._disconnectFilterTable) div._disconnectFilterTable();
             div.remove();
         });
     }
@@ -1289,42 +1287,31 @@ export default function (view) {
         view.querySelectorAll('.libraryMapping').forEach(function(row) {
             var sourceSelect = row.querySelector('.sourceLibrarySelect');
             var localSelect = row.querySelector('.localLibrarySelect');
+            var stored = row._storedMapping || {};
 
-            var filterMode = row._filterModeSelect ? row._filterModeSelect.value : 'AllowAll';
-            var filteredItems = [];
-            var selectedItems = row._selectedFilterItems || {};
-            Object.keys(selectedItems).forEach(function(id) {
-                var fi = selectedItems[id];
-                filteredItems.push({
-                    ItemId: fi.ItemId,
-                    Name: fi.Name || '',
-                    Year: fi.Year || null,
-                    Path: fi.Path || '',
-                    Type: fi.Type || null
-                });
-            });
-
-            var permanentItems = [];
-            var selectedPermanent = row._selectedPermanentItems || {};
-            Object.keys(selectedPermanent).forEach(function(id) {
-                var pi = selectedPermanent[id];
-                permanentItems.push({ ItemId: pi.ItemId, Name: pi.Name || '', Year: pi.Year || null, Path: pi.Path || '', Type: pi.Type || null });
-            });
-
-            mappings.push({
+            var mapping = {
                 IsEnabled: row.querySelector('.mappingEnabled').checked,
-                ExcludeFromLinkCache: row.querySelector('.cacheLinks') ? !row.querySelector('.cacheLinks').checked : false,
-                PermanentItems: permanentItems.length ? permanentItems : null,
                 SourceLibraryId: pickedValue(sourceSelect),
                 SourceLibraryName: pickedName(sourceSelect),
                 SourceRootPath: row.querySelector('.sourceRootPath').value,
                 LocalLibraryId: pickedValue(localSelect),
                 LocalLibraryName: pickedName(localSelect),
                 LocalRootPath: row.querySelector('.localRootPath').value,
-                FilterMode: filterMode,
-                FilteredItems: filteredItems,
-                StorageMode: row.querySelector('.storageModeSelect') ? row.querySelector('.storageModeSelect').value : 'Copy'
-            });
+                StorageMode: 'Copy',
+                ExcludeFromLinkCache: false,
+                PermanentItems: null,
+                FilterMode: 'AllowAll',
+                FilteredItems: []
+            };
+            // The Storage tab settings stay with the row. Picks name items of one source library, so a
+            // row moved to another source library keeps its storage, cache, and filter mode but starts
+            // with no picks.
+            copyStorageFields(stored, mapping);
+            if (stored.SourceLibraryId && !sameId(stored.SourceLibraryId, mapping.SourceLibraryId)) {
+                mapping.PermanentItems = null;
+                mapping.FilteredItems = [];
+            }
+            mappings.push(mapping);
         });
         return mappings;
     }
@@ -1358,11 +1345,80 @@ export default function (view) {
     }
 
     // The limits only mean something while linking is allowed.
-    function reflectLinking() {
-        setVisible('linkLimits', getChecked('chkAllowLinking'));
-        view.querySelectorAll('.userLinkCaps').forEach(function(caps) {
-            caps.classList.toggle('hidden', !getChecked('chkAllowLinking'));
+    function linkingAllowed() {
+        return getMode() !== 'Pull' && getChecked('chkAllowLinking');
+    }
+
+    // A user never gets more streams than the whole server, so each per user field is held to the
+    // server's total while one is set.
+    function clampUserStreams() {
+        var total = Math.max(0, parseInt(getValue('txtLinkMaxStreams', '0'), 10) || 0);
+        // Counting a user's own playback only changes anything while some per user limit applies.
+        var anyUserLimit = total > 0
+            || Array.prototype.some.call(view.querySelectorAll('.userLinkMaxStreams'), function (f) { return (parseInt(f.value, 10) || 0) > 0; });
+        setVisible('countOwnSessionsContainer', anyUserLimit);
+        var fields = Array.prototype.slice.call(view.querySelectorAll('.userLinkMaxStreams'));
+        fields.forEach(function(field) {
+            if (!field) return;
+            field.max = total > 0 ? String(total) : '1000';
+            var value = parseInt(field.value, 10);
+            if (total > 0 && value > total) field.value = String(total);
         });
+    }
+
+    // Whether each server runs Server Sync, as last checked: 'yes', 'no', 'unreachable', or 'checking'.
+    // Linking needs it there, so the Stream step warns when it is missing.
+    var peerPlugin = {};
+
+    function reflectLinkingPlugin() {
+        var server = selectedServer();
+        var note = getEl('linkingNeedsPlugin');
+        if (!server || !note) return;
+        var on = linkingAllowed();
+        var state = peerPlugin[server.Key];
+        if (on && state === undefined && server.Url && server.ApiKey) {
+            var key = server.Key;
+            var request = requestFor(server);
+            request.Mode = getMode();
+            peerPlugin[key] = 'checking';
+            apiRequest('Hints/CheckPeer', 'POST', request).then(function (result) {
+                peerPlugin[key] = result && result.Reachable ? (result.HasPlugin ? 'yes' : 'no') : 'unreachable';
+            }).catch(function () {
+                peerPlugin[key] = 'unreachable';
+            }).then(function () {
+                if (stillSelected(key)) reflectLinkingPlugin();
+            });
+        }
+        note.textContent = state === 'no'
+            ? 'That server does not run Server Sync, so it cannot link to files here until it is installed there.'
+            : state === 'unreachable' ? 'That server could not be reached to check that it runs Server Sync, which linking needs.' : '';
+        setVisible('linkingNeedsPlugin', on && (state === 'no' || state === 'unreachable'));
+    }
+
+    function reflectLinking() {
+        reflectLinkingPlugin();
+        setVisible('linkLimits', linkingAllowed());
+        view.querySelectorAll('.userLinkCaps').forEach(function(caps) {
+            caps.classList.toggle('hidden', !linkingAllowed());
+        });
+    }
+
+    // A Stream server maps no libraries here, so the Libraries step is hidden and the steps after it
+    // are numbered on from the ones still shown.
+    // Linking is for Stream, Push, and Sync servers. A Pull server only gives this one things to read,
+    // so it may never link here, and the step is hidden. A Stream server may be there only to download,
+    // so it links only with Allow Linking on, like the others.
+    function reflectStream() {
+        var mode = getMode();
+        var stream = mode === 'Stream';
+        setVisible('serverStepLibrariesSection', !stream);
+        setVisible('serverStepStreamSection', mode !== 'Pull');
+        var number = 0;
+        view.querySelectorAll('#serverEditor .jpk-collapsible-section').forEach(function(section) {
+            var label = section.querySelector('.jpk-step-number');
+            if (label && !section.classList.contains('hidden')) label.textContent = String(++number);
+        });
+        reflectLinking();
     }
 
     // Refilling keeps the choice on screen unless a server's own value is given, which always wins,
@@ -1371,7 +1427,7 @@ export default function (view) {
         var select = getEl('selLinkFallbackUser');
         if (!select) return;
         var savedValue = value !== undefined ? value : select.value;
-        select.innerHTML = '<option value="">None</option>';
+        select.innerHTML = '<option value="">Refuse Stream</option>';
         localUsers.forEach(function(user) {
             var option = document.createElement('option');
             option.value = user.Id;
@@ -1456,10 +1512,10 @@ export default function (view) {
                 '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Local User</label><select is="emby-select" class="localUserSelect"></select></div></div>' +
             '</div>' +
             '<div class="mappingGrid userLinkCaps' + (getChecked('chkAllowLinking') ? '' : ' hidden') + '">' +
-                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Streams At Once</label><input is="emby-input" type="number" min="0" max="100" class="userLinkMaxStreams" placeholder="Server\'s limit" value="' + (mapping.LinkMaxStreams == null ? '' : mapping.LinkMaxStreams) + '" />' +
-                    '<div class="fieldDescription">Most streams the local user may hold at once for that server\'s links. Empty uses Link Streams Per User from step 1. 0 for no limit.</div></div></div>' +
+                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Streams At Once</label><input is="emby-input" type="number" min="0" max="1000" class="userLinkMaxStreams" placeholder="Server\'s limit" value="' + (mapping.LinkMaxStreams == null ? '' : mapping.LinkMaxStreams) + '" />' +
+                    '<div class="fieldDescription">Most streams the local user may hold at once for that server\'s links. Empty or 0 for up to the server\'s limit.</div></div></div>' +
                 '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Speed (Mbps)</label><input is="emby-input" type="number" min="0" max="100000" class="userLinkSpeed" placeholder="Server\'s speed" value="' + (mapping.LinkStreamSpeedMbps == null ? '' : mapping.LinkStreamSpeedMbps) + '" />' +
-                    '<div class="fieldDescription">Most each stream and cache download for this user is sent at. The lower of this and the server\'s speed applies. Empty or 0 uses the server\'s.</div></div></div>' +
+                    '<div class="fieldDescription">Most each stream and cache download for this user is sent at, never above the server\'s speed. Empty or 0 uses the server\'s.</div></div></div>' +
             '</div>';
 
         container.appendChild(div);
@@ -1523,6 +1579,7 @@ export default function (view) {
             Promise.all([fetchLocalLibraries(), fetchLocalUsers()]).then(function() {
                 selectServer(servers.length > 0 ? 0 : -1);
                 refreshServerHealth();
+                checkPoolPlugins();
             });
         }).catch(function() {
             Dashboard.alert('Failed to load plugin configuration');
@@ -1565,6 +1622,11 @@ export default function (view) {
                 if (urlField) urlField.addEventListener('input', reflectAddressChange);
                 var linkingField = getEl('chkAllowLinking');
                 if (linkingField) linkingField.addEventListener('change', reflectLinking);
+                var totalField = getEl('txtLinkMaxStreams');
+                if (totalField) totalField.addEventListener('input', clampUserStreams);
+                view.addEventListener('change', function(e) {
+                    if (e.target && ((e.target.classList && e.target.classList.contains('userLinkMaxStreams')))) clampUserStreams();
+                });
                 modeGroup = createChoiceGroup(getEl('modeChoices'), { onChange: reflectMode });
                 authGroup = createChoiceGroup(getEl('authChoices'), { onChange: reflectAuthMethod });
 

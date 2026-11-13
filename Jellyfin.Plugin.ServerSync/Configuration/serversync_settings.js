@@ -9,12 +9,30 @@ export default function (view) {
     // TAB NAVIGATION (local copy for synchronous access)
     // ============================================
 
+    // The Storage tab shows only while content sync is on. The last known answer is kept per browser
+    // and refreshed whenever the shared module loads or saves the config (see serversync_shared.js).
+    // An unknown answer shows the tab.
+    function storageTabShown() {
+        try {
+            return window.localStorage.getItem('serversync.storageTab') !== '0';
+        } catch (e) {
+            return true;
+        }
+    }
+
     function getTabs() {
-        return [
+        var tabs = [
             { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
-            { href: 'configurationpage?name=serversync_servers', name: 'Servers' },
-            { href: 'configurationpage?name=serversync_settings', name: 'Settings' }
+            { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
         ];
+        if (storageTabShown()) tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
+        tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
+        return tabs;
+    }
+
+    // Settings is the last tab, after Storage when that shows.
+    function settingsTabIndex() {
+        return getTabs().length - 1;
     }
 
     // ============================================
@@ -31,6 +49,11 @@ export default function (view) {
     // Relative specifier so a server hosted under a base URL still resolves it.
     var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
         ServerSyncShared = shared.createServerSyncShared(view);
+        // A config load that turns content sync on or off adds or drops the Storage tab. A page the
+        // dashboard keeps hidden leaves the tabs to the page on screen.
+        ServerSyncShared.onTabsChanged = function () {
+            if (!view.classList.contains('hide')) LibraryMenu.setTabs('serversync', settingsTabIndex(), getTabs);
+        };
         confirmDialog = shared.confirmDialog;
         ({ escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor, getEl, setVisible } = ServerSyncShared.pageHelpers());
     });
@@ -170,40 +193,100 @@ export default function (view) {
         setValue('txtLinkCachePreCacheEpisodes', config.LinkCachePreCacheEpisodes == null ? 2 : config.LinkCachePreCacheEpisodes);
         setValue('selLinkCacheRemovalOrder', config.LinkCacheRemovalOrder || 'LastPlayed');
         loadLinkCacheStatus();
-        setChecked('chkSkipWatchedByAllUsers', config.SkipWatchedByAllUsers || false);
         renderWatchedFilterUsers(config.WatchedFilterUserIds || []);
         setValue('selDownloadNewContentMode', config.DownloadNewContentMode || 'Enabled');
         setValue('selReplaceExistingContentMode', config.ReplaceExistingContentMode || 'Enabled');
-        var missingAction = config.MissingContentAction || ((config.DeleteMissingContentMode || 'Disabled') === 'Disabled' ? 'Keep' : 'Delete');
-        setValue('selMissingContent', missingAction === 'Delete' && config.DeleteMissingContentMode === 'RequireApproval' ? 'DeleteAfterApproval' : missingAction);
+        setValue('selMissingContent', config.MissingContentAction || 'Keep');
         setChecked('chkEnableRecyclingBin', config.EnableRecyclingBin || false);
         setValue('txtRecyclingBinPath', config.RecyclingBinPath || '');
         setValue('txtRecyclingBinRetentionDays', config.RecyclingBinRetentionDays || 7);
         setChecked('chkRemoveEmptyFolders', config.RemoveEmptyFoldersOnDelete || false);
         setValue('txtMaxConcurrentDownloads', config.MaxConcurrentDownloads || 2);
-        setValue('txtMaxRetryCount', config.MaxRetryCount || 3);
-        setValue('txtSizeMatchToleranceBytes', config.SizeMatchToleranceBytes || 0);
         setValue('txtTempDownloadPath', config.TempDownloadPath || '');
-        setValue('txtMaxDownloadSpeed', config.MaxDownloadSpeed || 0);
-        setValue('selDownloadSpeedUnit', config.DownloadSpeedUnit || 'MB');
         setValue('txtMinFreeDiskSpace', config.MinimumFreeDiskSpaceGb == null ? 10 : config.MinimumFreeDiskSpaceGb);
+
+
+        // The cache's other settings only matter while it has a size.
+        var cacheSize = getEl('txtLinkCacheSizeGb');
+        var reflectCache = function () { setVisible('linkCacheOptions', (parseFloat(cacheSize && cacheSize.value) || 0) > 0); };
+        if (cacheSize && !cacheSize.dataset.bound) {
+            cacheSize.dataset.bound = '1';
+            cacheSize.addEventListener('input', reflectCache);
+        }
+        reflectCache();
+        ServerSyncShared.bindReveal('chkEnableRecyclingBin', 'recyclingBinSettings');
+    }
+
+    // ============================================
+    // BANDWIDTH
+    // ============================================
+
+    // The servers a stream goes to: Stream, Push, and Sync servers allowed to link here.
+    function linkingServers(config) {
+        return ((config && config.Servers) || []).filter(function (server) {
+            var mode = server.Mode;
+            return server.IsEnabled !== false && server.AllowLinking === true
+                && (mode === 'Stream' || mode === 'Push' || mode === 'Sync' || mode === 3 || mode === 1 || mode === 2);
+        });
+    }
+
+    function loadBandwidthSettings(config) {
+        setValue('txtMaxDownloadSpeed', config.MaxDownloadSpeed || 0);
         setChecked('chkEnableBandwidthScheduling', config.EnableBandwidthScheduling || false);
         setValue('txtScheduledStartHour', config.ScheduledStartHour || 0);
         setValue('txtScheduledEndHour', config.ScheduledEndHour == null ? 6 : config.ScheduledEndHour);
         setValue('txtScheduledDownloadSpeed', config.ScheduledDownloadSpeed || 0);
-        setValue('selScheduledDownloadSpeedUnit', config.ScheduledDownloadSpeedUnit || 'MB');
 
-        ServerSyncShared.bindReveal('chkSkipWatchedByAllUsers', 'watchedFilterUsersSettings');
-        ServerSyncShared.bindReveal('chkEnableRecyclingBin', 'recyclingBinSettings');
+        // One row per server allowed to link, in Mbps like a video's bitrate.
+        var rows = getEl('streamSpeedRows');
+        if (rows) {
+            rows.innerHTML = linkingServers(config).map(function (server) {
+                return '<div class="ssFormRow" data-server-key="' + escapeHtml(server.Key) + '">' +
+                    '<span class="ssFormLabel">Streams to ' + escapeHtml(ServerSyncShared.serverDisplayName(server)) + '<span class="ssFormHint">Each stream and cache download it gets</span></span>' +
+                    '<span class="ssFormCell"><input is="emby-input" type="number" min="0" max="100000" class="ssFormInput streamSpeed" value="' + (server.LinkStreamSpeedMbps || 0) + '" /><span class="ssUnit">Mbps</span></span>' +
+                    '<span class="ssFormCell ssScheduleCell"><input is="emby-input" type="number" min="0" max="100000" class="ssFormInput streamScheduledSpeed" value="' + (server.LinkScheduledStreamSpeedMbps || 0) + '" /><span class="ssUnit">Mbps</span></span>' +
+                '</div>';
+            }).join('');
+        }
+
         var scheduleToggle = getEl('chkEnableBandwidthScheduling');
         var reflectSchedule = function () {
-            view.querySelectorAll('.ssScheduleRow').forEach(function (row) { row.classList.toggle('hidden', !getChecked('chkEnableBandwidthScheduling')); });
+            var on = getChecked('chkEnableBandwidthScheduling');
+            view.querySelectorAll('.ssScheduleRow').forEach(function (row) { row.classList.toggle('hidden', !on); });
+            var table = getEl('bandwidthTable');
+            if (table) table.classList.toggle('ssNoSchedule', !on);
         };
         if (scheduleToggle && !scheduleToggle.dataset.bound) {
             scheduleToggle.dataset.bound = '1';
             scheduleToggle.addEventListener('change', reflectSchedule);
         }
         reflectSchedule();
+    }
+
+    function saveBandwidthSettings() {
+        var speeds = {};
+        view.querySelectorAll('#streamSpeedRows [data-server-key]').forEach(function (row) {
+            speeds[row.getAttribute('data-server-key')] = {
+                normal: Math.max(0, parseInt(row.querySelector('.streamSpeed').value, 10) || 0),
+                scheduled: Math.max(0, parseInt(row.querySelector('.streamScheduledSpeed').value, 10) || 0)
+            };
+        });
+        saveSection(function (config) {
+            config.MaxDownloadSpeed = getIntValue('txtMaxDownloadSpeed', 0);
+            config.DownloadSpeedUnit = 'Mbps';
+            config.EnableBandwidthScheduling = getChecked('chkEnableBandwidthScheduling');
+            config.ScheduledStartHour = getIntValue('txtScheduledStartHour', 0);
+            config.ScheduledEndHour = getIntValue('txtScheduledEndHour', 6);
+            config.ScheduledDownloadSpeed = getIntValue('txtScheduledDownloadSpeed', 0);
+            config.ScheduledDownloadSpeedUnit = 'Mbps';
+            (config.Servers || []).forEach(function (server) {
+                var speed = speeds[server.Key];
+                if (speed) {
+                    server.LinkStreamSpeedMbps = speed.normal;
+                    server.LinkScheduledStreamSpeedMbps = speed.scheduled;
+                }
+            });
+        }, 'Bandwidth saved', 'Failed to save bandwidth');
     }
 
     // What the link cache holds now, shown under its settings.
@@ -245,34 +328,27 @@ export default function (view) {
             config.LinkCacheRetentionDays = Math.max(0, getIntValue('txtLinkCacheRetentionDays', 30));
             config.LinkCachePreCacheEpisodes = Math.max(0, getIntValue('txtLinkCachePreCacheEpisodes', 2));
             config.LinkCacheRemovalOrder = getValue('selLinkCacheRemovalOrder', 'LastPlayed');
-            config.SkipWatchedByAllUsers = getChecked('chkSkipWatchedByAllUsers');
             // Only the users on screen can be judged. A saved id whose server did not answer this time is
             // kept as it was, so a failed user list never clears the filter and lets watched files back in.
             var shown = {};
             watchedFilterUsers.forEach(function (u) { shown[u.Id] = true; });
             var unseen = (config.WatchedFilterUserIds || []).filter(function (id) { return !shown[id]; });
             config.WatchedFilterUserIds = collectWatchedFilterUsers().concat(unseen);
+            // Skipping is on exactly while users are picked.
+            config.SkipWatchedByAllUsers = config.WatchedFilterUserIds.length > 0;
             config.DownloadNewContentMode = getValue('selDownloadNewContentMode', 'Enabled');
             config.ReplaceExistingContentMode = getValue('selReplaceExistingContentMode', 'Enabled');
             var missing = getValue('selMissingContent', 'Keep');
-            config.MissingContentAction = missing === 'DeleteAfterApproval' ? 'Delete' : missing;
+            config.MissingContentAction = missing;
+            // The older field is kept matching, so an earlier value left in it is never read back.
             config.DeleteMissingContentMode = missing === 'Delete' ? 'Enabled' : missing === 'DeleteAfterApproval' ? 'RequireApproval' : 'Disabled';
             config.EnableRecyclingBin = getChecked('chkEnableRecyclingBin');
             config.RecyclingBinPath = getValue('txtRecyclingBinPath');
             config.RecyclingBinRetentionDays = getIntValue('txtRecyclingBinRetentionDays', 7);
             config.RemoveEmptyFoldersOnDelete = getChecked('chkRemoveEmptyFolders');
             config.MaxConcurrentDownloads = getIntValue('txtMaxConcurrentDownloads', 2);
-            config.MaxRetryCount = getIntValue('txtMaxRetryCount', 3);
-            config.SizeMatchToleranceBytes = getIntValue('txtSizeMatchToleranceBytes', 0);
             config.TempDownloadPath = getValue('txtTempDownloadPath') || null;
-            config.MaxDownloadSpeed = getIntValue('txtMaxDownloadSpeed', 0);
-            config.DownloadSpeedUnit = getValue('selDownloadSpeedUnit', 'MB');
             config.MinimumFreeDiskSpaceGb = getIntValue('txtMinFreeDiskSpace', 10);
-            config.EnableBandwidthScheduling = getChecked('chkEnableBandwidthScheduling');
-            config.ScheduledStartHour = getIntValue('txtScheduledStartHour', 0);
-            config.ScheduledEndHour = getIntValue('txtScheduledEndHour', 6);
-            config.ScheduledDownloadSpeed = getIntValue('txtScheduledDownloadSpeed', 0);
-            config.ScheduledDownloadSpeedUnit = getValue('selScheduledDownloadSpeedUnit', 'MB');
         }, 'Content settings saved', 'Failed to save content settings');
     }
 
@@ -285,7 +361,6 @@ export default function (view) {
         setChecked('chkHistorySyncPlayCount', config.HistorySyncPlayCount !== false);
         setChecked('chkHistorySyncLastPlayedDate', config.HistorySyncLastPlayedDate !== false);
         setChecked('chkHistorySyncFavorites', config.HistorySyncFavorites !== false);
-        setChecked('chkHistorySyncNegotiate', config.HistorySyncNegotiate === true);
     }
 
     function saveHistorySettings() {
@@ -296,7 +371,6 @@ export default function (view) {
             config.HistorySyncPlayCount = getChecked('chkHistorySyncPlayCount');
             config.HistorySyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
             config.HistorySyncFavorites = getChecked('chkHistorySyncFavorites');
-            config.HistorySyncNegotiate = getChecked('chkHistorySyncNegotiate');
         }, 'History settings saved', 'Failed to save history settings');
     }
 
@@ -396,6 +470,13 @@ export default function (view) {
         setValue('txtRefreshParallelism', config.RefreshParallelism || 8);
         setValue('txtFullScanIntervalHours', config.FullScanIntervalHours == null ? 24 : config.FullScanIntervalHours);
         setChecked('chkDeepImageVerification', config.DeepImageVerification === true);
+        setValue('txtMaxRetryCount', config.MaxRetryCount || 3);
+
+        // Changes are only sent to Push and Sync servers, so their timing shows only when one exists.
+        var sends = (config.Servers || []).some(function (s) {
+            return s.IsEnabled !== false && (s.Mode === 'Push' || s.Mode === 'Sync' || s.Mode === 1 || s.Mode === 2);
+        });
+        setVisible('hintSettings', sends);
     }
 
     function saveProcessingSettings() {
@@ -409,6 +490,7 @@ export default function (view) {
             config.RefreshParallelism = Math.min(16, Math.max(1, getIntValue('txtRefreshParallelism', 8)));
             config.FullScanIntervalHours = Math.min(720, Math.max(0, getIntValue('txtFullScanIntervalHours', 24)));
             config.DeepImageVerification = getChecked('chkDeepImageVerification');
+            config.MaxRetryCount = Math.min(10, Math.max(1, getIntValue('txtMaxRetryCount', 3)));
         }, 'Processing settings saved', 'Failed to save processing settings');
     }
 
@@ -491,12 +573,20 @@ export default function (view) {
             currentConfig = config;
 
             loadContentSettings(config);
+            loadBandwidthSettings(config);
             loadHistorySettings(config);
             loadMetadataSettings(config);
             loadPeopleSettings(config);
             loadUserSyncSettings(config);
             loadPlaylistSettings(config);
             loadProcessingSettings(config);
+
+            // A sync type's options only show while it is on.
+            [['chkEnableContentSync', 'contentSyncOptions'], ['chkEnableHistorySync', 'historySyncOptions'],
+                ['chkEnableMetadataSync', 'metadataSyncOptions'], ['chkEnablePeopleSync', 'peopleSyncOptions'],
+                ['chkEnableUserSync', 'userSyncOptions']].forEach(function (pair) {
+                ServerSyncShared.bindReveal(pair[0], pair[1]);
+            });
             loadCallerAccessSettings(config);
             fetchWatchedFilterUsers();
         }).catch(function() {
@@ -550,7 +640,7 @@ export default function (view) {
     // ============================================
 
     view.addEventListener('viewshow', function () {
-        LibraryMenu.setTabs('serversync', 2, getTabs);
+        LibraryMenu.setTabs('serversync', settingsTabIndex(), getTabs);
 
         _sharedPromise.then(function() {
             if (!_initialized) {
@@ -563,6 +653,7 @@ export default function (view) {
                 bindClick('btnAddCallerGrant', function () { if (grantsLoaded) addGrantRow(); });
 
                 bindClick('btnSaveContentSettings', saveContentSettings);
+                bindClick('btnSaveBandwidth', saveBandwidthSettings);
                 bindClick('btnClearLinkCache', clearLinkCache);
                 bindClick('btnSaveHistorySettings', saveHistorySettings);
                 bindClick('btnSaveMetadataSettings', saveMetadataSettings);

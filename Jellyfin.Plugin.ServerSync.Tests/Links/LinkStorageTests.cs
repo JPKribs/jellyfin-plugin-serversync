@@ -249,6 +249,24 @@ public sealed class LinkStorageTests : IDisposable
     }
 
     /// <summary>
+    /// Un-keeping writes the link beside the kept copy it takes over from, before the copy leaves.
+    /// True: the link is written while that copy is still there, and any other copy still refuses it.
+    /// False: an un-keep errors forever, because its own copy blocks the link.
+    /// </summary>
+    [Fact]
+    public void Writer_ReplacingItsOwnCopy_IsAllowed()
+    {
+        var writer = new LinkWriter(_files, _registry, NullLogger<LinkWriter>.Instance);
+        var row = Row("d", Media("D.strm"), StorageMode.Link, sourcePath: "/src/D.mkv");
+        File.WriteAllText(Media("D.mkv"), "kept");
+
+        Assert.Throws<InvalidOperationException>(() => writer.Write(row, _table, Config(), Media("Other.mkv")));
+        writer.Write(row, _table, Config(), Media("D.mkv"));
+        Assert.True(_files.IsCurrent(row.LocalPath!, "d"));
+        Assert.True(File.Exists(Media("D.mkv")));
+    }
+
+    /// <summary>
     /// Two source files that differ only by extension cannot both be linked.
     /// True: the second is refused with a reason and the first keeps its link.
     /// False: the second would overwrite the first's link.

@@ -55,7 +55,7 @@ public sealed class LinkPolicy
     public LinkVerdict Check(SourceServer peer, Guid itemId, string? remoteUserId, string? claimedUserId, bool probe, bool watching = true)
     {
         ArgumentNullException.ThrowIfNull(peer);
-        if (!peer.IsEnabled || !peer.AllowLinking)
+        if (!peer.OffersLinks)
         {
             return LinkVerdict.Refuse($"linking is not allowed for {peer.DisplayName} here");
         }
@@ -140,12 +140,9 @@ public sealed class LinkPolicy
             }
         }
 
-        if (Guid.TryParse(peer.LinkFallbackUserId, out var fallback))
-        {
-            return fallback;
-        }
-
-        return peer.UserMappings?.Any(m => m.IsEnabled) != true && Guid.TryParse(claimedUserId, out var claimed) ? claimed : null;
+        // An unmapped user streams as the user chosen for them here, or is refused. The user the linking
+        // server claims is never taken, since it could name anyone here, an administrator included.
+        return Guid.TryParse(peer.LinkFallbackUserId, out var fallback) ? fallback : null;
     }
 
     /// <summary>The user's playback on this server outside links, when the setting counts it, otherwise 0.</summary>

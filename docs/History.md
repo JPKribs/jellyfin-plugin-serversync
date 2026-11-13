@@ -10,13 +10,15 @@ History syncing copies watch state from a source Jellyfin server onto this serve
 * **Play Count** syncs how many times each item was played.
 * **Last Played Date** syncs the date each item was last played.
 * **Favorites** syncs which items are marked as favorites.
+* **Negotiate History**, on each library of a Sync server in the Storage tab, writes the merged history back to that server as well. See [Two Way History](#two-way-history).
+
+The library filter on the Storage tab applies to history as it does to content.
 
 A part that is switched off is left alone in both directions. It is not written on this server, not written back to the Source Server, and not taken from another server that negotiates or sends live changes here. It is still read, so the parts left on merge as they otherwise would. Changing these switches makes the next scan read everything again. An item marked unplayed loses its last played date even with **Last Played Date** off, since clearing the date is how Jellyfin records the mark.
-* **Negotiate With Source Server** writes the merged history back to the Source Server as well. See below.
 
 ## Two Way History
 
-By default history flows one way. The Source Server's watch state is merged with this server's and the result is written here only. With **Negotiate With Source Server** turned on, the merged result is also written to the Source Server, so a play, a resume position, or a favorite made on either server reaches the other.
+By default history flows one way. The Source Server's watch state is merged with this server's and the result is written here only. With **Negotiate History** turned on for a library, the merged result is also written to the Source Server, so a play, a resume position, or a favorite made on either server reaches the other. It is offered only for a Sync server, since Pull and Push servers only take history one way and have nothing to negotiate.
 
 This needs Server Sync installed on the Source Server too. This server calls the Source Server's plugin at `/Sync/Peer/History` using the same key the other modules use, and the Source Server accepts the call when its **Whitelist** allows that key. The plugin adds no login of its own. An entry that holds a standard user's key negotiates only that user's history, and only once the Source Server whitelists that user. See [Permissions](Permissions.md).
 

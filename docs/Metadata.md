@@ -9,9 +9,11 @@ Metadata syncing copies item details from a source Jellyfin server onto matching
 * **Genres** syncs item genres.
 * **Tags** syncs item tags.
 * **Studios** syncs item studios.
-* **People** syncs the cast and crew attached to each item.
+* **Cast & Crew** syncs the cast and crew attached to each item. It can be slow.
 * **Images** syncs item images such as posters and backdrops.
 * **Folder Items** also syncs metadata for container items such as series and seasons.
+
+The library filter on the Storage tab applies to metadata as it does to content.
 
 ## Images
 

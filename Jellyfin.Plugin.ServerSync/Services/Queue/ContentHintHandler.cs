@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
@@ -104,53 +105,102 @@ public sealed class ContentHintHandler
                 : "the file is on the library mapping's block list");
         }
 
-        var watchedByAll = await IsWatchedByAllAsync(client, originItemId, config, cancellationToken).ConfigureAwait(false);
+        // A .strm points at a file somewhere else, so it is not the origin's to pass on.
+        if (UpdateSyncTablesTask.IsStrm(dto))
+        {
+            return HintApplyResult.Dropped(HintCode.Filtered, "the item is a .strm on the origin, which points at a file it does not hold");
+        }
 
-        // Priority: the earliest configured server that offers a file is the one that provides it.
+        var watchedByAll = await IsWatchedByAllAsync(client, originItemId, config, cancellationToken).ConfigureAwait(false);
         var scanServers = config.GetPullServers();
         var originIndex = scanServers.FindIndex(s => string.Equals(s.Key, origin.Key, StringComparison.OrdinalIgnoreCase));
-        var localPath = PathUtilities.TranslatePath(dto.Path, mapping.SourceRootPath, mapping.LocalRootPath);
-        var tracked = _table.GetByLocalPath(localPath)
-            ?? (Links.LinkPaths.LinkPathFor(localPath) is { } linkPath && _table.GetByLocalPath(linkPath) is { } link && Models.ContentSync.StorageModes.IsLink(link.StorageMode) ? link : null);
-        if (tracked is not null && !string.Equals(tracked.ServerKey, origin.Key, StringComparison.OrdinalIgnoreCase))
+        if (HigherPriorityServer(scanServers, originIndex, origin, mapping, dto.Path) is { } owner)
         {
-            var trackedIndex = scanServers.FindIndex(s => string.Equals(s.Key, tracked.ServerKey, StringComparison.OrdinalIgnoreCase));
-            if (trackedIndex >= 0 && trackedIndex < originIndex)
-            {
-                return HintApplyResult.Dropped(HintCode.Priority, $"'{scanServers[trackedIndex].DisplayName}' has priority for this file");
-            }
+            return HintApplyResult.Dropped(HintCode.Priority, $"'{owner}' has priority for this file");
         }
 
         var source = new ScanSource(origin, client, Math.Max(0, originIndex));
         var refresh = ActivatorUtilities.CreateInstance<UpdateSyncTablesTask>(_services);
+
+        // The hinted item first. When it is passed over, as the scan passes over a peer's link, its
+        // other versions are passed over with it, the same as a scan.
         var record = await refresh.RefreshOneAsync(new ContentRefreshWork(source, mapping, dto, watchedByAll), cancellationToken).ConfigureAwait(false);
         if (record is null)
         {
-            return HintApplyResult.Dropped(HintCode.Filtered, "the item is filtered out or has no path");
+            return refresh.LinkingRefusedBy(origin.Key)
+                ? HintApplyResult.Dropped(HintCode.Filtered, $"'{origin.DisplayName}' does not offer links to this server, so the file waits until linking is allowed there")
+                : HintApplyResult.Dropped(HintCode.Filtered, "the item is filtered out or has no path");
         }
 
-        switch (record.Status)
+        // A Link mapping links every version of a film, as the scan does. A Copy mapping lists none. A
+        // version another server provides is left to it.
+        var others = new List<ContentRefreshWork>();
+        UpdateSyncTablesTask.AddOtherVersions(others, source, mapping, dto, watchedByAll);
+        var records = new List<SyncItem?> { record };
+        foreach (var item in others)
         {
-            case SyncStatus.Queued:
-                break;
-            case SyncStatus.Pending:
-                return HintApplyResult.Kept(HintCode.AwaitingApproval, "waiting for approval on this server");
-            case SyncStatus.Ignored:
-                return HintApplyResult.Dropped(HintCode.Ignored, "the row is ignored on this server");
-            default:
-                return HintApplyResult.Unchanged;
+            if (HigherPriorityServer(scanServers, originIndex, origin, mapping, item.SourceItem.Path!) is null)
+            {
+                records.Add(await refresh.RefreshOneAsync(item, cancellationToken).ConfigureAwait(false));
+            }
         }
 
-        var download = ActivatorUtilities.CreateInstance<SyncMissingContentTask>(_services);
-        if (!await download.ApplyRowAsync(record, source, cancellationToken).ConfigureAwait(false))
+        // Each version is applied on its own, so one that fails does not hold back the others. A retry
+        // finds the ones already done synced and applies only the rest.
+        string? failure = null;
+        var applied = new List<SyncItem>();
+        foreach (var row in records.Where(r => r is not null && r.Status == SyncStatus.Queued))
         {
-            return HintApplyResult.RetryLater(record.Reason ?? "the download failed");
+            var download = ActivatorUtilities.CreateInstance<SyncMissingContentTask>(_services);
+            if (await download.ApplyRowAsync(row!, source, cancellationToken).ConfigureAwait(false))
+            {
+                applied.Add(row!);
+                _logger.LogInformation(
+                    "{Action} {Path} on a hint from '{Origin}'",
+                    StorageModes.IsLink(row!.StorageMode) ? "Linked" : "Downloaded",
+                    row.LocalPath,
+                    origin.DisplayName);
+            }
+            else
+            {
+                failure ??= row!.Reason ?? (StorageModes.IsLink(row.StorageMode) ? "the link could not be written" : "the download failed");
+            }
         }
 
-        _logger.LogInformation("Downloaded {Path} on a hint from '{Origin}'", record.LocalPath, origin.DisplayName);
+        if (failure is not null)
+        {
+            return HintApplyResult.RetryLater(failure);
+        }
+
+        if (applied.Count == 0)
+        {
+            return record.Status switch
+            {
+                SyncStatus.Pending => HintApplyResult.Kept(HintCode.AwaitingApproval, "waiting for approval on this server"),
+                SyncStatus.Ignored => HintApplyResult.Dropped(HintCode.Ignored, "the row is ignored on this server"),
+                _ => HintApplyResult.Unchanged
+            };
+        }
 
         // The file is new, so the library may not have it yet. Then the file's name stands in.
-        return HintApplyResult.AppliedTo(string.IsNullOrEmpty(record.LocalPath) ? null : _libraryManager.FindByPath(record.LocalPath, false));
+        var first = applied[0];
+        return HintApplyResult.AppliedTo(string.IsNullOrEmpty(first.LocalPath) ? null : _libraryManager.FindByPath(first.LocalPath, false));
+    }
+
+    // The first server in the pull order, ahead of the origin, that already provides the file at this
+    // path, as a copy or a link, or null when none does.
+    private string? HigherPriorityServer(List<SourceServer> scanServers, int originIndex, SourceServer origin, LibraryMapping mapping, string sourcePath)
+    {
+        var localPath = PathUtilities.TranslatePath(sourcePath, mapping.SourceRootPath, mapping.LocalRootPath);
+        var tracked = _table.GetByLocalPath(localPath)
+            ?? (Links.LinkPaths.LinkPathFor(localPath) is { } linkPath && _table.GetByLocalPath(linkPath) is { } link && StorageModes.IsLink(link.StorageMode) ? link : null);
+        if (tracked is null || string.Equals(tracked.ServerKey, origin.Key, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var trackedIndex = scanServers.FindIndex(s => string.Equals(s.Key, tracked.ServerKey, StringComparison.OrdinalIgnoreCase));
+        return trackedIndex >= 0 && trackedIndex < originIndex ? scanServers[trackedIndex].DisplayName : null;
     }
 
     // Whether every user the content filter names has played the item on the origin, which the scan
