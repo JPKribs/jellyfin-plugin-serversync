@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.11.5"
+version: "12.2.11.6"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -28,16 +28,8 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  fixed:
-  - Security. A visitor could pass as the server itself to a link's address by sending a loopback X-Forwarded-For through a trusted reverse proxy that forwards that header unchanged. Such a request is refused. The address still needed the link's secret and a user who had just been allowed to play the link
-  - Moving a cached file into the library held the link cache for the whole move, which between two disks is a copy, so playback of every link waited until it finished. The move runs on its own, staged beside the copy, and a move that fails is undone and the copy downloaded instead
-  - Moving a cached file skipped the checks a download makes. It is held to the copy's place in the library, the disk's room with Minimum Free Space, and one apply at a time
-  - Keep a full local copy counted a cached file whose source had since changed size as moved, and during a running sync the move waited for the next scheduled one. Only a cached file at the source's size is moved, and the sync runs again right after the one already running
-  - A stop the source could not apply in full was sent again and applied a second time, with a second activity entry. The source answers a stop as applied once the session has ended
-  - A playback report the source refused was sent again. Only a report the source did not answer or failed on is retried, and retries wait outside the queue, so a source that is down no longer holds up reports to the others
   changed:
-  - The link cache settings no longer mention Always Keep, which makes copies in the library
+  - The code is cleaned up throughout, with no change to what the plugin does. Unused code is removed, comments that no longer matched the code are corrected, and simple constructs are written more plainly
   developer:
-  - The wire protocol and the database schema are unchanged, so this release works alongside 12.2.11.x one server at a time
-  - The link address refuses X-Original-For, X-Original-Host, and X-Original-Proto
-  - The Docker pool checks Always Keep copies, the Cached filter, keeping a cached link while the source refuses, cached playback staying off the source, session names, and that the source never shows a transcode
+  - The wire protocol, the database schema, the API, and the settings are unchanged, so this release works alongside 12.2.11.x one server at a time
+  - Every area was checked against the unit tests and the Docker pool, and read again for anything that changes behaviour
