@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.11.7",
+        "changelog": "\n## Changed\n- The version follows Jellyfin 12.4, which Server Sync has been built for since 12.2.10.1. Nothing in what the plugin does changes, and it mixes freely with 12.2.11.x servers in a pool\n- The documentation is cleaned up\n\n## Developer\n- The old design notes under docs/plans, which the documentation site never published, are removed",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.11.7/jellyfin-plugin-serversync-12.4.11.7.zip",
+        "checksum": "d6e1985e6b0a1f76da024d18efd2c8bc",
+        "timestamp": "2026-11-13T08:34:15Z"
+      },
+      {
         "version": "12.2.11.6",
         "changelog": "\n## Changed\n- The code is cleaned up throughout, with no change to what the plugin does. Unused code is removed, comments that no longer matched the code are corrected, and simple constructs are written more plainly\n\n## Developer\n- The wire protocol, the database schema, the API, and the settings are unchanged, so this release works alongside 12.2.11.x one server at a time\n- Every area was checked against the unit tests and the Docker pool, and read again for anything that changes behaviour",
         "targetAbi": "12.4.0.0",
