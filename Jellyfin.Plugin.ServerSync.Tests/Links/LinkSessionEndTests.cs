@@ -172,6 +172,23 @@ public sealed class LinkSessionEndTests
         Assert.False(reporter.PlaysLocally(LinkPlaybackEvent.Stop, "w|a", () => false));
     }
 
+    /// <summary>
+    /// A viewer's session on the source is named after their client and their user on the server
+    /// holding the link, and a linking server that sends no user name is named instead.
+    /// True: the dashboard reads like the viewer's own server, as in Jellyfin Web (Joe).
+    /// False: every viewer would show under the linking server's name, or a name from another server could break the line.
+    /// </summary>
+    [Theory]
+    [InlineData("Jellyfin Web", "JPKwibs", "Jellyfin Web (JPKwibs)")]
+    [InlineData(null, "JPKwibs", "Parker (JPKwibs)")]
+    [InlineData("Jellyfin Web", null, "Parker (Server Sync, Jellyfin Web)")]
+    [InlineData(" ", "", "Parker (Server Sync)")]
+    [InlineData("Swiftfin\n", "Jo\u0007e", "Swiftfin (Joe)")]
+    public void Sessions_DeviceName_IsClientAndUser(string? client, string? user, string expected)
+        => Assert.Equal(expected, LinkPlaybackSessions.DeviceName(
+            new Models.Configuration.SourceServer { Name = "Parker" },
+            new PeerPlaybackReport { ClientName = client is null ? null : System.Text.RegularExpressions.Regex.Unescape(client), UserName = user is null ? null : System.Text.RegularExpressions.Regex.Unescape(user) }));
+
     private static (LinkPlaybackSessions Sessions, ISessionManager Manager, InterfaceStub Stub) Sessions()
     {
         var (manager, stub) = InterfaceStub.Create<ISessionManager>();

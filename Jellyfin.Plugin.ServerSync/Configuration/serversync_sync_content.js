@@ -30,13 +30,14 @@ export function createContentSyncTableModule(ctx, kit) {
         modalButtonPrefix: 'btnModal',
         extraModalButtons: [
             { id: 'MarkSynced', method: 'modalMarkSynced' },
+            { id: 'Keep', method: 'modalKeep' },
             { id: 'Delete', method: 'modalDelete' }
         ],
         bulkButtons: [
             { id: 'Ignore', title: 'Ignore', icon: 'block', method: 'bulkIgnore' },
             { id: 'MarkSynced', title: 'Mark Synced', icon: 'check_circle', method: 'bulkMarkSynced' },
             { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'jpk-button-submit', method: 'bulkQueue' },
-            { id: 'MakeCopy', title: 'Turn links into full copies, moving the cached file into place when there is one', icon: 'file_download', method: 'bulkMakeCopy' },
+            { id: 'MakeCopy', title: 'Keep a full local copy. A cached file is moved into place', icon: 'push_pin', method: 'bulkMakeCopy' },
             { id: 'Delete', title: 'Delete from local server only', icon: 'delete', className: 'jpk-button-destructive', method: 'bulkDelete' }
         ],
         idKey: 'SourceItemId',
@@ -235,20 +236,33 @@ export function createContentSyncTableModule(ctx, kit) {
             bulkMakeCopy: function() {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
-                this.postSelection('PromoteItems', { SourceItemIds: ids }, function(result) {
-                    var promoted = (result && result.Promoted) || 0;
-                    var fromCache = (result && result.FromCache) || 0;
-                    var msg = fromCache > 0
-                        ? fromCache + ' cached link(s) are being moved into the library now'
-                        : promoted + ' link(s) will be copied on the next sync';
-                    if (fromCache > 0 && promoted > fromCache) {
-                        msg += ', and ' + (promoted - fromCache) + ' will be downloaded';
-                    }
-                    if (result && result.Skipped > 0) {
-                        msg += ', ' + result.Skipped + ' item(s) were not links';
-                    }
-                    return msg;
-                }, 'Failed to turn links into copies');
+                this.postSelection('PromoteItems', { SourceItemIds: ids }, this.keepMessage, 'Failed to keep local copies');
+            },
+
+            modalKeep: function() {
+                var self = this;
+                if (!this.currentModalItem) return;
+                ServerSyncShared.apiRequest('PromoteItems', 'POST', { SourceItemIds: [this.currentModalItem.SourceItemId] }).then(function(result) {
+                    self.closeModal();
+                    ServerSyncShared.showAlert(self.keepMessage(result));
+                }).catch(function() {
+                    ServerSyncShared.showAlert('Failed to keep a local copy');
+                });
+            },
+
+            keepMessage: function(result) {
+                var promoted = (result && result.Promoted) || 0;
+                var fromCache = (result && result.FromCache) || 0;
+                var msg = fromCache > 0
+                    ? fromCache + ' cached link(s) are being moved into the library now'
+                    : promoted + ' link(s) will be copied on the next sync';
+                if (fromCache > 0 && promoted > fromCache) {
+                    msg += ', and ' + (promoted - fromCache) + ' will be downloaded';
+                }
+                if (result && result.Skipped > 0) {
+                    msg += ', ' + result.Skipped + ' item(s) were not links';
+                }
+                return msg;
             },
 
             bulkDelete: function() {
@@ -395,6 +409,10 @@ export function createContentSyncTableModule(ctx, kit) {
 
                 // Show Mark Synced only for Queued/Errored items
                 btnMarkSynced.style.display = isQueuedOrErrored ? 'inline-block' : 'none';
+
+                // Only a link can be kept as a copy, and not one already on its way or on its way out.
+                view.querySelector('#btnModalKeep').style.display = item.StorageMode === 'Link' && !isPendingDeletion
+                    && item.Status !== 'Ignored' && item.Status !== 'Deleting' ? 'inline-block' : 'none';
 
                 if (isPendingDeletion) {
                     btnQueue.style.display = 'none';

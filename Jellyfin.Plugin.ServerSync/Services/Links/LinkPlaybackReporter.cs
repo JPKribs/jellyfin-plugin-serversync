@@ -246,7 +246,8 @@ public sealed class LinkPlaybackReporter : BackgroundService
             }
 
             // Reported to the server the viewer streams from, under its own id of the file.
-            var userId = e.Users?.FirstOrDefault()?.Id;
+            var viewerUser = e.Users?.FirstOrDefault();
+            var userId = viewerUser?.Id;
             var route = (userId is { } viewerId ? _grants.RouteFor(link.LinkId, viewerId) : null) ?? LinkFallback.PrimaryOf(link);
             _queue.Writer.TryWrite((link, route, new PeerPlaybackReport
             {
@@ -259,7 +260,8 @@ public sealed class LinkPlaybackReporter : BackgroundService
                 PositionTicks = e.PlaybackPositionTicks,
                 IsPaused = e.IsPaused,
                 PlayMethod = ReportedMethod(e.Session?.PlayState?.PlayMethod?.ToString()),
-                ClientName = e.ClientName
+                ClientName = e.ClientName,
+                UserName = viewerUser?.Username
             }));
         }
         catch (Exception ex)

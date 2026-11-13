@@ -151,7 +151,7 @@ When no server allows the play, the refusal is the link's own server's reason, f
 
 ## Playback on the Source
 
-Playback of a link shows on the source as a live session named after the linking server and the viewer's client, under the client name **Server Sync**, for the user it streams as. From the source's dashboard:
+Playback of a link shows on the source as a live session named after the viewer's client and their user on the linking server, as in **Jellyfin Web (Joe)**, under the client name **Server Sync**, for the user it streams as. A linking server on a release before 12.2.11.4 sends no user name, and its sessions are named after it instead. From the source's dashboard:
 
 * **Stop, pause, resume, and seek** reach the viewer on the linking server. So does **Send Message**, which is shown with the source's name. This needs the source's entry for the linking server to have an address and a key.
 * The activity log and playback plugins on the source see the play.
@@ -224,7 +224,7 @@ The check also keeps each link's recorded size current, which is how another ser
 
 A link becomes a full copy in any of three ways:
 
-* **Turn links into full copies** on the Sync tab's toolbar, for the selected rows. These are queued at once, whatever **New files** is set to, since choosing them is the approval. When any of them is cached, a Sync Content run starts at once to move it into place.
+* **Keep a full local copy**, the pin on the Sync tab's toolbar for the selected rows, or **Keep Local Copy** in a link's details. These are queued at once, whatever **New files** is set to, since choosing them is the approval. When any of them is cached, a Sync Content run starts at once to move it into place.
 * Picking it under **Always Keep** on its mapping. The next refresh marks it under the **New files** approval, the same as below, and a new file under a pick is added as a copy. A pick removed before its copy is approved leaves it a link. A copy already made stays a copy.
 * Setting the mapping's **Storage** back to **Copy**. The next refresh marks its links under the **New files** approval: queued when new files download on their own, waiting as Pending Replacement when they need approval, and left as links when new files are switched off. Setting it back to Link before approving keeps them links. A link still waiting for its own first approval is left until that is settled.
 

@@ -232,8 +232,27 @@ public sealed class LinkPlaybackSessions
         return ended;
     }
 
-    private static string DeviceName(SourceServer peer, PeerPlaybackReport report)
-        => string.IsNullOrWhiteSpace(report.ClientName)
-            ? $"{peer.DisplayName} (Server Sync)"
-            : $"{peer.DisplayName} (Server Sync, {new string(report.ClientName.Where(c => !char.IsControl(c)).Take(64).ToArray())})";
+    /// <summary>
+    /// The name a viewer's session shows under here: their client and their user on the server holding
+    /// the link, as in <c>Jellyfin Web (Joe)</c>. A linking server that sends no user name, as releases
+    /// before 12.2.11.4 do, is named instead.
+    /// </summary>
+    public static string DeviceName(SourceServer peer, PeerPlaybackReport report)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        ArgumentNullException.ThrowIfNull(report);
+        var client = Clean(report.ClientName);
+        var user = Clean(report.UserName);
+        return (client.Length, user.Length) switch
+        {
+            ( > 0, > 0) => $"{client} ({user})",
+            (_, > 0) => $"{peer.DisplayName} ({user})",
+            ( > 0, _) => $"{peer.DisplayName} (Server Sync, {client})",
+            _ => $"{peer.DisplayName} (Server Sync)"
+        };
+    }
+
+    // Names come from another server, so they are held to a length and kept to one plain line.
+    private static string Clean(string? name)
+        => new string((name ?? string.Empty).Where(c => !char.IsControl(c)).Take(64).ToArray()).Trim();
 }

@@ -211,7 +211,7 @@ public partial class PeerController
     public async Task<IActionResult> Playback([FromBody] PeerPlaybackReport report, [FromServices] LinkPlaybackSessions sessions)
     {
         ArgumentNullException.ThrowIfNull(sessions);
-        if (report is null || report.SessionKey?.Length > 256 || report.ClientName?.Length > 256)
+        if (report is null || report.SessionKey?.Length > 256 || report.ClientName?.Length > 256 || report.UserName?.Length > 256)
         {
             return BadRequest("A playback report is required");
         }

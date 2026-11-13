@@ -48,6 +48,9 @@ public class PeerPlaybackReport
 
     /// <summary>Gets or sets the name of the client playing it on the reporting server.</summary>
     public string? ClientName { get; set; }
+
+    /// <summary>Gets or sets the user's name on the reporting server, which names the session on the source.</summary>
+    public string? UserName { get; set; }
 }
 
 /// <summary>

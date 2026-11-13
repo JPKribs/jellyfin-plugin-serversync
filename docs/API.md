@@ -270,7 +270,7 @@ A source older than fallback answers `400` to a request by path, and is listed a
 
 #### POST /Sync/Peer/Playback
 
-Playback of a link, reported by the linking server. The first report opens a session here under the client name **Server Sync**, for the user the stream runs as, and later reports run Jellyfin's own progress and stop handling on it. `SessionKey` is the linking server's session id, so each viewer there is a session of its own here. `Event` is `Start`, `Progress`, or `Stop`. `SessionKey` and `ClientName` are at most 256 characters.
+Playback of a link, reported by the linking server. The first report opens a session here under the client name **Server Sync**, for the user the stream runs as, and later reports run Jellyfin's own progress and stop handling on it. `SessionKey` is the linking server's session id, so each viewer there is a session of its own here. `Event` is `Start`, `Progress`, or `Stop`. `SessionKey`, `ClientName`, and `UserName` are at most 256 characters. The session is named after `ClientName` and `UserName`, the viewer's user on the linking server, as in `Jellyfin Web (Joe)`.
 
 ```json
 {
@@ -284,7 +284,8 @@ Playback of a link, reported by the linking server. The first report opens a ses
   "PositionTicks": 145000000,
   "IsPaused": true,
   "PlayMethod": "DirectPlay",
-  "ClientName": "Jellyfin Web"
+  "ClientName": "Jellyfin Web",
+  "UserName": "Joe"
 }
 ```
 
@@ -412,7 +413,7 @@ Discard one row from either queue by its `Id`. A discarded inbound row is report
 
 ### POST /Sync/PromoteItems
 
-Turns links into full copies, the **Turn links into full copies** action on the Sync tab. A link whose file is in the link cache has the cached file moved into place, and a Sync Content run starts now when any is. Any other copy downloads on the next Sync Content run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
+Turns links into full copies, the **Keep a full local copy** action on the Sync tab. A link whose file is in the link cache has the cached file moved into place, and a Sync Content run starts now when any is. Any other copy downloads on the next Sync Content run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
 
 ```json
 { "SourceItemIds": ["9c1e0f…", "77ab12…"] }
