@@ -1,11 +1,12 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -146,8 +147,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
     /// <summary>
     /// Maximum concurrent <see cref="BuildRecordAsync"/> calls per refresh.
-    /// Default <c>1</c> (serial). Raise only when build is HTTP-bound , 
-    /// Metadata fetches per-item image info and uses <c>8</c>. Parallelism
+    /// Default <c>1</c> (serial). Raise only when build is HTTP-bound.
+    /// Metadata and People use the configured refresh parallelism. Parallelism
     /// doesn't help in-process Jellyfin reads or SQLite-write-bound work
     /// (the table manager's single write lock serializes the upsert).
     /// </summary>
@@ -415,7 +416,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         // A row that has burned its retry allowance stays Errored. Without
         // this the refresh re-queues it every run and the sync re-applies it
-        // every run, so a row that can never converge churns forever , 
+        // every run, so a row that can never converge churns forever,
         // re-downloading images, rewriting user policies, with the failure
         // reason overwritten each cycle. The operator clears it with a Queue
         // or Retry action, which resets the count.
@@ -591,8 +592,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// rows (per <see cref="IsInScope"/>) are never pruned. Only called when
     /// discovery completed cleanly, a run that hit any source error skips
     /// pruning before reaching here (see <see cref="MarkSourceUnavailable"/>).
-    /// <paramref name="progress"/> reports 0 to 100 for the prune phase only.
-    /// the base scales it into the run's overall allocation, large prunes
+    /// <paramref name="progress"/> reports 0 to 100 for the prune phase only,
+    /// and the base scales it into the run's overall allocation, since large prunes
     /// (100k+ rows) take real time and the bar must move through them.
     /// Returns the number of rows pruned.
     /// </summary>
@@ -646,7 +647,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// configuration with a single try/catch, modules don't repeat that
     /// save plumbing.
     /// </summary>
-    protected virtual void RecordRunCompleted(Configuration.PluginConfiguration config, DateTime utcNow)
+    protected virtual void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         // Default: nothing to record.
     }
@@ -956,7 +957,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             await Parallel.ForEachAsync(
                 sourceItems,
                 new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = cancellationToken },
-                async (src, ct) => await BuildOneAsync(run, src, progress, ct).ConfigureAwait(false))
+                (src, ct) => BuildOneAsync(run, src, progress, ct))
                 .ConfigureAwait(false);
         }
 
@@ -1264,7 +1265,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     private int RetireSupersededRows(
         IReadOnlyDictionary<TKey, TRecord> existing,
         HashSet<TKey> seenKeySet,
-        System.Collections.Concurrent.ConcurrentDictionary<string, byte> seenPriorityKeys,
+        ConcurrentDictionary<string, byte> seenPriorityKeys,
         bool hadFailures)
     {
         if (seenPriorityKeys.IsEmpty)
@@ -1406,13 +1407,13 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         public double BuildEnd { get; }
 
-        public System.Collections.Concurrent.ConcurrentDictionary<TKey, byte> SeenKeys { get; } = new();
+        public ConcurrentDictionary<TKey, byte> SeenKeys { get; } = new();
 
-        public System.Collections.Concurrent.ConcurrentDictionary<string, byte> SeenPriorityKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public ConcurrentDictionary<string, byte> SeenPriorityKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public System.Collections.Concurrent.ConcurrentBag<TRecord> QueuedThisRun { get; } = new();
+        public ConcurrentBag<TRecord> QueuedThisRun { get; } = new();
 
-        public System.Collections.Concurrent.ConcurrentQueue<TRecord> PendingWrites { get; } = new();
+        public ConcurrentQueue<TRecord> PendingWrites { get; } = new();
 
         public object FlushLock { get; } = new();
 
@@ -1479,7 +1480,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             return value is not null;
         }
 
-        public IEnumerator<KeyValuePair<TKey, TRecord>> GetEnumerator() => System.Linq.Enumerable.Empty<KeyValuePair<TKey, TRecord>>().GetEnumerator();
+        public IEnumerator<KeyValuePair<TKey, TRecord>> GetEnumerator() => Enumerable.Empty<KeyValuePair<TKey, TRecord>>().GetEnumerator();
 
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }

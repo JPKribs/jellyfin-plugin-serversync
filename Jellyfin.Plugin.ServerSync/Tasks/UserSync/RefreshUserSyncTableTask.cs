@@ -111,9 +111,9 @@ public class RefreshUserSyncTableTask
                 var sourceUser = await client.GetUserAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
                 if (sourceUser == null)
                 {
-                    // Source user fetch returned null (transient API failure or
-                    // genuinely missing user, we can't tell). Skip pruning this
-                    // run so a network blip doesn't delete the mapping's rows.
+                    // Source user fetch returned null (a transient API failure and a
+                    // genuinely missing user look the same). Skip pruning this run
+                    // so a network blip doesn't delete the mapping's rows.
                     MarkSourceUnavailable($"source server unavailable, source user '{mapping.SourceUserName}' not returned");
                     Logger.LogWarning("Source user {Id} not found. Skipping mapping {Source} -> {Local}",
                         mapping.SourceUserId, mapping.SourceUserName, mapping.LocalUserName);
@@ -123,7 +123,7 @@ public class RefreshUserSyncTableTask
                 var localUser = _userManager.GetUserById(localUserId);
                 if (localUser == null)
                 {
-                    // Local target gone: we can't enumerate this mapping, so skip
+                    // Local target gone, so this mapping can't be enumerated. Skip
                     // pruning this run rather than treat its rows as deleted.
                     MarkSourceUnavailable($"local user '{mapping.LocalUserName}' not found. Mapping rows cannot be re-confirmed");
                     Logger.LogWarning("Local user {Id} not found. Skipping mapping {Source} -> {Local}",
@@ -236,7 +236,6 @@ public class RefreshUserSyncTableTask
     protected override (string SourceUserId, string LocalUserId, string PropertyCategory) ExtractKey(UserSyncItem record)
         => (record.SourceUserId, record.LocalUserId, record.PropertyCategory);
 
-
     // In scope when the row's user mapping is currently enabled. Disabling a
     // mapping preserves its rows (including Ignored overrides) instead of
     // pruning them.
@@ -257,10 +256,9 @@ public class RefreshUserSyncTableTask
     }
 
     /// <inheritdoc />
-    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(config);
         config.LastUserSyncTime = utcNow;
     }
-
 }

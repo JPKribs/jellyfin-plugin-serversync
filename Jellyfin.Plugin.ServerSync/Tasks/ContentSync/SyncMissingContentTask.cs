@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,9 +9,11 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 
@@ -42,10 +45,10 @@ public class SyncMissingContentTask
 
     // Every file this run wrote, skipped as already present, or removed, so the refresh afterwards
     // only looks at the folders that changed.
-    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _changedFiles = new();
+    private readonly ConcurrentQueue<string> _changedFiles = new();
 
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, byte> _skippedByBreaker = new();
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _downloadAttempted = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<long, byte> _skippedByBreaker = new();
+    private readonly ConcurrentDictionary<string, byte> _downloadAttempted = new(StringComparer.OrdinalIgnoreCase);
     private string? _tempPath;
     private long _speedLimit;
     private int _successCount;
@@ -62,10 +65,10 @@ public class SyncMissingContentTask
         ContentSyncTableManager manager,
         ISourceServerClientFactory clientFactory,
         DownloadService downloadService,
-        Services.Links.LinkWriter? linkWriter = null,
-        Services.Links.LinkVerifier? linkVerifier = null,
-        Services.Links.LinkCacheFiller? linkCacheFiller = null,
-        Services.Links.LinkCache? linkCache = null)
+        LinkWriter? linkWriter = null,
+        LinkVerifier? linkVerifier = null,
+        LinkCacheFiller? linkCacheFiller = null,
+        LinkCache? linkCache = null)
         : base(logger, manager, clientFactory, configManager)
     {
         _linkCache = linkCache;
@@ -77,10 +80,10 @@ public class SyncMissingContentTask
         _linkCacheFiller = linkCacheFiller;
     }
 
-    private readonly Services.Links.LinkWriter? _linkWriter;
-    private readonly Services.Links.LinkVerifier? _linkVerifier;
-    private readonly Services.Links.LinkCacheFiller? _linkCacheFiller;
-    private readonly Services.Links.LinkCache? _linkCache;
+    private readonly LinkWriter? _linkWriter;
+    private readonly LinkVerifier? _linkVerifier;
+    private readonly LinkCacheFiller? _linkCacheFiller;
+    private readonly LinkCache? _linkCache;
 
     /// <inheritdoc />
     public override string Name => "Sync Content";
@@ -195,6 +198,7 @@ public class SyncMissingContentTask
                 source.Dispose();
             }
         }
+
         if (allowed.Count == 0 && !OnlyLinksQueued())
         {
             FailPreflight("the circuit breaker is open for every reachable server");
@@ -240,7 +244,7 @@ public class SyncMissingContentTask
         return Task.CompletedTask;
     }
 
-    private void PrepareDownloads(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    private void PrepareDownloads(PluginConfiguration config)
     {
         var staleCount = ActiveDownloadTracker.CleanupStaleEntries();
         if (staleCount > 0)
@@ -258,10 +262,10 @@ public class SyncMissingContentTask
 
     // A library's own folder or one inside it. The roots above every library never lead a refresh anywhere.
     private bool IsLibraryFolder(string path)
-        => _libraryManager.FindByPath(path, true) is MediaBrowser.Controller.Entities.Folder folder
-            and not MediaBrowser.Controller.Entities.AggregateFolder
-            and not MediaBrowser.Controller.Entities.UserRootFolder
-            and not MediaBrowser.Controller.Entities.CollectionFolder;
+        => _libraryManager.FindByPath(path, true) is Folder
+            and not AggregateFolder
+            and not UserRootFolder
+            and not CollectionFolder;
 
     /// <summary>
     /// Tells Jellyfin which folders changed, so it refreshes those and nothing else. Returns false when
@@ -323,12 +327,12 @@ public class SyncMissingContentTask
             (_linkWriter ?? throw new InvalidOperationException("Links cannot be written on this server")).Write(record, TypedManager, ConfigManager.Configuration);
 
             // Read before the companions replace the row's list, which is where a written .nfo is recorded.
-            var nfoRecorded = Services.Links.LinkNfo.Recorded(record);
-            var nfoRemoved = linkWasThere && Services.Links.LinkNfo.RemovedByUser(record);
+            var nfoRecorded = LinkNfo.Recorded(record);
+            var nfoRemoved = linkWasThere && LinkNfo.RemovedByUser(record);
             await DownloadLinkCompanionsAsync(record, cancellationToken).ConfigureAwait(false);
             if (nfoRemoved)
             {
-                Services.Links.LinkNfo.Record(record);
+                LinkNfo.Record(record);
             }
             else
             {
@@ -346,7 +350,7 @@ public class SyncMissingContentTask
         if (record.StorageMode == StorageMode.Promoting)
         {
             var linkPath = record.LocalPath;
-            var copyPath = Services.Links.LinkPaths.CopiedPathOf(record) ?? throw new InvalidOperationException($"The link has no path (source: {record.SourcePath})");
+            var copyPath = LinkPaths.CopiedPathOf(record) ?? throw new InvalidOperationException($"The link has no path (source: {record.SourcePath})");
             record.LocalPath = copyPath;
             try
             {
@@ -407,7 +411,7 @@ public class SyncMissingContentTask
         // An .nfo written on an earlier run stays recorded when this run cannot write it again.
         if (recorded)
         {
-            Services.Links.LinkNfo.Record(record);
+            LinkNfo.Record(record);
         }
 
         if (SourceFor(record) is not { } source || !Guid.TryParse(record.SourceItemId, out var itemId) || string.IsNullOrEmpty(record.LocalPath))
@@ -417,15 +421,15 @@ public class SyncMissingContentTask
 
         try
         {
-            var items = await source.Client.GetItemsByIdsAsync(new[] { itemId }, Services.Links.LinkNfo.Fields, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var items = await source.Client.GetItemsByIdsAsync(new[] { itemId }, LinkNfo.Fields, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (items.FirstOrDefault() is not { } item)
             {
                 return;
             }
 
-            if (Services.Links.LinkNfo.Write(record.LocalPath, item))
+            if (LinkNfo.Write(record.LocalPath, item))
             {
-                Services.Links.LinkNfo.Record(record);
+                LinkNfo.Record(record);
             }
             else
             {
@@ -442,7 +446,6 @@ public class SyncMissingContentTask
         }
     }
 
-    // The copy path: disk space, validation, and the download itself.
     // A link becoming a copy takes the cached file when the cache holds all of it, held to the same
     // checks as a download: the copy's place in the library, the disk's room, and one apply at a time.
     // False when it cannot, and the copy is downloaded instead, where any of those checks says why.
@@ -484,6 +487,7 @@ public class SyncMissingContentTask
         return true;
     }
 
+    // The copy path: disk space, validation, and the download itself.
     private async Task DownloadAsync(SyncItem record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
     {
         if (_tempPath == null)
@@ -645,7 +649,7 @@ public class SyncMissingContentTask
         // Library refresh is conditional on actual filesystem changes
         // (downloads or deletions). A no-op run skips the refresh because
         // ValidateMediaLibrary is expensive on large libraries and there's
-        // nothing for Jellyfin to discover when we wrote/removed nothing.
+        // nothing for Jellyfin to discover when nothing was written or removed.
         // A run that touched a few folders has Jellyfin refresh just those,
         // and only a run that touched many falls back to the full scan.
         if ((_successCount > 0 || _deletedCount > 0) && !RefreshChangedFolders())
@@ -765,12 +769,11 @@ public class SyncMissingContentTask
     }
 
     /// <inheritdoc />
-    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(config);
         config.LastSyncEndTime = utcNow;
     }
-
 
     private ContentSyncTableManager TypedManager => (ContentSyncTableManager)Manager;
 

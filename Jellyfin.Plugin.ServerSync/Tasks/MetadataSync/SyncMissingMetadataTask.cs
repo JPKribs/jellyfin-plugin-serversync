@@ -7,12 +7,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
@@ -149,7 +149,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
         // Phase 1: write per-category. Each apply mutates localItem in-memory
         // and reports whether anything changed. The composite UpdateToRepository
-        // call combines flags so we save once per item, not once per category.
+        // call combines flags so the item is saved once, not once per category.
         var metadataChanged = false;
         var peopleChanged = false;
         var studiosChanged = false;
@@ -264,11 +264,11 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     }
 
     // Re-reads the local item and confirms each applied category landed in
-    // Jellyfin's repository, provider/aggregation logic can rewrite our
-    // blob between apply and persist, so a write-then-trust loop produces
-    // silent green badges on rows that are actually still divergent.
+    // Jellyfin's repository, provider/aggregation logic can rewrite the
+    // written blob between apply and persist, so a write-then-trust loop
+    // produces silent green badges on rows that are actually still divergent.
     // Categories whose verify passes are per-category <c>MarkSynced</c>'d
-    // inline so partial progress sticks even if a later category fails.
+    // inline so partial progress sticks even if a later category fails, and
     // the base then upserts the record as Errored with the cumulative
     // reason.
     /// <inheritdoc />
@@ -379,7 +379,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
     }
 
-    private MediaBrowser.Controller.Entities.BaseItem ResolveLocalItem(MetadataSyncItem record)
+    private BaseItem ResolveLocalItem(MetadataSyncItem record)
     {
         if (string.IsNullOrEmpty(record.LocalItemId))
         {
@@ -406,23 +406,22 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     }
 
     /// <inheritdoc />
-    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(config);
         config.LastMetadataSyncTime = utcNow;
     }
 
-
     /// <summary>
     /// Applies metadata fields to the local item, writing nulls and empty
     /// arrays through to local so "remove a tag" / "clear an overview" on
     /// source actually clears local. Does NOT call
-    /// <see cref="MediaBrowser.Controller.Entities.BaseItem.UpdateToRepositoryAsync"/> , 
-    /// the caller batches all category writes into a single repository save.
+    /// <see cref="BaseItem.UpdateToRepositoryAsync"/>,
+    /// because the caller batches all category writes into a single repository save.
     /// </summary>
     /// <returns>True if anything was changed, false if no-op.</returns>
     private static bool ApplyMetadata(
-        MediaBrowser.Controller.Entities.BaseItem localItem,
+        BaseItem localItem,
         MetadataSyncItem item,
         bool syncGenres,
         bool syncTags)
@@ -432,12 +431,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// Applies images from the source server to a local item.
     /// Two-pass approach: first download to temp files (so a partial
     /// failure leaves existing local images intact), then delete + replace
-    /// per type. Calls <see cref="MediaBrowser.Controller.Entities.BaseItem.UpdateToRepositoryAsync"/>
+    /// per type. Calls <see cref="BaseItem.UpdateToRepositoryAsync"/>
     /// at the end because <see cref="IProviderManager.SaveImage"/> needs the
     /// item present in the repository.
     /// </summary>
     private async Task ApplyImagesAsync(
-        MediaBrowser.Controller.Entities.BaseItem localItem,
+        BaseItem localItem,
         MetadataSyncItem item,
         SourceServerClient sourceClient,
         CancellationToken cancellationToken)
@@ -459,8 +458,8 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
 
         var anyChanged = false;
-        // Per-type failure log. If non-empty after the loop, we throw at the
-        // end so the orchestrator records this category as Errored with the
+        // Per-type failure log. If non-empty after the loop, this throws at
+        // the end so the orchestrator records this category as Errored with the
         // diagnostic. Errors ARE logged inline (LogWarning) for live tailing,
         // but the throw ensures verification doesn't silently mark Synced
         // when only some types/indexes landed.
@@ -543,8 +542,8 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
                 }
 
                 // Per-type atomicity: if ANY download for this type failed,
-                // skip Pass 2 entirely. Don't half-replace the local images
-                // ,  user keeps their existing set instead of being left in
+                // skip Pass 2 entirely. Don't half-replace the local images,
+                // so the user keeps their existing set instead of being left in
                 // a half-deleted state. The row will go Errored at the end.
                 if (typeErrors.Count > 0)
                 {
@@ -557,14 +556,14 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
                 if (tempFiles.Count == 0)
                 {
-                    // Source had this type but every download was empty , 
+                    // Source had this type but every download was empty, so
                     // nothing to do, nothing failed.
                     continue;
                 }
 
                 // Pass 2: delete existing, then apply, all or nothing per
                 // type. If a save fails, any partial mutation already made
-                // stays, because we cannot unwind a delete. We log the type
+                // stays, because a delete cannot be unwound. The type is logged
                 // as failed so verification and the user reason stay honest.
                 //
                 // The clear is a hard delete of the entry and the file, not a
@@ -641,7 +640,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// Applies people. Does NOT call UpdateToRepositoryAsync, caller batches.
     /// </summary>
     private async Task<bool> ApplyPeopleAsync(
-        MediaBrowser.Controller.Entities.BaseItem localItem,
+        BaseItem localItem,
         MetadataSyncItem item,
         CancellationToken cancellationToken)
     {
@@ -656,10 +655,10 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             throw new InvalidOperationException("People source blob deserialized to null");
         }
 
-        var people = new List<MediaBrowser.Controller.Entities.PersonInfo>();
+        var people = new List<PersonInfo>();
         foreach (var person in peopleList)
         {
-            var personInfo = new MediaBrowser.Controller.Entities.PersonInfo();
+            var personInfo = new PersonInfo();
 
             if (person.TryGetValue("Name", out var name))
             {
@@ -694,7 +693,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// Applies studios. Does NOT call UpdateToRepositoryAsync, caller batches.
     /// </summary>
     private bool ApplyStudios(
-        MediaBrowser.Controller.Entities.BaseItem localItem,
+        BaseItem localItem,
         MetadataSyncItem item)
     {
         if (string.IsNullOrEmpty(item.Studios.Source))
@@ -720,12 +719,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
 
     // ===================================================================
     // Verification, re-read local state and compare against source blob.
-    // Each helper is a pure function for testability: takes the freshly-
-    // read local item + source record, returns (succeeded, failureReason).
+    // Each helper takes the freshly-read local item + source record and
+    // returns (succeeded, failureReason).
     // ===================================================================
 
     private (bool Succeeded, string? FailureReason) VerifyMetadataApplied(
-        MediaBrowser.Controller.Entities.BaseItem freshLocal,
+        BaseItem freshLocal,
         MetadataSyncItem record,
         bool syncGenres,
         bool syncTags)
@@ -770,7 +769,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         {
             try
             {
-                enrichedSource = await Utilities.ImageManifestEnricher.EnrichAsync(
+                enrichedSource = await ImageManifestEnricher.EnrichAsync(
                     record.Images.Source,
                     sourceItemGuid,
                     imageSource.Client,
@@ -792,13 +791,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         // Metadata sync only writes to non-Person items, where Jellyfin
         // silently rejects Profile saves. If a record was built before
         // PopulateSourceImagesFromTags learned to filter Profile (or ever
-        // drifts back), we'd be stuck reporting an unsyncable diff forever.
+        // drifts back), the row would be stuck reporting an unsyncable diff forever.
         // Strip here so the verify reflects what's actually syncable
         // instead of what's on the wire from source.
         var sanitizedSource = StripUnsyncableImageTypes(enrichedSource);
 
-        var imagesComparator = record.Images.Comparator as Models.Common.Comparators.ImageManifestComparator;
-        if (imagesComparator != null)
+        if (record.Images.Comparator is Models.Common.Comparators.ImageManifestComparator imagesComparator)
         {
             var diff = imagesComparator.DescribeDifference(sanitizedSource, record.Images.Local);
             if (diff == null)
@@ -818,7 +816,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     }
 
     private (bool Succeeded, string? FailureReason) VerifyPeopleApplied(
-        MediaBrowser.Controller.Entities.BaseItem freshLocal,
+        BaseItem freshLocal,
         MetadataSyncItem record)
     {
         // Same comparator the refresh uses. A looser check here (names only)
@@ -836,7 +834,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     }
 
     private (bool Succeeded, string? FailureReason) VerifyStudiosApplied(
-        MediaBrowser.Controller.Entities.BaseItem freshLocal,
+        BaseItem freshLocal,
         MetadataSyncItem record)
     {
         var sourceList = JsonSerializer.Deserialize<List<string>>(record.Studios.Source ?? "[]") ?? new List<string>();
@@ -908,19 +906,6 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         for (var i = 0; i < aArr.Length; i++)
         {
             if (!string.Equals(aArr[i], bArr[i], StringComparison.Ordinal)) return false;
-        }
-
-        return true;
-    }
-
-    private static bool ArraysEqual<T>(T[]? a, T[]? b) where T : struct
-    {
-        var aArr = a ?? Array.Empty<T>();
-        var bArr = b ?? Array.Empty<T>();
-        if (aArr.Length != bArr.Length) return false;
-        for (var i = 0; i < aArr.Length; i++)
-        {
-            if (!aArr[i].Equals(bArr[i])) return false;
         }
 
         return true;

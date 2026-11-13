@@ -340,8 +340,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// this to process pending deletions and trigger a library refresh on
     /// every Sync run. Default is a no-op. For the per-module "last sync
     /// time" bump, override <see cref="RecordRunCompleted"/> instead.
-    /// <paramref name="progress"/> reports 0 to 100 for the finalize phase only.
-    /// the base scales it into the run's overall 90 to 100% band.
+    /// <paramref name="progress"/> reports 0 to 100 for the finalize phase only,
+    /// and the base scales it into the run's overall 90 to 100% band.
     /// </summary>
     protected virtual Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -352,7 +352,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// configuration with a single try/catch, modules don't repeat that
     /// save plumbing.
     /// </summary>
-    protected virtual void RecordRunCompleted(Configuration.PluginConfiguration config, DateTime utcNow)
+    protected virtual void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         // Default: nothing to record.
     }
@@ -638,7 +638,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
         // Mirror the refresh base: record/clear the run outcome so the
         // dashboard can surface "last sync had errors" without log-diving.
-        // We treat any errored item as a non-clean run.
+        // Any errored item makes the run a non-clean one.
         if (failures > 0)
         {
             RecordRunFailure("Sync", $"{failures} of {queued.Count} item(s) errored, open the table to see per-row reasons");
@@ -669,7 +669,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <summary>
     /// Plain-lambda IProgress. <see cref="Progress{T}"/> posts through the
     /// captured SynchronizationContext, which reorders and defers reports.
-    /// progress math here is already thread-safe, so report inline.
+    /// The progress math here is already thread-safe, so report inline.
     /// </summary>
     private sealed class DelegateProgress : IProgress<double>
     {

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
@@ -103,13 +104,13 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
         // whitelisted under several mappings of one server (movies + shows split across
         // libraries). Its local members are gathered across all of them. Collection ids are
         // the peer's own, so the grouping never crosses servers.
-        var work = new List<(Models.Configuration.SourceServer Server, Dictionary<string, List<Models.Configuration.LibraryMapping>> Collections)>();
+        var work = new List<(SourceServer Server, Dictionary<string, List<LibraryMapping>> Collections)>();
         foreach (var server in config.GetPullServers())
         {
-            var collectionsByIdN = new Dictionary<string, List<Models.Configuration.LibraryMapping>>(StringComparer.OrdinalIgnoreCase);
+            var collectionsByIdN = new Dictionary<string, List<LibraryMapping>>(StringComparer.OrdinalIgnoreCase);
             foreach (var mapping in server.GetEnabledLibraryMappings())
             {
-                if (mapping.FilterMode != Models.Configuration.LibraryFilterMode.Whitelist || mapping.FilteredItems == null)
+                if (mapping.FilterMode != LibraryFilterMode.Whitelist || mapping.FilteredItems == null)
                 {
                     continue;
                 }
@@ -118,7 +119,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
                 {
                     if (!collectionsByIdN.TryGetValue(fi.ItemId, out var list))
                     {
-                        list = new List<Models.Configuration.LibraryMapping>();
+                        list = new List<LibraryMapping>();
                         collectionsByIdN[fi.ItemId] = list;
                     }
 
@@ -216,7 +217,7 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
         SourceServerClient client,
         Guid sourceId,
         string sourceIdN,
-        List<Models.Configuration.LibraryMapping> mappings,
+        List<LibraryMapping> mappings,
         IReadOnlyList<BaseItem> localBoxSets,
         CancellationToken cancellationToken)
     {

@@ -8,6 +8,7 @@ using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
@@ -29,9 +30,8 @@ public class SyncMissingUserTask
     : SyncQueueTaskBase<UserSyncItem, (string SourceUserId, string LocalUserId, string PropertyCategory)>
 {
     private readonly IUserManager _userManager;
-    private readonly IProviderManager _providerManager;
     private readonly IServerConfigurationManager _serverConfigurationManager;
-    private readonly Services.Queue.AppliedVersionRecorder? _applied;
+    private readonly AppliedVersionRecorder? _applied;
 
     /// <summary>
     /// Initializes a new instance.
@@ -44,18 +44,17 @@ public class SyncMissingUserTask
         IProviderManager providerManager,
         IServerConfigurationManager serverConfigurationManager,
         UserSyncTableManager manager,
-        Services.Queue.AppliedVersionRecorder? applied = null)
+        AppliedVersionRecorder? applied = null)
         : base(logger, manager, clientFactory, configManager)
     {
         _userManager = userManager;
-        _providerManager = providerManager;
         _serverConfigurationManager = serverConfigurationManager;
         _applied = applied;
     }
 
     /// <inheritdoc />
     protected override IDisposable? EnterApplyGuard(UserSyncItem record)
-        => _applied?.Enter(Models.Queue.HintKind.Users, Guid.TryParse(record?.LocalUserId, out var id) ? Services.Queue.HintProtocol.UsersKey(id) : string.Empty);
+        => _applied?.Enter(Models.Queue.HintKind.Users, Guid.TryParse(record?.LocalUserId, out var id) ? HintProtocol.UsersKey(id) : string.Empty);
 
     // The version is recorded once per user.
     /// <inheritdoc />
@@ -68,9 +67,8 @@ public class SyncMissingUserTask
 
         if (_applied is not null)
         {
-            await _applied.RecordAsync(Models.Queue.HintKind.Users, Services.Queue.HintProtocol.UsersKey(localId), Services.Queue.HintProtocol.UsersKey(sourceId), SourceFor(record), cancellationToken).ConfigureAwait(false);
+            await _applied.RecordAsync(Models.Queue.HintKind.Users, HintProtocol.UsersKey(localId), HintProtocol.UsersKey(sourceId), SourceFor(record), cancellationToken).ConfigureAwait(false);
         }
-
     }
 
     /// <inheritdoc />
@@ -151,7 +149,7 @@ public class SyncMissingUserTask
         return Task.CompletedTask;
     }
 
-    private (Guid LocalUserId, Jellyfin.Database.Implementations.Entities.User LocalUser) ResolveLocalUser(UserSyncItem record)
+    private (Guid LocalUserId, User LocalUser) ResolveLocalUser(UserSyncItem record)
     {
         var localUserId = Guid.Parse(record.LocalUserId);
         var localUser = _userManager.GetUserById(localUserId)
@@ -307,12 +305,11 @@ public class SyncMissingUserTask
     }
 
     /// <inheritdoc />
-    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(config);
         config.LastUserSyncTime = utcNow;
     }
-
 
     // ===================================================================
     // Apply logic, per-category mutations on the local user. Each method
@@ -483,7 +480,7 @@ public class SyncMissingUserTask
 
         try
         {
-            // Phase 1: download and hash. tempPath is a fresh temp file , 
+            // Phase 1: download and hash. tempPath is a fresh temp file, so
             // failures here don't touch local state.
             using (var fileStream = File.Create(tempPath))
             {

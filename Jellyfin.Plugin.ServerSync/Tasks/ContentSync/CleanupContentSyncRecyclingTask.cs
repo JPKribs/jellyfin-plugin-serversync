@@ -34,13 +34,11 @@ public class EmptyRecyclingBinTask : IScheduledTask
     {
         var config = _configManager.Configuration;
 
-        // Skip if content sync is not enabled
         if (!config.EnableContentSync)
         {
             return Task.CompletedTask;
         }
 
-        // Skip if recycling bin is not enabled
         if (!config.EnableRecyclingBin)
         {
             _logger.LogDebug("Recycling bin is not enabled, skipping cleanup");

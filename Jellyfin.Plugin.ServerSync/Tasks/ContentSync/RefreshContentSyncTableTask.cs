@@ -1,17 +1,18 @@
 using System;
-using System.IO;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
@@ -126,13 +127,13 @@ public class UpdateSyncTablesTask
     private readonly LinkFiles? _linkFiles;
 
     // Whether each server offers links, asked once per run and only for a server with a Link mapping.
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<bool>> _linkingOffered = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Task<bool>> _linkingOffered = new(StringComparer.OrdinalIgnoreCase);
 
     // What each server last answered about links, kept across runs, and the copy this run started with.
     // A server's scope carries the answer the run started with, so when a server starts offering links
     // the run that learns it records the old answer, and the next run sees a new scope and lists the
     // server in full. Files passed over while it offered none are then linked.
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _linkingKnown = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, bool> _linkingKnown = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, bool> _linkingAtStart = new(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
@@ -179,8 +180,10 @@ public class UpdateSyncTablesTask
         return false;
     }
 
+    /// <inheritdoc />
     protected override bool SupportsIncremental => true;
 
+    /// <inheritdoc />
     protected override string ScopeSettings
     {
         get
@@ -223,18 +226,6 @@ public class UpdateSyncTablesTask
         return config.GetEnabledLibraryMappings().Count > 0;
     }
 
-    // Routing depends on <see cref="LibraryMapping.FilterMode"/>:
-    //   <list type="bullet">
-    //   <item><b>Whitelist</b>, fetch the items in
-    //   <see cref="LibraryMapping.FilteredItems"/> by ID in batches of 50.
-    //   No bulk library scan. The whitelist is the authority. If a user
-    //   wants every episode of a Series, they whitelist the episodes (or
-    //   we can layer AncestorIds expansion in later, but the spec is "fetch
-    //   only the items in FilteredItems").</item>
-    //   <item><b>Blacklist / AllowAll</b>, bulk-fetch the library, drop
-    //   blacklisted items via <see cref="PathUtilities.IsItemFiltered"/>.
-    //   This is the existing behavior.</item>
-    //   </list>
     // Per run state is reset once per run, not per server, since the list phase now runs once for
     // every connected server and the counts have to accumulate across them.
     /// <inheritdoc />
@@ -246,6 +237,15 @@ public class UpdateSyncTablesTask
         _linkingAtStart = new Dictionary<string, bool>(_linkingKnown, StringComparer.OrdinalIgnoreCase);
     }
 
+    // Routing depends on <see cref="LibraryMapping.FilterMode"/>:
+    //   <list type="bullet">
+    //   <item><b>Whitelist</b>, resolve each ID in
+    //   <see cref="LibraryMapping.FilteredItems"/> on its own. Leaves are
+    //   taken as-is and folder-type entries expand to their leaf
+    //   descendants. No bulk library scan. The whitelist is the authority.</item>
+    //   <item><b>Blacklist / AllowAll</b>, bulk-fetch the library, drop
+    //   blacklisted items via <see cref="PathUtilities.IsItemFiltered"/>.</item>
+    //   </list>
     /// <inheritdoc />
     protected override async Task<IList<ContentRefreshWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
     {
@@ -261,9 +261,9 @@ public class UpdateSyncTablesTask
         Guid? playlistUserId = Guid.TryParse(source.Server.AuthenticatedUserId, out var authUserId) ? authUserId : null;
 
         // Pre-fetch per-library counts so per-item progress reporting has a
-        // denominator. For whitelist mappings we know the count up front
-        // from FilteredItems.Count. Otherwise we ask the server (Limit=0
-        // count query). Total round-trip is at most one per enabled library.
+        // denominator. Bulk-fetched mappings ask the server (Limit=0 count
+        // query). Whitelist mappings leave it unset, see below. Total
+        // round-trip is at most one per enabled library.
         var libraryCounts = new Dictionary<string, int>(enabledMappings.Count);
         var totalExpected = 0;
         foreach (var mapping in enabledMappings)
@@ -277,9 +277,9 @@ public class UpdateSyncTablesTask
             if (mapping.FilterMode == LibraryFilterMode.Whitelist)
             {
                 // Whitelist count isn't known up-front: a single whitelisted
-                // Series expands to all of its episodes. We could query
-                // TotalRecordCount on the AncestorIds endpoint, but that's
-                // an extra round-trip per library. Cheaper to leave the
+                // Series expands to all of its episodes. TotalRecordCount on
+                // the AncestorIds endpoint could be queried, but that's an
+                // extra round-trip per library. Cheaper to leave the
                 // denominator unset and let progress be coarse for whitelist
                 // mappings, the bulk-fetch libraries (if any) dominate the
                 // bar. The Math.Min(100...) clamp keeps it visually sane.
@@ -339,7 +339,7 @@ public class UpdateSyncTablesTask
                 // ParentId+Recursive=true, which dropped items whose direct
                 // ParentId did not equal the whitelisted ID (e.g. all
                 // episodes under a whitelisted Series).
-                var rawItems = mapping.FilteredItems ?? new List<Models.Configuration.FilteredItem>();
+                var rawItems = mapping.FilteredItems ?? new List<FilteredItem>();
                 var ids = new List<Guid>(rawItems.Count);
                 var droppedIds = 0;
                 foreach (var fi in rawItems)
@@ -390,7 +390,7 @@ public class UpdateSyncTablesTask
                     catch (Exception ex)
                     {
                         // One whitelist entry failed, skip pruning this run so
-                        // items whose source state we couldn't verify aren't
+                        // items whose source state couldn't be verified aren't
                         // scheduled for deletion. Keep processing the remaining
                         // entries so partial progress is still recorded.
                         MarkSourceUnavailable($"source server unavailable resolving a whitelist entry in '{mapping.SourceLibraryName}'");
@@ -652,7 +652,7 @@ public class UpdateSyncTablesTask
         if (existingItem != null
             && existingItem.Status == SyncStatus.Synced
             && !string.IsNullOrEmpty(existingItem.LocalPath)
-            && !System.IO.File.Exists(existingItem.LocalPath))
+            && !File.Exists(existingItem.LocalPath))
         {
             // A crash between the two phases of a download replacement leaves
             // the user's file stranded as a .replacing sidecar next to the
@@ -661,7 +661,7 @@ public class UpdateSyncTablesTask
             TryRestoreReplacingSidecar(existingItem.LocalPath);
 
             if (config.DeleteMissingContentMode != ApprovalMode.Disabled
-                && !System.IO.File.Exists(existingItem.LocalPath))
+                && !File.Exists(existingItem.LocalPath))
             {
                 return Task.FromResult<SyncItem?>(null);
             }
@@ -682,7 +682,7 @@ public class UpdateSyncTablesTask
             }
 
             // A real copy already at the name always wins, and is tracked as a copy.
-            if (!System.IO.File.Exists(localPath))
+            if (!File.Exists(localPath))
             {
                 return NewLinkAsync(source, sourceItemId, sourcePath, sourceSize, sourceCreateDate, linkPath, config.DownloadNewContentMode, cancellationToken);
             }
@@ -1096,17 +1096,9 @@ public class UpdateSyncTablesTask
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var effectiveMode = deleteMode;
-                if (deleteMode == ApprovalMode.Enabled
-                    && (IsBlacklistExcluded(stale[i].SourceLibraryId, stale[i].SourceItemId)
-                        || (mappingById.TryGetValue(stale[i].SourceLibraryId, out var rowMapping)
-                            && ((rowMapping.FilterMode == LibraryFilterMode.Blacklist
-                                    && PathUtilities.IsItemFiltered(stale[i].SourcePath, rowMapping.SourceRootPath ?? string.Empty, rowMapping.FilterMode, rowMapping.FilteredItems))
-                                || (rowMapping.FilterMode == LibraryFilterMode.Whitelist
-                                    && HasContainerEntry(rowMapping))))))
-                {
-                    effectiveMode = ApprovalMode.RequireApproval;
-                }
+                var effectiveMode = deleteMode == ApprovalMode.Enabled && ScopeChanged(stale[i], mappingById)
+                    ? ApprovalMode.RequireApproval
+                    : deleteMode;
 
                 var result = SyncStateService.ProcessMissingItem(typedManager, stale[i], effectiveMode, Logger);
                 if (result.Changed)
@@ -1135,7 +1127,6 @@ public class UpdateSyncTablesTask
         ResolveLocalItemIds();
         return Task.CompletedTask;
     }
-
 
     /// <summary>
     /// Picks the configured watched filter users that exist on one scan
@@ -1244,8 +1235,8 @@ public class UpdateSyncTablesTask
 
     /// <summary>
     /// Builds an Ignored record for an item that every selected user has
-    /// played. If a record already exists in Synced/Ignored we leave it
-    /// alone. Otherwise we update it (or create a new one) with Ignored.
+    /// played. A record already in Synced/Ignored is left alone. Otherwise
+    /// it is updated (or a new one is created) as Ignored.
     /// </summary>
     private static SyncItem? BuildWatchedFiltered(
         LibraryMapping mapping,
@@ -1312,20 +1303,20 @@ public class UpdateSyncTablesTask
     {
         try
         {
-            var dir = System.IO.Path.GetDirectoryName(localPath);
-            if (string.IsNullOrEmpty(dir) || !System.IO.Directory.Exists(dir))
+            var dir = Path.GetDirectoryName(localPath);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
             {
                 return;
             }
 
-            var candidates = System.IO.Directory.GetFiles(dir, System.IO.Path.GetFileName(localPath) + ".replacing.*");
+            var candidates = Directory.GetFiles(dir, Path.GetFileName(localPath) + ".replacing.*");
             if (candidates.Length == 0)
             {
                 return;
             }
 
-            Array.Sort(candidates, (a, b) => System.IO.File.GetLastWriteTimeUtc(b).CompareTo(System.IO.File.GetLastWriteTimeUtc(a)));
-            System.IO.File.Move(candidates[0], localPath);
+            Array.Sort(candidates, (a, b) => File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
+            File.Move(candidates[0], localPath);
             Logger.LogWarning(
                 "Restored {Path} from a .replacing sidecar left behind by an interrupted replacement",
                 localPath);
@@ -1365,7 +1356,7 @@ public class UpdateSyncTablesTask
             }
             catch (Exception ex)
             {
-                Logger.LogDebug(ex, "Failed to resolve LocalItemId for {FileName}", System.IO.Path.GetFileName(item.LocalPath));
+                Logger.LogDebug(ex, "Failed to resolve LocalItemId for {FileName}", Path.GetFileName(item.LocalPath));
             }
         }
 

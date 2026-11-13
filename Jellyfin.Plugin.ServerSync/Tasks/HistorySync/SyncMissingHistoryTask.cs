@@ -76,8 +76,8 @@ public class SyncMissingHistoryTask
     // Servers that cannot negotiate this run, by entry key, with the reason their rows will carry.
     private readonly Dictionary<string, string> _negotiationBlocked = new(StringComparer.OrdinalIgnoreCase);
 
-    // Servers whose Server Sync refuses this server's key. History
-    // from them is applied one way, the way it was before negotiation existed, and no base is recorded.
+    // Servers whose Server Sync refuses this server's key. History from them is applied one way, the
+    // way it was before negotiation existed, and no base is recorded.
     private readonly HashSet<string> _oneWay = new(StringComparer.OrdinalIgnoreCase);
 
     private bool Negotiating => ConfigManager.Configuration.HistorySyncNegotiate;
@@ -361,7 +361,7 @@ public class SyncMissingHistoryTask
 
         var (localUserId, localItemId) = ParseLocalIds(record);
 
-        // Re-read the user-data and compare against what we just merged.
+        // Re-read the user-data and compare against what was just merged.
         // Mismatches surface as a precise Errored reason rather than a
         // silent green badge.
         var (ok, reason) = VerifyApplied(record, localUserId, localItemId);
@@ -457,7 +457,7 @@ public class SyncMissingHistoryTask
     }
 
     // HistorySyncItem has no SyncableValue fields (its base MarkSynced is
-    // a no-op), so on success we copy the merged values into the local
+    // a no-op), so on success the merged values are copied into the local
     // snapshot. The next Refresh will re-pull the actual local state, but
     // in the meantime <see cref="HistorySyncMergeService.HasChangesToSync"/>
     // will see local == merged and not requeue.
@@ -482,10 +482,9 @@ public class SyncMissingHistoryTask
     }
 
     /// <inheritdoc />
-    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(config);
         config.LastHistorySyncTime = utcNow;
     }
-
 }

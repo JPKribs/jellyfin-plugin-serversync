@@ -5,7 +5,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Services;
-using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
@@ -108,7 +107,6 @@ public class CleanupTempFilesTask : IScheduledTask
                 return Task.CompletedTask;
             }
 
-            // Get list of temp files currently being used by active downloads
             var activeTempFiles = ActiveDownloadTracker.GetActiveTempFiles()
                 .Select(f => f.ToLowerInvariant())
                 .ToHashSet();
@@ -139,8 +137,7 @@ public class CleanupTempFilesTask : IScheduledTask
                     // look stale. On Linux/macOS, deleting an open file
                     // succeeds (unlink while open) and silently strands the
                     // writer with a handle pointing to nothing visible.
-                    var isActiveDownload = activeTempFiles.Contains(file.ToLowerInvariant());
-                    if (isActiveDownload)
+                    if (activeTempFiles.Contains(file.ToLowerInvariant()))
                     {
                         _logger.LogDebug("Skipping active download: {FileName}", fileInfo.Name);
                         skippedCount++;

@@ -1,11 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -54,8 +54,10 @@ public class RefreshMetadataSyncTableTask
         _conflicts = conflicts;
     }
 
+    /// <inheritdoc />
     protected override bool SupportsIncremental => true;
 
+    /// <inheritdoc />
     protected override string ScopeSettings
     {
         get
@@ -124,7 +126,7 @@ public class RefreshMetadataSyncTableTask
             || config.MetadataSyncPeople || config.MetadataSyncStudios;
     }
 
-    // Two-phase fetch instead of "bulk-fetch everything heavy":
+    // Light discovery, then a heavy fetch, instead of "bulk-fetch everything heavy":
     //   <list type="number">
     //   <item>Enumerate local items per library and build a path lookup.</item>
     //   <item>Light source discovery, paginate every library asking for
@@ -136,8 +138,8 @@ public class RefreshMetadataSyncTableTask
     //   </list>
     // On a typical install where local is a subset of source, this
     // dramatically reduces both bytes-over-wire and the build phase's
-    // work, we no longer fetch full metadata for tens of thousands of
-    // source items the user doesn't have.
+    // work, since full metadata is no longer fetched for tens of thousands
+    // of source items the user doesn't have.
     /// <inheritdoc />
     protected override async Task<IList<MetadataWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
     {
@@ -175,17 +177,17 @@ public class RefreshMetadataSyncTableTask
         progress.Report(8);
 
         // Phase 2: lightweight discovery, find the source IDs of items whose
-        // translated paths exist locally. We collect (mapping, sourceId,
-        // isFolder) triples. The source-side metadata isn't materialized yet.
-        var matchedLeavesByMapping = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentBag<Guid>>();
-        var matchedFoldersByMapping = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentBag<Guid>>();
+        // translated paths exist locally, collected per mapping and split
+        // into leaves and folders. The source-side metadata isn't materialized yet.
+        var matchedLeavesByMapping = new ConcurrentDictionary<string, ConcurrentBag<Guid>>();
+        var matchedFoldersByMapping = new ConcurrentDictionary<string, ConcurrentBag<Guid>>();
 
         // Per-page discovery reporting. Without it the bar sat frozen at 8%
         // for the whole discovery pagination, minutes on big libraries.
         // Totals come from each pagination's first-page TotalRecordCount, so
         // the denominator firms up as pages land. Clamp keeps the band's end
         // reserved for actual completion.
-        var discoveryProgress = new System.Collections.Concurrent.ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
+        var discoveryProgress = new ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
         void ReportDiscovery(string key, long fetched, long total)
         {
             discoveryProgress[key] = (fetched, total);
@@ -210,8 +212,8 @@ public class RefreshMetadataSyncTableTask
                 if (!Guid.TryParse(mapping.SourceLibraryId, out var sourceLibraryId)) return;
                 if (!localByLibrary.TryGetValue(mapping.SourceLibraryId, out var localPaths)) return;
 
-                var leafBag = matchedLeavesByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new System.Collections.Concurrent.ConcurrentBag<Guid>());
-                var folderBag = matchedFoldersByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new System.Collections.Concurrent.ConcurrentBag<Guid>());
+                var leafBag = matchedLeavesByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new ConcurrentBag<Guid>());
+                var folderBag = matchedFoldersByMapping.GetOrAdd(mapping.SourceLibraryId, _ => new ConcurrentBag<Guid>());
 
                 await DiscoverForRunAsync(source, mapping, sourceLibraryId, leafTypes, localPaths.Leaves, leafBag, mapping.SourceLibraryId + "|leaves", ReportDiscovery, ct).ConfigureAwait(false);
                 if (includeFolderItems)
@@ -235,9 +237,9 @@ public class RefreshMetadataSyncTableTask
         }
 
         // Phase 3: batch-fetch full metadata only for matched IDs. Each
-        // library's matched IDs are batched independently so we keep track
-        // of which mapping a batch belongs to.
-        var work = new System.Collections.Concurrent.ConcurrentBag<MetadataWork>();
+        // library's matched IDs are batched independently so each batch
+        // keeps track of the mapping it belongs to.
+        var work = new ConcurrentBag<MetadataWork>();
         var fetched = 0;
         var heavyDenominator = Math.Max(totalMatched, 1);
 
@@ -248,8 +250,8 @@ public class RefreshMetadataSyncTableTask
         // items because no callback fired during the multi-minute serial
         // chunk loop.
         //
-        // Batch size capped at 50 (matches the SDK default). I tried bumping
-        // it to 200 to cut round-trip count, but that produced HTTP 414
+        // Batch size capped at 50 (matches the SDK default). Bumping it to
+        // 200 to cut round-trip count produced HTTP 414
         // (URI Too Long) on real-world setups, many reverse proxies (nginx
         // default large_client_header_buffers, IIS request filtering, etc.)
         // cap header size at 4 to 8KB, and 200 IDs × 32 hex chars + Fields=
@@ -332,7 +334,7 @@ public class RefreshMetadataSyncTableTask
         Guid sourceLibraryId,
         BaseItemKind[] includeTypes,
         Dictionary<string, BaseItem> localPaths,
-        System.Collections.Concurrent.ConcurrentBag<Guid> matchedIds,
+        ConcurrentBag<Guid> matchedIds,
         string progressKey,
         Action<string, long, long> reportDiscovery,
         CancellationToken cancellationToken)
@@ -344,12 +346,12 @@ public class RefreshMetadataSyncTableTask
             return;
         }
 
-        var all = new System.Collections.Concurrent.ConcurrentBag<Guid>();
-        var changed = new System.Collections.Concurrent.ConcurrentBag<Guid>();
+        var all = new ConcurrentBag<Guid>();
+        var changed = new ConcurrentBag<Guid>();
         await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, includeTypes, localPaths, all, progressKey, reportDiscovery, null, cancellationToken).ConfigureAwait(false);
         await DiscoverMatchingIdsAsync(source.Client, mapping, sourceLibraryId, includeTypes, localPaths, changed, progressKey + "|changed", reportDiscovery, changedSince, cancellationToken).ConfigureAwait(false);
         var changedIds = new HashSet<Guid>(changed);
-        foreach (var id in new HashSet<Guid>(all).Where(candidate => changedIds.Contains(candidate) || !ExistingRows.ContainsKey((mapping.SourceLibraryId, candidate.ToString("N", System.Globalization.CultureInfo.InvariantCulture)))))
+        foreach (var id in new HashSet<Guid>(all).Where(candidate => changedIds.Contains(candidate) || !ExistingRows.ContainsKey((mapping.SourceLibraryId, candidate.ToString("N", CultureInfo.InvariantCulture)))))
         {
             matchedIds.Add(id);
         }
@@ -361,7 +363,7 @@ public class RefreshMetadataSyncTableTask
         Guid sourceLibraryId,
         BaseItemKind[] includeTypes,
         Dictionary<string, BaseItem> localPaths,
-        System.Collections.Concurrent.ConcurrentBag<Guid> matchedIds,
+        ConcurrentBag<Guid> matchedIds,
         string progressKey,
         Action<string, long, long> reportDiscovery,
         DateTime? changedSince,
@@ -432,7 +434,7 @@ public class RefreshMetadataSyncTableTask
                     continue;
                 }
 
-                if (mapping.FilterMode != Models.Configuration.LibraryFilterMode.AllowAll
+                if (mapping.FilterMode != LibraryFilterMode.AllowAll
                     && mapping.FilteredItems?.Count > 0
                     && PathUtilities.IsItemFiltered(item.Path, mapping.SourceRootPath, mapping.FilterMode, mapping.FilteredItems))
                 {
@@ -532,7 +534,7 @@ public class RefreshMetadataSyncTableTask
         // Look up the previous row first: its source image manifest feeds the
         // carry-forward path that skips per-item image enrichment HTTP when
         // tags are unchanged.
-        var sourceItemId = source.SourceItem.Id!.Value.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        var sourceItemId = source.SourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
         existing.TryGetValue((source.LibraryMapping.SourceLibraryId, sourceItemId), out var priorRecord);
 
         var fresh = await _metadataService.BuildRecordAsync(
@@ -615,10 +617,9 @@ public class RefreshMetadataSyncTableTask
     }
 
     /// <inheritdoc />
-    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(config);
         config.LastMetadataSyncTime = utcNow;
     }
-
 }

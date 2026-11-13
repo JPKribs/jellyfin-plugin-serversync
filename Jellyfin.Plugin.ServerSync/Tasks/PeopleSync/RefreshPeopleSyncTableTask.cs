@@ -9,7 +9,6 @@ using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
-using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
@@ -87,8 +86,8 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             queued,
             Sources,
             Models.Queue.HintKind.People,
-            record => Services.Queue.HintProtocol.PeopleKey(record.PersonName),
-            record => Services.Queue.HintProtocol.PeopleKey(record.PersonName),
+            record => HintProtocol.PeopleKey(record.PersonName),
+            record => HintProtocol.PeopleKey(record.PersonName),
             record => (record.LocalPersonId, record.PersonName),
             record => Manager.Upsert(record),
             Logger,
@@ -219,8 +218,8 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
 
         if (sourcePersons.Count == 0)
         {
-            // A server whose library overlaps ours never has zero persons , 
-            // an empty 200 means the source didn't give a real answer (mid-
+            // A server whose library overlaps this one never has zero persons,
+            // so an empty 200 means the source didn't give a real answer (mid-
             // startup, migrating, or an endpoint/auth regression). Treating
             // it as truth is what wiped the tracking table on 10.11.64.0.
             MarkSourceUnavailable(
@@ -302,7 +301,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             // when a tag changed or a size is missing. PopulateImageData
             // builds the source side tag-only (Size=0) from
             // BaseItemDto.ImageTags. Without sizing, the comparator's
-            // tag-only-vs-sized fallback fires on every row, every refresh , 
+            // tag-only-vs-sized fallback fires on every row, every refresh, so
             // every row queues and re-downloads images that already match.
             if (!string.IsNullOrEmpty(record.SourcePersonId)
                 && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
@@ -357,10 +356,9 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
     protected override string? PriorityKeyOf(PeopleSyncItem record) => record?.PersonName;
 
     /// <inheritdoc />
-    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(config);
         config.LastPeopleSyncTime = utcNow;
     }
-
 }

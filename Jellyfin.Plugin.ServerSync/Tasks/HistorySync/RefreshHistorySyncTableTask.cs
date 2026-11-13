@@ -31,8 +31,8 @@ public sealed record HistoryWork(ScanSource Source, UserMapping UserMapping, Lib
 /// Refresh phase for History sync. Local-first discovery: enumerate the
 /// items in each mapped local library, then for each (enabled user mapping
 /// × enabled library mapping) batch-fetch user-data for the source items
-/// whose translated path exists locally. We never fetch user-data for items
-/// that aren't in the local library, the previous bulk per-(user × library)
+/// whose translated path exists locally. User-data is never fetched for items
+/// that aren't in the local library. The previous bulk per-(user × library)
 /// approach pulled tens of thousands of records over the wire just to
 /// throw most of them away on path mismatch.
 /// </summary>
@@ -61,7 +61,6 @@ public class RefreshHistorySyncTableTask
         _links = links;
     }
 
-
     /// <inheritdoc />
     public override string Name => "Refresh History Sync Table";
 
@@ -81,7 +80,7 @@ public class RefreshHistorySyncTableTask
     // scan reads everything again.
     /// <inheritdoc />
     protected override string ScopeSettings
-        => ((int)ConfigManager.Configuration.GetHistoryFields()).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        => ((int)ConfigManager.Configuration.GetHistoryFields()).ToString(CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
     protected override bool IsEnabled()
@@ -145,7 +144,7 @@ public class RefreshHistorySyncTableTask
 
         // Phase 2: light source discovery, find source IDs of items whose
         // translated path exists locally. One pass per library, regardless
-        // of how many users we sync.
+        // of how many users are synced.
         // Per-page reporting into the 8 to 30 band. Without it the bar froze at
         // 8% for the entire discovery pagination.
         var discoveryProgress = new ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
@@ -346,29 +345,29 @@ public class RefreshHistorySyncTableTask
             sourceItemId,
             negotiateWithSource: ConfigManager.Configuration.HistorySyncNegotiate);
 
-        // Carry forward the Synced baseline from the existing row, same as
-        // the Metadata refresh: the service builds a fresh record with a
-        // null SyncedHash, and without this the SourceHash == SyncedHash
-        // short-circuit in HasChanges can never fire and every refresh
-        // destroys the baseline the Sync task recorded via MarkSynced.
         if (record != null)
         {
             record.ServerKey = source.Source.Key;
-        }
 
-        if (record != null && existing.TryGetValue((record.SourceUserId, record.SourceItemId), out var prev))
-        {
-            CarryForwardRowState(record, prev);
-            record.SourceState.Synced = prev.SourceState.Synced;
-            record.SourceState.SyncedHash = prev.SourceState.SyncedHash;
-
-            // The service merged without knowing what the two servers last agreed on. With the base
-            // restored the merge becomes three way, which is what lets a change made only on this
-            // server survive instead of being overwritten by an unchanged source.
-            record.CarryNegotiatedBaseFrom(prev);
-            if (record.HasNegotiatedBase)
+            // Carry forward the Synced baseline from the existing row, same as
+            // the Metadata refresh: the service builds a fresh record with a
+            // null SyncedHash, and without this the SourceHash == SyncedHash
+            // short-circuit in HasChanges can never fire and every refresh
+            // destroys the baseline the Sync task recorded via MarkSynced.
+            if (existing.TryGetValue((record.SourceUserId, record.SourceItemId), out var prev))
             {
-                HistorySyncMergeService.MergeHistoryData(record);
+                CarryForwardRowState(record, prev);
+                record.SourceState.Synced = prev.SourceState.Synced;
+                record.SourceState.SyncedHash = prev.SourceState.SyncedHash;
+
+                // The service merged without knowing what the two servers last agreed on. With the base
+                // restored the merge becomes three way, which is what lets a change made only on this
+                // server survive instead of being overwritten by an unchanged source.
+                record.CarryNegotiatedBaseFrom(prev);
+                if (record.HasNegotiatedBase)
+                {
+                    HistorySyncMergeService.MergeHistoryData(record);
+                }
             }
         }
 
@@ -434,7 +433,6 @@ public class RefreshHistorySyncTableTask
         return false;
     }
 
-
     // DecideStatus intentionally NOT overridden. An override here used to
     // duplicate the base minus MarkSynced. With comparator-based change
     // detection MarkSynced is harmless bookkeeping, and the override was
@@ -442,10 +440,9 @@ public class RefreshHistorySyncTableTask
     // at MaxRetryCount was re-queued on every refresh anyway.
 
     /// <inheritdoc />
-    protected override void RecordRunCompleted(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, DateTime utcNow)
+    protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(config);
         config.LastHistorySyncTime = utcNow;
     }
-
 }
