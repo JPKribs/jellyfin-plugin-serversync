@@ -96,7 +96,7 @@ Pressing play asks the source about every version. The versions it refuses the u
 
 * Two versions that differ only by extension would be the same link, so only the first is linked.
 * A version outside the mapping's root folder, or left out by the library filter, is not linked.
-* When a mapping is set back to **Copy**, the first version's link is copied and the other versions' links follow **Removed files**.
+* When a mapping is set back to **Copy**, the first version's link is copied and the other versions' links are removed.
 
 ## What Gets Written
 
@@ -217,11 +217,27 @@ The cache is kept across restarts. At startup, downloads cut short and cache fil
 
 ## The Link Check
 
-Every **Sync Content** run asks each connected server about the links that stream from it. A link whose file is gone from the source, or whose source no longer allows linking, shows on the Sync tab as an error starting with `Link check:` and the source's reason, before anyone presses play. The `.strm` is left in place, and the row is settled again on the first run where the source can stream the file. A source that cannot be reached flags nothing, since play falls back to another server and the next run checks again. What happens to a link whose file was removed for good is still decided by **Removed files** on the next refresh.
+Every **Sync Content** run asks each connected server about the links that stream from it. A link whose file is gone from the source, or whose source no longer allows linking, shows on the Sync tab as an error starting with `Link check:` and the source's reason, before anyone presses play. The `.strm` is left in place, and the row is settled again on the first run where the source can stream the file. A source that cannot be reached flags nothing, since play falls back to another server and the next run checks again. A link whose file was removed for good is removed on the next full scan. See [When the File Is Gone](#when-the-file-is-gone).
 
 A source on a release before 12.2.11.0 is not checked. The reasons a row can show are `the file is no longer on the source`, `the item is a link on the source, not a file`, `the source cannot read the file`, and `linking is not allowed for *server* here`.
 
 The check also keeps each link's recorded size current, which is how another server's copy is recognized as the same file.
+
+## When the File Is Gone
+
+A link holds nothing a download would bring back, so **Removed files** does not apply to it. Once no server this one pulls from offers the file, the next **Sync Content** run that does a full scan removes the link:
+
+* The `.strm` goes, with every file beside it under the same name: its `.nfo`, subtitles, images, and trickplay.
+* Each folder this leaves holding nothing but title artwork and `.nfo` files goes too, up to the library root, so a show's folder goes with its last episode. A folder that still holds anything else stays, with its artwork.
+* Nothing is moved to the recycling bin, and nothing waits for approval, whatever **Removed files**, **Enable Recycling Bin**, and **Remove Empty Folders** are set to.
+
+While another server still offers the file at the same place, the link is kept and streams from that server instead. Nothing is removed on a run where a server did not answer, or where a mapped library answered with no items at all.
+
+These still follow **Removed files**, as a copy does:
+
+* A full copy in a Link library, kept by an **Always Keep** pick or by hand. It is a real file.
+* A link the library filter now leaves out, since its file is still on the source.
+* A `.strm` that no longer points at Server Sync, because it was edited or replaced.
 
 ## Turning Links Into Copies
 
@@ -270,7 +286,7 @@ When the source refuses, the player shows `This item streams from another server
 | the file's bitrate is above the *n* Mbps the source allows your account | Raise the user's remote bitrate limit on the source, or turn off **Honor Remote Bitrate Limits** |
 | the source allows *n* link stream(s) at once and all are in use | Wait, or raise **Link Streams At Once** |
 | the source allows your account *n* stream(s) at once and all are in use | Wait, or raise **Link Streams At Once** on that user's mapping |
-| the file is no longer on the source | The next refresh handles it as a removed file |
+| the file is no longer on the source | The next full scan removes the link, unless another server offers the file |
 | *source* could not be reached | The source is down or unreachable from the linking server |
 | the source answered *status*: … | The source answered but would not check: `404` means Server Sync there has no links, `409` that it does not list the linking server, and `428` that the two are not paired. Use **Check Link** on the linking server's entry for the source |
 | the source's key for this server belongs to another user | The source's entry holds a standard user's key, which only streams as that user |
@@ -307,7 +323,7 @@ The link cache logs why a file was not cached:
 * **No transcoding on the source.** A link streams the file as it is. A user over their bitrate limit is refused rather than transcoded on the source. The linking server can still transcode.
 * **Trickplay and chapter images** are only what the source made. Jellyfin makes none for a link. They need **Take Link Images From the Source** on and the source on 12.2.11.0 or later.
 * **Only video is linked.** Audio and books in a Link mapping are copied.
-* **Renames on the source** give the file a new id there, so the new name is linked as a new file and the old link follows **Removed files**, as a copy would.
+* **Renames on the source** give the file a new id there, so the new name is linked as a new file and the old link is removed.
 
 ## Upgrades and Downgrades
 

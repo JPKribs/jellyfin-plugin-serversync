@@ -224,11 +224,18 @@ public static class SyncStateService
     /// gone is dropped. A row whose file is still on disk stays so the deletion policy decides what
     /// happens to the file, since dropping it would leave a file nothing tracks any more.
     /// </summary>
+    /// <param name="manager">The content sync table.</param>
+    /// <param name="item">The row whose item is gone from the source.</param>
+    /// <param name="deleteMode">How the deletion is approved.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="ownLink">The row's file is a .strm this plugin wrote, so it is removed without asking.</param>
+    /// <returns>What changed.</returns>
     public static TransitionResult ProcessMissingItem(
         ContentSyncTableManager manager,
         SyncItem item,
         ApprovalMode deleteMode,
-        ILogger logger)
+        ILogger logger,
+        bool ownLink = false)
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(item);
@@ -268,7 +275,9 @@ public static class SyncStateService
         // the deletion waits for the user's approval even when deletion is otherwise automatic.
         // A link the link check flagged was settled until the source stopped having the file, and its
         // .strm is this plugin's own, so it is removed as a settled row is.
-        var settled = item.Status == SyncStatus.Synced || (item.StorageMode == StorageMode.Link && Links.LinkVerifier.Flagged(item));
+        // The caller passes ownLink for a .strm it has checked is this plugin's own, which holds
+        // nothing worth asking about whatever state its row is in.
+        var settled = ownLink || item.Status == SyncStatus.Synced || (item.StorageMode == StorageMode.Link && Links.LinkVerifier.Flagged(item));
         if (deleteMode == ApprovalMode.RequireApproval || !settled)
         {
             item.Status = SyncStatus.Pending;

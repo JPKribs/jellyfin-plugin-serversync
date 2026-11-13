@@ -98,6 +98,24 @@ public sealed class LinkFiles
     public static bool PointsAtLinkRoute(string? url)
         => url is not null && url.Contains("/" + Route + "/", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Whether the file at <paramref name="path"/> is a .strm this plugin wrote, whatever id and secret
+    /// it holds. A file that cannot be read is not taken as one.
+    /// </summary>
+    public static bool IsOwnLink(string path)
+    {
+        try
+        {
+            return string.Equals(Path.GetExtension(path), ".strm", StringComparison.OrdinalIgnoreCase)
+                && File.Exists(path)
+                && PointsAtLinkRoute(ReadUrl(path));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private string Secret(string linkId)
     {
         using var hmac = new HMACSHA256(Key());

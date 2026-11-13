@@ -147,6 +147,29 @@ public sealed class RefreshContentSyncTableTaskTests : IDisposable
         return _manager.GetByKey(id)!;
     }
 
+    /// <summary>Writes a tracked link row with its .strm, this plugin's own unless <paramref name="url"/> says otherwise.</summary>
+    private SyncItem TrackLink(string id, string title = "Title", string? folder = null, SyncStatus status = SyncStatus.Synced, PendingType? pendingType = null, string url = "http://localhost:8096/Sync/Link/id?s=secret", StorageMode storage = StorageMode.Link)
+    {
+        var localPath = Path.Combine(folder ?? Path.Combine(_localRoot, title), id + ".strm");
+        Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+        File.WriteAllText(localPath, url + "\n");
+        _manager.Upsert(new SyncItem
+        {
+            SourceLibraryId = Library,
+            LocalLibraryId = "local-1",
+            SourceItemId = id,
+            SourcePath = "/src/" + title + "/" + id + ".mkv",
+            SourceSize = 1,
+            SourceCreateDate = DateTime.UtcNow,
+            LocalPath = localPath,
+            Status = status,
+            PendingType = pendingType,
+            StatusDate = DateTime.UtcNow,
+            StorageMode = storage
+        });
+        return _manager.GetByKey(id)!;
+    }
+
     private Dictionary<string, SyncItem> Existing() => _manager.GetAllStrict().ToDictionary(r => r.SourceItemId, StringComparer.OrdinalIgnoreCase);
 
     private Task<int> Prune(params string[] seen) => _task.Prune(Existing(), new HashSet<string>(seen, StringComparer.OrdinalIgnoreCase));
@@ -173,7 +196,26 @@ public sealed class RefreshContentSyncTableTaskTests : IDisposable
     [InlineData(SyncStatus.Queued, null, true)]
     [InlineData(SyncStatus.Errored, null, true)]
     public void IsPruneCandidate_ExcludesRowsAlreadyDecided(SyncStatus status, PendingType? pendingType, bool expected)
-        => Assert.Equal(expected, _task.PruneCandidate(new SyncItem { Status = status, PendingType = pendingType }));
+    {
+        Mode(MissingContentAction.Delete);
+        Assert.Equal(expected, _task.PruneCandidate(new SyncItem { Status = status, PendingType = pendingType }));
+    }
+
+    /// <summary>
+    /// With Keep only a link is a candidate, since a copy is never pruned then.
+    /// True: copies kept for good never add up into a tripped breaker that would block removing links.
+    /// False: a Keep library with enough kept copies blocks every later removal of a gone link.
+    /// </summary>
+    [Theory]
+    [InlineData(StorageMode.Copy, false)]
+    [InlineData(StorageMode.Unkeeping, false)]
+    [InlineData(StorageMode.Link, true)]
+    [InlineData(StorageMode.Promoting, true)]
+    public void IsPruneCandidate_WithKeep_OnlyLinks(StorageMode storage, bool expected)
+    {
+        Mode(MissingContentAction.Keep, ApprovalMode.Disabled);
+        Assert.Equal(expected, _task.PruneCandidate(new SyncItem { Status = SyncStatus.Synced, StorageMode = storage }));
+    }
 
     // -----------------------------------------------------------------------
     // Delete
@@ -482,5 +524,158 @@ public sealed class RefreshContentSyncTableTaskTests : IDisposable
         Assert.False(File.Exists(marker));
         Assert.Equal(SyncStatus.Synced, Row("hidden")!.Status);
         Assert.Equal(SyncStatus.Ignored, Row("mine")!.Status);
+    }
+
+    // -----------------------------------------------------------------------
+    // Links
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A link no server offers any more is scheduled for removal whatever Removed files says, with no
+    /// approval, while a copy beside it follows the setting. A link on its way to a copy is still a link.
+    /// True: a dead link never lingers, and a real file is only removed when the setting says so.
+    /// False: dead links pile up under Keep, wait for approval, or are hidden instead of removed.
+    /// </summary>
+    [Theory]
+    [InlineData(MissingContentAction.Keep, ApprovalMode.Disabled, SyncStatus.Synced)]
+    [InlineData(MissingContentAction.Ignore, ApprovalMode.Disabled, SyncStatus.Ignored)]
+    [InlineData(MissingContentAction.Delete, ApprovalMode.Enabled, SyncStatus.Deleting)]
+    [InlineData(MissingContentAction.DeleteAfterApproval, ApprovalMode.RequireApproval, SyncStatus.Pending)]
+    public async Task GoneLink_IsScheduledWhateverTheSetting_AndCopyFollowsIt(MissingContentAction action, ApprovalMode deleteMode, SyncStatus copyStatus)
+    {
+        Mode(action, deleteMode);
+        _task.Seen(Library, 1);
+        TrackLink("link", title: "Linked");
+        TrackLink("promoting", title: "Promoting", storage: StorageMode.Promoting);
+        TrackLink("errored", title: "Errored", status: SyncStatus.Errored);
+        TrackLink("seen", title: "Seen");
+        Track("copy", title: "Copied");
+
+        await Prune("seen");
+
+        Assert.Equal(SyncStatus.Deleting, Row("link")!.Status);
+        Assert.Equal(SyncStatus.Deleting, Row("promoting")!.Status);
+        Assert.Equal(SyncStatus.Deleting, Row("errored")!.Status);
+        Assert.Equal(SyncStatus.Synced, Row("seen")!.Status);
+        Assert.Equal(copyStatus, Row("copy")!.Status);
+    }
+
+    /// <summary>
+    /// A gone link whose .strm is already off the disk is dropped from the table, even with Keep.
+    /// True: nothing tracks a link that is gone on both sides.
+    /// False: the row stays forever as an error nobody can clear.
+    /// </summary>
+    [Fact]
+    public async Task GoneLink_WithNoFile_IsDropped()
+    {
+        Mode(MissingContentAction.Keep, ApprovalMode.Disabled);
+        _task.Seen(Library, 1);
+        File.Delete(TrackLink("link").LocalPath!);
+
+        await Prune();
+
+        Assert.Null(Row("link"));
+    }
+
+    /// <summary>
+    /// A .strm at a link row's path that does not point at Server Sync is someone else's file, so it
+    /// follows Removed files as a copy does: kept with Keep, and held for approval with Delete.
+    /// True: a .strm a user wrote or edited is never removed without the setting saying so.
+    /// False: a user's own .strm is deleted because a row happened to name its path.
+    /// </summary>
+    [Theory]
+    [InlineData(MissingContentAction.Keep, ApprovalMode.Disabled, SyncStatus.Errored, null)]
+    [InlineData(MissingContentAction.Delete, ApprovalMode.Enabled, SyncStatus.Pending, PendingType.Deletion)]
+    public async Task GoneLink_NotThisPluginsFile_FollowsTheSetting(MissingContentAction action, ApprovalMode deleteMode, SyncStatus expected, PendingType? pendingType)
+    {
+        Mode(action, deleteMode);
+        _task.Seen(Library, 1);
+        TrackLink("theirs", status: SyncStatus.Errored, url: "http://example.test/video.mkv");
+
+        await Prune();
+
+        Assert.Equal(expected, Row("theirs")!.Status);
+        Assert.Equal(pendingType, Row("theirs")!.PendingType);
+        Assert.True(File.Exists(Row("theirs")!.LocalPath));
+    }
+
+    /// <summary>
+    /// A link the source never listed because its mapping answered with nothing is not removed.
+    /// True: an empty answer from a source does not take every link under that mapping with it.
+    /// False: a re-created source library deletes the whole linked library here.
+    /// </summary>
+    [Fact]
+    public async Task GoneLink_UnderMappingThatAnsweredEmpty_IsKept()
+    {
+        Mode(MissingContentAction.Keep, ApprovalMode.Disabled);
+        TrackLink("link");
+
+        await Prune();
+
+        Assert.Equal(SyncStatus.Synced, Row("link")!.Status);
+    }
+
+    /// <summary>
+    /// With Keep, a gone link already scheduled stays scheduled while a copy's waiting deletion is cancelled.
+    /// True: the stand-down for Keep never brings a dead link back.
+    /// False: each refresh cancels the link removal the last one scheduled, and the link never goes.
+    /// </summary>
+    [Fact]
+    public async Task Keep_StandDown_LeavesGoneLinksScheduled()
+    {
+        Mode(MissingContentAction.Keep, ApprovalMode.Disabled);
+        _task.Seen(Library, 1);
+        TrackLink("link", status: SyncStatus.Deleting);
+        Track("copy", SyncStatus.Deleting, title: "Copied");
+
+        await Prune();
+
+        Assert.Equal(SyncStatus.Deleting, Row("link")!.Status);
+        Assert.Equal(SyncStatus.Synced, Row("copy")!.Status);
+    }
+
+    /// <summary>
+    /// A scheduled link is deleted even with Keep and the recycling bin on: the .strm, the files beside
+    /// it, its folder, and the show's folder once that holds only artwork and an nfo. A copy scheduled
+    /// earlier is left alone with Keep, and a folder that still holds something stays.
+    /// True: a dead link leaves nothing behind, and nothing else is touched.
+    /// False: empty show folders and stray nfo files are left in the library, links fill the recycling
+    /// bin, or a kept copy is deleted.
+    /// </summary>
+    [Fact]
+    public void PendingDeletions_WithKeep_RemoveLinksAndTheirFolders_NotCopies()
+    {
+        Mode(MissingContentAction.Keep, ApprovalMode.Disabled);
+        var bin = Path.Combine(_tempDir, "bin");
+        _config.Configuration.EnableRecyclingBin = true;
+        _config.Configuration.RecyclingBinPath = bin;
+
+        var show = Path.Combine(_localRoot, "Show");
+        var season = Path.Combine(show, "Season 01");
+        var link = TrackLink("episode", folder: season, status: SyncStatus.Deleting);
+        File.WriteAllText(Path.ChangeExtension(link.LocalPath!, ".nfo"), "nfo");
+        File.WriteAllText(Path.ChangeExtension(link.LocalPath!, ".en.srt"), "sub");
+        File.WriteAllText(Path.Combine(show, "tvshow.nfo"), "nfo");
+        File.WriteAllText(Path.Combine(show, "poster.jpg"), "img");
+
+        var shared = Path.Combine(_localRoot, "Shared");
+        var sharedLink = TrackLink("shared", folder: shared, status: SyncStatus.Deleting);
+        File.WriteAllText(Path.Combine(shared, "other.mkv"), "x");
+
+        var copy = Track("copy", SyncStatus.Deleting, title: "Copied");
+
+        var (deleted, failed) = FileDeletionService.ProcessPendingDeletions(_manager, _config.Configuration, NullLogger.Instance, CancellationToken.None);
+
+        Assert.Equal(2, deleted);
+        Assert.Equal(0, failed);
+        Assert.False(Directory.Exists(show));
+        Assert.False(File.Exists(sharedLink.LocalPath));
+        Assert.True(File.Exists(Path.Combine(shared, "other.mkv")));
+        Assert.True(Directory.Exists(_localRoot));
+        Assert.False(Directory.Exists(bin));
+        Assert.Null(Row("episode"));
+        Assert.Null(Row("shared"));
+        Assert.True(File.Exists(copy.LocalPath));
+        Assert.Equal(SyncStatus.Deleting, Row("copy")!.Status);
     }
 }

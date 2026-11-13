@@ -905,10 +905,22 @@ public class UpdateSyncTablesTask
     protected override bool IsPruneCandidate(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
+        // With Removed files on Keep only a link is ever pruned, so a copy that stays for good never
+        // counts toward the breaker.
         return record.Status != SyncStatus.Ignored
             && record.Status != SyncStatus.Deleting
-            && !(record.Status == SyncStatus.Pending && record.PendingType == PendingType.Deletion);
+            && !(record.Status == SyncStatus.Pending && record.PendingType == PendingType.Deletion)
+            && (record.StorageMode.IsLink() || ConfigManager.Configuration.EffectiveMissingContentAction != MissingContentAction.Keep);
     }
+
+    // A link whose file no server offers any more, and whose .strm is this plugin's own or already
+    // gone. It holds nothing a download would bring back, so it is removed whatever Removed files
+    // says. A link the library filter now leaves out is still on the source, and a .strm someone else
+    // wrote is theirs, so both follow Removed files as a copy does.
+    private bool IsGoneLink(SyncItem row, Dictionary<string, LibraryMapping> mappingById)
+        => row.StorageMode.IsLink()
+            && !ScopeChanged(row, mappingById)
+            && (string.IsNullOrEmpty(row.LocalPath) || !File.Exists(row.LocalPath) || LinkFiles.IsOwnLink(row.LocalPath));
 
     private static readonly HashSet<string> MediaExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -982,9 +994,12 @@ public class UpdateSyncTablesTask
 
     // Changes the rows in the list as well as in the table, so a later step reading the same list
     // sees them stood down.
-    private int StandDownDeletions(ContentSyncTableManager manager, IList<SyncItem> current)
+    private int StandDownDeletions(ContentSyncTableManager manager, IList<SyncItem> current, HashSet<string> goneLinks)
     {
-        var waiting = current.Where(row => row.Status == SyncStatus.Deleting || (row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)).ToList();
+        var waiting = current
+            .Where(row => !goneLinks.Contains(row.SourceItemId)
+                && (row.Status == SyncStatus.Deleting || (row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)))
+            .ToList();
         foreach (var row in waiting)
         {
             row.Status = SyncStatus.Synced;
@@ -1065,7 +1080,8 @@ public class UpdateSyncTablesTask
 
     /// <inheritdoc />
     protected override bool PruneGuardApplies =>
-        ConfigManager.Configuration.EffectiveMissingContentAction != MissingContentAction.Keep;
+        ConfigManager.Configuration.EffectiveMissingContentAction != MissingContentAction.Keep
+        || ConfigManager.Configuration.GetEnabledLibraryMappings().Any(m => m.StorageMode == StorageMode.Link);
 
     // No-op, <see cref="BuildRecordAsync"/> sets the status itself based
     // on the configured approval modes (DownloadNewContentMode,
@@ -1092,21 +1108,6 @@ public class UpdateSyncTablesTask
         var hide = action == MissingContentAction.Ignore;
         var typedManager = (ContentSyncTableManager)Manager;
 
-        // The table as the build left it, read once for every step below. The snapshot passed in was
-        // taken before the build wrote this run's rows.
-        var current = typedManager.GetAllStrict();
-        var settled = deletes ? 0 : StandDownDeletions(typedManager, current);
-        if (!hide)
-        {
-            settled += ShowAllTitles(typedManager, current);
-        }
-
-        if (!deletes && !hide)
-        {
-            progress.Report(100);
-            return Task.FromResult(settled);
-        }
-
         // Skip rows already seen, and rows whose library mapping is currently
         // disabled (or removed from config), without the scope guard,
         // disabling a mapping silently schedules every synced file under it
@@ -1115,32 +1116,6 @@ public class UpdateSyncTablesTask
         // transient empty answer returns 200-empty with no error, and pruning
         // on it would schedule the mapping's entire local content for
         // deletion. (-1 = explicitly emptied whitelist, prune allowed.)
-        var stale = new List<SyncItem>();
-        var blockedMappings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var kvp in existing)
-        {
-            if (seenKeys.Contains(kvp.Key) || !IsInScope(kvp.Value))
-            {
-                continue;
-            }
-
-            if (_seenPerMapping.GetValueOrDefault(kvp.Value.SourceLibraryId, 0) == 0)
-            {
-                blockedMappings.Add(kvp.Value.SourceLibraryId);
-                continue;
-            }
-
-            stale.Add(kvp.Value);
-        }
-
-        if (blockedMappings.Count > 0)
-        {
-            Logger.LogWarning(
-                "Refusing to prune rows under {Count} mapping(s) the source reported no items for, a stale library ID or transient empty answer is indistinguishable from real removal. If the library really is empty (or was re-created with a new ID), fix or reset the mapping from the dashboard",
-                blockedMappings.Count);
-            MarkPruneBlocked($"Prune blocked for {blockedMappings.Count} library mapping(s): source reported 0 items while local rows exist, check the mapping's source library ID");
-        }
-
         // Items stale because the USER narrowed a blacklist (the item still
         // exists on the source. The current config just excludes it) go
         // through approval even in auto-delete mode, a filter edit is a
@@ -1154,13 +1129,67 @@ public class UpdateSyncTablesTask
             mappingById.TryAdd(mapping.SourceLibraryId, mapping);
         }
 
+        // Links no server offers any more are split off first. They are removed whatever Removed files
+        // says, and everything else follows it.
+        var stale = new List<SyncItem>();
+        var goneLinks = new List<SyncItem>();
+        var blockedMappings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in existing)
+        {
+            if (seenKeys.Contains(kvp.Key) || !IsInScope(kvp.Value))
+            {
+                continue;
+            }
+
+            var goneLink = IsGoneLink(kvp.Value, mappingById);
+            if (!goneLink && !deletes && !hide)
+            {
+                continue;
+            }
+
+            if (_seenPerMapping.GetValueOrDefault(kvp.Value.SourceLibraryId, 0) == 0)
+            {
+                blockedMappings.Add(kvp.Value.SourceLibraryId);
+                continue;
+            }
+
+            (goneLink ? goneLinks : stale).Add(kvp.Value);
+        }
+
+        if (blockedMappings.Count > 0)
+        {
+            Logger.LogWarning(
+                "Refusing to prune rows under {Count} mapping(s) the source reported no items for, a stale library ID or transient empty answer is indistinguishable from real removal. If the library really is empty (or was re-created with a new ID), fix or reset the mapping from the dashboard",
+                blockedMappings.Count);
+            MarkPruneBlocked($"Prune blocked for {blockedMappings.Count} library mapping(s): source reported 0 items while local rows exist, check the mapping's source library ID");
+        }
+
+        // The table as the build left it, read once for every step below. The snapshot passed in was
+        // taken before the build wrote this run's rows.
+        var goneLinkKeys = new HashSet<string>(goneLinks.Select(row => row.SourceItemId), StringComparer.OrdinalIgnoreCase);
+        var current = typedManager.GetAllStrict();
+        var settled = deletes ? 0 : StandDownDeletions(typedManager, current, goneLinkKeys);
+        if (!hide)
+        {
+            settled += ShowAllTitles(typedManager, current);
+        }
+
+        settled += RemoveGoneLinks(typedManager, goneLinks, cancellationToken);
+
+        if (!deletes && !hide)
+        {
+            progress.Report(100);
+            return Task.FromResult(settled);
+        }
+
         if (hide)
         {
             progress.Report(100);
             var returned = new HashSet<string>(
                 existing.Where(kvp => seenKeys.Contains(kvp.Key) && IsHiddenTitle(kvp.Value)).Select(kvp => kvp.Value.SourceItemId),
                 StringComparer.OrdinalIgnoreCase);
-            return Task.FromResult(settled + HideGoneTitles(typedManager, current, stale, returned, mappingById));
+            var remaining = current.Where(row => !goneLinkKeys.Contains(row.SourceItemId)).ToList();
+            return Task.FromResult(settled + HideGoneTitles(typedManager, remaining, stale, returned, mappingById));
         }
 
         var pruned = 0;
@@ -1193,6 +1222,34 @@ public class UpdateSyncTablesTask
 
         progress.Report(100);
         return Task.FromResult(settled + pruned);
+    }
+
+    // Schedules each gone link's .strm for removal, or drops the row when the .strm is already gone.
+    private int RemoveGoneLinks(ContentSyncTableManager manager, List<SyncItem> goneLinks, CancellationToken cancellationToken)
+    {
+        var removed = 0;
+        foreach (var link in goneLinks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (SyncStateService.ProcessMissingItem(manager, link, ApprovalMode.Enabled, Logger, ownLink: true).Changed)
+                {
+                    removed++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to process the gone link {SourceItemId}", link.SourceItemId);
+            }
+        }
+
+        if (removed > 0)
+        {
+            Logger.LogInformation("Removing {Count} link(s) whose file no server offers any more", removed);
+        }
+
+        return removed;
     }
 
     /// <inheritdoc />

@@ -8,6 +8,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -75,6 +76,42 @@ public static class FileDeletionService
         }
 
         return mainDeleted;
+    }
+
+    /// <summary>
+    /// Deletes a link's .strm with everything beside it under the same name, and then every folder
+    /// that leaves holding nothing but title artwork and nfo files, up to the library root. A link is
+    /// never recycled and its folders always go, whatever the settings for copies say, since nothing
+    /// in it is worth keeping once no server has the file. A show's folder goes with its last season.
+    /// </summary>
+    /// <param name="linkPath">The .strm.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="libraryRootPath">The library root, which bounds the folders removed.</param>
+    /// <returns>True when the .strm was deleted.</returns>
+    public static bool DeleteLinkWithFolders(string linkPath, ILogger logger, string? libraryRootPath)
+    {
+        if (!DeleteWithCompanions(linkPath, logger, removeEmptyFolders: true, libraryRootPath))
+        {
+            return false;
+        }
+
+        // The link's own folder was cleared above. Each folder above it is cleared the same way, but
+        // only once the folder below it has gone, so a folder that still holds anything stops the walk.
+        var stem = Path.GetFileNameWithoutExtension(linkPath);
+        var folder = Path.GetDirectoryName(linkPath);
+        while (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
+        {
+            folder = Path.GetDirectoryName(folder);
+            if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            {
+                continue;
+            }
+
+            DeleteTitleArtifacts(folder, stem, logger, libraryRootPath);
+            TryRemoveEmptyFolders(folder, logger, libraryRootPath);
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -507,12 +544,10 @@ public static class FileDeletionService
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(logger);
-        if (!config.DeletesMissing)
-        {
-            return (0, 0);
-        }
-
-        var itemsToDelete = manager.GetByStatus(SyncStatus.Deleting).ToList();
+        // A link is removed whatever Removed files says, since it holds nothing a download would bring
+        // back. A copy is only removed while Removed files deletes.
+        var deletesCopies = config.DeletesMissing;
+        var itemsToDelete = manager.GetByStatus(SyncStatus.Deleting).Where(item => deletesCopies || item.StorageMode.IsLink()).ToList();
 
         if (itemsToDelete.Count == 0)
         {
@@ -568,7 +603,11 @@ public static class FileDeletionService
                 }
 
                 DeletionResult result;
-                if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
+                if (item.StorageMode.IsLink() && LinkFiles.IsOwnLink(localPath))
+                {
+                    result = new DeletionResult(DeleteLinkWithFolders(localPath, logger, containingRoot));
+                }
+                else if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
                 {
                     result = DeleteWithRecyclingBin(localPath, config.RecyclingBinPath, logger);
                 }
