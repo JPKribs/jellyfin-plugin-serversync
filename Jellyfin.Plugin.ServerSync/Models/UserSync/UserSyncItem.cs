@@ -1,7 +1,6 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
-using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Models.UserSync;
@@ -68,7 +67,7 @@ public class UserSyncItem : SyncRecord
 
     /// <summary>
     /// Raw source value (JSON for Policy/Config, display string for ProfileImage).
-    /// Display-only, change detection uses <see cref="Value"/> for
+    /// Display-only. Change detection uses <see cref="Value"/> for
     /// Policy/Config and the image-hash fields for ProfileImage.
     /// </summary>
     public string? SourceValue { get; set; }
@@ -87,7 +86,7 @@ public class UserSyncItem : SyncRecord
 
     /// <summary>
     /// Computed apply target (source-wins with library-ID translation for
-    /// Policy. Identical to source for Configuration). Delegated to
+    /// Policy, identical to source for Configuration). Delegated to
     /// <see cref="Value"/>'s <see cref="SyncableValue{T}.Source"/>. Use
     /// <see cref="UpdateMergedValue"/> in the refresh build path so the
     /// source-hash gets recomputed via the comparator.
@@ -149,7 +148,7 @@ public class UserSyncItem : SyncRecord
     public string? LocalImageHash { get; set; }
 
     /// <summary>
-    /// Gets or sets the last synced image hash (to detect if we already synced).
+    /// Gets or sets the image hash last applied.
     /// </summary>
     public string? SyncedImageHash { get; set; }
 

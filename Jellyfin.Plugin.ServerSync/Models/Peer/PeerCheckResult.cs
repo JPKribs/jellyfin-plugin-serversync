@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Jellyfin.Plugin.ServerSync.Models.Peer;
 
 /// <summary>
@@ -30,7 +32,7 @@ public class PeerCheckResult
     public bool SendsToThisServer { get; set; }
 
     /// <summary>Gets or sets the kinds the peer applies, by name, or null when it is too old to say.</summary>
-    public System.Collections.Generic.List<string>? Accepts { get; set; }
+    public List<string>? Accepts { get; set; }
 
     /// <summary>Gets or sets how many seconds the peer's clock differs from this server's, when it could be read.</summary>
     public int ClockSkewSeconds { get; set; }

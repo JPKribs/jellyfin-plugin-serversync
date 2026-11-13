@@ -70,20 +70,16 @@ public class SyncItem : SyncRecord
     /// </summary>
     public StorageMode StorageMode { get; set; }
 
+    // Content sync's "needs work" signal is the PendingType, not a hash
+    // compare. Refresh sets PendingType when the file needs to be
+    // downloaded, replaced, or deleted, so this is true while the row is
+    // pending or queued and false once Synced.
+
     /// <inheritdoc />
     public override bool HasChanges
-    {
-        get
-        {
-            // Content sync's "needs work" signal is the PendingType, not a
-            // hash compare. Refresh sets PendingType when the file needs to
-            // be downloaded/replaced/deleted. HasChanges is true while it's
-            // pending or queued, false once Synced.
-            return Status == SyncStatus.Queued
-                || Status == SyncStatus.Deleting
-                || (Status == SyncStatus.Pending && PendingType.HasValue);
-        }
-    }
+        => Status == SyncStatus.Queued
+            || Status == SyncStatus.Deleting
+            || (Status == SyncStatus.Pending && PendingType.HasValue);
 
     /// <inheritdoc />
     public override void MarkSynced()

@@ -6,7 +6,6 @@ using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync;
 
@@ -28,8 +27,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             serviceCollection.Add(new ServiceDescriptor(serviceType, impl, attr.Lifetime));
         }
 
-        // Encrypts the source-server API key at rest (base helper. Degrades to plaintext + a logged
-        // warning when no provider is available). Keys live in a fixed directory under the Jellyfin
+        // Encrypts the source-server API key at rest (base helper, which degrades to plaintext and a
+        // logged warning when no provider is available). Keys live in a fixed directory under the Jellyfin
         // data folder with a pinned application name, otherwise a host launch-context change (app
         // update, desktop-app vs service, Docker) shifts the Data Protection discriminator and every
         // stored secret fails to decrypt. See StableSecretProtection.
@@ -56,7 +55,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService<Services.Peer.WhitelistUpgrade>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.QueueMaintenanceService>());
 
-        // Named HttpClient for source server communication. 
+        // Named HttpClient for source server communication.
         // HandlerLifetime caps DNS staleness for the long-lived plugin process.
         // A connect timeout keeps one unreachable peer from holding a worker for the operating system's
         // own connect timeout, which runs to minutes. Reads that time out or meet a busy server are

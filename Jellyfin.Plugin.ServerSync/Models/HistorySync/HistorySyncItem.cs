@@ -10,8 +10,8 @@ namespace Jellyfin.Plugin.ServerSync.Models.HistorySync;
 /// One row of synced watch-history state per (source user, source item),
 /// carrying Source / Local / Merged triples for IsPlayed, PlayCount,
 /// PlaybackPositionTicks, LastPlayedDate, and IsFavorite. The five
-/// source-side primitives are also bundled into <see cref="SourceState"/>
-/// to drive the SourceHash short-circuit on Refresh.
+/// source-side primitives are also bundled into <see cref="SourceState"/>,
+/// whose hashes are stored with the row.
 /// </summary>
 public class HistorySyncItem : SyncRecord
 {
@@ -208,13 +208,14 @@ public class HistorySyncItem : SyncRecord
         NegotiatedAt = previous.NegotiatedAt;
     }
 
-    // ===== Source-state bundle (drives the SourceHash short-circuit) =====
+    // ===== Source-state bundle =====
 
     /// <summary>
-    /// Source-side watch state rolled into one JSON blob. <see cref="SourceHash"/>
-    /// /<see cref="SyncedHash"/> on this value give us the fast-path skip
-    /// on Refresh: if the source state hasn't moved since the last
-    /// successful sync, the comparator never runs.
+    /// Source-side watch state rolled into one JSON blob. Its
+    /// <see cref="SyncableValue{T}.SourceHash"/> and
+    /// <see cref="SyncableValue{T}.SyncedHash"/> are stored with the row as a
+    /// record of what was last applied. Change detection does not consult
+    /// them, see <see cref="HasChanges"/>.
     /// </summary>
     public SyncableValue<string> SourceState { get; } = new SyncableValue<string>
     {
@@ -224,8 +225,8 @@ public class HistorySyncItem : SyncRecord
     /// <summary>
     /// Recomputes the <see cref="SourceState"/> bundle from the current
     /// <c>Source*</c> fields and updates the source-hash. Call after
-    /// populating <c>Source*</c> in the Refresh path so the hash short-circuit
-    /// stays honest.
+    /// populating <c>Source*</c> in the Refresh path so the stored hash
+    /// stays current.
     /// </summary>
     public void UpdateSourceStateBundle()
     {
@@ -242,10 +243,10 @@ public class HistorySyncItem : SyncRecord
 
     /// <inheritdoc />
     /// <remarks>
-    /// Always the merged-vs-local check. The old <c>SourceHash == SyncedHash</c>
-    /// short-circuit asked whether the SOURCE had moved, so a local playback
-    /// after a sync was never reconciled until the source item changed again.
-    /// See <see cref="SyncableValue{T}.HasChanges"/> for the full reasoning.
+    /// Always the merged-vs-local check, never a <c>SourceHash == SyncedHash</c>
+    /// short-circuit, which would only say whether the SOURCE had moved and
+    /// would leave a local playback after a sync unreconciled. See
+    /// <see cref="SyncableValue{T}.HasChanges"/>.
     /// </remarks>
     public override bool HasChanges => HistorySyncMergeService.HasChangesToSync(this);
 

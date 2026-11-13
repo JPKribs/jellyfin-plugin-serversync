@@ -1,7 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -22,9 +26,9 @@ public static class FileOperationUtilities
     private static readonly string[] ItemImageExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tbn" };
 
     // Images Jellyfin saves next to one media file, named after it: "<name>-thumb.jpg" and the like.
-    private static readonly System.Text.RegularExpressions.Regex ItemImageSuffix = new(
+    private static readonly Regex ItemImageSuffix = new(
         "^-(thumb|poster|fanart|landscape|banner|logo|clearlogo|clearart|disc|backdrop|background|art)[0-9]*$",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// What Jellyfin generates for one media file and names after it: its local images
@@ -129,11 +133,11 @@ public static class FileOperationUtilities
             .Replace(':', '.')
             .Trim('.');
 
-        // InvariantCulture: ExtractTimestampFromFileName parses with it, and a
+        // InvariantCulture: TryReadRecycledTime parses with it, and a
         // host on a non-Gregorian calendar (th-TH, ar-SA) would otherwise write
         // a year the parser can't read, silently dropping retention back to
         // LastWriteTimeUtc.
-        var timestamp = utcNow.ToString("yyyy-MM-dd_HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture);
+        var timestamp = utcNow.ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture);
         var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
         var extension = Path.GetExtension(fileName);
         var tail = $"{nameWithoutExt}_{timestamp}{extension}";
@@ -149,7 +153,7 @@ public static class FileOperationUtilities
             return full;
         }
 
-        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(directory)))[..8].ToLowerInvariant();
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(directory)))[..8].ToLowerInvariant();
         return FitName(hash + "~" + encodedPath, nameWithoutExt, timestamp, extension, keepPrefixChars: hash.Length + 1);
     }
 
@@ -178,7 +182,7 @@ public static class FileOperationUtilities
         return KeepStart(stem, budget) + suffix;
     }
 
-    private static int Utf8Length(string value) => System.Text.Encoding.UTF8.GetByteCount(value);
+    private static int Utf8Length(string value) => Encoding.UTF8.GetByteCount(value);
 
     // The longest end of the text that fits in the given bytes, never splitting a character.
     private static string KeepEnd(string text, int maxBytes)
@@ -206,9 +210,9 @@ public static class FileOperationUtilities
 
     // A recycled file as the bin names it: "<name>_yyyy-MM-dd_HH-mm-ss<ext>", with "_" and eight hex
     // digits before the extension when that name was taken.
-    private static readonly System.Text.RegularExpressions.Regex RecycledFileName = new(
+    private static readonly Regex RecycledFileName = new(
         "^.+_(?<at>[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2})(_[0-9a-f]{8})?(\\.[^.]*)?$",
-        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Reads the UTC time a file was recycled at from its name. Only names the recycling bin builds
@@ -224,8 +228,8 @@ public static class FileOperationUtilities
         return match.Success && DateTime.TryParseExact(
             match.Groups["at"].Value,
             "yyyy-MM-dd_HH-mm-ss",
-            System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
             out recycledAt);
     }
 

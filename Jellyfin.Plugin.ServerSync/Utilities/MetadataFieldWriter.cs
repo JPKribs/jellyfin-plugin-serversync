@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Entities;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 public static class MetadataFieldWriter
 {
-    public static bool Apply(MediaBrowser.Controller.Entities.BaseItem localItem, string? metadataJson, bool syncGenres, bool syncTags, bool syncLocks = true)
-
+    public static bool Apply(BaseItem localItem, string? metadataJson, bool syncGenres, bool syncTags, bool syncLocks = true)
     {
         ArgumentNullException.ThrowIfNull(localItem);
         if (string.IsNullOrEmpty(metadataJson))
@@ -25,7 +25,7 @@ public static class MetadataFieldWriter
         }
 
         var hasChanges = false;
-        var localVideo = localItem as MediaBrowser.Controller.Entities.Video;
+        var localVideo = localItem as Video;
 
         // Strings, assign through nulls and empty strings so source clearing
         // a field actually clears local.
@@ -171,9 +171,9 @@ public static class MetadataFieldWriter
         return hasChanges;
     }
 
-    public static List<MediaBrowser.Controller.Entities.PersonInfo> ReadPeople(string? peopleJson)
+    public static List<PersonInfo> ReadPeople(string? peopleJson)
     {
-        var people = new List<MediaBrowser.Controller.Entities.PersonInfo>();
+        var people = new List<PersonInfo>();
         if (string.IsNullOrEmpty(peopleJson))
         {
             return people;
@@ -181,7 +181,7 @@ public static class MetadataFieldWriter
 
         foreach (var person in JsonSerializer.Deserialize<List<Dictionary<string, string>>>(peopleJson) ?? new List<Dictionary<string, string>>())
         {
-            var personInfo = new MediaBrowser.Controller.Entities.PersonInfo();
+            var personInfo = new PersonInfo();
             if (person.TryGetValue("Name", out var name))
             {
                 personInfo.Name = name;
@@ -211,28 +211,8 @@ public static class MetadataFieldWriter
         => string.IsNullOrEmpty(studiosJson) ? Array.Empty<string>() : (JsonSerializer.Deserialize<List<string>>(studiosJson) ?? new List<string>()).ToArray();
 
     private static bool ArraysEqualOrdinal(string[]? a, string[]? b)
-    {
-        var aArr = a ?? Array.Empty<string>();
-        var bArr = b ?? Array.Empty<string>();
-        if (aArr.Length != bArr.Length) return false;
-        for (var i = 0; i < aArr.Length; i++)
-        {
-            if (!string.Equals(aArr[i], bArr[i], StringComparison.Ordinal)) return false;
-        }
-
-        return true;
-    }
+        => (a ?? Array.Empty<string>()).SequenceEqual(b ?? Array.Empty<string>(), StringComparer.Ordinal);
 
     private static bool ArraysEqual<T>(T[]? a, T[]? b) where T : struct
-    {
-        var aArr = a ?? Array.Empty<T>();
-        var bArr = b ?? Array.Empty<T>();
-        if (aArr.Length != bArr.Length) return false;
-        for (var i = 0; i < aArr.Length; i++)
-        {
-            if (!aArr[i].Equals(bArr[i])) return false;
-        }
-
-        return true;
-    }
+        => (a ?? Array.Empty<T>()).SequenceEqual(b ?? Array.Empty<T>());
 }

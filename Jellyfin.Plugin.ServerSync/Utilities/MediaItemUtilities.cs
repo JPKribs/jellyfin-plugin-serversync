@@ -1,3 +1,4 @@
+using System.Globalization;
 using Jellyfin.Sdk.Generated.Models;
 using Microsoft.Kiota.Abstractions.Serialization;
 
@@ -12,22 +13,11 @@ public static class MediaItemUtilities
     /// Returns the size of the first media source, or 0 when unavailable.
     /// </summary>
     public static long GetItemSize(BaseItemDto item)
-    {
-        if (item.MediaSources != null && item.MediaSources.Count > 0)
-        {
-            var firstSource = item.MediaSources[0];
-            if (firstSource.Size.HasValue)
-            {
-                return firstSource.Size.Value;
-            }
-        }
-
-        return 0;
-    }
+        => item.MediaSources is { Count: > 0 } sources ? sources[0].Size ?? 0 : 0;
 
     /// <summary>
     /// Unwraps a Kiota <c>AdditionalData</c> value to its underlying primitive string,
-    /// using <see cref="System.Globalization.CultureInfo.InvariantCulture"/> for numeric forms.
+    /// using <see cref="CultureInfo.InvariantCulture"/> for numeric forms.
     /// </summary>
     public static string? UnwrapKiotaPrimitive(object? value)
     {
@@ -47,11 +37,11 @@ public static class MediaItemUtilities
             {
                 UntypedString us => us.GetValue(),
                 UntypedBoolean ub => ub.GetValue() ? "true" : "false",
-                UntypedInteger ui => ui.GetValue().ToString(System.Globalization.CultureInfo.InvariantCulture),
-                UntypedLong ul => ul.GetValue().ToString(System.Globalization.CultureInfo.InvariantCulture),
-                UntypedDouble ud => ud.GetValue().ToString(System.Globalization.CultureInfo.InvariantCulture),
-                UntypedDecimal udec => udec.GetValue().ToString(System.Globalization.CultureInfo.InvariantCulture),
-                UntypedFloat uf => uf.GetValue().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                UntypedInteger ui => ui.GetValue().ToString(CultureInfo.InvariantCulture),
+                UntypedLong ul => ul.GetValue().ToString(CultureInfo.InvariantCulture),
+                UntypedDouble ud => ud.GetValue().ToString(CultureInfo.InvariantCulture),
+                UntypedDecimal udec => udec.GetValue().ToString(CultureInfo.InvariantCulture),
+                UntypedFloat uf => uf.GetValue().ToString(CultureInfo.InvariantCulture),
                 UntypedNull => null,
                 // Composite nodes (UntypedObject / UntypedArray) have no
                 // primitive form. The default ToString() yields the CLR type

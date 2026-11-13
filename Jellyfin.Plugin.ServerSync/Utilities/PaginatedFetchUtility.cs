@@ -11,10 +11,9 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 /// <summary>
 /// Outcome of a paginated fetch loop.
 /// <see cref="CompletedFully"/> is false when the loop broke early on
-/// errors/null results/cancellation, callers that drive pruning from
-/// "items I didn't see this run" must treat partial discovery as
-/// unsafe-to-prune, since the unseen items may just be ones we never
-/// got to enumerate.
+/// errors, null results, or cancellation. Callers that prune what they did
+/// not see this run must treat partial discovery as unsafe to prune, since
+/// the unseen items may just be ones the loop never reached.
 /// </summary>
 public readonly record struct PaginatedFetchOutcome(int ProcessedItems, bool CompletedFully);
 
@@ -261,9 +260,9 @@ public static class PaginatedFetchUtility
                 {
                     // Distinct from a plain skip: a Path-less item is invisible
                     // to the caller's seen set, and Jellyfin omits Path on
-                    // every item when the API key lacks admin rights, the
+                    // every item when the API key lacks admin rights. The
                     // per-mapping zero-seen guard catches the all-pathless
-                    // case, this counter surfaces partial ones.
+                    // case, and this counter surfaces partial ones.
                     state.PathlessSkipped.Add(id);
                     state.Handled.Add(id);
                     continue;
@@ -329,9 +328,9 @@ public static class PaginatedFetchUtility
         // the source mid-enumeration shifts everything after it down one slot,
         // silently skipping an unrelated item at the next page boundary, and
         // a skipped item is indistinguishable from a removed one to the
-        // caller's prune. The first page's TotalRecordCount tells us how many
+        // caller's prune. The first page's TotalRecordCount says how many
         // items existed at pass start. Fetching a different number means the
-        // catalog changed underneath us, so the pass is not a consistent snapshot.
+        // catalog changed during the pass, so it is not a consistent snapshot.
         if (expectedTotal.HasValue && rawFetched != expectedTotal.Value)
         {
             logger.LogWarning(

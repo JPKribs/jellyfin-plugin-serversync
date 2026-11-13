@@ -22,13 +22,7 @@ public static class JsonFieldHelpers
         ArgumentNullException.ThrowIfNull(assign);
         if (!metadata.TryGetValue(key, out var v)) return false;
 
-        string? read = v.ValueKind switch
-        {
-            JsonValueKind.String => v.GetString(),
-            _ => null
-        };
-
-        return assign(read);
+        return assign(v.ValueKind == JsonValueKind.String ? v.GetString() : null);
     }
 
     /// <summary>
@@ -40,7 +34,7 @@ public static class JsonFieldHelpers
         ArgumentNullException.ThrowIfNull(assign);
         if (!metadata.TryGetValue(key, out var v)) return false;
 
-        float? read = v.ValueKind == JsonValueKind.Number ? v.GetSingle() : (float?)null;
+        float? read = v.ValueKind == JsonValueKind.Number ? v.GetSingle() : null;
         return assign(read);
     }
 
@@ -53,7 +47,7 @@ public static class JsonFieldHelpers
         ArgumentNullException.ThrowIfNull(assign);
         if (!metadata.TryGetValue(key, out var v)) return false;
 
-        int? read = v.ValueKind == JsonValueKind.Number ? v.GetInt32() : (int?)null;
+        int? read = v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
         return assign(read);
     }
 
@@ -70,8 +64,8 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads a string array. Returns an empty array for missing or non-array input.
-    /// drops non-string entries.
+    /// Reads a string array. Returns an empty array for missing or non-array input,
+    /// and drops non-string entries.
     /// </summary>
     public static string[] ReadStringArray(JsonElement v)
     {
@@ -94,8 +88,8 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads an enum array. Returns an empty array for missing or non-array input.
-    /// drops unparseable entries.
+    /// Reads an enum array. Returns an empty array for missing or non-array input,
+    /// and drops unparseable entries.
     /// </summary>
     public static T[] ReadEnumArray<T>(JsonElement v) where T : struct, Enum
     {

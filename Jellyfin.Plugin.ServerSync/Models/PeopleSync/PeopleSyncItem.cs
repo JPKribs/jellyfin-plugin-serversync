@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
@@ -50,20 +51,11 @@ public class PeopleSyncItem : SyncRecord
     public bool HasImagesChanges => !string.IsNullOrEmpty(LocalPersonId) && Images.HasChanges;
 
     /// <inheritdoc />
-    public override bool HasChanges
-    {
-        get
-        {
-            // No row should exist without a local match (Refresh skips them),
-            // but guard anyway so a stale row doesn't get queued.
-            if (string.IsNullOrEmpty(LocalPersonId))
-            {
-                return false;
-            }
-
-            return HasMetadataChanges || HasImagesChanges;
-        }
-    }
+    /// <remarks>
+    /// No row should exist without a local match (Refresh skips them), but both
+    /// parts check for one anyway, so a stale row is never queued.
+    /// </remarks>
+    public override bool HasChanges => HasMetadataChanges || HasImagesChanges;
 
     /// <inheritdoc />
     public override void MarkSynced()
@@ -79,7 +71,7 @@ public class PeopleSyncItem : SyncRecord
     /// Tries to deserialize <see cref="Images"/>.<see cref="SyncableValue{T}.Source"/>
     /// as an image manifest. Returns false if missing or malformed.
     /// </summary>
-    public bool TryGetSourceImageManifest(out System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<ImageInfoDto>>? manifest)
+    public bool TryGetSourceImageManifest(out Dictionary<string, List<ImageInfoDto>>? manifest)
     {
         manifest = null;
         if (string.IsNullOrEmpty(Images.Source))
@@ -89,7 +81,7 @@ public class PeopleSyncItem : SyncRecord
 
         try
         {
-            manifest = JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<ImageInfoDto>>>(Images.Source);
+            manifest = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(Images.Source);
             return manifest != null;
         }
         catch (JsonException)

@@ -9,5 +9,4 @@ namespace Jellyfin.Plugin.ServerSync.Models.HistorySync;
 public class HistorySyncStatusResponse : BaseSyncStatusResponse
 {
     // History sync uses only the base status counts.
-    // Override Total if needed for custom calculation.
 }

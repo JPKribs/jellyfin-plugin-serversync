@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
-using Jellyfin.Plugin.ServerSync.Utilities;
 
 namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 
@@ -10,8 +9,8 @@ namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 /// One sync record per (source library, source item). Carries four parallel
 /// JSON-blob fields, <see cref="Metadata"/>, <see cref="Images"/>,
 /// <see cref="People"/>, <see cref="Studios"/>, each with its own
-/// Source/Local/Synced snapshots and content hashes for the change-detection
-/// short-circuit. Refresh populates the source side and recomputes hashes.
+/// Source/Local/Synced snapshots and content hashes recording what was last
+/// applied. Refresh populates the source side and recomputes hashes.
 /// Sync applies the source values to local and calls
 /// <see cref="SyncableValue{T}.MarkSynced"/> on each successfully-applied
 /// category.
@@ -122,22 +121,7 @@ public class MetadataSyncItem : SyncRecord
     /// to avoid wiping out local studio assignments when the source has none.
     /// </summary>
     public bool HasStudiosChanges
-    {
-        get
-        {
-            if (string.IsNullOrEmpty(LocalItemId))
-            {
-                return false;
-            }
-
-            if (string.IsNullOrEmpty(Studios.Source) || Studios.Source == "[]")
-            {
-                return false;
-            }
-
-            return Studios.HasChanges;
-        }
-    }
+        => !string.IsNullOrEmpty(LocalItemId) && !string.IsNullOrEmpty(Studios.Source) && Studios.Source != "[]" && Studios.HasChanges;
 
     /// <inheritdoc />
     public override bool HasChanges => HasMetadataChanges || HasImagesChanges || HasPeopleChanges || HasStudiosChanges;

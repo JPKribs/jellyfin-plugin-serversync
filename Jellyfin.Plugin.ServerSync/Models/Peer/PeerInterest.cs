@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
@@ -21,7 +23,7 @@ public class PeerInterest
 
     public string Revision { get; set; } = string.Empty;
 
-    public static PeerInterest For(global::Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, SourceServer entry)
+    public static PeerInterest For(PluginConfiguration config, SourceServer entry)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(entry);
@@ -41,9 +43,8 @@ public class PeerInterest
                 .OrderBy(l => l.Root, StringComparer.Ordinal)
                 .ToList(),
             Users = entry.GetEnabledUserMappings()
-                .Select(m => Guid.TryParse(m.SourceUserId, out var id) ? id.ToString("N", System.Globalization.CultureInfo.InvariantCulture) : null)
-                .Where(id => id is not null)
-                .Select(id => id!)
+                .Select(m => Guid.TryParse(m.SourceUserId, out var id) ? id.ToString("N", CultureInfo.InvariantCulture) : null)
+                .OfType<string>()
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(id => id, StringComparer.Ordinal)
                 .ToList()
@@ -66,10 +67,10 @@ public class PeerInterest
 
         if (kind == HintKind.Playlists)
         {
-            return Users.Contains(userId.ToString("N", System.Globalization.CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase);
+            return Users.Contains(userId.ToString("N", CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase);
         }
 
-        if (kind == HintKind.History && !Users.Contains(userId.ToString("N", System.Globalization.CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase))
+        if (kind == HintKind.History && !Users.Contains(userId.ToString("N", CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase))
         {
             return false;
         }

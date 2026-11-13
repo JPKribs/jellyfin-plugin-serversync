@@ -2,7 +2,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.Queue;
 
 /// <summary>
 /// What kind of object a hint describes. Each kind has its own key shape and its own apply code on
-/// the receiver. Only history travels as a hint today. The other kinds arrive in later phases.
+/// the receiver.
 /// </summary>
 public enum HintKind
 {

@@ -152,9 +152,8 @@ public static class ImageManifestEnricher
         var anyChanged = false;
         foreach (var kvp in manifest)
         {
-            for (var i = 0; i < kvp.Value.Count; i++)
+            foreach (var entry in kvp.Value)
             {
-                var entry = kvp.Value[i];
                 if (byKey.TryGetValue((kvp.Key, entry.ImageIndex), out var info))
                 {
                     if (info.Size.HasValue) entry.Size = info.Size.Value;
@@ -166,7 +165,7 @@ public static class ImageManifestEnricher
                 // /Items/{id}/Images reads Size from Jellyfin's in-memory
                 // item state, which goes stale when the image file is
                 // replaced on disk without a metadata rescan. HEAD the
-                // actual image URL, Jellyfin's image controller serves
+                // actual image URL instead. Jellyfin's image controller serves
                 // the file directly, so Content-Length is the current
                 // file length and the comparator sees the replacement
                 // even when Jellyfin hasn't re-indexed.
@@ -190,7 +189,7 @@ public static class ImageManifestEnricher
     /// enriches it with a live HTTP call. When that call fails or is skipped,
     /// the row would otherwise drop back to Size=0 and read as a change against
     /// the sized local side until the next successful enrichment. An unchanged
-    /// Tag means the same image, so the previously measured size still holds , 
+    /// Tag means the same image, so the previously measured size still holds, so
     /// carrying it forward keeps the comparison honest with no extra HTTP. A
     /// changed Tag is a real new image and is left tag-only so the change is
     /// still detected.

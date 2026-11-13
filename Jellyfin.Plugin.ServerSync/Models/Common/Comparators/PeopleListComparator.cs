@@ -1,7 +1,6 @@
-// CA5351, SHA256 here is a content fingerprint, not a security primitive.
+// SHA256 here is a content fingerprint, not a security primitive.
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;

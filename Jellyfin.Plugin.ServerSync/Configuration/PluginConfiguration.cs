@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
 using System.Linq;
+using System.Text.Json.Serialization;
+using System.Xml.Serialization;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using MediaBrowser.Model.Plugins;
@@ -296,7 +300,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
         // Equal start and end reads as "all day", not "never". The general
         // same-day branch evaluates to `hour >= X && hour < X`, which is always
-        // false, so a schedule of 3 to 3 silently did nothing.
+        // false, so a schedule of 3 to 3 would silently do nothing.
         return ScheduledStartHour == ScheduledEndHour
             || (ScheduledStartHour < ScheduledEndHour
                 ? currentHour >= ScheduledStartHour && currentHour < ScheduledEndHour
@@ -320,8 +324,8 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public MissingContentAction? MissingContentAction { get; set; }
 
-    [System.Xml.Serialization.XmlIgnore]
-    [System.Text.Json.Serialization.JsonIgnore]
+    [XmlIgnore]
+    [JsonIgnore]
     public MissingContentAction EffectiveMissingContentAction
         => MissingContentAction ?? (DeleteMissingContentMode == ApprovalMode.Disabled ? Models.ContentSync.Configuration.MissingContentAction.Keep : Models.ContentSync.Configuration.MissingContentAction.Delete);
 
@@ -466,14 +470,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public DateTime? LastHistorySyncTime { get; set; }
 
-    // ===== User Sync Configuration =====
-
     /// <summary>
     /// Negotiate watch history with the source server instead of only pulling it. The merged state is
     /// written to both servers through the Server Sync plugin on the source, which must be installed
     /// there. Requires an API key the source accepts, the same one the other modules use.
     /// </summary>
     public bool HistorySyncNegotiate { get; set; }
+
+    // ===== User Sync Configuration =====
 
     /// <summary>
     /// Enable user settings synchronization between servers.
@@ -639,7 +643,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// When enabled, whitelisted source collections are mirrored locally by
     /// the Sync Collections task: a matching local collection is created and
     /// its membership tracks the synced counterparts of the source
-    /// collection's items. Defaults to on, the whole point of whitelisting
+    /// collection's items. Defaults to on, since the whole point of whitelisting
     /// a collection is seeing it on this server.
     /// </summary>
     public bool MirrorSyncedCollections { get; set; } = true;
@@ -654,8 +658,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// would have the feature silently reset to off on upgrade. Reads map onto
     /// <see cref="DeepImageVerification"/>. Never serialized back out.
     /// </summary>
-    [System.Xml.Serialization.XmlElement("MetadataSyncDeepImageVerification")]
-    [System.ComponentModel.Browsable(false)]
+    [XmlElement("MetadataSyncDeepImageVerification")]
+    [Browsable(false)]
     public bool LegacyMetadataSyncDeepImageVerification
     {
         get => false;
@@ -665,8 +669,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// Legacy 10.11.64.0 element. See <see cref="LegacyMetadataSyncDeepImageVerification"/>.
     /// </summary>
-    [System.Xml.Serialization.XmlElement("PeopleSyncDeepImageVerification")]
-    [System.ComponentModel.Browsable(false)]
+    [XmlElement("PeopleSyncDeepImageVerification")]
+    [Browsable(false)]
     public bool LegacyPeopleSyncDeepImageVerification
     {
         get => false;
@@ -813,7 +817,7 @@ public class PluginConfiguration : BasePluginConfiguration
         // Validate path safety
         if (!string.IsNullOrWhiteSpace(TempDownloadPath))
         {
-            var normalizedTemp = System.IO.Path.GetFullPath(TempDownloadPath);
+            var normalizedTemp = Path.GetFullPath(TempDownloadPath);
             if (normalizedTemp != TempDownloadPath && TempDownloadPath.Contains("..", StringComparison.Ordinal))
             {
                 errors.Add("Temp download path must not contain path traversal sequences (..)");
@@ -829,7 +833,7 @@ public class PluginConfiguration : BasePluginConfiguration
             }
             else
             {
-                var normalizedBin = System.IO.Path.GetFullPath(RecyclingBinPath);
+                var normalizedBin = Path.GetFullPath(RecyclingBinPath);
                 if (normalizedBin != RecyclingBinPath && RecyclingBinPath.Contains("..", StringComparison.Ordinal))
                 {
                     errors.Add("Recycling bin path must not contain path traversal sequences (..)");
@@ -914,10 +918,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Returns true if the configuration passes validation.
     /// </summary>
     /// <returns>True if valid.</returns>
-    public bool IsValid()
-    {
-        return ValidateConfiguration().Count == 0;
-    }
+    public bool IsValid() => ValidateConfiguration().Count == 0;
 
     /// <summary>
     /// Clamps configuration values to valid ranges.
@@ -961,6 +962,7 @@ public class PluginConfiguration : BasePluginConfiguration
         {
             DeleteMissingContentMode = ApprovalMode.Enabled;
         }
+
         PeerCallerGrants = (PeerCallerGrants ?? new List<PeerCallerGrant>())
             .Where(g => g is not null && !string.IsNullOrWhiteSpace(g.UserId))
             .Select(g => new PeerCallerGrant
@@ -1013,7 +1015,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
         // Normalize filesystem paths to remove traversal sequences. An
         // unparseable path (embedded NUL, absurd length) is dropped rather
-        // than allowed to throw, SanitizeValues runs inside every save,
+        // than allowed to throw: SanitizeValues runs inside every save,
         // including the settings page's, and a throw would 500 the save.
         TempDownloadPath = NormalizePathOrNull(TempDownloadPath);
         RecyclingBinPath = NormalizePathOrNull(RecyclingBinPath);
@@ -1030,14 +1032,14 @@ public class PluginConfiguration : BasePluginConfiguration
         {
             // A relative path would resolve against the server's working directory, which is not a place
             // anyone chose, so it is treated as invalid rather than turned into a surprise location.
-            if (!System.IO.Path.IsPathFullyQualified(path))
+            if (!Path.IsPathFullyQualified(path))
             {
                 return null;
             }
 
-            return System.IO.Path.GetFullPath(path);
+            return Path.GetFullPath(path);
         }
-        catch (Exception ex) when (ex is ArgumentException or System.IO.PathTooLongException or NotSupportedException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException or System.Security.SecurityException)
         {
             return null;
         }
@@ -1047,16 +1049,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Normalizes a speed unit string to one of the valid values (KB, MB, GB).
     /// Returns "MB" for unrecognized values.
     /// </summary>
-    private static string NormalizeSpeedUnit(string unit)
+    private static string NormalizeSpeedUnit(string unit) => unit?.Trim().ToUpperInvariant() switch
     {
-        return unit?.Trim().ToUpperInvariant() switch
-        {
-            "KB" => "KB",
-            "MB" => "MB",
-            "GB" => "GB",
-            _ => "MB"
-        };
-    }
+        "KB" => "KB",
+        "MB" => "MB",
+        "GB" => "GB",
+        _ => "MB"
+    };
 
     /// <summary>
     /// Most-recent run failure per module, surfaced in the dashboard.

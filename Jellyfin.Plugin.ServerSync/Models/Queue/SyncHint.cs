@@ -4,7 +4,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.Queue;
 
 /// <summary>
 /// One change notice sent from the server where a change happened to a peer that pulls it. A hint says
-/// what changed and where. It never carries the value, the receiver reads the live state from the
+/// what changed and where. It never carries the value: the receiver reads the live state from the
 /// origin. Paths and names are the origin's own and the receiver maps them through its mappings for
 /// that origin. The origin's ids are included so the receiver can fetch the object, but they are never
 /// used as keys on the receiver.

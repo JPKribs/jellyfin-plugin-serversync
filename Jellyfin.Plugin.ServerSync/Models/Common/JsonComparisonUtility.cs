@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 
@@ -250,8 +251,8 @@ public static class JsonComparisonUtility
         => s.Length <= max ? s : string.Concat(s.AsSpan(0, max), "…");
 
     /// <summary>
-    /// Cheap shape check for ISO-8601 date strings (<c>yyyy-MM-dd…</c>) , 
-    /// every date this plugin serializes starts that way. Filters which
+    /// Cheap shape check for ISO-8601 date strings (<c>yyyy-MM-dd…</c>).
+    /// Every date this plugin serializes starts that way. Filters which
     /// string pairs are worth a <see cref="DateTimeOffset.TryParse(string, out DateTimeOffset)"/>
     /// attempt in <see cref="JsonElementEquals"/>.
     /// </summary>
@@ -266,18 +267,15 @@ public static class JsonComparisonUtility
     /// <summary>
     /// Checks if a JsonElement represents an "empty" value (null, empty string, empty array, empty object).
     /// </summary>
-    private static bool IsEmptyValue(JsonElement e)
+    private static bool IsEmptyValue(JsonElement e) => e.ValueKind switch
     {
-        return e.ValueKind switch
-        {
-            JsonValueKind.Null => true,
-            JsonValueKind.Undefined => true,
-            JsonValueKind.String => string.IsNullOrEmpty(e.GetString()),
-            JsonValueKind.Array => e.GetArrayLength() == 0,
-            JsonValueKind.Object => !e.EnumerateObject().Any(),
-            _ => false
-        };
-    }
+        JsonValueKind.Null => true,
+        JsonValueKind.Undefined => true,
+        JsonValueKind.String => string.IsNullOrEmpty(e.GetString()),
+        JsonValueKind.Array => e.GetArrayLength() == 0,
+        JsonValueKind.Object => !e.EnumerateObject().Any(),
+        _ => false
+    };
 
     /// <summary>
     /// Compares two nullable DateTime values as date-only (calendar date),
@@ -299,26 +297,22 @@ public static class JsonComparisonUtility
             return false;
         }
 
-        return AsUtcSafe(a.Value).Date == AsUtcSafe(b.Value).Date;
+        // Unspecified is read as UTC, not local, matching how Jellyfin stores date-only fields.
+        return Utilities.UtcTime.AsUtc(a.Value).Date == Utilities.UtcTime.AsUtc(b.Value).Date;
     }
-
-    // DateTime.ToUniversalTime() on a Kind=Unspecified value silently interprets it
-    // as local time and shifts. We treat Unspecified as already-UTC instead, which
-    // matches how Jellyfin commonly stores date-only fields.
-    private static DateTime AsUtcSafe(DateTime dt) => Utilities.UtcTime.AsUtc(dt);
 
     /// <summary>
     /// Normalizes a date-only semantic field (premiere/end/birth/death dates)
     /// to its UTC calendar date as <c>yyyy-MM-dd</c>. Blob builders store
     /// this instead of the raw timestamp so the JSON comparison agrees with
-    /// the apply step's <see cref="DateOnlyEquals"/>, servers routinely hold
+    /// the apply step's <see cref="DateOnlyEquals"/>. Servers routinely hold
     /// the same date with different times of day (TZ-shifted midnights,
     /// provider quirks like 07:01), and comparing timestamps left rows
     /// permanently diverged that the apply step correctly refused to touch.
     /// </summary>
     public static string? ToDateOnlyString(DateTime? value) =>
         value.HasValue
-            ? AsUtcSafe(value.Value).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+            ? Utilities.UtcTime.AsUtc(value.Value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
             : null;
 
     /// <summary>
@@ -326,7 +320,7 @@ public static class JsonComparisonUtility
     /// </summary>
     public static string? ToDateOnlyString(DateTimeOffset? value) =>
         value.HasValue
-            ? value.Value.UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+            ? value.Value.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
             : null;
 
     /// <summary>
@@ -425,13 +419,13 @@ public static class JsonComparisonUtility
 
                 // Compare as dates via DateTimeOffset to avoid the DateTime
                 // Unspecified-kind TZ shift. AssumeUniversal makes offset-less
-                // strings UTC. Gated on an ISO-date shape check first, blobs
+                // strings UTC. Gated on an ISO-date shape check first, since blobs
                 // are full of long non-date strings (overviews, taglines) and
                 // attempting a culture-aware parse on every unequal pair was
                 // measurable CPU across 100k-row refreshes.
                 if (LooksLikeIsoDate(s1) && LooksLikeIsoDate(s2) &&
-                    System.DateTimeOffset.TryParse(s1, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto1) &&
-                    System.DateTimeOffset.TryParse(s2, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dto2))
+                    DateTimeOffset.TryParse(s1, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto1) &&
+                    DateTimeOffset.TryParse(s2, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto2))
                 {
                     if (dto1.UtcDateTime == dto2.UtcDateTime)
                     {
@@ -440,8 +434,8 @@ public static class JsonComparisonUtility
 
                     // Date-only relaxation: both midnight in their own offset
                     // with the same calendar date (PremiereDate / birthdays).
-                    if (dto1.TimeOfDay == System.TimeSpan.Zero
-                        && dto2.TimeOfDay == System.TimeSpan.Zero
+                    if (dto1.TimeOfDay == TimeSpan.Zero
+                        && dto2.TimeOfDay == TimeSpan.Zero
                         && dto1.Date == dto2.Date)
                     {
                         return true;
@@ -453,7 +447,7 @@ public static class JsonComparisonUtility
                     if (dto1.Minute == 0 && dto1.Second == 0
                         && dto2.Minute == 0 && dto2.Second == 0
                         && dto1.UtcDateTime.Date == dto2.UtcDateTime.Date
-                        && System.Math.Abs((dto1.UtcDateTime - dto2.UtcDateTime).TotalHours) <= 24)
+                        && Math.Abs((dto1.UtcDateTime - dto2.UtcDateTime).TotalHours) <= 24)
                     {
                         return true;
                     }
@@ -474,9 +468,6 @@ public static class JsonComparisonUtility
             case JsonValueKind.True:
             case JsonValueKind.False:
                 return e1.GetBoolean() == e2.GetBoolean();
-
-            case JsonValueKind.Null:
-                return true;
 
             default:
                 return e1.GetRawText() == e2.GetRawText();

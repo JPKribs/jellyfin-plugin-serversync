@@ -51,11 +51,11 @@ public static class LocalImageUtilities
 
         if (imageType == ImageType.Chapter)
         {
-            // GetImages throws for chapter images, and we never sync them.
+            // GetImages throws for chapter images, and the plugin never syncs them.
             return 0;
         }
 
-        var existing = SafeCount(item, imageType, logger, context);
+        var existing = SafeList(item, imageType, logger, context).Count;
         if (existing == 0)
         {
             return 0;
@@ -149,9 +149,6 @@ public static class LocalImageUtilities
                 .Select((w, slot) => (w.ImageType, SourceIndex: w.ImageIndex, TargetIndex: slot)))
             .ToList();
     }
-
-    private static int SafeCount(BaseItem item, ImageType imageType, ILogger logger, string context)
-        => SafeList(item, imageType, logger, context).Count;
 
     private static List<ItemImageInfo> SafeList(BaseItem item, ImageType imageType, ILogger logger, string context)
     {

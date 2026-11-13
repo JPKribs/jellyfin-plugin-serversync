@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using JPKribs.Jellyfin.Base;
@@ -28,7 +29,8 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     private readonly Lazy<SecretProtector> _secrets;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Gets a value indicating whether the saved settings, read before they load, were written before
+    /// peer caller grants existed.
     /// </summary>
     public bool PredatesWhitelist { get; }
 
@@ -36,16 +38,22 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     {
         try
         {
-            return System.IO.File.Exists(path)
-                && !System.IO.File.ReadAllText(path).Contains("<PeerCallerGrants", StringComparison.Ordinal);
+            return File.Exists(path)
+                && !File.ReadAllText(path).Contains("<PeerCallerGrants", StringComparison.Ordinal);
         }
-        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             logger.LogWarning(ex, "Could not read the saved Server Sync settings before loading them");
             return false;
         }
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="Plugin"/> class.
+    /// </summary>
+    /// <param name="applicationPaths">The application paths.</param>
+    /// <param name="xmlSerializer">The XML serializer.</param>
+    /// <param name="logger">The logger.</param>
     public Plugin(
         IApplicationPaths applicationPaths,
         IXmlSerializer xmlSerializer,
@@ -65,11 +73,6 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         // The disk space checks are static and called from places with no logger of their own.
         Services.DiskSpaceService.Logger = logger;
 
-        // One-time upgrade: a pre-encryption config holds the key in
-        // plaintext, and the core config endpoint returns it verbatim on
-        // every settings-page load until something saves. Encrypt at startup
-        // instead of waiting. Protect() no-ops when Data Protection is
-        // unavailable, so this can't loop or throw the plugin out of load.
         try
         {
             // A configuration written before servers became a list carries one source in the legacy
@@ -80,6 +83,11 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
                 _logger.LogInformation("Moved the single source server into the server list");
             }
 
+            // One-time upgrade: a pre-encryption config holds the key in
+            // plaintext, and the core config endpoint returns it verbatim on
+            // every settings-page load until something saves. Encrypt at startup
+            // instead of waiting. Protect() no-ops when Data Protection is
+            // unavailable, so this can't loop or throw the plugin out of load.
             var encrypted = false;
             foreach (var server in Configuration.Servers)
             {
@@ -135,7 +143,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
             {
                 Services.Links.LinkCache.WipeFolder(before);
             }
-            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 _logger.LogWarning("Could not empty the link cache at {Root}: {Reason}", before, ex.Message);
             }
@@ -188,7 +196,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     }
 
     private string LinkCacheRoot(PluginConfiguration config)
-        => Services.Links.LinkCache.RootFor(config.LinkCachePath, System.IO.Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder));
+        => Services.Links.LinkCache.RootFor(config.LinkCachePath, Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder));
 
     /// <summary>
     /// Empties the link cache when the plugin is uninstalled: the folder under Jellyfin's cache, and a
@@ -196,13 +204,13 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     /// </summary>
     public override void OnUninstalling()
     {
-        foreach (var root in new[] { System.IO.Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder), LinkCacheRoot(Configuration) })
+        foreach (var root in new[] { Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder), LinkCacheRoot(Configuration) })
         {
             try
             {
                 Services.Links.LinkCache.WipeFolder(root);
             }
-            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 _logger.LogWarning("Could not empty the link cache at {Root} while uninstalling: {Reason}", root, ex.Message);
             }

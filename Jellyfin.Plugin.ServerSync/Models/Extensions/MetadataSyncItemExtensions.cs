@@ -24,16 +24,7 @@ public static class MetadataSyncItemExtensions
         string? sourceServerUrl,
         bool includeBlobs = true)
     {
-        string? sourceLibraryName = null;
-        string? localLibraryName = null;
-
         var mapping = libraryMappings?.FirstOrDefault(m => m.SourceLibraryId == item.SourceLibraryId);
-        if (mapping != null)
-        {
-            sourceLibraryName = mapping.SourceLibraryName;
-            localLibraryName = mapping.LocalLibraryName;
-        }
-
         var hasMetadataChanges = item.HasMetadataChanges;
         var hasImagesChanges = item.HasImagesChanges;
         var hasPeopleChanges = item.HasPeopleChanges;
@@ -45,8 +36,8 @@ public static class MetadataSyncItemExtensions
             Id = item.Id,
             SourceLibraryId = item.SourceLibraryId,
             LocalLibraryId = item.LocalLibraryId,
-            SourceLibraryName = sourceLibraryName,
-            LocalLibraryName = localLibraryName,
+            SourceLibraryName = mapping?.SourceLibraryName,
+            LocalLibraryName = mapping?.LocalLibraryName,
             SourceItemId = item.SourceItemId,
             LocalItemId = item.LocalItemId,
             ItemName = item.ItemName,

@@ -1,4 +1,4 @@
-// CA5351, SHA256 here is a content fingerprint, not a security primitive.
+// SHA256 here is a content fingerprint, not a security primitive.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -79,19 +79,15 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
             //
             // A source size of 0 means enrichment could not measure the image
             // (the /Items/{id}/Images call failed, a non-admin token gets
-            // 403 here). That is indeterminate, NOT a difference: we cannot
-            // assert the images differ, and an apply built on that guess
+            // 403 here). That is indeterminate, NOT a difference: nothing
+            // shows the images differ, and an apply built on that guess
             // fails verification for the same reason, so queueing it only
             // burns bandwidth. Counts are equal at this point, so an
             // unmeasured source image pairs with whatever local image is left
             // over. Only a measured source size with no local twin is a real
             // difference, which also covers a local file that is missing or
             // unreadable (Size=0).
-            var unmatchedLocal = new List<long>(localImages.Count);
-            foreach (var l in localImages)
-            {
-                unmatchedLocal.Add(l.Size);
-            }
+            var unmatchedLocal = localImages.Select(l => l.Size).ToList();
 
             foreach (var s in sourceImages)
             {
@@ -108,16 +104,6 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
         }
 
         // Local-only types are tolerated (source→local direction only).
-        foreach (var (type, localImages) in localMap)
-        {
-            if (!sourceMap.ContainsKey(type))
-            {
-                // Not a failure cause, Equals() above ignores local-only
-                // types, so don't report it as the diff. Continue.
-                _ = localImages;
-            }
-        }
-
         return null;
     }
 

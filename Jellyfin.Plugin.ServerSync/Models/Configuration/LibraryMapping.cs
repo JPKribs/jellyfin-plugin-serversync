@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 
@@ -64,14 +65,14 @@ public class LibraryMapping
     /// Left out of JSON while it is Copy, so a mapping that never used links hashes exactly as it did
     /// before this setting existed, and an upgrade does not turn every scan into a full one.
     /// </remarks>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public ContentSync.StorageMode StorageMode { get; set; } = ContentSync.StorageMode.Copy;
 
     /// <summary>
     /// Gets or sets a value indicating whether this library's links are kept out of the link cache.
     /// Links are cached unless this is set. Only matters while the cache is on and the library holds links.
     /// </summary>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool ExcludeFromLinkCache { get; set; }
 
     /// <summary>
@@ -82,6 +83,6 @@ public class LibraryMapping
     /// Left out of JSON while empty, like <see cref="StorageMode"/>, so a mapping that never picked
     /// anything hashes exactly as it did before the setting existed.
     /// </remarks>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<FilteredItem>? PermanentItems { get; set; }
 }

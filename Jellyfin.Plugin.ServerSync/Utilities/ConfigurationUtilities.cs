@@ -1,6 +1,10 @@
 using System;
+using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
@@ -14,9 +18,7 @@ public static class ConfigurationUtilities
     /// True when at least one configured server entry is one this server pulls from.
     /// </summary>
     public static bool HasValidAuthConfiguration(PluginConfiguration config)
-    {
-        return config.GetPullServers().Count > 0;
-    }
+        => config.GetPullServers().Count > 0;
 
     /// <summary>
     /// Returns null when the URL is acceptable, otherwise an error string explaining
@@ -47,8 +49,7 @@ public static class ConfigurationUtilities
 
         // IP-literal hosts are validated here. DNS names go through the HTTP stack.
         // Uri.Host keeps the brackets on an IPv6 literal ("[::1]"), which
-        // IPAddress.TryParse rejects, every IPv6 literal skipped classification
-        // entirely until the brackets were trimmed.
+        // IPAddress.TryParse rejects, so they are trimmed first.
         var host = uri.Host.Trim('[', ']');
         if (IPAddress.TryParse(host, out var ipAddress))
         {
@@ -60,7 +61,7 @@ public static class ConfigurationUtilities
         }
 
         if (uri.Scheme == Uri.UriSchemeHttp
-            && (!allowPrivateNetwork || (IPAddress.TryParse(host, out var literal) && !AllowsPlainHttp(literal))))
+            && (!allowPrivateNetwork || (ipAddress is not null && !AllowsPlainHttp(ipAddress))))
         {
             return PlainHttpRefusal;
         }
@@ -80,6 +81,7 @@ public static class ConfigurationUtilities
 
         if (address.AddressFamily == AddressFamily.InterNetwork)
         {
+            // 100.64.0.0/10, carrier-grade NAT shared space, private in practice.
             var bytes = address.GetAddressBytes();
             if (bytes[0] == 100 && (bytes[1] & 0xC0) == 64)
             {
@@ -100,7 +102,7 @@ public static class ConfigurationUtilities
     /// <param name="allowPrivateNetwork">Whether private and loopback addresses are allowed.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Null when acceptable, else why not.</returns>
-    public static async System.Threading.Tasks.Task<string?> ValidateServerUrlForSsrfAsync(string url, bool allowPrivateNetwork, System.Threading.CancellationToken cancellationToken = default)
+    public static async Task<string?> ValidateServerUrlForSsrfAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken = default)
     {
         var error = ValidateServerUrlForSsrf(url, allowPrivateNetwork);
         if (error is not null || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || IPAddress.TryParse(uri.Host.Trim('[', ']'), out _))
@@ -149,13 +151,13 @@ public static class ConfigurationUtilities
     /// <param name="context">The connection the handler wants.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The connected stream.</returns>
-    public static System.Threading.Tasks.ValueTask<System.IO.Stream> ConnectPublicOnlyAsync(System.Net.Http.SocketsHttpConnectionContext context, System.Threading.CancellationToken cancellationToken)
+    public static ValueTask<Stream> ConnectPublicOnlyAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         => ConnectCheckedAsync(context, allowPrivateNetwork: false, cancellationToken);
 
-    public static System.Threading.Tasks.ValueTask<System.IO.Stream> ConnectPrivateAllowedAsync(System.Net.Http.SocketsHttpConnectionContext context, System.Threading.CancellationToken cancellationToken)
+    public static ValueTask<Stream> ConnectPrivateAllowedAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         => ConnectCheckedAsync(context, allowPrivateNetwork: true, cancellationToken);
 
-    private static async System.Threading.Tasks.ValueTask<System.IO.Stream> ConnectCheckedAsync(System.Net.Http.SocketsHttpConnectionContext context, bool allowPrivateNetwork, System.Threading.CancellationToken cancellationToken)
+    private static async ValueTask<Stream> ConnectCheckedAsync(SocketsHttpConnectionContext context, bool allowPrivateNetwork, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
         var plainHttp = context.InitialRequestMessage.RequestUri?.Scheme == Uri.UriSchemeHttp;
@@ -171,18 +173,18 @@ public static class ConfigurationUtilities
             {
                 // One private answer refuses the whole name. Mixed answers are how a rebinding attack
                 // looks, so no address of such a name is used.
-                throw new System.Net.Http.HttpRequestException($"'{endPoint.Host}' resolves to {address}: {rejection}");
+                throw new HttpRequestException($"'{endPoint.Host}' resolves to {address}: {rejection}");
             }
 
             if (plainHttp && !AllowsPlainHttp(address))
             {
-                throw new System.Net.Http.HttpRequestException($"'{endPoint.Host}' resolves to {address}, a public address. {PlainHttpRefusal}");
+                throw new HttpRequestException($"'{endPoint.Host}' resolves to {address}, a public address. {PlainHttpRefusal}");
             }
         }
 
         if (addresses.Length == 0)
         {
-            throw new System.Net.Http.HttpRequestException($"'{endPoint.Host}' does not resolve");
+            throw new HttpRequestException($"'{endPoint.Host}' does not resolve");
         }
 
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };

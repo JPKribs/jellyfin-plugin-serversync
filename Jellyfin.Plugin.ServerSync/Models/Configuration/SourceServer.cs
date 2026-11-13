@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json.Serialization;
+using System.Xml.Serialization;
 
 namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 
 /// <summary>
-/// One configured peer server. The position of an entry in <see cref="Configuration.PluginConfiguration.Servers"/>
+/// One configured peer server. The position of an entry in <see cref="Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration.Servers"/>
 /// is its scan priority: when two servers offer the same item, the earlier entry wins and the later one only
 /// contributes what the earlier lacks.
 /// </summary>
@@ -154,31 +156,31 @@ public class SourceServer
     public List<UserMapping> UserMappings { get; set; } = new();
 
     /// <summary>Gets the name shown in logs and the dashboard.</summary>
-    [System.Xml.Serialization.XmlIgnore]
-    [System.Text.Json.Serialization.JsonIgnore]
+    [XmlIgnore]
+    [JsonIgnore]
     public string DisplayName
         => !string.IsNullOrWhiteSpace(Name) ? Name
             : !string.IsNullOrWhiteSpace(ServerName) ? ServerName
             : Url;
 
     /// <summary>Gets a value indicating whether the entry has enough to connect.</summary>
-    [System.Xml.Serialization.XmlIgnore]
-    [System.Text.Json.Serialization.JsonIgnore]
+    [XmlIgnore]
+    [JsonIgnore]
     public bool IsConfigured => !string.IsNullOrWhiteSpace(Url) && !string.IsNullOrWhiteSpace(ApiKey);
 
     /// <summary>Gets a value indicating whether this server scans the peer on a schedule.</summary>
-    [System.Xml.Serialization.XmlIgnore]
-    [System.Text.Json.Serialization.JsonIgnore]
+    [XmlIgnore]
+    [JsonIgnore]
     public bool Pulls => IsEnabled && IsConfigured && Mode is ServerMode.Pull or ServerMode.Sync;
 
     /// <summary>Gets a value indicating whether this server sends hints to the peer.</summary>
-    [System.Xml.Serialization.XmlIgnore]
-    [System.Text.Json.Serialization.JsonIgnore]
+    [XmlIgnore]
+    [JsonIgnore]
     public bool Pushes => IsEnabled && IsConfigured && Mode is ServerMode.Push or ServerMode.Sync;
 
     /// <summary>Gets the URL the browser should use for images from this peer.</summary>
-    [System.Xml.Serialization.XmlIgnore]
-    [System.Text.Json.Serialization.JsonIgnore]
+    [XmlIgnore]
+    [JsonIgnore]
     public string BrowserUrl => !string.IsNullOrEmpty(ExternalUrl) ? ExternalUrl : Url;
 
     /// <summary>Returns the enabled library mappings of this peer as a fresh list.</summary>
@@ -186,8 +188,8 @@ public class SourceServer
     public List<LibraryMapping> GetEnabledLibraryMappings()
         => LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
 
-    [System.Xml.Serialization.XmlIgnore]
-    [System.Text.Json.Serialization.JsonIgnore]
+    [XmlIgnore]
+    [JsonIgnore]
     public bool IsStandardUser => string.Equals(AccessLevel, StandardUserAccess, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Returns the enabled user mappings of this peer as a fresh list.</summary>
