@@ -43,10 +43,16 @@ public sealed class LinkSessionController : ISessionController
     }
 
     /// <inheritdoc />
-    public bool IsSessionActive => DateTime.UtcNow - new DateTime(Interlocked.Read(ref _lastReportTicks), DateTimeKind.Utc) < ActiveFor;
+    public bool IsSessionActive => ActiveAt(DateTime.UtcNow);
+
+    /// <summary>Whether the session still counts as active at <paramref name="now"/>.</summary>
+    public bool ActiveAt(DateTime now) => now - new DateTime(Interlocked.Read(ref _lastReportTicks), DateTimeKind.Utc) < ActiveFor;
 
     /// <summary>Records that the server holding the link reported on this session.</summary>
-    public void Touch() => Interlocked.Exchange(ref _lastReportTicks, DateTime.UtcNow.Ticks);
+    public void Touch() => Touch(DateTime.UtcNow);
+
+    /// <summary>Records that the server holding the link reported on this session at <paramref name="at"/>.</summary>
+    public void Touch(DateTime at) => Interlocked.Exchange(ref _lastReportTicks, at.Ticks);
 
     /// <inheritdoc />
     public bool SupportsMediaControl => _configManager.Configuration.FindServer(_peerKey) is { IsEnabled: true, IsConfigured: true };

@@ -43,6 +43,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.AddService<Services.Links.LinkPlaybackFilter>());
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkProbe>());
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkPlaybackReporter>());
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkSessionSweeper>());
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkCacheFiller>());
 
         // The hint pipeline runs for the life of the server. Each worker is registered once as itself,

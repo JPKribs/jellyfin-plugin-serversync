@@ -157,7 +157,7 @@ Playback of a link shows on the source as a live session named after the linking
 * The activity log and playback plugins on the source see the play.
 * Stopping updates played state, play count, and resume position on the source through Jellyfin's own rules.
 
-Progress is reported every 30 seconds, and at once on a pause or resume. The session ends when playback stops. If the linking server goes away, Jellyfin stops the playback after five minutes without a report, and the session closes ten minutes after the last report.
+Progress is reported every 30 seconds, and at once on a pause or resume. The session ends when playback stops, and a stop report that fails is tried again. If the linking server goes away, or its stop report never arrives, Jellyfin stops the playback after five minutes without a report, and Server Sync ends the session ten minutes after the last report.
 
 Jellyfin's own stop of a paused session on the source is not passed on, so the source's housekeeping never stops someone watching elsewhere.
 

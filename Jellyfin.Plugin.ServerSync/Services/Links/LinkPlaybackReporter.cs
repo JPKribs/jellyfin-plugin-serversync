@@ -45,6 +45,9 @@ public sealed class LinkPlaybackReporter : BackgroundService
     // The last progress sent per viewer and link, and whether it was paused.
     private readonly ConcurrentDictionary<string, (DateTime At, bool Paused)> _lastProgress = new(StringComparer.Ordinal);
 
+    // The link each session last reported, so a stop that names no item still reaches the source.
+    private readonly ConcurrentDictionary<string, LinkEntry> _playing = new(StringComparer.Ordinal);
+
     public LinkPlaybackReporter(
         ISessionManager sessionManager,
         MediaBrowser.Controller.Library.ILibraryManager libraryManager,
@@ -71,6 +74,42 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// </summary>
     public static bool ProgressDue((DateTime At, bool Paused)? last, bool paused, DateTime now)
         => last is not { } sent || sent.Paused != paused || now - sent.At >= ProgressEvery;
+
+    /// <summary>
+    /// How long to wait before each retry of a report that failed. A stop is retried, since no later
+    /// report makes up for it and the source would keep the session listed. Start and progress are not:
+    /// the next progress report makes up for either.
+    /// </summary>
+    public static TimeSpan[] RetryDelays(LinkPlaybackEvent kind)
+        => kind == LinkPlaybackEvent.Stop
+            ? new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10) }
+            : Array.Empty<TimeSpan>();
+
+    /// <summary>
+    /// The link a playback event is reported for, or null when it is not one. Start and progress name
+    /// their link and are remembered per session. A player that quits without naming what it played
+    /// stops with no item, and the link that session last reported is what stopped, so the source is
+    /// told about that one.
+    /// </summary>
+    /// <param name="kind">The event.</param>
+    /// <param name="sessionKey">The viewer's session here.</param>
+    /// <param name="named">The link the event's item is, or null.</param>
+    /// <param name="namesItem">Whether the event names an item at all.</param>
+    /// <returns>The link, or null.</returns>
+    public LinkEntry? Track(LinkPlaybackEvent kind, string sessionKey, LinkEntry? named, bool namesItem)
+    {
+        if (kind != LinkPlaybackEvent.Stop)
+        {
+            if (named is not null)
+            {
+                _playing[sessionKey] = named;
+            }
+
+            return named;
+        }
+
+        return _playing.TryRemove(sessionKey, out var last) && named is null && !namesItem ? last : named;
+    }
 
     /// <inheritdoc />
     public override Task StartAsync(CancellationToken cancellationToken)
@@ -118,13 +157,14 @@ public sealed class LinkPlaybackReporter : BackgroundService
         {
             // A film held in several versions reports the film, and names the version being played as
             // its media source. The version is what streams, so it is what the source is told about.
+            var sessionKey = e.Session?.Id ?? e.DeviceId ?? string.Empty;
             var path = (Guid.TryParse(e.MediaSourceId, out var version) && version != e.Item?.Id ? _libraryManager.GetItemById(version) : null)?.Path ?? e.Item?.Path;
-            if (path is null || !path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) || _links.Find(path) is not { } link)
+            var named = path is not null && path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) ? _links.Find(path) : null;
+            if (Track(kind, sessionKey, named, e.Item is not null) is not { } link)
             {
                 return;
             }
 
-            var sessionKey = e.Session?.Id ?? e.DeviceId ?? string.Empty;
             var viewer = sessionKey + "|" + link.LinkId;
             if (kind == LinkPlaybackEvent.Progress)
             {
@@ -175,22 +215,39 @@ public sealed class LinkPlaybackReporter : BackgroundService
             return;
         }
 
-        try
+        report.SourceUserId = Guid.TryParse(report.UserId, out var user) ? LinkAccess.SourceUserFor(server, user) : null;
+        var retries = RetryDelays(report.Event);
+        for (var attempt = 0; ; attempt++)
         {
-            report.SourceUserId = Guid.TryParse(report.UserId, out var user) ? LinkAccess.SourceUserFor(server, user) : null;
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(ReportTimeout);
-            using var client = _clientFactory.Create(server);
-            await client.ReportLinkPlaybackAsync(report, deadline.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // A lost report is made good by the next one, and history sync settles played state either way.
-            _logger.LogDebug(ex, "Could not report playback of {Path} to '{Server}'", link.LinkPath, server.DisplayName);
+            try
+            {
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                deadline.CancelAfter(ReportTimeout);
+                using var client = _clientFactory.Create(server);
+                await client.ReportLinkPlaybackAsync(report, deadline.Token).ConfigureAwait(false);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (attempt < retries.Length)
+            {
+                _logger.LogDebug(ex, "Could not report the {Event} of {Path} to '{Server}', trying again", report.Event, link.LinkPath, server.DisplayName);
+                await Task.Delay(retries[attempt], cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (report.Event == LinkPlaybackEvent.Stop)
+            {
+                // The source ends the session itself ten minutes after the last report it had.
+                _logger.LogWarning("Could not report the stop of {Path} to '{Server}', so it lists the viewer until it gives up on them: {Reason}", link.LinkPath, server.DisplayName, ex.Message);
+                return;
+            }
+            catch (Exception ex)
+            {
+                // A lost start or progress is made good by the next report, and history sync settles played state either way.
+                _logger.LogDebug(ex, "Could not report playback of {Path} to '{Server}'", link.LinkPath, server.DisplayName);
+                return;
+            }
         }
     }
 }

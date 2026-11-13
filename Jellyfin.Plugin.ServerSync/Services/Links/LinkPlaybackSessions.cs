@@ -9,6 +9,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Session;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
@@ -16,9 +17,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// Shows playback of a link on this server, the source, as a session of its own. Each viewer on the
 /// server holding the link is a device here under the client name Server Sync, so the dashboard lists
 /// it, the activity log and playback plugins see it, and Jellyfin's own stop handling updates played
-/// state and resume position for the user it streams as. Jellyfin stops playback that has not checked
-/// in for five minutes, and the session's controller stops counting as active ten minutes after the
-/// last report, so Jellyfin closes the session when the server holding the link goes away.
+/// state and resume position for the user it streams as. The server holding the link ends a session
+/// by reporting its stop. When that report is lost, <see cref="SweepAsync"/> ends the session once it
+/// has gone ten minutes without a report, since Jellyfin itself never removes it.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPlaybackSessions
@@ -150,21 +151,83 @@ public sealed class LinkPlaybackSessions
                 }).ConfigureAwait(false);
                 break;
             case LinkPlaybackEvent.Stop:
-                await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
+                // The session ends even when Jellyfin's stop handling throws, so a stop never leaves it listed.
+                try
                 {
-                    ItemId = item.Id,
-                    SessionId = session.Id,
-                    MediaSourceId = mediaSourceId,
-                    PositionTicks = report.PositionTicks,
-                    PlaySessionId = report.PlaySessionId
-                }).ConfigureAwait(false);
-                await _sessionManager.ReportSessionEnded(session.Id).ConfigureAwait(false);
+                    await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
+                    {
+                        ItemId = item.Id,
+                        SessionId = session.Id,
+                        MediaSourceId = mediaSourceId,
+                        PositionTicks = report.PositionTicks,
+                        PlaySessionId = report.PlaySessionId
+                    }).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await _sessionManager.ReportSessionEnded(session.Id).ConfigureAwait(false);
+                }
+
                 break;
             default:
                 return "unknown playback event";
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Ends every link session that has had no report for <see cref="LinkSessionController.ActiveFor"/>.
+    /// The server holding the link ends a session by reporting its stop, and when that report is lost
+    /// nothing in Jellyfin removes the session: it only checks a session's controllers when a websocket
+    /// closes, and a link session has none. So the sweep does it, stopping any playback first so played
+    /// state and resume position are kept.
+    /// </summary>
+    /// <param name="now">The time to judge staleness by.</param>
+    /// <returns>How many sessions were ended.</returns>
+    public async Task<int> SweepAsync(DateTime now)
+    {
+        var ended = 0;
+        foreach (var session in _sessionManager.Sessions.ToList())
+        {
+            var controllers = session.SessionControllers;
+            if (controllers.Count == 0
+                || !controllers.All(c => c is LinkSessionController link && !link.ActiveAt(now)))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (session.NowPlayingItem is { } playing)
+                {
+                    await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
+                    {
+                        ItemId = playing.Id,
+                        SessionId = session.Id,
+                        MediaSourceId = session.PlayState?.MediaSourceId,
+                        PositionTicks = session.PlayState?.PositionTicks is >= 0 and var at ? at : null
+                    }).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _controllerLogger.LogDebug(ex, "Could not stop playback on the stale link session {Session}", session.Id);
+            }
+
+            try
+            {
+                await _sessionManager.ReportSessionEnded(session.Id).ConfigureAwait(false);
+                ended++;
+                _controllerLogger.LogInformation("Ended the link session {Device} for {User}: the server holding the link has not reported on it for {Minutes} minutes", session.DeviceName, session.UserName, LinkSessionController.ActiveFor.TotalMinutes);
+            }
+            catch (Exception ex)
+            {
+                _controllerLogger.LogWarning(ex, "Could not end the stale link session {Session}", session.Id);
+            }
+        }
+
+        return ended;
     }
 
     private static string DeviceName(SourceServer peer, PeerPlaybackReport report)
