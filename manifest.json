@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.12.2",
+        "changelog": "\n## Changed\n- A link whose file no server offers any more is always removed on the next full scan, whatever Removed files says. Its .strm goes with the files beside it and each folder that leaves holding only artwork and nfo files, with no approval and no recycling bin\n- A full copy in a Link library, a link the library filter leaves out, and a .strm that no longer points at Server Sync still follow Removed files",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.12.2/jellyfin-plugin-serversync-12.4.12.2.zip",
+        "checksum": "83c9ec4c2db793ee79418e5a02ab667a",
+        "timestamp": "2026-11-13T22:36:11Z"
+      },
+      {
         "version": "12.4.12.1",
         "changelog": "## Fixed\n- The arrows on collapsible sections are back to their usual size\n\n## Developer\n- Uses JPKribs.Jellyfin.Base 2026.11.13.3",
         "targetAbi": "12.4.0.0",
