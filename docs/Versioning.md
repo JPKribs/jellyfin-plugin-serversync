@@ -23,7 +23,9 @@ Releases before protocol versions, up to 12.2.8.1, only talk to exactly the same
 
 [Links](Links.md) need both servers on 12.2.10.0 or later. The source advertises `Link` among its features, and a server with a Link mapping waits for a source that does. Releases without links ignore the feature, and matching against them works as before.
 
-12.2.11.1 to 12.2.11.5 change nothing in the protocol or the database, and mix freely with 12.2.11.0. A link session on the source is named after the viewer's client and user from 12.2.11.4 on, and needs both servers on it; with an older linking server it keeps the linking server's name. Ending stale link sessions, showing a link session as a direct stream, and refusing proxied requests to a link's address only need the server they run on. Keeping playback from the link cache off the source needs the linking server on 12.2.11.3 or later.
+12.4.11.7 is the release after 12.2.11.6. Only its first two parts changed, to the Jellyfin 12.4 it has been built for since 12.2.10.1, and it changes nothing in what the plugin does.
+
+12.2.11.1 to 12.2.11.6 change nothing in the protocol or the database, and mix freely with 12.2.11.0. A link session on the source is named after the viewer's client and user from 12.2.11.4 on, and needs both servers on it; with an older linking server it keeps the linking server's name. Ending stale link sessions, showing a link session as a direct stream, and refusing proxied requests to a link's address only need the server they run on. Keeping playback from the link cache off the source needs the linking server on 12.2.11.3 or later.
 
 12.2.11.0 adds the link cache, media info and images from the source, the link check, and speed and per user limits, with no change to the protocol or the database. A linking server on 12.2.11.0 works with a source on 12.2.10.x: its links are probed through the link, are not checked, and a cache download for a user counts as a stream on that source. The source's speed and per user limits need 12.2.11.0 on the source.
 

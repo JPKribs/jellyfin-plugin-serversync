@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.11.6"
+version: "12.4.11.7"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -29,7 +29,7 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   changed:
-  - The code is cleaned up throughout, with no change to what the plugin does. Unused code is removed, comments that no longer matched the code are corrected, and simple constructs are written more plainly
+  - The version follows Jellyfin 12.4, which Server Sync has been built for since 12.2.10.1. Nothing in what the plugin does changes, and it mixes freely with 12.2.11.x servers in a pool
+  - The documentation is cleaned up
   developer:
-  - The wire protocol, the database schema, the API, and the settings are unchanged, so this release works alongside 12.2.11.x one server at a time
-  - Every area was checked against the unit tests and the Docker pool, and read again for anything that changes behaviour
+  - The old design notes under docs/plans, which the documentation site never published, are removed
