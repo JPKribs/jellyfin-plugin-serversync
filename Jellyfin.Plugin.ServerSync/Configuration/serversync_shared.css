@@ -55,8 +55,6 @@
 
 /* ===== Layout Utility Classes ===== */
 .jpk-collapsible-actions { border-top: none; padding-top: 0; }
-/* Base 2026.11.13.2 ships this arrow at 1.4em; this keeps its earlier size until Base is fixed. */
-.jpk-collapsible-icon { font-size: 0.8em; }
 
 .modal-relative { position: relative; }
 
