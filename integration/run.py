@@ -1911,7 +1911,7 @@ def scenario_links(creds, apis):
         # Playback on the link shows on the source as a session and marks its file played there once.
         source_item = find_item(a, "Movie", needle)
         runtime = local.get(f"/Items/{item['Id']}?userId={lv}").get("RunTimeTicks") or 0
-        play = {"ItemId": item["Id"], "MediaSourceId": source["Id"], "PlaySessionId": "it-link", "PositionTicks": 0, "CanSeek": True, "PlayMethod": "Transcode"}
+        play = {"ItemId": item["Id"], "MediaSourceId": source["Id"], "PlaySessionId": "it-link", "PositionTicks": 0, "CanSeek": True, "PlayMethod": "DirectPlay"}
         viewer.post("/Sessions/Playing", play, expect=204)
 
         def playing_on_a():
@@ -1921,7 +1921,11 @@ def scenario_links(creds, apis):
         expect(all(x.get("UserId", "").replace("-", "") == av.replace("-", "") for x in playing_on_a()), "the session is the source's mapped user")
         expect(all(x.get("SupportsMediaControl") for x in playing_on_a()), "source-a's dashboard can control the session")
         expect(playing_on_a()[0].get("DeviceName") == "ServerSyncIT (viewer)", f"the session is named after the viewer's client and user on local ({playing_on_a()[0].get('DeviceName')})")
-        expect((playing_on_a()[0].get("PlayState") or {}).get("PlayMethod") == "DirectStream", "a transcode on local shows on source-a as a direct stream, since source-a only sends the file")
+        # Jellyfin turns a reported transcode with no transcode job behind it into direct play, so the
+        # mapping of a real transcode to a direct stream is covered by the unit tests. Here the source
+        # must show a direct play or stream, never a transcode it is not running.
+        method = (playing_on_a()[0].get("PlayState") or {}).get("PlayMethod")
+        expect(method in ("DirectPlay", "DirectStream"), f"source-a shows the link as a direct play or stream, never a transcode ({method})")
         a.post(f"/Sessions/{playing_on_a()[0]['Id']}/Playing/Stop", None, expect=204)
         wait_until(lambda: "Passed a remote control command from 'source-a'" in run(["docker", "logs", "--since", "2m", "serversync-it-local"], capture=True, check=False).stdout
                    + run(["docker", "logs", "--since", "2m", "serversync-it-local"], capture=True, check=False).stderr, 30,
