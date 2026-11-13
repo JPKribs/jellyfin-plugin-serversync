@@ -401,8 +401,9 @@ public partial class ConfigurationController
 
     /// <summary>
     /// Turns links into full copies, and its .strm is removed once the copy is in place. A link whose
-    /// file is in the link cache has the cached file moved into place, and a sync starts now to do it.
-    /// Any other copy downloads on the next sync. Rows that are not links are skipped.
+    /// whole file is in the link cache has the cached file moved into place, by a sync that starts now,
+    /// or right after the one already running. Any other copy downloads on the next sync. Rows that are
+    /// not links are skipped.
     /// </summary>
     /// <param name="manager">The content table.</param>
     /// <param name="cache">The link cache.</param>
@@ -436,7 +437,7 @@ public partial class ConfigurationController
             {
                 manager.Upsert(row);
                 promoted++;
-                if (cache.Holds(id))
+                if (cache.HoldsWhole(id, row.SourceSize))
                 {
                     fromCache++;
                 }
@@ -447,10 +448,11 @@ public partial class ConfigurationController
             }
         }
 
-        // A cached file moves in seconds, so it is not left waiting for the scheduled sync.
-        if (fromCache > 0)
+        // A cached file moves in seconds, so it is not left waiting for the scheduled sync. A sync already
+        // running read its rows when it started, so another is queued to follow it.
+        if (fromCache > 0 && _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncDownloadContent") is { } sync)
         {
-            ExecuteScheduledTaskByKey("ServerSyncDownloadContent", "Sync task started", "Download task not found");
+            _taskManager.QueueScheduledTask(sync.ScheduledTask, new TaskOptions());
         }
 
         return Ok(new { Promoted = promoted, FromCache = fromCache, Skipped = skipped });

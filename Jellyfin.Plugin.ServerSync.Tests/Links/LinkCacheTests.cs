@@ -260,8 +260,11 @@ public sealed class LinkCacheTests : IDisposable
         var library = Path.Combine(_dir, "library", "Film (2020)");
         var copy = Path.Combine(library, "Film (2020).mkv");
 
+        Assert.False(cache.HoldsWhole(A, 99));
+        Assert.True(cache.HoldsWhole(A, 100));
         Assert.False(cache.MoveTo(A, copy, 99));
         Assert.True(cache.MoveTo(A, copy, 100));
+        Assert.Empty(Directory.EnumerateFiles(library, "*.serversync-move"));
         Assert.Equal(100, new FileInfo(copy).Length);
         Assert.Null(cache.PathFor(A));
 
@@ -328,7 +331,7 @@ public sealed class LinkCacheTests : IDisposable
     [InlineData("/src/m/Loose A.mkv", "/src/m/Loose B.mkv", false)]
     [InlineData("/src/shows/Show", "/src/shows/Show/Season 01/E01.mkv", false)]
     public void SameFilm_IsAnotherVersionInItsFolder(string picked, string other, bool expected)
-        => Assert.Equal(expected, LinkCacheFiller.SameFilm(picked, other));
+        => Assert.Equal(expected, AlwaysKeep.SameFilm(picked, other));
 
     /// <summary>
     /// Emptying a cache folder from outside the cache, as saving the settings does, is seen by the

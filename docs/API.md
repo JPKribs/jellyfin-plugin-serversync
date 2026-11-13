@@ -413,7 +413,7 @@ Discard one row from either queue by its `Id`. A discarded inbound row is report
 
 ### POST /Sync/PromoteItems
 
-Turns links into full copies, the **Keep a full local copy** action on the Sync tab. A link whose file is in the link cache has the cached file moved into place, and a Sync Content run starts now when any is. Any other copy downloads on the next Sync Content run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
+Turns links into full copies, the **Keep a full local copy** action on the Sync tab. A link whose whole file is in the link cache, at the size the source reports, has the cached file moved into place by a Sync Content run that starts now, or right after the one already running. Any other copy downloads on the next Sync Content run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
 
 ```json
 { "SourceItemIds": ["9c1e0f…", "77ab12…"] }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -41,7 +42,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LinkPlaybackReporter> _logger;
     private readonly LinkGrants _grants;
-    private readonly Channel<(LinkEntry Link, LinkRoute Route, PeerPlaybackReport Report)> _queue = Channel.CreateBounded<(LinkEntry, LinkRoute, PeerPlaybackReport)>(
+    private readonly Channel<(LinkEntry Link, LinkRoute Route, PeerPlaybackReport Report, int Attempt)> _queue = Channel.CreateBounded<(LinkEntry, LinkRoute, PeerPlaybackReport, int)>(
         new BoundedChannelOptions(1000) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
 
     // The last progress sent per viewer and link, and whether it was paused.
@@ -87,12 +88,23 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// <summary>
     /// How long to wait before each retry of a report that failed. A stop is retried, since no later
     /// report makes up for it and the source would keep the session listed. Start and progress are not:
-    /// the next progress report makes up for either.
+    /// the next progress report makes up for either. A retry waits outside the queue, so a source that
+    /// is down never holds up reports to the others.
     /// </summary>
     public static TimeSpan[] RetryDelays(LinkPlaybackEvent kind)
         => kind == LinkPlaybackEvent.Stop
             ? new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10) }
             : Array.Empty<TimeSpan>();
+
+    /// <summary>
+    /// Whether a failed report may succeed if sent again: the source did not answer in time, could not be
+    /// reached, or failed itself. A refusal, such as a user the source does not map, is final.
+    /// </summary>
+    /// <param name="ex">What the send threw.</param>
+    /// <returns>True when a retry may help.</returns>
+    public static bool Retryable(Exception ex)
+        => ex is OperationCanceledException
+            || (ex is HttpRequestException http && (http.StatusCode is null || (int)http.StatusCode >= 500));
 
     /// <summary>
     /// How playback of a link shows on the source. The source only ever sends the file as it is, and
@@ -188,9 +200,9 @@ public sealed class LinkPlaybackReporter : BackgroundService
     {
         try
         {
-            await foreach (var (link, route, report) in _queue.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+            await foreach (var (link, route, report, attempt) in _queue.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
-                await SendAsync(link, route, report, stoppingToken).ConfigureAwait(false);
+                await SendAsync(link, route, report, attempt, stoppingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -262,7 +274,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
                 PlayMethod = ReportedMethod(e.Session?.PlayState?.PlayMethod?.ToString()),
                 ClientName = e.ClientName,
                 UserName = viewerUser?.Username
-            }));
+            }, 0));
         }
         catch (Exception ex)
         {
@@ -270,7 +282,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
         }
     }
 
-    private async Task SendAsync(LinkEntry link, LinkRoute route, PeerPlaybackReport report, CancellationToken cancellationToken)
+    private async Task SendAsync(LinkEntry link, LinkRoute route, PeerPlaybackReport report, int attempt, CancellationToken cancellationToken)
     {
         if (_configManager.Configuration.FindServer(route.ServerKey) is not { IsEnabled: true, IsConfigured: true } server)
         {
@@ -278,38 +290,43 @@ public sealed class LinkPlaybackReporter : BackgroundService
         }
 
         report.SourceUserId = Guid.TryParse(report.UserId, out var user) ? LinkAccess.SourceUserFor(server, user) : null;
-        var retries = RetryDelays(report.Event);
-        for (var attempt = 0; ; attempt++)
+        try
         {
-            try
-            {
-                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                deadline.CancelAfter(ReportTimeout);
-                using var client = _clientFactory.Create(server);
-                await client.ReportLinkPlaybackAsync(report, deadline.Token).ConfigureAwait(false);
-                return;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex) when (attempt < retries.Length)
-            {
-                _logger.LogDebug(ex, "Could not report the {Event} of {Path} to '{Server}', trying again", report.Event, link.LinkPath, server.DisplayName);
-                await Task.Delay(retries[attempt], cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (report.Event == LinkPlaybackEvent.Stop)
-            {
-                // The source ends the session itself ten minutes after the last report it had.
-                _logger.LogWarning("Could not report the stop of {Path} to '{Server}', so it lists the viewer until it gives up on them: {Reason}", link.LinkPath, server.DisplayName, ex.Message);
-                return;
-            }
-            catch (Exception ex)
-            {
-                // A lost start or progress is made good by the next report, and history sync settles played state either way.
-                _logger.LogDebug(ex, "Could not report playback of {Path} to '{Server}'", link.LinkPath, server.DisplayName);
-                return;
-            }
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(ReportTimeout);
+            using var client = _clientFactory.Create(server);
+            await client.ReportLinkPlaybackAsync(report, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (Retryable(ex) && RetryDelays(report.Event) is { } delays && attempt < delays.Length)
+        {
+            _logger.LogDebug(ex, "Could not report the {Event} of {Path} to '{Server}', trying again", report.Event, link.LinkPath, server.DisplayName);
+            _ = RequeueAsync((link, route, report, attempt + 1), delays[attempt], cancellationToken);
+        }
+        catch (Exception ex) when (report.Event == LinkPlaybackEvent.Stop)
+        {
+            // The source ends the session itself ten minutes after the last report it had.
+            _logger.LogWarning("Could not report the stop of {Path} to '{Server}', so it lists the viewer until it gives up on them: {Reason}", link.LinkPath, server.DisplayName, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            // A lost start or progress is made good by the next report, and history sync settles played state either way.
+            _logger.LogDebug(ex, "Could not report playback of {Path} to '{Server}'", link.LinkPath, server.DisplayName);
+        }
+    }
+
+    private async Task RequeueAsync((LinkEntry Link, LinkRoute Route, PeerPlaybackReport Report, int Attempt) retry, TimeSpan delay, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            _queue.Writer.TryWrite(retry);
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 }

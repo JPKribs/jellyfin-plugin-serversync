@@ -281,7 +281,7 @@
                                     </div>
 
                                     <h3 class="jpk-subsection-title">Link Cache</h3>
-                                    <div class="fieldDescription mb-md">Keeps full local copies of some links: ones that are played, episodes ahead of the one being watched, and the items each library is set to always keep. A cached link plays from here, even while its source is down. The link itself never changes. Each library chooses whether its links are cached in its mapping on the Servers tab.</div>
+                                    <div class="fieldDescription mb-md">Keeps full local copies of some links: ones that are played, and episodes ahead of the one being watched. A cached link plays from here, even while its source is down. The link itself never changes. Each library chooses whether its links are cached in its mapping on the Servers tab.</div>
                                     <div class="inputContainer">
                                         <label for="txtLinkCacheSizeGb">Cache Size (GB)</label>
                                         <input is="emby-input" type="number" id="txtLinkCacheSizeGb" min="0" />
@@ -310,7 +310,7 @@
                                             <option value="Newest">Newest in the cache first</option>
                                             <option value="Largest">Largest first</option>
                                         </select>
-                                        <div class="fieldDescription">Which file is dropped first when the cache is full. Items set to always keep are never dropped.</div>
+                                        <div class="fieldDescription">Which file is dropped first when the cache is full.</div>
                                     </div>
                                     <div id="linkCacheStatus" class="jpk-neutral mb-md"></div>
                                     <button is="emby-button" type="button" id="btnClearLinkCache" class="raised jpk-button-destructive jpk-button-small">

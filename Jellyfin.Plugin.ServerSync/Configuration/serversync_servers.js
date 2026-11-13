@@ -1157,7 +1157,7 @@ export default function (view) {
         var storageModeSelect = div.querySelector('.storageModeSelect');
         if (storageModeSelect) storageModeSelect.value = mapping.StorageMode === 'Link' || mapping.StorageMode === 1 ? 'Link' : 'Copy';
 
-        // --- Link cache: whether this library's links are cached, and the items to always keep ---
+        // --- Link cache: whether this library's links are cached. Always Keep: the items copied instead of linked ---
         var linkCacheSection = div.querySelector('.linkCacheSection');
         var permanentSection = div.querySelector('.permanentSection');
         var selectedPermanentItems = {};

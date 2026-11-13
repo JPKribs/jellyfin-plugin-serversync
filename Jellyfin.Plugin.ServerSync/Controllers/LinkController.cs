@@ -26,8 +26,10 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 public class LinkController : ControllerBase
 {
     // A request that passed through a proxy carries one of these. Jellyfin's own callers never do, and a
-    // reverse proxy on this machine would otherwise look like this server itself.
-    private static readonly string[] ProxyHeaders = { "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-IP", "Forwarded", "Via" };
+    // reverse proxy on this machine would otherwise look like this server itself. When Jellyfin trusts a
+    // proxy, it takes the address from X-Forwarded-For and removes that header, but leaves the
+    // X-Original ones behind, so a request whose address came from a header is still refused.
+    private static readonly string[] ProxyHeaders = { "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-IP", "Forwarded", "Via", "X-Original-For", "X-Original-Host", "X-Original-Proto" };
 
     private readonly LinkFiles _files;
     private readonly LinkGrants _grants;

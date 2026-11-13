@@ -101,35 +101,6 @@ public sealed class LinkCacheFiller : BackgroundService
             .ToList();
     }
 
-    /// <summary>
-    /// Whether two files are versions of one film: in the same folder, each named after it, as in
-    /// <c>Film (2020)/Film (2020) - 4K.mkv</c> and <c>Film (2020)/Film (2020) - 1080p.mkv</c>. A film is
-    /// picked by its first version's file, and picking it keeps every version.
-    /// </summary>
-    /// <param name="pickedPath">The path of the item that was picked.</param>
-    /// <param name="path">A link's source path.</param>
-    /// <returns>True for two versions of one film.</returns>
-    public static bool SameFilm(string? pickedPath, string? path)
-    {
-        if (string.IsNullOrEmpty(pickedPath) || string.IsNullOrEmpty(path) || !Path.HasExtension(pickedPath))
-        {
-            return false;
-        }
-
-        var picked = pickedPath.Replace('\\', '/');
-        var other = path.Replace('\\', '/');
-        var cut = picked.LastIndexOf('/');
-        if (cut <= 0 || other.LastIndexOf('/') != cut || !other.StartsWith(picked[..(cut + 1)], StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var folder = picked[(picked.LastIndexOf('/', cut - 1) + 1)..cut];
-        return folder.Length > 0
-            && picked[(cut + 1)..].StartsWith(folder, StringComparison.OrdinalIgnoreCase)
-            && other[(cut + 1)..].StartsWith(folder, StringComparison.OrdinalIgnoreCase);
-    }
-
     /// <summary>The library mapping a link row came through, or null when it is no longer set up.</summary>
     public static LibraryMapping? MappingFor(PluginConfiguration config, SyncItem row)
     {

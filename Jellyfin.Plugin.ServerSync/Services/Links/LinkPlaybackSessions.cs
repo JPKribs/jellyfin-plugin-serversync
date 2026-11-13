@@ -153,7 +153,8 @@ public sealed class LinkPlaybackSessions
                 }).ConfigureAwait(false);
                 break;
             case LinkPlaybackEvent.Stop:
-                // The session ends even when Jellyfin's stop handling throws, so a stop never leaves it listed.
+                // The session ends even when Jellyfin's stop handling throws, and the stop is answered as
+                // applied either way. Sent again, it would open a new session and stop it a second time.
                 try
                 {
                     await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
@@ -165,11 +166,12 @@ public sealed class LinkPlaybackSessions
                         PlaySessionId = report.PlaySessionId
                     }).ConfigureAwait(false);
                 }
-                finally
+                catch (Exception ex)
                 {
-                    await _sessionManager.ReportSessionEnded(session.Id).ConfigureAwait(false);
+                    _controllerLogger.LogWarning(ex, "Jellyfin could not stop the link session {Session}, so it is ended without its stop", session.Id);
                 }
 
+                await _sessionManager.ReportSessionEnded(session.Id).ConfigureAwait(false);
                 break;
             default:
                 return "unknown playback event";

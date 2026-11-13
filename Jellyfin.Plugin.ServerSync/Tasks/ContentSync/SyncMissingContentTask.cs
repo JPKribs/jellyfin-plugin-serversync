@@ -350,13 +350,7 @@ public class SyncMissingContentTask
             record.LocalPath = copyPath;
             try
             {
-                if (_linkCache?.MoveTo(record.SourceItemId, copyPath, record.SourceSize) == true)
-                {
-                    Logger.LogInformation("Moved {FileName} from the link cache into the library", Path.GetFileName(copyPath));
-                    Interlocked.Increment(ref _successCount);
-                    _changedFiles.Enqueue(copyPath);
-                }
-                else
+                if (!await MoveFromCacheAsync(record, cancellationToken).ConfigureAwait(false))
                 {
                     await DownloadAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
                 }
@@ -449,6 +443,47 @@ public class SyncMissingContentTask
     }
 
     // The copy path: disk space, validation, and the download itself.
+    // A link becoming a copy takes the cached file when the cache holds all of it, held to the same
+    // checks as a download: the copy's place in the library, the disk's room, and one apply at a time.
+    // False when it cannot, and the copy is downloaded instead, where any of those checks says why.
+    private async Task<bool> MoveFromCacheAsync(SyncItem record, CancellationToken cancellationToken)
+    {
+        if (_linkCache?.HoldsWhole(record.SourceItemId, record.SourceSize) != true || string.IsNullOrEmpty(record.LocalPath))
+        {
+            return false;
+        }
+
+        var config = ConfigManager.Configuration;
+        if (!DownloadService.ValidateForDownload(record, config, TypedManager).IsValid)
+        {
+            return false;
+        }
+
+        using var spaceHold = await DiskSpaceService.ReserveForFileAsync(record.LocalPath, record.SourceSize, config.MinimumFreeDiskSpaceGb, cancellationToken).ConfigureAwait(false);
+        if (spaceHold is null || !ActiveDownloadTracker.TryStartDownload(record.SourceItemId, record.LocalPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var path = record.LocalPath;
+            if (!await Task.Run(() => _linkCache.MoveTo(record.SourceItemId, path, record.SourceSize), cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+        finally
+        {
+            ActiveDownloadTracker.CompleteDownload(record.SourceItemId);
+        }
+
+        Logger.LogInformation("Moved {FileName} from the link cache into the library", Path.GetFileName(record.LocalPath));
+        Interlocked.Increment(ref _successCount);
+        _changedFiles.Enqueue(record.LocalPath);
+        return true;
+    }
+
     private async Task DownloadAsync(SyncItem record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
     {
         if (_tempPath == null)

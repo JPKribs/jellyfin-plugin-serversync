@@ -189,6 +189,22 @@ public sealed class LinkSessionEndTests
             new Models.Configuration.SourceServer { Name = "Parker" },
             new PeerPlaybackReport { ClientName = client is null ? null : System.Text.RegularExpressions.Regex.Unescape(client), UserName = user is null ? null : System.Text.RegularExpressions.Regex.Unescape(user) }));
 
+    /// <summary>
+    /// A report is sent again only when the source did not answer or failed itself, never when it refused.
+    /// True: a source that is briefly down still hears the stop, and a refusal is not repeated.
+    /// False: a refused stop would be sent three times, or a stop lost to a timeout never sent again.
+    /// </summary>
+    [Fact]
+    public void Reporter_RetriesOnlyWhatMaySucceed()
+    {
+        Assert.True(LinkPlaybackReporter.Retryable(new TaskCanceledException()));
+        Assert.True(LinkPlaybackReporter.Retryable(new System.Net.Http.HttpRequestException("down")));
+        Assert.True(LinkPlaybackReporter.Retryable(new System.Net.Http.HttpRequestException("failed", null, System.Net.HttpStatusCode.BadGateway)));
+        Assert.False(LinkPlaybackReporter.Retryable(new System.Net.Http.HttpRequestException("refused", null, System.Net.HttpStatusCode.Forbidden)));
+        Assert.False(LinkPlaybackReporter.Retryable(new System.Net.Http.HttpRequestException("bad", null, System.Net.HttpStatusCode.BadRequest)));
+        Assert.False(LinkPlaybackReporter.Retryable(new InvalidOperationException()));
+    }
+
     private static (LinkPlaybackSessions Sessions, ISessionManager Manager, InterfaceStub Stub) Sessions()
     {
         var (manager, stub) = InterfaceStub.Create<ISessionManager>();

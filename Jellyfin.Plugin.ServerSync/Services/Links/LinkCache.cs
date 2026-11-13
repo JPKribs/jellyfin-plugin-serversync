@@ -62,6 +62,9 @@ public sealed class LinkCache
     /// <summary>How a file being downloaded is named until it is whole.</summary>
     public const string PartExtension = ".part";
 
+    // A cached file on its way into the library, beside where its copy goes.
+    private const string MovePartExtension = ".serversync-move";
+
     private const string IndexFile = "index.json";
 
     private readonly IPluginConfigurationManager _configManager;
@@ -213,10 +216,24 @@ public sealed class LinkCache
         }
     }
 
+    /// <summary>Whether the cache holds a link's whole file, at <paramref name="size"/>.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="size">The size the source reports for the file now.</param>
+    /// <returns>True when the cached file is whole and that size.</returns>
+    public bool HoldsWhole(string linkId, long size)
+    {
+        lock (_lock)
+        {
+            return PathFor(linkId) is not null && Entries()[linkId].Size == size;
+        }
+    }
+
     /// <summary>
     /// Moves a link's cached file out of the cache to <paramref name="destination"/>, where it becomes
-    /// the link's copy. False, with nothing moved, when the cache does not hold the whole file, the file
-    /// is not <paramref name="expectedSize"/>, or something is already at the destination.
+    /// the link's copy. The cache forgets the file first, under its lock, and the move runs outside it,
+    /// so a move that is a copy between two disks never holds up playback. A move that fails is undone
+    /// and the file is cached again. False, with nothing moved, when the cache does not hold the whole
+    /// file at <paramref name="expectedSize"/>, or something is already at the destination.
     /// </summary>
     /// <param name="linkId">The link's id.</param>
     /// <param name="destination">Where the copy belongs.</param>
@@ -224,27 +241,56 @@ public sealed class LinkCache
     /// <returns>True when the file is now at the destination.</returns>
     public bool MoveTo(string linkId, string destination, long expectedSize)
     {
+        CacheEntry entry;
+        string cached;
         lock (_lock)
         {
-            if (PathFor(linkId) is not { } cached || new FileInfo(cached).Length != expectedSize || File.Exists(destination))
+            if (!HoldsWhole(linkId, expectedSize) || File.Exists(destination))
             {
                 return false;
             }
 
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Move(cached, destination);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogWarning("Could not move {File} out of the link cache: {Reason}", Path.GetFileName(cached), ex.Message);
-                return false;
-            }
-
-            Entries().Remove(linkId);
+            cached = PathFor(linkId)!;
+            Entries().Remove(linkId, out entry!);
             Save();
+        }
+
+        // Moved under a name of its own beside the copy first, which between two disks is a copy, then
+        // renamed into place, so a failure only ever leaves this move's own file to clear.
+        var part = destination + MovePartExtension;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Move(cached, part, overwrite: true);
+            File.Move(part, destination);
             return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Could not move {File} out of the link cache: {Reason}", Path.GetFileName(cached), ex.Message);
+            lock (_lock)
+            {
+                try
+                {
+                    if (!File.Exists(cached) && File.Exists(part))
+                    {
+                        File.Move(part, cached);
+                    }
+                }
+                catch (Exception back) when (back is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning("Could not return {File} to the link cache: {Reason}", Path.GetFileName(cached), back.Message);
+                }
+
+                Delete(part);
+                if (File.Exists(cached))
+                {
+                    Entries()[linkId] = entry;
+                    Save();
+                }
+            }
+
+            return false;
         }
     }
 

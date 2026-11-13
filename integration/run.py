@@ -1911,7 +1911,7 @@ def scenario_links(creds, apis):
         # Playback on the link shows on the source as a session and marks its file played there once.
         source_item = find_item(a, "Movie", needle)
         runtime = local.get(f"/Items/{item['Id']}?userId={lv}").get("RunTimeTicks") or 0
-        play = {"ItemId": item["Id"], "MediaSourceId": source["Id"], "PlaySessionId": "it-link", "PositionTicks": 0, "CanSeek": True, "PlayMethod": "DirectPlay"}
+        play = {"ItemId": item["Id"], "MediaSourceId": source["Id"], "PlaySessionId": "it-link", "PositionTicks": 0, "CanSeek": True, "PlayMethod": "Transcode"}
         viewer.post("/Sessions/Playing", play, expect=204)
 
         def playing_on_a():
@@ -1920,6 +1920,8 @@ def scenario_links(creds, apis):
         wait_until(lambda: len(playing_on_a()) == 1, 30, "playing the link shows on source-a as a Server Sync session")
         expect(all(x.get("UserId", "").replace("-", "") == av.replace("-", "") for x in playing_on_a()), "the session is the source's mapped user")
         expect(all(x.get("SupportsMediaControl") for x in playing_on_a()), "source-a's dashboard can control the session")
+        expect(playing_on_a()[0].get("DeviceName") == "ServerSyncIT (viewer)", f"the session is named after the viewer's client and user on local ({playing_on_a()[0].get('DeviceName')})")
+        expect((playing_on_a()[0].get("PlayState") or {}).get("PlayMethod") == "DirectStream", "a transcode on local shows on source-a as a direct stream, since source-a only sends the file")
         a.post(f"/Sessions/{playing_on_a()[0]['Id']}/Playing/Stop", None, expect=204)
         wait_until(lambda: "Passed a remote control command from 'source-a'" in run(["docker", "logs", "--since", "2m", "serversync-it-local"], capture=True, check=False).stdout
                    + run(["docker", "logs", "--since", "2m", "serversync-it-local"], capture=True, check=False).stderr, 30,
@@ -2172,7 +2174,8 @@ def scenario_link_care(creds, apis):
 
 def scenario_link_cache(creds, apis):
     """A played link is cached, plays from the cache under local's own rules while the source refuses,
-    still reports playback, and the cache empties when it is switched off."""
+    is not reported to the source while it plays from the cache, and the cache empties when it is
+    switched off. Keeping a cached link moves its file into the library, with the source refusing."""
     film = LinkedFilm(creds, apis, seconds=20, size="320x240", local_flags=dict(LinkCacheSizeGb=1, LinkCacheRetentionDays=0)).setup()
     a, local = film.a, film.local
     try:
@@ -2187,6 +2190,17 @@ def scenario_link_cache(creds, apis):
         expect((film.row() or {}).get("Cached") is True, "the Sync tab shows the link as cached")
         expect(os.path.exists(film.link) and not os.path.exists(os.path.join(film.folder, f"{film.title}.mp4")), "the link is still a .strm, with no copy in the library")
         local.post("/Sessions/Playing/Stopped", dict(play, PositionTicks=10_000_000), expect=204)
+
+        # Played again, the cached link plays from here, and the source is told nothing.
+        source_item = find_item(a, "Movie", film.needle)
+        again = dict(play, PlaySessionId=uuid.uuid4().hex)
+        local.post("/Sessions/Playing", again, expect=204)
+        local.post("/Sessions/Playing/Progress", dict(again, PositionTicks=5_000_000), expect=204)
+        time.sleep(8)
+        on_a = [x for x in a.get("/Sessions") if x.get("Client") == "Server Sync"
+                and (x.get("NowPlayingItem") or {}).get("Id", "").replace("-", "") == source_item["Id"].replace("-", "")]
+        expect(not on_a, "playing from the cache does not show on the source")
+        local.post("/Sessions/Playing/Stopped", dict(again, PositionTicks=10_000_000), expect=204)
 
         # The source now refuses this server outright. A cached link does not ask it.
         set_linking(a, "local", False)
@@ -2205,6 +2219,26 @@ def scenario_link_cache(creds, apis):
         film.play_info()
         status, _, body = http(local, "GET", base)
         expect(status == 200 and body == data, f"with the cache off the link streams from the source again ({status})")
+
+        # Cached again, the link is listed under the Cached filter, and keeping it moves the cached
+        # file into the library without the source, which refuses.
+        film.configure(LinkCacheSizeGb=1, LinkCacheRetentionDays=0)
+        film.play_info()
+        play = dict(play, PlaySessionId=uuid.uuid4().hex, MediaSourceId=film.source["Id"])
+        local.post("/Sessions/Playing", play, expect=204)
+        wait_until(lambda: local.get("/Sync/LinkCache").get("Files") == 1, 90, "playing the link caches its file again")
+        local.post("/Sessions/Playing/Stopped", dict(play, PositionTicks=10_000_000), expect=204)
+        listed = local.get("/Sync/Items?cached=true&take=200")["Items"]
+        expect([r["SourceItemId"] for r in listed] == [film.row()["SourceItemId"]], f"the Cached filter lists the cached link and nothing else ({len(listed)})")
+        set_linking(a, "local", False)
+        _, result = local.post("/Sync/PromoteItems", {"SourceItemIds": [film.row()["SourceItemId"]]}, expect=200)
+        expect(result.get("Promoted") == 1 and result.get("FromCache") == 1, f"keeping the link takes its file from the cache ({result})")
+        copy = os.path.join(film.folder, f"{film.title}.mp4")
+        wait_until(lambda: os.path.exists(copy) and not os.path.exists(film.link), 120, "the cached file is in the library and the link is gone")
+        with open(copy, "rb") as f:
+            expect(f.read() == data, "the kept copy is the source's file")
+        expect(local.get("/Sync/LinkCache").get("Files") == 0, "the file left the cache when it moved into the library")
+        wait_until(lambda: (film.row() or {}).get("StorageMode") == "Copy", 60, "the row is a copy")
     finally:
         set_linking(a, "local", True)
         film.teardown()
@@ -2212,7 +2246,8 @@ def scenario_link_cache(creds, apis):
 
 def scenario_link_cache_rules(creds, apis):
     """A user mapping's own stream limit applies to that user, starting an episode caches the next one
-    ahead, and a show picked to always keep is cached whole by the content sync."""
+    ahead, a library left out of the cache has its files dropped, and a show picked to always keep
+    becomes full copies in the library."""
     local, b = apis["local"], apis["source-b"]
     lu, bu = creds["servers"]["local"]["userId"], creds["servers"]["source-b"]["userId"]
     needle = f"Cache Show {uuid.uuid4().hex[:6]}"
@@ -2276,15 +2311,6 @@ def scenario_link_cache_rules(creds, apis):
         expect(cached() == ["S01E01", "S01E02"], f"episode 3, which is two ahead, is not cached ({cached()})")
         local.post("/Sessions/Playing/Stopped", dict(play, PositionTicks=10_000_000), expect=204)
 
-        # Picking the show to always keep caches the rest of it on the next content sync.
-        series = next(i for i in b.get("/Items?IncludeItemTypes=Series&Recursive=true&Fields=Path")["Items"] if needle in (i.get("Path") or ""))
-        config = plugin_config(local)
-        mapping = next(m for e in config["Servers"] if e["Name"] == "source-b" for m in e["LibraryMappings"] if m["SourceLibraryName"] == "Shows")
-        mapping["PermanentItems"] = [{"ItemId": series["Id"], "Name": series["Name"], "Path": series["Path"], "Type": "Series"}]
-        save_plugin_config(local, config)
-        run_task(local, "ServerSyncDownloadContent")
-        wait_until(lambda: cached() == ["S01E01", "S01E02", "S01E03"], 120, "a show picked to always keep is cached whole")
-
         # Leaving the library out of the cache drops its files on the next content sync.
         config = plugin_config(local)
         mapping = next(m for e in config["Servers"] if e["Name"] == "source-b" for m in e["LibraryMappings"] if m["SourceLibraryName"] == "Shows")
@@ -2292,6 +2318,21 @@ def scenario_link_cache_rules(creds, apis):
         save_plugin_config(local, config)
         run_task(local, "ServerSyncDownloadContent")
         expect(cached() == [] and local.get("/Sync/LinkCache").get("Files") == 0, f"a library left out of the cache has its files dropped ({cached()})")
+
+        # Picking the show to always keep turns its links into full copies on the next sync, cache or not.
+        series = next(i for i in b.get("/Items?IncludeItemTypes=Series&Recursive=true&Fields=Path")["Items"] if needle in (i.get("Path") or ""))
+        config = plugin_config(local)
+        mapping = next(m for e in config["Servers"] if e["Name"] == "source-b" for m in e["LibraryMappings"] if m["SourceLibraryName"] == "Shows")
+        mapping["PermanentItems"] = [{"ItemId": series["Id"], "Name": series["Name"], "Path": series["Path"], "Type": "Series"}]
+        save_plugin_config(local, config)
+        run_task(local, "ServerSyncUpdateTables")
+        run_task(local, "ServerSyncDownloadContent")
+        rows = [r for r in all_rows(local) if needle in r["SourcePath"]]
+        expect(len(rows) == 3 and all(r["StorageMode"] == "Copy" and r["Status"] == "Synced" for r in rows),
+               f"every episode of a show picked to always keep is a synced copy ({[(r['StorageMode'], r['Status']) for r in rows]})")
+        files = sorted(os.listdir(os.path.join(local_show, "Season 01")))
+        expect(sum(f.endswith(".mp4") for f in files) == 3 and not any(f.endswith(".strm") for f in files),
+               f"the episodes are files in the library, with no links left ({files})")
     finally:
         set_cap(None)
         configure_server(creds, b, "source-b", [])

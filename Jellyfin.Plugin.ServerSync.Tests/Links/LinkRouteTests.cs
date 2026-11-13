@@ -333,7 +333,8 @@ public sealed class LinkRouteTests : IDisposable
 
     /// <summary>
     /// The link route only answers a request from and to this machine with no sign of a proxy.
-    /// True: a reverse proxy on the same host cannot carry outside requests to a link.
+    /// True: a reverse proxy on the same host cannot carry outside requests to a link, even when Jellyfin
+    /// trusts it and took a visitor's forged loopback address from X-Forwarded-For.
     /// False: with Jellyfin's default of no known proxies, every proxied request would look local.
     /// </summary>
     [Theory]
@@ -341,6 +342,8 @@ public sealed class LinkRouteTests : IDisposable
     [InlineData("::ffff:127.0.0.1", "::ffff:127.0.0.1", null, true)]
     [InlineData("127.0.0.1", "127.0.0.1", "X-Forwarded-For", false)]
     [InlineData("127.0.0.1", "127.0.0.1", "Via", false)]
+    [InlineData("127.0.0.1", "127.0.0.1", "X-Original-For", false)]
+    [InlineData("127.0.0.1", "127.0.0.1", "X-Original-Proto", false)]
     [InlineData("127.0.0.1", "192.168.1.5", null, false)]
     [InlineData("192.168.1.20", "127.0.0.1", null, false)]
     public void Proxy_FromThisServer(string remote, string local, string? header, bool expected)
