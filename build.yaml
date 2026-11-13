@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.2.11.2"
+version: "12.2.11.3"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -28,9 +28,16 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  fixed:
-  - A viewer of a link stayed listed on the source's dashboard after their stream ended, until the source restarted, whenever the stop report from the server holding the link did not arrive. The source now ends a link session ten minutes after the last report it had, and stops its playback first so played state and the resume position are kept
-  - A stop report that fails is tried again, and a player that quits without naming what it played still ends its session on the source
+  important:
+  - Always Keep makes full copies in the library, synced like any copy, instead of holding files in the link cache. On the next refresh the links of picked shows and films become copies under the New files approval, every episode of a picked show and every version of a picked film. Their copies count toward the library's disk and Minimum Free Space, not Cache Size. A copy stays when its pick is removed
+  features:
+  - A Cached filter on the Sync tab's Content table lists the links whose file is in the link cache
+  - A link that becomes a copy takes its file from the link cache when the cache holds all of it, instead of downloading it again. Turn links into full copies starts a sync at once when any selected link is cached
+  changed:
+  - The source shows a link session as Direct Play or Direct Stream. The source only sends the file, and any transcode runs on the server holding the link
+  - Playback from the link cache is not reported to the source, which sends nothing for it. History sync carries its played state there
+  - The link cache no longer keeps files for good. Files an earlier release kept for Always Keep are ordinary cached files, dropped by retention and the size limit
   developer:
-  - The wire protocol and the database schema are unchanged, so this release works alongside 12.2.11.0 and 12.2.11.1 one server at a time
-  - New tests cover how a link session ends on the source
+  - The wire protocol and the database schema are unchanged, so this release works alongside 12.2.11.x one server at a time
+  - GET /Sync/Items takes cached=true, and POST /Sync/PromoteItems answers FromCache and starts Sync Content when it is above 0
+  - New tests cover Always Keep, moving a cached file into place, the Cached filter, the reported play method, and cached playback staying off the source
