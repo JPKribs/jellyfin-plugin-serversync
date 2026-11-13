@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Common;
-using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 
 namespace Jellyfin.Plugin.ServerSync.Services;

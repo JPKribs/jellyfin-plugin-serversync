@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
@@ -296,7 +295,7 @@ public class DownloadService
                     var downloadedCompanions = await DownloadCompanionFilesAsync(
                         client,
                         itemId,
-                        targetDir ?? Path.GetDirectoryName(item.LocalPath) ?? string.Empty,
+                        targetDir ?? string.Empty,
                         Path.GetFileNameWithoutExtension(item.LocalPath),
                         tempPath,
                         speedLimitBytesPerSecond,
@@ -466,20 +465,17 @@ public class DownloadService
         ContentSyncTableManager manager)
     {
         ArgumentNullException.ThrowIfNull(item);
-        // Validate path
         var pathValidation = FileValidationService.ValidatePath(item.LocalPath, item.SourceItemId, config, manager);
         if (!pathValidation.IsValid)
         {
             return (false, pathValidation.ErrorMessage);
         }
 
-        // Check disk space
         if (!DiskSpaceService.HasSufficientSpaceForFile(item.LocalPath, item.SourceSize, config.MinimumFreeDiskSpaceGb))
         {
             return (false, "Insufficient disk space");
         }
 
-        // Check write permissions
         if (!FileValidationService.HasWritePermission(item.LocalPath))
         {
             return (false, "No write permission to target directory");
@@ -766,12 +762,8 @@ public class DownloadService
         }
     }
 
-    /// <summary>
-    /// Archives a sidecar (the file we kept aside while replacing) to the
-    /// recycling bin under the original file's name, or deletes it outright if
-    /// the recycling bin is disabled. Quiet on missing sidecars (caller may
-    /// have already cleaned up via rollback).
-    /// </summary>
+    // Stamps a file just moved aside with the current time, so its age counts from the replacement
+    // rather than from when the old file was last written.
     private void TouchBackup(string backupPath)
     {
         try
@@ -784,6 +776,12 @@ public class DownloadService
         }
     }
 
+    /// <summary>
+    /// Archives a sidecar (the file kept aside while replacing) to the
+    /// recycling bin under the original file's name, or deletes it outright if
+    /// the recycling bin is disabled. Quiet on missing sidecars (the rollback
+    /// may have already put it back).
+    /// </summary>
     private void ArchiveOrDeleteSidecar(string? sidecarPath, string originalDisplayPath, PluginConfiguration config)
     {
         if (string.IsNullOrEmpty(sidecarPath) || !File.Exists(sidecarPath))

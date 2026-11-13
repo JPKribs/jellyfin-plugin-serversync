@@ -226,8 +226,8 @@ public static class DatabaseMigrationService
         // ===== Metadata Sync (MetadataSyncItems) =====
         // One row per item, four SyncableValue fields (Metadata, Images,
         // People, Studios). Hashes per category enable per-field
-        // short-circuiting. SourceETag removed, we use SourceMetadataHash
-        // for the same purpose with a stable signal.
+        // short-circuiting. SourceETag was removed, SourceMetadataHash
+        // serves the same purpose with a stable signal.
         using var metadataCmd = connection.CreateCommand();
         metadataCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS MetadataSyncItems (

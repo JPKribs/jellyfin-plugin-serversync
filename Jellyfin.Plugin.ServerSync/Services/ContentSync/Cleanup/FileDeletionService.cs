@@ -1,5 +1,4 @@
 using System;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,6 +7,7 @@ using System.Threading;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
+using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -36,6 +36,7 @@ public static class FileDeletionService
     /// <param name="filePath">Path to the main file to delete.</param>
     /// <param name="logger">Logger for operation output.</param>
     /// <param name="removeEmptyFolders">Whether to remove parent folders if they become empty.</param>
+    /// <param name="libraryRootPath">The library root bounding the empty-folder cleanup, or null to skip it.</param>
     /// <returns>True if main file was deleted successfully.</returns>
     public static bool DeleteWithCompanions(string filePath, ILogger logger, bool removeEmptyFolders = false, string? libraryRootPath = null)
     {
@@ -62,7 +63,6 @@ public static class FileDeletionService
             return false;
         }
 
-        // Delete companion files
         DeleteCompanionFiles(filePath, logger);
         DeleteItemArtifacts(filePath, logger);
 
@@ -98,15 +98,13 @@ public static class FileDeletionService
 
         try
         {
-            // Normalize the boundary path for comparison
             var normalizedRoot = Path.GetFullPath(libraryRootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-            // Walk up the directory tree and remove empty folders
             var currentDir = directoryPath;
 
             while (!string.IsNullOrEmpty(currentDir) && Directory.Exists(currentDir))
             {
-                // Stop if we've reached or gone above the library root
+                // Stop at the library root or anywhere outside it.
                 var normalizedCurrent = Path.GetFullPath(currentDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 if (string.Equals(normalizedCurrent, normalizedRoot, StringComparison.OrdinalIgnoreCase)
                     || !normalizedCurrent.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
@@ -114,23 +112,15 @@ public static class FileDeletionService
                     break;
                 }
 
-                // Check if directory is empty (no files and no subdirectories)
-                var hasFiles = Directory.EnumerateFiles(currentDir).Any();
-                var hasSubDirs = Directory.EnumerateDirectories(currentDir).Any();
-
-                if (hasFiles || hasSubDirs)
+                if (Directory.EnumerateFileSystemEntries(currentDir).Any())
                 {
-                    // Directory is not empty, stop here
                     break;
                 }
 
-                // Directory is empty, try to delete it
                 try
                 {
                     Directory.Delete(currentDir, recursive: false);
                     logger.LogDebug("Removed empty folder: {FolderPath}", currentDir);
-
-                    // Move up to parent directory
                     currentDir = Path.GetDirectoryName(currentDir);
                 }
                 catch (Exception ex)
@@ -406,13 +396,10 @@ public static class FileDeletionService
             {
                 return DeleteWithRecyclingBin(filePath, config.RecyclingBinPath!, logger);
             }
-            else
-            {
-                var success = DeleteWithCompanions(filePath, logger);
-                return success
-                    ? new DeletionResult(true)
-                    : new DeletionResult(false, "Failed to delete file");
-            }
+
+            return DeleteWithCompanions(filePath, logger)
+                ? new DeletionResult(true)
+                : new DeletionResult(false, "Failed to delete file");
         }
 
         // File doesn't exist
@@ -544,14 +531,11 @@ public static class FileDeletionService
         var failed = 0;
         var failedItems = new List<(string SourceItemId, string Error)>();
 
-        // Per-item atomicity: file delete → immediate DB row delete. The
-        // previous design ran all file deletes first, then a single
-        // BatchDelete at the end, if BatchDelete threw (SQLite locked,
-        // disk full), the files were gone but the DB still referenced them.
-        // A subsequent refresh would see "file missing" + Deleting status
-        // and confuse the user with a fake error. Per-item ordering means
-        // a transient DB failure leaves the row in place. The next refresh
-        // re-marks Deleting and we retry the whole pair on the next sync.
+        // Per-item atomicity: file delete, then the row delete right away. Deleting every file
+        // first and the rows in one batch at the end would leave rows pointing at deleted files
+        // whenever that batch failed (SQLite locked, disk full), and a later refresh would report
+        // a false error. Per item, a transient DB failure leaves only that row in place, which the
+        // next refresh re-marks Deleting so the pair is retried on the next sync.
         foreach (var item in itemsToDelete)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -627,9 +611,9 @@ public static class FileDeletionService
                 {
                     // File is gone but DB delete failed. Log loudly so the
                     // user can see it. The next sync run will pick up the
-                    // stale row and re-attempt cleanup. We don't add to
+                    // stale row and re-attempt cleanup. It is not added to
                     // failedItems because the file IS deleted, re-marking
-                    // Errored would be wrong.
+                    // it would be wrong.
                     logger.LogError(ex, "DB cleanup failed for {FileName} ({SourceItemId}), file already deleted. Will retry on next sync", fileName, item.SourceItemId);
                 }
             }

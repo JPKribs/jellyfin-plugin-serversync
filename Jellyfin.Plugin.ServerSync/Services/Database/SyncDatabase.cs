@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Data;
 using System.IO;
-using System.Linq;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
@@ -18,9 +17,10 @@ public class SyncDatabase : IDisposable
 {
     private readonly ILogger<SyncDatabase> _logger;
     private readonly string _dbPath;
+
     /// <summary>
     /// The most read connections open at once. WAL lets readers run beside the writer, so the
-    /// dashboard's polling and the scans' lookups no longer queue behind every write.
+    /// dashboard's polling and the scans' lookups do not queue behind every write.
     /// </summary>
     public const int MaxReadConnections = 4;
 
@@ -302,7 +302,7 @@ public class SyncDatabase : IDisposable
             catch (IOException ex) when (i < maxRetries - 1)
             {
                 _logger.LogDebug(ex, "Failed to delete {FilePath}, retrying ({Attempt}/{Max})", filePath, i + 1, maxRetries);
-                System.Threading.Thread.Sleep(50 * (i + 1)); // Brief backoff
+                System.Threading.Thread.Sleep(50 * (i + 1));
             }
             catch (Exception ex)
             {
@@ -488,14 +488,7 @@ public class SyncDatabase : IDisposable
             WithReadersDrained(() =>
             {
                 CloseConnection();
-
-                // Delete main database file with retry logic
-                if (File.Exists(_dbPath))
-                {
-                    DeleteFileWithRetry(_dbPath);
-                }
-
-                // Also delete WAL and SHM files if they exist
+                DeleteFileWithRetry(_dbPath);
                 DeleteWalFiles();
             });
 
@@ -524,10 +517,7 @@ public class SyncDatabase : IDisposable
 
                 try
                 {
-                    DropReaders();
-                    _connection?.Close();
-                    _connection?.Dispose();
-                    _connection = null;
+                    CloseConnection();
                 }
                 catch (Exception ex)
                 {

@@ -147,7 +147,6 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         return ReadAll(cmd);
     });
 
-    /// <inheritdoc />
     /// <summary>
     /// Runs a read that throws when the database cannot be read, rather than answering as if it held
     /// nothing. For a caller that would delete on an empty answer.
@@ -157,6 +156,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <returns>What it read.</returns>
     protected T ReadStrict<T>(Func<SqliteConnection, T> read) => _database.RunRead(read);
 
+    /// <inheritdoc />
     public IList<TRecord> GetByStatusStrict(SyncStatus status) => _database.RunRead(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -171,8 +171,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         {
             using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT COUNT(*) FROM {TableName}";
-            var result = cmd.ExecuteScalar();
-            return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+            return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
         },
         fallback: 0);
 
@@ -183,8 +182,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
             using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT COUNT(*) FROM {TableName} WHERE Status = @Status";
             cmd.Parameters.AddWithValue("@Status", (int)status);
-            var result = cmd.ExecuteScalar();
-            return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+            return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
         },
         fallback: 0);
 

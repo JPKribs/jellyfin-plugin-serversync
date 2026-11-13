@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// State transitions for content sync items. Change detection is size-only.
+/// State transitions for content sync items. Change detection is size-only:
 /// the ETag-based detection it replaced was unstable because Jellyfin's ETag
 /// changes whenever UserData changes. <see cref="ProcessMissingItem"/> owns
 /// its own writes (delete vs upsert). Other Process* methods are pure and
@@ -236,7 +236,7 @@ public static class SyncStateService
 
         // Deleting belongs here alongside pending-deletion: the row is already
         // scheduled and the file is still on disk waiting for the next Sync run
-        // to remove it. Falling through to the status checks below deleted
+        // to remove it. Falling through to the status checks below would delete
         // the tracking row instead, stranding the file permanently with nothing
         // left pointing at it. Reachable whenever a Refresh lands between the
         // mark and the Sync that would execute it, an aborted pre-flight
@@ -385,12 +385,7 @@ public static class SyncStateService
 
     private static bool HasMetadataChanged(SyncItem item, string sourcePath, long sourceSize)
     {
-        if (item.SourcePath != sourcePath)
-        {
-            return true;
-        }
-
-        return item.SourceSize != sourceSize;
+        return item.SourcePath != sourcePath || item.SourceSize != sourceSize;
     }
 
     internal static void UpdateItemMetadata(
@@ -436,8 +431,8 @@ public static class SyncStateService
 
     /// <summary>
     /// Follows a rename on the source by moving the local file to its new translated path. Simply
-    /// rewriting the row's path left the old file on disk with nothing tracking it, and the next
-    /// check found no file at the new path and downloaded a second copy. The move only happens into
+    /// rewriting the row's path would leave the old file on disk with nothing tracking it, and the
+    /// next check would find no file at the new path and download a second copy. The move only happens into
     /// a free path, and nothing is ever deleted here. When the new path is taken or the move fails,
     /// the row keeps pointing at the old file and the reason says why.
     /// </summary>

@@ -1,7 +1,7 @@
 using System;
-using Jellyfin.Plugin.ServerSync.Configuration;
 using System.IO;
 using System.Linq;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
@@ -35,7 +35,6 @@ public static class RecyclingBinService
 
         try
         {
-            // Ensure recycling bin directory exists
             if (!Directory.Exists(recyclingBinPath))
             {
                 Directory.CreateDirectory(recyclingBinPath);
@@ -183,9 +182,8 @@ public static class RecyclingBinService
             return false;
         }
 
-        // Move companion files (using the same strict matcher as
-        // FileOperationUtilities.GetCompanionFiles so we don't accidentally
-        // recycle siblings whose names share a prefix).
+        // Companions come from the strict matcher in FileOperationUtilities.GetCompanionFiles, so
+        // siblings whose names only share a prefix are not recycled with it.
         try
         {
             foreach (var companionFile in FileOperationUtilities.GetCompanionFiles(filePath))
@@ -214,13 +212,11 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Returns true when the recycling bin path overlaps a configured library
-    /// root (bin inside a library, or a library inside the bin). Cleanup
-    /// falls back to LastWriteTimeUtc for files without a recycled-timestamp
-    /// name, so running it against a media folder would permanently delete
-    /// ordinary media files older than the retention period.
+    /// Returns true when a folder the plugin cleans up on its own (the recycling bin, or the temp
+    /// folder) overlaps a configured library root: the folder inside a library, or a library inside
+    /// the folder. Running that cleanup against a media folder could permanently delete library files.
     /// </summary>
-    public static bool OverlapsLibraryRoot(string recyclingBinPath, Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    public static bool OverlapsLibraryRoot(string recyclingBinPath, PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
         if (string.IsNullOrEmpty(recyclingBinPath))
@@ -237,10 +233,10 @@ public static class RecyclingBinService
             }
 
             var root = Path.GetFullPath(mapping.LocalRootPath);
-            var binInRoot = !Path.GetRelativePath(root, bin).StartsWith("..", StringComparison.Ordinal)
-                && !Path.IsPathRooted(Path.GetRelativePath(root, bin));
-            var rootInBin = !Path.GetRelativePath(bin, root).StartsWith("..", StringComparison.Ordinal)
-                && !Path.IsPathRooted(Path.GetRelativePath(bin, root));
+            var binFromRoot = Path.GetRelativePath(root, bin);
+            var rootFromBin = Path.GetRelativePath(bin, root);
+            var binInRoot = !binFromRoot.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(binFromRoot);
+            var rootInBin = !rootFromBin.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(rootFromBin);
             if (binInRoot || rootInBin)
             {
                 return true;

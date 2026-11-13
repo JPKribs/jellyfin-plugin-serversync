@@ -158,9 +158,9 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     public void RequireLinkAwareReaders() => ExecuteWrite(conn =>
     {
         var floor = DatabaseMigrationService.MinReaderFor(conn);
-        if ((JPKribs.Jellyfin.Base.DatabaseSchema.GetMinReaderVersion(conn) ?? 0) < floor)
+        if ((DatabaseSchema.GetMinReaderVersion(conn) ?? 0) < floor)
         {
-            JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(conn, Math.Max(floor, JPKribs.Jellyfin.Base.DatabaseSchema.GetVersion(conn)), floor);
+            DatabaseSchema.Stamp(conn, Math.Max(floor, DatabaseSchema.GetVersion(conn)), floor);
         }
     });
 
@@ -168,18 +168,11 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// Returns every link row with a local path, and throws when the table cannot be read. The link
     /// cache drops the files of links that are gone, so it must never take a failed read for no links.
     /// </summary>
-    public IList<SyncItem> GetLinksStrict() => ReadStrict<IList<SyncItem>>(conn =>
+    public IList<SyncItem> GetLinksStrict() => ReadStrict(conn =>
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT * FROM SyncItems WHERE StorageMode IN (1, 2) AND LocalPath IS NOT NULL";
-        using var reader = cmd.ExecuteReader();
-        var links = new List<SyncItem>();
-        while (reader.Read())
-        {
-            links.Add(MapFromReader(reader));
-        }
-
-        return links;
+        return ReadAll(cmd);
     });
 
     /// <summary>
@@ -190,14 +183,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         {
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT * FROM SyncItems WHERE StorageMode IN (1, 2) AND LocalPath IS NOT NULL";
-            using var reader = cmd.ExecuteReader();
-            var links = new List<SyncItem>();
-            while (reader.Read())
-            {
-                links.Add(MapFromReader(reader));
-            }
-
-            return links;
+            return ReadAll(cmd);
         },
         fallback: new List<SyncItem>());
 
@@ -321,7 +307,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: new Dictionary<PendingType, int>());
 
     /// <summary>
-    /// Returns the byte-size breakdown for the items that affect storage , 
+    /// Returns the byte-size breakdown for the items that affect storage:
     /// pending downloads/replacements + queued, minus pending deletions.
     /// </summary>
     public Dictionary<string, long> GetPendingSizes() => ExecuteRead(
@@ -340,7 +326,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: new Dictionary<string, long>());
 
     /// <summary>
-    /// Returns errored items that haven't exceeded the retry threshold , 
+    /// Returns errored items that haven't exceeded the retry threshold,
     /// the candidates for the next sync run's retry pass.
     /// </summary>
     public IList<SyncItem> GetErroredItemsForRetry(int maxRetries) => ExecuteRead(
@@ -410,9 +396,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     {
         using var cmd = conn.CreateCommand();
         // Queued through this path is an operator action (Queue / Retry), and
-        // the base transition clauses reset RetryCount for it, the explicit
-        // resetRetryCount parameter this method briefly had would have emitted
-        // a second "RetryCount = 0" into the same SET list.
+        // the base transition clauses reset RetryCount for it.
         var clauses = BuildStatusTransitionClauses(status);
 
         // PendingType is set when transitioning to Pending, otherwise cleared.
