@@ -235,14 +235,15 @@ export default function (view) {
     }
 
     // This server in the middle, and one box per relationship around it, each listing its servers with
-    // their status. The arrows say the relationship, so the boxes carry no label: Pull points here,
-    // Push points out, Sync both ways, Stream is dashed toward here, since those servers stream from
-    // this one, and a dashed line out marks the servers whose files this one streams.
+    // their status. The arrows say the relationship, so the boxes carry no label, and every arrow
+    // points the way things travel: Pull points here, Push points out, Sync both ways. A dashed arrow
+    // is video streamed: Stream points out, since those servers stream this one's files, and a dashed
+    // arrow pointing here marks the servers whose files this one streams.
     var POOL_GROUPS = [
         { key: 'Sync', toward: 'both' },
         { key: 'Push', toward: 'there' },
-        { key: 'Links', toward: 'there', dashed: true },
-        { key: 'Stream', toward: 'here', dashed: true },
+        { key: 'Links', toward: 'here', dashed: true },
+        { key: 'Stream', toward: 'there', dashed: true },
         { key: 'Pull', toward: 'here' }
     ];
 

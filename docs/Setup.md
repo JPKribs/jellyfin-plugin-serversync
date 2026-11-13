@@ -6,7 +6,7 @@ The plugin has four tabs. **Sync** shows each module's table and the change queu
 
 ![Servers](screenshots/settings/Servers.png)
 
-The map at the top shows this server, by its own name, and every server it is set up with, grouped by relationship. The arrows give the relationship: Pull points here, Push points out, Sync both ways, Stream is dashed toward here, and a dashed arrow out marks the servers whose files this one streams. Each server's dot is green when it runs Server Sync, orange when it answers without it, red when it cannot be reached, and grey when it is disabled.
+The map at the top shows this server, by its own name, and every server it is set up with, grouped by relationship. Every arrow points the way things travel. Pull points here, Push points out, and Sync both ways. A dashed arrow is video being streamed: it points out to a Stream server, which streams this server's files, and points here from each server whose files this one streams. A Pull or Sync server with a Link library shows twice for that reason, once for what is pulled and once for what is streamed. Each server's dot is green when it runs Server Sync, orange when it answers without it, red when it cannot be reached, and grey when it is disabled.
 
 Servers higher in the list win when two offer the same item. Drag a server to change the order. Each server has these steps.
 

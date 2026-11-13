@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.12.2"
+version: "12.4.12.3"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -28,6 +28,5 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  changed:
-  - A link whose file no server offers any more is always removed on the next full scan, whatever Removed files says. Its .strm goes with the files beside it and each folder that leaves holding only artwork and nfo files, with no approval and no recycling bin
-  - A full copy in a Link library, a link the library filter leaves out, and a .strm that no longer points at Server Sync still follow Removed files
+  fixed:
+  - The dashed arrows on the Servers map pointed the wrong way. Every arrow now points the way things travel, so a server whose files this one streams has its arrow pointing here, and a Stream server has its arrow pointing out
