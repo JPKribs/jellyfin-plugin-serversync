@@ -1,9 +1,9 @@
 using System;
-using Jellyfin.Plugin.ServerSync.Configuration;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

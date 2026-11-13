@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Links;
-using Jellyfin.Plugin.ServerSync.Services.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -367,14 +366,15 @@ public partial class PeerController
         }
 
         // A standard user's key only learns about what that user can see.
-        var scoped = PeerCallerGuard.ScopedUser(HttpContext) is { } scopedId ? userManager.GetUserById(scopedId) : null;
+        var scopedId = PeerCallerGuard.ScopedUser(HttpContext);
+        var scoped = scopedId is { } id ? userManager.GetUserById(id) : null;
         var response = new PeerLinkDescribeResponse();
-        foreach (var id in request.ItemIds)
+        foreach (var requestedId in request.ItemIds)
         {
-            var answer = new PeerLinkDescription { ItemId = id };
+            var answer = new PeerLinkDescription { ItemId = requestedId };
             response.Items.Add(answer);
-            var item = Guid.TryParse(id, out var itemId) ? libraryManager.GetItemById(itemId) : null;
-            if (item is null || item is Folder || string.IsNullOrEmpty(item.Path) || (PeerCallerGuard.ScopedUser(HttpContext) is not null && (scoped is null || !item.IsVisible(scoped))))
+            var item = Guid.TryParse(requestedId, out var itemId) ? libraryManager.GetItemById(itemId) : null;
+            if (item is null || item is Folder || string.IsNullOrEmpty(item.Path) || (scopedId is not null && (scoped is null || !item.IsVisible(scoped))))
             {
                 answer.Reason = "the file is no longer on the source";
                 continue;
@@ -510,6 +510,8 @@ public partial class PeerController
     /// server's items matches a link by the file it stands in for rather than by its .strm.
     /// </summary>
     /// <param name="table">The content sync table.</param>
+    /// <param name="userManager">The users here.</param>
+    /// <param name="libraryManager">The library.</param>
     /// <returns>The links.</returns>
     [HttpGet("Links")]
     [RequireCompatibleProtocol]
@@ -521,8 +523,9 @@ public partial class PeerController
         ArgumentNullException.ThrowIfNull(libraryManager);
 
         // A standard user learns of the links it can see as items here, and of no other path.
-        var owner = PeerCallerGuard.ScopedUser(HttpContext) is { } scoped ? userManager.GetUserById(scoped) : null;
-        if (owner is null && PeerCallerGuard.ScopedUser(HttpContext) is not null)
+        var scoped = PeerCallerGuard.ScopedUser(HttpContext);
+        var owner = scoped is { } id ? userManager.GetUserById(id) : null;
+        if (owner is null && scoped is not null)
         {
             return Ok(new PeerLinksResponse());
         }
@@ -531,8 +534,7 @@ public partial class PeerController
             .Where(row => owner is null
                 || (Guid.TryParse(row.LocalItemId, out var localId) && libraryManager.GetItemById(localId) is { } local && local.IsVisible(owner)))
             .Select(row => LinkPaths.CopiedPathOf(row) is { } copied ? new PeerLink { LinkPath = row.LocalPath!, CopiedPath = copied } : null)
-            .Where(link => link is not null)
-            .Select(link => link!)
+            .OfType<PeerLink>()
             .ToList();
         return Ok(new PeerLinksResponse { Links = links });
     }

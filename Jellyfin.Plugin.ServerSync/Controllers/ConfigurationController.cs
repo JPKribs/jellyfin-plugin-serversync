@@ -1,13 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Mime;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
 using JPKribs.Jellyfin.Base;
@@ -221,22 +218,19 @@ public partial class ConfigurationController : ControllerBase
     /// <returns>The computed overall status string.</returns>
     private static string ComputeOverallStatus(params SyncStatus?[] statusValues)
     {
-        var statuses = statusValues
-            .Where(s => s.HasValue)
-            .Select(s => s!.Value)
-            .ToList();
+        var statuses = statusValues.OfType<SyncStatus>().ToList();
 
-        if (statuses.Any(s => s == SyncStatus.Errored))
+        if (statuses.Contains(SyncStatus.Errored))
         {
             return "Errored";
         }
 
-        if (statuses.Any(s => s == SyncStatus.Queued))
+        if (statuses.Contains(SyncStatus.Queued))
         {
             return "Queued";
         }
 
-        if (statuses.Any(s => s == SyncStatus.Pending))
+        if (statuses.Contains(SyncStatus.Pending))
         {
             return "Pending";
         }

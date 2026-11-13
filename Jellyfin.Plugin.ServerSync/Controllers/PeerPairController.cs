@@ -1,7 +1,7 @@
 using System.Net.Mime;
-using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Peer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;

@@ -39,14 +39,15 @@ public sealed class PeerCallerGuard : IAsyncActionFilter
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
         var http = context.HttpContext;
-        var verdict = await _policy.CheckAsync(http.GetNormalizedRemoteIP(), http.User, http.RequestAborted).ConfigureAwait(false);
+        var remote = http.GetNormalizedRemoteIP();
+        var verdict = await _policy.CheckAsync(remote, http.User, http.RequestAborted).ConfigureAwait(false);
         if (verdict.Refusal is not null)
         {
             _logger.LogWarning(
                 "Refused a Server Sync call to {Path} from {User} at {Address}: {Reason}",
                 JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(http.Request.Path.Value ?? string.Empty, 300),
                 JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(http.User.Identity?.Name ?? "an unknown user", 100),
-                http.GetNormalizedRemoteIP(),
+                remote,
                 JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(verdict.Refusal, 300));
             context.Result = new ObjectResult(new PeerCallerRefusal { Code = verdict.Code.ToString(), Message = verdict.Refusal }) { StatusCode = StatusCodes.Status403Forbidden };
             return;

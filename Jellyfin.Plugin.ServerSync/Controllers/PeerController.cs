@@ -35,7 +35,6 @@ public partial class PeerController : ControllerBase
     private readonly IPluginConfigurationManager _configManager;
     private readonly IServerApplicationHost _applicationHost;
     private readonly InboundHintStore _inbound;
-    private readonly OutboundHintStore _outbound;
     private readonly VersionStore _versions;
     private readonly InboundHintWorker _inboundWorker;
     private readonly OutboundHintWorker _outboundWorker;
@@ -43,7 +42,7 @@ public partial class PeerController : ControllerBase
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly HintTriage _triage;
     private readonly PeerItemLookup _lookup;
-    private readonly Microsoft.Extensions.Logging.ILogger<PeerController> _logger;
+    private readonly ILogger<PeerController> _logger;
 
     /// <summary>
     /// The largest body a peer route reads. The fullest request allowed, a batch of hints with every
@@ -61,11 +60,14 @@ public partial class PeerController : ControllerBase
     /// <param name="configManager">Plugin configuration manager.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="inbound">The inbound hint store.</param>
-    /// <param name="outbound">The outbound hint store.</param>
+    /// <param name="outbound">The outbound hint store. Not used by these routes.</param>
     /// <param name="versions">The version store.</param>
     /// <param name="inboundWorker">The worker that applies inbound hints.</param>
+    /// <param name="outboundWorker">The delivery worker, which removes the hints a peer reports done.</param>
     /// <param name="pairings">The pairing secrets.</param>
     /// <param name="clientFactory">Creates clients for the pairing calls.</param>
+    /// <param name="triage">Decides what to do with each inbound hint.</param>
+    /// <param name="lookup">Finds this server's item for a peer's description of one.</param>
     /// <param name="logger">Logger.</param>
     public PeerController(
         PeerHistoryService history,
@@ -80,7 +82,7 @@ public partial class PeerController : ControllerBase
         ISourceServerClientFactory clientFactory,
         HintTriage triage,
         PeerItemLookup lookup,
-        Microsoft.Extensions.Logging.ILogger<PeerController> logger)
+        ILogger<PeerController> logger)
     {
         _triage = triage;
         _lookup = lookup;
@@ -88,7 +90,6 @@ public partial class PeerController : ControllerBase
         _configManager = configManager;
         _applicationHost = applicationHost;
         _inbound = inbound;
-        _outbound = outbound;
         _versions = versions;
         _inboundWorker = inboundWorker;
         _outboundWorker = outboundWorker;
@@ -148,10 +149,9 @@ public partial class PeerController : ControllerBase
         response.AccessUser = string.IsNullOrEmpty(entry.AuthenticatedUser) ? null : entry.AuthenticatedUser;
         response.CanDownload = entry.CanDownload;
 
-        // The caller says it is this entry. Any whitelisted caller could say so, which
-        // is why the secret goes to the entry's own address over this server's own key for it, not back
-        // to the caller. Only the real server at that address receives it, and it is what every later
-        // request must carry.
+        // The caller says it is this entry. Any whitelisted caller could say so, which is why the secret
+        // goes to the entry's own address over this server's own key for it, not back to the caller. Only
+        // the real server at that address receives it, and it is what every later request must carry.
         if (response.Enabled)
         {
             (response.Paired, response.PairingError) = await PairAsync(entry, cancellationToken).ConfigureAwait(false);

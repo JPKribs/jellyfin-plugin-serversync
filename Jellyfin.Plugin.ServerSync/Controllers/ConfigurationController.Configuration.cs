@@ -300,8 +300,12 @@ public partial class ConfigurationController
     /// <param name="search">Optional search term.</param>
     /// <param name="startIndex">Starting index for pagination.</param>
     /// <param name="limit">Maximum items to return.</param>
+    /// <param name="skip">Alias for <paramref name="startIndex"/>, used when present.</param>
+    /// <param name="take">Alias for <paramref name="limit"/>, used when present.</param>
+    /// <param name="collections">Browse the server's collections instead of a library.</param>
+    /// <param name="playlists">Browse the server's playlists instead of a library.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of source files.</returns>
+    /// <returns>A page of top-level source items.</returns>
     [HttpGet("SourceLibraryItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -407,15 +411,13 @@ public partial class ConfigurationController
 
     /// <summary>
     /// Validates and normalizes a server URL. Classification is delegated to
-    /// <see cref="ConfigurationUtilities.ValidateServerUrlForSsrf"/>, the same
-    /// gate <see cref="ISourceServerClientFactory.Create"/> enforces. A second,
-    /// weaker copy lived here and ignored
-    /// <c>AllowSourceServerOnPrivateNetwork</c>, so a rejected URL passed this
-    /// check and then threw out of the factory as an unhandled 500 instead of
-    /// surfacing the reason the code had already written.
+    /// <see cref="ConfigurationUtilities.ValidateServerUrlForSsrfAsync"/>, the same
+    /// gate <see cref="ISourceServerClientFactory.Create"/> enforces, so a URL that
+    /// passes here is not then rejected by the factory as an unhandled 500.
     /// </summary>
     /// <param name="url">URL to validate.</param>
     /// <param name="allowPrivateNetwork">Whether a private network address is acceptable for this entry.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Validation response with normalized URL.</returns>
     private static async Task<ValidateUrlResponse> ValidateServerUrlAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken)
     {
@@ -431,7 +433,7 @@ public partial class ConfigurationController
             };
         }
 
-        // Guaranteed to parse, ValidateServerUrlForSsrf rejects anything that doesn't.
+        // Guaranteed to parse, the SSRF gate rejects anything that doesn't.
         var uri = new Uri(url, UriKind.Absolute);
 
         var isLocalhost = uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
@@ -444,11 +446,11 @@ public partial class ConfigurationController
             normalizedUrl += $":{uri.Port}";
         }
 
-        // Keep a sub-path (reverse proxy serving Jellyfin at /jellyfin) , 
-        // dropping it made such servers impossible to configure, with a
+        // Keep a sub-path (reverse proxy serving Jellyfin at /jellyfin).
+        // Dropping it made such servers impossible to configure, with a
         // misleading "connection failed" as the only symptom.
         var path = uri.AbsolutePath.TrimEnd('/');
-        if (!string.IsNullOrEmpty(path) && path != "/")
+        if (!string.IsNullOrEmpty(path))
         {
             normalizedUrl += path;
         }

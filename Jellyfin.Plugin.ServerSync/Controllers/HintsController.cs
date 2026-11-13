@@ -8,10 +8,10 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
-using MediaBrowser.Controller;
-using MediaBrowser.Controller.Library;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
+using MediaBrowser.Controller;
+using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -469,11 +469,11 @@ public class HintsController : ControllerBase
             return NoContent();
         }
 
-        var config = _configManager.Configuration;
-        var serverName = string.Equals(version.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase)
+        var isThisServer = string.Equals(version.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase);
+        var serverName = isThisServer
             ? _applicationHost.FriendlyName
-            : config.FindServerById(version.ServerId)?.DisplayName ?? version.ServerId;
-        return Ok(new ObjectVersionDto { ServerId = version.ServerId, ServerName = serverName, Timestamp = version.Timestamp, IsThisServer = string.Equals(version.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase) });
+            : _configManager.Configuration.FindServerById(version.ServerId)?.DisplayName ?? version.ServerId;
+        return Ok(new ObjectVersionDto { ServerId = version.ServerId, ServerName = serverName, Timestamp = version.Timestamp, IsThisServer = isThisServer });
     }
 
     /// <summary>Raises every gathered local change now, re-reads what each peer accepts, delivers, and applies, instead of waiting for the workers.</summary>

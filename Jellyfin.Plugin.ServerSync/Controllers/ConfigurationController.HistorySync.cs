@@ -6,7 +6,6 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services;
 using JPKribs.Jellyfin.Base;
-using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -18,8 +17,6 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 /// </summary>
 public partial class ConfigurationController
 {
-    // ===== History Sync Endpoints =====
-
     /// <summary>
     /// Gets paginated history sync items from the database with optional search and filter.
     /// </summary>
@@ -195,10 +192,8 @@ public partial class ConfigurationController
             }
             catch (Exception ex)
             {
-                var sanitizedUserId = SanitizeForLog(item.SourceUserId);
-                var sanitizedItemId = SanitizeForLog(item.SourceItemId);
                 _logger.LogWarning(ex, "Failed to {Verb} history item {SourceUserId}/{SourceItemId}",
-                        verb, sanitizedUserId, sanitizedItemId);
+                    verb, SanitizeForLog(item.SourceUserId), SanitizeForLog(item.SourceItemId));
             }
         }
 

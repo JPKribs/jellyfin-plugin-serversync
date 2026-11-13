@@ -6,11 +6,9 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using JPKribs.Jellyfin.Base;
-using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -22,10 +20,6 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 /// </summary>
 public partial class ConfigurationController
 {
-    // ============================================
-    // Metadata Sync Endpoints
-    // ============================================
-
     /// <summary>
     /// Gets a specific metadata sync item by its ID.
     /// </summary>

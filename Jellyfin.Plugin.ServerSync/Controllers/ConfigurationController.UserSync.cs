@@ -7,9 +7,7 @@ using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services;
-using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
-using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -264,9 +262,7 @@ public partial class ConfigurationController
             return NotFound();
         }
 
-        var config = _configManager.Configuration;
-        var dto = MapToUserSyncUserDetailDto(sourceUserId, localUserId, items.ToList(), config);
-        return Ok(dto);
+        return Ok(MapToUserSyncUserDetailDto(sourceUserId, localUserId, items.ToList(), _configManager.Configuration));
     }
 
     /// <summary>
@@ -309,8 +305,6 @@ public partial class ConfigurationController
         return Ok(new { Updated = successCount });
     }
 
-    // ===== DTO mapping helpers =====
-
     private static UserSyncUserDto MapToUserSyncUserDto(
         string sourceUserId,
         string localUserId,
@@ -322,15 +316,16 @@ public partial class ConfigurationController
         var policyItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.Policy);
         var configItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.Configuration);
         var imageItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.ProfileImage);
+        var firstItem = items.FirstOrDefault();
 
         var dto = new UserSyncUserDto
         {
             SourceUserId = sourceUserId,
             LocalUserId = localUserId,
-            SourceUserName = sourceUserName ?? items.FirstOrDefault()?.SourceUserName,
-            LocalUserName = localUserName ?? items.FirstOrDefault()?.LocalUserName,
-            SourceServerUrl = config.ResolveServer(items.FirstOrDefault()?.ServerKey)?.BrowserUrl,
-            ServerKey = items.FirstOrDefault()?.ServerKey,
+            SourceUserName = sourceUserName ?? firstItem?.SourceUserName,
+            LocalUserName = localUserName ?? firstItem?.LocalUserName,
+            SourceServerUrl = config.ResolveServer(firstItem?.ServerKey)?.BrowserUrl,
+            ServerKey = firstItem?.ServerKey,
             PolicyId = policyItem?.Id,
             ConfigurationId = configItem?.Id,
             ProfileImageId = imageItem?.Id,
@@ -345,7 +340,7 @@ public partial class ConfigurationController
             ProfileImageChangesSummary = imageItem?.ChangesSummary,
             HasChanges = (policyItem?.HasChanges ?? false) || (configItem?.HasChanges ?? false) || (imageItem?.HasChanges ?? false),
             LastSyncTime = new[] { policyItem?.LastSyncTime, configItem?.LastSyncTime, imageItem?.LastSyncTime }
-                .Where(t => t.HasValue).Select(t => t!.Value).DefaultIfEmpty().Max(),
+                .OfType<DateTime>().DefaultIfEmpty().Max(),
             ErrorMessage = string.Join("; ", new[] { policyItem?.Reason, configItem?.Reason, imageItem?.Reason }
                 .Where(e => !string.IsNullOrEmpty(e)))
         };
@@ -373,21 +368,22 @@ public partial class ConfigurationController
         var policyItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.Policy);
         var configItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.Configuration);
         var imageItem = items.FirstOrDefault(i => i.PropertyCategory == UserPropertyCategory.ProfileImage);
+        var firstItem = items.FirstOrDefault();
 
         var dto = new UserSyncUserDetailDto
         {
             SourceUserId = sourceUserId,
             LocalUserId = localUserId,
-            SourceUserName = items.FirstOrDefault()?.SourceUserName,
-            LocalUserName = items.FirstOrDefault()?.LocalUserName,
-            PolicyItem = policyItem != null ? policyItem.ToDto() : null,
-            ConfigurationItem = configItem != null ? configItem.ToDto() : null,
-            ProfileImageItem = imageItem != null ? imageItem.ToDto() : null,
+            SourceUserName = firstItem?.SourceUserName,
+            LocalUserName = firstItem?.LocalUserName,
+            PolicyItem = policyItem?.ToDto(),
+            ConfigurationItem = configItem?.ToDto(),
+            ProfileImageItem = imageItem?.ToDto(),
             PolicyEnabled = config.UserSyncPolicy,
             ConfigurationEnabled = config.UserSyncConfiguration,
             ProfileImageEnabled = config.UserSyncProfileImage,
             LastSyncTime = new[] { policyItem?.LastSyncTime, configItem?.LastSyncTime, imageItem?.LastSyncTime }
-                .Where(t => t.HasValue).Select(t => t!.Value).DefaultIfEmpty().Max(),
+                .OfType<DateTime>().DefaultIfEmpty().Max(),
             ErrorMessage = string.Join("; ", new[] { policyItem?.Reason, configItem?.Reason, imageItem?.Reason }
                 .Where(e => !string.IsNullOrEmpty(e)))
         };

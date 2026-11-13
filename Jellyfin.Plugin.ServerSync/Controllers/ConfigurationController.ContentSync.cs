@@ -3,13 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Models;
 using Jellyfin.Plugin.ServerSync.Models.Common;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
-using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
-using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -289,7 +285,6 @@ public partial class ConfigurationController
         {
             // Deleting schedules unattended file removal. It is only ever set
             // by the refresh pipeline or the approval flow, never directly.
-
             return BadRequest("Invalid status value");
         }
 
@@ -400,7 +395,7 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Turns links into full copies, and its .strm is removed once the copy is in place. A link whose
+    /// Turns links into full copies, each link's .strm removed once its copy is in place. A link whose
     /// whole file is in the link cache has the cached file moved into place, by a sync that starts now,
     /// or right after the one already running. Any other copy downloads on the next sync. Rows that are
     /// not links are skipped.
@@ -512,8 +507,7 @@ public partial class ConfigurationController
             }
             catch (Exception ex)
             {
-                var sanitizedId = SanitizeForLog(itemId);
-                _logger.LogWarning(ex, "Failed to mark item {ItemId} as synced", sanitizedId);
+                _logger.LogWarning(ex, "Failed to mark item {ItemId} as synced", SanitizeForLog(itemId));
                 notFoundCount++;
             }
         }
@@ -522,7 +516,7 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Deletes items from the LOCAL server only using the Jellyfin API.
+    /// Deletes items' files from the LOCAL server only. Each handled row is kept as Ignored.
     /// </summary>
     /// <param name="request">Bulk items request.</param>
     /// <returns>Action result with deletion counts.</returns>
@@ -551,8 +545,7 @@ public partial class ConfigurationController
             var item = manager.GetBySourceItemId(sourceItemId);
             if (item == null)
             {
-                var sanitizedSourceId = SanitizeForLog(sourceItemId);
-                _logger.LogWarning("SKIPPED DELETE: Item {SourceItemId} not found in tracking database", sanitizedSourceId);
+                _logger.LogWarning("SKIPPED DELETE: Item {SourceItemId} not found in tracking database", SanitizeForLog(sourceItemId));
                 skippedCount++;
                 continue;
             }
@@ -622,12 +615,11 @@ public partial class ConfigurationController
 
             if (!fileExists)
             {
-                // File doesn't exist anywhere - remove from tracking since there's nothing to delete
-                var sanitizedSourcePath = SanitizeForLog(item.SourcePath);
+                // Nothing to delete, so the row is kept as Ignored.
                 _logger.LogWarning(
                     "SKIPPED DELETE: {FileName} - File not found in Jellyfin library or on disk, so the row is kept as Ignored. Source path: {SourcePath}",
                     sanitizedFileName,
-                    sanitizedSourcePath);
+                    SanitizeForLog(item.SourcePath));
                 KeepAsIgnored(manager, item);
                 skippedCount++;
                 continue;
@@ -672,14 +664,13 @@ public partial class ConfigurationController
             }
             else
             {
-                // Check if file still exists after failed deletion attempt
-                // It may have been deleted externally (manually or by another process)
+                // The file may have been deleted externally (manually or by another process).
                 // A folder item counts too, so a refused disc structure is reported as failed, never as gone.
                 var stillExists = !string.IsNullOrEmpty(targetPath)
                     && (System.IO.File.Exists(targetPath) || System.IO.Directory.Exists(targetPath));
                 if (!stillExists)
                 {
-                    // File is gone (deleted elsewhere) - remove from tracking
+                    // Deleted elsewhere, so the row is kept as Ignored.
                     _logger.LogInformation(
                         "DELETE (external): {FileName} - File no longer exists after deletion attempt, so the row is kept as Ignored. Local path: {LocalPath}",
                         sanitizedFileName,
@@ -689,8 +680,7 @@ public partial class ConfigurationController
                 }
                 else
                 {
-                    var sanitizedError = SanitizeForLog(result.ErrorMessage);
-                    _logger.LogError("FAILED DELETE: {FileName} - {Error}. Local path: {LocalPath}", sanitizedFileName, sanitizedError, sanitizedLocalPath);
+                    _logger.LogError("FAILED DELETE: {FileName} - {Error}. Local path: {LocalPath}", sanitizedFileName, SanitizeForLog(result.ErrorMessage), sanitizedLocalPath);
                     failedCount++;
                 }
             }

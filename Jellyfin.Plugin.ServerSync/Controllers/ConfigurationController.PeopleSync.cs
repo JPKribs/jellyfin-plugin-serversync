@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,7 +7,6 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services;
 using JPKribs.Jellyfin.Base;
-using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -48,11 +46,9 @@ public partial class ConfigurationController
         // the user re-runs the Refresh task.
         peopleService.RefreshLocalSnapshot(item, syncImages: config.PeopleSyncImages);
 
-        // Enrich source-side image manifest with real sizes/dimensions so
-        // the modal renders Source as e.g. "623.4 KB" instead of "1 (0 B)".
-        // The refresh builds source manifests from ImageTags only (no per-
-        // person HTTP call) for performance. This is the per-modal-open
-        // compensation.
+        // Refresh builds source manifests from ImageTags only (no per-person
+        // HTTP call) for speed. The modal needs real sizes/dimensions to
+        // render Source as e.g. "623.4 KB" instead of "1 (0 B)".
         if (config.PeopleSyncImages && !string.IsNullOrEmpty(item.Images.Source))
         {
             try

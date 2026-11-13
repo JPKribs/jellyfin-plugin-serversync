@@ -1,4 +1,3 @@
-using System;
 using System.Net.Mime;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
