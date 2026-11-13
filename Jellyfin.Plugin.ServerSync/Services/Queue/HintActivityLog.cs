@@ -262,17 +262,14 @@ public sealed class HintActivityLog
             return "changes";
         }
 
-        if (names.Count > shown)
+        var listed = names.Count > shown ? names.GetRange(0, shown) : names;
+        var text = listed.Count switch
         {
-            return $"{string.Join(", ", names.Take(shown))}, and {names.Count - shown} more";
-        }
-
-        return names.Count switch
-        {
-            1 => names[0],
-            2 => $"{names[0]} and {names[1]}",
-            _ => string.Join(", ", names.Take(names.Count - 1)) + ", and " + names[^1]
+            1 => listed[0],
+            2 => $"{listed[0]} and {listed[1]}",
+            _ => string.Join(", ", listed.GetRange(0, listed.Count - 1)) + ", and " + listed[^1]
         };
+        return names.Count > shown ? $"{string.Join(", ", listed)}, and {names.Count - shown} more" : text;
     }
 
     /// <summary>The text with surrounding space removed and its first letter capitalized.</summary>

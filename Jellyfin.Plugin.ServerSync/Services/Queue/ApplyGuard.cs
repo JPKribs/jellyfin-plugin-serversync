@@ -66,13 +66,12 @@ public sealed class ApplyGuard
 
     private void Leave(string guardKey)
     {
-        var now = DateTime.UtcNow;
-        RecentApplies[guardKey] = now;
+        RecentApplies[guardKey] = DateTime.UtcNow;
         if (RecentApplies.Count > 10000)
         {
             foreach (var (key, at) in RecentApplies)
             {
-                if (now - at > TimeSpan.FromHours(1))
+                if (DateTime.UtcNow - at > TimeSpan.FromHours(1))
                 {
                     RecentApplies.TryRemove(key, out _);
                 }
