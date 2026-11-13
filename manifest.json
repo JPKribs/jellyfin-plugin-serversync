@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.4.12.3",
+        "changelog": "\n## Fixed\n- The dashed arrows on the Servers map pointed the wrong way. Every arrow now points the way things travel, so a server whose files this one streams has its arrow pointing here, and a Stream server has its arrow pointing out\n- A provider id held twice under two spellings, such as TvdbCollection and tvdbcollection, no longer fails metadata or people sync with a divergent ProviderIds error. The two count as one id, and applying the source's ids leaves it once under the source's spelling\n- The .nfo written for a link names each provider id as the source spells it, so Jellyfin no longer stores a second, lowercase copy of an id it does not know",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.4.12.3/jellyfin-plugin-serversync-12.4.12.3.zip",
+        "checksum": "bede96ba244fc6b782633c91e73ad1b8",
+        "timestamp": "2026-11-13T23:35:37Z"
+      },
+      {
         "version": "12.4.12.2",
         "changelog": "\n## Changed\n- A link whose file no server offers any more is always removed on the next full scan, whatever Removed files says. Its .strm goes with the files beside it and each folder that leaves holding only artwork and nfo files, with no approval and no recycling bin\n- A full copy in a Link library, a link the library filter leaves out, and a .strm that no longer points at Server Sync still follow Removed files",
         "targetAbi": "12.4.0.0",
