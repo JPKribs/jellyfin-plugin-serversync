@@ -2,12 +2,16 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -35,7 +39,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     private readonly IServerApplicationHost _applicationHost;
     private readonly HintActivityLog _activity;
     private readonly HintSuppression _suppression;
-    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
+    private readonly ILibraryManager _libraryManager;
     private readonly ILogger<OutboundHintWorker> _logger;
     private readonly SemaphoreSlim _wake = new(0, 1);
 
@@ -55,6 +59,8 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     /// <param name="clientFactory">Client factory for peers.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="activity">Writes pauses and rejections to Jellyfin's activity log.</param>
+    /// <param name="suppression">The hints peers declined, which are not sent to them again.</param>
+    /// <param name="libraryManager">The library, to drop rows whose object is gone here.</param>
     /// <param name="logger">Logger.</param>
     public OutboundHintWorker(
         OutboundHintStore outbound,
@@ -63,7 +69,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         IServerApplicationHost applicationHost,
         HintActivityLog activity,
         HintSuppression suppression,
-        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
+        ILibraryManager libraryManager,
         ILogger<OutboundHintWorker> logger)
     {
         _suppression = suppression;
@@ -89,6 +95,16 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     public bool PeerAccepts(string peerKey, HintKind kind)
         => !_peers.TryGetValue(peerKey, out var state) || state.Interest is null || state.Interest.Kinds.Contains(kind);
 
+    /// <summary>
+    /// Whether a peer wants a hint for one object: it applies the kind, maps the object, as last read
+    /// from it, and has not declined this object at its current settings.
+    /// </summary>
+    /// <param name="peerKey">The peer's entry key.</param>
+    /// <param name="kind">The kind.</param>
+    /// <param name="itemPath">The item's local path, when the kind concerns an item.</param>
+    /// <param name="userId">The local user, when the kind concerns a user.</param>
+    /// <param name="key">This server's key for the object.</param>
+    /// <returns><c>true</c> when the hint should be sent.</returns>
     public bool PeerWants(string peerKey, HintKind kind, string? itemPath, Guid userId, string key)
     {
         var interest = _peers.TryGetValue(peerKey, out var state) ? state.Interest : null;
@@ -96,6 +112,13 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             && !_suppression.IsHeld(peerKey, kind, key, interest?.Revision, DateTime.UtcNow);
     }
 
+    /// <summary>
+    /// Removes the rows a peer reports done. The ones it declined, for example as unmapped, are
+    /// remembered so the same version is not sent to it again.
+    /// </summary>
+    /// <param name="peer">The peer entry.</param>
+    /// <param name="completed">The peer's report.</param>
+    /// <returns>How many rows were removed.</returns>
     public int Complete(SourceServer peer, IList<CompletedHint> completed)
     {
         ArgumentNullException.ThrowIfNull(peer);
@@ -181,7 +204,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     /// <summary>One delivery pass over every peer. Public so the dashboard and tests can run it on demand.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="refreshCapabilities">Re-read what every peer accepts now, rather than only when the last answer is old.</param>
-    /// <returns>A task.</returns>
+    /// <returns>True when a peer was sent a full batch and more may be due.</returns>
     public async Task<bool> DeliverAsync(CancellationToken cancellationToken, bool refreshCapabilities = false)
     {
         await _pass.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -578,7 +601,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         {
             throw;
         }
-        catch (System.Net.Http.HttpRequestException ex) when ((int?)ex.StatusCode is 401 or 403 or 404 or 409 or 426 or 428)
+        catch (HttpRequestException ex) when ((int?)ex.StatusCode is 401 or 403 or 404 or 409 or 426 or 428)
         {
             state.Interest = null;
             _logger.LogDebug("'{Peer}' refused to say what it wants ({Status}). Sending everything until it answers, so the refusal surfaces as a pause", peer.DisplayName, (int?)ex.StatusCode);
@@ -632,7 +655,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         var completed = new HashSet<string>(StringComparer.Ordinal);
         foreach (var done in status.CompletedHints ?? new List<CompletedHint>())
         {
-            if (byId.TryGetValue(done.HintId, out var row) && Utilities.UtcTime.AsUtc(done.VersionTimestamp) >= Utilities.UtcTime.AsUtc(row.VersionTimestamp))
+            if (byId.TryGetValue(done.HintId, out var row) && UtcTime.AsUtc(done.VersionTimestamp) >= UtcTime.AsUtc(row.VersionTimestamp))
             {
                 completed.Add(done.HintId);
             }
@@ -644,12 +667,16 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             // The peer finished these but could not say so, which happens when it holds a standard
             // user's key for this server. Its status says it, so the rows are complete.
             var reported = (status.CompletedHints ?? new List<CompletedHint>()).GroupBy(c => c.HintId, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-            Complete(peer, finished.Select(id => new CompletedHint
+            Complete(peer, finished.Select(id =>
             {
-                HintId = id,
-                VersionTimestamp = byId[id].VersionTimestamp,
-                Code = reported.TryGetValue(id, out var done) ? done.Code : HintCode.Applied,
-                Reason = reported.TryGetValue(id, out var doneReason) ? doneReason.Reason : null
+                var done = reported.GetValueOrDefault(id);
+                return new CompletedHint
+                {
+                    HintId = id,
+                    VersionTimestamp = byId[id].VersionTimestamp,
+                    Code = done?.Code ?? HintCode.Applied,
+                    Reason = done?.Reason
+                };
             }).ToList());
             _logger.LogInformation("'{Peer}' finished {Count} hint(s) it could not report. Completed from its status", peer.DisplayName, finished.Count);
         }
@@ -687,12 +714,15 @@ public sealed class PeerDeliveryState
     /// <summary>Gets or sets why the last delivery did not go through, or null after a success.</summary>
     public string? Reason { get; set; }
 
-    public Models.Peer.PeerInterest? Interest { get; set; }
+    /// <summary>Gets or sets what the peer last said it wants, or null when not known.</summary>
+    public PeerInterest? Interest { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the peer runs a protocol this server cannot talk to.</summary>
     public bool VersionBlocked { get; set; }
 
     /// <summary>Gets the kinds the peer applies, or null when not known.</summary>
     public HashSet<HintKind>? Accepts => Interest is null ? null : new HashSet<HintKind>(Interest.Kinds);
 
+    /// <summary>Gets or sets when the peer's interest was last asked for, in UTC.</summary>
     public DateTime InterestReadAt { get; set; }
 }

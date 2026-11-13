@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Text.Json;
+
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>What the sender does with a batch of hints after the peer's answer.</summary>
@@ -9,7 +13,7 @@ public enum DeliveryOutcome
     /// <summary>400. The peer could not read the hints. Rows fail for good and are shown to the operator.</summary>
     Malformed,
 
-    /// <summary>401, 403, 404, 409, or 428. The peer cannot take hints from this server until something is fixed. The peer is paused with the reason.</summary>
+    /// <summary>401, 403, 404, 409, 426, or 428. The peer cannot take hints from this server until something is fixed. The peer is paused with the reason.</summary>
     PausePeer,
 
     /// <summary>Anything else, including no answer. Rows are retried with backoff, forever.</summary>
@@ -41,16 +45,16 @@ public static class HintDelivery
     /// <param name="heldByPeer">The hint ids in the peer's inbound queue.</param>
     /// <param name="completedByPeer">The hint ids the peer finished recently.</param>
     /// <returns>The ids to complete and the ids to send again.</returns>
-    public static (System.Collections.Generic.List<string> Complete, System.Collections.Generic.List<string> Resend) Reconcile(
-        System.Collections.Generic.IEnumerable<string> sentHintIds,
-        System.Collections.Generic.ISet<string> heldByPeer,
-        System.Collections.Generic.ISet<string> completedByPeer)
+    public static (List<string> Complete, List<string> Resend) Reconcile(
+        IEnumerable<string> sentHintIds,
+        ISet<string> heldByPeer,
+        ISet<string> completedByPeer)
     {
-        System.ArgumentNullException.ThrowIfNull(sentHintIds);
-        System.ArgumentNullException.ThrowIfNull(heldByPeer);
-        System.ArgumentNullException.ThrowIfNull(completedByPeer);
-        var complete = new System.Collections.Generic.List<string>();
-        var resend = new System.Collections.Generic.List<string>();
+        ArgumentNullException.ThrowIfNull(sentHintIds);
+        ArgumentNullException.ThrowIfNull(heldByPeer);
+        ArgumentNullException.ThrowIfNull(completedByPeer);
+        var complete = new List<string>();
+        var resend = new List<string>();
         foreach (var id in sentHintIds)
         {
             if (completedByPeer.Contains(id))
@@ -66,17 +70,20 @@ public static class HintDelivery
         return (complete, resend);
     }
 
+    /// <summary>The reason shown when the peer refused this server's key, with the peer's own message when it sent one.</summary>
+    /// <param name="body">The peer's answer body.</param>
+    /// <returns>The reason.</returns>
     public static string RefusalReason(string body)
     {
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(body);
-            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && doc.RootElement.TryGetProperty("Message", out var message) && message.GetString() is { Length: > 0 } text)
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("Message", out var message) && message.GetString() is { Length: > 0 } text)
             {
                 return "the peer refused this server's key: " + text + ". Add this server or its user to the whitelist there";
             }
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
         }
 

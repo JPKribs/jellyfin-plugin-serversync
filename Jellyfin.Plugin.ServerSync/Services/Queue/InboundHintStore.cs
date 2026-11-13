@@ -1,6 +1,7 @@
 #pragma warning disable CA2100 // SQL is internal and parameterized.
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Microsoft.Data.Sqlite;
@@ -77,7 +78,7 @@ public sealed class InboundHintStore : QueueStoreBase
             Add(cmd, "@next", Stamp(row.NextAttempt < row.ReceivedAt ? row.ReceivedAt : row.NextAttempt));
             Add(cmd, "@parked", row.ParkedPath);
             Add(cmd, "@error", row.ParkedPath is null ? null : row.LastError);
-            row.Id = Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+            row.Id = Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
         });
     }
 
@@ -139,7 +140,7 @@ public sealed class InboundHintStore : QueueStoreBase
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE Attempts > 0";
-        return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     });
 
     /// <summary>
@@ -167,7 +168,7 @@ public sealed class InboundHintStore : QueueStoreBase
         return ReadAll(cmd);
     });
 
-    /// <summary>Counts the rows held from one origin, so a full queue can answer "busy" rather than grow.</summary>
+    /// <summary>Counts the rows held from one origin, parked rows aside, so a full queue can answer "busy" rather than grow.</summary>
     /// <param name="originServerId">The origin's server id.</param>
     /// <returns>How many rows.</returns>
     public int CountForOrigin(string originServerId) => Read(conn =>
@@ -175,9 +176,13 @@ public sealed class InboundHintStore : QueueStoreBase
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM InboundHints WHERE OriginServerId = @origin AND ParkedPath IS NULL";
         Add(cmd, "@origin", OriginKey(originServerId));
-        return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     });
 
+    /// <summary>Removes the oldest parked rows from one origin beyond the number kept.</summary>
+    /// <param name="originServerId">The origin's server id.</param>
+    /// <param name="keep">How many of the newest parked rows to keep.</param>
+    /// <returns>How many rows were removed.</returns>
     public int TrimParked(string originServerId, int keep) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -292,8 +297,14 @@ public sealed class InboundHintStore : QueueStoreBase
         });
     }
 
-    /// <summary>Counts the rows.</summary>
-    /// <returns>The count.</returns>
+    /// <summary>
+    /// Sets a row aside until the local object it waits for appears or the time runs out, without
+    /// counting an attempt.
+    /// </summary>
+    /// <param name="row">The row as tried.</param>
+    /// <param name="parkKey">The key the row waits under.</param>
+    /// <param name="until">When to try the row again regardless.</param>
+    /// <param name="reason">Why.</param>
     public void Park(InboundHint row, string parkKey, DateTime until, string reason)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -328,6 +339,10 @@ public sealed class InboundHintStore : QueueStoreBase
         return cmd.ExecuteNonQuery();
     });
 
+    /// <summary>Makes the rows parked under a key due now, since what they waited for appeared.</summary>
+    /// <param name="parkKey">The park key.</param>
+    /// <param name="utcNow">The current time.</param>
+    /// <returns>How many rows were made due.</returns>
     public int WakeParked(string parkKey, DateTime utcNow) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -337,11 +352,13 @@ public sealed class InboundHintStore : QueueStoreBase
         return cmd.ExecuteNonQuery();
     });
 
+    /// <summary>Counts the rows.</summary>
+    /// <returns>The count.</returns>
     public int Count() => Read(conn =>
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM InboundHints";
-        return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     });
 
     private static List<InboundHint> ReadAll(SqliteCommand cmd)

@@ -41,8 +41,6 @@ public abstract class QueueStoreBase
         return Database.RunRead(read);
     }
 
-    /// <summary>Runs a write under the write lock.</summary>
-    /// <param name="write">The write.</param>
     /// <summary>Runs a write that returns a value, such as a count of deleted rows, under the write lock.</summary>
     /// <typeparam name="T">The result type.</typeparam>
     /// <param name="write">The write.</param>
@@ -56,6 +54,8 @@ public abstract class QueueStoreBase
         }
     }
 
+    /// <summary>Runs a write under the write lock.</summary>
+    /// <param name="write">The write.</param>
     protected void Write(Action<SqliteConnection> write)
     {
         ArgumentNullException.ThrowIfNull(write);

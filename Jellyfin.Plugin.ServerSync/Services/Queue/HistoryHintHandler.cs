@@ -10,6 +10,7 @@ using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Peer;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -30,7 +31,7 @@ public sealed class HistoryHintHandler
     private readonly LocalServerClient _localClient;
     private readonly ApplyGuard _guard;
     private readonly VersionStore _versions;
-    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
+    private readonly ILibraryManager _libraryManager;
     private readonly LocalHintPublisher _publisher;
     private readonly IServerApplicationHost _applicationHost;
     private readonly HintTriage _triage;
@@ -48,6 +49,7 @@ public sealed class HistoryHintHandler
     /// <param name="publisher">Publishes changes of this server's own to the other peers.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="configManager">Plugin configuration, for the history switch.</param>
+    /// <param name="triage">Finds the local item a hint waits for.</param>
     /// <param name="libraryManager">The library, which names the item the activity log mentions.</param>
     /// <param name="logger">Logger.</param>
     public HistoryHintHandler(
@@ -60,7 +62,7 @@ public sealed class HistoryHintHandler
         IServerApplicationHost applicationHost,
         IPluginConfigurationManager configManager,
         HintTriage triage,
-        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
+        ILibraryManager libraryManager,
         ILogger<HistoryHintHandler> logger)
     {
         _configManager = configManager;
@@ -201,8 +203,9 @@ public sealed class HistoryHintHandler
             return HintApplyResult.Unchanged;
         }
 
-        // A key the origin's whitelist refuses cannot negotiate. The merged state is then written here only, the way one way history
-        // always worked, and no base is recorded because the origin never agreed to anything.
+        // A key the origin's whitelist refuses cannot negotiate. The merged state is then written here
+        // only, the way one way history always worked, and no base is recorded because the origin never
+        // agreed to anything.
         var oneWay = false;
         NegotiationStep settled;
         try
@@ -261,8 +264,8 @@ public sealed class HistoryHintHandler
         if (movedPastOrigin)
         {
             // This server contributed to the merged state, so the other peers hear about it from here.
-            // The origin already holds it through the negotiation above, unless the key is a standard
-            // user's and nothing was negotiated, in which case the origin hears of it too.
+            // The origin already holds it through the negotiation above, unless the origin refused this
+            // server's key and nothing was negotiated, in which case the origin hears of it too.
             var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = now };
             _publisher.PublishHistory(localUserId, userMapping.LocalUserName, localItemId, record.LocalPath ?? string.Empty, version, excludePeerKey: oneWay ? null : origin.Key, itemType: hint.ItemType);
         }
@@ -306,8 +309,7 @@ public sealed class HistoryHintHandler
     /// <summary>
     /// The merge cannot be trusted to tell the newer change: the two servers have never agreed on this
     /// object, or this server's value has since come from a third server. When this server knows when
-    /// its own value was last edited, the newer edit wins outright on origin versions, as the plan
-    /// requires. Without a local version the merge stands, which keeps a play that predates versioning
+    /// its own value was last edited, the newer edit wins outright on origin versions. Without a local version the merge stands, which keeps a play that predates versioning
     /// rather than risk losing it, and the base recorded after this apply makes every later merge three
     /// way.
     /// </summary>
@@ -333,9 +335,6 @@ public sealed class HistoryHintHandler
             case VersionDecision.Keep:
                 PeerHistoryNegotiator.ApplyMergedState(record, local);
                 _logger.LogDebug("Deciding {Item} by version: this server's edit is newer, keeping it", record.ItemName);
-                break;
-
-            default:
                 break;
         }
     }

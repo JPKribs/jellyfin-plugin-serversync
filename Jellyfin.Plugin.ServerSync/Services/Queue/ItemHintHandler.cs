@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,6 +11,9 @@ using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using Jellyfin.Sdk.Generated.Models;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -31,7 +33,7 @@ public sealed class ItemHintHandler
     private readonly HintTriage _triage;
     private readonly IPluginConfigurationManager _configManager;
     private readonly VersionConflictResolver _resolver;
-    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
+    private readonly ILibraryManager _libraryManager;
     private readonly LocalHintPublisher _publisher;
     private readonly ILogger<ItemHintHandler> _logger;
 
@@ -40,6 +42,7 @@ public sealed class ItemHintHandler
     /// </summary>
     /// <param name="services">The service provider the module tasks are built from.</param>
     /// <param name="configManager">Plugin configuration.</param>
+    /// <param name="triage">Finds the local object a hint waits for.</param>
     /// <param name="resolver">The version resolver.</param>
     /// <param name="publisher">Publishes this server's winning values.</param>
     /// <param name="libraryManager">The library, which names the item the activity log mentions.</param>
@@ -50,7 +53,7 @@ public sealed class ItemHintHandler
         HintTriage triage,
         VersionConflictResolver resolver,
         LocalHintPublisher publisher,
-        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
+        ILibraryManager libraryManager,
         ILogger<ItemHintHandler> logger)
     {
         _services = services;
@@ -69,7 +72,7 @@ public sealed class ItemHintHandler
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="prefetched">The origin's item when the worker already read it in a page, else null.</param>
     /// <returns>The outcome.</returns>
-    public async Task<HintApplyResult> ApplyMetadataAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken, Jellyfin.Sdk.Generated.Models.BaseItemDto? prefetched = null)
+    public async Task<HintApplyResult> ApplyMetadataAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken, BaseItemDto? prefetched = null)
     {
         ArgumentNullException.ThrowIfNull(hint);
         ArgumentNullException.ThrowIfNull(origin);
@@ -101,7 +104,7 @@ public sealed class ItemHintHandler
         var dto = prefetched;
         if (dto is null)
         {
-            List<Jellyfin.Sdk.Generated.Models.BaseItemDto> fetched;
+            List<BaseItemDto> fetched;
             try
             {
                 fetched = await client.GetItemsByIdsAsync(new[] { originItemId }, RefreshMetadataSyncTableTask.BuildRequestedFields(config), cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -144,17 +147,17 @@ public sealed class ItemHintHandler
                 : HintApplyResult.Dropped(HintCode.NotMapped, $"the local item at the path mapped from '{dto.Path}' could not be matched here");
         }
 
+        var localItemId = Guid.Parse(record.LocalItemId!);
         return await SettleAndApplyAsync(
             record,
             HintKind.Metadata,
-            HintProtocol.MetadataKey(Guid.Parse(record.LocalItemId!)),
+            HintProtocol.MetadataKey(localItemId),
             hint,
             origin,
-            source,
-            version => _publisher.PublishMetadata(Guid.Parse(record.LocalItemId!), record.LocalPath ?? string.Empty, version, excludePeerKey: null, itemType: hint.ItemType),
+            version => _publisher.PublishMetadata(localItemId, record.LocalPath ?? string.Empty, version, excludePeerKey: null, itemType: hint.ItemType),
             () => ActivatorUtilities.CreateInstance<SyncMissingMetadataTask>(_services).ApplyRowAsync(record, source, cancellationToken),
             record.ItemName,
-            () => _libraryManager.GetItemById(Guid.Parse(record.LocalItemId!))).ConfigureAwait(false);
+            () => _libraryManager.GetItemById(localItemId)).ConfigureAwait(false);
     }
 
     /// <summary>Applies a people hint.</summary>
@@ -184,7 +187,7 @@ public sealed class ItemHintHandler
             return HintApplyResult.Park(waitFor, "the person does not exist on this server yet. It applies when the person arrives");
         }
 
-        Jellyfin.Sdk.Generated.Models.BaseItemDto? dto;
+        BaseItemDto? dto;
         try
         {
             dto = await client.GetPersonByNameAsync(hint.Key, cancellationToken).ConfigureAwait(false);
@@ -219,7 +222,6 @@ public sealed class ItemHintHandler
             HintProtocol.PeopleKey(record.PersonName),
             hint,
             origin,
-            source,
             version => _publisher.PublishPeople(record.PersonName, Guid.Parse(record.LocalPersonId), version, excludePeerKey: null),
             () => ActivatorUtilities.CreateInstance<SyncMissingPeopleTask>(_services).ApplyRowAsync(record, source, cancellationToken),
             record.PersonName,
@@ -232,11 +234,10 @@ public sealed class ItemHintHandler
         string localKey,
         InboundHint hint,
         SourceServer origin,
-        ScanSource source,
         Action<ObjectVersion> publishLocal,
         Func<Task<bool>> apply,
         string? name,
-        Func<MediaBrowser.Controller.Entities.BaseItem?> localItem)
+        Func<BaseItem?> localItem)
         where TRecord : SyncRecord
     {
         var incoming = HintProtocol.IncomingVersion(hint, kind, localKey);
@@ -312,18 +313,15 @@ public sealed class ItemHintHandler
         return HintApplyResult.AppliedTo(localItem());
     }
 
-    private void StoreKept<TRecord>(TRecord record, HintKind kind)
-        where TRecord : SyncRecord
+    private void StoreKept(SyncRecord record, HintKind kind)
     {
         switch (kind)
         {
             case HintKind.Metadata:
-                _services.GetRequiredService<MetadataSyncTableManager>().Upsert((MetadataSyncItem)(object)record);
+                _services.GetRequiredService<MetadataSyncTableManager>().Upsert((MetadataSyncItem)record);
                 break;
             case HintKind.People:
-                _services.GetRequiredService<PeopleSyncTableManager>().Upsert((PeopleSyncItem)(object)record);
-                break;
-            default:
+                _services.GetRequiredService<PeopleSyncTableManager>().Upsert((PeopleSyncItem)record);
                 break;
         }
     }

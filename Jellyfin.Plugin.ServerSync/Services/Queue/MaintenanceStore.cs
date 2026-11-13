@@ -33,9 +33,9 @@ public sealed class MaintenanceStore : QueueStoreBase
     public int BackfillServerKey(string serverKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
-        var updated = 0;
-        Write(conn =>
+        return Write(conn =>
         {
+            var updated = 0;
             using var transaction = conn.BeginTransaction();
             foreach (var table in SyncTables)
             {
@@ -47,8 +47,8 @@ public sealed class MaintenanceStore : QueueStoreBase
             }
 
             transaction.Commit();
+            return updated;
         });
-        return updated;
     }
 
     /// <summary>
@@ -60,9 +60,9 @@ public sealed class MaintenanceStore : QueueStoreBase
     /// <returns>How many rows were queued again.</returns>
     public int RequeueErrored(DateTime erroredBefore)
     {
-        var requeued = 0;
-        Write(conn =>
+        return Write(conn =>
         {
+            var requeued = 0;
             using var transaction = conn.BeginTransaction();
             foreach (var table in RetriedTables)
             {
@@ -74,7 +74,7 @@ public sealed class MaintenanceStore : QueueStoreBase
             }
 
             transaction.Commit();
+            return requeued;
         });
-        return requeued;
     }
 }

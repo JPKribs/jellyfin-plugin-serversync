@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
@@ -81,7 +82,7 @@ public static class HintMapping
 
     // Mappings can overlap, a whole drive and a folder on it. The deepest root that holds the path is the
     // one meant for it, whatever order the mappings were added in.
-    private static LibraryMapping? MostSpecific(System.Collections.Generic.IEnumerable<LibraryMapping> matches, Func<LibraryMapping, string?> rootOf)
+    private static LibraryMapping? MostSpecific(IEnumerable<LibraryMapping> matches, Func<LibraryMapping, string?> rootOf)
         => matches.OrderByDescending(m => Normalize(rootOf(m) ?? string.Empty).TrimEnd('/').Length).FirstOrDefault();
 
     private static string Normalize(string path) => path.Replace(Path.DirectorySeparatorChar, '/').Replace('\\', '/');

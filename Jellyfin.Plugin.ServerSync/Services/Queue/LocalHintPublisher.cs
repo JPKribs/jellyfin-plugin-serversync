@@ -1,5 +1,8 @@
 using System;
+using System.Globalization;
+using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Services.Links;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -20,7 +23,7 @@ public sealed class LocalHintPublisher
     private readonly OutboundHintWorker _worker;
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalHintPublisher> _logger;
-    private readonly Links.ILinkRegistry? _links;
+    private readonly ILinkRegistry? _links;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalHintPublisher"/> class.
@@ -31,6 +34,7 @@ public sealed class LocalHintPublisher
     /// <param name="worker">The delivery worker to wake.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="logger">Logger.</param>
+    /// <param name="links">The link registry, so a link goes out under its copy's path, or null.</param>
     public LocalHintPublisher(
         IPluginConfigurationManager configManager,
         OutboundHintStore outbound,
@@ -38,7 +42,7 @@ public sealed class LocalHintPublisher
         OutboundHintWorker worker,
         IServerApplicationHost applicationHost,
         ILogger<LocalHintPublisher> logger,
-        Links.ILinkRegistry? links = null)
+        ILinkRegistry? links = null)
     {
         _links = links;
         _configManager = configManager;
@@ -55,7 +59,8 @@ public sealed class LocalHintPublisher
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
     /// <param name="recorded">Whether the change was made by hand. Provider work is sent marked and records no version here.</param>
-    /// <returns>How many peers were queued a hint.</returns>
+    /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
+    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
     public int PublishMetadata(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, bool recorded = true, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -78,7 +83,7 @@ public sealed class LocalHintPublisher
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
     /// <param name="recorded">Whether the change was made by hand. Provider work is sent marked and records no version here.</param>
-    /// <returns>How many peers were queued a hint.</returns>
+    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
     public int PublishPeople(string name, Guid localPersonId, ObjectVersion version, string? excludePeerKey, bool recorded = true)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -90,21 +95,22 @@ public sealed class LocalHintPublisher
             version,
             excludePeerKey,
             _ => true,
-            () => new OutboundHint { Kind = HintKind.People, Key = name, ItemId = localPersonId.ToString("N", System.Globalization.CultureInfo.InvariantCulture), UserName = name, Recorded = recorded },
+            () => new OutboundHint { Kind = HintKind.People, Key = name, ItemId = localPersonId.ToString("N", CultureInfo.InvariantCulture), UserName = name, Recorded = recorded },
             recorded);
     }
 
     // A link goes out under the path its copy would have, so a peer matches the file it stands in for,
     // whatever version of Server Sync it runs.
     private string SentPath(string itemPath)
-        => _links is null || string.IsNullOrEmpty(itemPath) ? itemPath : Links.LinkPaths.RowPathFor(itemPath, _links);
+        => _links is null || string.IsNullOrEmpty(itemPath) ? itemPath : LinkPaths.RowPathFor(itemPath, _links);
 
     /// <summary>Publishes a media file that appeared here.</summary>
     /// <param name="localItemId">The local item.</param>
     /// <param name="itemPath">The local path of the file.</param>
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the file, or null.</param>
-    /// <returns>How many peers were queued a hint.</returns>
+    /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
+    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
     public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -126,10 +132,21 @@ public sealed class LocalHintPublisher
             itemPath: itemPath);
     }
 
+    /// <summary>Publishes a change to a playlist, or its deletion.</summary>
+    /// <param name="localPlaylistId">The local playlist.</param>
+    /// <param name="rootKey">The playlist key, shared by the original and its copies.</param>
+    /// <param name="name">The playlist's name.</param>
+    /// <param name="ownerId">The local owner.</param>
+    /// <param name="version">The version the change carries.</param>
+    /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
+    /// <param name="recorded">Whether the change was made by hand.</param>
+    /// <param name="deleted">Whether the playlist was deleted.</param>
+    /// <param name="copy">Whether the playlist is a copy of another server's.</param>
+    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
     public int PublishPlaylist(Guid localPlaylistId, string rootKey, string name, Guid ownerId, ObjectVersion version, string? excludePeerKey, bool recorded, bool deleted, bool copy)
     {
         ArgumentNullException.ThrowIfNull(version);
-        var owner = ownerId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        var owner = ownerId.ToString("N", CultureInfo.InvariantCulture);
         return Publish(
             HintKind.Playlists,
             rootKey,
@@ -140,7 +157,7 @@ public sealed class LocalHintPublisher
             {
                 Kind = HintKind.Playlists,
                 Key = rootKey,
-                ItemId = localPlaylistId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
+                ItemId = localPlaylistId.ToString("N", CultureInfo.InvariantCulture),
                 ItemType = HintProtocol.PlaylistItemType(copy, deleted),
                 UserId = owner,
                 UserName = name,
@@ -151,7 +168,7 @@ public sealed class LocalHintPublisher
             deletion: deleted);
     }
 
-    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<Models.Configuration.SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true, string? itemPath = null, Guid userId = default, bool deletion = false)
+    private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true, string? itemPath = null, Guid userId = default, bool deletion = false)
     {
         version.Kind = kind;
         version.Key = localKey;
@@ -210,15 +227,15 @@ public sealed class LocalHintPublisher
     /// <param name="version">The version the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change and needs no hint, or null.</param>
     /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
-    /// <returns>How many peers were queued a hint.</returns>
+    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
     public int PublishHistory(Guid localUserId, string? userName, Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
         itemPath = SentPath(itemPath);
 
         var key = HintProtocol.HistoryKey(localUserId, localItemId);
-        var itemKey = localItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
-        var userKey = localUserId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        var itemKey = localItemId.ToString("N", CultureInfo.InvariantCulture);
+        var userKey = localUserId.ToString("N", CultureInfo.InvariantCulture);
         return Publish(
             HintKind.History,
             key,

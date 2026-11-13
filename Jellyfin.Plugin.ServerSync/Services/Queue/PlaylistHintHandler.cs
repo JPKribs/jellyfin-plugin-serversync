@@ -5,12 +5,17 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Playlists;
-using JPKribs.Jellyfin.Base;
+using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
+/// <summary>
+/// Applies a playlist hint: reads the playlist from the origin and copies it here the way the scheduled
+/// playlist sync would, or deletes the local copy when the origin deleted its own. Unless the origin
+/// is a Pull server, a newer edit made here is kept and announced instead.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PlaylistHintHandler
 {
@@ -20,6 +25,14 @@ public sealed class PlaylistHintHandler
     private readonly LocalHintPublisher _publisher;
     private readonly ILogger<PlaylistHintHandler> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PlaylistHintHandler"/> class.
+    /// </summary>
+    /// <param name="configManager">Plugin configuration.</param>
+    /// <param name="mirror">Reads, copies, and deletes playlists.</param>
+    /// <param name="resolver">The version resolver.</param>
+    /// <param name="publisher">Publishes this server's winning values.</param>
+    /// <param name="logger">Logger.</param>
     public PlaylistHintHandler(IPluginConfigurationManager configManager, PlaylistMirror mirror, VersionConflictResolver resolver, LocalHintPublisher publisher, ILogger<PlaylistHintHandler> logger)
     {
         _configManager = configManager;
@@ -29,6 +42,12 @@ public sealed class PlaylistHintHandler
         _logger = logger;
     }
 
+    /// <summary>Applies one playlist hint, waiting briefly for the scheduled playlist sync to finish.</summary>
+    /// <param name="hint">The inbound row.</param>
+    /// <param name="origin">The configured entry for the origin.</param>
+    /// <param name="client">A client bound to the origin.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The outcome.</returns>
     public async Task<HintApplyResult> ApplyAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(hint);
@@ -47,8 +66,8 @@ public sealed class PlaylistHintHandler
 
         var rootKey = HintProtocol.PlaylistKey(root);
         var senderIsOriginal = !HintProtocol.IsPlaylistCopy(hint.ItemType);
-        var mutex = Tasks.Common.SyncModuleMutex.ForModule("Playlists");
-        if (!await mutex.WaitAsync(Tasks.Common.SyncModuleMutex.SingleRowWait, cancellationToken).ConfigureAwait(false))
+        var mutex = SyncModuleMutex.ForModule("Playlists");
+        if (!await mutex.WaitAsync(SyncModuleMutex.SingleRowWait, cancellationToken).ConfigureAwait(false))
         {
             return HintApplyResult.RetryLater("the scheduled playlist sync is running");
         }

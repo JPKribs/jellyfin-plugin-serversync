@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using JPKribs.Jellyfin.Base;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -81,17 +85,17 @@ public sealed class HintActivityLog
     /// </summary>
     /// <param name="item">The item.</param>
     /// <returns>The title.</returns>
-    public static string TitleOf(MediaBrowser.Controller.Entities.BaseItem item)
+    public static string TitleOf(BaseItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        if (item is MediaBrowser.Controller.Entities.TV.Episode episode)
+        if (item is Episode episode)
         {
             var series = string.IsNullOrEmpty(episode.SeriesName) ? null : episode.SeriesName;
             var code = EpisodeCode(episode);
             return series is null ? (code is null ? item.Name : $"{code} {item.Name}") : (code is null ? $"{series} {item.Name}" : $"{series} {code}");
         }
 
-        if (item is MediaBrowser.Controller.Entities.TV.Season season && !string.IsNullOrEmpty(season.SeriesName))
+        if (item is Season season && !string.IsNullOrEmpty(season.SeriesName))
         {
             return $"{season.SeriesName} {item.Name}";
         }
@@ -102,10 +106,10 @@ public sealed class HintActivityLog
     /// <summary>The title with the episode's own name after it, for the line of detail.</summary>
     /// <param name="item">The item.</param>
     /// <returns>The line.</returns>
-    public static string LineOf(MediaBrowser.Controller.Entities.BaseItem item)
+    public static string LineOf(BaseItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        return item is MediaBrowser.Controller.Entities.TV.Episode episode && EpisodeCode(episode) is not null && !string.IsNullOrEmpty(episode.SeriesName)
+        return item is Episode episode && EpisodeCode(episode) is not null && !string.IsNullOrEmpty(episode.SeriesName)
             ? $"{TitleOf(item)} - {item.Name}"
             : TitleOf(item);
     }
@@ -113,9 +117,9 @@ public sealed class HintActivityLog
     /// <summary>The episode's season and number, as S01E02, or null when either is unknown.</summary>
     /// <param name="episode">The episode.</param>
     /// <returns>The code.</returns>
-    public static string? EpisodeCode(MediaBrowser.Controller.Entities.TV.Episode episode)
+    public static string? EpisodeCode(Episode episode)
         => episode.ParentIndexNumber.HasValue && episode.IndexNumber.HasValue
-            ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "S{0:D2}E{1:D2}", episode.ParentIndexNumber.Value, episode.IndexNumber.Value)
+            ? string.Format(CultureInfo.InvariantCulture, "S{0:D2}E{1:D2}", episode.ParentIndexNumber.Value, episode.IndexNumber.Value)
             : null;
 
     /// <summary>The bare name of what a hint concerns: the file, the person, or the user.</summary>
@@ -202,8 +206,10 @@ public sealed class HintActivityLog
     /// <summary>Records that delivery to a peer is paused.</summary>
     /// <param name="peerName">The peer's display name.</param>
     /// <param name="reason">Why.</param>
+    /// <param name="waiting">The changes waiting to go to the peer.</param>
+    /// <param name="until">When delivery resumes.</param>
     /// <returns>A task.</returns>
-    public Task PausedAsync(string peerName, string reason, System.Collections.Generic.IReadOnlyList<OutboundHint> waiting, DateTime until)
+    public Task PausedAsync(string peerName, string reason, IReadOnlyList<OutboundHint> waiting, DateTime until)
     {
         ArgumentNullException.ThrowIfNull(waiting);
         var held = waiting.Count == 0 ? string.Empty : $" Waiting to go: {Changes(waiting)}.";
@@ -216,10 +222,10 @@ public sealed class HintActivityLog
 
     /// <summary>Records that a peer rejected a whole request, once for the batch.</summary>
     /// <param name="peerName">The peer's display name.</param>
-    /// <param name="count">How many hints the request carried.</param>
+    /// <param name="rows">The hints the request carried.</param>
     /// <param name="reason">Why.</param>
     /// <returns>A task.</returns>
-    public Task RejectedBatchAsync(string peerName, System.Collections.Generic.IReadOnlyList<OutboundHint> rows, string reason)
+    public Task RejectedBatchAsync(string peerName, IReadOnlyList<OutboundHint> rows, string reason)
     {
         ArgumentNullException.ThrowIfNull(rows);
         return WriteAsync(
@@ -231,9 +237,9 @@ public sealed class HintActivityLog
 
     /// <summary>Records that a peer lost hints and they were sent again.</summary>
     /// <param name="peerName">The peer's display name.</param>
-    /// <param name="count">How many.</param>
+    /// <param name="rows">The hints sent again.</param>
     /// <returns>A task.</returns>
-    public Task ResentAsync(string peerName, System.Collections.Generic.IReadOnlyList<OutboundHint> rows)
+    public Task ResentAsync(string peerName, IReadOnlyList<OutboundHint> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
         return WriteAsync(
@@ -243,33 +249,35 @@ public sealed class HintActivityLog
             LogLevel.Warning);
     }
 
-    public static string Changes(System.Collections.Generic.IReadOnlyList<OutboundHint> rows, int shown = 5)
+    /// <summary>Lists the subjects of some changes in a sentence, naming at most a few and counting the rest.</summary>
+    /// <param name="rows">The changes.</param>
+    /// <param name="shown">How many subjects to name.</param>
+    /// <returns>The list.</returns>
+    public static string Changes(IReadOnlyList<OutboundHint> rows, int shown = 5)
     {
         ArgumentNullException.ThrowIfNull(rows);
-        var names = new System.Collections.Generic.List<string>();
-        foreach (var name in rows.Select(row => Subject(row.Kind, row.ItemPath, row.UserName, row.Key)))
-        {
-            if (!names.Contains(name, StringComparer.Ordinal))
-            {
-                names.Add(name);
-            }
-        }
-
+        var names = rows.Select(row => Subject(row.Kind, row.ItemPath, row.UserName, row.Key)).Distinct(StringComparer.Ordinal).ToList();
         if (names.Count == 0)
         {
             return "changes";
         }
 
-        var listed = names.Count > shown ? names.GetRange(0, shown) : names;
-        var text = listed.Count switch
+        if (names.Count > shown)
         {
-            1 => listed[0],
-            2 => $"{listed[0]} and {listed[1]}",
-            _ => string.Join(", ", listed.GetRange(0, listed.Count - 1)) + ", and " + listed[^1]
+            return $"{string.Join(", ", names.Take(shown))}, and {names.Count - shown} more";
+        }
+
+        return names.Count switch
+        {
+            1 => names[0],
+            2 => $"{names[0]} and {names[1]}",
+            _ => string.Join(", ", names.Take(names.Count - 1)) + ", and " + names[^1]
         };
-        return names.Count > shown ? $"{string.Join(", ", listed)}, and {names.Count - shown} more" : text;
     }
 
+    /// <summary>The text with surrounding space removed and its first letter capitalized.</summary>
+    /// <param name="text">The text.</param>
+    /// <returns>The sentence, or the text itself when it is blank.</returns>
     public static string? Sentence(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))

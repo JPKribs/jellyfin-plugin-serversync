@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -41,7 +44,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     private readonly SemaphoreSlim _wakeContent = new(0, 1);
     private readonly SemaphoreSlim _quickPass = new(1, 1);
     private readonly SemaphoreSlim _contentPass = new(1, 1);
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, DateTime Version, HintCode Code, string? Reason)> _completed = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (DateTime At, DateTime Version, HintCode Code, string? Reason)> _completed = new(StringComparer.Ordinal);
     private CancellationTokenSource? _stopping;
     private Task? _loop;
     private Task? _contentLoop;
@@ -55,7 +58,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     /// <param name="history">The history handler.</param>
     /// <param name="items">The metadata and people handler.</param>
     /// <param name="content">The content handler.</param>
+    /// <param name="playlists">The playlist handler.</param>
     /// <param name="activity">Writes each conclusion to Jellyfin's activity log.</param>
+    /// <param name="triage">Finds the local object a parked hint waits for.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="logger">Logger.</param>
     public InboundHintWorker(
@@ -162,7 +167,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>Makes the rows parked under a key due now and wakes the worker to apply them.</summary>
+    /// <param name="parkKey">The park key.</param>
+    /// <returns>How many rows were made due.</returns>
     public int WakeParked(string parkKey)
     {
         var woken = _inbound.WakeParked(parkKey, DateTime.UtcNow);
@@ -175,6 +182,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         return woken;
     }
 
+    /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _stopping = new CancellationTokenSource();
@@ -276,7 +284,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         {
             var due = _inbound.GetDue(DateTime.UtcNow, BatchSize, content);
             full = due.Count >= BatchSize;
-            var prefetched = content ? new Dictionary<string, Jellyfin.Sdk.Generated.Models.BaseItemDto>(StringComparer.Ordinal) : await PrefetchItemsAsync(due, config, clients, cancellationToken).ConfigureAwait(false);
+            var prefetched = content ? new Dictionary<string, BaseItemDto>(StringComparer.Ordinal) : await PrefetchItemsAsync(due, config, clients, cancellationToken).ConfigureAwait(false);
             foreach (var row in due)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -406,7 +414,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
 
     // Applies one row. Null means the module's scheduled run holds it: nothing failed, so the row is put
     // off for a minute without counting an attempt.
-    private async Task<HintApplyResult?> TryApplyAsync(InboundHint row, SourceServer origin, SourceServerClient client, Jellyfin.Sdk.Generated.Models.BaseItemDto? prefetched, CancellationToken cancellationToken)
+    private async Task<HintApplyResult?> TryApplyAsync(InboundHint row, SourceServer origin, SourceServerClient client, BaseItemDto? prefetched, CancellationToken cancellationToken)
     {
         try
         {
@@ -453,10 +461,12 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 if (_triage.Present(result.ParkKey, row.Kind == HintKind.People ? row.Key : null))
                 {
                     WakeParked(result.ParkKey);
-                    return null;
+                }
+                else
+                {
+                    _logger.LogDebug("Hint {Hint} from '{Origin}' waits for {Key}", row.HintId, origin.DisplayName, result.ParkKey);
                 }
 
-                _logger.LogDebug("Hint {Hint} from '{Origin}' waits for {Key}", row.HintId, origin.DisplayName, result.ParkKey);
                 return null;
             }
 
@@ -497,13 +507,13 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     // page per origin, instead of one request per hint. A bulk provider refresh on a peer then costs the
     // receiver no more fetches than its own scan would. A page that cannot be read falls back to the
     // per hint fetch, which says why.
-    private async Task<Dictionary<string, Jellyfin.Sdk.Generated.Models.BaseItemDto>> PrefetchItemsAsync(
+    private async Task<Dictionary<string, BaseItemDto>> PrefetchItemsAsync(
         IList<InboundHint> due,
-        Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config,
+        PluginConfiguration config,
         Dictionary<string, SourceServerClient> clients,
         CancellationToken cancellationToken)
     {
-        var items = new Dictionary<string, Jellyfin.Sdk.Generated.Models.BaseItemDto>(StringComparer.Ordinal);
+        var items = new Dictionary<string, BaseItemDto>(StringComparer.Ordinal);
         var byOrigin = due
             .Where(r => r.Kind == HintKind.Metadata && Guid.TryParse(r.Key, out _))
             .GroupBy(r => r.OriginServerId, StringComparer.OrdinalIgnoreCase)
@@ -550,7 +560,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         return items;
     }
 
-    private async Task<HintApplyResult> ApplyOneAsync(InboundHint row, SourceServer origin, SourceServerClient client, Jellyfin.Sdk.Generated.Models.BaseItemDto? prefetched, CancellationToken cancellationToken)
+    private async Task<HintApplyResult> ApplyOneAsync(InboundHint row, SourceServer origin, SourceServerClient client, BaseItemDto? prefetched, CancellationToken cancellationToken)
     {
         return row.Kind switch
         {

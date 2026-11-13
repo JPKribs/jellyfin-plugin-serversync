@@ -1,5 +1,6 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Utilities;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
@@ -62,7 +63,7 @@ public static class VersionDecider
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
-        return Utilities.UtcTime.AsUtc(a.Timestamp) == Utilities.UtcTime.AsUtc(b.Timestamp) && string.Equals(a.ServerId, b.ServerId, StringComparison.Ordinal);
+        return UtcTime.AsUtc(a.Timestamp) == UtcTime.AsUtc(b.Timestamp) && string.Equals(a.ServerId, b.ServerId, StringComparison.Ordinal);
     }
 
     /// <summary>Whether one version is newer than another, with the server id breaking ties.</summary>
@@ -74,7 +75,7 @@ public static class VersionDecider
         ArgumentNullException.ThrowIfNull(candidate);
         ArgumentNullException.ThrowIfNull(other);
 
-        var byTime = Utilities.UtcTime.AsUtc(candidate.Timestamp).CompareTo(Utilities.UtcTime.AsUtc(other.Timestamp));
+        var byTime = UtcTime.AsUtc(candidate.Timestamp).CompareTo(UtcTime.AsUtc(other.Timestamp));
         if (byTime != 0)
         {
             return byTime > 0;
@@ -82,5 +83,4 @@ public static class VersionDecider
 
         return string.CompareOrdinal(candidate.ServerId, other.ServerId) > 0;
     }
-
 }

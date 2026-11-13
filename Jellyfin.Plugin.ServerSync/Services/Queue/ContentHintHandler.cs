@@ -10,6 +10,7 @@ using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -27,7 +28,7 @@ public sealed class ContentHintHandler
     private readonly IServiceProvider _services;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ContentSyncTableManager _table;
-    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
+    private readonly ILibraryManager _libraryManager;
     private readonly ILogger<ContentHintHandler> _logger;
 
     /// <summary>
@@ -38,7 +39,7 @@ public sealed class ContentHintHandler
     /// <param name="table">The content table.</param>
     /// <param name="libraryManager">The library, which names the item the activity log mentions.</param>
     /// <param name="logger">Logger.</param>
-    public ContentHintHandler(IServiceProvider services, IPluginConfigurationManager configManager, ContentSyncTableManager table, MediaBrowser.Controller.Library.ILibraryManager libraryManager, ILogger<ContentHintHandler> logger)
+    public ContentHintHandler(IServiceProvider services, IPluginConfigurationManager configManager, ContentSyncTableManager table, ILibraryManager libraryManager, ILogger<ContentHintHandler> logger)
     {
         _services = services;
         _configManager = configManager;

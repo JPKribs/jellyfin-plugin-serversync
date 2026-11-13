@@ -1,6 +1,7 @@
 #pragma warning disable CA2100 // SQL is internal and parameterized.
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Microsoft.Data.Sqlite;
@@ -65,7 +66,7 @@ public sealed class OutboundHintStore : QueueStoreBase
             // The id is minted before the insert, so the row and its id land in one statement and a crash
             // cannot leave a row with no id. It stays the same for every later edit of the object, and is
             // never reused after the database is reset, since a peer may still remember a completed one.
-            Add(cmd, "@hint", originServerId + ":" + Guid.NewGuid().ToString("N", System.Globalization.CultureInfo.InvariantCulture));
+            Add(cmd, "@hint", originServerId + ":" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
             Add(cmd, "@peer", row.PeerKey);
             Add(cmd, "@kind", (int)row.Kind);
             Add(cmd, "@key", row.Key);
@@ -101,7 +102,7 @@ public sealed class OutboundHintStore : QueueStoreBase
             using var count = conn.CreateCommand();
             count.CommandText = "SELECT COUNT(*) FROM OutboundHints WHERE PeerKey = @peer AND State = 0";
             Add(count, "@peer", peerKey);
-            if (Convert.ToInt32(count.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) <= HintProtocol.MaxPendingPerPeer)
+            if (Convert.ToInt32(count.ExecuteScalar(), CultureInfo.InvariantCulture) <= HintProtocol.MaxPendingPerPeer)
             {
                 return;
             }
@@ -130,18 +131,13 @@ public sealed class OutboundHintStore : QueueStoreBase
     /// </summary>
     /// <param name="before">The cutoff.</param>
     /// <returns>How many rows were removed.</returns>
-    public int ExpireSettled(DateTime before)
+    public int ExpireSettled(DateTime before) => Write(conn =>
     {
-        var removed = 0;
-        Write(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "DELETE FROM OutboundHints WHERE State <> 0 AND COALESCE(SentAt, CreatedAt) < @before";
-            Add(cmd, "@before", Stamp(before));
-            removed = cmd.ExecuteNonQuery();
-        });
-        return removed;
-    }
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM OutboundHints WHERE State <> 0 AND COALESCE(SentAt, CreatedAt) < @before";
+        Add(cmd, "@before", Stamp(before));
+        return cmd.ExecuteNonQuery();
+    });
 
     /// <summary>Returns the pending rows for one peer that are due, oldest first.</summary>
     /// <param name="peerKey">The peer's entry key.</param>
@@ -294,10 +290,10 @@ public sealed class OutboundHintStore : QueueStoreBase
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(peerKey);
         ArgumentNullException.ThrowIfNull(completed);
-        var removed = 0;
         var now = DateTime.UtcNow;
-        Write(conn =>
+        return Write(conn =>
         {
+            var removed = 0;
             using var transaction = conn.BeginTransaction();
             foreach (var done in completed)
             {
@@ -311,10 +307,14 @@ public sealed class OutboundHintStore : QueueStoreBase
             }
 
             transaction.Commit();
+            return removed;
         });
-        return removed;
     }
 
+    /// <summary>Returns the rows for one peer that carry the given hint ids.</summary>
+    /// <param name="peerKey">The peer's entry key.</param>
+    /// <param name="hintIds">The hint ids.</param>
+    /// <returns>The rows found, by hint id.</returns>
     public Dictionary<string, OutboundHint> GetByHintIds(string peerKey, IEnumerable<string> hintIds)
     {
         ArgumentNullException.ThrowIfNull(hintIds);
@@ -325,7 +325,7 @@ public sealed class OutboundHintStore : QueueStoreBase
             return found;
         }
 
-        Read(conn =>
+        return Read(conn =>
         {
             foreach (var hintId in wanted)
             {
@@ -342,7 +342,6 @@ public sealed class OutboundHintStore : QueueStoreBase
 
             return found;
         });
-        return found;
     }
 
     /// <summary>Returns the sent rows for a peer that have waited longer than the grace period.</summary>

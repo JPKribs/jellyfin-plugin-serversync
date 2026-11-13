@@ -1,9 +1,9 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using MediaBrowser.Controller;
@@ -27,13 +27,14 @@ public sealed class VersionConflictResolver
     private readonly IServerApplicationHost _applicationHost;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ILogger<VersionConflictResolver> _logger;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime CheckedAt, bool? Carries)> _capabilities = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (DateTime CheckedAt, bool? Carries)> _capabilities = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VersionConflictResolver"/> class.
     /// </summary>
     /// <param name="versions">The version store.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
+    /// <param name="configManager">Plugin configuration, for this plugin's version.</param>
     /// <param name="logger">Logger.</param>
     public VersionConflictResolver(VersionStore versions, IServerApplicationHost applicationHost, IPluginConfigurationManager configManager, ILogger<VersionConflictResolver> logger)
     {
@@ -208,6 +209,6 @@ public sealed class VersionConflictResolver
             return local is null ? VersionDecision.Apply : VersionDecision.Keep;
         }
 
-        return local is null ? VersionDecision.Apply : VersionDecider.Decide(local, peerVersion, valuesEqual: false);
+        return VersionDecider.Decide(local, peerVersion, valuesEqual: false);
     }
 }

@@ -5,11 +5,13 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Services.Playlists;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;
-using Jellyfin.Plugin.ServerSync.Services.Playlists;
+using MediaBrowser.Model.Plugins;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -40,7 +42,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly IUserDataManager _userDataManager;
     private readonly IUserManager _userManager;
     private readonly ILibraryManager _libraryManager;
-    private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor _httpContext;
+    private readonly IHttpContextAccessor _httpContext;
     private readonly IPluginConfigurationManager _configManager;
     private readonly LocalHintPublisher _publisher;
     private readonly OutboundHintWorker _worker;
@@ -53,6 +55,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly ConcurrentDictionary<string, PendingChange> _pending = new(StringComparer.Ordinal);
     private CancellationTokenSource? _stopping;
     private Task? _flushLoop;
+
     // The most unmatched changes kept to check again. A server whose mappings miss a whole library
     // would otherwise hold every change made there.
     private const int MaxUnmatched = 1000;
@@ -71,13 +74,16 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <param name="worker">The delivery worker, which knows what each peer accepts.</param>
     /// <param name="guard">The apply guard.</param>
     /// <param name="versions">The version store, for edits no peer is told about.</param>
+    /// <param name="suppression">The hints peers declined, forgotten when the configuration changes.</param>
+    /// <param name="inboundWorker">The inbound worker, woken when an item or person a parked hint waits for arrives.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
+    /// <param name="playlistCopies">The playlist copy store.</param>
     /// <param name="logger">Logger.</param>
     public LocalChangeObserver(
         IUserDataManager userDataManager,
         IUserManager userManager,
         ILibraryManager libraryManager,
-        Microsoft.AspNetCore.Http.IHttpContextAccessor httpContext,
+        IHttpContextAccessor httpContext,
         IPluginConfigurationManager configManager,
         LocalHintPublisher publisher,
         OutboundHintWorker worker,
@@ -453,7 +459,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     // A saved mapping may now cover a change that matched nothing, so each is raised again. One that
     // still matches nothing is noted again by the raise.
-    private void OnConfigurationChanged(object? sender, MediaBrowser.Model.Plugins.BasePluginConfiguration e)
+    private void OnConfigurationChanged(object? sender, BasePluginConfiguration e)
     {
         _suppression.Clear();
 
@@ -512,9 +518,6 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
             case HintKind.Content when !string.IsNullOrEmpty(item.Path):
                 NoteUnmatched(_publisher.PublishContent(change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), change, HintKind.Content, item.Path, null);
-                break;
-
-            default:
                 break;
         }
     }

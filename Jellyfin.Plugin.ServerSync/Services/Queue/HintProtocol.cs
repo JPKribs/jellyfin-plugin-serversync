@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Utilities;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
@@ -23,7 +26,7 @@ public static class HintProtocol
     /// <summary>How long a peer that refused the key or lacks the plugin is left alone before another try.</summary>
     /// <param name="config">The configuration, which holds the minutes.</param>
     /// <returns>The pause.</returns>
-    public static TimeSpan PeerPause(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    public static TimeSpan PeerPause(PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
         return TimeSpan.FromMinutes(Math.Clamp(config.HintRefusedRetryMinutes, 1, 1440));
@@ -36,7 +39,7 @@ public static class HintProtocol
     /// <param name="config">The configuration, which holds the first wait and the ceiling.</param>
     /// <param name="attemptsSoFar">How many attempts have failed, including this one.</param>
     /// <returns>The delay.</returns>
-    public static TimeSpan OutboundDelay(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config, int attemptsSoFar)
+    public static TimeSpan OutboundDelay(PluginConfiguration config, int attemptsSoFar)
     {
         ArgumentNullException.ThrowIfNull(config);
         var first = TimeSpan.FromSeconds(Math.Clamp(config.HintRetrySeconds, 5, 3600));
@@ -62,7 +65,7 @@ public static class HintProtocol
 
     /// <summary>
     /// The most pending rows kept for one peer. A paused peer accumulates rows without bound otherwise.
-    /// beyond the cap the oldest pending rows are dropped, since the scheduled tasks recover anything a
+    /// Beyond the cap the oldest pending rows are dropped, since the scheduled tasks recover anything a
     /// dropped hint would have carried.
     /// </summary>
     public const int MaxPendingPerPeer = 10000;
@@ -73,7 +76,7 @@ public static class HintProtocol
     /// </summary>
     /// <param name="config">The configuration, which holds the seconds.</param>
     /// <returns>The wait.</returns>
-    public static TimeSpan Debounce(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    public static TimeSpan Debounce(PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
         return TimeSpan.FromSeconds(Math.Clamp(config.HintDebounceSeconds, 1, 3600));
@@ -123,6 +126,7 @@ public static class HintProtocol
     /// </summary>
     public static readonly TimeSpan ParkWindow = TimeSpan.FromHours(6);
 
+    /// <summary>The header carrying the caller's plugin version.</summary>
     public const string VersionHeader = "X-ServerSync-Version";
 
     /// <summary>The header carrying the wire protocol the caller speaks.</summary>
@@ -145,8 +149,13 @@ public static class HintProtocol
     /// </summary>
     public const int MinProtocolVersion = 1;
 
+    /// <summary>The status a receiver answers when the caller's protocol is not compatible with its own.</summary>
     public const int VersionMismatchStatus = 426;
 
+    /// <summary>Whether two plugin versions are the same, ignoring surrounding space. A missing version matches nothing.</summary>
+    /// <param name="a">One version.</param>
+    /// <param name="b">The other version.</param>
+    /// <returns>True when both name the same version.</returns>
     public static bool SameVersion(string? a, string? b)
         => !string.IsNullOrWhiteSpace(a) && string.Equals(a.Trim(), b?.Trim(), StringComparison.Ordinal);
 
@@ -175,12 +184,16 @@ public static class HintProtocol
     /// <param name="capabilities">The peer's capabilities.</param>
     /// <param name="thisVersion">This server's plugin version.</param>
     /// <returns>True when the two can exchange hints.</returns>
-    public static bool Compatible(Models.Peer.PeerCapabilities capabilities, string thisVersion)
+    public static bool Compatible(PeerCapabilities capabilities, string thisVersion)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
         return Compatible(capabilities.ProtocolVersion, capabilities.MinProtocolVersion, capabilities.PluginVersion, thisVersion);
     }
 
+    /// <summary>Describes a plugin version mismatch with a peer from before protocol versions.</summary>
+    /// <param name="peerVersion">The peer's plugin version.</param>
+    /// <param name="thisVersion">This server's plugin version.</param>
+    /// <returns>The reason.</returns>
     public static string VersionMismatch(string? peerVersion, string thisVersion)
         => $"Server Sync {(string.IsNullOrWhiteSpace(peerVersion) ? "of an unknown version" : peerVersion.Trim())} on the peer and {thisVersion} on this server differ. Update both servers to the same version";
 
@@ -206,7 +219,7 @@ public static class HintProtocol
     /// <param name="capabilities">The peer's capabilities.</param>
     /// <param name="thisVersion">This server's plugin version.</param>
     /// <returns>The reason.</returns>
-    public static string ProtocolMismatch(Models.Peer.PeerCapabilities capabilities, string thisVersion)
+    public static string ProtocolMismatch(PeerCapabilities capabilities, string thisVersion)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
         return ProtocolMismatch(capabilities.ProtocolVersion, capabilities.MinProtocolVersion, capabilities.PluginVersion, thisVersion);
@@ -221,11 +234,9 @@ public static class HintProtocol
     /// <returns>The timestamp, or now when it lay ahead.</returns>
     public static DateTime BoundVersion(DateTime timestamp, DateTime utcNow)
     {
-        var at = AsUtc(timestamp);
+        var at = UtcTime.AsUtc(timestamp);
         return at > utcNow ? utcNow : at;
     }
-
-    private static DateTime AsUtc(DateTime timestamp) => Utilities.UtcTime.AsUtc(timestamp);
 
     /// <summary>
     /// The version a received hint carries, bounded to this server's clock, for deciding and recording.
@@ -246,15 +257,12 @@ public static class HintProtocol
     /// <param name="timestamp">The version's timestamp.</param>
     /// <param name="utcNow">This server's clock.</param>
     /// <returns>True when it is beyond the allowed lead.</returns>
-    public static bool IsFutureVersion(DateTime timestamp, DateTime utcNow)
-    {
-        return AsUtc(timestamp) - utcNow > MaxVersionLead;
-    }
+    public static bool IsFutureVersion(DateTime timestamp, DateTime utcNow) => UtcTime.AsUtc(timestamp) - utcNow > MaxVersionLead;
 
     /// <summary>The kinds a server applies from hints, by its module switches. Users are never among them.</summary>
     /// <param name="config">The configuration.</param>
     /// <returns>The kinds whose module is on.</returns>
-    public static IReadOnlyList<HintKind> AcceptedKinds(Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration config)
+    public static IReadOnlyList<HintKind> AcceptedKinds(PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
         var kinds = new List<HintKind>(6);
@@ -323,22 +331,39 @@ public static class HintProtocol
     /// <returns>The key.</returns>
     public static string MetadataKey(Guid itemId) => itemId.ToString("N", CultureInfo.InvariantCulture);
 
+    /// <summary>Builds the playlist key, which the original playlist and its copies share.</summary>
+    /// <param name="rootId">The id of the original playlist.</param>
+    /// <returns>The key.</returns>
     public static string PlaylistKey(Guid rootId) => rootId.ToString("N", CultureInfo.InvariantCulture);
 
+    /// <summary>The item type a playlist hint carries for an original playlist.</summary>
     public const string PlaylistOriginal = "Playlist";
 
+    /// <summary>The item type a playlist hint carries for a copy of a playlist.</summary>
     public const string PlaylistCopy = "PlaylistCopy";
 
+    /// <summary>The item type a playlist hint carries when an original playlist was deleted.</summary>
     public const string PlaylistDeleted = "PlaylistDeleted";
 
+    /// <summary>The item type a playlist hint carries when a copy of a playlist was deleted.</summary>
     public const string PlaylistCopyDeleted = "PlaylistCopyDeleted";
 
+    /// <summary>The item type a playlist hint carries.</summary>
+    /// <param name="copy">Whether the playlist is a copy.</param>
+    /// <param name="deleted">Whether the playlist was deleted.</param>
+    /// <returns>The item type.</returns>
     public static string PlaylistItemType(bool copy, bool deleted)
         => deleted ? (copy ? PlaylistCopyDeleted : PlaylistDeleted) : (copy ? PlaylistCopy : PlaylistOriginal);
 
+    /// <summary>Whether a playlist hint's item type is a deletion.</summary>
+    /// <param name="itemType">The item type.</param>
+    /// <returns>True for a deletion.</returns>
     public static bool IsPlaylistDeletion(string? itemType)
         => itemType is PlaylistDeleted or PlaylistCopyDeleted;
 
+    /// <summary>Whether a playlist hint's item type is a copy.</summary>
+    /// <param name="itemType">The item type.</param>
+    /// <returns>True for a copy.</returns>
     public static bool IsPlaylistCopy(string? itemType)
         => itemType is PlaylistCopy or PlaylistCopyDeleted;
 
@@ -366,7 +391,7 @@ public static class HintProtocol
     /// <summary>
     /// How long to wait before the next attempt after a failure: one minute, five, fifteen, then one
     /// hour for every attempt after that. A received hint gives up after <see cref="MaxInboundAttempts"/>
-    /// attempts, and a sent one keeps trying until the peer answers or the row expires.
+    /// attempts. A sent hint waits by <see cref="OutboundDelay"/> instead.
     /// </summary>
     /// <param name="attemptsSoFar">How many attempts have failed, including this one.</param>
     /// <returns>The delay.</returns>

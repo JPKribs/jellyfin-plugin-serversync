@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
@@ -16,6 +17,13 @@ public sealed class ApplyGuard
 
     private readonly ConcurrentDictionary<string, int> _active = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Whether an apply of this object, or of its whole kind, ended within the window. Kept across
+    /// guard instances so a late save event still reads as the echo of an apply.
+    /// </summary>
+    /// <param name="guardKey">The guard key.</param>
+    /// <param name="window">How far back an apply counts.</param>
+    /// <returns><c>true</c> when an apply ended within the window.</returns>
     public static bool AppliedRecently(string guardKey, TimeSpan window)
     {
         ArgumentException.ThrowIfNullOrEmpty(guardKey);
@@ -58,12 +66,13 @@ public sealed class ApplyGuard
 
     private void Leave(string guardKey)
     {
-        RecentApplies[guardKey] = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        RecentApplies[guardKey] = now;
         if (RecentApplies.Count > 10000)
         {
             foreach (var (key, at) in RecentApplies)
             {
-                if (DateTime.UtcNow - at > TimeSpan.FromHours(1))
+                if (now - at > TimeSpan.FromHours(1))
                 {
                     RecentApplies.TryRemove(key, out _);
                 }
@@ -74,7 +83,7 @@ public sealed class ApplyGuard
         {
             if (count <= 1)
             {
-                if (_active.TryRemove(new System.Collections.Generic.KeyValuePair<string, int>(guardKey, count)))
+                if (_active.TryRemove(new KeyValuePair<string, int>(guardKey, count)))
                 {
                     return;
                 }

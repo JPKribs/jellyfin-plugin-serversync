@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using MediaBrowser.Controller.Entities;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
@@ -17,14 +18,17 @@ public enum HintApplyOutcome
     /// <summary>Something failed that may pass later. The row stays and is tried again.</summary>
     Retry,
 
+    /// <summary>No local item matches yet. The hint waits under a park key until one appears.</summary>
     Parked
 }
 
 /// <summary>The outcome of one inbound apply, with the reason when it did not simply apply.</summary>
 /// <param name="Outcome">What happened.</param>
+/// <param name="Code">The code the origin is told.</param>
 /// <param name="Reason">Why, for everything but a plain apply.</param>
 /// <param name="ItemTitle">Jellyfin's title for the local item, when the handler knew it.</param>
 /// <param name="ItemLine">The title with an episode's own name after it, for the line of detail.</param>
+/// <param name="ParkKey">The key a parked hint waits under.</param>
 public readonly record struct HintApplyResult(HintApplyOutcome Outcome, HintCode Code, string? Reason, string? ItemTitle = null, string? ItemLine = null, string? ParkKey = null)
 {
     /// <summary>A plain apply.</summary>
@@ -33,15 +37,20 @@ public readonly record struct HintApplyResult(HintApplyOutcome Outcome, HintCode
     /// <summary>Applied to a known local item, whose Jellyfin title names it in the activity log.</summary>
     /// <param name="item">The local item, or null when it is not known.</param>
     /// <returns>The result.</returns>
-    public static HintApplyResult AppliedTo(MediaBrowser.Controller.Entities.BaseItem? item)
+    public static HintApplyResult AppliedTo(BaseItem? item)
         => item is null ? Applied : new(HintApplyOutcome.Applied, HintCode.Applied, null, HintActivityLog.TitleOf(item), HintActivityLog.LineOf(item));
 
     /// <summary>Nothing to write.</summary>
     public static HintApplyResult Unchanged => new(HintApplyOutcome.Unchanged, HintCode.Unchanged, null);
 
+    /// <summary>Builds a result for a value this server keeps. Nothing was written.</summary>
+    /// <param name="code">The code.</param>
+    /// <param name="reason">Why.</param>
+    /// <returns>The result.</returns>
     public static HintApplyResult Kept(HintCode code, string reason) => new(HintApplyOutcome.Unchanged, code, reason);
 
     /// <summary>Builds a dropped result.</summary>
+    /// <param name="code">The code.</param>
     /// <param name="reason">Why.</param>
     /// <returns>The result.</returns>
     public static HintApplyResult Dropped(HintCode code, string reason) => new(HintApplyOutcome.Dropped, code, reason);
@@ -51,5 +60,9 @@ public readonly record struct HintApplyResult(HintApplyOutcome Outcome, HintCode
     /// <returns>The result.</returns>
     public static HintApplyResult RetryLater(string reason) => new(HintApplyOutcome.Retry, HintCode.Queued, reason);
 
+    /// <summary>Builds a parked result.</summary>
+    /// <param name="parkKey">The key the hint waits under.</param>
+    /// <param name="reason">Why.</param>
+    /// <returns>The result.</returns>
     public static HintApplyResult Park(string parkKey, string reason) => new(HintApplyOutcome.Parked, HintCode.NoLocalItem, reason, ParkKey: parkKey);
 }

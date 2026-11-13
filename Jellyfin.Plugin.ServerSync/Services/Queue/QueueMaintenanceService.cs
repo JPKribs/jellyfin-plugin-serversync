@@ -1,11 +1,16 @@
 using System;
-using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Services.Playlists;
+using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Playlists;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -15,8 +20,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// <summary>
 /// Background upkeep for the hint queues and the sync tables. Every six hours it removes hints that sat
 /// sent or failed for a week, pending versions whose values never applied, and the versions of items and
-/// users this server no longer has, and gives errored rows a fresh set of retries once a day. At start it
-/// gives rows from before servers became a list the key of the server they belong to.
+/// users this server no longer has, gives rows that errored more than a day ago a fresh set of retries,
+/// forgets copies of playlists that were deleted, and removes the backups a finished file replacement
+/// left behind. It also gives rows from before servers became a list the key of the server they belong to.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class QueueMaintenanceService : IHostedService, IDisposable
@@ -49,6 +55,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     /// <param name="configManager">Plugin configuration.</param>
     /// <param name="libraryManager">The library, to tell which items still exist.</param>
     /// <param name="userManager">The users, to tell which still exist.</param>
+    /// <param name="services">The service provider the content table is read from.</param>
     /// <param name="logger">Logger.</param>
     public QueueMaintenanceService(
         OutboundHintStore outbound,
@@ -122,11 +129,11 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     private int ForgetDeletedPlaylistCopies()
     {
         var forgotten = 0;
-        foreach (var id in Playlists.PlaylistCopyStore.Ids())
+        foreach (var id in PlaylistCopyStore.Ids())
         {
-            if (_libraryManager.GetItemById(id) is not MediaBrowser.Controller.Playlists.Playlist)
+            if (_libraryManager.GetItemById(id) is not Playlist)
             {
-                Playlists.PlaylistCopyStore.Remove(id);
+                PlaylistCopyStore.Remove(id);
                 forgotten++;
             }
         }
@@ -136,7 +143,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
 
     private int RemoveFinishedReplacementBackups()
     {
-        var content = Tasks.Common.SyncModuleMutex.ForModule("Content");
+        var content = SyncModuleMutex.ForModule("Content");
         if (!content.Wait(0))
         {
             return 0;
@@ -148,22 +155,22 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
             var manager = _services.GetRequiredService<ContentSyncTableManager>();
             var cutoff = DateTime.UtcNow - ReplacementBackupKept;
             var removed = 0;
-            foreach (var row in manager.GetByStatus(Models.Common.SyncStatus.Synced))
+            foreach (var row in manager.GetByStatus(SyncStatus.Synced))
             {
                 if (string.IsNullOrEmpty(row.LocalPath)
-                    || !System.IO.File.Exists(row.LocalPath)
-                    || (row.SourceSize > 0 && new System.IO.FileInfo(row.LocalPath).Length != row.SourceSize)
-                    || System.IO.Path.GetDirectoryName(row.LocalPath) is not { Length: > 0 } folder)
+                    || !File.Exists(row.LocalPath)
+                    || (row.SourceSize > 0 && new FileInfo(row.LocalPath).Length != row.SourceSize)
+                    || Path.GetDirectoryName(row.LocalPath) is not { Length: > 0 } folder)
                 {
                     continue;
                 }
 
-                var paths = new[] { row.LocalPath }.Concat(Utilities.FileOperationUtilities.GetCompanionFiles(row.LocalPath));
+                var paths = new[] { row.LocalPath }.Concat(FileOperationUtilities.GetCompanionFiles(row.LocalPath));
                 foreach (var original in paths)
                 {
-                    foreach (var backup in System.IO.Directory.EnumerateFiles(folder, System.IO.Path.GetFileName(original) + ReplacementMarker + "*"))
+                    foreach (var backup in Directory.EnumerateFiles(folder, Path.GetFileName(original) + ReplacementMarker + "*"))
                     {
-                        if (System.IO.File.GetLastWriteTimeUtc(backup) > cutoff || !FileValidationService.IsPathWithinLibrary(backup, config))
+                        if (File.GetLastWriteTimeUtc(backup) > cutoff || !FileValidationService.IsPathWithinLibrary(backup, config))
                         {
                             continue;
                         }
@@ -176,12 +183,12 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
                             }
                             else
                             {
-                                System.IO.File.Delete(backup);
+                                File.Delete(backup);
                             }
 
                             removed++;
                         }
-                        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                         {
                             _logger.LogDebug(ex, "Could not remove the replacement backup {Backup}", backup);
                         }

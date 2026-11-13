@@ -6,11 +6,20 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
+/// <summary>What the receiver decided about a hint as it arrived.</summary>
+/// <param name="Code">The code the sender is told.</param>
+/// <param name="Reason">Why, when the hint is not simply queued.</param>
+/// <param name="ParkKey">The key a hint waits under until its local item or person appears.</param>
 public readonly record struct HintAssessment(HintCode Code, string? Reason, string? ParkKey = null)
 {
+    /// <summary>Gets a value indicating whether the hint is stored, to apply now or once its local object appears.</summary>
     public bool Keep => Code is HintCode.Queued or HintCode.NoLocalItem;
 }
 
+/// <summary>
+/// Decides on arrival whether a hint can apply here, so one that never will is answered at once
+/// instead of being stored, and one whose local object is missing waits for it.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class HintTriage
 {
@@ -18,6 +27,12 @@ public sealed class HintTriage
     private readonly ILocalItems _local;
     private readonly VersionStore _versions;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="HintTriage"/> class.
+    /// </summary>
+    /// <param name="configManager">Plugin configuration.</param>
+    /// <param name="local">This server's items and people.</param>
+    /// <param name="versions">The version store.</param>
     public HintTriage(IPluginConfigurationManager configManager, ILocalItems local, VersionStore versions)
     {
         _configManager = configManager;
@@ -25,6 +40,10 @@ public sealed class HintTriage
         _versions = versions;
     }
 
+    /// <summary>Whether the local object a parked hint waits for exists now.</summary>
+    /// <param name="parkKey">The park key.</param>
+    /// <param name="personName">The person's name, for a people hint.</param>
+    /// <returns><c>true</c> when the object exists.</returns>
     public bool Present(string parkKey, string? personName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(parkKey);
@@ -36,6 +55,12 @@ public sealed class HintTriage
         return !string.IsNullOrWhiteSpace(personName) && _local.GetPerson(personName) is not null;
     }
 
+    /// <summary>The park key of the local object a hint needs and this server does not have yet.</summary>
+    /// <param name="origin">The origin entry.</param>
+    /// <param name="kind">The kind.</param>
+    /// <param name="originPath">The item's path on the origin.</param>
+    /// <param name="key">The hint's key.</param>
+    /// <returns>The park key, or null when nothing is missing or the kind needs no local object.</returns>
     public string? MissingLocal(SourceServer origin, HintKind kind, string? originPath, string key)
     {
         ArgumentNullException.ThrowIfNull(origin);
@@ -53,10 +78,20 @@ public sealed class HintTriage
         return _local.FindByPath(localPath) is null ? PathParkKey(localPath) : null;
     }
 
+    /// <summary>The park key for a hint that waits for a local item.</summary>
+    /// <param name="localPath">The item's path on this server.</param>
+    /// <returns>The park key.</returns>
     public static string PathParkKey(string localPath) => "path:" + localPath;
 
+    /// <summary>The park key for a hint that waits for a local person.</summary>
+    /// <param name="name">The person's name.</param>
+    /// <returns>The park key.</returns>
     public static string PersonParkKey(string name) => "person:" + HintProtocol.PeopleKey(name);
 
+    /// <summary>Whether a library mapping's filter leaves out a path on the origin.</summary>
+    /// <param name="mapping">The library mapping.</param>
+    /// <param name="path">The path on the origin.</param>
+    /// <returns><c>true</c> when the path is left out.</returns>
     public static bool IsFiltered(LibraryMapping mapping, string? path)
     {
         ArgumentNullException.ThrowIfNull(mapping);
@@ -82,6 +117,12 @@ public sealed class HintTriage
             || hint.OriginServerId?.Length > MaxIdLength
             || hint.VersionServerId?.Length > MaxIdLength;
 
+    /// <summary>Decides what to do with a hint that just arrived.</summary>
+    /// <param name="origin">The origin entry.</param>
+    /// <param name="hint">The hint.</param>
+    /// <param name="senderServerId">The id of the server that sent the request.</param>
+    /// <param name="utcNow">This server's clock.</param>
+    /// <returns>The assessment.</returns>
     public HintAssessment Assess(SourceServer origin, SyncHint hint, string senderServerId, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(origin);
@@ -221,7 +262,7 @@ public sealed class HintTriage
             return new(HintCode.ModuleOff, "playlist sync is off on this server");
         }
 
-        if (!Guid.TryParse(hint.Key, out _) || !Guid.TryParse(hint.ItemId, out _))
+        if (!Guid.TryParse(hint.Key, out var rootId) || !Guid.TryParse(hint.ItemId, out _))
         {
             return new(HintCode.Invalid, "the key is not a playlist id");
         }
@@ -233,7 +274,7 @@ public sealed class HintTriage
 
         return origin.Mode == ServerMode.Pull
             ? new(HintCode.Queued, null)
-            : AssessVersion(hint, HintProtocol.PlaylistKey(Guid.Parse(hint.Key)), utcNow);
+            : AssessVersion(hint, HintProtocol.PlaylistKey(rootId), utcNow);
     }
 
     private HintAssessment AssessVersion(SyncHint hint, string localKey, DateTime utcNow)

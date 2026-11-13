@@ -1,6 +1,7 @@
 #pragma warning disable CA2100 // SQL is internal and parameterized.
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Microsoft.Extensions.DependencyInjection;
@@ -67,7 +68,7 @@ public sealed class VersionStore : QueueStoreBase
                 var names = new string[chunk.Count];
                 for (var i = 0; i < chunk.Count; i++)
                 {
-                    names[i] = "@k" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    names[i] = "@k" + i.ToString(CultureInfo.InvariantCulture);
                     Add(cmd, names[i], chunk[i]);
                 }
 
@@ -99,8 +100,7 @@ public sealed class VersionStore : QueueStoreBase
     {
         ArgumentNullException.ThrowIfNull(version);
         var at = HintProtocol.BoundVersion(version.Timestamp, DateTime.UtcNow);
-        var stored = 0;
-        Write(conn =>
+        return Write(conn =>
         {
             // Stamps are fixed width UTC text, so text order is time order.
             using var cmd = conn.CreateCommand();
@@ -112,9 +112,8 @@ public sealed class VersionStore : QueueStoreBase
             Add(cmd, "@key", version.Key);
             Add(cmd, "@server", version.ServerId);
             Add(cmd, "@at", Stamp(at));
-            stored = cmd.ExecuteNonQuery();
+            return cmd.ExecuteNonQuery() > 0;
         });
-        return stored > 0;
     }
 
     /// <summary>
@@ -185,18 +184,13 @@ public sealed class VersionStore : QueueStoreBase
     /// <summary>Removes pending versions read longer ago than the cutoff, whose values never applied.</summary>
     /// <param name="readBefore">The cutoff.</param>
     /// <returns>How many were removed.</returns>
-    public int PrunePending(DateTime readBefore)
+    public int PrunePending(DateTime readBefore) => Write(conn =>
     {
-        var removed = 0;
-        Write(conn =>
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "DELETE FROM PendingVersions WHERE ReadAt < @before";
-            Add(cmd, "@before", Stamp(readBefore));
-            removed = cmd.ExecuteNonQuery();
-        });
-        return removed;
-    }
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM PendingVersions WHERE ReadAt < @before";
+        Add(cmd, "@before", Stamp(readBefore));
+        return cmd.ExecuteNonQuery();
+    });
 
     /// <summary>Lists the keys held for one kind, for pruning versions of objects that no longer exist.</summary>
     /// <param name="kind">The kind.</param>
@@ -213,7 +207,7 @@ public sealed class VersionStore : QueueStoreBase
             keys.Add(reader.GetString(0));
         }
 
-        return (IList<string>)keys;
+        return keys;
     });
 
     /// <summary>Removes the versions of objects that no longer exist here.</summary>
@@ -223,10 +217,10 @@ public sealed class VersionStore : QueueStoreBase
     public int Remove(HintKind kind, IEnumerable<string> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
-        var removed = 0;
         var list = keys.ToList();
-        Write(conn =>
+        return Write(conn =>
         {
+            var removed = 0;
             using var transaction = conn.BeginTransaction();
             foreach (var key in list)
             {
@@ -239,7 +233,7 @@ public sealed class VersionStore : QueueStoreBase
             }
 
             transaction.Commit();
+            return removed;
         });
-        return removed;
     }
 }
