@@ -135,8 +135,7 @@ public static class FileOperationUtilities
 
         // InvariantCulture: TryReadRecycledTime parses with it, and a
         // host on a non-Gregorian calendar (th-TH, ar-SA) would otherwise write
-        // a year the parser can't read, silently dropping retention back to
-        // LastWriteTimeUtc.
+        // a year the parser can't read, and the file would never expire.
         var timestamp = utcNow.ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture);
         var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
         var extension = Path.GetExtension(fileName);
