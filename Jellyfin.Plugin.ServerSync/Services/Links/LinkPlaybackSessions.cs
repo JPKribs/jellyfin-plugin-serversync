@@ -115,7 +115,9 @@ public sealed class LinkPlaybackSessions
         }
 
         var mediaSourceId = item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
-        var method = Enum.TryParse<PlayMethod>(report.PlayMethod, true, out var parsed) ? parsed : PlayMethod.DirectStream;
+        // This server only sends the file, so a transcode reported by an older linking server shows as
+        // the direct stream it is here.
+        var method = Enum.Parse<PlayMethod>(LinkPlaybackReporter.ReportedMethod(report.PlayMethod));
         switch (report.Event)
         {
             case LinkPlaybackEvent.Start:

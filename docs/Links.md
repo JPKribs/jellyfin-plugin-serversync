@@ -157,6 +157,10 @@ Playback of a link shows on the source as a live session named after the linking
 * The activity log and playback plugins on the source see the play.
 * Stopping updates played state, play count, and resume position on the source through Jellyfin's own rules.
 
+The session always shows as Direct Play or Direct Stream. The source only sends the file, and when the viewer's client needs a transcode, the linking server runs it.
+
+A link that plays from the linking server's cache does not show on the source, since the source sends nothing for it. History sync carries its played state to the source.
+
 Progress is reported every 30 seconds, and at once on a pause or resume. The session ends when playback stops, and a stop report that fails is tried again. If the linking server goes away, or its stop report never arrives, Jellyfin stops the playback after five minutes without a report, and Server Sync ends the session ten minutes after the last report.
 
 Jellyfin's own stop of a paused session on the source is not passed on, so the source's housekeeping never stops someone watching elsewhere.
@@ -168,7 +172,7 @@ History sync takes the larger play count when both servers counted, so a play co
 A link can keep a full local copy of its file in the link cache. The `.strm` never changes, so Jellyfin and players notice nothing when a file is cached or dropped. While a link's file is in the cache:
 
 * It plays from the linking server, under the linking server's own rules. The source is not asked, its limits do not apply, and the link plays while the source is down.
-* Playback is still reported to the source while it is up. It shows the session and updates played state as for any link, when the user is one it would let stream.
+* Playback is not reported to the source, since it sends nothing. History sync carries played state there.
 * The Sync tab shows the row as **(Link, Cached)**.
 
 The cache is one folder with one size limit, whichever servers its links stream from. It is off until it is given a size.
@@ -177,7 +181,6 @@ The cache is one folder with one size limit, whichever servers its links stream 
 
 * **A link someone plays.** Pressing play queues the file, so a resume or a second watch is local.
 * **Episodes ahead.** The next episodes after the one a user starts, in order and across a season's end, up to **Pre-cache Episodes**.
-* **Items to always keep.** Shows and films picked on a library's mapping. Every link under a picked show is kept.
 
 Files are downloaded one at a time in the background, from the link's own server. The source's speed limits for the linking server and for the user apply, and so does the linking server's own download speed and schedule. A download passes the source's checks for the user it is made for, and is nobody watching, so it is not counted as a stream and the stream limits do not hold it back. The source sends one linking server at most two cache downloads at once. A file is only served once it is whole and the size the source reports.
 
@@ -201,11 +204,11 @@ Below them the page shows how many files are cached, how much of the size is use
 On each library mapping set to Link, on the Servers tab:
 
 * **Cache This Library's Links** lets that library's links into the cache. On by default.
-* **Always Keep** picks the shows and films that are always kept, and shows while **Cache This Library's Links** is on. Retention and the removal order never drop them, and they count toward the cache's size. When they alone fill the cache, **Sync Content** logs a warning and nothing else is cached. An item no longer picked stays cached, as one that was played, until retention or the size limit drops it.
+* **Always Keep** picks shows and films that are full copies in the library instead of links, synced like any copy. Every episode of a picked show and every version of a picked film is copied. It works whether or not the cache is on, and its copies count toward the library's disk, not the cache's size. See [Turning Links Into Copies](#turning-links-into-copies).
 
 ### Upkeep
 
-Every **Sync Content** run queues the items to always keep, drops files whose link is gone or became a copy, or whose library no longer caches its links, or that the link check found the source will not stream, and applies retention and the size limit. A file that is being played is never dropped to make room.
+Every **Sync Content** run drops files whose link is gone or became a copy, or whose library no longer caches its links, or that the link check found the source will not stream, and applies retention and the size limit. A file that is being played is never dropped to make room.
 
 The cache is kept across restarts. At startup, downloads cut short and cache files the cache has no record of are cleared, and whole cached files are kept. **Empty the Cache** in Settings deletes every cached file, and so does uninstalling the plugin. Only the cache's own files are ever removed from its folder.
 
@@ -219,18 +222,19 @@ The check also keeps each link's recorded size current, which is how another ser
 
 ## Turning Links Into Copies
 
-A link becomes a full copy in either of two ways:
+A link becomes a full copy in any of three ways:
 
-* **Turn links into full copies** on the Sync tab's toolbar, for the selected rows. These are queued at once, whatever **New files** is set to, since choosing them is the approval.
+* **Turn links into full copies** on the Sync tab's toolbar, for the selected rows. These are queued at once, whatever **New files** is set to, since choosing them is the approval. When any of them is cached, a Sync Content run starts at once to move it into place.
+* Picking it under **Always Keep** on its mapping. The next refresh marks it under the **New files** approval, the same as below, and a new file under a pick is added as a copy. A pick removed before its copy is approved leaves it a link. A copy already made stays a copy.
 * Setting the mapping's **Storage** back to **Copy**. The next refresh marks its links under the **New files** approval: queued when new files download on their own, waiting as Pending Replacement when they need approval, and left as links when new files are switched off. Setting it back to Link before approving keeps them links. A link still waiting for its own first approval is left until that is settled.
 
-The next Sync Content run downloads the copy through the normal download path, with its disk space and validation checks. The `.strm` is removed only once the copy is in place, so the link keeps playing until then. If the download fails, the link stays and the row retries. Server Sync's `.nfo` and the subtitles stay beside the copy, since they describe the same film. Jellyfin sees one item removed and one added, and history sync carries watched state across.
+The next Sync Content run moves the link's cached file into place when the cache holds the whole file, and otherwise downloads the copy through the normal download path, with its disk space and validation checks. The `.strm` is removed only once the copy is in place, so the link keeps playing until then. If the download fails, the link stays and the row retries. Server Sync's `.nfo` and the subtitles stay beside the copy, since they describe the same film. Jellyfin sees one item removed and one added, and history sync carries watched state across.
 
 Copies already in a library stay copies when its mapping is set to Link.
 
 ## The Sync Tab
 
-Link rows show **(Link)** after their status, and links on their way to a copy show **(Link to Copy)**. **Mark Synced**, **Ignore**, **Queue**, and **Delete** work as for copies. Deleting a link removes the `.strm` and, as for a copy, every file beside it under the same name: its `.nfo`, subtitles, and images.
+Link rows show **(Link)** after their status, cached ones **(Link, Cached)**, and links on their way to a copy **(Link to Copy)**. The **Cached** filter shows only the links whose file is in the cache. **Mark Synced**, **Ignore**, **Queue**, and **Delete** work as for copies. Deleting a link removes the `.strm` and, as for a copy, every file beside it under the same name: its `.nfo`, subtitles, and images.
 
 ## Matching Across Servers
 
@@ -291,7 +295,6 @@ The link cache logs why a file was not cached:
 | Did not cache *file*: the link cache has no room for it | The file is larger than **Cache Size**, or what is left may not be dropped |
 | Did not cache *file*: *server* answered 403 | The source refused the download, such as with linking off or for a user it would not let play |
 | Did not cache *file*: what *server* sent was not the size of the file | The download was cut short or the file changed. It is tried again when next queued |
-| The items chosen to always keep fill the link cache | Raise **Cache Size** or pick fewer items under **Always Keep** |
 
 ## Limitations
 

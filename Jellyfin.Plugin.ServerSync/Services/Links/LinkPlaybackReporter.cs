@@ -17,8 +17,10 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Tells the source about playback of this server's links, so it shows there as a live session, lands
-/// in its activity log, and updates played state there through Jellyfin's own handling. Progress goes
+/// Tells the source about playback of this server's links that it streams, so it shows there as a live
+/// session, lands in its activity log, and updates played state there through Jellyfin's own handling.
+/// Playback from the link cache is not reported, since the source has no part in it, and a transcode
+/// here shows on the source as a direct stream, since the source only sends the file. Progress goes
 /// at most every 30 seconds, and at once when playback pauses or resumes. Reports are sent in the
 /// background in the order they happened, so Jellyfin's playback events never wait on the network.
 /// </summary>
@@ -48,6 +50,11 @@ public sealed class LinkPlaybackReporter : BackgroundService
     // The link each session last reported, so a stop that names no item still reaches the source.
     private readonly ConcurrentDictionary<string, LinkEntry> _playing = new(StringComparer.Ordinal);
 
+    // The viewers whose playback the source has been told about, so it also hears their stop.
+    private readonly ConcurrentDictionary<string, byte> _reported = new(StringComparer.Ordinal);
+
+    private readonly LinkCache? _cache;
+
     public LinkPlaybackReporter(
         ISessionManager sessionManager,
         MediaBrowser.Controller.Library.ILibraryManager libraryManager,
@@ -56,8 +63,10 @@ public sealed class LinkPlaybackReporter : BackgroundService
         ISourceServerClientFactory clientFactory,
         IServerApplicationHost applicationHost,
         LinkGrants grants,
-        ILogger<LinkPlaybackReporter> logger)
+        ILogger<LinkPlaybackReporter> logger,
+        LinkCache? cache = null)
     {
+        _cache = cache;
         _sessionManager = sessionManager;
         _libraryManager = libraryManager;
         _links = links;
@@ -84,6 +93,50 @@ public sealed class LinkPlaybackReporter : BackgroundService
         => kind == LinkPlaybackEvent.Stop
             ? new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10) }
             : Array.Empty<TimeSpan>();
+
+    /// <summary>
+    /// How playback of a link shows on the source. The source only ever sends the file as it is, and
+    /// any transcode runs on the server holding the link, so the source shows direct play or direct
+    /// stream, never a transcode it is not running.
+    /// </summary>
+    /// <param name="method">How the viewer here plays it.</param>
+    /// <returns>DirectPlay, or DirectStream for anything else.</returns>
+    public static string ReportedMethod(string? method)
+        => string.Equals(method, nameof(MediaBrowser.Model.Session.PlayMethod.DirectPlay), StringComparison.OrdinalIgnoreCase)
+            ? nameof(MediaBrowser.Model.Session.PlayMethod.DirectPlay)
+            : nameof(MediaBrowser.Model.Session.PlayMethod.DirectStream);
+
+    /// <summary>
+    /// Whether a viewer's playback stays off the source. A viewer whose link is in the cache when they
+    /// are first seen plays from this server's disk and asks nothing of the source, so the source is
+    /// not told about them. Once the source has been told about a viewer it hears every report through
+    /// their stop, so it never keeps a session that was started there.
+    /// </summary>
+    /// <param name="kind">The event.</param>
+    /// <param name="viewer">The viewer and link.</param>
+    /// <param name="cached">Whether the link's file is in the cache now.</param>
+    /// <returns>True when nothing is sent to the source.</returns>
+    public bool PlaysLocally(LinkPlaybackEvent kind, string viewer, Func<bool> cached)
+    {
+        ArgumentNullException.ThrowIfNull(cached);
+        if (kind == LinkPlaybackEvent.Stop)
+        {
+            return !_reported.TryRemove(viewer, out _);
+        }
+
+        if (_reported.ContainsKey(viewer))
+        {
+            return false;
+        }
+
+        if (cached())
+        {
+            return true;
+        }
+
+        _reported[viewer] = 0;
+        return false;
+    }
 
     /// <summary>
     /// The link a playback event is reported for, or null when it is not one. Start and progress name
@@ -166,6 +219,13 @@ public sealed class LinkPlaybackReporter : BackgroundService
             }
 
             var viewer = sessionKey + "|" + link.LinkId;
+
+            // Playback from the cache is this server's alone, so the source is not told about it.
+            if (PlaysLocally(kind, viewer, () => _cache?.Holds(link.LinkId) == true))
+            {
+                return;
+            }
+
             if (kind == LinkPlaybackEvent.Progress)
             {
                 var now = DateTime.UtcNow;
@@ -198,7 +258,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
                 PlaySessionId = e.PlaySessionId,
                 PositionTicks = e.PlaybackPositionTicks,
                 IsPaused = e.IsPaused,
-                PlayMethod = e.Session?.PlayState?.PlayMethod?.ToString(),
+                PlayMethod = ReportedMethod(e.Session?.PlayState?.PlayMethod?.ToString()),
                 ClientName = e.ClientName
             }));
         }

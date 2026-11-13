@@ -64,9 +64,11 @@ public class SyncMissingContentTask
         DownloadService downloadService,
         Services.Links.LinkWriter? linkWriter = null,
         Services.Links.LinkVerifier? linkVerifier = null,
-        Services.Links.LinkCacheFiller? linkCacheFiller = null)
+        Services.Links.LinkCacheFiller? linkCacheFiller = null,
+        Services.Links.LinkCache? linkCache = null)
         : base(logger, manager, clientFactory, configManager)
     {
+        _linkCache = linkCache;
         _libraryManager = libraryManager;
         _libraryMonitor = libraryMonitor;
         _downloadService = downloadService;
@@ -78,6 +80,7 @@ public class SyncMissingContentTask
     private readonly Services.Links.LinkWriter? _linkWriter;
     private readonly Services.Links.LinkVerifier? _linkVerifier;
     private readonly Services.Links.LinkCacheFiller? _linkCacheFiller;
+    private readonly Services.Links.LinkCache? _linkCache;
 
     /// <inheritdoc />
     public override string Name => "Sync Content";
@@ -337,8 +340,9 @@ public class SyncMissingContentTask
             return;
         }
 
-        // A link becoming a copy downloads through the copy path below, to where the copy belongs, and
-        // the .strm goes only once the copy is in place. Until then it keeps playing as a link.
+        // A link becoming a copy takes its file from the link cache when the cache holds it, and
+        // otherwise downloads through the copy path below, to where the copy belongs. The .strm goes
+        // only once the copy is in place. Until then it keeps playing as a link.
         if (record.StorageMode == StorageMode.Promoting)
         {
             var linkPath = record.LocalPath;
@@ -346,7 +350,16 @@ public class SyncMissingContentTask
             record.LocalPath = copyPath;
             try
             {
-                await DownloadAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
+                if (_linkCache?.MoveTo(record.SourceItemId, copyPath, record.SourceSize) == true)
+                {
+                    Logger.LogInformation("Moved {FileName} from the link cache into the library", Path.GetFileName(copyPath));
+                    Interlocked.Increment(ref _successCount);
+                    _changedFiles.Enqueue(copyPath);
+                }
+                else
+                {
+                    await DownloadAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch
             {
@@ -665,17 +678,13 @@ public class SyncMissingContentTask
         }
     }
 
-    // Every run brings the link cache in line with the settings: the items to always keep are queued,
-    // files whose link is gone are dropped, and retention and the size limit are applied.
+    // Every run brings the link cache in line with the settings: files whose link is gone or became
+    // a copy are dropped, and retention and the size limit are applied.
     private void ReconcileLinkCache()
     {
         try
         {
-            var queued = _linkCacheFiller?.Reconcile() ?? 0;
-            if (queued > 0)
-            {
-                Logger.LogInformation("{Task}: queued {Count} item(s) chosen to always keep for the link cache", Name, queued);
-            }
+            _linkCacheFiller?.Reconcile();
         }
         catch (Exception ex)
         {

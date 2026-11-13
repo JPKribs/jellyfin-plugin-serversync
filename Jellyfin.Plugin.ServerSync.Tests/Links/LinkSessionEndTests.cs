@@ -124,6 +124,54 @@ public sealed class LinkSessionEndTests
         Assert.Empty(LinkPlaybackReporter.RetryDelays(LinkPlaybackEvent.Progress));
     }
 
+    /// <summary>
+    /// The source is only ever told a link plays as a direct play or a direct stream.
+    /// True: a transcode on the server holding the link never shows as one on the source, which only sends the file.
+    /// False: the source's dashboard would claim a transcode it is not running.
+    /// </summary>
+    [Theory]
+    [InlineData("DirectPlay", "DirectPlay")]
+    [InlineData("directplay", "DirectPlay")]
+    [InlineData("DirectStream", "DirectStream")]
+    [InlineData("Transcode", "DirectStream")]
+    [InlineData(null, "DirectStream")]
+    [InlineData("nonsense", "DirectStream")]
+    public void Reporter_ReportedMethod_NeverTranscode(string? method, string expected)
+        => Assert.Equal(expected, LinkPlaybackReporter.ReportedMethod(method));
+
+    /// <summary>
+    /// A viewer playing a cached link is never reported to the source, start to stop.
+    /// True: playback from this server's own disk does not show on the source.
+    /// False: the source would list a viewer it sends nothing to.
+    /// </summary>
+    [Fact]
+    public void Reporter_CachedViewer_StaysLocal()
+    {
+        var reporter = Reporter();
+        Assert.True(reporter.PlaysLocally(LinkPlaybackEvent.Start, "v|a", () => true));
+        Assert.True(reporter.PlaysLocally(LinkPlaybackEvent.Progress, "v|a", () => true));
+        Assert.True(reporter.PlaysLocally(LinkPlaybackEvent.Stop, "v|a", () => true));
+    }
+
+    /// <summary>
+    /// A viewer the source was told about is reported through their stop, even when the file lands in
+    /// the cache partway, and a viewer whose cached file is dropped partway starts being reported.
+    /// True: a session started on the source is always ended there, and a stream that moves to the source shows there.
+    /// False: the source would keep a session it never hears the end of, or stream to someone it never lists.
+    /// </summary>
+    [Fact]
+    public void Reporter_ReportedViewer_ReportedThroughStop()
+    {
+        var reporter = Reporter();
+        Assert.False(reporter.PlaysLocally(LinkPlaybackEvent.Start, "v|a", () => false));
+        Assert.False(reporter.PlaysLocally(LinkPlaybackEvent.Progress, "v|a", () => true));
+        Assert.False(reporter.PlaysLocally(LinkPlaybackEvent.Stop, "v|a", () => true));
+
+        Assert.True(reporter.PlaysLocally(LinkPlaybackEvent.Start, "w|a", () => true));
+        Assert.False(reporter.PlaysLocally(LinkPlaybackEvent.Progress, "w|a", () => false));
+        Assert.False(reporter.PlaysLocally(LinkPlaybackEvent.Stop, "w|a", () => false));
+    }
+
     private static (LinkPlaybackSessions Sessions, ISessionManager Manager, InterfaceStub Stub) Sessions()
     {
         var (manager, stub) = InterfaceStub.Create<ISessionManager>();

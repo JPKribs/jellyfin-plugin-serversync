@@ -412,17 +412,17 @@ Discard one row from either queue by its `Id`. A discarded inbound row is report
 
 ### POST /Sync/PromoteItems
 
-Turns links into full copies, the **Turn links into full copies** action on the Sync tab. Each copy downloads on the next Sync Content run, and its `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped.
+Turns links into full copies, the **Turn links into full copies** action on the Sync tab. A link whose file is in the link cache has the cached file moved into place, and a Sync Content run starts now when any is. Any other copy downloads on the next Sync Content run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
 
 ```json
 { "SourceItemIds": ["9c1e0f…", "77ab12…"] }
 ```
 
 ```json
-{ "Promoted": 2, "Skipped": 0 }
+{ "Promoted": 2, "FromCache": 1, "Skipped": 0 }
 ```
 
-Content rows from `GET /Sync/Items` carry `StorageMode`: `Copy`, `Link`, or `Promoting` for a link on its way to a copy, and `Cached`, true for a link whose file is in the link cache.
+Content rows from `GET /Sync/Items` carry `StorageMode`: `Copy`, `Link`, or `Promoting` for a link on its way to a copy, and `Cached`, true for a link whose file is in the link cache. `cached=true` on `GET /Sync/Items` lists only those.
 
 ### GET /Sync/LinkCache
 

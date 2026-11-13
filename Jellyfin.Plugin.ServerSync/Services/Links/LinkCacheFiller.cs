@@ -27,8 +27,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
 /// Decides what goes into the link cache and downloads it, one file at a time, in the background.
-/// Three things put a link's file in the cache: someone plays the link, it is an episode ahead of the
-/// one a user is watching, or it is one of the items chosen to always keep. Each download reads the
+/// Two things put a link's file in the cache: someone plays the link, or it is an episode ahead of the
+/// one a user is watching. Items picked to always keep are full copies in the library instead, see
+/// <see cref="AlwaysKeep"/>. Each download reads the
 /// file from the link's own server through the route links stream from, so that server's speed limits
 /// apply, and this server's own download speed limit applies as well.
 /// </summary>
@@ -101,31 +102,6 @@ public sealed class LinkCacheFiller : BackgroundService
     }
 
     /// <summary>
-    /// The links chosen to always keep: every link whose source file sits under one of the items
-    /// picked on its library mapping.
-    /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <param name="links">Every link row.</param>
-    /// <returns>The link ids.</returns>
-    public static HashSet<string> PermanentLinks(PluginConfiguration config, IEnumerable<SyncItem> links)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(links);
-        var permanent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in links)
-        {
-            if (MappingFor(config, row) is { ExcludeFromLinkCache: false, PermanentItems.Count: > 0 } mapping
-                && (PathUtilities.IsItemFiltered(row.SourcePath, mapping.SourceRootPath ?? string.Empty, LibraryFilterMode.Blacklist, mapping.PermanentItems)
-                    || mapping.PermanentItems.Any(pick => SameFilm(pick.Path, row.SourcePath))))
-            {
-                permanent.Add(row.SourceItemId);
-            }
-        }
-
-        return permanent;
-    }
-
-    /// <summary>
     /// Whether two files are versions of one film: in the same folder, each named after it, as in
     /// <c>Film (2020)/Film (2020) - 4K.mkv</c> and <c>Film (2020)/Film (2020) - 1080p.mkv</c>. A film is
     /// picked by its first version's file, and picking it keeps every version.
@@ -192,22 +168,21 @@ public sealed class LinkCacheFiller : BackgroundService
     }
 
     /// <summary>
-    /// Brings the cache in line with the settings: marks and queues the items to always keep, forgets
-    /// files whose link is gone, and applies retention and the size limit. Run by every content sync.
+    /// Brings the cache in line with the settings: forgets files whose link is gone or became a copy,
+    /// and applies retention and the size limit. Run by every content sync.
     /// </summary>
-    /// <returns>How many files were queued to cache.</returns>
-    public int Reconcile()
+    public void Reconcile()
     {
         if (!_cache.Enabled)
         {
-            return 0;
+            return;
         }
 
         var config = _configManager.Configuration;
         // Read so that a table that cannot be read throws. Taken for no links, it would empty the cache.
-        var rows = Table().GetLinksStrict().Where(r => r.StorageMode == StorageMode.Link).ToList();
+        // A link on its way to a copy keeps its cached file until the copy is in place.
+        var rows = Table().GetLinksStrict().Where(r => r.StorageMode.IsLink()).ToList();
         var byId = rows.ToDictionary(r => r.SourceItemId, StringComparer.OrdinalIgnoreCase);
-        var permanent = PermanentLinks(config, rows);
         foreach (var entry in _cache.List())
         {
             // The link was removed, became a copy, or its library left the cache. A link the link check
@@ -219,25 +194,7 @@ public sealed class LinkCacheFiller : BackgroundService
             }
         }
 
-        _cache.MarkPermanent(permanent);
-        if (!_cache.MakeRoom(0, Playing()))
-        {
-            _logger.LogWarning(
-                "The items chosen to always keep fill the link cache ({Used} of {Limit}), so nothing else is cached until its size is raised or fewer are chosen",
-                FormatUtilities.FormatBytes(_cache.UsedBytes()),
-                FormatUtilities.FormatBytes(config.GetLinkCacheSizeBytes()));
-        }
-
-        var queued = 0;
-        foreach (var linkId in permanent)
-        {
-            if (Enqueue(linkId, CacheReason.Permanent, null))
-            {
-                queued++;
-            }
-        }
-
-        return queued;
+        _cache.MakeRoom(0, Playing());
     }
 
     /// <summary>Queues a link's file to be cached. False when it is cached or waiting already.</summary>
@@ -396,7 +353,6 @@ public sealed class LinkCacheFiller : BackgroundService
             return;
         }
 
-        var permanent = PermanentLinks(config, new[] { row }).Count > 0;
         var name = Path.GetFileName(row.SourcePath);
         // The size is what room is made for and what the download is held to, so a file whose size
         // the source never gave is not cached.
@@ -459,7 +415,7 @@ public sealed class LinkCacheFiller : BackgroundService
             }
 
             var expected = row.SourceSize;
-            if (_cache.Complete(fill.LinkId, extension, expected, fill.Reason, permanent))
+            if (_cache.Complete(fill.LinkId, extension, expected, fill.Reason))
             {
                 _logger.LogInformation("Cached {File} ({Size}) from '{Server}'", name, FormatUtilities.FormatBytes(expected), server.DisplayName);
             }

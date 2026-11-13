@@ -1029,11 +1029,11 @@ export default function (view) {
                     '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="cacheLinks" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">Cache This Library\'s Links</span></label>' +
                     '<div class="fieldDescription checkboxFieldDescription">Keep full local copies of links that are played, and of episodes ahead, in the link cache. The cache is switched on and sized under Content in Settings.</div>' +
                 '</div>' +
-                '<div class="permanentSection">' +
-                    '<label class="inputLabel">Always Keep</label>' +
-                    '<div class="fieldDescription mb-md">Shows and films picked here are always kept in the link cache, and never dropped to make room.</div>' +
-                    '<div class="filterTableContainer" id="' + permanentTableId + '"></div>' +
-                '</div>' +
+            '</div>' +
+            '<div class="permanentSection" style="display:none;">' +
+                '<h3 class="jpk-subsection-title">Always Keep</h3>' +
+                '<div class="fieldDescription mb-md">Shows and films picked here are full copies in this library, synced like any copy, instead of links. Every version of a picked film is copied. Removing a pick leaves its copies here.</div>' +
+                '<div class="filterTableContainer" id="' + permanentTableId + '"></div>' +
             '</div>' +
             '<div class="filterSection">' +
                 '<h3 class="jpk-subsection-title">Library Filter</h3>' +
@@ -1160,7 +1160,6 @@ export default function (view) {
         // --- Link cache: whether this library's links are cached, and the items to always keep ---
         var linkCacheSection = div.querySelector('.linkCacheSection');
         var permanentSection = div.querySelector('.permanentSection');
-        var cacheLinksBox = div.querySelector('.cacheLinks');
         var selectedPermanentItems = {};
         var permanentTable = null;
         (mapping.PermanentItems || []).forEach(function(pi) {
@@ -1188,18 +1187,16 @@ export default function (view) {
             permanentTable.reload();
         }
 
-        // The cache only holds links, so its options show for a Link library, and the picker while it is cached.
+        // The cache and Always Keep only apply to links, so they show for a Link library.
         function updateLinkCacheVisibility() {
             var linked = storageModeSelect && storageModeSelect.value === 'Link';
             linkCacheSection.style.display = linked ? '' : 'none';
-            var cached = linked && cacheLinksBox.checked;
-            permanentSection.style.display = cached ? '' : 'none';
-            if (cached && filterCurrentLibraryId) {
+            permanentSection.style.display = linked ? '' : 'none';
+            if (linked && filterCurrentLibraryId) {
                 buildPermanentTable();
             }
         }
         if (storageModeSelect) storageModeSelect.addEventListener('change', updateLinkCacheVisibility);
-        cacheLinksBox.addEventListener('change', updateLinkCacheVisibility);
         updateLinkCacheVisibility();
         div._selectedPermanentItems = selectedPermanentItems;
         filterModeSelect.addEventListener('change', updateFilterVisibility);

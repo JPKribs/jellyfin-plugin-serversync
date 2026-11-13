@@ -29,6 +29,7 @@ public partial class ConfigurationController
     /// <param name="search">Optional search term.</param>
     /// <param name="status">Optional status filter.</param>
     /// <param name="pendingType">Optional pending type filter.</param>
+    /// <param name="cached">Only links whose file is in the link cache.</param>
     /// <param name="skip">Number of items to skip (default 0).</param>
     /// <param name="take">Maximum items to return (default 50, max 200).</param>
     /// <returns>Paginated result of sync item DTOs.</returns>
@@ -39,11 +40,13 @@ public partial class ConfigurationController
         [FromQuery] string? search = null,
         [FromQuery] string? status = null,
         [FromQuery] string? pendingType = null,
+        [FromQuery] bool cached = false,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
         ArgumentNullException.ThrowIfNull(manager);
         var config = _configManager.Configuration;
+        var cache = HttpContext?.RequestServices?.GetService(typeof(Services.Links.LinkCache)) as Services.Links.LinkCache;
 
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
@@ -60,7 +63,8 @@ public partial class ConfigurationController
             pendingTypeFilter = parsedPendingType;
         }
 
-        var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take);
+        var cachedIds = cached ? cache?.List().Select(e => e.LinkId).ToList() ?? new List<string>() : null;
+        var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take, cachedIds);
 
         var libraryMappings = config.GetAllLibraryMappings();
         var libraryNameLookup = libraryMappings
@@ -70,7 +74,6 @@ public partial class ConfigurationController
                 g => (SourceName: g.First().SourceLibraryName, LocalName: g.First().LocalLibraryName),
                 StringComparer.OrdinalIgnoreCase);
 
-        var cache = HttpContext?.RequestServices?.GetService(typeof(Services.Links.LinkCache)) as Services.Links.LinkCache;
         return Ok(new PagedResult<SyncItemDto>(
             items.Select(i =>
             {
@@ -397,25 +400,31 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Turns links into full copies. Each copy downloads on the next sync, and its .strm is removed once
-    /// the copy is in place. Rows that are not links are skipped.
+    /// Turns links into full copies, and its .strm is removed once the copy is in place. A link whose
+    /// file is in the link cache has the cached file moved into place, and a sync starts now to do it.
+    /// Any other copy downloads on the next sync. Rows that are not links are skipped.
     /// </summary>
+    /// <param name="manager">The content table.</param>
+    /// <param name="cache">The link cache.</param>
     /// <param name="request">Bulk items request.</param>
-    /// <returns>How many links will be copied, and how many rows were skipped.</returns>
+    /// <returns>How many links will be copied, how many of those come from the cache, and how many rows were skipped.</returns>
     [HttpPost("PromoteItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult PromoteItems(
         [FromServices] ContentSyncTableManager manager,
+        [FromServices] Services.Links.LinkCache cache,
         [FromBody] BulkItemsRequest request)
     {
         ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(cache);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
             return BadRequest("No items specified");
         }
 
         var promoted = 0;
+        var fromCache = 0;
         var skipped = 0;
         foreach (var id in request.SourceItemIds)
         {
@@ -427,6 +436,10 @@ public partial class ConfigurationController
             {
                 manager.Upsert(row);
                 promoted++;
+                if (cache.Holds(id))
+                {
+                    fromCache++;
+                }
             }
             else
             {
@@ -434,7 +447,13 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(new { Promoted = promoted, Skipped = skipped });
+        // A cached file moves in seconds, so it is not left waiting for the scheduled sync.
+        if (fromCache > 0)
+        {
+            ExecuteScheduledTaskByKey("ServerSyncDownloadContent", "Sync task started", "Download task not found");
+        }
+
+        return Ok(new { Promoted = promoted, FromCache = fromCache, Skipped = skipped });
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
+using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using JPKribs.Jellyfin.Base;
@@ -231,15 +232,17 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
 
     /// <summary>
     /// Searches sync items with pagination. Used by the Content admin UI
-    /// which can additionally filter by <see cref="PendingType"/> beyond
-    /// what the universal <see cref="Paginate"/> exposes.
+    /// which can additionally filter by <see cref="PendingType"/>, and to a set of
+    /// items such as the links in the cache, beyond what the universal
+    /// <see cref="Paginate"/> exposes.
     /// </summary>
     public (IList<SyncItem> Items, int TotalCount) SearchPaginated(
         string? searchTerm,
         SyncStatus? status = null,
         PendingType? pendingType = null,
         int skip = 0,
-        int take = 50) => ExecuteRead<(IList<SyncItem> Items, int TotalCount)>(
+        int take = 50,
+        IReadOnlyList<string>? sourceItemIds = null) => ExecuteRead<(IList<SyncItem> Items, int TotalCount)>(
         conn =>
         {
             var conditions = new List<string>();
@@ -258,13 +261,18 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
                 conditions.Add("PendingType = @pendingType");
             }
 
+            if (sourceItemIds is not null)
+            {
+                conditions.Add(sourceItemIds.Count == 0 ? "0" : $"SourceItemId IN ({string.Join(", ", sourceItemIds.Select((_, i) => "@id" + i.ToString(CultureInfo.InvariantCulture)))})");
+            }
+
             var whereClause = conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : string.Empty;
 
             int totalCount;
             using (var countCmd = conn.CreateCommand())
             {
                 countCmd.CommandText = $"SELECT COUNT(*) FROM SyncItems {whereClause}";
-                BindSearchFilters(countCmd, searchTerm, status, pendingType);
+                BindSearchFilters(countCmd, searchTerm, status, pendingType, sourceItemIds);
                 totalCount = Convert.ToInt32(countCmd.ExecuteScalar(), CultureInfo.InvariantCulture);
             }
 
@@ -274,7 +282,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
                 {whereClause}
                 ORDER BY {StatusPriorityOrderBy}, LocalPath ASC, Id ASC
                 LIMIT @take OFFSET @skip";
-            BindSearchFilters(dataCmd, searchTerm, status, pendingType);
+            BindSearchFilters(dataCmd, searchTerm, status, pendingType, sourceItemIds);
             dataCmd.Parameters.AddWithValue("@take", take);
             dataCmd.Parameters.AddWithValue("@skip", skip);
             return (ReadAll(dataCmd), totalCount);
@@ -489,8 +497,13 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         return count;
     }
 
-    private static void BindSearchFilters(SqliteCommand cmd, string? searchTerm, SyncStatus? status, PendingType? pendingType)
+    private static void BindSearchFilters(SqliteCommand cmd, string? searchTerm, SyncStatus? status, PendingType? pendingType, IReadOnlyList<string>? sourceItemIds)
     {
+        for (var i = 0; i < (sourceItemIds?.Count ?? 0); i++)
+        {
+            cmd.Parameters.AddWithValue("@id" + i.ToString(CultureInfo.InvariantCulture), sourceItemIds![i]);
+        }
+
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
             cmd.Parameters.AddWithValue("@search", $"%{searchTerm}%");

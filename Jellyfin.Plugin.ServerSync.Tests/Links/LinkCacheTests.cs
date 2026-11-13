@@ -20,8 +20,8 @@ using Xunit;
 namespace Jellyfin.Plugin.ServerSync.Tests.Links;
 
 /// <summary>
-/// The link cache: what it holds, what it drops and in which order, what it serves, and which links
-/// are chosen for it.
+/// The link cache: what it holds, what it drops and in which order, what it serves and hands to the
+/// library, and which links Always Keep copies instead.
 /// </summary>
 public sealed class LinkCacheTests : IDisposable
 {
@@ -56,7 +56,7 @@ public sealed class LinkCacheTests : IDisposable
         Put(cache, A, 100);
         File.WriteAllBytes(cache.PartPathFor(B, ".mkv"), new byte[50]);
 
-        Assert.False(cache.Complete(B, ".mkv", 100, CacheReason.Played, false));
+        Assert.False(cache.Complete(B, ".mkv", 100, CacheReason.Played));
 
         Assert.Equal(Path.Combine(_dir, A + ".mkv"), cache.PathFor(A));
         Assert.Null(cache.PathFor(B));
@@ -98,9 +98,9 @@ public sealed class LinkCacheTests : IDisposable
     }
 
     /// <summary>
-    /// Room is made in the order the setting names, and an item set to always keep is never dropped.
-    /// True: the administrator decides what goes first, and pinned items stay whatever else happens.
-    /// False: the wrong file would be dropped, or a pinned item would be.
+    /// Room is made in the order the setting names.
+    /// True: the administrator decides what goes first.
+    /// False: the wrong file would be dropped.
     /// </summary>
     [Theory]
     [InlineData(CacheRemovalOrder.LastPlayed, B)]
@@ -122,9 +122,6 @@ public sealed class LinkCacheTests : IDisposable
         _config.LinkCacheRemovalOrder = order;
 
         Assert.Equal(firstToGo, LinkCache.RemovalOrder(cache.List(), order).First().LinkId);
-
-        cache.MarkPermanent(new HashSet<string> { firstToGo });
-        Assert.NotEqual(firstToGo, LinkCache.RemovalOrder(cache.List(), order).First().LinkId);
     }
 
     /// <summary>
@@ -154,9 +151,9 @@ public sealed class LinkCacheTests : IDisposable
 
     /// <summary>
     /// Retention drops a file not played for the set number of days, counted from when it was cached
-    /// if it was never played, and never an item set to always keep.
+    /// if it was never played.
     /// True: the cache clears itself of what nobody watches.
-    /// False: files would sit in the cache for good, or pinned ones would expire.
+    /// False: files would sit in the cache for good.
     /// </summary>
     [Fact]
     public void Retention_DropsWhatWasNotPlayed()
@@ -165,15 +162,13 @@ public sealed class LinkCacheTests : IDisposable
         var cache = Cache();
         Put(cache, A, 100);
         Put(cache, B, 100);
-        Put(cache, C, 100);
-        cache.MarkPermanent(new HashSet<string> { C });
         _now += TimeSpan.FromDays(5);
         cache.Played(B);
         _now += TimeSpan.FromDays(3);
 
         cache.MakeRoom(0);
 
-        Assert.Equal(new[] { B, C }, cache.List().Select(e => e.LinkId).OrderBy(id => id));
+        Assert.Equal(new[] { B }, cache.List().Select(e => e.LinkId));
     }
 
     /// <summary>
@@ -217,7 +212,7 @@ public sealed class LinkCacheTests : IDisposable
         var cache = Cache();
         var data = Enumerable.Range(0, 1000).Select(i => (byte)(i % 251)).ToArray();
         File.WriteAllBytes(cache.PartPathFor(A, ".mkv"), data);
-        Assert.True(cache.Complete(A, ".mkv", data.Length, CacheReason.Played, false));
+        Assert.True(cache.Complete(A, ".mkv", data.Length, CacheReason.Played));
         var streamer = new LinkStreamer(new FakeConfig(_config), null!, null!, null!, new LinkGrants(), new LinkHealth(), NullLogger<LinkStreamer>.Instance, LinkStreamer.StallTimeout, cache);
         var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
         var body = new MemoryStream();
@@ -251,35 +246,80 @@ public sealed class LinkCacheTests : IDisposable
     }
 
     /// <summary>
-    /// The links to always keep are the ones under an item picked on their library, and none from a
-    /// library kept out of the cache.
-    /// True: picking a show keeps every episode of it, and nothing else.
-    /// False: pinned shows would not be kept, or a library left out of the cache would fill it.
+    /// A cached file moves out of the cache to where the link's copy belongs, and is forgotten by the
+    /// cache. Nothing moves when the size is wrong or something is already there.
+    /// True: keeping a cached link puts the file in the library without downloading it again.
+    /// False: the copy would download again, a short file would become the copy, or a file in the library would be replaced.
     /// </summary>
     [Fact]
-    public void PermanentLinks_AreTheOnesUnderPickedItems()
+    public void MoveTo_PutsTheCachedFileInPlace()
     {
-        var mapping = new LibraryMapping
-        {
-            SourceLibraryId = "lib",
-            SourceRootPath = "/src/shows",
-            IsEnabled = true,
-            PermanentItems = new List<FilteredItem> { new() { ItemId = "s", Path = "/src/shows/Kept Show" } }
-        };
-        var config = new PluginConfiguration { Servers = new List<SourceServer> { new() { Key = "a", Url = "http://a", ApiKey = "k", IsEnabled = true, LibraryMappings = new List<LibraryMapping> { mapping } } } };
-        SyncItem Row(string id, string path) => new() { SourceItemId = id, SourcePath = path, SourceLibraryId = "lib", ServerKey = "a", StorageMode = StorageMode.Link, Status = SyncStatus.Synced };
-        var rows = new[] { Row(A, "/src/shows/Kept Show/Season 01/E01.mkv"), Row(B, "/src/shows/Kept Show 2/Season 01/E01.mkv"), Row(C, "/src/shows/Other/E01.mkv") };
+        var cache = Cache();
+        Put(cache, A, 100);
+        Put(cache, B, 100);
+        var library = Path.Combine(_dir, "library", "Film (2020)");
+        var copy = Path.Combine(library, "Film (2020).mkv");
 
-        Assert.Equal(new[] { A }, LinkCacheFiller.PermanentLinks(config, rows));
+        Assert.False(cache.MoveTo(A, copy, 99));
+        Assert.True(cache.MoveTo(A, copy, 100));
+        Assert.Equal(100, new FileInfo(copy).Length);
+        Assert.Null(cache.PathFor(A));
 
-        mapping.ExcludeFromLinkCache = true;
-        Assert.Empty(LinkCacheFiller.PermanentLinks(config, rows));
+        Assert.False(cache.MoveTo(B, copy, 100));
+        Assert.NotNull(cache.PathFor(B));
+        Assert.False(cache.MoveTo(C, Path.Combine(library, "Other.mkv"), 100));
     }
 
     /// <summary>
-    /// Picking a film keeps every version of it, and nothing else in its library.
-    /// True: the version a user actually plays is the one kept, whichever it is.
-    /// False: only the film's first version would be kept, and the others dropped to make room.
+    /// A file under an item picked to always keep is copied, everything else in a Link mapping is
+    /// linked, and a Copy mapping copies whatever is picked.
+    /// True: picking a show copies every episode of it, and nothing else, whether or not the library is cached.
+    /// False: picked shows would stay links, or a show sharing a name prefix would be copied too.
+    /// </summary>
+    [Fact]
+    public void AlwaysKeep_CopiesWhatIsUnderPickedItems()
+    {
+        var mapping = new LibraryMapping
+        {
+            SourceRootPath = "/src/shows",
+            StorageMode = StorageMode.Link,
+            ExcludeFromLinkCache = true,
+            PermanentItems = new List<FilteredItem> { new() { ItemId = "s", Path = "/src/shows/Kept Show" } }
+        };
+
+        Assert.Equal(StorageMode.Copy, AlwaysKeep.StorageFor(mapping, "/src/shows/Kept Show/Season 01/E01.mkv"));
+        Assert.Equal(StorageMode.Link, AlwaysKeep.StorageFor(mapping, "/src/shows/Kept Show 2/Season 01/E01.mkv"));
+        Assert.Equal(StorageMode.Link, AlwaysKeep.StorageFor(mapping, "/src/shows/Other/E01.mkv"));
+        Assert.Equal(StorageMode.Link, AlwaysKeep.StorageFor(mapping, null));
+
+        mapping.StorageMode = StorageMode.Copy;
+        Assert.False(AlwaysKeep.Covers(mapping, "/src/shows/Kept Show/Season 01/E01.mkv"));
+        Assert.Equal(StorageMode.Copy, AlwaysKeep.StorageFor(mapping, "/src/shows/Other/E01.mkv"));
+    }
+
+    /// <summary>
+    /// Picking a film copies every version of it.
+    /// True: each version a user might play is a local file.
+    /// False: only the version picked would be copied, and the others left as links.
+    /// </summary>
+    [Fact]
+    public void AlwaysKeep_CopiesEveryVersionOfAPickedFilm()
+    {
+        var mapping = new LibraryMapping
+        {
+            SourceRootPath = "/src/m",
+            StorageMode = StorageMode.Link,
+            PermanentItems = new List<FilteredItem> { new() { ItemId = "f", Path = "/src/m/Film (2020)/Film (2020) - 4K.mkv" } }
+        };
+
+        Assert.True(AlwaysKeep.Covers(mapping, "/src/m/Film (2020)/Film (2020) - 1080p.mkv"));
+        Assert.False(AlwaysKeep.Covers(mapping, "/src/m/Film (2021)/Film (2021).mkv"));
+    }
+
+    /// <summary>
+    /// Two files are versions of one film when they share its folder and are both named after it.
+    /// True: every version of a picked film is copied, and nothing else in its library.
+    /// False: only the film's first version would be copied, or another film would be.
     /// </summary>
     [Theory]
     [InlineData("/src/m/Film (2020)/Film (2020) - 4K.mkv", "/src/m/Film (2020)/Film (2020) - 1080p.mkv", true)]
@@ -359,7 +399,7 @@ public sealed class LinkCacheTests : IDisposable
     private static void Put(LinkCache cache, string linkId, int size)
     {
         File.WriteAllBytes(cache.PartPathFor(linkId, ".mkv"), new byte[size]);
-        Assert.True(cache.Complete(linkId, ".mkv", size, CacheReason.Played, false));
+        Assert.True(cache.Complete(linkId, ".mkv", size, CacheReason.Played));
     }
 
     // A file of a real size on disk without writing it out: the length is set, and nothing is stored.
@@ -370,7 +410,7 @@ public sealed class LinkCacheTests : IDisposable
             file.SetLength(size);
         }
 
-        Assert.True(cache.Complete(linkId, ".mkv", size, CacheReason.Played, false));
+        Assert.True(cache.Complete(linkId, ".mkv", size, CacheReason.Played));
     }
 
     private sealed class FakeConfig : IPluginConfigurationManager

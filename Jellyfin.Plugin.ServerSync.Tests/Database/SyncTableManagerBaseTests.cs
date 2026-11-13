@@ -89,6 +89,28 @@ public sealed class SyncTableManagerBaseTests : IDisposable
             => new(Array.Empty<PeopleSyncItem>(), 0, 0, 50);
     }
 
+    /// <summary>
+    /// The content search can be held to a set of items, such as the links in the cache, and an empty
+    /// set finds nothing.
+    /// True: the Cached filter lists exactly the cached links, paged and counted like any filter.
+    /// False: the filter would list every row, or none would be counted right.
+    /// </summary>
+    [Fact]
+    public void ContentSearch_HeldToItems()
+    {
+        foreach (var id in new[] { "a", "b", "c" })
+        {
+            _content.Upsert(Row(id, SyncStatus.Synced));
+        }
+
+        var (items, total) = _content.SearchPaginated(null, sourceItemIds: new[] { "a", "c", "gone" });
+        Assert.Equal(2, total);
+        Assert.Equal(new[] { "a", "c" }, items.Select(i => i.SourceItemId).OrderBy(i => i));
+
+        Assert.Equal(0, _content.SearchPaginated(null, sourceItemIds: Array.Empty<string>()).TotalCount);
+        Assert.Equal(3, _content.SearchPaginated(null).TotalCount);
+    }
+
     private static SyncItem Row(string sourceItemId, SyncStatus status, int retryCount = 0, string? reason = null, string? serverKey = null) => new()
     {
         SourceLibraryId = "lib-1",

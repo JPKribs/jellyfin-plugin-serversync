@@ -18,10 +18,7 @@ public enum CacheReason
     Played = 0,
 
     /// <summary>It is an episode ahead of the one a user is watching.</summary>
-    Ahead = 1,
-
-    /// <summary>It is one of the items chosen to always keep.</summary>
-    Permanent = 2
+    Ahead = 1
 }
 
 /// <summary>One file in the link cache.</summary>
@@ -44,9 +41,6 @@ public sealed class CacheEntry
 
     /// <summary>Gets or sets why the file was cached.</summary>
     public CacheReason Reason { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether retention and removal never drop the file.</summary>
-    public bool Permanent { get; set; }
 }
 
 /// <summary>
@@ -189,9 +183,8 @@ public sealed class LinkCache
     /// <param name="extension">The source file's extension.</param>
     /// <param name="expectedSize">The size the source reports for the file, or 0 when unknown.</param>
     /// <param name="reason">Why it was cached.</param>
-    /// <param name="permanent">Whether it is one of the items to always keep.</param>
     /// <returns>True when the file is now in the cache.</returns>
-    public bool Complete(string linkId, string extension, long expectedSize, CacheReason reason, bool permanent)
+    public bool Complete(string linkId, string extension, long expectedSize, CacheReason reason)
     {
         var name = FileNameFor(linkId, extension);
         var part = Path.Combine(Root, name + PartExtension);
@@ -208,7 +201,7 @@ public sealed class LinkCache
                 }
 
                 File.Move(part, path, overwrite: true);
-                Entries()[linkId] = new CacheEntry { LinkId = linkId, File = name, Size = size, CachedAt = _now(), Reason = reason, Permanent = permanent };
+                Entries()[linkId] = new CacheEntry { LinkId = linkId, File = name, Size = size, CachedAt = _now(), Reason = reason };
                 Save();
                 return true;
             }
@@ -217,6 +210,41 @@ public sealed class LinkCache
                 _logger.LogWarning("Could not take {File} into the link cache: {Reason}", name, ex.Message);
                 return false;
             }
+        }
+    }
+
+    /// <summary>
+    /// Moves a link's cached file out of the cache to <paramref name="destination"/>, where it becomes
+    /// the link's copy. False, with nothing moved, when the cache does not hold the whole file, the file
+    /// is not <paramref name="expectedSize"/>, or something is already at the destination.
+    /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="destination">Where the copy belongs.</param>
+    /// <param name="expectedSize">The size the source reports for the file.</param>
+    /// <returns>True when the file is now at the destination.</returns>
+    public bool MoveTo(string linkId, string destination, long expectedSize)
+    {
+        lock (_lock)
+        {
+            if (PathFor(linkId) is not { } cached || new FileInfo(cached).Length != expectedSize || File.Exists(destination))
+            {
+                return false;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Move(cached, destination);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning("Could not move {File} out of the link cache: {Reason}", Path.GetFileName(cached), ex.Message);
+                return false;
+            }
+
+            Entries().Remove(linkId);
+            Save();
+            return true;
         }
     }
 
@@ -251,47 +279,16 @@ public sealed class LinkCache
         }
     }
 
-    /// <summary>
-    /// Marks which cached files are items to always keep, from the links that are now. A file no
-    /// longer chosen is kept, as one that was played, until retention or the size limit drops it.
-    /// </summary>
-    public void MarkPermanent(IReadOnlySet<string> permanentLinkIds)
-    {
-        ArgumentNullException.ThrowIfNull(permanentLinkIds);
-        lock (_lock)
-        {
-            var changed = false;
-            foreach (var entry in Entries().Values)
-            {
-                var permanent = permanentLinkIds.Contains(entry.LinkId);
-                if (entry.Permanent != permanent)
-                {
-                    entry.Permanent = permanent;
-                    changed = true;
-                }
-            }
-
-            if (changed)
-            {
-                Save();
-            }
-        }
-    }
-
-    /// <summary>
-    /// The order files are dropped in when room is needed: never a permanent one, and otherwise by
-    /// the setting.
-    /// </summary>
+    /// <summary>The order files are dropped in when room is needed, by the setting.</summary>
     public static IEnumerable<CacheEntry> RemovalOrder(IEnumerable<CacheEntry> entries, CacheRemovalOrder order)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var removable = entries.Where(e => !e.Permanent);
         return order switch
         {
-            CacheRemovalOrder.Oldest => removable.OrderBy(e => e.CachedAt),
-            CacheRemovalOrder.Newest => removable.OrderByDescending(e => e.CachedAt),
-            CacheRemovalOrder.Largest => removable.OrderByDescending(e => e.Size).ThenBy(e => e.LastPlayedAt ?? e.CachedAt),
-            _ => removable.OrderBy(e => e.LastPlayedAt ?? e.CachedAt)
+            CacheRemovalOrder.Oldest => entries.OrderBy(e => e.CachedAt),
+            CacheRemovalOrder.Newest => entries.OrderByDescending(e => e.CachedAt),
+            CacheRemovalOrder.Largest => entries.OrderByDescending(e => e.Size).ThenBy(e => e.LastPlayedAt ?? e.CachedAt),
+            _ => entries.OrderBy(e => e.LastPlayedAt ?? e.CachedAt)
         };
     }
 
@@ -314,7 +311,7 @@ public sealed class LinkCache
             if (config.LinkCacheRetentionDays > 0)
             {
                 var cutoff = _now() - TimeSpan.FromDays(config.LinkCacheRetentionDays);
-                foreach (var old in entries.Values.Where(e => !e.Permanent && (e.LastPlayedAt ?? e.CachedAt) < cutoff && keep?.Contains(e.LinkId) != true).ToList())
+                foreach (var old in entries.Values.Where(e => (e.LastPlayedAt ?? e.CachedAt) < cutoff && keep?.Contains(e.LinkId) != true).ToList())
                 {
                     _logger.LogInformation("Dropped {File} from the link cache: not played for {Days} day(s)", old.File, config.LinkCacheRetentionDays);
                     entries.Remove(old.LinkId);

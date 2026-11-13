@@ -36,7 +36,7 @@ export function createContentSyncTableModule(ctx, kit) {
             { id: 'Ignore', title: 'Ignore', icon: 'block', method: 'bulkIgnore' },
             { id: 'MarkSynced', title: 'Mark Synced', icon: 'check_circle', method: 'bulkMarkSynced' },
             { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'jpk-button-submit', method: 'bulkQueue' },
-            { id: 'MakeCopy', title: 'Turn links into full copies', icon: 'file_download', method: 'bulkMakeCopy' },
+            { id: 'MakeCopy', title: 'Turn links into full copies, moving the cached file into place when there is one', icon: 'file_download', method: 'bulkMakeCopy' },
             { id: 'Delete', title: 'Delete from local server only', icon: 'delete', className: 'jpk-button-destructive', method: 'bulkDelete' }
         ],
         idKey: 'SourceItemId',
@@ -56,12 +56,16 @@ export function createContentSyncTableModule(ctx, kit) {
                 { value: 'Errored', label: 'Errored' },
                 { value: 'Ignored', label: 'Ignored' },
                 { value: 'Pending', label: 'Pending' },
+                { value: 'Cached', label: 'Cached' },
                 { value: 'Pending:Download', label: 'Pending Download', id: 'optPendingDownload', hidden: true },
                 { value: 'Pending:Replacement', label: 'Pending Replace', id: 'optPendingReplacement', hidden: true },
                 { value: 'Pending:Deletion', label: 'Pending Delete', id: 'optPendingDeletion', hidden: true },
                 { value: 'Deleting', label: 'Deleting', id: 'optDeleting', hidden: true }
             ],
             buildParams: function(filterValue) {
+                if (filterValue === 'Cached') {
+                    return { cached: true };
+                }
                 if (filterValue.indexOf(':') > -1) {
                     var parts = filterValue.split(':');
                     return { status: parts[0], pendingType: parts[1] };
@@ -227,12 +231,19 @@ export function createContentSyncTableModule(ctx, kit) {
                 }, 'Failed to mark items as synced');
             },
 
-            // Only links can become copies. The server skips anything else.
+            // Only links can become copies. The server skips anything else, and moves cached files into place now.
             bulkMakeCopy: function() {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
                 this.postSelection('PromoteItems', { SourceItemIds: ids }, function(result) {
-                    var msg = ((result && result.Promoted) || 0) + ' link(s) will be copied on the next sync';
+                    var promoted = (result && result.Promoted) || 0;
+                    var fromCache = (result && result.FromCache) || 0;
+                    var msg = fromCache > 0
+                        ? fromCache + ' cached link(s) are being moved into the library now'
+                        : promoted + ' link(s) will be copied on the next sync';
+                    if (fromCache > 0 && promoted > fromCache) {
+                        msg += ', and ' + (promoted - fromCache) + ' will be downloaded';
+                    }
                     if (result && result.Skipped > 0) {
                         msg += ', ' + result.Skipped + ' item(s) were not links';
                     }

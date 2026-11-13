@@ -609,6 +609,9 @@ public class UpdateSyncTablesTask
         var sourceCreateDate = source.SourceItem.DateCreated?.DateTime ?? DateTime.UtcNow;
         var localPath = PathUtilities.TranslatePath(sourcePath, source.Mapping.SourceRootPath, source.Mapping.LocalRootPath);
 
+        // An item picked to always keep is copied, even in a Link mapping.
+        var storage = AlwaysKeep.StorageFor(source.Mapping, sourcePath);
+
         existing.TryGetValue(sourceItemId, out var existingItem);
 
         // Rows are keyed by the source's item id, and two servers can report the same id. When the
@@ -635,7 +638,7 @@ public class UpdateSyncTablesTask
             // A file new to a Link mapping is recorded as a link, so it is linked rather than copied
             // if it is ever wanted again.
             if (existingItem is null && watched is not null && _linkFiles is not null
-                && source.Mapping.StorageMode == StorageMode.Link && LinkPaths.CanLink(source.SourceItem) && LinkPaths.LinkPathFor(localPath) is { } watchedLink)
+                && storage == StorageMode.Link && LinkPaths.CanLink(source.SourceItem) && LinkPaths.LinkPathFor(localPath) is { } watchedLink)
             {
                 watched.StorageMode = StorageMode.Link;
                 watched.LocalPath = watchedLink;
@@ -664,17 +667,17 @@ public class UpdateSyncTablesTask
             }
         }
 
-        // A link row stays a link and a copy row stays a copy, whatever the mapping says now, so switching
-        // a mapping never removes or replaces a file already here. Only new files follow the mapping.
-        // Only video is linked, since Jellyfin plays nothing else from a .strm. Anything else in a Link
-        // mapping is copied.
+        // A copy row stays a copy whatever the mapping says now, so switching a mapping never removes a
+        // file already here. A link becomes a copy when its mapping copies, or when it is picked to
+        // always keep, and new files follow the same. Only video is linked, since Jellyfin plays
+        // nothing else from a .strm. Anything else in a Link mapping is copied.
         if (_linkFiles is not null
-            && (existingItem?.StorageMode ?? (LinkPaths.CanLink(source.SourceItem) ? source.Mapping.StorageMode : StorageMode.Copy)).IsLink()
+            && (existingItem?.StorageMode ?? (LinkPaths.CanLink(source.SourceItem) ? storage : StorageMode.Copy)).IsLink()
             && LinkPaths.LinkPathFor(localPath) is { } linkPath)
         {
             if (existingItem != null)
             {
-                var promote = source.Mapping.StorageMode == StorageMode.Copy ? config.DownloadNewContentMode : (ApprovalMode?)null;
+                var promote = storage == StorageMode.Copy ? config.DownloadNewContentMode : (ApprovalMode?)null;
                 return Task.FromResult(Stamp(LinkStateService.ProcessExistingLink(existingItem, sourcePath, sourceSize, sourceCreateDate, linkPath, _linkFiles, Logger, promote), source));
             }
 

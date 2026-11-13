@@ -75,12 +75,12 @@ public class LibraryMapping
     public bool ExcludeFromLinkCache { get; set; }
 
     /// <summary>
-    /// Gets or sets the shows and films whose links are always kept in the link cache. Retention and
-    /// the cache's removal order never drop them.
+    /// Gets or sets the shows and films picked to always keep on a Link mapping. Their files are full
+    /// copies in the library instead of links. See <see cref="Services.Links.AlwaysKeep"/>.
     /// </summary>
     /// <remarks>
-    /// Left out of JSON while empty, like <see cref="StorageMode"/>, so a mapping that never used the
-    /// cache hashes exactly as it did before the cache existed.
+    /// Left out of JSON while empty, like <see cref="StorageMode"/>, so a mapping that never picked
+    /// anything hashes exactly as it did before the setting existed.
     /// </remarks>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public List<FilteredItem>? PermanentItems { get; set; }
