@@ -9,6 +9,14 @@
     "category": "Administration",
     "versions": [
       {
+        "version": "12.2.11.4",
+        "changelog": "\n## Changed\n- A link session on the source is named after the viewer's client and their user on the linking server, as in Jellyfin Web (Joe). Both servers need this release. A linking server on an earlier release keeps the old name\n- Keeping a full local copy of a link is easier to find on the Sync tab. The toolbar's copy action is a pin, Keep a full local copy, and a link's details offer Keep Local Copy. A cached file is moved into place\n\n## Developer\n- The wire protocol and the database schema are unchanged, so this release works alongside 12.2.11.x one server at a time\n- The playback report carries an optional UserName of at most 256 characters\n- New tests cover the session name",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/JPKribs/jellyfin-plugin-serversync/releases/download/v12.2.11.4/jellyfin-plugin-serversync-12.2.11.4.zip",
+        "checksum": "91a6bfed8573a3233309e9c5b86c63b7",
+        "timestamp": "2026-11-13T06:01:03Z"
+      },
+      {
         "version": "12.2.11.3",
         "changelog": "\n## Important\n- Always Keep makes full copies in the library, synced like any copy, instead of holding files in the link cache. On the next refresh the links of picked shows and films become copies under the New files approval, every episode of a picked show and every version of a picked film. Their copies count toward the library's disk and Minimum Free Space, not Cache Size. A copy stays when its pick is removed\n\n## Features\n- A Cached filter on the Sync tab's Content table lists the links whose file is in the link cache\n- A link that becomes a copy takes its file from the link cache when the cache holds all of it, instead of downloading it again. Turn links into full copies starts a sync at once when any selected link is cached\n\n## Changed\n- The source shows a link session as Direct Play or Direct Stream. The source only sends the file, and any transcode runs on the server holding the link\n- Playback from the link cache is not reported to the source, which sends nothing for it. History sync carries its played state there\n- The link cache no longer keeps files for good. Files an earlier release kept for Always Keep are ordinary cached files, dropped by retention and the size limit\n\n## Developer\n- The wire protocol and the database schema are unchanged, so this release works alongside 12.2.11.x one server at a time\n- GET /Sync/Items takes cached=true, and POST /Sync/PromoteItems answers FromCache and starts Sync Content when it is above 0\n- New tests cover Always Keep, moving a cached file into place, the Cached filter, the reported play method, and cached playback staying off the source",
         "targetAbi": "12.4.0.0",
