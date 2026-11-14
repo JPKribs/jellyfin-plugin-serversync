@@ -33,6 +33,12 @@ public class PeerLinkDescribeResponse
 /// <summary>What the source holds for one linked file.</summary>
 public class PeerLinkDescription
 {
+    /// <summary>
+    /// The reason a source gives when the file is still its item but could not be read just now. Unlike
+    /// every other reason, it does not say the file is gone.
+    /// </summary>
+    public const string Unreadable = "the source cannot read the file";
+
     /// <summary>Gets or sets the source's id of the item.</summary>
     public string ItemId { get; set; } = string.Empty;
 

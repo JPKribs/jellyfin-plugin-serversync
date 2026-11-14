@@ -158,8 +158,11 @@ public sealed class LinkCacheFiller : BackgroundService
         {
             // The link was removed, became a copy, or its library left the cache. A link the link check
             // found the source will not stream, such as with linking turned off there, is dropped too,
-            // so a cached file does not outlive the source's say for longer than one content sync.
-            if (!byId.TryGetValue(entry.LinkId, out var row) || MappingFor(config, row) is not { ExcludeFromLinkCache: false } || LinkVerifier.Flagged(row))
+            // so a cached file does not outlive the source's say for longer than one content sync. A
+            // cached file that is not the size the source now reports is an older version of a file
+            // replaced there under the same name, and would keep playing in place of the new one.
+            if (!byId.TryGetValue(entry.LinkId, out var row) || MappingFor(config, row) is not { ExcludeFromLinkCache: false } || LinkVerifier.Flagged(row)
+                || (row.SourceSize > 0 && entry.Size != row.SourceSize))
             {
                 _cache.Remove(entry.LinkId);
             }
@@ -333,7 +336,7 @@ public sealed class LinkCacheFiller : BackgroundService
             return;
         }
 
-        if (row.SourceSize > config.GetLinkCacheSizeBytes())
+        if (row.SourceSize > _cache.LimitBytes())
         {
             _logger.LogInformation("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));
             return;

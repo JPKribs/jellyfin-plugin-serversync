@@ -93,8 +93,10 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         InboundHintWorker inboundWorker,
         IServerApplicationHost applicationHost,
         PlaylistCopyStore playlistCopies,
-        ILogger<LocalChangeObserver> logger)
+        ILogger<LocalChangeObserver> logger,
+        RemovedItemsStore? removed = null)
     {
+        _removed = removed;
         ArgumentNullException.ThrowIfNull(playlistCopies);
         _suppression = suppression;
         _inboundWorker = inboundWorker;
@@ -372,8 +374,43 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
+    private readonly RemovedItemsStore? _removed;
+
+    // A media file that left the library is written down, so a server reading this one can ask what
+    // was removed since it last looked, and is announced to the servers this one sends changes to,
+    // so their links to it move to another holder or go without waiting for a scan. A .strm is not a
+    // file anyone was offered, so its leaving is nobody's news.
+    private void NoteMediaRemoved(BaseItem item)
+    {
+        if (item is Folder || item.IsVirtualItem || string.IsNullOrEmpty(item.Path)
+            || item.Path.EndsWith(Links.LinkPaths.Extension, StringComparison.OrdinalIgnoreCase)
+            || item is not (MediaBrowser.Controller.Entities.Movies.Movie or MediaBrowser.Controller.Entities.TV.Episode or MediaBrowser.Controller.Entities.Audio.Audio or MediaBrowser.Controller.Entities.Video))
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        _removed?.Note(item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture), now);
+        // Announced whether or not this server syncs content itself, as a new file is: a server that
+        // only gives still has servers linking to its files.
+        var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = now };
+        _publisher.PublishContent(item.Id, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name, removed: true);
+    }
+
     private void OnItemRemoved(object? sender, ItemChangeEventArgs e)
     {
+        try
+        {
+            if (e?.Item is not null and not Playlist)
+            {
+                NoteMediaRemoved(e.Item);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not record a media file leaving the library");
+        }
+
         try
         {
             if (e?.Item is not Playlist playlist)

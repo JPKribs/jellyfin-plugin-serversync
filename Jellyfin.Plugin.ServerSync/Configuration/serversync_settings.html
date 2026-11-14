@@ -61,9 +61,9 @@
 
                             <div id="hintSettings">
                             <div class="inputContainer">
-                                <label class="inputLabel inputLabelUnfocused" for="txtHintDebounceSeconds">Send Changes After (seconds)</label>
+                                <label for="txtHintDebounceSeconds">Send Changes After (seconds)</label>
                                 <input is="emby-input" type="number" id="txtHintDebounceSeconds" min="1" max="3600" />
-                                <div class="fieldDescription">Quiet time after an edit before it is sent. Default 60.</div>
+                                <div class="fieldDescription">Quiet time after an edit before it is sent.</div>
                             </div>
 
                             <h3 class="jpk-subsection-title">Change Retries</h3>
@@ -76,21 +76,21 @@
                             </div>
 
                             <div class="inputContainer">
-                                <label class="inputLabel inputLabelUnfocused" for="txtMaxRetryCount">Failed Item Retries</label>
+                                <label for="txtMaxRetryCount">Failed Item Retries</label>
                                 <input is="emby-input" type="number" id="txtMaxRetryCount" min="1" max="10" />
-                                <div class="fieldDescription">Tries for a failed download or errored item before it waits for a manual retry. 1 to 10.</div>
+                                <div class="fieldDescription">Tries for a failed download or item within one run. One that still fails is tried again on the next run. 1 to 10.</div>
                             </div>
 
                             <div class="inputContainer">
-                                <label class="inputLabel inputLabelUnfocused" for="txtRefreshParallelism">Refresh Parallelism</label>
+                                <label for="txtRefreshParallelism">Refresh Parallelism</label>
                                 <input is="emby-input" type="number" id="txtRefreshParallelism" min="1" max="16" />
-                                <div class="fieldDescription">Metadata and People items at once. Default 8.</div>
+                                <div class="fieldDescription">Metadata and People items at once.</div>
                             </div>
 
                             <div class="inputContainer">
-                                <label class="inputLabel inputLabelUnfocused" for="txtFullScanIntervalHours">Full Scan Every (hours)</label>
+                                <label for="txtFullScanIntervalHours">Full Scan Every (hours)</label>
                                 <input is="emby-input" type="number" id="txtFullScanIntervalHours" min="0" max="720" />
-                                <div class="fieldDescription">Read everything this often. 0 makes every scan a full scan. Default 24.</div>
+                                <div class="fieldDescription">Read everything this often. 0 makes every scan a full scan.</div>
                             </div>
 
                             <div class="checkboxContainer checkboxContainer-withDescription">
@@ -203,7 +203,7 @@
 
 
                                     <div id="watchedFilterUsersSettings">
-                                        <label class="inputLabel">Skip Items Watched By</label>
+                                        <label>Skip Items Watched By</label>
                                         <div class="fieldDescription">Skip items every picked user has watched. None picked syncs everything.</div>
                                         <div id="watchedFilterUsersList"></div>
                                     </div>
@@ -230,7 +230,7 @@
                                     <div id="recyclingBinSettings" class="jpk-indent hidden">
                                         <div class="inputContainer">
                                             <label for="txtRecyclingBinPath">Recycling Bin Path</label>
-                                            <input is="emby-input" type="text" id="txtRecyclingBinPath" placeholder="/path/to/recycling-bin" />
+                                            <input is="emby-input" type="text" id="txtRecyclingBinPath" />
                                             <div class="fieldDescription">Folder for the bin.</div>
                                         </div>
 
@@ -288,17 +288,39 @@
                                         <div class="fieldDescription checkboxFieldDescription">Stream a link's direct play from its source per user, so two viewers are counted apart. Turn off if a player cannot direct play links.</div>
                                     </div>
 
+                                    <div class="ssFormTable ssFormTable2 mb-md" id="linkStreamsTable">
+                                        <div class="ssFormRow ssFormHead"><span>Link streams</span><span>At once</span></div>
+                                        <div class="ssFormRow"><span class="ssFormLabel">All servers<span class="ssFormHint">Links this server streams at once, in all</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtLinkMaxStreamsTotal" min="0" max="1000" class="ssFormInput" /></span></div>
+                                        <div id="linkTakeRows"></div>
+                                    </div>
+                                    <div class="fieldDescription mb-md">0 is no limit. When several servers hold a film, the highest in the Servers list streams it while it is doing nothing else for this server, and otherwise the one with the most streams free. A server at its limit here is passed over. A link that plays from the link cache is not counted.</div>
+
                                     <h3 class="jpk-subsection-title">Link Cache</h3>
                                     <div class="fieldDescription mb-md">Local copies of played links and upcoming episodes, which play from here even while the source is down. Each library can opt out on the Storage tab.</div>
-                                    <div class="inputContainer">
-                                        <label for="txtLinkCacheSizeGb">Cache Size (GB)</label>
+                                    <div class="selectContainer">
+                                        <label for="selLinkCacheSizing">Cache Size</label>
+                                        <select is="emby-select" id="selLinkCacheSizing">
+                                            <option value="Off">Off</option>
+                                            <option value="All">Use all available space</option>
+                                            <option value="Fixed">Use up to a fixed amount</option>
+                                            <option value="Percent">Use a percentage of available space</option>
+                                        </select>
+                                        <div class="fieldDescription">Most disk the cache may use, across all servers. Available space is what the cache holds plus what is free on its disk, less Minimum Free Space. Off empties the cache.</div>
+                                    </div>
+                                    <div class="inputContainer" id="linkCacheFixedRow">
+                                        <label for="txtLinkCacheSizeGb">Fixed Amount (GB)</label>
                                         <input is="emby-input" type="number" id="txtLinkCacheSizeGb" min="0" />
-                                        <div class="fieldDescription">Most disk the cache may use, across all servers. 0 turns the cache off and empties it.</div>
+                                        <div class="fieldDescription">0 uses all available space.</div>
+                                    </div>
+                                    <div class="inputContainer" id="linkCachePercentRow">
+                                        <label for="txtLinkCachePercent">Share of Available Space (%)</label>
+                                        <input is="emby-input" type="number" id="txtLinkCachePercent" min="1" max="100" />
+                                        <div class="fieldDescription">Share of the available space the cache may use. 1 to 100.</div>
                                     </div>
                                     <div id="linkCacheOptions">
                                     <div class="inputContainer">
                                         <label for="txtLinkCachePath">Cache Location</label>
-                                        <input is="emby-input" type="text" id="txtLinkCachePath" placeholder="(Uses default cache directory)" />
+                                        <input is="emby-input" type="text" id="txtLinkCachePath" placeholder="Default" />
                                         <div class="fieldDescription">Files go in a serversync-links folder here. Empty uses Jellyfin's cache folder. Changing it empties the old location.</div>
                                     </div>
                                     <div class="inputContainer">
@@ -765,136 +787,4 @@
     <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
     <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
 
-    <!-- STYLES: Settings-specific -->
-    <style>
-        /* ===== Utility Classes ===== */
-        .flex { display: flex; }
-        .mb-md { margin-bottom: 12px; }
-
-        /* ===== Watched Filter User List ===== */
-        .filterItemsList {
-            padding: 0;
-            transition: opacity 0.15s;
-        }
-        .filterItem {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 12px;
-            border-bottom: 1px solid rgba(85, 85, 85, 0.15);
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        .filterItem:hover {
-            background: rgba(255, 255, 255, 0.05);
-        }
-        .filterItem.selected {
-            background: rgba(82, 181, 219, 0.12);
-        }
-        /* In the base paginated table the row already provides padding/border/hover,
-           so flatten the inner item (no nested box) and tint the whole row when selected. */
-        .jpk-table-cell .filterItem { padding: 0; border-bottom: none; }
-        .jpk-table-cell .filterItem:hover,
-        .jpk-table-cell .filterItem.selected { background: transparent; }
-        .jpk-table-row:has(.filterItem.selected) { background: rgba(82, 181, 219, 0.12); }
-        .filterItemThumb {
-            flex: 0 0 40px;
-            width: 40px;
-            height: 60px;
-            border-radius: 3px;
-            object-fit: cover;
-            background: rgba(255, 255, 255, 0.05);
-        }
-        .filterItemThumbPlaceholder {
-            flex: 0 0 40px;
-            width: 40px;
-            height: 60px;
-            border-radius: 3px;
-            background: rgba(255, 255, 255, 0.05);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: rgba(255, 255, 255, 0.2);
-            font-size: 18px;
-        }
-        .filterItemInfo {
-            flex: 1;
-            min-width: 0;
-            overflow: hidden;
-        }
-        .filterItemName {
-            font-weight: 500;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .filterItemMeta {
-            font-size: 0.8em;
-            color: rgba(255, 255, 255, 0.5);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .filterItemCheck {
-            flex: 0 0 auto;
-        }
-        .filterItemThumb.filterItemThumbSquare,
-        .filterItemThumbPlaceholder.filterItemThumbSquare {
-            width: 50px;
-            height: 50px;
-            flex: 0 0 50px;
-            border-radius: 50%;
-        }
-        .filterBrowserStatus {
-            padding: 12px;
-            text-align: center;
-            color: rgba(255, 255, 255, 0.4);
-            font-size: 0.85em;
-        }
-
-        /* ===== Nested Settings ===== */
-
-
-        /* ===== Settings Groups ===== */
-        .settingsGroup {
-            margin-bottom: 16px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-        .settingsGroup:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-            padding-bottom: 0;
-        }
-
-        /* ===== Database Reset Buttons ===== */
-        .resetButtonGroup {
-            margin-bottom: 16px;
-        }
-        .resetButtonRow {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 12px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        .resetButtonRow:last-child {
-            border-bottom: none;
-        }
-        .resetButtonRow-nuclear {
-            background: rgba(217, 83, 79, 0.08);
-            border-radius: 4px;
-            border-bottom: none;
-        }
-        .resetButtonInfo {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-            flex: 1;
-            margin-right: 16px;
-        }
-        .resetButtonInfo .fieldDescription {
-            margin-top: 2px;
-        }
-    </style>
 </div>

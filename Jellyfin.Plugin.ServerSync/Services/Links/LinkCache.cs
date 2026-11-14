@@ -104,7 +104,65 @@ public sealed class LinkCache
     }
 
     /// <summary>Gets a value indicating whether the cache is on.</summary>
-    public bool Enabled => _configManager.Configuration.LinkCacheSizeGb > 0;
+    public bool Enabled => _configManager.Configuration.LinkCacheOn;
+
+    /// <summary>Gets or sets how the free space on a folder's disk is read. Tests set it.</summary>
+    public Func<string, long> FreeSpace { get; set; } = DiskFreeSpace;
+
+    /// <summary>
+    /// The most disk the cache may use now, in bytes, by its size setting. A cache sized by the room
+    /// on its disk grows and shrinks with that disk, so this is read whenever room is needed.
+    /// </summary>
+    /// <returns>The limit, or 0 when the cache is off.</returns>
+    public long LimitBytes()
+    {
+        var config = _configManager.Configuration;
+        return config.EffectiveLinkCacheSizing switch
+        {
+            LinkCacheSizing.Off => 0,
+            LinkCacheSizing.Fixed => config.GetLinkCacheLimitBytes(0, 0),
+            _ => config.GetLinkCacheLimitBytes(UsedBytes() + DownloadingBytes(), FreeSpace(Root))
+        };
+    }
+
+    // What the cache's own downloads in progress hold on the disk. They have already come out of the
+    // free space and are not yet counted as cached, so without them the limit would dip while a file
+    // downloads and come back when it finishes. With them, nothing the cache does moves its own limit:
+    // a byte it takes leaves the free space and joins what it holds, and the two together stay the same.
+    private long DownloadingBytes()
+    {
+        try
+        {
+            var root = Root;
+            return Directory.Exists(root)
+                ? Directory.EnumerateFiles(root, "*" + PartExtension).Sum(part => new FileInfo(part).Length)
+                : 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
+
+    // The free space on the disk a folder is on, or on its nearest parent that exists. 0 when it
+    // cannot be read, so a cache sized by its disk takes nothing new until it can.
+    private static long DiskFreeSpace(string folder)
+    {
+        try
+        {
+            var path = Path.GetFullPath(folder);
+            while (!Directory.Exists(path) && Path.GetDirectoryName(path) is { Length: > 0 } parent)
+            {
+                path = parent;
+            }
+
+            return new DriveInfo(path).AvailableFreeSpace;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
 
     /// <summary>Gets the folder the cache keeps its files in.</summary>
     public string Root
@@ -206,6 +264,8 @@ public sealed class LinkCache
             }
 
             // Removed or cut short behind the cache's back: it is forgotten, and may be cached again.
+            // A file left at the wrong size is the cache's own and plays as nothing, so it goes too.
+            Delete(path);
             Entries().Remove(linkId);
             Save();
             return null;
@@ -369,7 +429,7 @@ public sealed class LinkCache
     public bool Adopt(string linkId, string file, long size)
     {
         ArgumentException.ThrowIfNullOrEmpty(file);
-        if (!Enabled || size <= 0 || size > _configManager.Configuration.GetLinkCacheSizeBytes()
+        if (!Enabled || size <= 0 || size > LimitBytes()
             || !File.Exists(file) || new FileInfo(file).Length != size
             || !MakeRoom(size, new HashSet<string>(StringComparer.Ordinal) { linkId }))
         {
@@ -453,9 +513,11 @@ public sealed class LinkCache
     public bool MakeRoom(long incoming, IReadOnlySet<string>? keep = null)
     {
         var config = _configManager.Configuration;
-        var limit = config.GetLinkCacheSizeBytes();
         lock (_lock)
         {
+            // Read before anything is dropped. Dropping a file frees what it used, so the room on the
+            // disk, and with it a limit taken from that room, stays the same through the loop.
+            var limit = LimitBytes();
             var entries = Entries();
             var changed = false;
             if (config.LinkCacheRetentionDays > 0)
@@ -655,7 +717,15 @@ public sealed class LinkCache
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (JsonException ex)
+        {
+            // The index is there and is not an index: cut short by a power loss, most likely. It will
+            // not read on a later start either, so the cache starts over. The files it listed are
+            // cleared as unlisted and cached again as they are played.
+            entries.Clear();
+            _logger.LogWarning("The link cache's index at {Root} is damaged, so the cache starts over: {Reason}", root, ex.Message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _indexUnreadable = true;
             _logger.LogWarning("Could not read the link cache's index at {Root}, so it starts empty: {Reason}", root, ex.Message);

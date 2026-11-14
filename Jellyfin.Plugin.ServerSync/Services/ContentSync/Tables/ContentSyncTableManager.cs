@@ -88,6 +88,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         item.CompanionFiles = ReadNullableString(reader, "CompanionFiles");
         item.StorageMode = (StorageMode)(ReadNullableInt32(reader, "StorageMode") ?? 0);
         item.Kept = (KeptReason)(ReadNullableInt32(reader, "Kept") ?? 0);
+        item.OriginServerId = ReadNullableString(reader, "OriginServerId");
         return item;
     }
 
@@ -129,6 +130,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             .Set("CompanionFiles", record.CompanionFiles)
             .Set("StorageMode", (int)record.StorageMode)
             .Set("Kept", (int)record.Kept)
+            .Set("OriginServerId", record.OriginServerId)
             .SyncColumns(record);
         ExecuteWrite(upsert.Execute);
     }
@@ -148,6 +150,24 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT * FROM SyncItems WHERE LocalPath = @path LIMIT 1";
             cmd.Parameters.AddWithValue("@path", localPath);
+            using var reader = cmd.ExecuteReader();
+            return reader.Read() ? MapFromReader(reader) : null;
+        },
+        fallback: null);
+
+    /// <summary>
+    /// The row of another source item that records the same local path, or null when none does.
+    /// </summary>
+    /// <param name="localPath">The local path.</param>
+    /// <param name="exceptSourceItemId">The source item whose own row is passed over.</param>
+    /// <returns>The other row, or null.</returns>
+    public SyncItem? GetOtherByLocalPath(string localPath, string exceptSourceItemId) => ExecuteRead(
+        conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM SyncItems WHERE LocalPath = @path AND SourceItemId != @except LIMIT 1";
+            cmd.Parameters.AddWithValue("@path", localPath);
+            cmd.Parameters.AddWithValue("@except", exceptSourceItemId);
             using var reader = cmd.ExecuteReader();
             return reader.Read() ? MapFromReader(reader) : null;
         },
@@ -204,6 +224,44 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: null);
 
     /// <summary>
+    /// Records that a copy this server was given by another was removed, with the server it first
+    /// came from, in the record of files that left the library.
+    /// </summary>
+    /// <param name="path">Where the copy sat.</param>
+    /// <param name="originServerId">The server it first came from.</param>
+    public void NoteRemovedCopy(string? path, string? originServerId)
+    {
+        if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(originServerId))
+        {
+            return;
+        }
+
+        ExecuteWrite(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "INSERT INTO RemovedItems (ItemId, RemovedAt, Path, OriginServerId) VALUES ('', @at, @path, @origin)";
+            cmd.Parameters.AddWithValue("@at", UpsertBuilder.Time(DateTime.UtcNow));
+            cmd.Parameters.AddWithValue("@path", path);
+            cmd.Parameters.AddWithValue("@origin", originServerId);
+            cmd.ExecuteNonQuery();
+        });
+    }
+
+    /// <summary>
+    /// The copies this server downloaded from another, each with the server it first came from. Null
+    /// when the table cannot be read, which is no answer.
+    /// </summary>
+    /// <returns>The rows, or null.</returns>
+    public IList<SyncItem>? TryGetCopiesWithOrigin() => ExecuteRead<IList<SyncItem>?>(
+        conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM SyncItems WHERE StorageMode = 0 AND LocalPath IS NOT NULL AND OriginServerId IS NOT NULL AND OriginServerId <> ''";
+            return ReadAll(cmd);
+        },
+        fallback: null);
+
+    /// <summary>
     /// Returns true if another item already uses this local path.
     /// </summary>
     /// <param name="localPath">Path to check.</param>
@@ -214,8 +272,13 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             using var cmd = conn.CreateCommand();
             if (excludeSourceItemId != null)
             {
-                cmd.CommandText = "SELECT COUNT(*) FROM SyncItems WHERE LocalPath = @path AND SourceItemId != @excludeId";
+                // Another row holds the path when it is settled there, or when it was tracked first.
+                // Two rows that both still want the path would otherwise each refuse for the other
+                // and neither would ever land, so the earlier one goes ahead and the later one waits.
+                cmd.CommandText = @"SELECT COUNT(*) FROM SyncItems other WHERE other.LocalPath = @path AND other.SourceItemId != @excludeId
+                    AND (other.Status = @synced OR other.Id < COALESCE((SELECT Id FROM SyncItems WHERE SourceItemId = @excludeId), 9223372036854775807))";
                 cmd.Parameters.AddWithValue("@excludeId", excludeSourceItemId);
+                cmd.Parameters.AddWithValue("@synced", (int)SyncStatus.Synced);
             }
             else
             {
@@ -419,6 +482,25 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             cmd.CommandText = "SELECT * FROM SyncItems WHERE Status = @status AND (RetryCount IS NULL OR RetryCount < @maxRetries)";
             cmd.Parameters.AddWithValue("@status", (int)SyncStatus.Errored);
             cmd.Parameters.AddWithValue("@maxRetries", maxRetries);
+            return ReadAll(cmd);
+        },
+        fallback: (IList<SyncItem>)Array.Empty<SyncItem>());
+
+    /// <summary>
+    /// Rows that errored, used up their tries, and have sat that way since before a given time. A
+    /// link the link check flagged is not among them: the check looks at it again on every run.
+    /// </summary>
+    /// <param name="maxRetries">The tries a row gets.</param>
+    /// <param name="erroredBefore">Only rows errored before this.</param>
+    /// <returns>The rows.</returns>
+    public IList<SyncItem> GetErroredCopiesSince(int maxRetries, DateTime erroredBefore) => ExecuteRead(
+        conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM SyncItems WHERE Status = @status AND RetryCount >= @maxRetries AND RetryCount < 1000000 AND StatusDate < @before";
+            cmd.Parameters.AddWithValue("@status", (int)SyncStatus.Errored);
+            cmd.Parameters.AddWithValue("@maxRetries", maxRetries);
+            cmd.Parameters.AddWithValue("@before", UpsertBuilder.Time(erroredBefore));
             return ReadAll(cmd);
         },
         fallback: (IList<SyncItem>)Array.Empty<SyncItem>());

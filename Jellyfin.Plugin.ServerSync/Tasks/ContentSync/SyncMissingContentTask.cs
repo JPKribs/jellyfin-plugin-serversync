@@ -127,8 +127,19 @@ public class SyncMissingContentTask
         var maxRetries = ConfigManager.Configuration.MaxRetryCount > 0
             ? ConfigManager.Configuration.MaxRetryCount
             : DefaultMaxRetries;
+        // A row whose tries ran out is tried again on the next run, so a failure whose cause has passed,
+        // such as a full disk or a source that was down, does not wait for someone to press Retry. A
+        // row that goes on failing for a day is raised on the Activity page by the upkeep service.
+        // A row whose library mapping is off, or whose server is, is left exactly as it is, as a row
+        // of a server that is not set up here is. Applying it could only fail, on every run, since a
+        // path under a mapping that is off is outside every library this plugin writes to.
+        var mapped = new HashSet<string>(
+            ConfigManager.Configuration.GetPullServers().SelectMany(server => server.GetEnabledLibraryMappings().Select(mapping => server.Key + "|" + mapping.SourceLibraryId)),
+            StringComparer.OrdinalIgnoreCase);
         return typedManager.GetByStatusStrict(SyncStatus.Queued)
             .Concat(typedManager.GetErroredItemsForRetry(maxRetries))
+            .Concat(typedManager.GetErroredCopiesSince(maxRetries, DateTime.UtcNow - TimeSpan.FromHours(1)))
+            .Where(row => string.IsNullOrEmpty(row.ServerKey) || mapped.Contains(row.ServerKey + "|" + row.SourceLibraryId))
             .ToList();
     }
 
@@ -137,6 +148,18 @@ public class SyncMissingContentTask
     {
         var config = ConfigManager.Configuration;
         _downloadAttempted.Clear();
+
+        // Links first. Writing one needs no source and no disk space to speak of, so it is done before
+        // anything that can stop the run.
+        RepairLinks(config, cancellationToken);
+
+        // A disk too full to download to is the disk the waiting removals would free, so they run
+        // before the run gives up on it.
+        if (!DiskSpaceService.HasSufficientSpace(config, out _) && !OnlyLinksQueued())
+        {
+            var (freed, _) = FileDeletionService.ProcessPendingDeletions(TypedManager, config, Logger, new List<string>(), cancellationToken);
+            Interlocked.Add(ref _deletedCount, freed);
+        }
 
         if (!DiskSpaceService.HasSufficientSpace(config, out var insufficientPath) && !OnlyLinksQueued())
         {
@@ -344,9 +367,25 @@ public class SyncMissingContentTask
             var linkPath = record.LocalPath;
             var copyPath = LinkPaths.CopiedPathOf(record) ?? throw new InvalidOperationException($"The link has no path (source: {record.SourcePath})");
             record.LocalPath = copyPath;
+
+            // A move out of the cache that was cut short leaves its half beside where the copy goes.
+            // It is the cache's own file and no use to anything, so it is cleared before trying again.
             try
             {
-                if (!await MoveFromCacheAsync(record, cancellationToken).ConfigureAwait(false))
+                File.Delete(copyPath + ".serversync-move");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Logger.LogDebug(ex, "Could not clear a half-moved file beside {Path}", copyPath);
+            }
+
+            try
+            {
+                // A copy that already arrived, on a run that stopped before the link was removed, is
+                // the copy. Nothing more is fetched, so a disk too full for a second one does not hold
+                // the change up for good.
+                var arrived = record.SourceSize > 0 && File.Exists(copyPath) && new FileInfo(copyPath).Length == record.SourceSize;
+                if (!arrived && !await MoveFromCacheAsync(record, cancellationToken).ConfigureAwait(false))
                 {
                     await DownloadAsync(record, itemProgress, cancellationToken).ConfigureAwait(false);
                 }
@@ -382,6 +421,7 @@ public class SyncMissingContentTask
         // An .nfo that is gone while its link is still there was removed by the user. One that went
         // with its link, such as a deleted folder, was not, and is written again with the link.
         var linkWasThere = !string.IsNullOrEmpty(record.LocalPath) && File.Exists(record.LocalPath);
+        await TakeOverLinkPathAsync(record, cancellationToken).ConfigureAwait(false);
         (_linkWriter ?? throw new InvalidOperationException("Links cannot be written on this server")).Write(record, TypedManager, ConfigManager.Configuration, replacing);
 
         // Read before the companions replace the row's list, which is where a written .nfo is recorded.
@@ -397,8 +437,43 @@ public class SyncMissingContentTask
             await WriteLinkNfoAsync(record, nfoRecorded, cancellationToken).ConfigureAwait(false);
         }
 
+        // A link that was already in the library keeps its item, and with it the media info of whatever
+        // file it pointed at before: an older encode under the same name, or the file this link took
+        // the path over from. The source's media info for the file as it is now replaces it.
+        if (linkWasThere && _linkVerifier is not null && SourceFor(record) is { } described
+            && await _linkVerifier.RedescribeAsync(record, described.Client, cancellationToken).ConfigureAwait(false))
+        {
+            Logger.LogDebug("Took the media info for {Path} again, since the file behind it changed", record.LocalPath);
+        }
+
         Interlocked.Increment(ref _successCount);
         _changedFiles.Enqueue(record.LocalPath!);
+    }
+
+    // A source file that changes only its extension is a new item on the source, and its link sits
+    // exactly where the old file's link does. Left alone, the new link is refused for as long as the
+    // old row lasts, and the old link is then deleted with its folder before the new one is written,
+    // so the title is dead and then missing for a day or more. Instead, once the old file's own server
+    // says it is gone, or its removal is already scheduled, the new link takes the .strm over in place.
+    // While the old file is still on the source the two really do collide, and the write is refused
+    // as before.
+    private async Task TakeOverLinkPathAsync(SyncItem record, CancellationToken cancellationToken)
+    {
+        if (_linkWriter is null || LinkWriter.Predecessor(record, TypedManager) is not { } old)
+        {
+            return;
+        }
+
+        var gone = old.Status == SyncStatus.Deleting
+            || (_linkVerifier is not null && SourceFor(old) is { } source
+                && await _linkVerifier.GoneFromSourceAsync(old, source.Client, cancellationToken).ConfigureAwait(false));
+        if (!gone)
+        {
+            return;
+        }
+
+        _linkWriter.TakeOver(record, old, TypedManager);
+        _linkCache?.Remove(old.SourceItemId);
     }
 
     // The copy is the only one this server holds, so it is let go only when the source still has the
@@ -604,6 +679,10 @@ public class SyncMissingContentTask
                 $"Validation failed for {fileName}: {validationError ?? "unknown reason"} (source: {record.SourcePath ?? record.SourceItemId})");
         }
 
+        // What an interrupted replacement set aside goes back first, so the local file is in place
+        // again whether or not this download then succeeds.
+        ReplacementRecovery.Restore(record.LocalPath, Logger);
+
         if (DownloadService.ShouldSkipDownload(record, 0, out var skipReason))
         {
             Logger.LogDebug("Skipped: {FileName} ({Size}) - {Reason}", fileName, fileSize, skipReason);
@@ -635,6 +714,14 @@ public class SyncMissingContentTask
             {
                 breaker.RecordSuccess();
                 record.CompanionFiles = result.CompanionFiles;
+                record.OriginServerId = await OriginOfDownloadAsync(source, record, cancellationToken).ConfigureAwait(false);
+
+                // The file here is the source's now, downloaded over whatever was here before.
+                if (record.Kept == KeptReason.Own)
+                {
+                    record.Kept = KeptReason.None;
+                }
+                await RetireReplacedCopiesAsync(record, source, cancellationToken).ConfigureAwait(false);
                 Interlocked.Increment(ref _successCount);
                 _changedFiles.Enqueue(record.LocalPath);
                 Logger.LogInformation("DOWNLOADED: {FileName} ({Size}) -> {LocalPath}", fileName, fileSize, record.LocalPath);
@@ -655,6 +742,84 @@ public class SyncMissingContentTask
         finally
         {
             ActiveDownloadTracker.CompleteDownload(record.SourceItemId);
+        }
+    }
+
+    // A file replaced on the source by one of the same name in another container, as Film.mkv by
+    // Film.mp4, arrives as a new item, and the old copy would sit beside the new one until the next
+    // full scan, where Jellyfin may play either. Once the new file is down, a copy of the same name
+    // from the same server is handled the way that scan would handle it, by Removed files, as soon as
+    // the source answers that it no longer holds the old file. A source that cannot be asked, or that
+    // still holds both, changes nothing here.
+    private async Task RetireReplacedCopiesAsync(SyncItem record, ScanSource source, CancellationToken cancellationToken)
+    {
+        var config = ConfigManager.Configuration;
+        if (!config.DeletesMissing || string.IsNullOrEmpty(record.LocalPath)
+            || Path.GetDirectoryName(record.LocalPath) is not { Length: > 0 } folder || !Directory.Exists(folder))
+        {
+            return;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(record.LocalPath);
+        foreach (var file in Directory.EnumerateFiles(folder))
+        {
+            if (string.Equals(file, record.LocalPath, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(Path.GetFileNameWithoutExtension(file), stem, StringComparison.OrdinalIgnoreCase)
+                || TypedManager.GetByLocalPath(file) is not { } old
+                || string.Equals(old.SourceItemId, record.SourceItemId, StringComparison.OrdinalIgnoreCase)
+                || old.Status != SyncStatus.Synced
+                || old.StorageMode != StorageMode.Copy
+                || !string.Equals(old.ServerKey, record.ServerKey, StringComparison.OrdinalIgnoreCase)
+                || !Guid.TryParse(old.SourceItemId, out var oldId))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (await source.Client.FindItemDetailsAsync(oldId, cancellationToken).ConfigureAwait(false) is not null)
+                {
+                    continue;
+                }
+
+                // While both files sit side by side on the source, Jellyfin lists the old one as another
+                // version of the new item, under no id of its own. It is still there, so it stays here.
+                var replacement = Guid.TryParse(record.SourceItemId, out var newId)
+                    ? await source.Client.FindItemDetailsAsync(newId, cancellationToken).ConfigureAwait(false)
+                    : null;
+                if (replacement is null
+                    || replacement.MediaSources?.Any(version => string.Equals(version.Path, old.SourcePath, StringComparison.OrdinalIgnoreCase)) == true)
+                {
+                    continue;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                Logger.LogDebug(ex, "Could not ask '{Server}' whether {Path} is still there, so the copy is left for the next full scan", source.Name, old.SourcePath);
+                continue;
+            }
+
+            if (SyncStateService.ProcessMissingItem(TypedManager, old, config.DeletionApproval, Logger).Changed)
+            {
+                Logger.LogInformation("{Old} was replaced on '{Server}' by {New}, so the old copy follows Removed files now", Path.GetFileName(old.LocalPath), source.Name, Path.GetFileName(record.LocalPath));
+            }
+        }
+    }
+
+    // The server a downloaded file first came from: the origin its source names for it when the source
+    // was itself given the file, and otherwise the source. Left empty when the source cannot say, so a
+    // file whose origin is not known is never treated as another server's.
+    private async Task<string?> OriginOfDownloadAsync(ScanSource source, SyncItem record, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var named = await source.Client.OriginOfAsync(record.SourcePath, cancellationToken).ConfigureAwait(false);
+            return !string.IsNullOrEmpty(named) ? named : string.IsNullOrEmpty(source.Server.ServerId) ? null : source.Server.ServerId;
+        }
+        catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            Logger.LogDebug(ex, "Could not read where {Path} first came from, so no origin is recorded for it", record.SourcePath);
+            return null;
         }
     }
 
@@ -863,6 +1028,45 @@ public class SyncMissingContentTask
             && ConfigManager.Configuration.FindServer(record.ServerKey) is { IsEnabled: true };
     }
 
+    // A link is a few bytes this plugin wrote, so one that is missing, or that points at an address
+    // this server no longer answers on, is simply written again. Every settled link is looked at on
+    // every run, here, rather than waiting for a full scan with its source connected. The writer
+    // refuses whatever is not a link of its own: a real copy at the name, a .strm someone else wrote,
+    // a path another row holds. Those are left as they are.
+    private void RepairLinks(PluginConfiguration config, CancellationToken cancellationToken)
+    {
+        if (_linkWriter is null)
+        {
+            return;
+        }
+
+        var repaired = 0;
+        foreach (var row in TypedManager.GetLinks())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (row.StorageMode != StorageMode.Link || row.Status is not (SyncStatus.Synced or SyncStatus.Errored)
+                || string.IsNullOrEmpty(row.LocalPath) || _linkWriter.IsCurrent(row))
+            {
+                continue;
+            }
+
+            try
+            {
+                _linkWriter.Write(row, TypedManager, config);
+                repaired++;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+            {
+                Logger.LogDebug(ex, "Did not write the link {Path} again", row.LocalPath);
+            }
+        }
+
+        if (repaired > 0)
+        {
+            Logger.LogInformation("{Task}: wrote {Count} link(s) again that were missing or out of date", Name, repaired);
+        }
+    }
+
     // A run with only links to write needs no disk space to speak of and no server to download from,
     // so the checks that guard downloads do not stop it. Any copy queued keeps them in force.
     // Rows from a server that is not set up here are left alone by every run, so they neither count as
@@ -873,7 +1077,9 @@ public class SyncMissingContentTask
         var queued = GetItemsToApply()
             .Where(r => AppliesWithoutSource(r) || (r.ServerKey is { } key && pulling.Contains(key)) || (string.IsNullOrEmpty(r.ServerKey) && pulling.Count > 0))
             .ToList();
-        return queued.Count > 0 && queued.All(r => r.StorageMode == StorageMode.Link);
+        // Nothing queued is nothing to download, so the run goes on to its upkeep: the link check, the
+        // cache, and removals do not wait for disk space a download would need.
+        return queued.All(r => r.StorageMode == StorageMode.Link);
     }
 
     /// <summary>

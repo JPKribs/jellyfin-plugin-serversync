@@ -31,7 +31,12 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
     private static readonly TimeSpan SettledKept = TimeSpan.FromDays(7);
     private static readonly TimeSpan PendingKept = TimeSpan.FromDays(14);
-    private static readonly TimeSpan ErroredRetryAfter = TimeSpan.FromDays(1);
+    // A failed row is tried again on the next run rather than waiting for someone to press Retry. The
+    // hour keeps a row that failed a moment ago from being queued again in the same breath.
+    private static readonly TimeSpan ErroredRetryAfter = TimeSpan.FromHours(1);
+
+    // How long a row may go on failing, retried on every run, before the administrator is told.
+    private static readonly TimeSpan FailingBeforeTold = TimeSpan.FromDays(1);
     private static readonly TimeSpan ReplacementBackupKept = TimeSpan.FromDays(1);
     private const string ReplacementMarker = ".replacing.";
 
@@ -118,12 +123,94 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
             var first = _configManager.Configuration.GetPullServers().FirstOrDefault();
             return first is null ? 0 : _store.BackfillServerKey(first.Key);
         });
+        Step("mark the copies tracked before origins were recorded", MarkExistingCopies);
         Step("expire settled hints", () => _outbound.ExpireSettled(now - SettledKept));
         Step("prune pending versions", () => _versions.PrunePending(now - PendingKept));
+        // Before the requeue, while the rows that failed on the last run still read as failed.
+        Step("tell the administrator what keeps failing", () => ReportFailing(now));
+        Step("tell the administrator what is blocked", ReportBlocked);
         Step("requeue errored rows", () => _store.RequeueErrored(now - ErroredRetryAfter));
+        Step("forget old removals", () => _services.GetService<RemovedItemsStore>()?.Trim(now - RemovedItemsStore.Kept) ?? 0);
         Step("prune versions of removed items", PruneMissingVersions);
         Step("forget copies of deleted playlists", ForgetDeletedPlaylistCopies);
         Step("remove finished replacement backups", RemoveFinishedReplacementBackups);
+    }
+
+    // One entry on Jellyfin's Activity page for what has failed on every run for a day. Everything
+    // else is retried quietly, so this is the only time a failing row asks for anyone's attention.
+    private int ReportFailing(DateTime now)
+    {
+        var failing = _store.TrackFailures(now, now - FailingBeforeTold);
+        if (failing.Count == 0)
+        {
+            return 0;
+        }
+
+        var total = failing.Sum(kind => kind.Count);
+        var kinds = string.Join(", ", failing.Select(kind => $"{kind.Count} {kind.Label}{(kind.Count == 1 ? string.Empty : " items")}"));
+        var example = failing.Select(kind => kind.Reason).FirstOrDefault(reason => !string.IsNullOrWhiteSpace(reason));
+        var overview = $"{kinds} have failed on every run for a day and are still being retried. Open Server Sync and filter the Sync tab by Errored to see each one"
+            + (example is null ? string.Empty : $". For example: {example}");
+        _logger.LogWarning("Server Sync: {Overview}", overview);
+        if (_services.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
+        {
+            _ = activity.LogAndWaitAsync($"Server Sync Needs Attention: {total} Item{(total == 1 ? string.Empty : "s")} Keep Failing", "ServerSyncAttention", JPKribs.Jellyfin.Base.ActivityText.Sentence(overview), LogLevel.Warning);
+        }
+
+        return total;
+    }
+
+    // One entry on the Activity page for each kind of run that has ended the same wrong way for a
+    // day: a cleanup held back by a safety limit, a server that cannot be reached, a disk too full to
+    // download to. A clean run clears the failure, so it is only raised again if it comes back.
+    private int ReportBlocked()
+    {
+        var standing = RunFailureLog.TakeUnreported(_configManager, FailingBeforeTold);
+        foreach (var failure in standing)
+        {
+            var overview = $"{failure.ModuleKey} {failure.Phase.ToLowerInvariant()} has ended this way on every run for a day: {failure.Reason}";
+            _logger.LogWarning("Server Sync: {Overview}", overview);
+            if (_services.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
+            {
+                _ = activity.LogAndWaitAsync($"Server Sync Needs Attention: {failure.ModuleKey} {failure.Phase} Is Held Up", "ServerSyncAttention", JPKribs.Jellyfin.Base.ActivityText.Sentence(overview), LogLevel.Warning);
+            }
+        }
+
+        return standing.Count;
+    }
+
+    // Once, after the update that records where a copy came from. A copy tracked before it says
+    // neither, so each is looked at: one that never went through a download was on this server
+    // already and is its own, and one that did was given by the server its row names. From then on
+    // the old rows follow the same rules as new ones: a server's own file stays when another removes
+    // theirs, and a download is known as its origin's file.
+    private int MarkExistingCopies()
+    {
+        var config = _configManager.Configuration;
+        if (config.ExistingCopiesMarked)
+        {
+            return 0;
+        }
+
+        var content = SyncModuleMutex.ForModule("Content");
+        if (!content.Wait(0))
+        {
+            return 0;
+        }
+
+        var marked = 0;
+        try
+        {
+            marked = ExistingCopies.Mark(_services.GetRequiredService<ContentSyncTableManager>(), config);
+        }
+        finally
+        {
+            content.Release();
+        }
+
+        config.ExistingCopiesMarked = true;
+        _configManager.SaveConfiguration();
+        return marked;
     }
 
     private int ForgetDeletedPlaylistCopies()
@@ -141,6 +228,48 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         return forgotten;
     }
 
+    // A download is copied into the library folder under "name.syncing.<id>" and renamed into place.
+    // A server stopped mid-copy leaves that half file behind, and only another download of the same
+    // file would clear it. Any that has sat for a day is removed. It is never the only copy of
+    // anything: the download it belonged to starts again from the source.
+    private int RemoveAbandonedStagedFiles(ContentSyncTableManager manager, PluginConfiguration config, DateTime cutoff)
+    {
+        var removed = 0;
+        var folders = manager.GetAllStrict()
+            .Select(row => string.IsNullOrEmpty(row.LocalPath) ? null : Path.GetDirectoryName(row.LocalPath))
+            .Where(folder => !string.IsNullOrEmpty(folder))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in folders)
+        {
+            if (!Directory.Exists(folder))
+            {
+                continue;
+            }
+
+            foreach (var staged in Directory.EnumerateFiles(folder!, "*.syncing.*"))
+            {
+                var name = Path.GetFileName(staged);
+                var id = name[(name.LastIndexOf(".syncing.", StringComparison.Ordinal) + ".syncing.".Length)..];
+                if (id.Length != 32 || !id.All(Uri.IsHexDigit) || File.GetLastWriteTimeUtc(staged) > cutoff || !FileValidationService.IsPathWithinLibrary(staged, config))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(staged);
+                    removed++;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogDebug(ex, "Could not remove the abandoned download {File}", staged);
+                }
+            }
+        }
+
+        return removed;
+    }
+
     private int RemoveFinishedReplacementBackups()
     {
         var content = SyncModuleMutex.ForModule("Content");
@@ -154,7 +283,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
             var config = _configManager.Configuration;
             var manager = _services.GetRequiredService<ContentSyncTableManager>();
             var cutoff = DateTime.UtcNow - ReplacementBackupKept;
-            var removed = 0;
+            var removed = RemoveAbandonedStagedFiles(manager, config, cutoff);
             foreach (var row in manager.GetByStatus(SyncStatus.Synced))
             {
                 if (string.IsNullOrEmpty(row.LocalPath)

@@ -83,6 +83,12 @@ public class SourceServer
     public int LinkMaxStreams { get; set; }
 
     /// <summary>
+    /// Gets or sets the most link streams this server takes from that server at once, or 0 for no
+    /// limit. It is this server's own choice, apart from whatever that server allows it.
+    /// </summary>
+    public int LinkTakeMaxStreams { get; set; }
+
+    /// <summary>
     /// Gets or sets the server wide per user limit from before 12.4.12.0. It is read once, when the
     /// configuration loads, and copied onto every user mapping that sets none, since a per user limit
     /// is now set only on a user mapping. Always 0 afterwards.

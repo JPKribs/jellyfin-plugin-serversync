@@ -321,6 +321,88 @@ public class LinkFallbackTests
     private static HttpResponseMessage Allowed(string? itemId, long size = 1000)
         => Json(new LinkStreamCheckResponse { Allowed = true, ItemId = itemId, Size = size });
 
+    private static HttpResponseMessage Busy(string? itemId, int inUse, int limit)
+        => Json(new LinkStreamCheckResponse { Allowed = true, ItemId = itemId, Size = 1000, StreamsInUse = inUse, StreamLimit = limit });
+
+    // A play already going: allowed, then used, so it counts as streaming from its server.
+    private static void Play(LinkGrants grants, string linkId, string serverKey)
+    {
+        var user = Guid.NewGuid();
+        grants.Grant(linkId, user, new LinkRoute(serverKey, serverKey));
+        grants.Refresh(linkId, user);
+    }
+
+    /// <summary>
+    /// The link's own server keeps a play while it is doing nothing for this server. Once it is
+    /// streaming, the first server down the list that is idle takes the next play, and with none idle
+    /// the one with the most streams free does.
+    /// True: plays spread over the servers that hold a film, highest in the list first.
+    /// False: every play lands on one server until it refuses, while another sits idle.
+    /// </summary>
+    [Fact]
+    public async Task Choose_SpreadsPlays_IdleFirstThenMostRoom()
+    {
+        var a = Server("a", "/src/a");
+        var b = Server("b", "/src/b");
+        var c = Server("c", "/src/c");
+
+        var idle = new Peers { ["a"] = _ => Busy("aaaa", 0, 3), ["b"] = _ => Busy("bbbb", 0, 2), ["c"] = _ => Busy("cccc", 0, 2) };
+        Assert.Equal("a", (await Access(idle, a, b, c).ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None)).Route!.ServerKey);
+
+        var firstBusy = new Peers { ["a"] = _ => Busy("aaaa", 1, 3), ["b"] = _ => Busy("bbbb", 0, 2), ["c"] = _ => Busy("cccc", 0, 2) };
+        Assert.Equal("b", (await Access(firstBusy, a, b, c).ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None)).Route!.ServerKey);
+
+        var allBusy = new Peers { ["a"] = _ => Busy("aaaa", 2, 3), ["b"] = _ => Busy("bbbb", 1, 2), ["c"] = _ => Busy("cccc", 1, 4) };
+        Assert.Equal("c", (await Access(allBusy, a, b, c).ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None)).Route!.ServerKey);
+
+        var tied = new Peers { ["a"] = _ => Busy("aaaa", 1, 3), ["b"] = _ => Busy("bbbb", 1, 3), ["c"] = _ => Busy("cccc", 2, 4) };
+        Assert.Equal("a", (await Access(tied, a, b, c).ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None)).Route!.ServerKey);
+    }
+
+    /// <summary>
+    /// This server's own limits: how many links it takes from one server at once, and how many it
+    /// streams in all. A server at its limit here is not asked and the next is used. At the limit in
+    /// all, the play is refused. A play already going is not counted against itself.
+    /// True: the limits set here hold, whatever each source would allow.
+    /// False: one server could be handed every stream, or the total could run past what was set.
+    /// </summary>
+    [Fact]
+    public async Task Choose_HoldsThisServersOwnLimits()
+    {
+        var a = Server("a", "/src/a");
+        a.LinkTakeMaxStreams = 1;
+        var b = Server("b", "/src/b");
+        var peers = new Peers { ["a"] = _ => Allowed("aaaa"), ["b"] = _ => Allowed("bbbb") };
+        var grants = new LinkGrants();
+        var access = Access(peers, a, b);
+        access.Grants = grants;
+
+        Play(grants, "other-film", "a");
+        var choice = await access.ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None);
+        Assert.Equal("b", choice.Route!.ServerKey);
+        Assert.DoesNotContain(peers.Asked, asked => asked.Server == "a");
+
+        // The play already going on a is chosen for again, and is still a's.
+        var watching = Guid.NewGuid();
+        grants.Grant(Link.LinkId, watching, new LinkRoute("a", "aaaa"));
+        grants.Refresh(Link.LinkId, watching);
+        var limited = Access(peers, Server("a", "/src/a"), b);
+        limited.Grants = new LinkGrants();
+        limited.Grants.Grant(Link.LinkId, watching, new LinkRoute("a", "aaaa"));
+        limited.Grants.Refresh(Link.LinkId, watching);
+        Assert.Equal("a", (await limited.ChooseAsync(Link, watching, null, CancellationToken.None)).Route!.ServerKey);
+
+        // Two in all, and two are streaming.
+        var capped = new LinkAccess(new FakeConfig(new PluginConfiguration { Servers = new List<SourceServer> { Server("a", "/src/a"), b }, LinkMaxStreamsTotal = 2 }), new Factory(peers), InterfaceStub.Create<IServerApplicationHost>().Item1, NullLogger<LinkAccess>.Instance, new LinkHealth(), LinkAccess.Hedge)
+        {
+            Grants = grants
+        };
+        Play(grants, "third-film", "b");
+        var refused = await capped.ChooseAsync(Link, Guid.NewGuid(), null, CancellationToken.None);
+        Assert.Null(refused.Route);
+        Assert.Contains("the most it streams at once", refused.Refusal, StringComparison.Ordinal);
+    }
+
     private static HttpResponseMessage Refused(string reason)
         => Json(new LinkStreamCheckResponse { Allowed = false, Reason = reason });
 

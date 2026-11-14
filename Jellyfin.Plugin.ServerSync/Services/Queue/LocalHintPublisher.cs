@@ -116,6 +116,22 @@ public sealed class LocalHintPublisher
     /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
     /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
     public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
+        => PublishContent(localItemId, itemPath, version, excludePeerKey, itemType, removed: false);
+
+    /// <summary>
+    /// Publishes a media file that appeared here, or one that left. A removal goes out under the same
+    /// key as the file's arrival did and says that it is one. The peer still asks for the item before
+    /// acting, and settles what it held of it only on finding it gone. A file this server was given by a peer is announced when it leaves, though not when
+    /// it arrives, since a server that links to this one's copy has nobody else to hear it from.
+    /// </summary>
+    /// <param name="localItemId">The local item.</param>
+    /// <param name="itemPath">The local path of the file.</param>
+    /// <param name="version">The version the change carries.</param>
+    /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
+    /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
+    /// <param name="removed">Whether the file left.</param>
+    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
+    public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType, bool removed)
     {
         ArgumentNullException.ThrowIfNull(version);
 
@@ -128,7 +144,7 @@ public sealed class LocalHintPublisher
 
         // A file the sync downloaded from a peer is that peer's to announce, not this server's. The
         // in-memory mark of the sync's writes is gone after a restart, so the content table is asked too.
-        if (!string.IsNullOrEmpty(itemPath) && _content?.GetByLocalPath(itemPath) is not null)
+        if (!removed && !string.IsNullOrEmpty(itemPath) && _content?.GetByLocalPath(itemPath) is not null)
         {
             return 0;
         }
@@ -140,8 +156,9 @@ public sealed class LocalHintPublisher
             version,
             excludePeerKey,
             peer => HintMapping.FindByLocalPath(peer, itemPath) is not null,
-            () => new OutboundHint { Kind = HintKind.Content, Key = key, ItemPath = itemPath, ItemId = key, ItemType = itemType },
-            itemPath: itemPath);
+            () => new OutboundHint { Kind = HintKind.Content, Key = key, ItemPath = itemPath, ItemId = key, ItemType = removed ? HintProtocol.ContentRemoved : itemType },
+            itemPath: itemPath,
+            deletion: removed);
     }
 
     /// <summary>Publishes a change to a playlist, or its deletion.</summary>

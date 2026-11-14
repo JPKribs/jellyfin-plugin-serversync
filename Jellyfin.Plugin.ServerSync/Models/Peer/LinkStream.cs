@@ -39,4 +39,10 @@ public class LinkStreamCheckResponse
 
     /// <summary>Gets or sets the file's size in bytes, when allowed, so the asking server can tell it is the same file.</summary>
     public long Size { get; set; }
+
+    /// <summary>Gets or sets how many link streams this server is running for the caller now.</summary>
+    public int StreamsInUse { get; set; }
+
+    /// <summary>Gets or sets the most link streams this server runs for the caller at once, or 0 for no limit.</summary>
+    public int StreamLimit { get; set; }
 }

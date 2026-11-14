@@ -259,8 +259,10 @@ A server [falling back](Links.md#when-the-source-cannot-stream) from another sou
 An allowed answer carries this server's id for the item and the file's size in bytes, so the caller streams by that id and can tell the file is the same. A refusal carries the reason.
 
 ```json
-{ "Allowed": true, "Reason": null, "ItemId": "4b07c2…", "Size": 734003200 }
+{ "Allowed": true, "Reason": null, "ItemId": "4b07c2…", "Size": 734003200, "StreamsInUse": 1, "StreamLimit": 3 }
 ```
+
+`StreamsInUse` is how many link streams this server is running for the caller now, and `StreamLimit` the most it runs for the caller at once, where 0 is no limit. A caller with several servers that hold the same file uses them to [pick the one with the most room](Links.md#when-the-source-cannot-stream).
 
 ```json
 { "Allowed": false, "Reason": "the source allows 2 link stream(s) at once and all are in use" }
@@ -338,6 +340,24 @@ This server's links, each with the path its full copy would have, in this server
 { "Links": [ { "LinkPath": "/media/Movies/Film (2020)/Film (2020).strm", "CopiedPath": "/media/Movies/Film (2020)/Film (2020).mkv" } ] }
 ```
 
+#### GET /Sync/Peer/Changes?since={time}
+
+The media files that left this server's library since a UTC time. A server that reads this server's items asks on each scan that lists only what changed, since Jellyfin answers what was added or changed since a time and nothing else remembers what was removed. Only ids are given.
+
+```json
+{ "CoveredFrom": "2026-10-15T08:00:00Z", "TooOld": false, "RemovedItemIds": [ "9c1e0f…", "4b07c2…" ] }
+```
+
+Removals are remembered for 30 days, and `CoveredFrom` is how far back the record reaches. With `since` before it, `TooOld` is true: removals were missed that this answer cannot name, and the caller finds them on its next full scan. A server that answers `404` or refuses keeps no such record, and its removals are found by a full scan.
+
+#### GET /Sync/Peer/Copies
+
+The copies this server downloaded from other servers, each with the id of the server it first came from, in this server's paths. A server that reads this server's items asks once per run, so it can tell a file that is this server's own from one it was given. See [Servers that sync with each other](Content.md#servers-that-sync-with-each-other). A copy removed within the last day is still listed, since Jellyfin lists a removed file until it next scans the folder. A server that answers `404` or refuses names no origins, and every file on it counts as its own.
+
+```json
+{ "Copies": [ { "Path": "/media/Movies/Film (2020)/Film (2020).mkv", "OriginServerId": "0f6f1b0e8f4c4f0a9d6c2d1f5a7b3c9e" } ] }
+```
+
 #### GET /Sync/Link/{linkId}?k={secret}
 
 The address written inside each link. Jellyfin's own ffmpeg and stream proxy call it while playing a link, with no token, so it is the one plugin route that needs no Jellyfin sign in. It only answers a request from and to this server's own loopback address that carries no proxy header, with the link's secret, while a user who was allowed at play, or this server's media probe, may read it. It sends the file from the link cache when it is there, and otherwise streams it from the source, with range support, and `HEAD` answers the headers alone. The probe's read ends after 256 MB. Direct play does not come through here unless **Stream Direct Play of Links Per User** is off. Anything else is `403`, an unknown link is `404`, and a source that cannot be reached or is no longer set up is `502` or `503`.
@@ -377,7 +397,7 @@ What the Servers tab's Check Link button calls. Judges a server entry against th
 { "ServerUrl": "http://source-a:8096", "ApiKey": "…", "ServerKey": "entry key", "AllowPrivateNetwork": true, "Mode": "Sync" }
 ```
 
-`ApiKey` may be the stored key's sentinel `__JPK_SECRET_KEPT__` with `ServerKey` naming the entry, so a key never has to be re-entered. `Mode` is `Stream`, `Pull`, `Push`, or `Sync`.
+`ApiKey` may be the stored key's sentinel `__JPK_SECRET_KEPT__` with `ServerKey` naming the entry, so a key never has to be re-entered. `Mode` is `Pull`, `Push`, or `Sync`.
 
 ```json
 {
@@ -406,6 +426,10 @@ The version an object carries on this server: which server last edited it and wh
 ### POST /Sync/Hints/Failed/Retry and DELETE /Sync/Hints/Failed
 
 Every failed row at once, the **Retry Failed** and **Dismiss Failed** buttons on the Queue tab. A failed row is an outbound row in the `Failed` state, or an inbound row whose apply has failed at least once and waits to be tried again. Retry clears each row's attempts, then delivers the outbound rows and applies the inbound rows now, and answers `{ "Retried": 1200, "Outbound": 1150, "Inbound": 50 }`. Delete discards them, and answers `{ "Removed": 1200, "Outbound": 1150, "Inbound": 50 }`. A discarded inbound row is reported to its sender as finished, so it is not sent again. The scheduled tasks still carry the changes either way.
+
+### DELETE /Sync/Hints/Unmatched
+
+Clears the count of local changes that no server entry wanted, the **Dismiss** button beside that count on the Queue tab.
 
 ### DELETE /Sync/Hints/Outbound/{id} and DELETE /Sync/Hints/Inbound/{id}
 
@@ -446,10 +470,10 @@ Turns copies back into links, as **Turn Back Into Links** does, and starts a Syn
 What the [link cache](Links.md#the-link-cache) holds now. The Settings tab shows it under the cache's settings.
 
 ```json
-{ "Enabled": true, "Location": "/cache/serversync-links", "Files": 12, "UsedBytes": 48318382080, "UsedFormatted": "45 GB", "LimitBytes": 107374182400, "LimitFormatted": "100 GB", "Waiting": 2 }
+{ "Enabled": true, "Sizing": "Fixed", "Location": "/cache/serversync-links", "Files": 12, "UsedBytes": 48318382080, "UsedFormatted": "45 GB", "LimitBytes": 107374182400, "LimitFormatted": "100 GB", "Waiting": 2 }
 ```
 
-`Waiting` counts files queued to be cached. With the cache off, `Enabled` is false and the counts are 0.
+`Sizing` is `Off`, `All`, `Fixed`, or `Percent`, and `LimitBytes` is what that comes to now: a cache sized by its disk has a limit that moves with the disk. `Waiting` counts files queued to be cached. With the cache off, `Enabled` is false and the counts are 0.
 
 ### POST /Sync/LinkCache/Clear
 
@@ -457,7 +481,7 @@ Deletes every cached file, as **Empty the Cache** does. Links keep playing from 
 
 ### DELETE /Sync/Servers/{key}/Rows
 
-Removes every sync row and queued hint that came from one server entry, by the entry's `Key`. The Servers tab calls this after a server is removed. Files already downloaded are not touched.
+Removes every sync row and queued hint that came from one server entry, by the entry's `Key`. The Servers tab calls this after a server is removed. The links that streamed from that server are removed with their rows. Files already downloaded are not touched.
 
 ```json
 { "Content": 11, "History": 4, "Metadata": 11, "People": 1, "Users": 2, "Hints": 0 }

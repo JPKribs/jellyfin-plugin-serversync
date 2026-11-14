@@ -211,7 +211,7 @@ export function createUserSyncTableModule(ctx, kit) {
                 row.className = 'userSyncModal-disabledRow';
                 var cell = document.createElement('td');
                 cell.colSpan = 4;
-                cell.innerHTML = '<span style="opacity: 0.5;">' + ServerSyncShared.escapeHtml(category) + ': ' + ServerSyncShared.escapeHtml(message) + '</span>';
+                cell.innerHTML = '<span class="ssMuted">' + ServerSyncShared.escapeHtml(category) + ': ' + ServerSyncShared.escapeHtml(message) + '</span>';
                 row.appendChild(cell);
                 return row;
             },

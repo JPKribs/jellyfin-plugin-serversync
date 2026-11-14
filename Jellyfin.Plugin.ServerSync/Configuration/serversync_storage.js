@@ -212,41 +212,42 @@ export default function (view) {
                 '</div>' +
                 '<span class="storageModeBadge"></span>' +
             '</div>' +
-            '<div class="inputContainer storageModeBlock">' +
-                '<label class="inputLabel">Storage</label>' +
+            '<div class="selectContainer storageModeBlock">' +
+                '<label>Storage</label>' +
                 '<select is="emby-select" class="storageModeSelect">' +
                     '<option value="Copy">Copy</option>' +
                     '<option value="Link">Link</option>' +
                 '</select>' +
-                '<div class="fieldDescription">Copy downloads each file. Link writes a .strm that streams from that server, which must allow linking for this one.</div>' +
+                '<div class="fieldDescription">Copy downloads each file and follows that server: a file it removes is handled by Removed files here. Link writes a .strm that streams from any server that holds the file and allows linking, and goes only when none holds it.</div>' +
             '</div>' +
-            '<div class="linkCacheSection" style="display:none;">' +
+            '<div class="linkCacheSection hidden">' +
                 '<h3 class="jpk-subsection-title">Link Cache</h3>' +
                 '<div class="checkboxContainer checkboxContainer-withDescription">' +
                     '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="cacheLinks" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">Cache This Library\'s Links</span></label>' +
                     '<div class="fieldDescription checkboxFieldDescription">Cache played links and upcoming episodes. The cache is set up under Settings &gt; Content.</div>' +
                 '</div>' +
             '</div>' +
-            '<div class="permanentSection" style="display:none;">' +
+            '<div class="permanentSection hidden">' +
                 '<h3 class="jpk-subsection-title">Always Keep</h3>' +
                 '<div class="fieldDescription mb-md">Picked shows and films, every version included, are full copies here instead of links. Removing a pick turns them back into links on the next sync.</div>' +
                 '<div class="filterTableContainer" id="' + permanentTableId + '"></div>' +
             '</div>' +
             '<div class="filterSection">' +
                 '<h3 class="jpk-subsection-title">Library Filter</h3>' +
-                '<div class="filterHeader">' +
+                '<div class="selectContainer">' +
                     '<label>Filter Mode</label>' +
                     '<select is="emby-select" class="filterModeSelect">' +
                         '<option value="AllowAll">Allow All</option>' +
                         '<option value="Whitelist">Whitelist</option>' +
                         '<option value="Blacklist">Blacklist</option>' +
                     '</select>' +
+                    '<div class="fieldDescription">Allow All syncs everything. Whitelist syncs only what is picked. Blacklist syncs everything but what is picked.</div>' +
                 '</div>' +
-                '<div class="filterBrowserContainer" style="display:none;">' +
-                    '<div class="filterBrowseToggle">' +
-                        '<button is="emby-button" type="button" class="raised button-submit" data-browse="items">Files</button>' +
-                        '<button is="emby-button" type="button" class="raised" data-browse="collections">Collections</button>' +
-                        '<button is="emby-button" type="button" class="raised" data-browse="playlists">Playlists</button>' +
+                '<div class="filterBrowserContainer hidden">' +
+                    '<div class="qFilters filterBrowseToggle">' +
+                        '<button type="button" class="qFilter on" data-browse="items">Files</button>' +
+                        '<button type="button" class="qFilter" data-browse="collections">Collections</button>' +
+                        '<button type="button" class="qFilter" data-browse="playlists">Playlists</button>' +
                     '</div>' +
                     '<div class="filterTableContainer" id="' + filterTableId + '"></div>' +
                 '</div>' +
@@ -348,7 +349,7 @@ export default function (view) {
 
         function updateFilterVisibility() {
             var show = filterModeSelect.value !== 'AllowAll';
-            filterBrowserContainer.style.display = show ? '' : 'none';
+            filterBrowserContainer.classList.toggle('hidden', !show);
             if (show && libraryId && createPaginatedTable) {
                 if (!filterTable) filterTable = pickerTable(filterTableId, selectedFilterItems, filterBrowserContainer, function () { return filterBrowseMode; });
                 filterTable.reload();
@@ -363,8 +364,8 @@ export default function (view) {
                 badge.textContent = linked ? 'Link' : 'Copy';
                 badge.classList.toggle('storageModeBadge-link', linked);
             }
-            linkCacheSection.style.display = linked ? '' : 'none';
-            permanentSection.style.display = linked ? '' : 'none';
+            linkCacheSection.classList.toggle('hidden', !linked);
+            permanentSection.classList.toggle('hidden', !linked);
             if (linked && libraryId && createPaginatedTable) {
                 if (!permanentTable) permanentTable = pickerTable(permanentTableId, selectedPermanentItems, permanentSection, function () { return 'items'; });
                 permanentTable.reload();
@@ -372,12 +373,12 @@ export default function (view) {
         }
 
         // Files / Collections / Playlists. Whitelisting a collection or playlist syncs its members, and
-        // blacklisting one excludes them. button-submit marks the side in use.
+        // blacklisting one excludes them. The pill that is on marks the side in use.
         var browseButtons = div.querySelectorAll('.filterBrowseToggle > button');
         browseButtons.forEach(function (btn) {
             btn.addEventListener('click', function () {
                 filterBrowseMode = btn.dataset.browse;
-                browseButtons.forEach(function (b) { b.classList.toggle('button-submit', b.dataset.browse === filterBrowseMode); });
+                browseButtons.forEach(function (b) { b.classList.toggle('on', b.dataset.browse === filterBrowseMode); });
                 if (filterTable) filterTable.reload();
             });
         });
@@ -455,6 +456,7 @@ export default function (view) {
     var KEPT_BADGES = {
         Pick: { label: 'Always Keep', cls: 'blue', title: 'Copied because of an Always Keep pick' },
         Hand: { label: 'Kept By Hand', cls: 'purple', title: 'Downloaded by hand with Download' },
+        Own: { label: 'Already Here', cls: 'green', title: 'On this server before it was matched to that server\'s file. It stays when that server removes its file' },
         Unknown: { label: 'Earlier Copy', cls: 'gray', title: 'A copy from before Server Sync recorded why it is a copy' }
     };
 

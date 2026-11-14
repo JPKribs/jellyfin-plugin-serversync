@@ -1,0 +1,56 @@
+# Four Jellyfin servers for the file change matrix in matrix.py. Every server holds writable media and
+# the plugin, so any of them can be the main server, a child, or an equal partner. n1 is always the
+# server the files change on. Kept apart from the three server pool run.py drives, so neither disturbs
+# the other's state.
+services:
+  n1:
+    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.4.20261026-211555}
+    container_name: serversync-mx-n1
+    ports:
+      - "8121:8096"
+    volumes:
+      - ./.state/matrix/n1/config:/config
+      - ./.state/matrix/n1/cache:/cache
+      - ./.state/matrix/media/n1:/media
+      - ./.plugin:/config/plugins/${PLUGIN_FOLDER:-Server Sync_0.0.0.0}
+    environment:
+      - JELLYFIN_PublishedServerUrl=http://n1:8096
+
+  n2:
+    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.4.20261026-211555}
+    container_name: serversync-mx-n2
+    ports:
+      - "8122:8096"
+    volumes:
+      - ./.state/matrix/n2/config:/config
+      - ./.state/matrix/n2/cache:/cache
+      - ./.state/matrix/media/n2:/media
+      - ./.plugin:/config/plugins/${PLUGIN_FOLDER:-Server Sync_0.0.0.0}
+    environment:
+      - JELLYFIN_PublishedServerUrl=http://n2:8096
+
+  n3:
+    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.4.20261026-211555}
+    container_name: serversync-mx-n3
+    ports:
+      - "8123:8096"
+    volumes:
+      - ./.state/matrix/n3/config:/config
+      - ./.state/matrix/n3/cache:/cache
+      - ./.state/matrix/media/n3:/media
+      - ./.plugin:/config/plugins/${PLUGIN_FOLDER:-Server Sync_0.0.0.0}
+    environment:
+      - JELLYFIN_PublishedServerUrl=http://n3:8096
+
+  n4:
+    image: ${JELLYFIN_IMAGE:-jellyfin/jellyfin:12.4.20261026-211555}
+    container_name: serversync-mx-n4
+    ports:
+      - "8124:8096"
+    volumes:
+      - ./.state/matrix/n4/config:/config
+      - ./.state/matrix/n4/cache:/cache
+      - ./.state/matrix/media/n4:/media
+      - ./.plugin:/config/plugins/${PLUGIN_FOLDER:-Server Sync_0.0.0.0}
+    environment:
+      - JELLYFIN_PublishedServerUrl=http://n4:8096

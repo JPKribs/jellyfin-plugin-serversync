@@ -160,10 +160,10 @@ export function createContentSyncTableModule(ctx, kit) {
                 var modalDeleteBtn = view.querySelector('#btnModalDelete');
 
                 if (bulkDeleteBtn) {
-                    bulkDeleteBtn.style.display = canDelete ? 'inline-block' : 'none';
+                    bulkDeleteBtn.classList.toggle('hidden', !canDelete);
                 }
                 if (modalDeleteBtn) {
-                    modalDeleteBtn.style.display = canDelete ? 'inline-block' : 'none';
+                    modalDeleteBtn.classList.toggle('hidden', !canDelete);
                 }
             },
 
@@ -392,18 +392,18 @@ export function createContentSyncTableModule(ctx, kit) {
                     localPathEl.textContent = item.LocalPath;
                     if (localExists) {
                         localPathNoteEl.textContent = '';
-                        localPathNoteEl.style.display = 'none';
+                        localPathNoteEl.classList.add('hidden');
                         localSizeEl.textContent = ServerSyncShared.formatSize(item.LocalSize || item.SourceSize);
-                        localSizeRowEl.style.display = 'block';
+                        localSizeRowEl.classList.remove('hidden');
                     } else {
                         localPathNoteEl.textContent = 'File will be synced to this location';
-                        localPathNoteEl.style.display = 'block';
-                        localSizeRowEl.style.display = 'none';
+                        localPathNoteEl.classList.remove('hidden');
+                        localSizeRowEl.classList.add('hidden');
                     }
                 } else {
                     localPathEl.textContent = 'N/A';
-                    localPathNoteEl.style.display = 'none';
-                    localSizeRowEl.style.display = 'none';
+                    localPathNoteEl.classList.add('hidden');
+                    localSizeRowEl.classList.add('hidden');
                 }
 
                 var btnQueue = view.querySelector('#btnModalQueue');
@@ -416,24 +416,24 @@ export function createContentSyncTableModule(ctx, kit) {
 
                 btnQueue.querySelector('span').textContent = isSynced ? 'Resync' : 'Queue';
 
-                btnMarkSynced.style.display = isQueuedOrErrored ? 'inline-block' : 'none';
+                btnMarkSynced.classList.toggle('hidden', !isQueuedOrErrored);
 
                 // Only a link can be kept as a copy, and not one already on its way or on its way out.
-                view.querySelector('#btnModalKeep').style.display = item.StorageMode === 'Link' && !isPendingDeletion
-                    && item.Status !== 'Ignored' && item.Status !== 'Deleting' ? 'inline-block' : 'none';
+                view.querySelector('#btnModalKeep').classList.toggle('hidden', !(item.StorageMode === 'Link' && !isPendingDeletion
+                    && item.Status !== 'Ignored' && item.Status !== 'Deleting'));
 
                 if (isPendingDeletion) {
-                    btnQueue.style.display = 'none';
+                    btnQueue.classList.add('hidden');
                     if (self.capabilities && self.capabilities.CanDeleteItems) {
-                        modalDeleteBtn.style.display = 'inline-block';
+                        modalDeleteBtn.classList.remove('hidden');
                     }
                 } else if (isPendingDownloadOrReplacement) {
-                    btnQueue.style.display = 'inline-block';
-                    modalDeleteBtn.style.display = 'none';
+                    btnQueue.classList.remove('hidden');
+                    modalDeleteBtn.classList.add('hidden');
                 } else {
-                    btnQueue.style.display = 'inline-block';
+                    btnQueue.classList.remove('hidden');
                     if (self.capabilities && self.capabilities.CanDeleteItems) {
-                        modalDeleteBtn.style.display = 'inline-block';
+                        modalDeleteBtn.classList.remove('hidden');
                     }
                 }
 

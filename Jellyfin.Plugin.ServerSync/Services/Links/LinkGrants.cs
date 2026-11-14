@@ -66,7 +66,7 @@ public sealed class LinkGrants
         {
             var users = UsersOf(linkId);
             var used = users.TryGetValue(userId, out var current) && Live(current) && current.Used;
-            users[userId] = new Entry(false, _now(), used, route, 0);
+            users[userId] = new Entry(false, _now(), used, route, 0, current?.Open ?? 0);
         }
     }
 
@@ -192,9 +192,96 @@ public sealed class LinkGrants
         return users;
     }
 
+    /// <summary>How long after its last request a play still counts as streaming.</summary>
+    public static readonly TimeSpan Playing = TimeSpan.FromSeconds(90);
+
+    /// <summary>
+    /// How many links are streaming now, each by one user, from one server or from all of them. A play
+    /// counts from its first request until <see cref="Playing"/> after its last, so a paused player
+    /// gives its place up. The play being chosen for is left out, since choosing again for a play
+    /// already going must not count it against itself.
+    /// </summary>
+    /// <param name="serverKey">The server streamed from, or null for every server.</param>
+    /// <param name="exceptLinkId">The link being chosen for.</param>
+    /// <param name="exceptUserId">The user being chosen for.</param>
+    /// <returns>The number of plays streaming.</returns>
+    public int Streaming(string? serverKey, string? exceptLinkId = null, Guid? exceptUserId = null)
+    {
+        lock (_lock)
+        {
+            var now = _now();
+            var count = 0;
+            foreach (var (linkId, users) in _grants)
+            {
+                foreach (var (userId, entry) in users)
+                {
+                    if (entry.Probe || !entry.Used || entry.Route is null || (entry.Open <= 0 && now - entry.At >= Playing)
+                        || (exceptUserId == userId && string.Equals(linkId, exceptLinkId, StringComparison.OrdinalIgnoreCase))
+                        || (serverKey is not null && !string.Equals(entry.Route.ServerKey, serverKey, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    count++;
+                }
+            }
+
+            return count;
+        }
+    }
+
     private bool Live(Entry entry)
         => _now() - entry.At < (entry.Probe ? ProbeWait : entry.Used ? InUse : Unused)
             && (!entry.Probe || entry.Spent < ProbeBudget);
 
-    private sealed record Entry(bool Probe, DateTime At, bool Used, LinkRoute? Route, long Spent);
+    private sealed record Entry(bool Probe, DateTime At, bool Used, LinkRoute? Route, long Spent, int Open = 0);
+
+    /// <summary>
+    /// Marks a play as streaming for as long as one of its requests is open. A player that reads a
+    /// whole film in one request makes no further request to be seen by, so the open request itself
+    /// is what counts it. Disposing the answer closes it, and the play then counts for
+    /// <see cref="Playing"/> more.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="userId">The user playing it.</param>
+    /// <returns>The hold to dispose when the request ends.</returns>
+    public IDisposable Hold(string linkId, Guid userId)
+    {
+        Adjust(linkId, userId, 1);
+        return new Held(this, linkId, userId);
+    }
+
+    private void Adjust(string linkId, Guid userId, int by)
+    {
+        lock (_lock)
+        {
+            if (_grants.TryGetValue(linkId, out var users) && users.TryGetValue(userId, out var current))
+            {
+                users[userId] = current with { Open = Math.Max(0, current.Open + by), At = _now(), Used = true };
+            }
+        }
+    }
+
+    private sealed class Held : IDisposable
+    {
+        private readonly LinkGrants _owner;
+        private readonly string _linkId;
+        private readonly Guid _userId;
+        private int _done;
+
+        public Held(LinkGrants owner, string linkId, Guid userId)
+        {
+            _owner = owner;
+            _linkId = linkId;
+            _userId = userId;
+        }
+
+        public void Dispose()
+        {
+            if (System.Threading.Interlocked.Exchange(ref _done, 1) == 0)
+            {
+                _owner.Adjust(_linkId, _userId, -1);
+            }
+        }
+    }
 }

@@ -193,10 +193,45 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool StreamLinksDirectly { get; set; } = true;
 
     /// <summary>
-    /// The most disk the link cache may use, in gigabytes, wherever its links stream from. 0 turns the
-    /// cache off, which is the default.
+    /// Whether the copies tracked before origins were recorded have been looked at once and marked:
+    /// each as this server's own file, or as a download with the server it came from.
+    /// </summary>
+    public bool ExistingCopiesMarked { get; set; }
+
+    /// <summary>
+    /// The most links this server streams from other servers at once, across all of them, or 0 for no
+    /// limit. A link that plays from the link cache streams from nobody and is not counted.
+    /// </summary>
+    public int LinkMaxStreamsTotal { get; set; }
+
+    /// <summary>
+    /// How much disk the link cache may use. Unset, as a configuration saved before this setting
+    /// existed is, the cache is off at a size of 0 and holds up to <see cref="LinkCacheSizeGb"/> otherwise.
+    /// </summary>
+    public LinkCacheSizing? LinkCacheSizing { get; set; }
+
+    /// <summary>
+    /// The most disk the link cache may use, in gigabytes, when it is held to a fixed amount. At 0 a
+    /// cache that is on uses all the room there is.
     /// </summary>
     public int LinkCacheSizeGb { get; set; }
+
+    /// <summary>The share of the room on the cache's disk the cache may use, when it is held to a share.</summary>
+    public int LinkCachePercent { get; set; } = 50;
+
+    /// <summary>Gets how the cache is sized, with an unset choice read from the size and a fixed size of 0 read as all the room.</summary>
+    [System.Xml.Serialization.XmlIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public LinkCacheSizing EffectiveLinkCacheSizing => (LinkCacheSizing ?? (LinkCacheSizeGb > 0 ? Models.ContentSync.Configuration.LinkCacheSizing.Fixed : Models.ContentSync.Configuration.LinkCacheSizing.Off)) switch
+    {
+        Models.ContentSync.Configuration.LinkCacheSizing.Fixed when LinkCacheSizeGb <= 0 => Models.ContentSync.Configuration.LinkCacheSizing.All,
+        var sizing => sizing
+    };
+
+    /// <summary>Gets a value indicating whether the link cache is on.</summary>
+    [System.Xml.Serialization.XmlIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool LinkCacheOn => EffectiveLinkCacheSizing != Models.ContentSync.Configuration.LinkCacheSizing.Off;
 
     /// <summary>
     /// Where cached files are kept. Empty keeps them under Jellyfin's cache folder.
@@ -217,9 +252,25 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Which cached file is dropped first when the cache is full.</summary>
     public CacheRemovalOrder LinkCacheRemovalOrder { get; set; } = CacheRemovalOrder.LastPlayed;
 
-    /// <summary>The most disk the link cache may use, in bytes, or 0 when the cache is off.</summary>
+    /// <summary>
+    /// The most disk the link cache may use, in bytes, or 0 when the cache is off. The room on the
+    /// cache's disk is what the cache holds now plus what is free, less the free space always kept.
+    /// </summary>
+    /// <param name="usedBytes">What the cache holds now.</param>
+    /// <param name="freeBytes">The free space on the cache's disk.</param>
     /// <returns>The size in bytes.</returns>
-    public long GetLinkCacheSizeBytes() => Math.Max(0, LinkCacheSizeGb) * 1024L * 1024L * 1024L;
+    public long GetLinkCacheLimitBytes(long usedBytes, long freeBytes)
+    {
+        const long Gb = 1024L * 1024L * 1024L;
+        var room = Math.Max(0, usedBytes) + Math.Max(0, freeBytes - (Math.Max(0, MinimumFreeDiskSpaceGb) * Gb));
+        return EffectiveLinkCacheSizing switch
+        {
+            Models.ContentSync.Configuration.LinkCacheSizing.Off => 0,
+            Models.ContentSync.Configuration.LinkCacheSizing.Fixed => LinkCacheSizeGb * Gb,
+            Models.ContentSync.Configuration.LinkCacheSizing.Percent => (long)(room * (Math.Clamp(LinkCachePercent, 1, 100) / 100.0)),
+            _ => room
+        };
+    }
 
     public int MaxConcurrentDownloads { get; set; } = 2;
 
@@ -913,7 +964,22 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         MaxConcurrentDownloads = Math.Clamp(MaxConcurrentDownloads, 1, 10);
         MaxDownloadSpeed = Math.Max(0, MaxDownloadSpeed);
+        // Stream was folded into Push. A configuration saved with it, by an older page or a script, is kept as Push.
+        foreach (var server in Servers ?? new List<SourceServer>())
+        {
+            if (server.Mode == ServerMode.Stream)
+            {
+                server.Mode = ServerMode.Push;
+            }
+        }
+
         LinkCacheSizeGb = Math.Clamp(LinkCacheSizeGb, 0, 1_000_000);
+        LinkCachePercent = Math.Clamp(LinkCachePercent, 1, 100);
+        LinkMaxStreamsTotal = Math.Clamp(LinkMaxStreamsTotal, 0, 1000);
+        foreach (var server in Servers ?? new List<SourceServer>())
+        {
+            server.LinkTakeMaxStreams = Math.Clamp(server.LinkTakeMaxStreams, 0, 1000);
+        }
         LinkCacheRetentionDays = Math.Clamp(LinkCacheRetentionDays, 0, 3650);
         LinkCachePreCacheEpisodes = Math.Clamp(LinkCachePreCacheEpisodes, 0, 50);
         LinkCachePath = (LinkCachePath ?? string.Empty).Trim();
@@ -1087,6 +1153,15 @@ public class PluginConfiguration : BasePluginConfiguration
 /// </summary>
 public sealed class SyncRunFailure
 {
+    /// <summary>
+    /// Gets or sets when this failure was first recorded for its module and phase. A run that fails
+    /// again keeps it, so it says how long the module has been failing, not when it last did.
+    /// </summary>
+    public DateTime? FirstSeen { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the administrator has been told about this failure.</summary>
+    public bool Reported { get; set; }
+
     /// <summary>
     /// Module mutex key, "Content", "History", "Metadata", "People", or "User".
     /// </summary>

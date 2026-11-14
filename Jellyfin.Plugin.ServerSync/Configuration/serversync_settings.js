@@ -187,7 +187,25 @@ export default function (view) {
         setChecked('chkIncludeCompanionFiles', config.IncludeCompanionFiles || false);
         setChecked('chkTakeLinkImagesFromSource', config.TakeLinkImagesFromSource !== false);
         setChecked('chkStreamLinksDirectly', config.StreamLinksDirectly !== false);
+        setValue('txtLinkMaxStreamsTotal', config.LinkMaxStreamsTotal || 0);
+
+        // One row per server this one links to: a server it pulls from with a library kept as links.
+        var takeRows = getEl('linkTakeRows');
+        if (takeRows) {
+            takeRows.innerHTML = ((config && config.Servers) || []).filter(function (server) {
+                var pulls = server.Mode === 'Pull' || server.Mode === 'Sync' || server.Mode === 0 || server.Mode === 2;
+                return server.IsEnabled !== false && pulls && (server.LibraryMappings || []).some(function (m) { return m.IsEnabled !== false && (m.StorageMode === 'Link' || m.StorageMode === 1); });
+            }).map(function (server) {
+                return '<div class="ssFormRow" data-server-key="' + escapeHtml(server.Key) + '">' +
+                    '<span class="ssFormLabel">From ' + escapeHtml(ServerSyncShared.serverDisplayName(server)) + '<span class="ssFormHint">Links this server takes from it at once</span></span>' +
+                    '<span class="ssFormCell"><input is="emby-input" type="number" min="0" max="1000" class="ssFormInput linkTake" value="' + (server.LinkTakeMaxStreams || 0) + '" /></span>' +
+                '</div>';
+            }).join('');
+        }
+
+        setValue('selLinkCacheSizing', config.LinkCacheSizing || (config.LinkCacheSizeGb > 0 ? 'Fixed' : 'Off'));
         setValue('txtLinkCacheSizeGb', config.LinkCacheSizeGb || 0);
+        setValue('txtLinkCachePercent', config.LinkCachePercent || 50);
         setValue('txtLinkCachePath', config.LinkCachePath || '');
         setValue('txtLinkCacheRetentionDays', config.LinkCacheRetentionDays == null ? 30 : config.LinkCacheRetentionDays);
         setValue('txtLinkCachePreCacheEpisodes', config.LinkCachePreCacheEpisodes == null ? 2 : config.LinkCachePreCacheEpisodes);
@@ -206,12 +224,17 @@ export default function (view) {
         setValue('txtMinFreeDiskSpace', config.MinimumFreeDiskSpaceGb == null ? 10 : config.MinimumFreeDiskSpaceGb);
 
 
-        // The cache's other settings only matter while it has a size.
-        var cacheSize = getEl('txtLinkCacheSizeGb');
-        var reflectCache = function () { setVisible('linkCacheOptions', (parseFloat(cacheSize && cacheSize.value) || 0) > 0); };
-        if (cacheSize && !cacheSize.dataset.bound) {
-            cacheSize.dataset.bound = '1';
-            cacheSize.addEventListener('input', reflectCache);
+        // The cache's other settings only matter while it is on, and each size choice shows its own field.
+        var cacheSizing = getEl('selLinkCacheSizing');
+        var reflectCache = function () {
+            var sizing = getValue('selLinkCacheSizing', 'Off');
+            setVisible('linkCacheOptions', sizing !== 'Off');
+            setVisible('linkCacheFixedRow', sizing === 'Fixed');
+            setVisible('linkCachePercentRow', sizing === 'Percent');
+        };
+        if (cacheSizing && !cacheSizing.dataset.bound) {
+            cacheSizing.dataset.bound = '1';
+            cacheSizing.addEventListener('change', reflectCache);
         }
         reflectCache();
         ServerSyncShared.bindReveal('chkEnableRecyclingBin', 'recyclingBinSettings');
@@ -318,12 +341,22 @@ export default function (view) {
             config.IncludeCompanionFiles = getChecked('chkIncludeCompanionFiles');
             config.TakeLinkImagesFromSource = getChecked('chkTakeLinkImagesFromSource');
             config.StreamLinksDirectly = getChecked('chkStreamLinksDirectly');
-            // Saving a size of 0 empties the cache, so only a typed 0 does. An empty or unreadable
-            // field keeps the saved size, and a fraction of a gigabyte rounds up to one.
+            // An empty or unreadable field keeps the saved number, and a fraction of a gigabyte rounds
+            // up to one. A fixed amount of 0 uses all available space.
+            config.LinkMaxStreamsTotal = Math.max(0, getIntValue('txtLinkMaxStreamsTotal', 0));
+            var takes = {};
+            view.querySelectorAll('#linkTakeRows [data-server-key]').forEach(function (row) {
+                takes[row.getAttribute('data-server-key')] = Math.max(0, parseInt(row.querySelector('.linkTake').value, 10) || 0);
+            });
+            (config.Servers || []).forEach(function (server) {
+                if (Object.prototype.hasOwnProperty.call(takes, server.Key)) server.LinkTakeMaxStreams = takes[server.Key];
+            });
+            config.LinkCacheSizing = getValue('selLinkCacheSizing', 'Off');
             var cacheSize = parseFloat(getValue('txtLinkCacheSizeGb'));
             if (!isNaN(cacheSize)) {
                 config.LinkCacheSizeGb = cacheSize > 0 ? Math.max(1, Math.floor(cacheSize)) : 0;
             }
+            config.LinkCachePercent = Math.min(100, Math.max(1, getIntValue('txtLinkCachePercent', 50)));
             config.LinkCachePath = getValue('txtLinkCachePath') || '';
             config.LinkCacheRetentionDays = Math.max(0, getIntValue('txtLinkCacheRetentionDays', 30));
             config.LinkCachePreCacheEpisodes = Math.max(0, getIntValue('txtLinkCachePreCacheEpisodes', 2));
@@ -349,7 +382,7 @@ export default function (view) {
             config.MaxConcurrentDownloads = getIntValue('txtMaxConcurrentDownloads', 2);
             config.TempDownloadPath = getValue('txtTempDownloadPath') || null;
             config.MinimumFreeDiskSpaceGb = getIntValue('txtMinFreeDiskSpace', 10);
-        }, 'Content settings saved', 'Failed to save content settings');
+        }, 'Content settings saved', 'Failed to save content settings').then(loadLinkCacheStatus);
     }
 
     // --- History Settings ---
@@ -516,7 +549,7 @@ export default function (view) {
         }).join('');
         row.innerHTML =
             '<select class="grantUser ssGrantField" aria-label="User">' + options + '</select>' +
-            '<input type="text" class="grantLocations ssGrantField" aria-label="Locations" placeholder="All locations" />' +
+            '<input type="text" class="grantLocations ssGrantField" aria-label="Locations" placeholder="Default" />' +
             '<button is="emby-button" type="button" class="raised jpk-button-destructive jpk-button-small grantRemove"><span>Remove</span></button>';
         container.appendChild(row);
         var select = row.querySelector('.grantUser');

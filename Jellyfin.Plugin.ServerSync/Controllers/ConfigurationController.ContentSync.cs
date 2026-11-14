@@ -372,10 +372,11 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(cache);
         ArgumentNullException.ThrowIfNull(filler);
         var used = cache.Enabled ? cache.UsedBytes() : 0;
-        var limit = _configManager.Configuration.GetLinkCacheSizeBytes();
+        var limit = cache.LimitBytes();
         return Ok(new
         {
             cache.Enabled,
+            Sizing = _configManager.Configuration.EffectiveLinkCacheSizing.ToString(),
             Location = cache.Root,
             Files = cache.Enabled ? cache.List().Count : 0,
             UsedBytes = used,

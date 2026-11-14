@@ -253,6 +253,17 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
             _outbound.TrimPending(peerKey);
             var state = _peers.GetOrAdd(peerKey, _ => new PeerDeliveryState());
+
+            // A pause is for the entry as it was. Once its address, key, or direction is changed, the
+            // reason may be gone, so the next pass tries it rather than waiting the pause out.
+            if (state.PausedUntil.HasValue && !state.VersionBlocked && state.PausedFor is not null
+                && !string.Equals(state.PausedFor, EntrySignature(peer), StringComparison.Ordinal))
+            {
+                state.PausedUntil = null;
+                state.PausedFor = null;
+                _outbound.BringForward(peerKey, DateTime.UtcNow);
+            }
+
             if (state.PausedUntil > DateTime.UtcNow || state.VersionBlocked)
             {
                 continue;
@@ -528,12 +539,16 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         return retry;
     }
 
+    private static string EntrySignature(SourceServer peer)
+        => string.Join('|', peer.Url, peer.ApiKey, peer.AllowPrivateNetwork, peer.Mode, peer.IsEnabled);
+
     private async Task PauseAsync(SourceServer peer, PeerDeliveryState state, IList<OutboundHint> due, string reason)
     {
         var config = _configManager.Configuration;
         var until = DateTime.UtcNow + HintProtocol.PeerPause(config);
         var alreadyPaused = state.PausedUntil.HasValue && string.Equals(state.Reason, reason, StringComparison.Ordinal);
         state.PausedUntil = until;
+        state.PausedFor = EntrySignature(peer);
         state.Reason = reason;
         _outbound.Defer(GiveUp(peer, due, config.HintRefusedMaxRetries, reason), until, reason);
         _logger.LogError("Hints to '{Peer}' are paused until {Until:u}: {Reason}", peer.DisplayName, until, reason);
@@ -713,6 +728,9 @@ public sealed class PeerDeliveryState
 
     /// <summary>Gets or sets why the last delivery did not go through, or null after a success.</summary>
     public string? Reason { get; set; }
+
+    /// <summary>Gets or sets the settings of the peer's entry when it was paused, or null when not paused over a delivery.</summary>
+    public string? PausedFor { get; set; }
 
     /// <summary>Gets or sets what the peer last said it wants, or null when not known.</summary>
     public PeerInterest? Interest { get; set; }

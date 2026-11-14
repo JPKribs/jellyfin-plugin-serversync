@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net.Mime;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
@@ -71,11 +72,35 @@ public class ServersController : ControllerBase
     [HttpDelete("{key}/Rows")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult<ServerRowsRemoved> ForgetRows([FromRoute] string key, [FromQuery] string? serverId)
+    public ActionResult<ServerRowsRemoved> ForgetRows([FromRoute] string key, [FromQuery] string? serverId, [FromServices] MediaBrowser.Controller.Library.ILibraryManager? libraryManager = null)
     {
         if (string.IsNullOrWhiteSpace(key))
         {
             return BadRequest("A server key is required");
+        }
+
+        // The removed server's links point at a server this one no longer talks to, so they go with
+        // their rows. Only a .strm this plugin wrote is removed. Its copies are real files and stay.
+        var links = 0;
+        var roots = libraryManager?.GetVirtualFolders().SelectMany(folder => folder.Locations ?? System.Array.Empty<string>()).ToList() ?? new System.Collections.Generic.List<string>();
+        foreach (var row in (_content.TryGetLinks() ?? new System.Collections.Generic.List<Models.ContentSync.SyncItem>())
+            .Where(row => string.Equals(row.ServerKey, key, System.StringComparison.OrdinalIgnoreCase)))
+        {
+            if (string.IsNullOrEmpty(row.LocalPath) || !Services.Links.LinkFiles.IsOwnLink(row.LocalPath))
+            {
+                continue;
+            }
+
+            var root = roots.FirstOrDefault(location => row.LocalPath.StartsWith(location.TrimEnd('/', '\\') + System.IO.Path.DirectorySeparatorChar, System.StringComparison.OrdinalIgnoreCase));
+            if (root is not null && FileDeletionService.DeleteLinkWithFolders(row.LocalPath, _logger, root))
+            {
+                links++;
+            }
+        }
+
+        if (links > 0)
+        {
+            _logger.LogInformation("Removed {Count} link(s) to the forgotten server {Key}", links, FormatUtilities.SanitizeForLog(key));
         }
 
         var removed = new ServerRowsRemoved

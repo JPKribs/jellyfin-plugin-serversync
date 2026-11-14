@@ -107,6 +107,8 @@ public sealed class RefreshContentSyncTableTaskTests : IDisposable
 
         public void Seen(string sourceLibraryId, int count) => RecordMappingSeen(sourceLibraryId, count);
 
+        public void Seen(string serverKey, string sourceLibraryId, int count) => RecordMappingSeen(serverKey, sourceLibraryId, count);
+
         public void StartRun() => OnRunStarting();
 
         public Task<int> Prune(IReadOnlyDictionary<string, SyncItem> existing, HashSet<string> seen)
@@ -357,6 +359,207 @@ public sealed class RefreshContentSyncTableTaskTests : IDisposable
         await Prune();
 
         Assert.Equal(pruneAllowed ? SyncStatus.Deleting : SyncStatus.Synced, Row("gone")!.Status);
+    }
+
+    /// <summary>
+    /// Two servers set up alike give their libraries the same id. One that holds nothing answers with
+    /// no items, and that answer is about its own library only.
+    /// True: a file gone from the first server is removed although the second reported nothing.
+    /// False: a partner with an empty library stops every removal from every other server.
+    /// </summary>
+    [Fact]
+    public async Task RecordMappingSeen_CountsEachServersLibraryOnItsOwn()
+    {
+        Mode(MissingContentAction.Delete);
+        foreach (var key in new[] { "main", "partner" })
+        {
+            _config.Configuration.Servers.Add(new SourceServer { Key = key, Url = $"http://{key}:8096", ApiKey = "k", Mode = ServerMode.Pull, LibraryMappings = { _mapping } });
+        }
+
+        _task.StartRun();
+        _task.Seen("main", Library, 5);
+        _task.Seen("partner", Library, 0);
+        var fromMain = Track("gone-main");
+        fromMain.ServerKey = "main";
+        _manager.Upsert(fromMain);
+        var fromPartner = Track("gone-partner");
+        fromPartner.ServerKey = "partner";
+        _manager.Upsert(fromPartner);
+
+        await Prune();
+
+        Assert.Equal(SyncStatus.Deleting, Row("gone-main")!.Status);
+        Assert.Equal(SyncStatus.Synced, Row("gone-partner")!.Status);
+    }
+
+    /// <summary>
+    /// A file that was on this server before it was matched to a source's file is this server's own.
+    /// True: the source removing its file drops the tracking and leaves the file, even with Removed
+    /// files on Delete, while a file this server downloaded is still removed.
+    /// False: a server loses its own film because another server deleted theirs.
+    /// </summary>
+    [Fact]
+    public async Task OwnFile_StaysWhenTheSourceRemovesIts()
+    {
+        Mode(MissingContentAction.Delete);
+        _task.StartRun();
+        _task.Seen(Library, 5);
+        var own = Track("own");
+        own.Kept = KeptReason.Own;
+        _manager.Upsert(own);
+        Track("downloaded");
+
+        await Prune();
+
+        Assert.Null(Row("own"));
+        Assert.True(File.Exists(own.LocalPath));
+        Assert.Equal(SyncStatus.Deleting, Row("downloaded")!.Status);
+    }
+
+    /// <summary>
+    /// Copies tracked before origins were recorded are marked once: a file that never went through a
+    /// download is this server's own, and one that did came from the server its row names. Rows that
+    /// already say, links, and rows with no file are left alone, and a second pass changes nothing.
+    /// True: an existing library follows the same rules as files synced from now on.
+    /// False: the rules would only cover new files, or a second pass would mark a row twice.
+    /// </summary>
+    [Fact]
+    public void ExistingCopies_AreMarkedOnce_AsOwnOrDownloaded()
+    {
+        _config.Configuration.Servers[0].ServerId = "aaaa1111";
+        var matched = Track("matched");
+        var downloaded = Track("downloaded");
+        downloaded.LastSyncTime = DateTime.UtcNow.AddDays(-3);
+        downloaded.ServerKey = "server-a";
+        _manager.Upsert(downloaded);
+        var pick = Track("pick");
+        pick.Kept = KeptReason.Pick;
+        _manager.Upsert(pick);
+        Track("no-file", withFile: false);
+        var unknown = Track("unknown-server");
+        unknown.LastSyncTime = DateTime.UtcNow;
+        unknown.ServerKey = "gone";
+        _manager.Upsert(unknown);
+
+        Assert.Equal(2, ExistingCopies.Mark(_manager, _config.Configuration));
+
+        Assert.Equal(KeptReason.Own, Row("matched")!.Kept);
+        Assert.Null(Row("matched")!.OriginServerId);
+        Assert.Equal("aaaa1111", Row("downloaded")!.OriginServerId);
+        Assert.Equal(KeptReason.None, Row("downloaded")!.Kept);
+        Assert.Equal(KeptReason.Pick, Row("pick")!.Kept);
+        Assert.Null(Row("no-file")!.OriginServerId);
+        Assert.Null(Row("unknown-server")!.OriginServerId);
+        Assert.Equal(0, ExistingCopies.Mark(_manager, _config.Configuration));
+    }
+
+    /// <summary>
+    /// A server that is disabled, or gone from the list, leaves its rows behind under a library id
+    /// another server may share.
+    /// True: its rows are left alone, and do not count as that other server's removed files.
+    /// False: a disabled server's rows read as all removed and stop the cleanup for every server.
+    /// </summary>
+    [Fact]
+    public async Task Scope_IsTheRowsOwnServer()
+    {
+        Mode(MissingContentAction.Delete);
+        _task.StartRun();
+        _task.Seen("server-a", Library, 5);
+        var leftover = Track("leftover");
+        leftover.ServerKey = "gone-server";
+        _manager.Upsert(leftover);
+        var mine = Track("mine");
+        mine.ServerKey = "server-a";
+        _manager.Upsert(mine);
+
+        await Prune();
+
+        Assert.Equal(SyncStatus.Synced, Row("leftover")!.Status);
+        Assert.Equal(SyncStatus.Deleting, Row("mine")!.Status);
+    }
+
+    // -----------------------------------------------------------------------
+    // Files a server was given by another
+    // -----------------------------------------------------------------------
+
+    private PluginConfiguration Mesh()
+    {
+        var config = new PluginConfiguration();
+        config.Servers.Add(new SourceServer
+        {
+            Key = "main", Name = "Main", ServerId = "aaaa1111", Url = "http://main:8096", ApiKey = "k", Mode = ServerMode.Pull,
+            LibraryMappings = { new LibraryMapping { SourceLibraryId = "m", LocalLibraryId = "l", SourceRootPath = "/media/Movies", LocalRootPath = "/media/Movies" } }
+        });
+        config.Servers.Add(new SourceServer
+        {
+            Key = "sibling", Name = "Sibling", ServerId = "bbbb2222", Url = "http://sibling:8096", ApiKey = "k", Mode = ServerMode.Sync,
+            LibraryMappings =
+            {
+                new LibraryMapping { SourceLibraryId = "m", LocalLibraryId = "l", SourceRootPath = "/media/Movies", LocalRootPath = "/media/Movies" },
+                new LibraryMapping { SourceLibraryId = "t", LocalLibraryId = "t", SourceRootPath = "/media/Shows", LocalRootPath = "/media/Shows" }
+            }
+        });
+        return config;
+    }
+
+    /// <summary>
+    /// A file a partner was given by this server is this server's to decide about.
+    /// True: a film removed here is not downloaded back from the partner that still holds its copy.
+    /// False: removing a film on one of two servers that sync with each other brings it straight back.
+    /// </summary>
+    [Fact]
+    public void DecidedElsewhere_AFileThatCameFromHere_IsNeverTakenBack()
+    {
+        Assert.Equal("this server", UpdateSyncTablesTask.DecidedElsewhere(Mesh(), "cccc-3333", "sibling", "CCCC3333", "/media/Movies/Film/Film.mkv"));
+    }
+
+    /// <summary>
+    /// A sibling's copy of a file from a server this one syncs the same folder from is left to that server.
+    /// True: once the main server removes a film, its copies on the siblings stop keeping each other alive.
+    /// False: two children of one main server keep every removed film forever.
+    /// </summary>
+    [Fact]
+    public void DecidedElsewhere_ASiblingsCopyOfTheMainServersFile_IsLeftToTheMainServer()
+    {
+        Assert.Equal("Main", UpdateSyncTablesTask.DecidedElsewhere(Mesh(), "cccc3333", "sibling", "aaaa1111", "/media/Movies/Film/Film.mkv"));
+    }
+
+    /// <summary>
+    /// The offer counts whenever nothing says another server decides: the file is the offering
+    /// server's own, its origin is not synced from here, its origin does not cover that folder here,
+    /// its origin did not answer this run, or the origin is the offering server itself.
+    /// True: a file still reaches this server through one in between, and an outage of the first
+    /// server does not hold back what another holds.
+    /// False: files would stop arriving, or a folder only the sibling provides would be emptied.
+    /// </summary>
+    [Fact]
+    public void DecidedElsewhere_AnyOtherOffer_Counts()
+    {
+        var config = Mesh();
+        Assert.Null(UpdateSyncTablesTask.DecidedElsewhere(config, "cccc3333", "sibling", null, "/media/Movies/Film/Film.mkv"));
+        Assert.Null(UpdateSyncTablesTask.DecidedElsewhere(config, "cccc3333", "sibling", "dddd4444", "/media/Movies/Film/Film.mkv"));
+        Assert.Null(UpdateSyncTablesTask.DecidedElsewhere(config, "cccc3333", "sibling", "aaaa1111", "/media/Shows/Show/S01E01.mkv"));
+        Assert.Null(UpdateSyncTablesTask.DecidedElsewhere(config, "cccc3333", "sibling", "aaaa1111", "/media/Movies/Film/Film.mkv", key => key != "main"));
+        Assert.Null(UpdateSyncTablesTask.DecidedElsewhere(config, "cccc3333", "main", "aaaa1111", "/media/Movies/Film/Film.mkv"));
+        Assert.Null(UpdateSyncTablesTask.DecidedElsewhere(config, "cccc3333", "sibling", "aaaa1111", "/media/MoviesOther/Film/Film.mkv"));
+    }
+
+    /// <summary>
+    /// The origin a download records is stored with the row and read back, and a table from before
+    /// origins reads as none.
+    /// True: what a server was given is still known after a restart.
+    /// False: every copy would read as the server's own again, and be handed back to where it came from.
+    /// </summary>
+    [Fact]
+    public void Origin_IsStoredWithTheRow()
+    {
+        var row = Track("given");
+        Assert.Null(Row("given")!.OriginServerId);
+        row.OriginServerId = "aaaa1111";
+        _manager.Upsert(row);
+
+        Assert.Equal("aaaa1111", Row("given")!.OriginServerId);
+        Assert.Single(_manager.TryGetCopiesWithOrigin()!);
     }
 
     /// <summary>

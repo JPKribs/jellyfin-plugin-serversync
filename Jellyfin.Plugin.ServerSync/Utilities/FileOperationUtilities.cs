@@ -49,6 +49,13 @@ public static class FileOperationUtilities
         var stem = Path.GetFileNameWithoutExtension(mainFilePath);
         try
         {
+            // Another media file under the same name, such as Film.mp4 beside the Film.mkv it replaced,
+            // or a link beside its copy, shares these by name. They are its now, so none is matched.
+            if (HasSameNamedMedia(directory, stem, mainFilePath))
+            {
+                return (images, null);
+            }
+
             foreach (var file in Directory.EnumerateFiles(directory, stem + "-*"))
             {
                 var name = Path.GetFileNameWithoutExtension(file);
@@ -286,6 +293,15 @@ public static class FileOperationUtilities
 
         return companions;
     }
+
+    // Whether the folder holds another file with the same name and a different extension that is not a
+    // companion, such as a second container of the same title.
+    private static bool HasSameNamedMedia(string directory, string stem, string mainFilePath)
+        => Directory.EnumerateFiles(directory, stem + ".*")
+            .Any(path => !string.Equals(path, mainFilePath, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(Path.GetFileNameWithoutExtension(path), stem, StringComparison.OrdinalIgnoreCase)
+                && !IsCompanionExtension(path)
+                && !Path.GetFileName(path).Contains(".replacing.", StringComparison.Ordinal));
 
     private static bool IsCompanionExtension(string path)
         => Array.Exists(CompanionExtensions, ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase));

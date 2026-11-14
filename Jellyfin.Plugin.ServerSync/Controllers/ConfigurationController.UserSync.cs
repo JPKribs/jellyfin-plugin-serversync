@@ -20,58 +20,6 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 public partial class ConfigurationController
 {
     /// <summary>
-    /// Gets a single user sync item by its ID.
-    /// </summary>
-    [HttpGet("UserItems/{id}")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<UserSyncItemDto> GetUserSyncItemById(long id, [FromServices] UserSyncTableManager manager)
-    {
-        var item = manager.GetById(id);
-        if (item == null)
-        {
-            return NotFound("User sync item not found");
-        }
-
-        return Ok(item.ToDto(BrowserUrlFor(item.ServerKey)));
-    }
-
-    /// <summary>
-    /// Gets paginated user sync items with optional search and status filter.
-    /// </summary>
-    [HttpGet("UserItems")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<PagedResult<UserSyncItemDto>> GetUserSyncItems(
-        [FromServices] UserSyncTableManager manager,
-        [FromQuery] string? search = null,
-        [FromQuery] string? status = null,
-        [FromQuery] string? sourceUserId = null,
-        [FromQuery] string? propertyCategory = null,
-        [FromQuery] int skip = 0,
-        [FromQuery] int take = 50)
-    {
-        take = Math.Clamp(take, 1, 200);
-        skip = Math.Max(0, skip);
-
-        SyncStatus? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SyncStatus>(status, out var parsed) && Enum.IsDefined(parsed))
-        {
-            statusFilter = parsed;
-        }
-
-        // Page by offset, with the user and category filters in the query. Filtering a page after the
-        // fact shrank it and left the total counting rows the filters excluded, and converting skip to
-        // a page number landed on the wrong rows whenever skip was not a multiple of take.
-        var result = manager.SearchPaginated(search, statusFilter, sourceUserId, propertyCategory, skip, take);
-
-        return Ok(new PagedResult<UserSyncItemDto>(
-            result.Items.Select(i => i.ToDto(BrowserUrlFor(i.ServerKey))).ToList(),
-            result.TotalCount,
-            skip,
-            take));
-    }
-
-    /// <summary>
     /// Gets user sync status counts. Counts distinct user mappings (one per
     /// visible row) rather than raw category-row count, so the header
     /// counter matches the list below. See
@@ -92,24 +40,6 @@ public partial class ConfigurationController
         };
         PopulateLastFailure(response, "User");
         return Ok(response);
-    }
-
-    /// <summary>
-    /// Updates the status of a user sync item.
-    /// </summary>
-    [HttpPost("UserItems/UpdateStatus")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult UpdateUserSyncItemStatus(
-        [FromBody] UpdateUserSyncItemStatusRequest request,
-        [FromServices] UserSyncTableManager manager)
-    {
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status))
-        {
-            return BadRequest("Invalid status value");
-        }
-
-        manager.UpdateStatus(request.Id, status);
-        return Ok(new { Success = true });
     }
 
     /// <summary>
@@ -143,34 +73,6 @@ public partial class ConfigurationController
         {
             _logger.LogError(ex, "Failed to queue user sync items by IDs");
             return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
-        }
-    }
-
-    /// <summary>
-    /// Marks user sync items as ignored.
-    /// </summary>
-    [HttpPost("UserItems/Ignore")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult IgnoreUserSyncItems(
-        [FromBody] BulkUserSyncItemsRequest request,
-        [FromServices] UserSyncTableManager manager)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        if (request?.Ids == null || request.Ids.Count == 0)
-        {
-            return BadRequest("No items specified");
-        }
-
-        try
-        {
-            var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Ignored);
-            return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "IgnoreUserSyncItems"));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to ignore user sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
         }
     }
 

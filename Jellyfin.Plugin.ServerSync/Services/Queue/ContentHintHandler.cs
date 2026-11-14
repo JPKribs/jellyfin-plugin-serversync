@@ -82,7 +82,29 @@ public sealed class ContentHintHandler
         var dto = await client.FindItemDetailsAsync(originItemId, cancellationToken).ConfigureAwait(false);
         if (dto is null || !dto.Id.HasValue)
         {
-            return HintApplyResult.Dropped(HintCode.SourceGone, $"the item no longer exists on '{origin.DisplayName}'");
+            // The file left that server. A copy of it here is a real file, and is settled by the scan,
+            // with its safety limits. A link to it holds nothing, so it is settled now: it moves to
+            // another server that holds the file, or goes.
+            var held = _table.GetByKey(originItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture));
+            if (held is { StorageMode: StorageMode.Link }
+                && string.Equals(held.ServerKey, origin.Key, StringComparison.OrdinalIgnoreCase)
+                && held.Status is not (SyncStatus.Ignored or SyncStatus.Deleting)
+                && (string.IsNullOrEmpty(held.LocalPath) || !System.IO.File.Exists(held.LocalPath) || Links.LinkFiles.IsOwnLink(held.LocalPath))
+                && _services.GetService<Links.LinkRehomer>() is { } rehomer)
+            {
+                var movedTo = await rehomer.SettleGoneAsync(held, cancellationToken).ConfigureAwait(false);
+                if (movedTo is not null)
+                {
+                    return HintApplyResult.Dropped(HintCode.SourceGone, $"the file left '{origin.DisplayName}', so its link here now streams from '{movedTo}'");
+                }
+
+                FileDeletionService.ProcessPendingDeletions(_table, config, _logger, new List<string>(), cancellationToken);
+                return HintApplyResult.Dropped(HintCode.SourceGone, $"the file left '{origin.DisplayName}' and no other server holds it, so its link here was removed");
+            }
+
+            return HintApplyResult.Dropped(HintCode.SourceGone, HintProtocol.IsContentRemoval(hint.ItemType)
+                ? $"the file left '{origin.DisplayName}'. A copy of it here is settled by the next scan"
+                : $"the item no longer exists on '{origin.DisplayName}'");
         }
 
         if (string.IsNullOrEmpty(dto.Path))
@@ -117,6 +139,16 @@ public sealed class ContentHintHandler
         if (HigherPriorityServer(scanServers, originIndex, origin, mapping, dto.Path) is { } owner)
         {
             return HintApplyResult.Dropped(HintCode.Priority, $"'{owner}' has priority for this file");
+        }
+
+        // A file the announcing server was itself given is left to the server it first came from. A
+        // failed read throws and is retried by the worker.
+        var firstFrom = await client.OriginOfAsync(dto.Path, cancellationToken).ConfigureAwait(false);
+        var localServerId = _services.GetService<MediaBrowser.Controller.IServerApplicationHost>()?.SystemId;
+        if (Links.AlwaysKeep.StorageFor(mapping, dto.Path) != StorageMode.Link
+            && UpdateSyncTablesTask.DecidedElsewhere(config, localServerId, origin.Key, firstFrom, PathUtilities.TranslatePath(dto.Path, mapping.SourceRootPath, mapping.LocalRootPath)) is { } decider)
+        {
+            return HintApplyResult.Dropped(HintCode.Priority, $"the file first came from {decider}, which decides about it");
         }
 
         var source = new ScanSource(origin, client, Math.Max(0, originIndex));

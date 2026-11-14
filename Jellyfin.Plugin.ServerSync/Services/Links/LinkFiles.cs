@@ -84,8 +84,24 @@ public sealed class LinkFiles
         }
 
         var temp = path + ".serversync-tmp";
-        File.WriteAllText(temp, UrlFor(linkId) + "\n", new UTF8Encoding(false));
-        File.Move(temp, path, overwrite: true);
+        try
+        {
+            File.WriteAllText(temp, UrlFor(linkId) + "\n", new UTF8Encoding(false));
+            File.Move(temp, path, overwrite: true);
+        }
+        catch
+        {
+            // A write that fails leaves nothing behind for a later run to trip over.
+            try
+            {
+                File.Delete(temp);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+
+            throw;
+        }
     }
 
     /// <summary>The first URL line in a .strm, the same line Jellyfin reads.</summary>

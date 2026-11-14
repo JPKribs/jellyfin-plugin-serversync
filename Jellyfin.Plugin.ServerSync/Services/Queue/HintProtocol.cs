@@ -355,6 +355,18 @@ public static class HintProtocol
     public static string PlaylistItemType(bool copy, bool deleted)
         => deleted ? (copy ? PlaylistCopyDeleted : PlaylistDeleted) : (copy ? PlaylistCopy : PlaylistOriginal);
 
+    /// <summary>
+    /// The item type a content hint carries when the file left the library, in place of the item's
+    /// Jellyfin type. It says outright what the hint is about, as a playlist's deletion does.
+    /// </summary>
+    public const string ContentRemoved = "Removed";
+
+    /// <summary>Whether a content hint says its file left the library.</summary>
+    /// <param name="itemType">The item type.</param>
+    /// <returns>True for a removal.</returns>
+    public static bool IsContentRemoval(string? itemType)
+        => string.Equals(itemType, ContentRemoved, StringComparison.Ordinal);
+
     /// <summary>Whether a playlist hint's item type is a deletion.</summary>
     /// <param name="itemType">The item type.</param>
     /// <returns>True for a deletion.</returns>

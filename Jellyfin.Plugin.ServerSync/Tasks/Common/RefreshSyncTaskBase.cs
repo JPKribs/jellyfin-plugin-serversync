@@ -162,7 +162,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </summary>
     protected virtual async Task<bool> TestConnectionAsync(CancellationToken cancellationToken)
     {
-        var connected = await ScanSources.ConnectAsync(_configManager, _clientFactory, Logger, Name, MarkSourceUnavailable, cancellationToken).ConfigureAwait(false);
+        var connected = await ScanSources.ConnectAsync(_configManager, _clientFactory, Logger, Name, MarkServerUnreachable, cancellationToken).ConfigureAwait(false);
         Sources = connected;
         return connected.Count > 0;
     }
@@ -246,6 +246,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             var sourceProgress = new Progress<double>(p => progress.Report(offset + (Math.Clamp(p, 0, 100) / count)));
             _currentListingFailed = false;
             IList<TSource> items;
+            _listingServer = true;
             try
             {
                 items = await GetListAsync(source, sourceProgress, cancellationToken).ConfigureAwait(false);
@@ -261,6 +262,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 Logger.LogWarning(ex, "{Task}: listing '{Server}' failed. Its items are left out of this run", Name, source.Name);
                 MarkSourceUnavailable($"server '{source.Name}' failed while listing: {ex.Message}");
                 continue;
+            }
+            finally
+            {
+                _listingServer = false;
             }
 
             if (!_currentListingFailed)
@@ -281,6 +286,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
 
         progress.Report(100);
+
+        // An offer that is not the offering server's to make is left out before the servers' offers are
+        // weighed against each other, so it never takes the place of the offer that counts.
+        all = await DropOffersNotTheirsAsync(all, cancellationToken).ConfigureAwait(false);
 
         if (Sources.Count < 2)
         {
@@ -309,6 +318,38 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         return kept;
     }
+
+    /// <summary>
+    /// Settles the rows whose items a server says left its library since the last scan, on a run that
+    /// listed only what changed. Default does nothing, and removals wait for the next full scan.
+    /// </summary>
+    /// <param name="existing">The stored rows, as the run started.</param>
+    /// <param name="seenKeys">The keys this run saw on a source.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>How many rows were settled.</returns>
+    protected virtual Task<int> ApplyReportedRemovalsAsync(IReadOnlyDictionary<TKey, TRecord> existing, HashSet<TKey> seenKeys, CancellationToken cancellationToken)
+        => Task.FromResult(0);
+
+    /// <summary>The most of one server's rows a single run may take for removed, as a fraction.</summary>
+    protected static double PruneFractionLimit => MaxPruneFraction;
+
+    /// <summary>The number of rows a server must hold before <see cref="PruneFractionLimit"/> applies.</summary>
+    protected static int PruneGuardRows => PruneGuardMinRows;
+
+    /// <summary>
+    /// Leaves out offers that are not the offering server's to make, once every server has been listed.
+    /// Default keeps them all.
+    /// </summary>
+    /// <param name="items">Every server's offers, in priority order.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The offers that count.</returns>
+    protected virtual Task<List<TSource>> DropOffersNotTheirsAsync(List<TSource> items, CancellationToken cancellationToken)
+        => Task.FromResult(items);
+
+    /// <summary>Whether a server's listing finished cleanly this run.</summary>
+    /// <param name="serverKey">The server entry's key.</param>
+    /// <returns>True when it did.</returns>
+    protected bool ListedCleanly(string serverKey) => _listedCleanly.Contains(serverKey);
 
     /// <summary>
     /// Applies user/library filters to <paramref name="items"/>. Default
@@ -524,6 +565,12 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </summary>
     private volatile bool _sourceUnavailable;
 
+    // Whether a server is being listed right now, and whether a failure was raised while none was.
+    // A failure during one server's listing leaves that server out of the cleanly listed set, and
+    // only its rows are held back from the prune. Any other failure holds the whole prune.
+    private volatile bool _listingServer;
+    private volatile bool _unavailableBeyondOneServer;
+
     /// <summary>
     /// Set when this run's prune was fully or partially refused by a safety
     /// guard (the base circuit breaker or a subclass guard such as Content's
@@ -554,9 +601,21 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// concurrent discovery tasks.
     /// </summary>
     /// <param name="reason">Short description of what failed, for the log.</param>
-    protected void MarkSourceUnavailable(string reason)
+    protected void MarkSourceUnavailable(string reason) => MarkUnavailable(reason, oneServer: _listingServer);
+
+    // A server that could not be reached at all. It is one server's failure: it is not among the
+    // servers listed, so its rows are held back and the rest are cleaned up.
+    private void MarkServerUnreachable(string reason) => MarkUnavailable(reason, oneServer: true);
+
+    private void MarkUnavailable(string reason, bool oneServer)
     {
         _currentListingFailed = true;
+        if (!oneServer)
+        {
+            // Raised outside the listing of any one server, so it cannot be laid at one server's door.
+            _unavailableBeyondOneServer = true;
+        }
+
         if (_sourceUnavailable)
         {
             return;
@@ -688,6 +747,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     {
         Logger.LogInformation("Starting {Task}", Name);
         _sourceUnavailable = false;
+        _unavailableBeyondOneServer = false;
         _pruneBlocked = false;
 
         // TestConnectionAsync fills Sources with one connected client per
@@ -757,6 +817,13 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         var pruned = 0;
         if (IsIncrementalRun)
         {
+            // A server that keeps a record of what left its library is asked for it, so a removal is
+            // settled on this run. Anything it cannot name waits for the next full scan, as before.
+            if (!_sourceUnavailable && !run.HadFailures)
+            {
+                pruned = await ApplyReportedRemovalsAsync(run.Existing, run.SeenKeySet, cancellationToken).ConfigureAwait(false);
+            }
+
             Logger.LogInformation("{Task}: listed only what changed, so stale rows are pruned on the next full scan", Name);
         }
         else
@@ -1124,8 +1191,25 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     {
         if (_sourceUnavailable)
         {
-            Logger.LogWarning("{Task}: source was unavailable during discovery, skipping prune. No rows removed this run", Name);
-            return 0;
+            // A server that did not answer says nothing about its rows, so they are left exactly as
+            // they are. The servers that answered in full are still cleaned up after: one server that
+            // is down, or one that names a filter entry it no longer has, does not hold the rest.
+            if (_unavailableBeyondOneServer || _listedCleanly.Count == 0)
+            {
+                Logger.LogWarning("{Task}: source was unavailable during discovery, skipping prune. No rows removed this run", Name);
+                return 0;
+            }
+
+            var held = 0;
+            foreach (var kvp in run.Existing)
+            {
+                if (!_listedCleanly.Contains(kvp.Value.ServerKey ?? string.Empty) && run.SeenKeySet.Add(kvp.Key))
+                {
+                    held++;
+                }
+            }
+
+            Logger.LogWarning("{Task}: a server did not answer in full, so {Held} row(s) of it are left as they are. The other servers' rows are cleaned up as usual", Name, held);
         }
 
         if (run.HadFailures)

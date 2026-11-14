@@ -73,6 +73,13 @@ public class SyncItem : SyncRecord
     /// </summary>
     public StorageMode StorageMode { get; set; }
 
+    /// <summary>
+    /// Gets or sets the id of the server this copy first came from. Set when this server downloads the
+    /// file: the origin its source names for it, or the source itself. Empty for a file that was
+    /// already here when it was matched, and for a row from before origins were recorded.
+    /// </summary>
+    public string? OriginServerId { get; set; }
+
     // Content sync's "needs work" signal is the PendingType, not a hash
     // compare. Refresh sets PendingType when the file needs to be
     // downloaded, replaced, or deleted, so this is true while the row is

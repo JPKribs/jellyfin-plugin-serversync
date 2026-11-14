@@ -144,7 +144,7 @@ export default function (view) {
     }
 
     function modeBadgeClass(mode) {
-        return mode === 'Sync' ? 'purple' : mode === 'Push' ? 'blue' : mode === 'Stream' ? 'orange' : 'green';
+        return mode === 'Sync' ? 'purple' : mode === 'Push' ? 'blue' : 'green';
     }
 
     function cardSpec(server) {
@@ -197,7 +197,8 @@ export default function (view) {
 
     function modeOf(server) {
         var mode = server.Mode;
-        return mode === 1 ? 'Push' : mode === 2 ? 'Sync' : mode === 3 ? 'Stream' : (typeof mode === 'string' ? mode : 'Pull');
+        // Stream was folded into Push. A configuration that still holds it reads as Push until it is saved.
+        return mode === 1 || mode === 3 || mode === 'Stream' ? 'Push' : mode === 2 ? 'Sync' : (typeof mode === 'string' ? mode : 'Pull');
     }
 
     // A server's colour: green runs Server Sync and answers, orange answers without it, red does not
@@ -230,22 +231,23 @@ export default function (view) {
         });
     }
 
-    function hasLinkLibraries(server) {
-        return (server.LibraryMappings || []).some(function (m) { return m.IsEnabled !== false && (m.StorageMode === 'Link' || m.StorageMode === 1); });
-    }
-
-    // This server in the middle, and one box per relationship around it, each listing its servers with
-    // their status. The arrows say the relationship, so the boxes carry no label, and every arrow
-    // points the way things travel: Pull points here, Push points out, Sync both ways. A dashed arrow
-    // is video streamed: Stream points out, since those servers stream this one's files, and a dashed
-    // arrow pointing here marks the servers whose files this one streams.
-    var POOL_GROUPS = [
-        { key: 'Sync', toward: 'both' },
-        { key: 'Push', toward: 'there' },
-        { key: 'Links', toward: 'here', dashed: true },
-        { key: 'Stream', toward: 'there', dashed: true },
-        { key: 'Pull', toward: 'here' }
+    // This server as a card in the middle, and every other server as its own pill in a lane that is
+    // always in the same place: the servers this one pulls from on the left, the servers it pushes to
+    // on the right, and the servers it syncs with below. A lane's pills join one trunk line, so
+    // however many servers a lane holds, one line meets the card. The line's colour is the colour of
+    // that relationship's badge on the cards, and its arrow points the way things travel. A Stream
+    // entry gives and takes nothing back, as Push does, so it is drawn with Push.
+    var POOL_LANES = [
+        { key: 'Pull', side: 'left', color: '#6cc070' },
+        { key: 'Push', side: 'right', color: '#52b5db' },
+        { key: 'Sync', side: 'below', color: '#b08ae6' }
     ];
+    var POOL_PILL_H = 26;
+    var POOL_PILL_GAP = 8;
+    var POOL_REACH = 46;      // from the card to a lane's trunk
+    var POOL_STUB = 22;       // from the trunk to a pill
+    var POOL_SIDE_ROWS = 8;   // pills in one column of a side lane
+    var POOL_BELOW_COLS = 4;  // pills in one row of the lane below
 
     // This server's own name, for the middle of the map, read once.
     var localServerName = '';
@@ -259,6 +261,10 @@ export default function (view) {
             renderPoolMap();
         }).catch(function () { /* the map keeps its fallback */ });
     }
+
+    // The name in the middle of the map. A name too long for the circle is shown as "Server", and
+    // the full name stays in the circle's tooltip.
+    var SELF_NAME_CHARS = 12;
 
     function renderPoolMap() {
         askLocalServerName();
@@ -275,86 +281,121 @@ export default function (view) {
         servers.forEach(function (server) {
             var mode = modeOf(server);
             (members[mode] = members[mode] || []).push(server);
-            if (mode !== 'Stream' && hasLinkLibraries(server)) (members.Links = members.Links || []).push(server);
         });
-        var groups = POOL_GROUPS.filter(function (g) { return members[g.key] && members[g.key].length; });
+        var lanes = POOL_LANES.filter(function (lane) { return members[lane.key] && members[lane.key].length; });
 
-        var rowH = 19;
-        var maxRows = 8;
-        var hereName = localServerName || 'This Server';
-        if (hereName.length > 16) hereName = hereName.substring(0, 15) + '\u2026';
-        var hereR = Math.max(30, hereName.length * 3.6 + 12);
-        var ring = (groups.length <= 2 ? 150 : 175) + hereR - 30;
-        var parts = ['<defs><marker id="poolArrowHead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#9aa4ab"/></marker></defs>'];
-        var bounds = [[-hereR, -hereR], [hereR, hereR]];
+        var hereName = (localServerName || 'This Server').trim();
+        if (hereName.length > SELF_NAME_CHARS) hereName = 'Server';
+        var cardW = Math.max(92, hereName.length * 7.4 + 32);
+        var cardH = 46;
+        var parts = ['<defs><marker id="poolArrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>'];
+        var bounds = [[-cardW / 2, -cardH / 2], [cardW / 2, cardH / 2]];
         var labels = [];
-        var boxes = [];
+        var pills = [];
+        var fixed = function (n) { return n.toFixed(1); };
+        var line = function (d, color, start, end) {
+            parts.push('<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' +
+                (start ? ' marker-start="url(#poolArrowHead)"' : '') + (end ? ' marker-end="url(#poolArrowHead)"' : '') + ' />');
+        };
+        var pill = function (server, x, y, w) {
+            var name = serverTitle(server);
+            if (name.length > 18) name = name.substring(0, 17) + '\u2026';
+            pills.push('<g><title>' + escapeHtml(serverTitle(server) + ', ' + modeOf(server)) + '</title>' +
+                '<rect x="' + fixed(x) + '" y="' + fixed(y) + '" width="' + fixed(w) + '" height="' + POOL_PILL_H + '" rx="6" fill="#1c1c1c" stroke="#444" stroke-width="1" />' +
+                '<circle cx="' + fixed(x + 14) + '" cy="' + fixed(y + POOL_PILL_H / 2) + '" r="4" fill="' + POOL_COLORS[poolState(server)] + '" />' +
+                '<text class="ssPoolName" x="' + fixed(x + 25) + '" y="' + fixed(y + POOL_PILL_H / 2) + '" dominant-baseline="central">' + escapeHtml(name) + '</text></g>');
+            labels.push(serverTitle(server) + ' ' + modeOf(server));
+            bounds.push([x, y], [x + w, y + POOL_PILL_H]);
+        };
 
-        groups.forEach(function (group, gi) {
-            var list = members[group.key];
-            var columns = Math.ceil(list.length / maxRows);
-            var rows = Math.min(list.length, maxRows);
+        // The side lanes are drawn first, so the lane below can start under the taller of them.
+        var sideBottom = cardH / 2;
+        // Where an overflow column or row starts: centred in the gaps of the first, and one place over
+        // when that would put one of its lines on top of the trunk through the middle.
+        var overflowStart = function (firstOfFull, pitch, full, count) {
+            var skip = Math.max(0, Math.floor((full - 1 - count) / 2));
+            var start = firstOfFull + pitch / 2 + skip * pitch;
+            for (var n = 0; n < count; n++) {
+                if (Math.abs(start + n * pitch) < 1) return start + (skip > 0 ? -pitch : pitch);
+            }
+            return start;
+        };
+        lanes.slice().sort(function (a, b) { return (a.side === 'below') - (b.side === 'below'); }).forEach(function (lane) {
+            var list = members[lane.key];
             var longest = Math.max.apply(null, list.map(function (s) { return Math.min(serverTitle(s).length, 18); }));
-            var colW = longest * 6.9 + 30;
-            var w = columns * colW + 8;
-            var h = rows * rowH + 14;
-            // Two boxes sit left and right; more spread round the circle from the top.
-            var angle = groups.length === 1 ? 0 : groups.length === 2 ? (gi === 0 ? Math.PI : 0) : -Math.PI / 2 + 2 * Math.PI * gi / groups.length;
-            var ux = Math.cos(angle);
-            var uy = Math.sin(angle);
-            var cx = ux * (ring + w / 2 * Math.abs(ux) * 0.6);
-            var cy = uy * (ring * 0.72 + h / 2 * Math.abs(uy) * 0.6);
-            var x0 = cx - w / 2;
-            var y0 = cy - h / 2;
+            var w = longest * 6.9 + 38;
+            var pitch = POOL_PILL_H + POOL_PILL_GAP;
 
-            // The line meets the box's edge where the spoke enters it.
-            var dx = cx;
-            var dy = cy;
-            var len = Math.sqrt(dx * dx + dy * dy) || 1;
-            var vx = dx / len;
-            var vy = dy / len;
-            var tBox = Math.min(Math.abs(vx) > 1e-6 ? (w / 2) / Math.abs(vx) : Infinity, Math.abs(vy) > 1e-6 ? (h / 2) / Math.abs(vy) : Infinity);
-            var sx = vx * (hereR + 3);
-            var sy = vy * (hereR + 3);
-            var ex = cx - vx * (tBox + 3);
-            var ey = cy - vy * (tBox + 3);
-            var here = group.toward === 'here' || group.toward === 'both';
-            var there = group.toward === 'there' || group.toward === 'both';
-            parts.push('<line x1="' + sx.toFixed(1) + '" y1="' + sy.toFixed(1) + '" x2="' + ex.toFixed(1) + '" y2="' + ey.toFixed(1) + '" stroke="#9aa4ab" stroke-width="1.8"' +
-                (group.dashed ? ' stroke-dasharray="5 4"' : '') + (here ? ' marker-start="url(#poolArrowHead)"' : '') + (there ? ' marker-end="url(#poolArrowHead)"' : '') + ' />');
+            if (lane.side === 'below') {
+                // Rows of pills under the card. A row's pills hang from one level line, and a second
+                // row sits half a pill across so its lines drop through the gaps of the row above.
+                // Never more than two rows, since a third could not drop its lines through the first.
+                var step = w + 12;
+                var busY = sideBottom + POOL_REACH * 0.6;
+                var perRow = Math.max(POOL_BELOW_COLS, Math.ceil(list.length / 2));
+                var rows = [];
+                for (var r = 0; r * perRow < list.length; r++) rows.push(list.slice(r * perRow, (r + 1) * perRow));
+                var widest = Math.min(list.length, perRow);
+                var xs = [];
+                rows.forEach(function (row, r) {
+                    var top = busY + POOL_STUB + r * pitch;
+                    // The second row is centred under the first, in its gaps.
+                    var first = r % 2 ? overflowStart(-((widest - 1) * step) / 2, step, widest, row.length) : -((widest - 1) * step) / 2;
+                    row.forEach(function (server, c) {
+                        var cx = first + c * step;
+                        xs.push(cx);
+                        pill(server, cx - w / 2, top, w);
+                        line('M' + fixed(cx) + ' ' + fixed(busY) + ' V' + fixed(top - 3), lane.color, false, true);
+                    });
+                });
+                line('M' + fixed(Math.min.apply(null, xs.concat([0]))) + ' ' + fixed(busY) + ' H' + fixed(Math.max.apply(null, xs.concat([0]))), lane.color, false, false);
+                line('M0 ' + fixed(cardH / 2 + 3) + ' V' + fixed(busY), lane.color, true, false);
+                return;
+            }
 
-            var box = '<rect x="' + x0.toFixed(1) + '" y="' + y0.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="8" fill="#1c1c1c" stroke="#444" stroke-width="1" />';
-            list.forEach(function (server, si) {
-                var col = Math.floor(si / maxRows);
-                var row = si % maxRows;
-                var px = x0 + 4 + col * colW + 12;
-                var py = y0 + 7 + row * rowH + rowH / 2;
-                var state = poolState(server);
-                var name = serverTitle(server);
-                if (name.length > 18) name = name.substring(0, 17) + '\u2026';
-                box += '<g><title>' + escapeHtml(serverTitle(server) + ', ' + modeOf(server)) + '</title>' +
-                    '<circle cx="' + px.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="4" fill="' + POOL_COLORS[state] + '" />' +
-                    '<text class="ssPoolName" x="' + (px + 10).toFixed(1) + '" y="' + py.toFixed(1) + '" dominant-baseline="middle">' + escapeHtml(name) + '</text></g>';
-                if (group.key !== 'Links') labels.push(serverTitle(server) + ' ' + modeOf(server));
+            // Columns of pills beside the card. A column's pills join one upright line, and a further
+            // column sits half a pill down so its lines run through the gaps of the column before it.
+            var dir = lane.side === 'left' ? -1 : 1;
+            var busX = dir * (cardW / 2 + POOL_REACH);
+            // Never more than two columns, since a third could not run its lines through the first.
+            var perColumn = Math.max(POOL_SIDE_ROWS, Math.ceil(list.length / 2));
+            var columns = [];
+            for (var k = 0; k * perColumn < list.length; k++) columns.push(list.slice(k * perColumn, (k + 1) * perColumn));
+            var tallest = Math.min(list.length, perColumn);
+            var ys = [];
+            columns.forEach(function (column, c) {
+                var near = busX + dir * (POOL_STUB + c * (w + 14));
+                // The second column is centred beside the first, in its gaps.
+                var firstY = c % 2 ? overflowStart(-((tallest - 1) * pitch) / 2, pitch, tallest, column.length) : -((tallest - 1) * pitch) / 2;
+                column.forEach(function (server, r) {
+                    var cy = firstY + r * pitch;
+                    ys.push(cy);
+                    pill(server, dir < 0 ? near - w : near, cy - POOL_PILL_H / 2, w);
+                    // Pull runs from the pill to the trunk. Push runs from the trunk to the pill, where its arrow is.
+                    if (dir < 0) line('M' + fixed(near + 3) + ' ' + fixed(cy) + ' H' + fixed(busX), lane.color, false, false);
+                    else line('M' + fixed(busX) + ' ' + fixed(cy) + ' H' + fixed(near - 3), lane.color, false, true);
+                });
             });
-            boxes.push(box);
-            bounds.push([x0, y0], [x0 + w, y0 + h]);
+            line('M' + fixed(busX) + ' ' + fixed(Math.min.apply(null, ys.concat([0]))) + ' V' + fixed(Math.max.apply(null, ys.concat([0]))), lane.color, false, false);
+            sideBottom = Math.max(sideBottom, Math.max.apply(null, ys) + POOL_PILL_H / 2);
+            if (dir < 0) line('M' + fixed(busX) + ' 0 H' + fixed(-cardW / 2 - 3), lane.color, false, true);
+            else line('M' + fixed(cardW / 2 + 3) + ' 0 H' + fixed(busX), lane.color, false, false);
         });
 
-        parts = parts.concat(boxes);
-        parts.push('<circle cx="0" cy="0" r="' + hereR + '" fill="#52b5db" fill-opacity="0.15" stroke="#52b5db" stroke-width="1.6"><title>' + escapeHtml((localServerName || 'This server') + ', this server') + '</title></circle>');
-        parts.push('<text class="ssPoolSelf" x="0" y="4">' + escapeHtml(hereName) + '</text>');
+        parts = parts.concat(pills);
+        parts.push('<rect x="' + fixed(-cardW / 2) + '" y="' + fixed(-cardH / 2) + '" width="' + fixed(cardW) + '" height="' + cardH + '" rx="8" fill="#16242c" stroke="#52b5db" stroke-width="1.6"><title>' + escapeHtml((localServerName || 'This server') + ', this server') + '</title></rect>');
+        parts.push('<text class="ssPoolSelf" x="0" y="0" dominant-baseline="central">' + escapeHtml(hereName) + '</text>');
 
         var minX = Math.min.apply(null, bounds.map(function (b) { return b[0]; })) - 6;
         var minY = Math.min.apply(null, bounds.map(function (b) { return b[1]; })) - 6;
         var maxX = Math.max.apply(null, bounds.map(function (b) { return b[0]; })) + 6;
+        // The card stays in the middle of the picture, whichever lanes are in use.
+        var half = Math.max(-minX, maxX);
+        minX = -half;
+        maxX = half;
         var maxY = Math.max.apply(null, bounds.map(function (b) { return b[1]; })) + 6;
-        var legendDot = function (state, text) { return '<span><i style="background:' + POOL_COLORS[state] + '"></i>' + text + '</span>'; };
         host.setAttribute('aria-label', 'Servers this one is set up with: ' + labels.join(', '));
-        host.innerHTML = '<svg viewBox="' + minX.toFixed(0) + ' ' + minY.toFixed(0) + ' ' + (maxX - minX).toFixed(0) + ' ' + (maxY - minY).toFixed(0) + '" style="max-width:' + Math.round(maxX - minX) + 'px" xmlns="http://www.w3.org/2000/svg">' + parts.join('') + '</svg>' +
-            '<div class="ssPoolLegend">' +
-                legendDot('ok', 'Runs Server Sync') + legendDot('noPlugin', 'No Server Sync') + legendDot('down', 'Unreachable') + legendDot('disabled', 'Disabled') +
-            '</div>';
+        host.innerHTML = '<svg viewBox="' + minX.toFixed(0) + ' ' + minY.toFixed(0) + ' ' + (maxX - minX).toFixed(0) + ' ' + (maxY - minY).toFixed(0) + '" style="max-width:' + Math.round(maxX - minX) + 'px" xmlns="http://www.w3.org/2000/svg">' + parts.join('') + '</svg>';
     }
 
     // Updates each card's dot in place. A full render rebuilds the cards and moves the open editor,
@@ -517,7 +558,7 @@ export default function (view) {
     }
 
     function reflectModeLimits(server) {
-        setVisible('modeLimited', isStandardUser(server) && getMode() !== 'Pull' && getMode() !== 'Stream');
+        setVisible('modeLimited', isStandardUser(server) && getMode() !== 'Pull');
     }
 
     function reflectUserLimits(server) {
@@ -923,9 +964,31 @@ export default function (view) {
         });
     }
 
+    // Push and Sync, and a library kept as links, only work when the other server runs Server Sync.
+    // A plain Jellyfin server can only be pulled from, as copies. So a server that answers and does
+    // not run it is not saved that way. One that cannot be reached is saved, since it cannot be asked.
     function saveServerConfig() {
-        if (!collectServerEditor()) return;
-        saveServers('Server saved', 'Failed to save server');
+        var server = collectServerEditor();
+        if (!server) return;
+        var links = (server.LibraryMappings || []).some(function (m) { return m.IsEnabled !== false && (m.StorageMode === 'Link' || m.StorageMode === 1); });
+        if ((modeOf(server) === 'Pull' && !links) || !server.Url || !server.ApiKey) {
+            saveServers('Server saved', 'Failed to save server');
+            return;
+        }
+
+        var request = requestFor(server);
+        request.Mode = modeOf(server);
+        apiRequest('Hints/CheckPeer', 'POST', request).then(function (result) {
+            if (result && result.Reachable && !result.HasPlugin) {
+                peerPlugin[server.Key] = 'no';
+                Dashboard.alert(serverTitle(server) + ' does not run Server Sync, so it can only be a Pull server with libraries kept as copies. Install Server Sync there, or set this server to Pull and its libraries to Copy. Nothing was saved.');
+                return;
+            }
+
+            saveServers(result && result.Reachable ? 'Server saved' : 'Server saved. It could not be reached to confirm it runs Server Sync, so nothing is sent to it until it answers.', 'Failed to save server');
+        }).catch(function () {
+            saveServers('Server saved', 'Failed to save server');
+        });
     }
 
     function testConnection() {
@@ -1224,12 +1287,12 @@ export default function (view) {
             '</div>' +
             '<div class="mappingGrid">' +
                 '<div class="mappingColumn">' +
-                    '<div class="inputContainer"><label class="inputLabel">Source Library</label><select is="emby-select" class="sourceLibrarySelect"></select></div>' +
-                    '<div class="inputContainer"><label class="inputLabel">Source Root Path</label><input is="emby-input" type="text" class="sourceRootPath" value="' + escapeHtml(mapping.SourceRootPath || '') + '" /></div>' +
+                    '<div class="selectContainer"><label>Source Library</label><select is="emby-select" class="sourceLibrarySelect"></select></div>' +
+                    '<div class="inputContainer"><label>Source Root Path</label><input is="emby-input" type="text" class="sourceRootPath" value="' + escapeHtml(mapping.SourceRootPath || '') + '" /></div>' +
                 '</div>' +
                 '<div class="mappingColumn">' +
-                    '<div class="inputContainer"><label class="inputLabel">Local Library</label><select is="emby-select" class="localLibrarySelect"></select></div>' +
-                    '<div class="inputContainer"><label class="inputLabel">Local Root Path</label><input is="emby-input" type="text" class="localRootPath" value="' + escapeHtml(mapping.LocalRootPath || '') + '" /></div>' +
+                    '<div class="selectContainer"><label>Local Library</label><select is="emby-select" class="localLibrarySelect"></select></div>' +
+                    '<div class="inputContainer"><label>Local Root Path</label><input is="emby-input" type="text" class="localRootPath" value="' + escapeHtml(mapping.LocalRootPath || '') + '" /></div>' +
                 '</div>' +
             '</div>';
 
@@ -1404,15 +1467,10 @@ export default function (view) {
         });
     }
 
-    // A Stream server maps no libraries here, so the Libraries step is hidden and the steps after it
-    // are numbered on from the ones still shown.
-    // Linking is for Stream, Push, and Sync servers. A Pull server only gives this one things to read,
-    // so it may never link here, and the step is hidden. A Stream server may be there only to download,
-    // so it links only with Allow Linking on, like the others.
+    // Linking is for Push and Sync servers. A Pull server only gives this one things to read, so it
+    // may never link here, and the step is hidden. The steps are numbered on from the ones shown.
     function reflectStream() {
         var mode = getMode();
-        var stream = mode === 'Stream';
-        setVisible('serverStepLibrariesSection', !stream);
         setVisible('serverStepStreamSection', mode !== 'Pull');
         var number = 0;
         view.querySelectorAll('#serverEditor .jpk-collapsible-section').forEach(function(section) {
@@ -1509,14 +1567,14 @@ export default function (view) {
                 '<button is="emby-button" type="button" class="btnRemoveUserMapping raised jpk-button-destructive jpk-button-small"><span>Remove</span></button>' +
             '</div>' +
             '<div class="mappingGrid">' +
-                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Source User</label><select is="emby-select" class="sourceUserSelect"></select></div></div>' +
-                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Local User</label><select is="emby-select" class="localUserSelect"></select></div></div>' +
+                '<div class="mappingColumn"><div class="selectContainer"><label>Source User</label><select is="emby-select" class="sourceUserSelect"></select></div></div>' +
+                '<div class="mappingColumn"><div class="selectContainer"><label>Local User</label><select is="emby-select" class="localUserSelect"></select></div></div>' +
             '</div>' +
             '<div class="mappingGrid userLinkCaps' + (getChecked('chkAllowLinking') ? '' : ' hidden') + '">' +
-                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Streams At Once</label><input is="emby-input" type="number" min="0" max="1000" class="userLinkMaxStreams" placeholder="Server\'s limit" value="' + (mapping.LinkMaxStreams == null ? '' : mapping.LinkMaxStreams) + '" />' +
-                    '<div class="fieldDescription">Most streams the local user may hold at once for that server\'s links. Empty or 0 for up to the server\'s limit.</div></div></div>' +
-                '<div class="mappingColumn"><div class="inputContainer"><label class="inputLabel">Link Speed (Mbps)</label><input is="emby-input" type="number" min="0" max="100000" class="userLinkSpeed" placeholder="Server\'s speed" value="' + (mapping.LinkStreamSpeedMbps == null ? '' : mapping.LinkStreamSpeedMbps) + '" />' +
-                    '<div class="fieldDescription">Most each stream and cache download for this user is sent at, never above the server\'s speed. Empty or 0 uses the server\'s.</div></div></div>' +
+                '<div class="mappingColumn"><div class="inputContainer"><label>Link Streams At Once</label><input is="emby-input" type="number" min="0" max="1000" class="userLinkMaxStreams" placeholder="Default" value="' + (mapping.LinkMaxStreams == null ? '' : mapping.LinkMaxStreams) + '" />' +
+                    '<div class="fieldDescription">Most streams the local user may hold at once for that server\'s links. Empty or 0 uses the server\'s limit.</div></div></div>' +
+                '<div class="mappingColumn"><div class="inputContainer"><label>Link Speed (Mbps)</label><input is="emby-input" type="number" min="0" max="100000" class="userLinkSpeed" placeholder="Default" value="' + (mapping.LinkStreamSpeedMbps == null ? '' : mapping.LinkStreamSpeedMbps) + '" />' +
+                    '<div class="fieldDescription">Most each stream and cache download for this user is sent at, never above the server\'s speed. Empty or 0 uses the server\'s speed.</div></div></div>' +
             '</div>';
 
         container.appendChild(div);

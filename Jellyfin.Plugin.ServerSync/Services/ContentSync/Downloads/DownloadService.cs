@@ -168,6 +168,18 @@ public class DownloadService
                         throw new IOException(errorMsg);
                     }
 
+                    // With no length from the source there is nothing to hold the download to but the
+                    // size the scan recorded. A download that does not match it never replaces a file
+                    // that is already here: the local file is kept and the row errors, and the next
+                    // scan records the size the source has now.
+                    if (!download.TotalLength.HasValue && item.SourceSize > 0 && downloadedInfo.Length != item.SourceSize
+                        && !string.IsNullOrEmpty(item.LocalPath) && File.Exists(item.LocalPath))
+                    {
+                        validator = null;
+                        CleanupTempFile(tempFilePath);
+                        throw new InvalidDataException($"The source gave no length and sent {downloadedInfo.Length} bytes where {item.SourceSize} were expected, so the file already here is kept");
+                    }
+
                     if (item.SourceSize > 0 && downloadedInfo.Length != item.SourceSize)
                     {
                         _logger.LogDebug(

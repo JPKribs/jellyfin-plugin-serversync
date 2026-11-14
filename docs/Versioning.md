@@ -23,7 +23,7 @@ Releases before protocol versions, up to 12.2.8.1, only talk to exactly the same
 
 12.4.12.0 changes nothing in the protocol, and mixes freely with 12.4.11.7. The update converts the settings once:
 
-* A Pull entry that allowed linking and maps no libraries becomes **Stream**. One that maps libraries keeps Pull and loses linking, with a warning in the log, since a Pull server can no longer link here.
+* A Pull entry that allowed linking and maps no libraries becomes **Push**. One that maps libraries keeps Pull and loses linking, with a warning in the log, since a Pull server cannot link here.
 * A server wide per user stream limit is copied onto that entry's user mappings that set none.
 * The old history negotiation switch, when on, turns on **Negotiate History** for every library. It applies to Sync servers only.
 * Download speeds set in KB, MB, or GB per second are converted to Mbps.

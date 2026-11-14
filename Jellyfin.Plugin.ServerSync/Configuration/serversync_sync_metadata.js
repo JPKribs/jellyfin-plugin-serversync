@@ -276,7 +276,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 }
 
                 if (html === '') {
-                    html = '<tr><td colspan="4" style="text-align: center; opacity: 0.5;">No sync categories are enabled</td></tr>';
+                    html = '<tr><td colspan="4" class="ssEmptyCell">No sync categories are enabled</td></tr>';
                 }
 
                 tbody.innerHTML = html;
@@ -288,7 +288,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
             // unexplainable from the UI.
             buildChangeDetailRow: function(text) {
                 if (!text) return '';
-                return '<tr><td colspan="4" style="opacity:0.6;font-size:0.85em;">Changed: ' +
+                return '<tr><td colspan="4" class="ssNoteCell">Changed: ' +
                     ServerSyncShared.escapeHtml(text) + '</td></tr>';
             },
 
@@ -576,7 +576,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
                 });
 
                 if (typesArray.length === 0) {
-                    html += '<tr><td colspan="4" style="text-align: center; opacity: 0.5;">No images</td></tr>';
+                    html += '<tr><td colspan="4" class="ssEmptyCell">No images</td></tr>';
                 }
 
                 return html;

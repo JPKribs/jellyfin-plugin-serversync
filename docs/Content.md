@@ -1,6 +1,6 @@
 # Content Syncing
 
-Content syncing mirrors missing or updated media files from a source Jellyfin server onto this server. A library mapping can instead hold them as **links** that stream from the source, set by its **Storage**. See [Links](Links.md). Files are matched by their path under each mapped library's root folder, so both servers must keep the same folder and file structure under that root. A file renamed or moved on the source usually gets a new item id there, so it is downloaded again at its new path, and the old copy is handled by **Removed files**.
+Content syncing mirrors missing or updated media files from a source Jellyfin server onto this server. A library mapping can instead hold them as **links** that stream from the source, set by its **Storage**. See [Links](Links.md). Files are matched by their path under each mapped library's root folder, so both servers must keep the same folder and file structure under that root. A file renamed or moved on the source usually gets a new item id there, so it is downloaded again at its new path, and the old copy is handled by **Removed files**. A file replaced by one of the same name in another container, as `Film.mkv` by `Film.mp4`, is handled the same way but sooner: as soon as the new file is down and the source answers that the old one is gone, the old copy follows **Removed files** on that run instead of waiting for the next full scan, and the images and trickplay the two share stay with the new file.
 
 ## Settings
 
@@ -25,7 +25,7 @@ Elsewhere:
 
 * **Storage** and **Library Filter**, on each library mapping in the Storage tab. Storage holds the source's files as full **Copy** files, the default, or as **Link** files that stream from the source. See [Links](Links.md). The filter is covered below.
 * **Downloads** under **Settings > Bandwidth** caps the total rate of every download to this server, in Mbps, where 0 means no limit. With **Scheduled Speed** on, the **Scheduled** rate applies during the set hours, in the server's time. A download already running follows the hours as they begin and end. Downloads into the link cache are held to it too.
-* **Failed Item Retries** under **Settings > Processing** sets how many times a failed download is tried before it errors, and how many later runs retry an errored item of any sync type. A retry picks up where the failed attempt stopped when the source supports it, and starts over if the file changed on the source in between.
+* **Failed Item Retries** under **Settings > Processing** sets how many times a failed download or item is tried within one run. One that still fails is tried again on the next run, and is raised on the Activity page once it has failed for a day. See [When something goes wrong](#when-something-goes-wrong). A retry picks up where the failed attempt stopped when the source supports it, and starts over if the file changed on the source in between.
 
 A `.strm` on the source is never copied or linked, whether it is one of the source's links or one a user made.
 
@@ -105,7 +105,37 @@ whitelist still reconciles normally.
 
 ## Live changes between servers
 
-When a server entry is in Push or Sync mode, a file that appears here is announced to that server as soon as this server's library has picked it up, and that server downloads it through the same code Sync Content uses, respecting its own approval mode and library mappings. When several servers offer the same file, the earliest entry in that server's list provides it. Downloads run in their own lane so a large file never delays a history or metadata change arriving at the same time, and the receiving library is asked to refresh that file's folder once the file is in place. Replacements and removals are not announced. Sync Content handles those on its schedule. A `.strm` is never announced, so a link is never passed on to a third server.
+When a server entry is in Push or Sync mode, a file that appears here is announced to that server as soon as this server's library has picked it up, and that server downloads it through the same code Sync Content uses, respecting its own approval mode and library mappings. When several servers offer the same file, the earliest entry in that server's list provides it. Downloads run in their own lane so a large file never delays a history or metadata change arriving at the same time, and the receiving library is asked to refresh that file's folder once the file is in place. A file that leaves this server's library is announced the same way. A server that holds a link to it moves the link to another server that holds the file, or removes the link when none does. A server that holds a copy of it keeps the copy until its next scan, which settles it by **Removed files**. A `.strm` is never announced, so a link is never passed on to a third server.
+
+A server also keeps a record of the files that left its library, for 30 days. A server reading it asks for that record on every scan, so a removal is settled on the next scan rather than the next full scan, whether or not the announcement arrived. The full scan remains as the check on both.
+
+## When something goes wrong
+
+Server Sync is meant to be set up and left alone. What fails is tried again without anyone asking, and only what cannot fix itself is brought to an administrator.
+
+* **Every failed item is retried on the next run**, for every sync type, once the tries set by **Failed Item Retries** are used up. A full disk, a source that was down, or a network that dropped clears on its own.
+* **An item that has failed on every run for a day is raised once** on Jellyfin's **Activity** page, as "Server Sync Needs Attention", with how many items of each kind are failing and one reason as an example. It goes on being retried. Filter the Sync tab by Errored to see each one.
+* **A link that is missing or out of date is written again** at the start of every Sync Content run. A link holds nothing, so it is never repaired, only replaced.
+* **Copies tracked before origins were recorded are marked once.** After the update, each is looked at: one that never went through a download was on this server already and is marked as its own, and one that did is marked with the server it came from.
+* **A file that was already here is this server's own.** A file on this server before it was matched to another server's is tracked, and stays when that server removes its file, whatever **Removed files** is set to. Only files this server downloaded follow **Removed files**.
+* **When both servers already hold a title as different files, the direction decides.** A **Pull** server is a source to mirror: its file replaces this server's by **Changed files**, and is from then on a downloaded file like any other. A **Sync** server is an equal: each keeps its own file, the row is settled and says the two differ, and only what each lacks is filled in. Queue the row on the Sync tab to take the other server's file by hand. A [Link library](Links.md#versions) keeps this server's own file the same way, whatever the direction.
+* **A copy is kept above all else.** A download interrupted while replacing a file puts the old file, its subtitles, artwork, and `.nfo` back on the next run. A download that does not match the size the source reported never replaces a file that is already here.
+* **A server that does not answer holds only its own files.** Removed files are still cleaned up for the servers that answered. The same goes for a server whose library filter names a collection it no longer has.
+* **A full disk does not stop removals.** Files waiting to be removed are removed before the run gives up for lack of space.
+* **Leftovers are cleared.** A half-copied download left in a library folder by a crash is removed after a day, and removing a server removes the links that pointed at it. Its copies are real files and stay.
+
+## Servers that sync with each other
+
+When servers pass files between each other, each copy remembers the server it first came from, its **origin**. A server that downloads a file records the origin its source names for it, or the source itself when the file is the source's own. The rules below apply to files a library copies. A **Link** library works the other way round: a film is there for as long as any server it reads from holds a real copy, so every holder's offer counts and a link is written to it. See [Links](Links.md).
+
+* A file that first came from this server is this server's to decide about. Another server's copy of it is never downloaded back, so a film removed here stays removed, and the other servers remove their copies under their own **Removed files** setting.
+* A file that first came from another server this one syncs the same folder from is that server's to decide about. A copy of it on a third server is not taken as a file of its own, so once the origin removes the film, its copies on the other servers stop keeping each other in place.
+* Any other offer counts. A file still reaches a server through one in between when that server does not sync from the origin, or when the origin does not answer.
+* Change or replace a file on the server it first came from. A copy changed on another server is that server's local edit, and its next sync puts the origin's file back when **Detect Updated Files** is on.
+
+A server goes on naming the origin of a copy for a day after removing it, since Jellyfin lists a removed file until it next scans the folder.
+
+An origin is recorded when a file is downloaded. A file that was already on a server when it was matched to another server's has none recorded, and counts as that server's own. Every server in the pool must run a release that records origins for a file's origin to be passed along. A server that does not is read as if every file on it were its own.
 
 ## Deleting From the Sync Tab
 

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
 using Microsoft.Extensions.Logging;
@@ -38,13 +40,16 @@ internal static class RunFailureLog
             lock (_lock)
             {
                 var failures = configManager.Configuration.LastRunFailures;
+                var before = failures.FirstOrDefault(f => Matches(f, moduleKey, phase));
                 failures.RemoveAll(f => Matches(f, moduleKey, phase));
                 failures.Add(new SyncRunFailure
                 {
                     ModuleKey = moduleKey,
                     Phase = phase,
                     Reason = reason,
-                    Timestamp = DateTime.UtcNow
+                    Timestamp = DateTime.UtcNow,
+                    FirstSeen = before?.FirstSeen ?? before?.Timestamp ?? DateTime.UtcNow,
+                    Reported = before?.Reported ?? false
                 });
                 configManager.SaveConfiguration();
             }
@@ -81,6 +86,33 @@ internal static class RunFailureLog
         catch (Exception ex)
         {
             logger.LogWarning(ex, "{Task}: failed to clear run-failure outcome", taskName);
+        }
+    }
+
+    /// <summary>
+    /// The failures that have stood for longer than <paramref name="standing"/> and that the
+    /// administrator has not been told about. Each is marked as told, so it is raised once, and is
+    /// raised again only after a clean run has cleared it and it comes back.
+    /// </summary>
+    public static IReadOnlyList<SyncRunFailure> TakeUnreported(IPluginConfigurationManager configManager, TimeSpan standing)
+    {
+        lock (_lock)
+        {
+            var cutoff = DateTime.UtcNow - standing;
+            var due = configManager.Configuration.LastRunFailures
+                .Where(f => !f.Reported && (f.FirstSeen ?? f.Timestamp) < cutoff)
+                .ToList();
+            if (due.Count > 0)
+            {
+                foreach (var failure in due)
+                {
+                    failure.Reported = true;
+                }
+
+                configManager.SaveConfiguration();
+            }
+
+            return due;
         }
     }
 

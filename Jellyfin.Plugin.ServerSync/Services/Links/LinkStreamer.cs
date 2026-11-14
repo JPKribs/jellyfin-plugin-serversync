@@ -120,6 +120,8 @@ public sealed class LinkStreamer
             }
         }
 
+        // Counted as streaming while this request is open, so this server's own stream limits see it.
+        using var playing = grant.Probe ? null : _grants.Hold(link.LinkId, grant.UserId ?? Guid.Empty);
         var head = HttpMethods.IsHead(context.Request.Method);
         var aborted = context.RequestAborted;
         var range = context.Request.Headers.Range.ToString();

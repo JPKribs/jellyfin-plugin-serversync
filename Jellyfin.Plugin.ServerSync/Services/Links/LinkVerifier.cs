@@ -126,8 +126,12 @@ public sealed class LinkVerifier
                         }
 
                         // The size is what tells another server's copy is the same file, so it is kept current.
+                        // A size that moved means the file was replaced under the same name, such as a
+                        // re-encode, so the media info held for it describes the old file and is taken again.
+                        var replaced = false;
                         if (found.Size > 0 && found.Size != row.SourceSize)
                         {
+                            replaced = row.SourceSize > 0;
                             row.SourceSize = found.Size;
                             changed = true;
                         }
@@ -137,7 +141,7 @@ public sealed class LinkVerifier
                             table.Upsert(row);
                         }
 
-                        if (Lacks(row))
+                        if (replaced || Lacks(row))
                         {
                             lacking.Add(row);
                         }
@@ -164,6 +168,63 @@ public sealed class LinkVerifier
         }
 
         return new LinkVerification(seen, dead, restored, described);
+    }
+
+    /// <summary>
+    /// Whether a link's own server says the file is no longer there. False when the server could not be
+    /// asked, refused the question, or only failed to read the file, so an outage is never taken for a
+    /// removal.
+    /// </summary>
+    /// <param name="row">The link's row.</param>
+    /// <param name="client">The server the link streams from.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when the server answered that it no longer has the file.</returns>
+    public async Task<bool> GoneFromSourceAsync(SyncItem row, SourceServerClient client, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(client);
+        try
+        {
+            var answer = await client.DescribeLinksAsync(Request(new[] { row }, details: false), cancellationToken).ConfigureAwait(false);
+            return answer?.Items.FirstOrDefault(i => string.Equals(i.ItemId, row.SourceItemId, StringComparison.OrdinalIgnoreCase)) is { Exists: false } found
+                && !string.Equals(found.Reason, PeerLinkDescription.Unreadable, StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogDebug("Could not ask whether {Path} is still on its source: {Reason}", row.SourcePath, ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Takes the source's media info again for a link that was already in the library, after the file
+    /// behind it changed. Jellyfin never probes a .strm that already has streams, so without this a
+    /// re-encoded file would keep showing, and be played by, the old file's codecs.
+    /// </summary>
+    /// <param name="row">The link's row.</param>
+    /// <param name="client">The server the link streams from.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when the item now has the source's media info.</returns>
+    public async Task<bool> RedescribeAsync(SyncItem row, SourceServerClient client, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(client);
+        if (_mediaInfo is null || string.IsNullOrEmpty(row.LocalPath) || _libraryManager.FindByPath(row.LocalPath, false) is not { } item)
+        {
+            return false;
+        }
+
+        try
+        {
+            var answer = await client.DescribeLinksAsync(Request(new[] { row }, details: true), cancellationToken).ConfigureAwait(false);
+            return answer?.Items.FirstOrDefault(i => string.Equals(i.ItemId, row.SourceItemId, StringComparison.OrdinalIgnoreCase)) is { Exists: true } description
+                && await _mediaInfo.ApplyAsync(item, description, client, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogDebug("Could not take the media info for {Path} again: {Reason}", row.LocalPath, ex.Message);
+            return false;
+        }
     }
 
     private PeerLinkDescribeRequest Request(IEnumerable<SyncItem> rows, bool details)

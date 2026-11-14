@@ -603,6 +603,82 @@ public sealed class LinkStorageTests : IDisposable
     private SyncItem? NewLink(string path, ApprovalMode mode)
         => LinkStateService.ProcessNewLink(new LibraryMapping { SourceLibraryId = "s", LocalLibraryId = "l" }, "id", "/src/Movie.mkv", 1, DateTime.UtcNow, path, mode, _files);
 
+    /// <summary>
+    /// A source file that changed only its extension is a new item whose link sits where the old one
+    /// does. Once the old file is gone, the new link takes the .strm over in place.
+    /// True: Film.mkv re-encoded to Film.mp4 keeps one working link at the same path, with the item and companions it had.
+    /// False: the new link would be refused until the old one was deleted, folder and all, a day later.
+    /// </summary>
+    [Fact]
+    public void Writer_ExtensionSwap_TakesThePathOver()
+    {
+        var writer = new LinkWriter(_files, _registry, NullLogger<LinkWriter>.Instance);
+        var old = Row("a", Media("Movie.strm"), StorageMode.Link, sourcePath: "/src/Movie.mkv", status: SyncStatus.Synced);
+        old.LocalItemId = "item";
+        old.CompanionFiles = "Movie.nfo";
+        _table.Upsert(old);
+        writer.Write(old, _table, Config());
+
+        var swapped = Row("b", Media("Movie.strm"), StorageMode.Link, sourcePath: "/src/Movie.mp4");
+        _table.Upsert(swapped);
+        var predecessor = LinkWriter.Predecessor(swapped, _table);
+        Assert.Equal("a", predecessor?.SourceItemId);
+
+        writer.TakeOver(swapped, predecessor!, _table);
+        writer.Write(swapped, _table, Config());
+
+        Assert.Null(_table.GetBySourceItemId("a"));
+        Assert.True(_files.IsCurrent(swapped.LocalPath!, "b"));
+        Assert.Equal("item", swapped.LocalItemId);
+        Assert.Equal("Movie.nfo", swapped.CompanionFiles);
+        Assert.Equal(Media("Movie.mp4"), _registry.CopiedPathFor(Media("Movie.strm")));
+    }
+
+    /// <summary>
+    /// Only a link row over this plugin's own .strm can be taken over from.
+    /// True: a copy, a user's .strm, and the row's own path are never offered for a take over.
+    /// False: a new link could claim a path a real file or someone else's .strm holds.
+    /// </summary>
+    [Fact]
+    public void Writer_Predecessor_IsOnlyAnOwnLink()
+    {
+        var alone = Row("a", Media("Alone.strm"), StorageMode.Link, sourcePath: "/src/Alone.mkv");
+        _table.Upsert(alone);
+        Assert.Null(LinkWriter.Predecessor(alone, _table));
+
+        _table.Upsert(Row("c", Media("Copy.strm"), StorageMode.Copy, sourcePath: "/src/Copy.mkv"));
+        Assert.Null(LinkWriter.Predecessor(Row("d", Media("Copy.strm"), StorageMode.Link, sourcePath: "/src/Copy.mp4"), _table));
+
+        _table.Upsert(Row("e", Media("Users.strm"), StorageMode.Link, sourcePath: "/src/Users.mkv"));
+        File.WriteAllText(Media("Users.strm"), "http://example.com/stream\n");
+        Assert.Null(LinkWriter.Predecessor(Row("f", Media("Users.strm"), StorageMode.Link, sourcePath: "/src/Users.mp4"), _table));
+    }
+
+    /// <summary>
+    /// A linked file replaced on the source under the same name is applied again.
+    /// True: a re-encode makes the link take the source's subtitles and media info for the new file.
+    /// False: the link would keep the old file's codecs, and players would be told the wrong ones.
+    /// </summary>
+    [Fact]
+    public void State_ReplacedFile_RequeuesTheLink()
+    {
+        var path = Media("Movie.strm");
+        _files.Write(path, "id", replace: false);
+        var row = Row("id", path, StorageMode.Link, status: SyncStatus.Synced);
+        row.SourceSize = 5000;
+        LinkNfo.Record(row);
+
+        LinkStateService.ProcessExistingLink(row, row.SourcePath, 5000, DateTime.UtcNow, path, _files, NullLogger.Instance);
+        Assert.Equal(SyncStatus.Synced, row.Status);
+
+        LinkStateService.ProcessExistingLink(row, row.SourcePath, 3000, DateTime.UtcNow, path, _files, NullLogger.Instance);
+        Assert.Equal(SyncStatus.Queued, row.Status);
+        Assert.Equal(3000, row.SourceSize);
+
+        LinkStateService.ProcessExistingLink(row, row.SourcePath, 3000, DateTime.UtcNow, path, _files, NullLogger.Instance);
+        Assert.Equal(SyncStatus.Synced, row.Status);
+    }
+
     private static SyncItem Row(string id, string localPath, StorageMode mode, string sourcePath = "/src/Movie.mkv", SyncStatus status = SyncStatus.Queued)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);

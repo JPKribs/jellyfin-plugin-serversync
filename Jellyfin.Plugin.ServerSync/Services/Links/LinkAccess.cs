@@ -52,10 +52,17 @@ public sealed class LinkAccess : ILinkAccess
     private readonly LinkHealth _health;
     private readonly TimeSpan _hedge;
 
-    public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health)
+    public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health, LinkGrants? grants = null)
         : this(configManager, clientFactory, applicationHost, logger, health, Hedge)
     {
+        Grants = grants;
     }
+
+    /// <summary>
+    /// Gets or sets the plays in progress here, which say how many links this server is streaming
+    /// from each server. With none given, this server's own limits are not applied.
+    /// </summary>
+    public LinkGrants? Grants { get; set; }
 
     /// <summary>Initializes a new instance of the <see cref="LinkAccess"/> class, for tests.</summary>
     public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health, TimeSpan hedge)
@@ -99,9 +106,23 @@ public sealed class LinkAccess : ILinkAccess
         var primary = ServerFor(link);
         var primaryPassedOver = false;
         Task<LinkStreamCheckResponse>? primaryAsk = null;
+        LinkStreamCheckResponse? busyPrimary = null;
+
+        // This server's own limits come first: how many links it streams at once in all, and how many
+        // it takes from each server. A server at its limit here is not asked, and the next is tried.
+        var streaming = Grants?.Streaming(null, link.LinkId, userId) ?? 0;
+        if (config.LinkMaxStreamsTotal > 0 && streaming >= config.LinkMaxStreamsTotal)
+        {
+            return new LinkChoice(null, $"this server is already streaming {streaming} link(s), the most it streams at once");
+        }
+
         if (primary is null)
         {
             firstRefusal = "the server this link streams from is no longer set up here";
+        }
+        else if (!Skipped(primary) && Full(primary))
+        {
+            firstRefusal = $"this server is already streaming {Taking(primary)} link(s) from {primary.DisplayName}, the most it takes from it";
         }
         else if (!Skipped(primary))
         {
@@ -117,12 +138,22 @@ public sealed class LinkAccess : ILinkAccess
                 if (await Task.WhenAny(primaryAsk, Task.Delay(_hedge, cancellationToken)).ConfigureAwait(false) == primaryAsk)
                 {
                     var answer = await primaryAsk.ConfigureAwait(false);
-                    if (answer.Allowed)
+                    if (answer.Allowed && Idle(primary, answer))
                     {
                         return new LinkChoice(LinkFallback.PrimaryOf(link), null);
                     }
 
-                    firstRefusal = answer.Reason;
+                    if (answer.Allowed)
+                    {
+                        // It may play the link, and is already streaming for this server. Another
+                        // server that holds the same file with more room is used instead.
+                        busyPrimary = answer;
+                    }
+                    else
+                    {
+                        firstRefusal = answer.Reason;
+                    }
+
                     primaryAsk = null;
                 }
             }
@@ -133,7 +164,46 @@ public sealed class LinkAccess : ILinkAccess
         var alternates = LinkFallback.Alternates(config, link).Where(a => !Skipped(a.Server)).ToList();
         var asks = alternates.Select(a => _health.IsDown(a.Server.Key)
             ? Task.FromResult(new LinkStreamCheckResponse { Reason = $"{a.Server.DisplayName} could not be reached" })
-            : AskAlternateAsync(a, link, userId, cancellationToken)).ToList();
+            : Full(a.Server)
+                ? Task.FromResult(new LinkStreamCheckResponse { Reason = $"this server is already streaming {Taking(a.Server)} link(s) from {a.Server.DisplayName}, the most it takes from it" })
+                : AskAlternateAsync(a, link, userId, cancellationToken)).ToList();
+        if (busyPrimary is not null)
+        {
+            // The first server in the list that is doing nothing for this one takes the play. With
+            // none idle, the one with the most room does, and the link's own server keeps it unless
+            // another has strictly more. Equal room goes to the higher server in the list.
+            var bestRoom = Room(primary!, busyPrimary);
+            (SourceServer Server, LinkRoute Route)? roomier = null;
+            for (var i = 0; i < alternates.Count; i++)
+            {
+                var answer = await asks[i].ConfigureAwait(false);
+                if (!answer.Allowed)
+                {
+                    continue;
+                }
+
+                if (Idle(alternates[i].Server, answer))
+                {
+                    roomier = (alternates[i].Server, new LinkRoute(alternates[i].Server.Key, answer.ItemId!));
+                    break;
+                }
+
+                if (Room(alternates[i].Server, answer) > bestRoom)
+                {
+                    bestRoom = Room(alternates[i].Server, answer);
+                    roomier = (alternates[i].Server, new LinkRoute(alternates[i].Server.Key, answer.ItemId!));
+                }
+            }
+
+            if (roomier is { } chosen)
+            {
+                _logger.LogInformation("Playing the link {Path} from '{Server}', which has more room than '{Primary}'", link.LinkPath, chosen.Server.DisplayName, primary!.DisplayName);
+                return new LinkChoice(chosen.Route, null);
+            }
+
+            return new LinkChoice(LinkFallback.PrimaryOf(link), null);
+        }
+
         var standIn = FirstAllowedAsync();
 
         // The link's own server is still thinking. It wins if it allows the play before another does.
@@ -190,18 +260,51 @@ public sealed class LinkAccess : ILinkAccess
 
         bool Skipped(SourceServer server) => skip?.Contains(server.Key, StringComparer.OrdinalIgnoreCase) == true;
 
+        // How many links this server is streaming from a server now, and whether that is all it takes.
+        int Taking(SourceServer server) => Grants?.Streaming(server.Key, link.LinkId, userId) ?? 0;
+
+        bool Full(SourceServer server) => server.LinkTakeMaxStreams > 0 && Taking(server) >= server.LinkTakeMaxStreams;
+
+        // A server doing nothing for this one, by its own count and by this server's.
+        bool Idle(SourceServer server, LinkStreamCheckResponse answer) => answer.StreamsInUse <= 0 && Taking(server) == 0;
+
+        // The streams still free between the two: what the server has left for this one, and what
+        // this one has left to take from it, whichever is less. No limit counts as the most room.
+        long Room(SourceServer server, LinkStreamCheckResponse answer)
+        {
+            var theirs = (answer.StreamLimit > 0 ? answer.StreamLimit : int.MaxValue) - (long)Math.Max(0, answer.StreamsInUse);
+            var mine = (server.LinkTakeMaxStreams > 0 ? server.LinkTakeMaxStreams : int.MaxValue) - (long)Taking(server);
+            return Math.Min(theirs, mine);
+        }
+
+        // The first server in the list that allows the play and is doing nothing for this one. With
+        // none idle, the one that allows it with the most room, the higher in the list on a tie.
         async Task<(SourceServer Server, LinkRoute Route)?> FirstAllowedAsync()
         {
+            (SourceServer Server, LinkRoute Route)? busiest = null;
+            var most = long.MinValue;
             for (var i = 0; i < alternates.Count; i++)
             {
                 var answer = await asks[i].ConfigureAwait(false);
-                if (answer.Allowed)
+                if (!answer.Allowed)
                 {
-                    return (alternates[i].Server, new LinkRoute(alternates[i].Server.Key, answer.ItemId!));
+                    continue;
+                }
+
+                var found = (alternates[i].Server, new LinkRoute(alternates[i].Server.Key, answer.ItemId!));
+                if (Idle(alternates[i].Server, answer))
+                {
+                    return found;
+                }
+
+                if (Room(alternates[i].Server, answer) > most)
+                {
+                    most = Room(alternates[i].Server, answer);
+                    busiest = found;
                 }
             }
 
-            return null;
+            return busiest;
         }
     }
 

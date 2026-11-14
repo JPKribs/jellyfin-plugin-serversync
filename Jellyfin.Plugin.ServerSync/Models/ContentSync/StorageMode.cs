@@ -35,7 +35,13 @@ public enum KeptReason
     Pick = 1,
 
     /// <summary>Downloaded by hand with Download. It stays until turned back by hand.</summary>
-    Hand = 2
+    Hand = 2,
+
+    /// <summary>
+    /// Already on this server when it was matched to a source's file. It is this server's own file,
+    /// so it stays when the source removes its file, and is never turned into a link.
+    /// </summary>
+    Own = 3
 }
 
 /// <summary>Helpers for <see cref="StorageMode"/>.</summary>

@@ -149,7 +149,8 @@ public partial class PeerController
         [FromBody] LinkStreamCheckRequest request,
         [FromServices] LinkPolicy policy,
         [FromServices] IUserManager userManager,
-        [FromServices] ILibraryManager libraryManager)
+        [FromServices] ILibraryManager libraryManager,
+        [FromServices] LinkSessions? sessions = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(libraryManager);
@@ -193,7 +194,16 @@ public partial class PeerController
             // The stream reads it again and answers for itself, so a size it cannot read now is left out.
         }
 
-        return Ok(new LinkStreamCheckResponse { Allowed = true, ItemId = verdict.Item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture), Size = size });
+        // How busy this server is for the caller goes with the answer, so a caller with several
+        // servers that hold the file picks the one with the most room without asking twice.
+        return Ok(new LinkStreamCheckResponse
+        {
+            Allowed = true,
+            ItemId = verdict.Item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
+            Size = size,
+            StreamsInUse = sessions?.CountForPeer(peer.Key) ?? 0,
+            StreamLimit = Math.Max(0, peer.LinkMaxStreams)
+        });
     }
 
     /// <summary>
@@ -399,7 +409,7 @@ public partial class PeerController
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                answer.Reason = "the source cannot read the file";
+                answer.Reason = PeerLinkDescription.Unreadable;
                 continue;
             }
 
@@ -551,5 +561,82 @@ public partial class PeerController
             .OfType<PeerLink>()
             .ToList();
         return Ok(new PeerLinksResponse { Links = links });
+    }
+
+    /// <summary>
+    /// The media files that left this server's library since a time. A server that reads this one
+    /// asks on each scan that lists only what changed, since Jellyfin answers what was added or
+    /// changed and nothing else remembers what was removed. Only ids are given: an id names nothing to
+    /// a caller that did not already hold the item.
+    /// </summary>
+    /// <param name="since">The time to answer from, in UTC.</param>
+    /// <param name="removed">The record of removals.</param>
+    /// <returns>The ids removed since, and how far back the record reaches.</returns>
+    [HttpGet("Changes")]
+    [RequireCompatibleProtocol]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult<PeerChangesResponse> Changes([FromQuery] DateTime? since, [FromServices] RemovedItemsStore removed)
+    {
+        ArgumentNullException.ThrowIfNull(removed);
+        if (since is not { } from)
+        {
+            return BadRequest("A since time is required");
+        }
+
+        from = from.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(from, DateTimeKind.Utc) : from.ToUniversalTime();
+        var (covered, ids) = removed.Since(from, DateTime.UtcNow);
+        return Ok(new PeerChangesResponse { CoveredFrom = covered, TooOld = from < covered, RemovedItemIds = ids.ToList() });
+    }
+
+    /// <summary>
+    /// Lists the copies this server downloaded from other servers, each with the server it first came
+    /// from, so a peer reading this server's items can tell a file that is this server's own from one
+    /// it was given. A file that is this server's own is not listed.
+    /// </summary>
+    /// <param name="table">The content sync table.</param>
+    /// <param name="userManager">The users here.</param>
+    /// <param name="libraryManager">The library.</param>
+    /// <returns>The copies.</returns>
+    [HttpGet("Copies")]
+    [RequireCompatibleProtocol]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<PeerCopiesResponse> Copies([FromServices] ContentSyncTableManager table, [FromServices] IUserManager userManager, [FromServices] ILibraryManager libraryManager)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+
+        // A standard user learns of the copies it can see as items here, and of no other path.
+        var scoped = PeerCallerGuard.ScopedUser(HttpContext);
+        var owner = scoped is { } id ? userManager.GetUserById(id) : null;
+        if (owner is null && scoped is not null)
+        {
+            return Ok(new PeerCopiesResponse());
+        }
+
+        // A table that cannot be read is no answer. An empty list would tell the peer every file here
+        // is this server's own.
+        if (table.TryGetCopiesWithOrigin() is not { } rows)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "this server could not read its copies");
+        }
+
+        var copies = rows
+            .Where(row => owner is null || (libraryManager.FindByPath(row.LocalPath!, false) is { } local && local.IsVisible(owner)))
+            .Select(row => new PeerCopy { Path = row.LocalPath!, OriginServerId = row.OriginServerId! })
+            .ToList();
+
+        // A copy removed within the last day may still be listed by Jellyfin, so its origin is still told.
+        // Only to a caller that sees everything: a path with no item left cannot be checked for a user.
+        if (owner is null && HttpContext.RequestServices.GetService(typeof(RemovedItemsStore)) is RemovedItemsStore removedItems)
+        {
+            var listed = new System.Collections.Generic.HashSet<string>(copies.Select(copy => copy.Path), StringComparer.OrdinalIgnoreCase);
+            copies.AddRange(removedItems.CopiesSince(DateTime.UtcNow.AddDays(-1))
+                .Where(removed => listed.Add(removed.Key))
+                .Select(removed => new PeerCopy { Path = removed.Key, OriginServerId = removed.Value }));
+        }
+
+        return Ok(new PeerCopiesResponse { Copies = copies });
     }
 }

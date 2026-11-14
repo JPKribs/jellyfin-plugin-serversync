@@ -83,6 +83,108 @@ public sealed class LinkCacheTests : IDisposable
     }
 
     /// <summary>
+    /// The cache's limit follows its size setting: a fixed amount, all the room on its disk, or a
+    /// share of that room. The room is what the cache holds plus what is free, less the free space kept.
+    /// True: each choice holds the cache to what it says, and an older configuration keeps its meaning.
+    /// False: a cache set to use the disk would stay off, or one set to a share would fill the disk.
+    /// </summary>
+    [Fact]
+    public void Limit_FollowsTheSizeSetting()
+    {
+        const long Gb = 1024L * 1024L * 1024L;
+        var cache = Cache();
+        cache.FreeSpace = _ => 100 * Gb;
+        _config.MinimumFreeDiskSpaceGb = 10;
+        Put(cache, A, 100);
+
+        // Saved before the setting existed: a size is a fixed amount, and no size is off.
+        Assert.Equal(Gb, cache.LimitBytes());
+        _config.LinkCacheSizeGb = 0;
+        Assert.False(cache.Enabled);
+        Assert.Equal(0, cache.LimitBytes());
+
+        _config.LinkCacheSizing = LinkCacheSizing.All;
+        Assert.True(cache.Enabled);
+        Assert.Equal((90 * Gb) + 100, cache.LimitBytes());
+
+        _config.LinkCacheSizing = LinkCacheSizing.Percent;
+        _config.LinkCachePercent = 50;
+        Assert.Equal(((90 * Gb) + 100) / 2, cache.LimitBytes());
+
+        _config.LinkCacheSizing = LinkCacheSizing.Fixed;
+        _config.LinkCacheSizeGb = 5;
+        Assert.Equal(5 * Gb, cache.LimitBytes());
+
+        // On with no amount given uses the room there is.
+        _config.LinkCacheSizeGb = 0;
+        Assert.True(cache.Enabled);
+        Assert.Equal((90 * Gb) + 100, cache.LimitBytes());
+
+        _config.LinkCacheSizing = LinkCacheSizing.Off;
+        _config.LinkCacheSizeGb = 5;
+        Assert.False(cache.Enabled);
+    }
+
+    /// <summary>
+    /// A cache sized as a share of its disk has the same limit whatever it holds itself: caching a
+    /// file, downloading one, and dropping one each move bytes between the free space and the cache,
+    /// and the limit is taken from the two together. Only other files on the disk move it.
+    /// True: the cache settles at its share and stays there.
+    /// False: every file cached would shrink the limit, which would drop a file, which would raise it again.
+    /// </summary>
+    [Fact]
+    public void Limit_AsAShare_IsNotMovedByTheCacheItself()
+    {
+        const long Disk = 1000;
+        var cache = Cache();
+        _config.LinkCacheSizing = LinkCacheSizing.Percent;
+        _config.LinkCachePercent = 50;
+        _config.MinimumFreeDiskSpaceGb = 0;
+        long others = 0;
+        long OnDisk() => Directory.Exists(_dir) ? Directory.EnumerateFiles(_dir).Where(f => !f.EndsWith("index.json", StringComparison.Ordinal)).Sum(f => new FileInfo(f).Length) : 0;
+        cache.FreeSpace = _ => Disk - others - OnDisk();
+
+        Assert.Equal(500, cache.LimitBytes());
+
+        Put(cache, A, 250);
+        Assert.Equal(500, cache.LimitBytes());
+
+        File.WriteAllBytes(cache.PartPathFor(B, ".mkv"), new byte[100]);
+        Assert.Equal(500, cache.LimitBytes());
+        Assert.True(cache.Complete(B, ".mkv", 100, CacheReason.Played));
+        Assert.Equal(500, cache.LimitBytes());
+
+        cache.Remove(B);
+        Assert.Equal(500, cache.LimitBytes());
+
+        // Other files take 400 of the disk: 350 free and 250 cached is 600, and half of that is 300.
+        others = 400;
+        Assert.Equal(300, cache.LimitBytes());
+        Assert.True(cache.MakeRoom(50));
+        Assert.False(cache.MakeRoom(51) && cache.List().Count == 1);
+    }
+
+    /// <summary>
+    /// A cache sized by its disk drops its own files to take a new one when the disk is short.
+    /// True: the cache turns over inside the room it has, and never takes the free space kept.
+    /// False: a full disk would stop the cache for good, or the cache would fill the disk.
+    /// </summary>
+    [Fact]
+    public void MakeRoom_SizedByTheDisk_DropsFilesWhenTheDiskIsShort()
+    {
+        var cache = Cache();
+        _config.LinkCacheSizing = LinkCacheSizing.All;
+        _config.MinimumFreeDiskSpaceGb = 0;
+        Put(cache, A, 100);
+        Put(cache, B, 100);
+        cache.FreeSpace = _ => 50;
+
+        Assert.True(cache.MakeRoom(120));
+        Assert.Single(cache.List());
+        Assert.False(cache.MakeRoom(400));
+    }
+
+    /// <summary>
     /// A file removed behind the cache's back is forgotten rather than served.
     /// True: a link whose cached file is gone streams from its source again.
     /// False: the link would fail to play until the cache was emptied.

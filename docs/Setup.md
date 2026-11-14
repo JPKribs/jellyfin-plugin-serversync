@@ -6,7 +6,7 @@ The plugin has four tabs. **Sync** shows each module's table and the change queu
 
 ![Servers](screenshots/settings/Servers.png)
 
-The map at the top shows this server, by its own name, and every server it is set up with, grouped by relationship. Every arrow points the way things travel. Pull points here, Push points out, and Sync both ways. A dashed arrow is video being streamed: it points out to a Stream server, which streams this server's files, and points here from each server whose files this one streams. A Pull or Sync server with a Link library shows twice for that reason, once for what is pulled and once for what is streamed. Each server's dot is green when it runs Server Sync, orange when it answers without it, red when it cannot be reached, and grey when it is disabled.
+The map at the top shows this server, by its own name, and every server it is set up with, grouped by relationship. Every arrow points the way things travel. Pull points here, Push points out, and Sync both ways. The servers this one pulls from are always on the left, the servers it pushes to on the right, and the servers it syncs with below, and each lane's line is the colour of that relationship's badge on the server cards. Each server's dot is green when it runs Server Sync, orange when it answers without it, red when it cannot be reached, and grey when it is disabled.
 
 Servers higher in the list win when two offer the same item. Drag a server to change the order. Each server has these steps.
 
@@ -14,11 +14,13 @@ Servers higher in the list win when two offer the same item. Drag a server to ch
 | :--- | :--- |
 | 1. Connection | Name, Server URL, an optional External URL, and whether a LAN address is allowed |
 | 2. Authentication | An API key or a sign in, Test Connection, what the key can do there, and the Direction |
-| 3. Stream | For Stream, Push, and Sync servers: Allow Linking, the stream limit, bitrate limits, and who unmapped users stream as. A warning shows when that server does not run Server Sync |
-| 4. Libraries | Which library there maps to which library here, and their root folders. Hidden for a Stream server. How each one keeps its files is set on the [Storage](#storage) tab |
+| 3. Stream | For Push and Sync servers: Allow Linking, the stream limit, bitrate limits, and who unmapped users stream as. A warning shows when that server does not run Server Sync |
+| 4. Libraries | Which library there maps to which library here, and their root folders. How each one keeps its files is set on the [Storage](#storage) tab |
 | 5. Users | Which user there maps to which user here, for history, user settings, and playlists, and, with Allow Linking on, that user's own link stream limit and speed |
 
-Steps are numbered in the order they show, so a Pull server's Libraries is step 3 and a Stream server's Users is step 4.
+**The other server needs Server Sync for everything but a plain pull.** A server that runs plain Jellyfin can be a **Pull** server whose libraries are kept as copies, and nothing else. Saving an entry as Push or Sync, or with a library kept as links, is refused when that server answers and does not run Server Sync. A server that cannot be reached is saved, since it cannot be asked, and nothing is sent to it until it answers.
+
+Steps are numbered in the order they show, so a Pull server's Libraries is step 3.
 
 | Connection | Authentication |
 | :--- | :--- |
@@ -37,9 +39,8 @@ Steps are numbered in the order they show, so a Pull server's Libraries is step 
 | Direction | Needs Server Sync there | What happens |
 | :--- | :--- | :--- |
 | Pull | No | This server reads from that one on a schedule. Changes also arrive as they happen when that server pushes to this one |
-| Push | Yes, listing this server as Pull or Sync | Changes made here are sent to that server as they happen |
+| Push | Yes, listing this server as Pull or Sync | Changes made here are sent to that server as they happen, and it may download this server's files. This server reads nothing from it |
 | Sync | Yes, listing this server as Sync | Both, for a pool of equals |
-| Stream | Yes, listing this server as Pull | That server may download this server's files, and link to them with **Allow Linking** on, and nothing else. This server never reads from it or sends it changes, and turns away its hints. The Libraries step is hidden |
 
 **Check Link** confirms the other server is set up for the chosen direction and reports the access it holds for this one.
 
@@ -59,7 +60,7 @@ The Storage tab shows while content, history, or metadata sync is on. Pick a ser
 
 | Setting | What it holds |
 | :--- | :--- |
-| Storage | Full **Copy** files, the default, or **Link** files that stream from the source. See [Links](Links.md) |
+| Storage | Full **Copy** files, the default, which follow that server: a file it removes is handled by **Removed files** here. Or **Link** files, which stream from any server that holds the file and go only when none holds it. See [Links](Links.md) |
 | Link Cache | For a Link library, whether its played links are kept in the link cache |
 | Always Keep | For a Link library, the shows and films that are full copies instead of links |
 | Library Filter | **Allow All**, or a **Whitelist** or **Blacklist** of files, collections, and playlists. It applies to content, history, and metadata. See [Content](Content.md#collection-syncing) |

@@ -237,10 +237,17 @@ def compose(*args, folder=None):
 
 def ffmpeg(out_dir, *args):
     """Runs the ffmpeg inside the Jellyfin image with out_dir mounted at /out, so the host needs nothing."""
-    run([
+    cmd = [
         "docker", "run", "--rm", "-v", f"{out_dir}:/out", "--entrypoint", "/usr/lib/jellyfin-ffmpeg/ffmpeg", IMAGE,
         "-loglevel", "error", "-y", *args,
-    ])
+    ]
+    # A folder emptied a moment ago can reach the container as a stale mount, so a failed write is tried again.
+    for _ in range(2):
+        os.makedirs(out_dir, exist_ok=True)
+        if run(cmd, check=False).returncode == 0:
+            return
+        time.sleep(2)
+    run(cmd)
 
 
 def seed_media():
@@ -1798,15 +1805,13 @@ def scenario_whitelist_upgrade(creds, apis):
 
 def set_linking(api, peer, allow):
     """Lets a peer link here or stops it. A Pull entry may never link, so allowing it makes the entry
-    Stream, and stopping a Stream entry makes it Pull again. Push and Sync use Allow Linking."""
+    Push, which gives and takes nothing back. Stopping it leaves the direction and turns linking off."""
     config = plugin_config(api)
     for entry in config["Servers"]:
         if entry["Name"] == peer:
             entry["AllowLinking"] = allow
             if allow and entry.get("Mode") in ("Pull", 0):
-                entry["Mode"] = "Stream"
-            elif not allow and entry.get("Mode") in ("Stream", 3):
-                entry["Mode"] = "Pull"
+                entry["Mode"] = "Push"
     save_plugin_config(api, config)
 
 
@@ -2942,7 +2947,9 @@ def scenario_link_rename(creds, apis):
         expect(os.path.exists(moved), "the renamed film gets a link under its new name")
         rows = content_rows(film.local)
         expect(rows.get(f"{renamed}.mp4", {}).get("StorageMode") == "Link", "the new name's row is a link")
-        expect(os.path.exists(film.link), "the old name's link is kept, as Keep does for any file gone from the source")
+        # A link holds nothing, so Removed files does not apply to it: once no server offers the old
+        # name's file, the full scan removes its link, whatever Removed files is set to.
+        expect(not os.path.exists(film.link), "the old name's link is removed, since no server offers that file any more")
         wait_until(lambda: find_item(film.local, "Movie", renamed_needle) is not None, 150, "local lists the renamed link")
         item = find_item(film.local, "Movie", renamed_needle)
         status, body = film.local.call("POST", f"/Items/{item['Id']}/PlaybackInfo?userId={film.lu}", {}, raw=True)
@@ -3366,7 +3373,7 @@ def scenario_chaos_tampered_links(creds, apis):
         run_task(film.local, "ServerSyncDownloadContent")
         expect(open(film.link, encoding="utf-8").read() == good, "a link with a stale URL to this route is repaired")
 
-        for label, content in (("garbage", "\x00\x01not a url at all"), ("an outside address", "http://example.invalid/movie.mp4\n"), ("nothing", "")):
+        for label, content in (("garbage", "\x00\x01not a url at all"), ("an outside address", "http://example.invalid/movie.mp4\n")):
             with open(film.link, "w", encoding="utf-8") as f:
                 f.write(content)
             run_task(film.local, "ServerSyncUpdateTables")
@@ -3375,6 +3382,12 @@ def scenario_chaos_tampered_links(creds, apis):
             expect(open(film.link, encoding="utf-8").read() == content, f"a .strm holding {label} is left as it is, since Server Sync no longer owns it")
             expect(row.get("Status") == "Errored" and "did not write" in (row.get("ErrorMessage") or ""), f"its row says why ({row.get('Status')})")
             film.local.post("/Sync/UpdateItemStatus", {"SourceItemId": row.get("SourceItemId"), "Status": "Synced"}, expect=200)
+        # A .strm with nothing in it points nowhere, as one cut short by a power loss does, so it is written again.
+        with open(film.link, "w", encoding="utf-8") as f:
+            f.write("")
+        run_task(film.local, "ServerSyncUpdateTables")
+        run_task(film.local, "ServerSyncDownloadContent")
+        expect(open(film.link, encoding="utf-8").read() == good, "an empty link is written again on the next sync")
         unexpected = plugin_errors("serversync-it-local", since, allowed=("apply failed for record",))
         expect(healthy(film.local) and not unexpected, f"local stayed healthy and logged nothing beyond the refusals it was meant to ({unexpected[:2]})")
     finally:

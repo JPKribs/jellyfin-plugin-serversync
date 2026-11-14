@@ -607,6 +607,13 @@ public static class FileDeletionService
                 {
                     result = new DeletionResult(DeleteLinkWithFolders(localPath, logger, containingRoot));
                 }
+                else if (item.StorageMode.IsLink())
+                {
+                    // The row is a link, but the file there now is not one this plugin wrote: someone
+                    // put their own in its place. It is theirs, so the row goes and the file stays.
+                    logger.LogInformation("Left {Path} in place: the link there was replaced by a file Server Sync did not write", localPath);
+                    result = new DeletionResult(true);
+                }
                 else if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
                 {
                     result = DeleteWithRecyclingBin(localPath, config.RecyclingBinPath, logger);
@@ -639,6 +646,11 @@ public static class FileDeletionService
             {
                 try
                 {
+                    if (item.StorageMode == StorageMode.Copy)
+                    {
+                        manager.NoteRemovedCopy(item.LocalPath, item.OriginServerId);
+                    }
+
                     manager.Delete(item.SourceItemId);
                     deleted++;
                 }

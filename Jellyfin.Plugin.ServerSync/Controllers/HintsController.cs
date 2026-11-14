@@ -104,7 +104,7 @@ public class HintsController : ControllerBase
         var result = new PeerCheckResult();
         var mode = string.Equals(request.Mode, "Sync", StringComparison.OrdinalIgnoreCase) ? ServerMode.Sync
             : string.Equals(request.Mode, "Push", StringComparison.OrdinalIgnoreCase) ? ServerMode.Push
-            : string.Equals(request.Mode, "Stream", StringComparison.OrdinalIgnoreCase) ? ServerMode.Stream
+            : string.Equals(request.Mode, "Stream", StringComparison.OrdinalIgnoreCase) ? ServerMode.Push
             : ServerMode.Pull;
         if (string.IsNullOrWhiteSpace(request.ServerUrl) || string.IsNullOrWhiteSpace(request.ApiKey))
         {
@@ -211,7 +211,7 @@ public class HintsController : ControllerBase
             result.PeerCanDownload = link?.CanDownload;
             (result.Severity, result.Message) = Verdict(mode, link, capabilities.PluginVersion, result);
 
-            if (mode is not (ServerMode.Pull or ServerMode.Stream) || result.SendsToThisServer)
+            if (mode is not ServerMode.Pull || result.SendsToThisServer)
             {
                 result.Message += acceptsNote;
             }
@@ -246,8 +246,6 @@ public class HintsController : ControllerBase
             ServerMode.Pull => ("warn", $"Server Sync {version} there {listing}. This server will pull on a schedule, but changes will not arrive as they happen until that server lists this one as Push or Sync."),
             ServerMode.Push when result.ListsThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so it will pull the changes this server announces."),
             ServerMode.Push => ("error", $"Server Sync {version} there {listing}. Push needs that server to list this one as Pull or Sync, enabled, with a URL and key."),
-            ServerMode.Stream when result.ListsThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so it can link to this server's files and stream them. Nothing else is sent between the two."),
-            ServerMode.Stream => ("error", $"Server Sync {version} there {listing}. Stream needs that server to list this one as Pull, enabled, with a URL and key, and its libraries mapped as Link."),
             _ when link is { Listed: true, Enabled: true } && string.Equals(link.Mode, "Sync", StringComparison.OrdinalIgnoreCase)
                 => ("ok", $"Ready. Server Sync {version} there lists this server as Sync, so changes travel both ways as they happen."),
             _ => ("error", $"Server Sync {version} there {listing}. Sync needs that server to list this one as Sync, enabled, with a URL and key.")

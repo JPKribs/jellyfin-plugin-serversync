@@ -65,6 +65,53 @@ public partial class SourceServerClient
         }
     }
 
+    private readonly SemaphoreSlim _peerCopiesLock = new(1, 1);
+    private Dictionary<string, string>? _peerCopies;
+
+    /// <summary>
+    /// The id of the server a file on the peer first came from, when the peer downloaded it from
+    /// another server. Null for a file that is the peer's own. The peer's copies are read once for this
+    /// client. A peer with no copies route, as an older version is, names no origin. A read that fails
+    /// throws, since a file whose origin is not known cannot be told from the peer's own.
+    /// </summary>
+    /// <param name="peerPath">The file's path on the peer.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The origin server's id, or null.</returns>
+    public virtual async Task<string?> OriginOfAsync(string? peerPath, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(peerPath))
+        {
+            return null;
+        }
+
+        if (_peerCopies is null)
+        {
+            await _peerCopiesLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (_peerCopies is null)
+                {
+                    var copies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var copy in (await GetPeerCopiesAsync(cancellationToken).ConfigureAwait(false))?.Copies ?? new List<Models.Peer.PeerCopy>())
+                    {
+                        if (!string.IsNullOrEmpty(copy.Path) && !string.IsNullOrEmpty(copy.OriginServerId))
+                        {
+                            copies[copy.Path] = copy.OriginServerId;
+                        }
+                    }
+
+                    _peerCopies = copies;
+                }
+            }
+            finally
+            {
+                _peerCopiesLock.Release();
+            }
+        }
+
+        return _peerCopies.TryGetValue(peerPath, out var origin) ? origin : null;
+    }
+
     private async Task<Dictionary<string, string>> PeerLinksAsync(CancellationToken cancellationToken)
     {
         if (_peerLinks is { } known)

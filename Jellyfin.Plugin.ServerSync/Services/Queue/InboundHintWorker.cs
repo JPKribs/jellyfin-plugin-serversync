@@ -292,12 +292,28 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 var origin = config.Servers.FirstOrDefault(s => s.Pulls && string.Equals(s.ServerId, row.OriginServerId, StringComparison.OrdinalIgnoreCase));
                 if (origin is null)
                 {
+                    // Tried for as long as any failing notice, then dropped: the server may be added
+                    // back, but a notice from one that never is would otherwise be retried for good.
+                    if (row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
+                    {
+                        _inbound.Remove(row.Id, row.VersionTimestamp);
+                        _logger.LogInformation("Dropped a change from server {Origin}, which is not set up as a Pull or Sync server here", row.OriginServerId);
+                        continue;
+                    }
+
                     _inbound.Defer(row, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), $"server {row.OriginServerId} is not configured as a Pull or Sync server here, so its change cannot be pulled");
                     continue;
                 }
 
                 if (!TryGetClient(origin, clients, out var client, out var clientError))
                 {
+                    if (row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
+                    {
+                        _inbound.Remove(row.Id, row.VersionTimestamp);
+                        _logger.LogInformation("Dropped a change from '{Origin}', whose address here is not valid: {Error}", origin.DisplayName, clientError);
+                        continue;
+                    }
+
                     _inbound.Defer(row, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), $"server '{origin.DisplayName}' has an invalid URL: {clientError}");
                     continue;
                 }

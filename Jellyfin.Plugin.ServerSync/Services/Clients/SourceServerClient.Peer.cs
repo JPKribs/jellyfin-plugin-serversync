@@ -481,6 +481,58 @@ public partial class SourceServerClient
     }
 
     /// <summary>
+    /// Reads what left the peer's library since a time. Null when the peer has no such route or
+    /// refuses, in which case removals are found the way they always were, by a full listing. Throws
+    /// on a server error, which is no answer.
+    /// </summary>
+    /// <param name="since">The time to ask from, in UTC.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's removals, or null.</returns>
+    public async Task<PeerChangesResponse?> GetPeerChangesAsync(DateTime since, CancellationToken cancellationToken = default)
+    {
+        var path = "/Sync/Peer/Changes?since=" + Uri.EscapeDataString(since.ToUniversalTime().ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+        var (status, parsed, body) = await PeerRequestAsync<PeerChangesResponse>(HttpMethod.Get, path, null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        if (status is >= 400 and < 500)
+        {
+            _logger.LogDebug("The peer does not say what it removed ({Status}): {Body}", status, body);
+            return null;
+        }
+
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException($"The peer answered {status} to the changes request", null, (System.Net.HttpStatusCode)status);
+        }
+
+        return parsed;
+    }
+
+    /// <summary>
+    /// Reads the copies the peer downloaded from other servers, each with its origin. Null when the peer
+    /// has no such route, as a server without Server Sync or a version from before origins has none,
+    /// and when it refuses the request, as it does for a key it will not answer peer calls for. Such a
+    /// server is read as it always was, with every file taken as its own. Throws on a server error,
+    /// which is no answer.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's copies, or null.</returns>
+    public async Task<PeerCopiesResponse?> GetPeerCopiesAsync(CancellationToken cancellationToken = default)
+    {
+        var (status, parsed, body) = await PeerRequestAsync<PeerCopiesResponse>(HttpMethod.Get, "/Sync/Peer/Copies", null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
+        if (status is >= 400 and < 500)
+        {
+            _logger.LogDebug("The peer does not say where its copies came from ({Status}): {Body}", status, body);
+            return null;
+        }
+
+        if (status is < 200 or >= 300)
+        {
+            throw new HttpRequestException($"The peer answered {status} to the copies request", null, (System.Net.HttpStatusCode)status);
+        }
+
+        return parsed ?? new PeerCopiesResponse();
+    }
+
+    /// <summary>
     /// One call to the peer's Server Sync endpoints. Builds the request, signs it, sends it, and on a
     /// success parses the answer, otherwise reads the body as text. Every peer method is a short rule
     /// over this, so the transport and its error handling live in one place.

@@ -137,7 +137,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         // The link cache is one folder. Turning the cache off, or pointing it somewhere else, empties
         // the folder it leaves, so nothing is left behind using disk.
         var before = LinkCacheRoot(stored);
-        if (stored.LinkCacheSizeGb > 0 && (incoming.LinkCacheSizeGb <= 0 || !string.Equals(before, LinkCacheRoot(incoming), StringComparison.Ordinal)))
+        if (stored.LinkCacheOn && (!incoming.LinkCacheOn || !string.Equals(before, LinkCacheRoot(incoming), StringComparison.Ordinal)))
         {
             try
             {

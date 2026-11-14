@@ -44,8 +44,8 @@
                                     <div id="serverStepConnection" class="jpk-collapsible-content collapsed">
 
                                         <div class="inputContainer">
-                                            <label for="txtServerName">Name:</label>
-                                            <input is="emby-input" type="text" id="txtServerName" placeholder="Living room server" />
+                                            <label for="txtServerName">Name</label>
+                                            <input is="emby-input" type="text" id="txtServerName" placeholder="Default" />
                                             <div class="fieldDescription">Shown in tables and logs. Empty uses the server's own name.</div>
                                         </div>
 
@@ -58,14 +58,14 @@
                                         </div>
 
                                         <div class="inputContainer">
-                                            <label for="txtSourceServerUrl">Server URL:</label>
-                                            <input is="emby-input" type="text" id="txtSourceServerUrl" placeholder="http://server:8096" />
-                                            <div class="fieldDescription">URL this server connects to.</div>
+                                            <label for="txtSourceServerUrl">Server URL</label>
+                                            <input is="emby-input" type="text" id="txtSourceServerUrl" />
+                                            <div class="fieldDescription">URL this server connects to, such as http://server:8096.</div>
                                         </div>
 
                                         <div class="inputContainer">
-                                            <label for="txtSourceServerExternalUrl">External URL (optional):</label>
-                                            <input is="emby-input" type="text" id="txtSourceServerExternalUrl" placeholder="https://media.example.com" />
+                                            <label for="txtSourceServerExternalUrl">External URL</label>
+                                            <input is="emby-input" type="text" id="txtSourceServerExternalUrl" placeholder="Default" />
                                             <div class="fieldDescription">Its public address, if different. Empty uses the Server URL.</div>
                                         </div>
 
@@ -118,22 +118,22 @@
 
                                         <div id="authKeyPanel">
                                             <div class="inputContainer">
-                                                <label for="txtSourceServerApiKey">API Key:</label>
+                                                <label for="txtSourceServerApiKey">API Key</label>
                                                 <input is="emby-input" type="password" id="txtSourceServerApiKey" />
                                                 <div class="fieldDescription">The key is stored encrypted and never shown again.</div>
                                             </div>
                                         </div>
 
-                                        <div id="authUserPanel" class="jpk-bulk-edit-bar hidden" style="padding: 14px; border: 1px solid var(--jpk-border); border-radius: 6px; background: rgba(255, 255, 255, 0.04);">
+                                        <div id="authUserPanel" class="jpk-bulk-edit-bar ssPanel hidden">
                                             <div id="authSignedIn" class="jpk-info hidden">Signed in as <strong id="authSignedInUser"></strong>. Sign in again to replace the token.</div>
                                             <div class="jpk-edit-line">
                                                 <div class="jpk-field">
                                                     <label for="txtAuthUsername">Username</label>
-                                                    <input is="emby-input" type="text" id="txtAuthUsername" placeholder="Enter username" />
+                                                    <input is="emby-input" type="text" id="txtAuthUsername" />
                                                 </div>
                                                 <div class="jpk-field">
                                                     <label for="txtAuthPassword">Password</label>
-                                                    <input is="emby-input" type="password" id="txtAuthPassword" placeholder="Enter password" />
+                                                    <input is="emby-input" type="password" id="txtAuthPassword" />
                                                 </div>
                                             </div>
                                             <div class="flex align-items-center gap-sm">
@@ -153,8 +153,8 @@
                                             <span id="connectionStatus" class="jpk-status-text"></span>
                                         </div>
 
-                                        <div id="accessUnknown" class="jpk-neutral hidden" style="margin-top: 12px;">Test the connection to see what this key can do.</div>
-                                        <div id="accessSummary" class="hidden" style="margin-top: 12px;">
+                                        <div id="accessUnknown" class="jpk-neutral mt-md hidden">Test the connection to see what this key can do.</div>
+                                        <div id="accessSummary" class="mt-md hidden">
                                             <div id="accessHeadline" class="mb-md"></div>
                                             <div id="accessRows" class="ssAccessGrid mb-md"></div>
                                             <div class="fieldDescription">What that server reads here depends on its own key. Check Link shows it.</div>
@@ -162,11 +162,6 @@
 
                                         <h3 class="jpk-subsection-title">Direction</h3>
                                         <div class="jpk-choice-group" id="modeChoices" role="radiogroup" aria-label="Mode">
-                                            <label class="jpk-choice" data-mode="Stream">
-                                                <input type="radio" name="serverMode" value="Stream" />
-                                                <span class="jpk-choice-name">Stream</span>
-                                                <span class="jpk-choice-text">Let it download from here, and stream with Allow Linking. Nothing else.</span>
-                                            </label>
                                             <label class="jpk-choice" data-mode="Pull">
                                                 <input type="radio" name="serverMode" value="Pull" />
                                                 <span class="jpk-choice-name">Pull</span>
@@ -183,10 +178,10 @@
                                                 <span class="jpk-choice-text">Pull and Push together. Needs Server Sync there set to Sync.</span>
                                             </label>
                                         </div>
-                                        <div id="modeLimited" class="jpk-warn hidden" style="margin-top: 8px;">A standard user must be on that server's whitelist.</div>
+                                        <div id="modeLimited" class="jpk-warn mt-sm hidden">A standard user must be on that server's whitelist.</div>
 
                                         <div id="peerCheckArea" class="hidden">
-                                            <div class="jpk-collapsible-actions" style="margin-top: 8px;">
+                                            <div class="jpk-collapsible-actions mt-sm">
                                                 <button is="emby-button" type="button" id="btnCheckPeer" class="raised jpk-button-small">
                                                     <span>Check Link</span>
                                                 </button>
@@ -214,9 +209,9 @@
 
                                         <div id="linkLimits" class="hidden">
                                             <div class="inputContainer">
-                                                <label for="txtLinkMaxStreams">Link Streams At Once:</label>
+                                                <label for="txtLinkMaxStreams">Link Streams At Once</label>
                                                 <input is="emby-input" type="number" id="txtLinkMaxStreams" min="0" max="1000" />
-                                                <div class="fieldDescription">Most streams that server may run at once. 0 for no limit.</div>
+                                                <div class="fieldDescription">Most streams that server may run at once. 0 is no limit.</div>
                                             </div>
                                             <div class="checkboxContainer checkboxContainer-withDescription" id="countOwnSessionsContainer">
                                                 <label class="emby-checkbox-label">
@@ -305,48 +300,4 @@
     <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
     <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
 
-    <!-- STYLES: Servers-specific -->
-    <style>
-        /* ===== Servers page ===== */
-        .text-warn { color: var(--jpk-warning, #f0ad4e); }
-        #authChoices { grid-template-columns: repeat(2, 1fr); }
-        #btnCheckPeer, #btnTestConnection { white-space: nowrap; flex: 0 0 auto; }
-        .ssEditorFooter { display: flex; gap: 8px; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
-        @media (max-width: 768px) { #authChoices { grid-template-columns: 1fr; } }
-
-        /* ===== Utility Classes ===== */
-        .text-success { color: var(--status-synced-color, #5cb85c); }
-        .text-error { color: var(--status-errored-color, #d9534f); }
-        .flex { display: flex; }
-        .mb-md { margin-bottom: 12px; }
-
-        /* ===== Mapping Styles ===== */
-        .mapping {
-            margin-bottom: 2em;
-            padding-bottom: 1em;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-        .mapping:last-child {
-            border-bottom: none;
-            margin-bottom: 1em;
-        }
-        .mappingGrid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0 24px;
-        }
-        .mappingHeader {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1em;
-        }
-        .mappingColumn {
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* ===== Additional Utility Classes ===== */
-        .gap-sm { gap: 8px; }
-    </style>
 </div>

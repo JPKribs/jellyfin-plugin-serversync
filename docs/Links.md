@@ -32,9 +32,9 @@ Playback works with direct play, direct stream, and transcoding on the linking s
 
 ### On the source
 
-Open the Servers tab and the entry for the linking server. The entry must exist, since that is how the source knows the linking server and pairs with it. Its direction must be **Stream**, **Push**, or **Sync**: a Pull server only gives this server things to read, so it may never link here. Choose **Stream** when files are all the two servers share: no libraries are mapped, and nothing else passes between them. In the **Stream** step:
+Open the Servers tab and the entry for the linking server. The entry must exist, since that is how the source knows the linking server and pairs with it. Its direction must be **Push** or **Sync**: a Pull server only gives this server things to read, so it may never link here. Choose **Push** when this server only gives: it maps no libraries from the other and reads nothing from it. In the **Stream** step:
 
-* **Allow Linking** lets that server stream this server's files for its links. Off by default. A Stream server with it off can still download files, but not link to them.
+* **Allow Linking** lets that server stream this server's files for its links. Off by default. A server with it off can still download files, but not link to them.
 
 With it on, these appear:
 
@@ -94,7 +94,8 @@ When the source holds a film in several versions, such as `Film (2020) - 4K.mkv`
 
 Pressing play asks the source about every version. The versions it refuses the user, such as one above their bitrate limit, are left out of what their player is offered, and the film plays in a version it allows. The play is refused only when no version is allowed, with the reason for the first.
 
-* Two versions that differ only by extension would be the same link, so only the first is linked.
+* A film this server already has is its own. In a Link library the source's file at the same name is never downloaded over it, whether it is the same file, a different one, or changes later, and no link is written beside it. It is tracked, shows as **Already Here** among the copies on the Storage tab, and stays when the source removes its file. Picking the film to **Always Keep** asks for the source's copy, which is the one case it is replaced.
+* Two versions that differ only by extension would be the same link, so only the first is linked. When the first is replaced by the second on the source, as when `Film.mkv` becomes `Film.mp4`, the link follows the new file on the next Sync Content run, in place, once the source confirms the old file is gone.
 * A version outside the mapping's root folder, or left out by the library filter, is not linked.
 * When a mapping is set back to **Copy**, the first version's link is copied and the other versions' links are removed.
 
@@ -125,7 +126,7 @@ Jellyfin never probes a `.strm` during a scan. The source already holds the file
 
 When the source cannot give it, such as a source on an older release, the file is probed through the link instead. The probe may read up to 256 MB of a file, which is far more than a probe needs and far less than a film, so nothing else on the linking server reads whole files from the source through a new link. The source holds probes to an allowance of its own, 512 MB of each file an hour for each server, and answers `429` past it, so the probe cannot be used to copy files around the stream and speed limits.
 
-Every **Sync Content** run also gives any link still without media info the source's, so a link missed while a server was restarting is caught on the next run. Jellyfin probes a link again each time someone plays it, as it does for any `.strm`.
+Every **Sync Content** run also gives any link still without media info the source's, so a link missed while a server was restarting is caught on the next run. A link whose file changed size on the source, as a re-encode under the same name does, is given the source's media info again on that run, and its cached file is dropped. Jellyfin probes a link again each time someone plays it, as it does for any `.strm`.
 
 ### Trickplay and chapter images
 
@@ -138,7 +139,16 @@ Jellyfin makes neither for a `.strm`, whatever the library's settings say. With 
 
 A link streams from the server that won its file in sync: the first server on the linking server's Servers tab that offers it. When two servers hold the same film in folders that map to the same place, only one row and one link are made, as for copies.
 
-When that server is down, at its limits, or refuses, the linking server tries the others it pulls from, and uses the first in the Servers tab's order that allows the play. The others are asked together, so one slow server does not hold up the rest. When the link's own server takes more than two seconds to answer, the others are asked alongside it. A server that did not answer is passed over for the next minute while another can play the file, so only the first play after a server goes down waits on it. A server is tried when one of its enabled library mappings covers the folder the link sits in. It is asked for the file at the matching path there, with the same checks as the link's own server, and it is used only when it allows the user and its file is the same size. The link file itself never changes, and the next play asks the link's own server first again.
+When that server is down, at its limits, or refuses, the linking server tries the others it pulls from, and uses the first in the Servers tab's order that allows the play.
+
+When several servers hold the same film, plays are spread over them:
+
+* The link's own server streams it while that server is doing nothing else for this one.
+* Once it is streaming, the first server down the Servers list that holds the same file and is doing nothing takes the next play.
+* With none idle, the server with the most streams free takes it. Streams free is the lesser of what that server still allows this one and what this one still takes from it. Equal room goes to the link's own server, then to the higher server in the list.
+* A server at a limit is passed over for the next.
+
+This server's own limits are set under **Settings > Content > Links**: **All servers** is the most links it streams at once in all, and **From** *server* the most it takes from that server at once. 0 is no limit. At the limit for all servers, a play is refused until one ends. A play counts from its first read until 90 seconds after its last, and a link that plays from the link cache streams from nobody and is not counted. Each source's own limits for this server apply as well, as set in its Stream step. The others are asked together, so one slow server does not hold up the rest. When the link's own server takes more than two seconds to answer, the others are asked alongside it. A server that did not answer is passed over for the next minute while another can play the file, so only the first play after a server goes down waits on it. A server is tried when one of its enabled library mappings covers the folder the link sits in. It is asked for the file at the matching path there, with the same checks as the link's own server, and it is used only when it allows the user and its file is the same size. The link file itself never changes, and the next play asks the link's own server first again.
 
 This happens at three moments:
 
@@ -189,14 +199,14 @@ Files are downloaded one at a time in the background, from the link's own server
 
 * A file larger than **Cache Size** is never cached.
 * Only a settled link is cached, and only from its own server. Another server that holds the same file is not used for the download.
-* **Minimum Free Space** does not apply to the cache. Only **Cache Size** limits it.
+* **Minimum Free Space** is left free on the cache's disk when **Cache Size** uses all available space or a share of it. A fixed amount is held to that amount alone.
 * Specials are not cached ahead.
 
 ### Settings
 
 On the linking server, under **Content** in Settings:
 
-* **Cache Size (GB)** is the most disk the cache may use. 0 turns the cache off and empties it.
+* **Cache Size** is the most disk the cache may use. **Off** turns the cache off and empties it. **Use all available space** takes what the cache holds plus what is free on its disk, less **Minimum Free Space**. **Use up to a fixed amount** takes **Fixed Amount (GB)**, and an amount of 0 uses all available space. **Use a percentage of available space** takes **Share of Available Space (%)** of that same room. A cache sized by its disk follows the disk: when other files have filled it, the cache drops its own files the next time it needs room.
 * **Cache Location** is where the files are kept, as a full path. Empty uses a folder under Jellyfin's cache. The cache keeps its files in a `serversync-links` folder of its own inside the location, so it never shares a folder with anything else. Changing it empties the old location.
 * **Cache Retention (days)** drops a file this many days after it was last played, or after it was cached if it was never played. 0 keeps files until the space is needed. The default is 30.
 * **Pre-cache Episodes** is how many episodes are cached ahead. 0 caches none ahead. The default is 2.
@@ -225,13 +235,13 @@ The check also keeps each link's recorded size current, which is how another ser
 
 ## When the File Is Gone
 
-A link holds nothing a download would bring back, so **Removed files** does not apply to it. Once no server this one pulls from offers the file, the next **Sync Content** run that does a full scan removes the link:
+A link holds nothing a download would bring back, so **Removed files** does not apply to it. When the server a link streams from says the file has left it, by an announcement or on the next scan, the other servers this one pulls from are asked whether they hold the file. The link moves to the first that does, in the Servers tab's order. When none does, the link is removed:
 
 * The `.strm` goes, with every file beside it under the same name: its `.nfo`, subtitles, images, and trickplay.
 * Each folder this leaves holding nothing but title artwork and `.nfo` files goes too, up to the library root, so a show's folder goes with its last episode. A folder that still holds anything else stays, with its artwork.
 * Nothing is moved to the recycling bin, and nothing waits for approval, whatever **Removed files**, **Enable Recycling Bin**, and **Remove Empty Folders** are set to.
 
-While another server still offers the file at the same place, the link is kept and streams from that server instead. Nothing is removed on a run where a server did not answer, or where a mapped library answered with no items at all.
+While another server still offers the file at the same place, the link is kept and streams from that server instead. A server that did not answer on a run, or whose mapped library answered with no items at all, has none of its links removed on that run. The links of the servers that did answer are removed as usual.
 
 These still follow **Removed files**, as a copy does:
 
@@ -303,7 +313,7 @@ A link row that errors on the Sync tab says why:
 | :--- | :--- |
 | Link check: *reason* | The last content sync found the source cannot stream the file. See [The Link Check](#the-link-check) |
 | A full copy is already at *path* | A real file has that name. It is tracked as a copy instead |
-| Another source file would link to *path* | Two source files differ only by extension, so only one can be linked |
+| Another source file would link to *path* | Two source files differ only by extension and both are still on the source, so only one can be linked. Once the older one is gone the link follows the newer |
 | A .strm that Server Sync did not write is already at *path* | A `.strm` there no longer points at Server Sync, so it is left alone |
 | *path* is outside every mapped library | The path escapes the mapping's root |
 

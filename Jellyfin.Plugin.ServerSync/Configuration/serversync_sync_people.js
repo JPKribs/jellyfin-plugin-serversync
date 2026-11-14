@@ -234,8 +234,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                 var row = document.createElement('tr');
                 var cell = document.createElement('td');
                 cell.colSpan = 4;
-                cell.style.opacity = '0.6';
-                cell.style.fontSize = '0.85em';
+                cell.classList.add('ssNoteCell');
                 cell.textContent = 'Changed: ' + text;
                 row.appendChild(cell);
                 tbody.appendChild(row);

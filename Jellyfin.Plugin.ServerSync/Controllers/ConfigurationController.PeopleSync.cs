@@ -128,25 +128,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Updates the status of a people sync item.
-    /// </summary>
-    [HttpPost("PeopleItems/UpdateStatus")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult UpdatePeopleSyncItemStatus(
-        [FromBody] UpdatePeopleSyncItemStatusRequest request,
-        [FromServices] PeopleSyncTableManager manager)
-    {
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var parsedStatus) || !Enum.IsDefined(parsedStatus))
-        {
-            return BadRequest("Invalid status value");
-        }
-
-        manager.UpdateStatus(request.Id, parsedStatus);
-        return Ok(new { Success = true });
-    }
-
-    /// <summary>
     /// Moves people sync items to Queued status. With no ids and a Status, queues every row in that
     /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>

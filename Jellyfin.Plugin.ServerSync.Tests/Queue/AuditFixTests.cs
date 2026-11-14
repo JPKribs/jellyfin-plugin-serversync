@@ -66,6 +66,44 @@ public sealed class AuditFixTests : IDisposable
     }
 
     /// <summary>
+    /// A row that fails is retried on every run, and the administrator is told once it has gone on
+    /// failing for a day, through being queued again in between. A row that settles is forgotten.
+    /// True: one notice per row that keeps failing, and none for one that failed and recovered.
+    /// False: either nobody hears about a row that never syncs, or every run raises it again.
+    /// </summary>
+    [Fact]
+    public void Maintenance_ReportsARowOnceAfterADayOfFailing()
+    {
+        var table = new HistorySyncTableManager(_provider, NullLogger<HistorySyncTableManager>.Instance);
+        var row = Row(negotiatedAt: null, played: true);
+        row.Status = SyncStatus.Errored;
+        row.Reason = "the peer refused";
+        table.Upsert(row);
+        var store = new MaintenanceStore(_provider, NullLogger<MaintenanceStore>.Instance);
+        var start = DateTime.UtcNow;
+
+        // First seen failing: noted, not yet reported.
+        Assert.Empty(store.TrackFailures(start, start.AddDays(-1)));
+
+        // Queued for another try and still not settled a day on: reported, once.
+        store.RequeueErrored(DateTime.UtcNow.AddMinutes(1));
+        var due = store.TrackFailures(start.AddDays(2), start.AddDays(1));
+        Assert.Single(due);
+        Assert.Equal(1, due[0].Count);
+        Assert.Equal("watch history", due[0].Label);
+        Assert.Empty(store.TrackFailures(start.AddDays(3), start.AddDays(2)));
+
+        // Settled: forgotten, so a later failure starts its day again.
+        var held = table.GetByKey(("su", "si"))!;
+        held.Status = SyncStatus.Synced;
+        table.Upsert(held);
+        Assert.Empty(store.TrackFailures(start.AddDays(4), start.AddDays(3)));
+        held.Status = SyncStatus.Errored;
+        table.Upsert(held);
+        Assert.Empty(store.TrackFailures(start.AddDays(5), start.AddDays(4)));
+    }
+
+    /// <summary>
     /// Rows from before servers became a list are given the first scan server's key, and errored rows that
     /// sat for a day are queued again with fresh retries.
     /// True: removing that server removes its rows, and a peer that restarted does not leave rows errored forever.

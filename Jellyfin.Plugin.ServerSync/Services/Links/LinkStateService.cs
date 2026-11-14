@@ -94,6 +94,11 @@ public static class LinkStateService
             row.StatusDate = DateTime.UtcNow;
         }
 
+        // The file was replaced on the source under the same name, such as a re-encode. The .strm is
+        // still right, but the media info and subtitles taken with it describe the old file.
+        var replaced = row.StorageMode == StorageMode.Link && row.Status == SyncStatus.Synced
+            && row.SourceSize > 0 && sourceSize > 0 && row.SourceSize != sourceSize;
+
         // A rename on the source moves the .strm and its companions along, the same way a copy moves.
         SyncStateService.UpdateItemMetadata(row, sourcePath, sourceSize, sourceCreateDate, linkPath, logger);
 
@@ -130,6 +135,17 @@ public static class LinkStateService
 
         if (row.Status == SyncStatus.Pending)
         {
+            return row;
+        }
+
+        // Applied again, which writes nothing over a link that is current and takes the source's
+        // subtitles and media info for the file as it is now.
+        if (replaced && row.Status == SyncStatus.Synced)
+        {
+            row.Status = SyncStatus.Queued;
+            row.PendingType = null;
+            row.StatusDate = DateTime.UtcNow;
+            logger.LogDebug("Re-queued the link {FileName} (the file changed on the source)", Path.GetFileName(row.LocalPath));
             return row;
         }
 

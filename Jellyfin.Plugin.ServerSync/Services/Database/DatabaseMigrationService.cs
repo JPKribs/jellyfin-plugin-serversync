@@ -16,7 +16,7 @@ public static class DatabaseMigrationService
     /// <summary>
     /// Current schema version. Increment this when adding new migrations.
     /// </summary>
-    public const int CurrentSchemaVersion = 33;
+    public const int CurrentSchemaVersion = 36;
 
     /// <summary>
     /// The oldest schema version whose code can still work with a database at
@@ -104,6 +104,9 @@ public static class DatabaseMigrationService
         syncItemsCmd.ExecuteNonQuery();
         CreateV32Additions(connection);
         CreateV33Additions(connection);
+        CreateV34Additions(connection);
+        CreateV35Additions(connection);
+        CreateV36Additions(connection);
 
         // ===== History Sync (HistorySyncItems) =====
         // One row per (user, library, item). Source/Local/Merged are five
@@ -380,6 +383,75 @@ public static class DatabaseMigrationService
         }
 
         AddColumnIfMissing(connection, transaction, "SyncItems", "StorageMode INTEGER NOT NULL DEFAULT 0");
+        transaction.Commit();
+    }
+
+    /// <summary>
+    /// Adds the record of media files that left the library, and the time that record began. A server
+    /// reading this one asks what was removed since it last looked, instead of listing everything.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void CreateV36Additions(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS RemovedItems (
+                Seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                ItemId TEXT NOT NULL,
+                RemovedAt TEXT NOT NULL,
+                Path TEXT,
+                OriginServerId TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_removed_items_at ON RemovedItems(RemovedAt);
+            CREATE TABLE IF NOT EXISTS RemovedItemsLog (StartedAt TEXT NOT NULL);
+            INSERT INTO RemovedItemsLog (StartedAt) SELECT @now WHERE NOT EXISTS (SELECT 1 FROM RemovedItemsLog);";
+        cmd.Parameters.AddWithValue("@now", Utilities.UtcTime.Format(DateTime.UtcNow));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the table that remembers when each failing row first failed. A failed row is tried again
+    /// on every run, which resets everything on the row that could say how long it has been failing,
+    /// so that is kept here, and the administrator is told once about a row that has failed for a day.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void CreateV35Additions(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS SyncAttention (
+                TableName TEXT NOT NULL,
+                RowId INTEGER NOT NULL,
+                FirstFailed TEXT NOT NULL,
+                Reason TEXT,
+                Reported INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(TableName, RowId)
+            );";
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the server each copy first came from, so a copy passed between servers that sync with each
+    /// other is still known as its origin's file, and is not handed back to it or kept alive without it.
+    /// </summary>
+    /// <param name="connection">Database connection.</param>
+    public static void CreateV34Additions(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        using var transaction = connection.BeginTransaction();
+        using (var exists = connection.CreateCommand())
+        {
+            exists.Transaction = transaction;
+            exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SyncItems'";
+            if (Convert.ToInt64(exists.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
+            {
+                return;
+            }
+        }
+
+        AddColumnIfMissing(connection, transaction, "SyncItems", "OriginServerId TEXT");
         transaction.Commit();
     }
 
@@ -774,6 +846,24 @@ public static class DatabaseMigrationService
             {
                 logger.LogInformation("Schema upgrade to v33: recording why a copy in a Link mapping is kept.");
                 CreateV33Additions(connection);
+            }
+
+            if (fromVersion < 34)
+            {
+                logger.LogInformation("Schema upgrade to v34: recording the server each copy first came from.");
+                CreateV34Additions(connection);
+            }
+
+            if (fromVersion < 35)
+            {
+                logger.LogInformation("Schema upgrade to v35: remembering when each failing row first failed.");
+                CreateV35Additions(connection);
+            }
+
+            if (fromVersion < 36)
+            {
+                logger.LogInformation("Schema upgrade to v36: recording the media files that leave the library.");
+                CreateV36Additions(connection);
             }
 
             JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(connection, CurrentSchemaVersion, MinReaderFor(connection));

@@ -46,7 +46,38 @@ public sealed class WhitelistUpgrade : IHostedService
             _logger.LogError(ex, "Could not apply the linking rules to existing servers after updating");
         }
 
+        try
+        {
+            FoldStreamIntoPush();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not turn the Stream servers into Push servers after updating");
+        }
+
         return Task.CompletedTask;
+    }
+
+    // Stream gave a server this one's files and told it nothing. Push gives the same, and tells it
+    // about changes in the libraries mapped on its entry. Every Stream entry becomes Push.
+    private void FoldStreamIntoPush()
+    {
+        var config = _configManager.Configuration;
+        var folded = 0;
+        foreach (var server in config.Servers ?? new System.Collections.Generic.List<SourceServer>())
+        {
+            if (server.Mode == ServerMode.Stream)
+            {
+                server.Mode = ServerMode.Push;
+                folded++;
+                _logger.LogInformation("'{Server}' was a Stream server and is now a Push server. It is given the same files and links. Map libraries on its entry to tell it about changes in them as they happen", server.DisplayName);
+            }
+        }
+
+        if (folded > 0)
+        {
+            _configManager.SaveConfiguration();
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -102,12 +133,12 @@ public sealed class WhitelistUpgrade : IHostedService
             {
                 if (server.LibraryMappings?.Any(m => m.IsEnabled) == true)
                 {
-                    _logger.LogWarning("'{Server}' is a Pull server allowed to link here, which is no longer possible, since Pull only reads from it. Set it to Sync, or to Stream if this server reads nothing from it", server.DisplayName);
+                    _logger.LogWarning("'{Server}' is a Pull server allowed to link here, which is no longer possible, since Pull only reads from it. Set it to Sync, or to Push if this server reads nothing from it", server.DisplayName);
                 }
                 else
                 {
-                    server.Mode = ServerMode.Stream;
-                    _logger.LogInformation("'{Server}' was a Pull server allowed to link here that maps no libraries, so it is now a Stream server", server.DisplayName);
+                    server.Mode = ServerMode.Push;
+                    _logger.LogInformation("'{Server}' was a Pull server allowed to link here that maps no libraries, so it is now a Push server", server.DisplayName);
                 }
             }
 

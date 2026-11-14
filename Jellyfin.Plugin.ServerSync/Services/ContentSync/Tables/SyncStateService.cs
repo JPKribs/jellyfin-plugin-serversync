@@ -257,6 +257,17 @@ public static class SyncStateService
         }
 
         var localFileExists = !string.IsNullOrEmpty(item.LocalPath) && File.Exists(item.LocalPath);
+
+        // A file that was already here when it was matched is this server's own. Another server
+        // removing its file is no reason to remove this one, whatever Removed files says: only the
+        // tracking goes, and the file stays where it is.
+        if (localFileExists && item.Kept == KeptReason.Own && !ownLink)
+        {
+            manager.DeleteByKey(item.SourceItemId);
+            logger.LogInformation("Kept {FileName}: it was on this server before it was matched to a source's file, so the source removing its own leaves it here", Path.GetFileName(item.LocalPath));
+            return new TransitionResult(true, "Kept, since the file was this server's own");
+        }
+
         if (!localFileExists)
         {
             manager.DeleteByKey(item.SourceItemId);

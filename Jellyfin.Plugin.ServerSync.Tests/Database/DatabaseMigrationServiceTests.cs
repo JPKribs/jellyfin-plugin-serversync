@@ -91,7 +91,7 @@ public class DatabaseMigrationServiceTests
     [Fact]
     public void CurrentSchemaVersion_IsThirtyThree()
     {
-        Assert.Equal(33, DatabaseMigrationService.CurrentSchemaVersion);
+        Assert.Equal(36, DatabaseMigrationService.CurrentSchemaVersion);
     }
 
     /// <summary>

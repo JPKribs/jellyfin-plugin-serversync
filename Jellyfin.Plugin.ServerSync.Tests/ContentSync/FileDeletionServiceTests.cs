@@ -112,6 +112,30 @@ public sealed class FileDeletionServiceTests : IDisposable
     }
 
     /// <summary>
+    /// A file replaced on the source by one that differs only in extension shares its name with the
+    /// new copy, so everything named after it belongs to the new copy once that is here.
+    /// True: deleting Title.mkv after Title.mp4 arrived leaves the subtitles, images, and trickplay Jellyfin now shows for Title.mp4.
+    /// False: the old file's deletion would strip the new file's images and trickplay.
+    /// </summary>
+    [Fact]
+    public void DeleteWithCompanions_SameNameInAnotherContainer_KeepsWhatItShares()
+    {
+        var old = Write("Title (2020).mkv", "old");
+        var replacement = Write("Title (2020).mp4", "new");
+        var subtitle = Write("Title (2020).en.srt", "1");
+        var thumb = Write("Title (2020)-thumb.jpg");
+        var trickplay = Write(Path.Combine("Title (2020).trickplay", "320 - 10x10", "0.jpg"));
+
+        Assert.True(FileDeletionService.DeleteWithCompanions(old, NullLogger.Instance, removeEmptyFolders: true, _root));
+
+        Assert.False(File.Exists(old));
+        Assert.True(File.Exists(replacement));
+        Assert.True(File.Exists(subtitle));
+        Assert.True(File.Exists(thumb));
+        Assert.True(File.Exists(trickplay));
+    }
+
+    /// <summary>
     /// A movie that had its folder to itself leaves nothing behind: its companions, its own images and
     /// trickplay, the title artwork and nfo, and, with empty folders removed, the folder itself. The
     /// library root stays.
