@@ -32,7 +32,7 @@ public sealed class HistorySyncTableManager
         ISyncDatabaseProvider databaseProvider,
         ILogger<HistorySyncTableManager> logger,
         IPluginConfigurationManager? configManager = null)
-        : base(GetDatabase(databaseProvider), logger)
+        : base(databaseProvider, logger)
     {
         _configManager = configManager;
     }
@@ -40,12 +40,6 @@ public sealed class HistorySyncTableManager
     // Whether rows should count a source that is behind as work. Not stored on the row, since it is
     // a property of the current configuration, so every row read from the database is stamped with
     // the live setting. The dashboard and the sync task then see the same answer the refresh did.
-
-    private static SyncDatabase GetDatabase(ISyncDatabaseProvider provider)
-    {
-        ArgumentNullException.ThrowIfNull(provider);
-        return provider.Database;
-    }
 
     /// <inheritdoc />
     protected override string TableName => "HistorySyncItems";

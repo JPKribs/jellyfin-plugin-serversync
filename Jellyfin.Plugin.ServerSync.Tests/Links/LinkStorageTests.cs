@@ -79,32 +79,6 @@ public sealed class LinkStorageTests : IDisposable
     }
 
     /// <summary>
-    /// The v32 step adds the column to an existing table and leaves every row a copy.
-    /// True: an upgrade changes nothing about files already synced.
-    /// False: an upgrade would lose rows or mark them as links.
-    /// </summary>
-    [Fact]
-    public void Migration_V32_KeepsRowsAsCopies()
-    {
-        using var conn = new SqliteConnection("Data Source=:memory:");
-        conn.Open();
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = @"
-                CREATE TABLE SyncItems (Id INTEGER PRIMARY KEY AUTOINCREMENT, SourceItemId TEXT NOT NULL, LocalPath TEXT);
-                INSERT INTO SyncItems (SourceItemId, LocalPath) VALUES ('old', '/m/Old.mkv');";
-            cmd.ExecuteNonQuery();
-        }
-
-        DatabaseMigrationService.CreateV32Additions(conn);
-        DatabaseMigrationService.CreateV32Additions(conn);
-
-        using var read = conn.CreateCommand();
-        read.CommandText = "SELECT StorageMode FROM SyncItems WHERE SourceItemId = 'old'";
-        Assert.Equal(0L, read.ExecuteScalar());
-    }
-
-    /// <summary>
     /// The registry finds a link by its own path and by the path its copy would have.
     /// True: lookups by a translated source path reach the link.
     /// False: a linked item would look missing to every module.
@@ -402,8 +376,7 @@ public sealed class LinkStorageTests : IDisposable
     }
 
     /// <summary>
-    /// A database names v28 as its oldest reader until it holds a link, and v32 once it does, and a later
-    /// migration keeps that floor.
+    /// A database names v28 as its oldest reader until it holds a link, and v32 once it does.
     /// True: an older build that would download media over a .strm sets a database with links aside.
     /// False: a downgrade with links in place would overwrite every link with a copy's bytes.
     /// </summary>
@@ -412,9 +385,9 @@ public sealed class LinkStorageTests : IDisposable
     {
         using var conn = new SqliteConnection("Data Source=:memory:");
         conn.Open();
-        DatabaseMigrationService.CreateInitialSchema(conn);
-        JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(conn, DatabaseMigrationService.CurrentSchemaVersion, DatabaseMigrationService.MinReaderVersion);
-        Assert.Equal(DatabaseMigrationService.MinReaderVersion, DatabaseMigrationService.MinReaderFor(conn));
+        SyncSchema.Create(conn);
+        JPKribs.Jellyfin.Base.DatabaseSchema.Stamp(conn, SyncSchema.CurrentSchemaVersion, SyncSchema.MinReaderVersion);
+        Assert.Equal(SyncSchema.MinReaderVersion, SyncSchema.MinReaderFor(conn));
 
         using (var insert = conn.CreateCommand())
         {
@@ -423,9 +396,7 @@ public sealed class LinkStorageTests : IDisposable
             insert.ExecuteNonQuery();
         }
 
-        Assert.Equal(DatabaseMigrationService.LinkReaderVersion, DatabaseMigrationService.MinReaderFor(conn));
-        Assert.True(DatabaseMigrationService.MigrateSchema(conn, DatabaseMigrationService.CurrentSchemaVersion - 1, NullLogger.Instance));
-        Assert.Equal(DatabaseMigrationService.LinkReaderVersion, JPKribs.Jellyfin.Base.DatabaseSchema.GetMinReaderVersion(conn));
+        Assert.Equal(SyncSchema.LinkReaderVersion, SyncSchema.MinReaderFor(conn));
     }
 
     /// <summary>
@@ -444,7 +415,7 @@ public sealed class LinkStorageTests : IDisposable
 
         using var reader = new SqliteConnection($"Data Source={Path.Combine(_dir, "serversync", "sync.db")};Mode=ReadOnly");
         reader.Open();
-        Assert.Equal(DatabaseMigrationService.LinkReaderVersion, JPKribs.Jellyfin.Base.DatabaseSchema.GetMinReaderVersion(reader));
+        Assert.Equal(SyncSchema.LinkReaderVersion, JPKribs.Jellyfin.Base.DatabaseSchema.GetMinReaderVersion(reader));
     }
 
     /// <summary>

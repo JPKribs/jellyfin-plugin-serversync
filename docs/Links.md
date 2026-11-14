@@ -337,8 +337,6 @@ The link cache logs why a file was not cached:
 
 ## Upgrades and Downgrades
 
-Links add one column to Server Sync's database. Updating keeps every row as it was, and copies stay copies.
-
-12.2.11.0 changes nothing in the database. An older release does not know the link cache: it drops the cache's settings and leaves the cache's folder as it is. Use **Empty the Cache** before downgrading to free the disk. Links then stream from their sources as before.
+Updating has a floor: see [Versioning](Versioning.md#updating-from-an-older-release).
 
 Once a server holds a link, its database tells older releases not to use it. An older release then sets the database aside and starts fresh rather than mistake a `.strm` for a broken copy and download over it. The old database is kept beside the new one as a `.newer-*` backup. The `.strm` files are left as they are, and the older release downloads full copies beside them. A server that never held a link can be downgraded as before.

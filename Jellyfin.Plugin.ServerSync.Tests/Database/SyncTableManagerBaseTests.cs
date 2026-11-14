@@ -61,7 +61,7 @@ public sealed class SyncTableManagerBaseTests : IDisposable
     private sealed class FailingReadManager : SyncTableManagerBase<PeopleSyncItem, string>
     {
         public FailingReadManager(SyncDatabase database)
-            : base(database, NullLogger.Instance)
+            : base(new FixedProvider(database), NullLogger.Instance)
         {
         }
 

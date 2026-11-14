@@ -77,44 +77,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Manually triggers the refresh user sync table task.
-    /// </summary>
-    [HttpPost("TriggerUserRefresh")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerUserRefresh()
-        => ExecuteScheduledTaskByKey("ServerSyncRefreshUserTable", "User refresh task started", "User refresh task not found");
-
-    /// <summary>
-    /// Manually triggers the sync missing user data task.
-    /// </summary>
-    [HttpPost("TriggerUserSync")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerUserSync()
-        => ExecuteScheduledTaskByKey("ServerSyncMissingUserData", "User sync task started", "User sync task not found");
-
-    /// <summary>
-    /// Resets the user sync database, removing all tracked user sync items.
-    /// </summary>
-    [HttpPost("ResetUserSyncDatabase")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetUserSyncDatabase([FromServices] UserSyncTableManager manager)
-    {
-        try
-        {
-            var deleted = manager.ResetTable();
-            _logger.LogInformation("User sync database has been reset, {Count} rows deleted", deleted);
-            return Ok(new { Success = true, Message = "User sync database reset successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to reset user sync database");
-            return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
-        }
-    }
-
-    /// <summary>
     /// Gets paginated list of user sync users (consolidated view).
     /// Groups items by (SourceUserId, LocalUserId) showing one row per user.
     /// </summary>

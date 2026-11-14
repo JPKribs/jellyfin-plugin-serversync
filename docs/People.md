@@ -6,6 +6,7 @@ People syncing copies person entities from a source Jellyfin server onto this se
 
 * **Enable People Sync** turns people syncing on.
 * **Images** syncs profile images for people, along with any backdrops a person carries.
+* **Precedence** chooses which server is heard for a person several servers know: the one whose edit is newest, or always the highest ranked. See [Several servers](SyncTypes.md#several-servers).
 
 ## Images
 

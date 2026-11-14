@@ -104,29 +104,24 @@ public sealed class AuditFixTests : IDisposable
     }
 
     /// <summary>
-    /// Rows from before servers became a list are given the first scan server's key, and errored rows that
-    /// sat for a day are queued again with fresh retries.
-    /// True: removing that server removes its rows, and a peer that restarted does not leave rows errored forever.
-    /// False: legacy rows belong to whichever server connects first, and transient failures are permanent.
+    /// Errored rows that sat for a day are queued again with fresh retries.
+    /// True: a peer that restarted does not leave rows errored forever.
+    /// False: transient failures are permanent.
     /// </summary>
     [Fact]
-    public void Maintenance_BackfillsKeysAndRequeuesErrored()
+    public void Maintenance_RequeuesErrored()
     {
         var table = new HistorySyncTableManager(_provider, NullLogger<HistorySyncTableManager>.Instance);
         var row = Row(negotiatedAt: null, played: true);
-        row.ServerKey = null;
         row.Status = SyncStatus.Errored;
         row.RetryCount = 5;
         row.StatusDate = DateTime.UtcNow.AddDays(-2);
         table.Upsert(row);
 
         var store = new MaintenanceStore(_provider, NullLogger<MaintenanceStore>.Instance);
-        Assert.Equal(1, store.BackfillServerKey("first"));
-        Assert.Equal(0, store.BackfillServerKey("first"));
         Assert.Equal(1, store.RequeueErrored(DateTime.UtcNow.AddDays(-1)));
 
         var held = table.GetByKey(("su", "si"));
-        Assert.Equal("first", held?.ServerKey);
         Assert.Equal(SyncStatus.Queued, held?.Status);
         Assert.Equal(0, held?.RetryCount);
     }

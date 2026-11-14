@@ -94,9 +94,8 @@ internal static class ScanSources
     }
 
     /// <summary>
-    /// Finds the connected source for a server entry key. A null key is a row written before servers
-    /// became a list and belongs to the first configured scan server, which is where the single source
-    /// migrated to, not to whichever server happened to connect first.
+    /// Finds the connected source for a server entry key. A row with no key belongs to the first
+    /// configured scan server, not to whichever server happened to connect first.
     /// </summary>
     /// <param name="sources">The sources connected this run.</param>
     /// <param name="configManager">The configuration.</param>

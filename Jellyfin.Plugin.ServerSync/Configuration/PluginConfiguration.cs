@@ -25,152 +25,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public List<SourceServer> Servers { get; set; } = new();
 
-    // ===== Legacy single source =====
-    // The fields below carried the single source before servers became a list. They are still read so an
-    // older configuration file loads, then MigrateLegacyServer moves them into the first entry of Servers
-    // and they are never written again.
-
-    public string SourceServerUrl { get; set; } = string.Empty;
-
-    /// <summary>
-    /// When true (default), the source-server URL is allowed to point at
-    /// loopback, RFC1918, or IPv6 ULA addresses, typical for home Jellyfin
-    /// installs where the source server runs on the same LAN. When false, the
-    /// URL must resolve to a public address. Loopback/private ranges are
-    /// rejected. Cloud-metadata endpoints (169.254.0.0/16, IPv6 link-local,
-    /// IPv6 site-local, 0.0.0.0) are always blocked regardless of this flag.
-    /// </summary>
-    public bool AllowSourceServerOnPrivateNetwork { get; set; } = true;
-
-    /// <summary>
-    /// Optional external URL for the source server, used only for image display in the UI.
-    /// When set, image thumbnails in sync tables and filter browsers use this URL instead
-    /// of SourceServerUrl. Useful when the sync connection uses an internal/VPN address
-    /// but the browser needs a public URL to load images.
-    /// </summary>
-    public string SourceServerExternalUrl { get; set; } = string.Empty;
-
-    /// <summary>
-    /// API key or access token for authenticating with the source server.
-    /// Can be either a manually entered API key or a token generated from username/password.
-    /// </summary>
-    public string SourceServerApiKey { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Username that was used to generate the access token.
-    /// Empty if using a manually entered API key.
-    /// </summary>
-    public string SourceServerAuthenticatedUser { get; set; } = string.Empty;
-
-    /// <summary>
-    /// User ID of the authenticated user on the source server.
-    /// Used for user-scoped API fallbacks when the user is not an admin.
-    /// Empty if using a manually entered API key.
-    /// </summary>
-    public string SourceServerAuthenticatedUserId { get; set; } = string.Empty;
-
-    public string SourceServerName { get; set; } = string.Empty;
-
-    public string SourceServerId { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Library mappings between source and local servers.
-    /// Shared by ContentSync and HistorySync features.
-    /// </summary>
-    public List<LibraryMapping> LibraryMappings { get; set; } = new();
-
-    /// <summary>
-    /// User mappings between source and local servers.
-    /// Used by HistorySync and UserSync features.
-    /// </summary>
-    public List<UserMapping> UserMappings { get; set; } = new();
-
-    /// <summary>Suppresses the legacy element. See <see cref="MigrateLegacyServer"/>.</summary>
-    public bool ShouldSerializeSourceServerUrl() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeAllowSourceServerOnPrivateNetwork() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeSourceServerExternalUrl() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeSourceServerApiKey() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeSourceServerAuthenticatedUser() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeSourceServerAuthenticatedUserId() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeSourceServerName() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeSourceServerId() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeLibraryMappings() => false;
-
-    /// <summary>Suppresses the legacy element.</summary>
-    public bool ShouldSerializeUserMappings() => false;
-
-    /// <summary>
-    /// Moves a single source written by an older version into the first entry of <see cref="Servers"/>.
-    /// Runs on every load and save and does nothing once the list has an entry or the legacy fields are
-    /// empty, so it is safe to call repeatedly.
-    /// </summary>
-    /// <returns><c>true</c> when an entry was created.</returns>
-    public bool MigrateLegacyServer()
-    {
-        // The plugin also calls this on load, before any save has sanitized the file, so a list read
-        // back as null is replaced here rather than throwing on the count below.
-        Servers ??= new List<SourceServer>();
-
-        var hasLegacyData = !string.IsNullOrWhiteSpace(SourceServerUrl)
-            || !string.IsNullOrWhiteSpace(SourceServerApiKey)
-            || (LibraryMappings?.Count ?? 0) > 0
-            || (UserMappings?.Count ?? 0) > 0;
-        if (Servers.Count > 0 || !hasLegacyData)
-        {
-            ClearLegacyServer();
-            return false;
-        }
-
-        Servers.Add(new SourceServer
-        {
-            Name = SourceServerName,
-            Url = SourceServerUrl,
-            ExternalUrl = SourceServerExternalUrl,
-            AllowPrivateNetwork = AllowSourceServerOnPrivateNetwork,
-            ApiKey = SourceServerApiKey,
-            AuthenticatedUser = SourceServerAuthenticatedUser,
-            AuthenticatedUserId = SourceServerAuthenticatedUserId,
-            ServerName = SourceServerName,
-            ServerId = SourceServerId,
-            Mode = ServerMode.Pull,
-            IsEnabled = true,
-            LibraryMappings = LibraryMappings ?? new List<LibraryMapping>(),
-            UserMappings = UserMappings ?? new List<UserMapping>()
-        });
-
-        ClearLegacyServer();
-        return true;
-    }
-
-    private void ClearLegacyServer()
-    {
-        SourceServerUrl = string.Empty;
-        SourceServerExternalUrl = string.Empty;
-        SourceServerApiKey = string.Empty;
-        SourceServerAuthenticatedUser = string.Empty;
-        SourceServerAuthenticatedUserId = string.Empty;
-        SourceServerName = string.Empty;
-        SourceServerId = string.Empty;
-        LibraryMappings = new List<LibraryMapping>();
-        UserMappings = new List<UserMapping>();
-    }
-
     // ===== Content Sync Configuration =====
 
     public bool EnableContentSync { get; set; }
@@ -191,12 +45,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// cannot tell two viewers of one link apart.
     /// </summary>
     public bool StreamLinksDirectly { get; set; } = true;
-
-    /// <summary>
-    /// Whether the copies tracked before origins were recorded have been looked at once and marked:
-    /// each as this server's own file, or as a download with the server it came from.
-    /// </summary>
-    public bool ExistingCopiesMarked { get; set; }
 
     /// <summary>
     /// The most links this server streams from other servers at once, across all of them, or 0 for no
@@ -550,6 +398,17 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool UserSyncProfileImage { get; set; } = true;
 
     /// <summary>
+    /// Which server speaks for a user's settings when several map a user onto the same local user.
+    /// </summary>
+    public SyncPrecedence UserSyncPrecedence { get; set; } = SyncPrecedence.Newest;
+
+    /// <summary>
+    /// What a user's permissions become when this server and a Sync server both changed them since
+    /// the two last agreed.
+    /// </summary>
+    public UserConflictRule UserSyncConflict { get; set; } = UserConflictRule.Newest;
+
+    /// <summary>
     /// Timestamp when the last user sync completed.
     /// </summary>
     public DateTime? LastUserSyncTime { get; set; }
@@ -560,6 +419,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Enable metadata synchronization between servers.
     /// </summary>
     public bool EnableMetadataSync { get; set; }
+
+    /// <summary>
+    /// Which server speaks for an item's metadata when several hold the item.
+    /// </summary>
+    public SyncPrecedence MetadataSyncPrecedence { get; set; } = SyncPrecedence.Newest;
 
     /// <summary>
     /// Sync core metadata fields (title, overview, ratings, dates, provider IDs).
@@ -610,6 +474,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Syncs person metadata (biography, provider IDs, images) by matching people by name.
     /// </summary>
     public bool EnablePeopleSync { get; set; }
+
+    /// <summary>
+    /// Which server speaks for a person when several know the person.
+    /// </summary>
+    public SyncPrecedence PeopleSyncPrecedence { get; set; } = SyncPrecedence.Newest;
 
     /// <summary>
     /// Sync person images (Primary, etc.) from source to local.
@@ -675,23 +544,13 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public List<PeerCallerGrant> PeerCallerGrants { get; set; } = new();
 
-    public bool PeerCallerWhitelistSeeded { get; set; }
-
-    /// <summary>
-    /// Gets or sets a value indicating whether the linking rules of 12.4.12.0 were applied to entries
-    /// made before them: a Pull entry allowed to link that maps no libraries becomes Stream.
-    /// </summary>
-    public bool LinkRulesUpgraded { get; set; }
-
     /// <summary>
     /// Verify source image sizes with live HTTP calls on every refresh, even
     /// for images whose tag hasn't changed. Applies to all sync modules.
     /// Catches the rare case of an image file replaced on the source's disk
     /// without a metadata rescan, at the cost of one GET plus one HEAD per
     /// image per item per refresh. Off by default, unchanged tags reuse the
-    /// previously measured sizes. Replaces the per-module
-    /// MetadataSyncDeepImageVerification / PeopleSyncDeepImageVerification
-    /// settings from 10.11.64.0.
+    /// previously measured sizes.
     /// </summary>
     public bool DeepImageVerification { get; set; }
 
@@ -709,39 +568,15 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool PlaylistSyncShares { get; set; } = true;
 
     /// <summary>
-    /// Legacy 10.11.64.0 element. XML deserialization drops unknown elements,
-    /// so without this shim a user who enabled per-module deep verification
-    /// would have the feature silently reset to off on upgrade. Reads map onto
-    /// <see cref="DeepImageVerification"/>. Never serialized back out.
+    /// Which copy of a playlist wins between this server and a Sync server: the one edited last, or
+    /// always the other server's when it ranks above this server's own edits.
     /// </summary>
-    [XmlElement("MetadataSyncDeepImageVerification")]
-    [Browsable(false)]
-    public bool LegacyMetadataSyncDeepImageVerification
-    {
-        get => false;
-        set => DeepImageVerification |= value;
-    }
+    public SyncPrecedence PlaylistSyncPrecedence { get; set; } = SyncPrecedence.Newest;
 
     /// <summary>
-    /// Legacy 10.11.64.0 element. See <see cref="LegacyMetadataSyncDeepImageVerification"/>.
+    /// What happens to a copied playlist when the server it came from deletes its own.
     /// </summary>
-    [XmlElement("PeopleSyncDeepImageVerification")]
-    [Browsable(false)]
-    public bool LegacyPeopleSyncDeepImageVerification
-    {
-        get => false;
-        set => DeepImageVerification |= value;
-    }
-
-    /// <summary>
-    /// Suppresses serialization of the legacy metadata element.
-    /// </summary>
-    public bool ShouldSerializeLegacyMetadataSyncDeepImageVerification() => false;
-
-    /// <summary>
-    /// Suppresses serialization of the legacy people element.
-    /// </summary>
-    public bool ShouldSerializeLegacyPeopleSyncDeepImageVerification() => false;
+    public PlaylistRemovedAction PlaylistRemovedAction { get; set; } = PlaylistRemovedAction.Delete;
 
     /// <summary>
     /// Validates configuration values and returns a list of validation errors.
@@ -964,14 +799,6 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         MaxConcurrentDownloads = Math.Clamp(MaxConcurrentDownloads, 1, 10);
         MaxDownloadSpeed = Math.Max(0, MaxDownloadSpeed);
-        // Stream was folded into Push. A configuration saved with it, by an older page or a script, is kept as Push.
-        foreach (var server in Servers ?? new List<SourceServer>())
-        {
-            if (server.Mode == ServerMode.Stream)
-            {
-                server.Mode = ServerMode.Push;
-            }
-        }
 
         LinkCacheSizeGb = Math.Clamp(LinkCacheSizeGb, 0, 1_000_000);
         LinkCachePercent = Math.Clamp(LinkCachePercent, 1, 100);
@@ -1082,7 +909,7 @@ public class PluginConfiguration : BasePluginConfiguration
             .Take(200)
             .ToList();
 
-        MigrateLegacyServer();
+        Servers ??= new List<SourceServer>();
 
         foreach (var server in Servers)
         {
@@ -1267,8 +1094,7 @@ public static class PluginConfigurationExtensions
     }
 
     /// <summary>
-    /// Resolves the server a sync row came from. Rows written before servers became a list carry no key
-    /// and belong to the first scan server, which is where the single source migrated to.
+    /// Resolves the server a sync row came from. A row that carries no key belongs to the first scan server.
     /// </summary>
     /// <param name="config">The configuration.</param>
     /// <param name="key">The entry key carried on the row, or null.</param>

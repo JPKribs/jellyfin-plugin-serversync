@@ -22,7 +22,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// sent or failed for a week, pending versions whose values never applied, and the versions of items and
 /// users this server no longer has, gives rows that errored more than a day ago a fresh set of retries,
 /// forgets copies of playlists that were deleted, and removes the backups a finished file replacement
-/// left behind. It also gives rows from before servers became a list the key of the server they belong to.
+/// left behind.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class QueueMaintenanceService : IHostedService, IDisposable
@@ -118,12 +118,6 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     public void RunOnce()
     {
         var now = DateTime.UtcNow;
-        Step("backfill server keys", () =>
-        {
-            var first = _configManager.Configuration.GetPullServers().FirstOrDefault();
-            return first is null ? 0 : _store.BackfillServerKey(first.Key);
-        });
-        Step("mark the copies tracked before origins were recorded", MarkExistingCopies);
         Step("expire settled hints", () => _outbound.ExpireSettled(now - SettledKept));
         Step("prune pending versions", () => _versions.PrunePending(now - PendingKept));
         // Before the requeue, while the rows that failed on the last run still read as failed.
@@ -177,40 +171,6 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         }
 
         return standing.Count;
-    }
-
-    // Once, after the update that records where a copy came from. A copy tracked before it says
-    // neither, so each is looked at: one that never went through a download was on this server
-    // already and is its own, and one that did was given by the server its row names. From then on
-    // the old rows follow the same rules as new ones: a server's own file stays when another removes
-    // theirs, and a download is known as its origin's file.
-    private int MarkExistingCopies()
-    {
-        var config = _configManager.Configuration;
-        if (config.ExistingCopiesMarked)
-        {
-            return 0;
-        }
-
-        var content = SyncModuleMutex.ForModule("Content");
-        if (!content.Wait(0))
-        {
-            return 0;
-        }
-
-        var marked = 0;
-        try
-        {
-            marked = ExistingCopies.Mark(_services.GetRequiredService<ContentSyncTableManager>(), config);
-        }
-        finally
-        {
-            content.Release();
-        }
-
-        config.ExistingCopiesMarked = true;
-        _configManager.SaveConfiguration();
-        return marked;
     }
 
     private int ForgetDeletedPlaylistCopies()

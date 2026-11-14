@@ -227,7 +227,7 @@ export function createSyncTableKit(ctx) {
                 btn.disabled = true;
                 btn.querySelector('span').textContent = 'Starting...';
 
-                ServerSyncShared.apiRequest(task.endpoint, 'POST').then(function() {
+                ServerSyncShared.apiRequest('Tasks/' + task.key + '/Run', 'POST').then(function() {
                     _activePollIntervals.push(ServerSyncShared.pollTaskProgress(btn, task.key, label, function() {
                         self.loadAll();
                     }));

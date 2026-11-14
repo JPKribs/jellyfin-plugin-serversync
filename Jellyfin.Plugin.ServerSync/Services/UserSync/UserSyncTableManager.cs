@@ -25,14 +25,8 @@ public sealed class UserSyncTableManager
     /// Initializes a new instance.
     /// </summary>
     public UserSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<UserSyncTableManager> logger)
-        : base(GetDatabase(databaseProvider), logger)
+        : base(databaseProvider, logger)
     {
-    }
-
-    private static SyncDatabase GetDatabase(ISyncDatabaseProvider provider)
-    {
-        ArgumentNullException.ThrowIfNull(provider);
-        return provider.Database;
     }
 
     /// <inheritdoc />

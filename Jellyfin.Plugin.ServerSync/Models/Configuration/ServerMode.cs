@@ -3,8 +3,7 @@ using System.Xml.Serialization;
 namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 
 /// <summary>
-/// What this server does with a configured server. The saved form keeps the original names, so a
-/// configuration written before the rename still loads.
+/// What this server does with a configured server. The settings file stores them as Scan, Send, and Both.
 /// </summary>
 public enum ServerMode
 {
@@ -18,13 +17,5 @@ public enum ServerMode
 
     /// <summary>Pull and Push together, for a pool of equals.</summary>
     [XmlEnum("Both")]
-    Sync = 2,
-
-    /// <summary>
-    /// The other server may download this server's files, and link to and stream them when linking is
-    /// allowed, and nothing else: this server never reads from it, never sends it changes, and turns away
-    /// its hints. It maps no libraries here. Needs the plugin there, where this server is a Pull server.
-    /// </summary>
-    [XmlEnum("Stream")]
-    Stream = 3
+    Sync = 2
 }

@@ -54,7 +54,9 @@
 }
 
 /* ===== Layout Utility Classes ===== */
-.jpk-collapsible-actions { border-top: none; padding-top: 0; }
+.jpk-collapsible-actions { border-top: none; padding-top: 0; align-items: center; }
+/* The words beside a button sit on its centre line, not under its top edge. */
+.jpk-collapsible-actions .jpk-status-text { margin-top: 0; }
 
 .modal-relative { position: relative; }
 
@@ -981,4 +983,10 @@ div:not(.ssFormRow) + .ssFormRow {
 }
 .resetButtonInfo .fieldDescription {
     margin-top: 2px;
+}
+
+.ssHealthBanner {
+    margin: 1em 0 !important;
+    font-size: 1em;
+    line-height: 1.5;
 }

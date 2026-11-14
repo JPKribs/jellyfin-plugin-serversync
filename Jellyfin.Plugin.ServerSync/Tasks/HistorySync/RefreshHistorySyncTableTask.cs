@@ -400,14 +400,57 @@ public class RefreshHistorySyncTableTask
         return string.IsNullOrEmpty(record.LocalPath) ? null : record.LocalUserId + "|" + record.LocalPath;
     }
 
+    // History is merged, not replaced, so every server that holds a file has something to add. One
+    // server speaks for a file on each run: the highest ranked one whose history of it has moved since
+    // this server last looked, or that this server has never looked at. When none has moved, rank
+    // decides. A server passed over this run is heard on the next, since what it holds still differs
+    // from what was last seen of it, so every server's history is merged in over a few runs and none
+    // is merged against a state another merge has already changed.
+    /// <inheritdoc />
+    protected override Task<IReadOnlyDictionary<string, HistoryWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<HistoryWork>> contested, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(contested);
+        var winners = new Dictionary<string, HistoryWork>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, offers) in contested)
+        {
+            var moved = offers.FirstOrDefault(HasMovedSinceSeen);
+            if (moved is not null && !ReferenceEquals(moved, offers[0]))
+            {
+                winners[key] = moved;
+            }
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, HistoryWork>>(winners);
+    }
+
+    // On a run that lists only what changed, a server lists a file because its history of it moved.
+    /// <inheritdoc />
+    protected override bool MayOutrankOwner(HistorySyncItem record) => true;
+
+    private bool HasMovedSinceSeen(HistoryWork offer)
+    {
+        if (offer.SourceItem.Id is not { } id
+            || !ExistingRows.TryGetValue((offer.UserMapping.SourceUserId, id.ToString("N", CultureInfo.InvariantCulture)), out var seen))
+        {
+            return true;
+        }
+
+        var now = offer.SourceItem.UserData;
+        return seen.SourceIsPlayed != now?.Played
+            || seen.SourcePlayCount != now?.PlayCount
+            || seen.SourcePlaybackPositionTicks != now?.PlaybackPositionTicks
+            || seen.SourceIsFavorite != now?.IsFavorite
+            || !HistorySyncMergeService.SameInstantToSecond(seen.SourceLastPlayedDate, now?.LastPlayedDate?.UtcDateTime);
+    }
+
     /// <summary>
-    /// A history row that holds a negotiated base is kept when another server covers its item. The base
-    /// belongs to this server and that row's server, and every hint between the two merges against it. A
-    /// full mesh creates such rows for lower priority servers on purpose.
+    /// A history row is kept when another server speaks for its file. It records what was last seen of
+    /// its own server, which is how that server is known to have moved, and a negotiated base belongs
+    /// to this server and that row's server alone.
     /// </summary>
     /// <param name="record">The row.</param>
-    /// <returns>True when it may be retired.</returns>
-    protected override bool CanRetire(HistorySyncItem record) => base.CanRetire(record) && !record.HasNegotiatedBase;
+    /// <returns>Always false.</returns>
+    protected override bool CanRetire(HistorySyncItem record) => false;
 
     // In scope when both the row's library mapping AND its user mapping are
     // currently enabled. Disabling either preserves history rows instead of

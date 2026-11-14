@@ -91,6 +91,31 @@ public class RefreshMetadataSyncTableTask
             Logger,
             cancellationToken);
 
+    private HashSet<string> _versionedServers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    protected override async Task PrepareContestAsync(CancellationToken cancellationToken)
+        => _versionedServers = ConfigManager.Configuration.MetadataSyncPrecedence == Models.Configuration.SyncPrecedence.Rank
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : await _conflicts.ServersWithVersionsAsync(Sources, cancellationToken).ConfigureAwait(false);
+
+    // Among the servers offering one item, the one that holds the newest recorded edit of it speaks.
+    /// <inheritdoc />
+    protected override Task<IReadOnlyDictionary<string, MetadataWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<MetadataWork>> contested, CancellationToken cancellationToken)
+        => _conflicts.NewestOffersAsync(
+            contested,
+            Models.Queue.HintKind.Metadata,
+            _versionedServers,
+            work => work.Source,
+            work => work.SourceItem.Id?.ToString("N", CultureInfo.InvariantCulture),
+            cancellationToken);
+
+    // On a run that lists only what changed, a change on a lower ranked server that keeps versions is
+    // weighed against this server's value by ResolveConflictsAsync, not dropped for its rank.
+    /// <inheritdoc />
+    protected override bool MayOutrankOwner(MetadataSyncItem record)
+        => record?.ServerKey is { } key && _versionedServers.Contains(key);
+
     /// <inheritdoc />
     public override string Name => "Refresh Metadata Sync Table";
 

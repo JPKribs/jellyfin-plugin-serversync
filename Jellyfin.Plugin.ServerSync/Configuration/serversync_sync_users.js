@@ -43,8 +43,8 @@ export function createUserSyncTableModule(ctx, kit) {
         idKey: function(item) { return item.SourceUserId + '|' + item.LocalUserId; },
         selectionBody: function(keys) { return { UserMappings: userMappingsFromKeys(keys) }; },
         tasks: {
-            refresh: { endpoint: 'TriggerUserRefresh', key: 'ServerSyncRefreshUserTable' },
-            sync: { endpoint: 'TriggerUserSync', key: 'ServerSyncMissingUserData' }
+            refresh: { key: 'ServerSyncRefreshUserTable' },
+            sync: { key: 'ServerSyncMissingUserData' }
         },
         taskNoun: 'user',
         singularNoun: 'User',

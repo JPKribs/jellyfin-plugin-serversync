@@ -143,50 +143,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets detailed sync statistics for health dashboard.
-    /// </summary>
-    /// <returns>Sync stats response.</returns>
-    [HttpGet("Stats")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public ActionResult<SyncStatsResponse> GetSyncStats([FromServices] ContentSyncTableManager manager)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        try
-        {
-            var config = _configManager.Configuration;
-            var stats = manager.GetSyncStats();
-            var pendingCounts = manager.GetPendingCounts();
-            var diskInfo = DiskSpaceService.GetMinimumDiskSpaceInfo(config);
-
-            return Ok(new SyncStatsResponse
-            {
-                TotalItems = stats.StatusCounts.Values.Sum(),
-                SyncedItems = stats.StatusCounts.GetValueOrDefault(SyncStatus.Synced, 0),
-                QueuedItems = stats.StatusCounts.GetValueOrDefault(SyncStatus.Queued, 0),
-                ErroredItems = stats.StatusCounts.GetValueOrDefault(SyncStatus.Errored, 0),
-                PendingItems = stats.StatusCounts.GetValueOrDefault(SyncStatus.Pending, 0),
-                PendingDownloadItems = pendingCounts.GetValueOrDefault(PendingType.Download, 0),
-                PendingReplacementItems = pendingCounts.GetValueOrDefault(PendingType.Replacement, 0),
-                PendingDeletionItems = pendingCounts.GetValueOrDefault(PendingType.Deletion, 0),
-                IgnoredItems = stats.StatusCounts.GetValueOrDefault(SyncStatus.Ignored, 0),
-                TotalSyncedBytes = stats.TotalSyncedBytes,
-                TotalQueuedBytes = stats.TotalQueuedBytes,
-                LastSyncTime = stats.LastSyncTime,
-                LastSyncStartTime = config.LastSyncStartTime,
-                LastSyncEndTime = config.LastSyncEndTime,
-                FreeDiskSpaceBytes = diskInfo?.FreeBytes ?? 0,
-                MinimumRequiredBytes = (long)config.MinimumFreeDiskSpaceGb * 1024 * 1024 * 1024,
-                HasSufficientDiskSpace = diskInfo?.IsSufficient ?? true
-            });
-        }
-        catch (ObjectDisposedException)
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, "Database is not available");
-        }
-    }
-
-    /// <summary>
     /// Gets the total size of pending items to be synced.
     /// Calculates: PendingDownload + PendingReplacement + Queued - PendingDeletion
     /// </summary>
@@ -220,26 +176,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Manually triggers the sync task.
-    /// </summary>
-    /// <returns>Action result with status message.</returns>
-    [HttpPost("TriggerSync")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerSync()
-        => ExecuteScheduledTaskByKey("ServerSyncDownloadContent", "Sync task started", "Download task not found");
-
-    /// <summary>
-    /// Manually triggers the refresh sync table task.
-    /// </summary>
-    /// <returns>Action result with status message.</returns>
-    [HttpPost("TriggerRefresh")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerRefresh()
-        => ExecuteScheduledTaskByKey("ServerSyncUpdateTables", "Refresh task started", "Refresh task not found");
-
-    /// <summary>
     /// Resets errored items for retry.
     /// </summary>
     /// <param name="request">Optional request with specific item IDs.</param>
@@ -269,31 +205,6 @@ public partial class ConfigurationController
             }
         }
 
-        return Ok(new { Success = true });
-    }
-
-    /// <summary>
-    /// Updates the status of a sync item.
-    /// </summary>
-    /// <param name="request">Status update request.</param>
-    /// <returns>Action result with success status.</returns>
-    [HttpPost("UpdateItemStatus")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult UpdateItemStatus(
-        [FromServices] ContentSyncTableManager manager,
-        [FromBody] UpdateItemStatusRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        ArgumentNullException.ThrowIfNull(request);
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status)
-            || status == SyncStatus.Deleting)
-        {
-            // Deleting schedules unattended file removal. It is only ever set
-            // by the refresh pipeline or the approval flow, never directly.
-            return BadRequest("Invalid status value");
-        }
-
-        manager.UpdateStatus(request.SourceItemId, status);
         return Ok(new { Success = true });
     }
 

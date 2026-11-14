@@ -40,20 +40,19 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // Links: the filter on Jellyfin's own playback routes, which does nothing for any item that is
         // not one of this server's links, and the probe that gives a new link its media info.
         serviceCollection.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.AddService<Services.Links.LinkPlaybackFilter>());
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkProbe>());
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkPlaybackReporter>());
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkSessionSweeper>());
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Links.LinkCacheFiller>());
+        serviceCollection.AddHostedService<Gate<Services.Links.LinkProbe>>();
+        serviceCollection.AddHostedService<Gate<Services.Links.LinkPlaybackReporter>>();
+        serviceCollection.AddHostedService<Gate<Services.Links.LinkSessionSweeper>>();
+        serviceCollection.AddHostedService<Gate<Services.Links.LinkCacheFiller>>();
 
         // The hint pipeline runs for the life of the server. Each worker is registered once as itself,
         // by the attribute scan above, and once more as a hosted service that resolves that same
         // instance, so the controllers and the publisher talk to the running worker.
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.OutboundHintWorker>());
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.InboundHintWorker>());
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.LocalChangeObserver>());
+        serviceCollection.AddHostedService<Gate<Services.Queue.OutboundHintWorker>>();
+        serviceCollection.AddHostedService<Gate<Services.Queue.InboundHintWorker>>();
+        serviceCollection.AddHostedService<Gate<Services.Queue.LocalChangeObserver>>();
         serviceCollection.AddHostedService<Tasks.HiddenTaskScheduleCleaner>();
-        serviceCollection.AddHostedService<Services.Peer.WhitelistUpgrade>();
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Services.Queue.QueueMaintenanceService>());
+        serviceCollection.AddHostedService<Gate<Services.Queue.QueueMaintenanceService>>();
 
         // Named HttpClient for source server communication.
         // HandlerLifetime caps DNS staleness for the long-lived plugin process.
@@ -110,5 +109,32 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 
             yield return (type, attr);
         }
+    }
+
+    // Starts one of the plugin's background services, unless Server Sync is held for a database an
+    // older release wrote: building the service would read that database, and a hosted service that
+    // cannot be built stops Jellyfin itself. Each service is resolved as the one instance the
+    // controllers and the publisher use.
+    private sealed class Gate<T> : Microsoft.Extensions.Hosting.IHostedService
+        where T : class, Microsoft.Extensions.Hosting.IHostedService
+    {
+        private readonly IServiceProvider _services;
+        private T? _inner;
+
+        public Gate(IServiceProvider services) => _services = services;
+
+        public System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken)
+        {
+            if (Plugin.Held)
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+
+            _inner = _services.GetRequiredService<T>();
+            return _inner.StartAsync(cancellationToken);
+        }
+
+        public System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken)
+            => _inner?.StopAsync(cancellationToken) ?? System.Threading.Tasks.Task.CompletedTask;
     }
 }

@@ -157,6 +157,119 @@ public sealed class ScanConflictSettler
         }
     }
 
+    /// <summary>The connected servers that keep versions, so their offers can be weighed on who edited last.</summary>
+    /// <param name="sources">The connected servers.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The entry keys of the servers that keep versions.</returns>
+    public async Task<HashSet<string>> ServersWithVersionsAsync(IReadOnlyList<ScanSource> sources, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+        var versioned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in sources)
+        {
+            if (await _resolver.PeerCarriesVersionsAsync(source, cancellationToken).ConfigureAwait(false) == true)
+            {
+                versioned.Add(source.Key);
+            }
+        }
+
+        return versioned;
+    }
+
+    /// <summary>
+    /// Chooses, for each thing several servers offer, the server that holds the newest recorded edit of
+    /// it. Rank still decides whenever nothing says otherwise: when the highest ranked server offering
+    /// it keeps no versions, when no server has recorded an edit of it, when two servers hold the same
+    /// edit, and when a server's versions cannot be read. A lower ranked server is only heard over the
+    /// ones ranked above it that keep versions too.
+    /// </summary>
+    /// <typeparam name="TSource">The offer type.</typeparam>
+    /// <param name="contested">The offers of each contested key, highest priority first.</param>
+    /// <param name="kind">The kind.</param>
+    /// <param name="versioned">The servers that keep versions, as <see cref="ServersWithVersionsAsync"/> gives them.</param>
+    /// <param name="sourceOf">The server an offer came from.</param>
+    /// <param name="peerKeyOf">The key the offering server knows the thing by.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The winning offer for each key rank does not decide.</returns>
+    public async Task<IReadOnlyDictionary<string, TSource>> NewestOffersAsync<TSource>(
+        IReadOnlyDictionary<string, IReadOnlyList<TSource>> contested,
+        HintKind kind,
+        HashSet<string> versioned,
+        Func<TSource, ScanSource> sourceOf,
+        Func<TSource, string?> peerKeyOf,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(contested);
+        ArgumentNullException.ThrowIfNull(versioned);
+        ArgumentNullException.ThrowIfNull(sourceOf);
+        ArgumentNullException.ThrowIfNull(peerKeyOf);
+        var winners = new Dictionary<string, TSource>(StringComparer.OrdinalIgnoreCase);
+
+        // Only the offers that can be weighed: the run of servers from the top of each list that keep versions.
+        var weighed = new Dictionary<string, List<TSource>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, offers) in contested)
+        {
+            var run = offers.TakeWhile(o => versioned.Contains(sourceOf(o).Key)).ToList();
+            if (run.Count > 1)
+            {
+                weighed[key] = run;
+            }
+        }
+
+        if (weighed.Count == 0)
+        {
+            return winners;
+        }
+
+        var versions = new Dictionary<string, Dictionary<string, ObjectVersion>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var byServer in weighed.Values.SelectMany(o => o).GroupBy(o => sourceOf(o).Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var source = sourceOf(byServer.First());
+            var keys = byServer.Select(peerKeyOf).Where(k => !string.IsNullOrEmpty(k)).Select(k => k!).Distinct(StringComparer.Ordinal).ToList();
+            var read = await _resolver.PeerVersionsAsync(source, kind, keys, cancellationToken).ConfigureAwait(false);
+            if (read is not null)
+            {
+                versions[source.Key] = read;
+            }
+        }
+
+        foreach (var (key, offers) in weighed)
+        {
+            // A server whose versions could not be read cannot be weighed, so rank decides this key.
+            if (offers.Any(o => !versions.ContainsKey(sourceOf(o).Key)))
+            {
+                continue;
+            }
+
+            var best = offers[0];
+            var bestVersion = VersionOf(best);
+            foreach (var offer in offers.Skip(1))
+            {
+                var version = VersionOf(offer);
+                if (version is null)
+                {
+                    continue;
+                }
+
+                if (bestVersion is null || (!VersionDecider.SameVersion(version, bestVersion) && VersionDecider.IsNewer(version, bestVersion)))
+                {
+                    best = offer;
+                    bestVersion = version;
+                }
+            }
+
+            if (!ReferenceEquals(best, offers[0]))
+            {
+                winners[key] = best;
+            }
+        }
+
+        return winners;
+
+        ObjectVersion? VersionOf(TSource offer)
+            => peerKeyOf(offer) is { Length: > 0 } peerKey && versions[sourceOf(offer).Key].TryGetValue(peerKey, out var version) ? version : null;
+    }
+
     // Rows whose local value carries a recorded edit are left alone this scan, since nothing can say
     // whether the peer's value is newer. Their stored hash is not touched, so the next scan queues them
     // again and decides once the versions can be read.

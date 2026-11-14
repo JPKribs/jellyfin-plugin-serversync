@@ -19,25 +19,31 @@ The protocol number changes only when a hint, a peer route, or a conflict rule c
 
 Releases before protocol versions, up to 12.2.8.1, only talk to exactly the same version, so the first update to a protocol aware release still needs every server in the pool updated.
 
-## Updating to 12.4.12.0
+## Updating from an older release
 
-12.4.12.0 changes nothing in the protocol, and mixes freely with 12.4.11.7. The update converts the settings once:
+This release carries no upgrade steps for anything older than **12.4.13.0**. It opens the database and settings 12.4.13.0 leaves behind, and nothing before them.
 
-* A Pull entry that allowed linking and maps no libraries becomes **Push**. One that maps libraries keeps Pull and loses linking, with a warning in the log, since a Pull server cannot link here.
-* A server wide per user stream limit is copied onto that entry's user mappings that set none.
-* The old history negotiation switch, when on, turns on **Negotiate History** for every library. It applies to Sync servers only.
-* Download speeds set in KB, MB, or GB per second are converted to Mbps.
+To update a server that runs a release before 12.4.13.0:
 
-Its database adds a column for why a copy in a Link mapping is kept. While a copy is on its way back to a link, the database names 12.4.12.0 as its oldest reader, so an older release sets it aside rather than take that row for a copy still to download.
+1. Install **12.4.13.0** and restart Jellyfin.
+2. Leave it running for a day. It converts the database and the settings when it starts, and marks the copies it already tracks during its upkeep, which waits for a moment when no content task is running.
+3. Update to the current release and restart Jellyfin.
 
-## Links and older releases
+A server already on 12.4.13.0 or later updates directly.
 
-[Links](Links.md) need both servers on 12.2.10.0 or later. The source advertises `Link` among its features, and a server with a Link mapping waits for a source that does. Releases without links ignore the feature, and matching against them works as before.
+When a server skips 12.4.13.0, Server Sync holds itself and Jellyfin runs as usual:
 
-12.4.11.7 is the release after 12.2.11.6. Only its first two parts changed, to the Jellyfin 12.4 it has been built for since 12.2.10.1, and it changes nothing in what the plugin does.
+* **The database is left exactly as it was.** Nothing is read from it, written to it, or moved aside.
+* **The settings are left exactly as they were.** They are copied to `Jellyfin.Plugin.ServerSync.xml.before-12.4.13.0` beside the settings file before anything reads them, and every save is refused, so the settings an older release wrote are still there for 12.4.13.0 to convert.
+* **Nothing of Server Sync runs.** No background work starts, playback is not touched, and its metadata lookups answer nothing. Its tasks fail with the reason.
+* **Every Server Sync page says why** in a line at its top. The Jellyfin log and the **Activity** page say the same, as "Server Sync Needs an Earlier Update First".
 
-12.2.11.1 to 12.2.11.6 change nothing in the protocol or the database, and mix freely with 12.2.11.0. A link session on the source is named after the viewer's client and user from 12.2.11.4 on, and needs both servers on it; with an older linking server it keeps the linking server's name. Ending stale link sessions, showing a link session as a direct stream, and refusing proxied requests to a link's address only need the server they run on. Keeping playback from the link cache off the source needs the linking server on 12.2.11.3 or later.
+Installing 12.4.13.0, starting Jellyfin, leaving it a day, and then updating again picks up where the server left off.
 
-12.2.11.0 adds the link cache, media info and images from the source, the link check, and speed and per user limits, with no change to the protocol or the database. A linking server on 12.2.11.0 works with a source on 12.2.10.x: its links are probed through the link, are not checked, and a cache download for a user counts as a stream on that source. The source's speed and per user limits need 12.2.11.0 on the source.
+## Downgrading
 
-Server Sync keeps its own database, which notes the oldest release that can read it. Updating to 12.2.10.0 or later only adds a column, so a release from 12.2.2.0 on still reads it, until the server holds a link. From the first link on, written or waiting to be, the database names the first release with links as its oldest reader. An older release sets such a database aside as a `.newer-*` backup and starts fresh, rather than take a `.strm` for a broken copy and download over it.
+Server Sync's database notes the oldest release that can read it. A release that only added to the database leaves that alone, so an older release keeps using the file. Once a server holds a link, the database names the first release with links as its oldest reader, and once a kept copy is on its way back to a link, the first release that knows that. An older release sets such a database aside as a `.newer-*` backup and starts fresh, rather than take a `.strm` for a broken copy and download over it.
+
+## Links and other releases
+
+[Links](Links.md) need Server Sync on both servers. The source advertises `Link` among its features, and a server with a Link mapping waits for a source that does.

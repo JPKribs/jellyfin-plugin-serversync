@@ -792,7 +792,7 @@ public sealed class LinkRouteTests : IDisposable
         var (users, _) = InterfaceStub.Create<IUserManager>();
         var (sessions, _) = InterfaceStub.Create<MediaBrowser.Controller.Session.ISessionManager>();
         var policy = new LinkPolicy(library, users, sessions, new LinkSessions());
-        var peer = new SourceServer { Name = "third", IsEnabled = true, Mode = ServerMode.Stream, AllowLinking = true };
+        var peer = new SourceServer { Name = "third", IsEnabled = true, Mode = ServerMode.Push, AllowLinking = true };
 
         var verdict = policy.Check(peer, Guid.NewGuid(), null, null, probe: true);
 
@@ -804,18 +804,18 @@ public sealed class LinkRouteTests : IDisposable
     }
 
     /// <summary>
-    /// Stream, Push, and Sync servers link only with Allow Linking on, and a Pull server never does.
-    /// True: a Stream server kept for downloads cannot link, and a Pull server cannot link at all.
+    /// Push and Sync servers link only with Allow Linking on, and a Pull server never does.
+    /// True: a Push server kept for downloads cannot link, and a Pull server cannot link at all.
     /// False: a server could stream files here that it was only meant to download, or read from.
     /// </summary>
     /// <param name="mode">The entry's mode.</param>
     /// <param name="allowLinking">Whether Allow Linking is on.</param>
     /// <param name="allowed">Whether a stream is allowed.</param>
     [Theory]
-    [InlineData(ServerMode.Stream, true, true)]
-    [InlineData(ServerMode.Stream, false, false)]
-    [InlineData(ServerMode.Sync, true, true)]
+    [InlineData(ServerMode.Push, true, true)]
     [InlineData(ServerMode.Push, false, false)]
+    [InlineData(ServerMode.Sync, true, true)]
+    [InlineData(ServerMode.Sync, false, false)]
     [InlineData(ServerMode.Pull, true, false)]
     public void Policy_StreamMode_AllowsLinking(ServerMode mode, bool allowLinking, bool allowed)
     {

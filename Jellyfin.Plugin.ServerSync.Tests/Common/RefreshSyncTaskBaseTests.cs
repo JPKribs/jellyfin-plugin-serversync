@@ -217,6 +217,12 @@ public class RefreshSyncTaskBaseTests
             return Task.FromResult(offered);
         }
 
+        /// <summary>Chooses between servers' offers of one key, when a test wants rank overruled.</summary>
+        public Func<IReadOnlyDictionary<string, IReadOnlyList<string>>, IReadOnlyDictionary<string, string>>? Contest { get; set; }
+
+        protected override Task<IReadOnlyDictionary<string, string>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<string>> contested, CancellationToken cancellationToken)
+            => Contest is null ? base.ContestAsync(contested, cancellationToken) : Task.FromResult(Contest(contested));
+
         protected override string? PriorityKeyOf(string source) => PriorityKey?.Invoke(source);
 
         protected override string? PriorityKeyOf(TestRecord record) => RecordPriorityKey?.Invoke(record);
@@ -688,6 +694,39 @@ public class RefreshSyncTaskBaseTests
 
         Assert.Equal(new[] { "server-0:shared", "server-0:only-a", "server-1:shared", "server-1:only-b" }, task.Listed);
         Assert.Equal(new[] { "shared", "only-a", "only-b" }, manager.Upserted.Select(r => r.Key));
+    }
+
+    /// <summary>
+    /// A module may let a lower ranked server speak for an item both offer, as when it holds the newer
+    /// edit. The item is still built once, from that server, and only the keys the module names are
+    /// taken from rank.
+    /// True: an edit made on the server everyone ranks last still arrives by scan.
+    /// False: a scan could only ever hear the highest ranked server, whatever the others hold.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_TwoServers_ModuleMayLetTheLowerOneSpeak()
+    {
+        var task = CreateTask(out var manager);
+        task.PerServer = new List<IList<string>>
+        {
+            new List<string> { "a:edited", "a:plain", "a:only" },
+            new List<string> { "b:edited", "b:plain" }
+        };
+        task.PriorityKey = item => item.Split(':')[1];
+        task.Builder = item => new TestRecord { Key = item, Changed = true };
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? asked = null;
+        task.Contest = contested =>
+        {
+            asked = contested;
+            return new Dictionary<string, string> { ["edited"] = contested["edited"][1] };
+        };
+
+        await task.ExecuteAsync(new Progress<double>(), CancellationToken.None);
+
+        Assert.NotNull(asked);
+        Assert.Equal(new[] { "edited", "plain" }, asked!.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        Assert.Equal(new[] { "a:edited", "b:edited" }, asked["edited"]);
+        Assert.Equal(new[] { "b:edited", "a:plain", "a:only" }, manager.Upserted.Select(r => r.Key));
     }
 
     /// <summary>

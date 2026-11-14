@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services;
@@ -21,6 +23,12 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 public sealed class UserCategoryWork
 {
     public required ScanSource Source { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether another server speaks for this user this run, so the row is
+    /// only brought up to date with what this server holds and nothing is applied from it.
+    /// </summary>
+    public bool Observe { get; init; }
 
     public required UserMapping Mapping { get; init; }
 
@@ -212,14 +220,122 @@ public class RefreshUserSyncTableTask
             ConfigManager.Configuration,
             existingItem,
             cancellationToken,
-            source.Source.Server.GetEnabledLibraryMappings()).ConfigureAwait(false);
+            source.Source.Server.GetEnabledLibraryMappings(),
+            source.Observe ? null : BothWaysRule(source.Source.Server)).ConfigureAwait(false);
 
         if (record != null)
         {
             record.ServerKey = source.Source.Key;
+            record.Observed = source.Observe;
         }
 
         return record;
+    }
+
+    private bool Newest => ConfigManager.Configuration.UserSyncPrecedence == SyncPrecedence.Newest;
+
+    // Settings go both ways with a Sync server: a change made here stays until that server takes it.
+    // From a Pull server they only ever arrive.
+    private UserConflictRule? BothWaysRule(SourceServer server)
+        => Newest && server.Mode == ServerMode.Sync ? ConfigManager.Configuration.UserSyncConflict : null;
+
+    // One server speaks for a local user's settings on each run: the highest ranked one that changed
+    // them since this server last looked. When none has, the server whose settings were applied last
+    // goes on speaking, so a lower ranked server's change is not undone by a higher one that has
+    // nothing new. Rank decides before anything has been applied.
+    /// <inheritdoc />
+    protected override Task<IReadOnlyDictionary<string, UserCategoryWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<UserCategoryWork>> contested, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(contested);
+        var winners = new Dictionary<string, UserCategoryWork>(StringComparer.OrdinalIgnoreCase);
+        if (!Newest)
+        {
+            return Task.FromResult<IReadOnlyDictionary<string, UserCategoryWork>>(winners);
+        }
+
+        foreach (var (key, offers) in contested)
+        {
+            var speaking = offers.FirstOrDefault(HasChangedSinceSeen)
+                ?? offers.Where(o => Seen(o)?.LastSyncTime is not null).MaxBy(o => Seen(o)!.LastSyncTime)
+                ?? offers[0];
+            if (!ReferenceEquals(speaking, offers[0]))
+            {
+                winners[key] = speaking;
+            }
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, UserCategoryWork>>(winners);
+    }
+
+    // A server passed over before this server has ever looked at it is recorded, so the next run can
+    // tell whether it has changed since. One already recorded and unchanged needs nothing.
+    /// <inheritdoc />
+    protected override UserCategoryWork? ObservedOffer(UserCategoryWork passedOver, UserCategoryWork speaking)
+    {
+        ArgumentNullException.ThrowIfNull(passedOver);
+        if (!Newest || Seen(passedOver) is not null || passedOver.Category == UserPropertyCategory.ProfileImage)
+        {
+            return null;
+        }
+
+        return new UserCategoryWork
+        {
+            Source = passedOver.Source,
+            Mapping = passedOver.Mapping,
+            Category = passedOver.Category,
+            SourceUser = passedOver.SourceUser,
+            LocalUserDto = passedOver.LocalUserDto,
+            LocalUser = passedOver.LocalUser,
+            Observe = true
+        };
+    }
+
+    /// <inheritdoc />
+    protected override bool MayOutrankOwner(UserSyncItem record) => Newest;
+
+    // Each server's row records what was last seen of it, which is how it is known to have changed.
+    /// <inheritdoc />
+    protected override bool CanRetire(UserSyncItem record) => !Newest && base.CanRetire(record);
+
+    /// <inheritdoc />
+    protected override void DecideStatus(UserSyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.Observed)
+        {
+            if (record.Status != SyncStatus.Ignored)
+            {
+                record.Status = SyncStatus.Synced;
+                record.Reason = "seen: another server speaks for this user's settings";
+            }
+
+            return;
+        }
+
+        base.DecideStatus(record);
+        if (record.KeepAgreedValue && record.Status == SyncStatus.Synced)
+        {
+            record.Reason = "kept: changed on this server, and the other server has not changed it since the two agreed";
+        }
+    }
+
+    private UserSyncItem? Seen(UserCategoryWork offer)
+        => ExistingRows.TryGetValue((offer.Mapping.SourceUserId, offer.Mapping.LocalUserId, offer.Category), out var row) ? row : null;
+
+    private bool HasChangedSinceSeen(UserCategoryWork offer)
+    {
+        if (Seen(offer) is not { } seen)
+        {
+            return false;
+        }
+
+        var now = offer.Category switch
+        {
+            UserPropertyCategory.Policy => UserSyncMergeService.ExtractPolicyJson(offer.SourceUser.Policy),
+            UserPropertyCategory.Configuration => UserSyncMergeService.ExtractConfigurationJson(offer.SourceUser.Configuration),
+            _ => null
+        };
+        return now is not null && !new Models.Common.Comparators.JsonBlobComparator().Equals(seen.SourceValue, now);
     }
 
     // Two servers collide when both map a user onto the same local user. The higher priority

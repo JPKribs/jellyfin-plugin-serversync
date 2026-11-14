@@ -15,6 +15,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// </summary>
 public class SyncDatabase : IDisposable
 {
+    private static int _tooOldReported;
     private readonly ILogger<SyncDatabase> _logger;
     private readonly string _dbPath;
 
@@ -359,7 +360,7 @@ public class SyncDatabase : IDisposable
                     _logger.LogInformation(
                         "Sync database is schema v{Found}, newer than this plugin's v{Expected}, and readable by v{MinReader} and later. Using it as is",
                         DatabaseSchema.GetVersion(_connection),
-                        DatabaseMigrationService.CurrentSchemaVersion,
+                        SyncSchema.CurrentSchemaVersion,
                         DatabaseSchema.GetMinReaderVersion(_connection));
                     return;
 
@@ -370,17 +371,13 @@ public class SyncDatabase : IDisposable
                     _logger.LogError(
                         "Sync database is schema v{Found}, newer than this plugin's v{Expected}, and this version cannot read it. It is kept as a .newer-* backup the newer version can still read, and a fresh database is started",
                         DatabaseSchema.GetVersion(_connection),
-                        DatabaseMigrationService.CurrentSchemaVersion);
+                        SyncSchema.CurrentSchemaVersion);
                     RecreateDatabase("newer");
                     return;
 
-                case SchemaAction.MigrationFailed:
-                    _logger.LogWarning("Migration failed. The database is kept as a .corrupt-* backup and a fresh one is started");
-                    RecreateDatabase("corrupt");
-                    return;
             }
 
-            _logger.LogDebug("Sync database initialized at {DbPath} (schema v{Version})", _dbPath, DatabaseMigrationService.CurrentSchemaVersion);
+            _logger.LogDebug("Sync database initialized at {DbPath} (schema v{Version})", _dbPath, SyncSchema.CurrentSchemaVersion);
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 11 || ex.SqliteErrorCode == 26)
         {
@@ -400,6 +397,18 @@ public class SyncDatabase : IDisposable
                 throw new InvalidOperationException("Unable to initialize or recover sync database", recreateEx);
             }
         }
+        catch (SchemaTooOldException ex)
+        {
+            // An older release wrote this database and this one has no steps to bring it forward. It is
+            // left as it is, and said once at this level, since every later use fails the same way.
+            if (System.Threading.Interlocked.Exchange(ref _tooOldReported, 1) == 0)
+            {
+                _logger.LogError("{Message}", ex.Message);
+            }
+
+            CloseConnection();
+            throw;
+        }
         catch
         {
             // Any other failure propagates so the plugin retries on the next start. Release the
@@ -412,12 +421,12 @@ public class SyncDatabase : IDisposable
     private SchemaAction OpenSchema(SqliteConnection connection)
         => DatabaseSchema.Open(
             connection,
-            DatabaseMigrationService.CurrentSchemaVersion,
+            SyncSchema.CurrentSchemaVersion,
             // The floor follows what the file holds. A database with links keeps the higher floor
             // across restarts, so a release that cannot read links never opens it as usable.
-            DatabaseMigrationService.MinReaderFor(connection),
-            c => DatabaseMigrationService.CreateInitialSchema((SqliteConnection)c),
-            (c, fromVersion) => DatabaseMigrationService.MigrateSchema((SqliteConnection)c, fromVersion, _logger));
+            SyncSchema.MinReaderFor(connection),
+            c => SyncSchema.Create((SqliteConnection)c),
+            (_, fromVersion) => throw new SchemaTooOldException(fromVersion));
 
     /// <summary>
     /// Closes the current database, moves it aside as a timestamped backup with its journal, and creates a
@@ -435,7 +444,7 @@ public class SyncDatabase : IDisposable
         });
         _connection = OpenConnection();
         OpenSchema(_connection);
-        _logger.LogInformation("Database recreated with fresh schema v{Version}", DatabaseMigrationService.CurrentSchemaVersion);
+        _logger.LogInformation("Database recreated with fresh schema v{Version}", SyncSchema.CurrentSchemaVersion);
     }
 
     /// <summary>
@@ -493,7 +502,7 @@ public class SyncDatabase : IDisposable
             });
 
             InitializeDatabase();
-            _logger.LogInformation("Sync database has been reset with fresh schema v{Version}", DatabaseMigrationService.CurrentSchemaVersion);
+            _logger.LogInformation("Sync database has been reset with fresh schema v{Version}", SyncSchema.CurrentSchemaVersion);
         }
     }
 

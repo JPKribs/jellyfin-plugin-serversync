@@ -47,7 +47,8 @@ public class UserSyncTableService
         PluginConfiguration config,
         UserSyncItem? existingItem,
         CancellationToken cancellationToken,
-        List<LibraryMapping>? libraryMappings = null)
+        List<LibraryMapping>? libraryMappings = null,
+        UserConflictRule? bothWays = null)
     {
         ArgumentNullException.ThrowIfNull(mapping);
         ArgumentNullException.ThrowIfNull(sourceUser);
@@ -57,8 +58,8 @@ public class UserSyncTableService
 
         return category switch
         {
-            UserPropertyCategory.Policy => BuildPolicyItem(mapping, sourceUser, localUserDto, libraryMappings, existingItem),
-            UserPropertyCategory.Configuration => BuildConfigurationItem(mapping, sourceUser, localUserDto, existingItem),
+            UserPropertyCategory.Policy => BuildPolicyItem(mapping, sourceUser, localUserDto, libraryMappings, existingItem, bothWays),
+            UserPropertyCategory.Configuration => BuildConfigurationItem(mapping, sourceUser, localUserDto, existingItem, bothWays),
             UserPropertyCategory.ProfileImage => await BuildProfileImageItemAsync(mapping, sourceUser, localUser, sourceClient, existingItem, cancellationToken).ConfigureAwait(false),
             _ => null
         };
@@ -69,11 +70,17 @@ public class UserSyncTableService
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
         MediaBrowser.Model.Dto.UserDto localUserDto,
         List<LibraryMapping> libraryMappings,
-        UserSyncItem? existingItem)
+        UserSyncItem? existingItem,
+        UserConflictRule? bothWays)
     {
         var sourcePolicy = UserSyncMergeService.ExtractPolicyJson(sourceUser.Policy);
         var localPolicy = UserSyncMergeService.ExtractPolicyJson(localUserDto.Policy);
         var mergedPolicy = UserSyncMergeService.ComputeMergedPolicy(sourcePolicy, libraryMappings);
+        var keep = false;
+        if (bothWays is { } rule)
+        {
+            (mergedPolicy, keep) = SettleBothWays(existingItem, mergedPolicy, localPolicy, other => UserPolicyCombiner.Combine(other, localPolicy, rule));
+        }
 
         var item = existingItem ?? new UserSyncItem
         {
@@ -91,18 +98,65 @@ public class UserSyncTableService
         // comparator. SyncedHash matches that format after a successful sync,
         // so the fast-path skip on the next Refresh stays consistent.
         item.UpdateMergedValue(mergedPolicy);
+        item.KeepAgreedValue = keep;
         item.StatusDate = DateTime.UtcNow;
         return item;
+    }
+
+    /// <summary>
+    /// Decides what one category of a user's settings becomes between this server and a server it
+    /// syncs with, from which of the two changed it since they last agreed. Only the other server
+    /// changed it: its value applies. Only this server changed it: this server's value stays, and the
+    /// other server takes it on its own scan. Both changed it: <paramref name="combine"/> decides.
+    /// Before the two have ever agreed, the other server's value applies.
+    /// </summary>
+    /// <param name="seen">The stored row, as the last scan left it, or null.</param>
+    /// <param name="theirs">The other server's value in this server's terms.</param>
+    /// <param name="mine">This server's value now.</param>
+    /// <param name="combine">Combines the two when both changed.</param>
+    /// <returns>The value to apply, and whether it is this server's own value being kept.</returns>
+    public static (string? Value, bool Keep) SettleBothWays(UserSyncItem? seen, string? theirs, string? mine, Func<string?, string?> combine)
+    {
+        ArgumentNullException.ThrowIfNull(combine);
+        var comparator = new Models.Common.Comparators.JsonBlobComparator();
+        if (seen?.SyncedValueHash is not { Length: > 0 } agreed || comparator.Equals(theirs, mine))
+        {
+            return (theirs, false);
+        }
+
+        // The value to apply is built the same way from the same settings on every scan, so the
+        // fingerprint taken when the two agreed still matches until the other server changes them.
+        var theyChanged = !string.Equals(comparator.ComputeHash(theirs), agreed, StringComparison.Ordinal);
+        if (!theyChanged)
+        {
+            return (mine, true);
+        }
+
+        // This server changed it too when the last scan already kept a value of its own, or when
+        // its value has moved since that scan. A kept value is a settled row that holds something
+        // other than what the two agreed on. A change still waiting to be applied is neither.
+        var keptBefore = seen.Status == Models.Common.SyncStatus.Synced
+            && !string.Equals(comparator.ComputeHash(seen.MergedValue), agreed, StringComparison.Ordinal);
+        var iChanged = keptBefore || !comparator.Equals(seen.LocalValue, mine);
+        return (iChanged ? combine(theirs) : theirs, false);
     }
 
     private static UserSyncItem BuildConfigurationItem(
         UserMapping mapping,
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
         MediaBrowser.Model.Dto.UserDto localUserDto,
-        UserSyncItem? existingItem)
+        UserSyncItem? existingItem,
+        UserConflictRule? bothWays)
     {
         var sourceConfig = UserSyncMergeService.ExtractConfigurationJson(sourceUser.Configuration);
         var localConfig = UserSyncMergeService.ExtractConfigurationJson(localUserDto.Configuration);
+        var applied = sourceConfig;
+        var keep = false;
+        if (bothWays is not null)
+        {
+            // Preferences have no more and no less, so when both servers changed them the other server's stand.
+            (applied, keep) = SettleBothWays(existingItem, sourceConfig, localConfig, other => other);
+        }
 
         var item = existingItem ?? new UserSyncItem
         {
@@ -115,8 +169,8 @@ public class UserSyncTableService
         item.LocalUserName = localUserDto.Name;
         item.SourceValue = sourceConfig;
         item.LocalValue = localConfig;
-        // Configuration is pure source-wins, so MergedValue == sourceConfig.
-        item.UpdateMergedValue(sourceConfig);
+        item.UpdateMergedValue(applied);
+        item.KeepAgreedValue = keep;
         item.StatusDate = DateTime.UtcNow;
         return item;
     }

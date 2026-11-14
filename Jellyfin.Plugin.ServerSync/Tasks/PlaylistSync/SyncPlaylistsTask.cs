@@ -17,6 +17,9 @@ namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
 {
+    // The playlists a higher ranked server already spoke for this run, when rank decides.
+    private readonly HashSet<string> _spokenFor = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly ILogger<SyncPlaylistsTask> _logger;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ISourceServerClientFactory _clientFactory;
@@ -75,6 +78,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
         try
         {
             _mirror.RebuildCopiesFromTags();
+            _spokenFor.Clear();
             var failures = 0;
             var waiting = 0;
             for (var i = 0; i < servers.Count; i++)
@@ -143,21 +147,43 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
             }
         }
 
+        var config = _configManager.Configuration;
+        var byRank = config.PlaylistSyncPrecedence == SyncPrecedence.Rank;
         var local = _mirror.LocalPlaylists();
         foreach (var playlist in playlists)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // By rank, the highest ranked server that holds a playlist is the only one heard for it.
+            if (byRank && !_spokenFor.Add(playlist.RootId))
+            {
+                continue;
+            }
+
             ObjectVersion? peerVersion = null;
-            if (twoWay && _mirror.FindByRoot(playlist.RootId, playlist.IsOriginal, local) is not null)
+            if (twoWay)
             {
                 var localKey = HintProtocol.PlaylistKey(Guid.Parse(playlist.RootId));
-                if (carries != true || peerVersions is null || !peerVersions.TryGetValue(playlist.RootId, out peerVersion))
+                var known = peerVersions is not null && peerVersions.TryGetValue(playlist.RootId, out peerVersion);
+                if (_mirror.FindByRoot(playlist.RootId, playlist.IsOriginal, local) is not null)
                 {
-                    continue;
-                }
+                    if (carries != true || !known)
+                    {
+                        peerVersion = null;
+                        continue;
+                    }
 
-                if (_resolver.Decide(HintKind.Playlists, localKey, peerVersion) == VersionDecision.Keep)
+                    if (_resolver.Decide(HintKind.Playlists, localKey, peerVersion) == VersionDecision.Keep)
+                    {
+                        continue;
+                    }
+                }
+                else if (_resolver.Recorded(HintKind.Playlists, localKey) is { } gone
+                    && (peerVersion is null || VersionDecider.SameVersion(peerVersion, gone) || !VersionDecider.IsNewer(peerVersion, gone)))
                 {
+                    // This server knew the playlist and no longer holds it, so it was deleted here or
+                    // by a server this one syncs with. It comes back only when the other server's copy
+                    // was edited after that.
                     continue;
                 }
             }
@@ -187,7 +213,74 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
 
         if (!twoWay)
         {
-            PruneDeleted(server, playlists, users);
+            if (config.PlaylistRemovedAction == PlaylistRemovedAction.Delete)
+            {
+                PruneDeleted(server, playlists, users);
+            }
+
+            return;
+        }
+
+        if (carries == true)
+        {
+            await SettleDeletedAsync(source, playlists, users, config.PlaylistRemovedAction, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // A copy this server took from a Sync server that the server no longer lists was deleted there,
+    // when that server also holds a newer version of it than this one does: the deletion. A deletion
+    // announced as it happened is settled the same way, so this only catches the ones that were missed.
+    // The copy is deleted or kept by Removed Playlists, and the deletion is recorded either way, so
+    // the playlist is not handed back to the server that deleted it. A copy edited here since is kept
+    // and stays this server's newer edit, which that server takes back on its own scan.
+    private async Task SettleDeletedAsync(ScanSource source, List<SourcePlaylist> listed, Dictionary<string, Guid> users, PlaylistRemovedAction action, CancellationToken cancellationToken)
+    {
+        var roots = new HashSet<string>(listed.Select(p => p.RootId), StringComparer.OrdinalIgnoreCase);
+        var owners = new HashSet<Guid>(users.Values);
+        var missing = _mirror.LocalPlaylists()
+            .Where(p => string.Equals(PlaylistMirror.CopyServer(p), source.Key, StringComparison.OrdinalIgnoreCase)
+                && owners.Contains(p.OwnerUserId)
+                && !roots.Contains(PlaylistMirror.RootKey(p)))
+            .ToList();
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        var versions = await _resolver.PeerVersionsAsync(source, HintKind.Playlists, missing.Select(PlaylistMirror.RootKey).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), cancellationToken).ConfigureAwait(false);
+        if (versions is null)
+        {
+            return;
+        }
+
+        foreach (var playlist in missing)
+        {
+            var root = PlaylistMirror.RootKey(playlist);
+            if (!Guid.TryParse(root, out var rootId) || !versions.TryGetValue(root, out var theirs))
+            {
+                continue;
+            }
+
+            var localKey = HintProtocol.PlaylistKey(rootId);
+            if (_resolver.Recorded(HintKind.Playlists, localKey) is { } mine
+                && (VersionDecider.SameVersion(theirs, mine) || !VersionDecider.IsNewer(theirs, mine)))
+            {
+                continue;
+            }
+
+            theirs.Kind = HintKind.Playlists;
+            theirs.Key = localKey;
+            if (action == PlaylistRemovedAction.Delete)
+            {
+                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}', so the copy here is deleted", Name, source.Name, playlist.Name);
+                _mirror.Delete(playlist);
+            }
+            else
+            {
+                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}'. The copy here is kept, as Removed Playlists is set to Keep", Name, source.Name, playlist.Name);
+            }
+
+            _resolver.Record(theirs);
         }
     }
 

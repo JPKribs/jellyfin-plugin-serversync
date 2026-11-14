@@ -42,8 +42,8 @@ export function createContentSyncTableModule(ctx, kit) {
         ],
         idKey: 'SourceItemId',
         tasks: {
-            refresh: { endpoint: 'TriggerRefresh', key: 'ServerSyncUpdateTables' },
-            sync: { endpoint: 'TriggerSync', key: 'ServerSyncDownloadContent' }
+            refresh: { key: 'ServerSyncUpdateTables' },
+            sync: { key: 'ServerSyncDownloadContent' }
         },
         taskNoun: '',
         singularNoun: 'Item',
@@ -120,13 +120,12 @@ export function createContentSyncTableModule(ctx, kit) {
         },
         loadHealth: function() {
             return Promise.all([
-                ServerSyncShared.apiRequest('Stats', 'GET'),
                 ServerSyncShared.getConfig(),
                 ServerSyncShared.apiRequest('PendingSize', 'GET')
             ]).then(function(results) {
-                var pendingSizeData = results[2];
+                var pendingSizeData = results[1];
                 setHealthLastSync('healthLastSync', results[0].LastSyncEndTime);
-                setHealthCount('healthLibraryCount', ServerSyncShared.allLibraryMappings(results[1]).length);
+                setHealthCount('healthLibraryCount', ServerSyncShared.allLibraryMappings(results[0]).length);
 
                 var pendingCountEl = view.querySelector('#healthPendingCount');
                 if (pendingSizeData && typeof pendingSizeData.TotalPendingBytes === 'number') {
@@ -139,34 +138,9 @@ export function createContentSyncTableModule(ctx, kit) {
             });
         },
         statusRequest: function(item, status) {
-            return { endpoint: 'UpdateItemStatus', body: { SourceItemId: item.SourceItemId, Status: status } };
+            return { endpoint: status === 'Ignored' ? 'IgnoreItems' : 'QueueItems', body: { SourceItemIds: [item.SourceItemId] } };
         },
         methods: {
-            capabilities: null, // Server capabilities, such as CanDeleteItems
-
-            loadCapabilities: function() {
-                var self = this;
-                return ServerSyncShared.apiRequest('Capabilities', 'GET').then(function(capabilities) {
-                    self.capabilities = capabilities;
-                    self.updateDeleteCapabilityVisibility(capabilities.CanDeleteItems);
-                }).catch(function() {
-                    self.capabilities = { CanDeleteItems: false };
-                    self.updateDeleteCapabilityVisibility(false);
-                });
-            },
-
-            updateDeleteCapabilityVisibility: function(canDelete) {
-                var bulkDeleteBtn = view.querySelector('#btnBulkDelete');
-                var modalDeleteBtn = view.querySelector('#btnModalDelete');
-
-                if (bulkDeleteBtn) {
-                    bulkDeleteBtn.classList.toggle('hidden', !canDelete);
-                }
-                if (modalDeleteBtn) {
-                    modalDeleteBtn.classList.toggle('hidden', !canDelete);
-                }
-            },
-
             loadStatus: function() {
                 var self = this;
                 return ServerSyncShared.apiRequest('Status', 'GET').then(function(status) {
@@ -424,17 +398,13 @@ export function createContentSyncTableModule(ctx, kit) {
 
                 if (isPendingDeletion) {
                     btnQueue.classList.add('hidden');
-                    if (self.capabilities && self.capabilities.CanDeleteItems) {
-                        modalDeleteBtn.classList.remove('hidden');
-                    }
+                    modalDeleteBtn.classList.remove('hidden');
                 } else if (isPendingDownloadOrReplacement) {
                     btnQueue.classList.remove('hidden');
                     modalDeleteBtn.classList.add('hidden');
                 } else {
                     btnQueue.classList.remove('hidden');
-                    if (self.capabilities && self.capabilities.CanDeleteItems) {
-                        modalDeleteBtn.classList.remove('hidden');
-                    }
+                    modalDeleteBtn.classList.remove('hidden');
                 }
 
                 self._dialog.open();
@@ -528,7 +498,6 @@ export function createContentPageController(ctx, SyncTableModule) {
     var ContentPageController = {
         init: function() {
             SyncTableModule.init();
-            SyncTableModule.loadCapabilities();
             ServerSyncShared.fetchLocalServerName();
             ServerSyncShared.getConfig().then(function(config) {
                 SyncTableModule.currentConfig = config;

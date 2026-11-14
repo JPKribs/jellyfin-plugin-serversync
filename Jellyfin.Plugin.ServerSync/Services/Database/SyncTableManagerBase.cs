@@ -26,30 +26,34 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     where TRecord : SyncRecord
     where TKey : notnull
 {
-    private readonly SyncDatabase _database;
+    private readonly ISyncDatabaseProvider _provider;
 
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
-    /// <param name="database">Database whose connection and write-lock back this manager.</param>
+    /// <param name="databaseProvider">Provider of the database whose connection and write-lock back this manager.</param>
     /// <param name="logger">Logger.</param>
-    protected SyncTableManagerBase(SyncDatabase database, ILogger logger)
+    protected SyncTableManagerBase(ISyncDatabaseProvider databaseProvider, ILogger logger)
     {
-        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(databaseProvider);
         ArgumentNullException.ThrowIfNull(logger);
-        _database = database;
+        _provider = databaseProvider;
         Logger = logger;
     }
+
+    // Opened on first use, never while a manager is being built, so a database that cannot be opened
+    // fails the call that needs it and not the start of everything that holds a manager.
+    private SyncDatabase Database => _provider.Database;
 
     /// <summary>
     /// Gets the live SQLite connection (re-resolved per access, handles closes/reopens).
     /// </summary>
-    private SqliteConnection Connection => _database.Connection;
+    private SqliteConnection Connection => Database.Connection;
 
     /// <summary>
     /// Gets the shared write lock for serializing mutations.
     /// </summary>
-    private object WriteLock => _database.WriteLock;
+    private object WriteLock => Database.WriteLock;
 
     /// <summary>
     /// Gets the logger for use by subclasses.
@@ -140,7 +144,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         fallback: (IList<TRecord>)Array.Empty<TRecord>());
 
     /// <inheritdoc />
-    public IList<TRecord> GetAllStrict() => _database.RunRead(conn =>
+    public IList<TRecord> GetAllStrict() => Database.RunRead(conn =>
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = $"SELECT * FROM {TableName}";
@@ -154,10 +158,10 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <typeparam name="T">What the read returns.</typeparam>
     /// <param name="read">The read.</param>
     /// <returns>What it read.</returns>
-    protected T ReadStrict<T>(Func<SqliteConnection, T> read) => _database.RunRead(read);
+    protected T ReadStrict<T>(Func<SqliteConnection, T> read) => Database.RunRead(read);
 
     /// <inheritdoc />
-    public IList<TRecord> GetByStatusStrict(SyncStatus status) => _database.RunRead(conn =>
+    public IList<TRecord> GetByStatusStrict(SyncStatus status) => Database.RunRead(conn =>
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = $"SELECT * FROM {TableName} WHERE Status = @Status";
@@ -663,7 +667,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         ArgumentNullException.ThrowIfNull(readOperation);
         try
         {
-            return _database.RunRead(readOperation);
+            return Database.RunRead(readOperation);
         }
         catch (SqliteException ex) when (
             ex.SqliteErrorCode == 5 ||  // SQLITE_BUSY

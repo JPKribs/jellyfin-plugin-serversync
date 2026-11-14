@@ -34,8 +34,8 @@ export function createMetadataSyncTableModule(ctx, kit) {
         modalId: 'metadataSyncItemDetailModal',
         modalButtonPrefix: 'btnMetadataSyncModal',
         tasks: {
-            refresh: { endpoint: 'TriggerMetadataRefresh', key: 'ServerSyncRefreshMetadataTable' },
-            sync: { endpoint: 'TriggerMetadataSync', key: 'ServerSyncMissingMetadata' }
+            refresh: { key: 'ServerSyncRefreshMetadataTable' },
+            sync: { key: 'ServerSyncMissingMetadata' }
         },
         taskNoun: 'metadata',
         singularNoun: 'Item',
@@ -83,7 +83,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
             });
         },
         statusRequest: function(item, status) {
-            return { endpoint: 'MetadataItems/UpdateStatus', body: { Id: item.Id, Status: status } };
+            return { endpoint: 'MetadataItems/' + (status === 'Ignored' ? 'Ignore' : 'Queue'), body: { Ids: [item.Id] } };
         },
         methods: {
             showDetail: function(item) {

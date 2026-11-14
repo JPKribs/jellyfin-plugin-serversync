@@ -22,7 +22,6 @@ public sealed class PlaylistCopyStore : QueueStoreBase
         : base(databaseProvider, logger)
     {
         _current = this;
-        ImportLegacyFile();
     }
 
     public static PlaylistCopy? Get(Guid playlistId)
@@ -112,36 +111,15 @@ public sealed class PlaylistCopyStore : QueueStoreBase
 
     private static string Key(Guid id) => id.ToString("N", CultureInfo.InvariantCulture);
 
-    private void ImportLegacyFile()
+    /// <summary>
+    /// Forgets which playlists here are copies of a peer's. Each copy also carries that on itself, so
+    /// the next playlist sync finds every copy again and none is made twice.
+    /// </summary>
+    /// <returns>How many copies were forgotten.</returns>
+    public int Clear() => Write(conn =>
     {
-        if (Plugin.Instance?.DataFolderPath is not { Length: > 0 } folder)
-        {
-            return;
-        }
-
-        var path = Path.Combine(folder, "playlist-copies.json");
-        if (!File.Exists(path))
-        {
-            return;
-        }
-
-        try
-        {
-            var stored = JsonSerializer.Deserialize<Dictionary<string, PlaylistCopy>>(File.ReadAllText(path)) ?? new Dictionary<string, PlaylistCopy>();
-            foreach (var (id, copy) in stored)
-            {
-                if (copy is not null && Guid.TryParse(id, out var playlistId))
-                {
-                    Set(playlistId, copy.Root, copy.Server);
-                }
-            }
-
-            File.Delete(path);
-            Logger.LogInformation("Moved {Count} playlist copies from playlist-copies.json into the sync database", stored.Count);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            Logger.LogWarning(ex, "Could not import playlist-copies.json");
-        }
-    }
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM PlaylistCopies";
+        return cmd.ExecuteNonQuery();
+    });
 }

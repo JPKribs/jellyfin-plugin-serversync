@@ -99,9 +99,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected IReadOnlyList<ScanSource> Sources { get; set; } = Array.Empty<ScanSource>();
 
     /// <summary>
-    /// Finds the connected source for a server entry key. A null key is a row written before servers
-    /// became a list and belongs to the first configured scan server, which is where the single source
-    /// migrated to, not to whichever server happened to connect first.
+    /// Finds the connected source for a server entry key. A row with no key belongs to the first
+    /// configured scan server, not to whichever server happened to connect first.
     /// </summary>
     /// <param name="serverKey">The entry key carried on a row, or null.</param>
     /// <returns>The source, or null when that server did not connect this run.</returns>
@@ -194,6 +193,45 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <param name="source">A work item.</param>
     /// <returns>The collision key, or null.</returns>
     protected virtual string? PriorityKeyOf(TSource source) => null;
+
+    /// <summary>
+    /// Chooses between several servers' offers of the same thing, for the collision keys more than one
+    /// server offered. Each list is in priority order. A key left out of the answer goes to the first
+    /// server in priority order, which is what the default does for every key.
+    /// </summary>
+    /// <param name="contested">The offers of each contested key, highest priority first.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The offer that speaks for a key, for the keys rank does not decide.</returns>
+    protected virtual Task<IReadOnlyDictionary<string, TSource>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<TSource>> contested, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyDictionary<string, TSource>>(new Dictionary<string, TSource>());
+
+    /// <summary>
+    /// What becomes of an offer that lost its key to another server's this run. Default drops it. A
+    /// module that needs to remember what a server held, so it can tell later that the server changed
+    /// it, returns the offer marked to be recorded and not applied.
+    /// </summary>
+    /// <param name="passedOver">The offer that does not speak for its key this run.</param>
+    /// <param name="speaking">The offer that does.</param>
+    /// <returns>The offer to build a row from without applying it, or null to drop it.</returns>
+    protected virtual TSource? ObservedOffer(TSource passedOver, TSource speaking) => default;
+
+    /// <summary>
+    /// Whether a row built from a lower priority server's offer may be weighed against this server's
+    /// value on a run that lists only what changed, although a higher priority server holds the item.
+    /// The higher server listed nothing for it, so it has nothing new, and the lower one has. Default
+    /// is no, and the higher server keeps the item until a full scan.
+    /// </summary>
+    /// <param name="record">The row built from the lower priority server's offer.</param>
+    /// <returns>True when the row goes on to be weighed.</returns>
+    protected virtual bool MayOutrankOwner(TRecord record) => false;
+
+    /// <summary>
+    /// Runs once per run after every server has been listed and before the offers are weighed. Default
+    /// does nothing.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    protected virtual Task PrepareContestAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private readonly HashSet<string> _claimedByHigherServers = new(StringComparer.OrdinalIgnoreCase);
 
@@ -296,24 +334,71 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             return all;
         }
 
+        await PrepareContestAsync(cancellationToken).ConfigureAwait(false);
+
+        // One server speaks for each thing. Rank decides unless the module says otherwise for a key,
+        // as when a lower ranked server holds a newer edit than the higher one.
+        var offers = new Dictionary<string, List<TSource>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in all)
+        {
+            if (PriorityKeyOf(item) is { } key)
+            {
+                if (!offers.TryGetValue(key, out var list))
+                {
+                    offers[key] = list = new List<TSource>(1);
+                }
+
+                list.Add(item);
+            }
+        }
+
+        var contested = offers.Where(o => o.Value.Count > 1).ToDictionary(o => o.Key, o => (IReadOnlyList<TSource>)o.Value, StringComparer.OrdinalIgnoreCase);
+        var winners = contested.Count > 0
+            ? await ContestAsync(contested, cancellationToken).ConfigureAwait(false)
+            : new Dictionary<string, TSource>();
+
         var kept = new List<TSource>(all.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var dropped = 0;
+        var outranked = 0;
         foreach (var item in all)
         {
             var key = PriorityKeyOf(item);
-            if (key is not null && !seen.Add(key))
+            if (key is null)
+            {
+                kept.Add(item);
+                continue;
+            }
+
+            if (!seen.Add(key))
             {
                 dropped++;
                 continue;
             }
 
-            kept.Add(item);
+            var speaking = item;
+            if (winners.TryGetValue(key, out var winner) && !ReferenceEquals(winner, item))
+            {
+                speaking = winner;
+                outranked++;
+            }
+
+            kept.Add(speaking);
+            if (contested.TryGetValue(key, out var offered))
+            {
+                foreach (var other in offered)
+                {
+                    if (!ReferenceEquals(other, speaking) && ObservedOffer(other, speaking) is { } observed)
+                    {
+                        kept.Add(observed);
+                    }
+                }
+            }
         }
 
         if (dropped > 0)
         {
-            Logger.LogInformation("{Task}: {Dropped} item(s) offered by a lower priority server were already covered by a higher one", Name, dropped);
+            Logger.LogInformation("{Task}: {Dropped} item(s) offered by more than one server were left to one of them, {Outranked} to a lower priority server that holds the newer edit", Name, dropped, outranked);
         }
 
         return kept;
@@ -977,8 +1062,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         // The server each stored row belonged to before the build. A module may build by updating the
         // stored row in place (People does), which stamps the new server onto the very object the guard
-        // would read, so the guard reads this snapshot instead. A row with no key is a row written before
-        // servers became a list and belongs to the first configured server.
+        // would read, so the guard reads this snapshot instead. A row with no key belongs to the
+        // first configured server.
         var firstServerKey = pullServers.Count > 0 ? pullServers[0].Key : null;
         var heldServerKeys = new Dictionary<TKey, string?>(existing.Count);
         foreach (var kvp in existing)
@@ -1102,7 +1187,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             if (priorityKey is not null
                 && run.IncrementalOwners is { } owners
                 && owners.TryGetValue(priorityKey, out var ownerOrder)
-                && ownerOrder < run.OrderOf(record.ServerKey))
+                && ownerOrder < run.OrderOf(record.ServerKey)
+                && !MayOutrankOwner(record))
             {
                 return;
             }

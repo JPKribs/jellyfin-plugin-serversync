@@ -72,7 +72,7 @@ public sealed class OutboundHintStore : QueueStoreBase
             Add(cmd, "@key", row.Key);
             Add(cmd, "@itemPath", row.ItemPath);
             Add(cmd, "@itemId", row.ItemId);
-            Add(cmd, "@itemType", row.ItemType);
+            Add(cmd, "@itemType", WithWaitingParts(conn, row));
             Add(cmd, "@userId", row.UserId);
             Add(cmd, "@userName", row.UserName);
             Add(cmd, "@versionServer", row.VersionServerId);
@@ -488,4 +488,33 @@ public sealed class OutboundHintStore : QueueStoreBase
         LastError = Text(reader, "LastError"),
         CreatedAt = Unstamp(reader.GetString(reader.GetOrdinal("CreatedAt")))
     };
+
+    // A history hint names the parts that changed. One that replaces a hint still waiting for the
+    // same object carries that hint's parts as well, or the earlier change would never be taken.
+    private static string? WithWaitingParts(SqliteConnection conn, OutboundHint row)
+    {
+        if (row.Kind != HintKind.History)
+        {
+            return row.ItemType;
+        }
+
+        var type = HintProtocol.SplitHistoryItemType(row.ItemType, out var parts);
+        if (parts == HistoryParts.None)
+        {
+            return row.ItemType;
+        }
+
+        using var probe = conn.CreateCommand();
+        probe.CommandText = "SELECT ItemType FROM OutboundHints WHERE PeerKey = @owner AND Kind = @kind AND Key = @key AND State = 0";
+        Add(probe, "@owner", row.PeerKey);
+        Add(probe, "@kind", (int)row.Kind);
+        Add(probe, "@key", row.Key);
+        if (probe.ExecuteScalar() is string waiting)
+        {
+            HintProtocol.SplitHistoryItemType(waiting, out var earlier);
+            parts |= earlier;
+        }
+
+        return HintProtocol.HistoryItemType(type, parts);
+    }
 }

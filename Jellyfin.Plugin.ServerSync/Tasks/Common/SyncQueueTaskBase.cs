@@ -70,9 +70,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     protected IReadOnlyList<ScanSource> Sources { get; set; } = Array.Empty<ScanSource>();
 
     /// <summary>
-    /// Finds the connected source a row belongs to. A row with no key was written before servers
-    /// became a list and belongs to the first configured scan server, which is where the single source
-    /// migrated to, not to whichever server happened to connect first.
+    /// Finds the connected source a row belongs to. A row with no key belongs to the first
+    /// configured scan server, not to whichever server happened to connect first.
     /// </summary>
     /// <param name="record">The row.</param>
     /// <returns>The source, or null when that server did not connect this run.</returns>

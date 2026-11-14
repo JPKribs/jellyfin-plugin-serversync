@@ -6,6 +6,7 @@ Usage:
   matrix.py run interrupt [copy|link]                  only the rounds that kill a server partway
   matrix.py run holders                                only the round where two servers hold one film
   matrix.py run own                                    only the round for films a server already had
+  matrix.py run idle                                   only the round that leaves a ring of equals alone
   matrix.py down                                        stop the pool, keeping its state
   matrix.py reset                                       stop the pool and delete its state
 
@@ -290,13 +291,32 @@ def clean(creds, apis):
         # Jellyfin leaves a library alone while its folder is empty, so something always sits in it.
         with open(os.path.join(root, "placeholder.txt"), "w", encoding="utf-8") as f:
             f.write("keeps the folder from being empty\n")
-        apis[name].post("/Sync/ResetContentSyncDatabase", None)
+        apis[name].post("/Sync/Reset/Content", None)
     for name in NODES:
         rescan(apis[name], lambda n=name: not apis[n].get("/Items?IncludeItemTypes=Movie&Recursive=true")["Items"], f"{name} emptied its library")
     quiet(apis, NODES, 60)
 
 
 # --------------------------------------------------------------------------------------------------
+
+def stays_quiet(apis, members, label, watch=15):
+    """Expects every hint queue to drain and then nothing new to be raised: a change that came to rest
+    must not start another one anywhere in the pool."""
+    expect(quiet(apis, members), f"{label}: every hint queue drained")
+    raised = {}
+    deadline = time.time() + watch
+    while time.time() < deadline:
+        for n in members:
+            overview = it.hints(apis[n])
+            for side in ("Outbound", "Inbound"):
+                for row in overview[side]:
+                    key = (n, side, row.get("PeerKey") or row.get("OriginKey") or "", row.get("Category") or row.get("ItemType") or "", row.get("Key") or row.get("ItemPath") or "")
+                    raised[key] = raised.get(key, 0) + 1
+            if overview["Pending"]:
+                raised[(n, "Pending", "", "", "")] = overview["Pending"]
+        time.sleep(1)
+    expect(not raised, f"{label}: nothing was raised in the {watch} seconds after the pool went quiet" + (f" ({sorted(raised)[:8]})" if raised else ""))
+
 # One round
 # --------------------------------------------------------------------------------------------------
 
@@ -420,6 +440,8 @@ def round_(creds, apis, shape, storage, hints):
     for node in followers:
         rescan(apis[node], lambda n=node: len(items(apis[n], tag)) == 7, f"{node} lists the seeded films")
         check(apis, creds, node, tag, storage, "seeded", final=True)
+    if hints:
+        stays_quiet(apis, members, "seeded")
 
     # Change everything on n1 at once.
     log("   -- changing the files on n1")
@@ -486,6 +508,8 @@ def round_(creds, apis, shape, storage, hints):
         want = [p for p in video_files(ORIGIN, tag) if not p.endswith(".strm")]
         expect(len(want) == 6 and not [p for p in video_files(ORIGIN, tag) if p.endswith(".strm")] and len(folders(ORIGIN, tag)) == 6,
                f"n1 settled: its own changes were not undone by its partners (files {video_files(ORIGIN, tag)})")
+    if hints:
+        stays_quiet(apis, members, "settled")
     failed = len(it._failures) - before
     log(f"   round {title}: {'passed' if failed == 0 else str(failed) + ' failed'}")
     return title, failed
@@ -993,6 +1017,35 @@ def clash_round(creds, apis):
     expect(not os.path.exists(on("n1", "Clash")), "the title does not come back to n1")
     expect(os.path.exists(on("n1", "OnlyTwo")) and os.path.exists(on("n2", "OnlyOne")), "the films each got from the other are untouched")
 
+    stays_quiet(apis, pair, "settled")
+    failed = len(it._failures) - before
+    log(f"   round {title}: {'passed' if failed == 0 else str(failed) + ' failed'}")
+    return title, failed
+
+
+def idle_round(creds, apis):
+    """Three equal partners hold the same films and nothing changes. A pool at rest sends nothing: no
+    server announces what it was given, so no change travels round the ring a second time."""
+    tag = uuid.uuid4().hex[:6]
+    title = "1:1:1 copy left idle"
+    log(f"== round: {title} ({tag})")
+    before = len(it._failures)
+    clean(creds, apis)
+    members, followers, _ = configure(creds, apis, "1:1:1", "copy", True)
+    origin = apis[ORIGIN]
+    for kind in ("Rest", "Still"):
+        encode(ORIGIN, f"{kind} {tag} (2024)", f"{kind} {tag} (2024).mkv", "hevc")
+    rescan(origin, lambda: len(items(origin, tag)) == 2, "n1 lists the seeded films")
+    quiet(apis, members)
+    sync_pass(apis, members)
+    sync_pass(apis, members)
+    for node in followers:
+        rescan(apis[node], lambda n=node: len(items(apis[n], tag)) == 2, f"{node} lists the seeded films")
+        check(apis, creds, node, tag, "copy", "seeded", final=True)
+    # Every server has now scanned files it was given by the others, which is when an echo would start.
+    stays_quiet(apis, members, "left idle", watch=180)
+    for node in members:
+        expect(len(video_files(node, tag)) == 2, f"{node} left idle: still holds the two films and nothing else ({video_files(node, tag)})")
     failed = len(it._failures) - before
     log(f"   round {title}: {'passed' if failed == 0 else str(failed) + ' failed'}")
     return title, failed
@@ -1005,6 +1058,8 @@ def cmd_run(args):
     only_interrupt = "interrupt" in args
     only_holders = "holders" in args
     only_own = "own" in args
+    only_idle = "idle" in args
+    with_idle = only_idle or not args
     with_interrupt = only_interrupt or not args
     with_holders = only_holders or not args
     with_own = only_own or not args
@@ -1016,7 +1071,7 @@ def cmd_run(args):
     compose("restart")
     creds, apis = setup_pool()
     results = []
-    for shape in ([] if only_interrupt or only_holders or only_own else shapes):
+    for shape in ([] if only_interrupt or only_holders or only_own or only_idle else shapes):
         for storage in storages:
             modes = discovery or (["hints", "scan"] if shape == "1:1" else ["hints"])
             for mode in modes:
@@ -1033,6 +1088,13 @@ def cmd_run(args):
             log(f"   ERROR {type(ex).__name__}: {ex}")
             it._failures.append(f"{own.__name__}: {ex}")
             results.append((own.__name__, -1))
+    if with_idle:
+        try:
+            results.append(idle_round(creds, apis))
+        except Exception as ex:  # noqa: BLE001 report and go on to the next round
+            log(f"   ERROR {type(ex).__name__}: {ex}")
+            it._failures.append(f"idle ring: {ex}")
+            results.append(("1:1:1 copy left idle", -1))
     if with_holders:
         try:
             results.append(holders_round(creds, apis))

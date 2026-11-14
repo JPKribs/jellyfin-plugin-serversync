@@ -388,7 +388,7 @@ export default function (view) {
     // --- History Settings ---
 
     function loadHistorySettings(config) {
-        setChecked('chkEnableHistorySync', config.EnableHistorySync || false);
+        needsUserMapping(config, 'chkEnableHistorySync', 'historyNeedsMapping', config.EnableHistorySync === true);
         setChecked('chkHistorySyncPlayedStatus', config.HistorySyncPlayedStatus !== false);
         setChecked('chkHistorySyncPlaybackPosition', config.HistorySyncPlaybackPosition !== false);
         setChecked('chkHistorySyncPlayCount', config.HistorySyncPlayCount !== false);
@@ -398,7 +398,7 @@ export default function (view) {
 
     function saveHistorySettings() {
         saveSection(function (config) {
-            config.EnableHistorySync = getChecked('chkEnableHistorySync');
+            config.EnableHistorySync = hasUserMapping(config) && getChecked('chkEnableHistorySync');
             config.HistorySyncPlayedStatus = getChecked('chkHistorySyncPlayedStatus');
             config.HistorySyncPlaybackPosition = getChecked('chkHistorySyncPlaybackPosition');
             config.HistorySyncPlayCount = getChecked('chkHistorySyncPlayCount');
@@ -409,6 +409,14 @@ export default function (view) {
 
     // --- Metadata Settings ---
 
+    // A choice is saved by name and may be read back by name or by number.
+    var PRECEDENCE = ['Newest', 'Rank'];
+
+    function choiceOf(value, names) {
+        if (typeof value === 'number') return names[value] || names[0];
+        return names.indexOf(value) >= 0 ? value : names[0];
+    }
+
     function loadMetadataSettings(config) {
         setChecked('chkEnableMetadataSync', config.EnableMetadataSync || false);
         setChecked('chkMetadataSyncMetadata', config.MetadataSyncMetadata !== false);
@@ -418,6 +426,7 @@ export default function (view) {
         setChecked('chkMetadataSyncPeople', config.MetadataSyncPeople === true);
         setChecked('chkMetadataSyncImages', config.MetadataSyncImages !== false);
         setChecked('chkMetadataSyncFolderItems', config.MetadataSyncFolderItems === true);
+        setValue('selMetadataSyncPrecedence', choiceOf(config.MetadataSyncPrecedence, PRECEDENCE));
     }
 
     function saveMetadataSettings() {
@@ -430,6 +439,7 @@ export default function (view) {
             config.MetadataSyncPeople = getChecked('chkMetadataSyncPeople');
             config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
             config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
+            config.MetadataSyncPrecedence = getValue('selMetadataSyncPrecedence') || 'Newest';
         }, 'Metadata settings saved', 'Failed to save metadata settings');
     }
 
@@ -438,30 +448,36 @@ export default function (view) {
     function loadPeopleSettings(config) {
         setChecked('chkEnablePeopleSync', config.EnablePeopleSync === true);
         setChecked('chkPeopleSyncImages', config.PeopleSyncImages !== false);
+        setValue('selPeopleSyncPrecedence', choiceOf(config.PeopleSyncPrecedence, PRECEDENCE));
     }
 
     function savePeopleSettings() {
         saveSection(function (config) {
             config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
             config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
+            config.PeopleSyncPrecedence = getValue('selPeopleSyncPrecedence') || 'Newest';
         }, 'People settings saved', 'Failed to save people settings');
     }
 
     // --- User Sync Settings ---
 
     function loadUserSyncSettings(config) {
-        setChecked('chkEnableUserSync', config.EnableUserSync || false);
+        needsUserMapping(config, 'chkEnableUserSync', 'userNeedsMapping', config.EnableUserSync === true);
         setChecked('chkUserSyncPolicy', config.UserSyncPolicy !== false);
         setChecked('chkUserSyncConfiguration', config.UserSyncConfiguration !== false);
         setChecked('chkUserSyncProfileImage', config.UserSyncProfileImage !== false);
+        setValue('selUserSyncPrecedence', choiceOf(config.UserSyncPrecedence, PRECEDENCE));
+        setValue('selUserSyncConflict', choiceOf(config.UserSyncConflict, ['Newest', 'Permissive', 'Restrictive']));
     }
 
     function saveUserSyncSettings() {
         saveSection(function (config) {
-            config.EnableUserSync = getChecked('chkEnableUserSync');
+            config.EnableUserSync = hasUserMapping(config) && getChecked('chkEnableUserSync');
             config.UserSyncPolicy = getChecked('chkUserSyncPolicy');
             config.UserSyncConfiguration = getChecked('chkUserSyncConfiguration');
             config.UserSyncProfileImage = getChecked('chkUserSyncProfileImage');
+            config.UserSyncPrecedence = getValue('selUserSyncPrecedence') || 'Newest';
+            config.UserSyncConflict = getValue('selUserSyncConflict') || 'Newest';
         }, 'User sync settings saved', 'Failed to save user sync settings');
     }
 
@@ -476,18 +492,28 @@ export default function (view) {
     }
 
     function loadPlaylistSettings(config) {
-        var mapped = hasUserMapping(config);
-        var toggle = getEl('chkEnablePlaylistSync');
-        if (toggle) toggle.disabled = !mapped;
-        setChecked('chkEnablePlaylistSync', mapped && config.EnablePlaylistSync === true);
+        needsUserMapping(config, 'chkEnablePlaylistSync', 'playlistNeedsMapping', config.EnablePlaylistSync === true);
         setChecked('chkPlaylistSyncShares', config.PlaylistSyncShares !== false);
-        setVisible('playlistNeedsMapping', !mapped);
+        setValue('selPlaylistSyncPrecedence', choiceOf(config.PlaylistSyncPrecedence, PRECEDENCE));
+        setValue('selPlaylistRemovedAction', choiceOf(config.PlaylistRemovedAction, ['Delete', 'Keep']));
+    }
+
+    // History, playlists, and user settings all travel by user mapping. Without one there is nothing
+    // to sync, so the switch is off and says what to do first.
+    function needsUserMapping(config, toggleId, warningId, on) {
+        var mapped = hasUserMapping(config);
+        var toggle = getEl(toggleId);
+        if (toggle) toggle.disabled = !mapped;
+        setChecked(toggleId, mapped && on);
+        setVisible(warningId, !mapped);
     }
 
     function savePlaylistSettings() {
         saveSection(function (config) {
             config.EnablePlaylistSync = hasUserMapping(config) && getChecked('chkEnablePlaylistSync');
             config.PlaylistSyncShares = getChecked('chkPlaylistSyncShares');
+            config.PlaylistSyncPrecedence = getValue('selPlaylistSyncPrecedence') || 'Newest';
+            config.PlaylistRemovedAction = getValue('selPlaylistRemovedAction') || 'Delete';
         }, 'Playlist settings saved', 'Failed to save playlist settings');
     }
 
@@ -617,7 +643,7 @@ export default function (view) {
             // A sync type's options only show while it is on.
             [['chkEnableContentSync', 'contentSyncOptions'], ['chkEnableHistorySync', 'historySyncOptions'],
                 ['chkEnableMetadataSync', 'metadataSyncOptions'], ['chkEnablePeopleSync', 'peopleSyncOptions'],
-                ['chkEnableUserSync', 'userSyncOptions']].forEach(function (pair) {
+                ['chkEnableUserSync', 'userSyncOptions'], ['chkEnablePlaylistSync', 'playlistSyncOptions']].forEach(function (pair) {
                 ServerSyncShared.bindReveal(pair[0], pair[1]);
             });
             loadCallerAccessSettings(config);
@@ -636,17 +662,17 @@ export default function (view) {
         return confirmDialog(paragraphs.map(function (p) { return '<p>' + escapeHtml(p) + '</p>'; }).join(''), { html: true, destructive: true });
     }
 
-    function resetTable(endpoint, tableName) {
+    function resetTable(table, tableName) {
         confirmReset([
             'Are you sure you want to reset the ' + tableName + ' table?',
             'This will delete all ' + tableName + ' tracking data and you will need to re-sync. This cannot be undone.'
         ]).then(function (confirmed) {
             if (!confirmed) return;
 
-            ServerSyncShared.apiRequest(endpoint, 'POST').then(function() {
+            ServerSyncShared.apiRequest('Reset/' + table, 'POST').then(function() {
                 ServerSyncShared.showAlert('The ' + tableName + ' table has been reset.');
             }).catch(function(err) {
-                console.error(endpoint + ' error:', err);
+                console.error('Reset ' + table + ' error:', err);
                 ServerSyncShared.showAlert('Failed to reset ' + tableName + ' table.');
             });
         });
@@ -655,14 +681,14 @@ export default function (view) {
     function resetEntireDatabase() {
         confirmReset([
             'Are you sure you want to reset the ENTIRE sync database?',
-            'This will delete ALL tracking data across all sync types (Content, History, Metadata, People, Users). You will need to re-sync everything from scratch. This cannot be undone.'
+            'This will delete ALL tracking data across all sync types (Content, History, Metadata, People, Playlists, Users). You will need to re-sync everything from scratch. This cannot be undone.'
         ]).then(function (confirmed) {
             if (!confirmed) return;
 
-            ServerSyncShared.apiRequest('ResetSyncDatabase', 'POST').then(function() {
+            ServerSyncShared.apiRequest('Reset/All', 'POST').then(function() {
                 ServerSyncShared.showAlert('The entire sync database has been reset.');
             }).catch(function(err) {
-                console.error('ResetSyncDatabase error:', err);
+                console.error('Reset All error:', err);
                 ServerSyncShared.showAlert('Failed to reset sync database.');
             });
         });
@@ -694,11 +720,12 @@ export default function (view) {
                 bindClick('btnSaveUserSyncSettings', saveUserSyncSettings);
                 bindClick('btnSavePlaylistSettings', savePlaylistSettings);
 
-                bindClick('btnResetContentTable', function() { resetTable('ResetContentSyncDatabase', 'content sync'); });
-                bindClick('btnResetHistoryTable', function() { resetTable('ResetHistorySyncDatabase', 'history sync'); });
-                bindClick('btnResetMetadataTable', function() { resetTable('ResetMetadataSyncDatabase', 'metadata sync'); });
-                bindClick('btnResetUserTable', function() { resetTable('ResetUserSyncDatabase', 'user sync'); });
-                bindClick('btnResetPeopleTable', function() { resetTable('ResetPeopleSyncDatabase', 'people sync'); });
+                bindClick('btnResetContentTable', function() { resetTable('Content', 'content sync'); });
+                bindClick('btnResetHistoryTable', function() { resetTable('History', 'history sync'); });
+                bindClick('btnResetMetadataTable', function() { resetTable('Metadata', 'metadata sync'); });
+                bindClick('btnResetPeopleTable', function() { resetTable('People', 'people sync'); });
+                bindClick('btnResetPlaylistTable', function() { resetTable('Playlists', 'playlist sync'); });
+                bindClick('btnResetUserTable', function() { resetTable('Users', 'user sync'); });
                 bindClick('btnResetEntireDatabase', resetEntireDatabase);
             }
 

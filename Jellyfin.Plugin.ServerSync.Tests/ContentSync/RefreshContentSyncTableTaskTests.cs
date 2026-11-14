@@ -417,43 +417,6 @@ public sealed class RefreshContentSyncTableTaskTests : IDisposable
     }
 
     /// <summary>
-    /// Copies tracked before origins were recorded are marked once: a file that never went through a
-    /// download is this server's own, and one that did came from the server its row names. Rows that
-    /// already say, links, and rows with no file are left alone, and a second pass changes nothing.
-    /// True: an existing library follows the same rules as files synced from now on.
-    /// False: the rules would only cover new files, or a second pass would mark a row twice.
-    /// </summary>
-    [Fact]
-    public void ExistingCopies_AreMarkedOnce_AsOwnOrDownloaded()
-    {
-        _config.Configuration.Servers[0].ServerId = "aaaa1111";
-        var matched = Track("matched");
-        var downloaded = Track("downloaded");
-        downloaded.LastSyncTime = DateTime.UtcNow.AddDays(-3);
-        downloaded.ServerKey = "server-a";
-        _manager.Upsert(downloaded);
-        var pick = Track("pick");
-        pick.Kept = KeptReason.Pick;
-        _manager.Upsert(pick);
-        Track("no-file", withFile: false);
-        var unknown = Track("unknown-server");
-        unknown.LastSyncTime = DateTime.UtcNow;
-        unknown.ServerKey = "gone";
-        _manager.Upsert(unknown);
-
-        Assert.Equal(2, ExistingCopies.Mark(_manager, _config.Configuration));
-
-        Assert.Equal(KeptReason.Own, Row("matched")!.Kept);
-        Assert.Null(Row("matched")!.OriginServerId);
-        Assert.Equal("aaaa1111", Row("downloaded")!.OriginServerId);
-        Assert.Equal(KeptReason.None, Row("downloaded")!.Kept);
-        Assert.Equal(KeptReason.Pick, Row("pick")!.Kept);
-        Assert.Null(Row("no-file")!.OriginServerId);
-        Assert.Null(Row("unknown-server")!.OriginServerId);
-        Assert.Equal(0, ExistingCopies.Mark(_manager, _config.Configuration));
-    }
-
-    /// <summary>
     /// A server that is disabled, or gone from the list, leaves its rows behind under a library id
     /// another server may share.
     /// True: its rows are left alone, and do not count as that other server's removed files.

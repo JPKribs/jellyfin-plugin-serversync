@@ -31,8 +31,8 @@ export function createHistorySyncTableModule(ctx, kit) {
         modalId: 'historyItemDetailModal',
         modalButtonPrefix: 'btnHistoryModal',
         tasks: {
-            refresh: { endpoint: 'TriggerHistoryRefresh', key: 'ServerSyncRefreshHistoryTable' },
-            sync: { endpoint: 'TriggerHistorySync', key: 'ServerSyncMissingHistory' }
+            refresh: { key: 'ServerSyncRefreshHistoryTable' },
+            sync: { key: 'ServerSyncMissingHistory' }
         },
         taskNoun: 'history',
         singularNoun: 'Item',
@@ -89,7 +89,7 @@ export function createHistorySyncTableModule(ctx, kit) {
             });
         },
         statusRequest: function(item, status) {
-            return { endpoint: 'HistoryItems/UpdateStatus', body: { Id: item.Id, Status: status } };
+            return { endpoint: 'HistoryItems/' + (status === 'Ignored' ? 'Ignore' : 'Queue'), body: { Ids: [item.Id] } };
         },
         methods: {
             showDetail: function(item) {

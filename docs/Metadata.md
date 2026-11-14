@@ -12,6 +12,7 @@ Metadata syncing copies item details from a source Jellyfin server onto matching
 * **Cast & Crew** syncs the cast and crew attached to each item. It can be slow.
 * **Images** syncs item images such as posters and backdrops.
 * **Folder Items** also syncs metadata for container items such as series and seasons.
+* **Precedence** chooses which server is heard for an item several servers hold: the one whose edit is newest, or always the highest ranked. See [Several servers](SyncTypes.md#several-servers).
 
 The library filter on the Storage tab applies to metadata as it does to content.
 

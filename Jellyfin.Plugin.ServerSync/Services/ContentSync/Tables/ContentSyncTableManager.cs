@@ -26,14 +26,8 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// Initializes a new instance.
     /// </summary>
     public ContentSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<ContentSyncTableManager> logger)
-        : base(GetDatabase(databaseProvider), logger)
+        : base(databaseProvider, logger)
     {
-    }
-
-    private static SyncDatabase GetDatabase(ISyncDatabaseProvider provider)
-    {
-        ArgumentNullException.ThrowIfNull(provider);
-        return provider.Database;
     }
 
     /// <inheritdoc />
@@ -179,7 +173,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// </summary>
     public void RequireLinkAwareReaders() => ExecuteWrite(conn =>
     {
-        var floor = DatabaseMigrationService.MinReaderFor(conn);
+        var floor = SyncSchema.MinReaderFor(conn);
         if ((DatabaseSchema.GetMinReaderVersion(conn) ?? 0) < floor)
         {
             DatabaseSchema.Stamp(conn, Math.Max(floor, DatabaseSchema.GetVersion(conn)), floor);
@@ -504,41 +498,6 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             return ReadAll(cmd);
         },
         fallback: (IList<SyncItem>)Array.Empty<SyncItem>());
-
-    /// <summary>
-    /// Returns aggregate sync statistics for the dashboard.
-    /// </summary>
-    public SyncStats GetSyncStats() => ExecuteRead(
-        conn =>
-        {
-            var stats = new SyncStats();
-
-            using (var countCmd = conn.CreateCommand())
-            {
-                countCmd.CommandText = "SELECT Status, COUNT(*) FROM SyncItems GROUP BY Status";
-                using var reader = countCmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    stats.StatusCounts[(SyncStatus)reader.GetInt32(0)] = reader.GetInt32(1);
-                }
-            }
-
-            stats.TotalQueuedBytes = SumSize(conn, SyncStatus.Queued, pendingType: null);
-            stats.TotalSyncedBytes = SumSize(conn, SyncStatus.Synced, pendingType: null);
-
-            using (var lastSyncCmd = conn.CreateCommand())
-            {
-                lastSyncCmd.CommandText = "SELECT MAX(LastSyncTime) FROM SyncItems WHERE LastSyncTime IS NOT NULL";
-                var lastSync = lastSyncCmd.ExecuteScalar();
-                if (lastSync != null && lastSync != DBNull.Value)
-                {
-                    stats.LastSyncTime = ParseTimestamp((string)lastSync);
-                }
-            }
-
-            return stats;
-        },
-        fallback: new SyncStats());
 
     /// <summary>
     /// Updates the status of a sync item by source-item ID, optionally

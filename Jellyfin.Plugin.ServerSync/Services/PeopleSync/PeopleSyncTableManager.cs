@@ -22,14 +22,8 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
     /// Initializes a new instance.
     /// </summary>
     public PeopleSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<PeopleSyncTableManager> logger)
-        : base(GetDatabase(databaseProvider), logger)
+        : base(databaseProvider, logger)
     {
-    }
-
-    private static SyncDatabase GetDatabase(ISyncDatabaseProvider provider)
-    {
-        ArgumentNullException.ThrowIfNull(provider);
-        return provider.Database;
     }
 
     /// <inheritdoc />

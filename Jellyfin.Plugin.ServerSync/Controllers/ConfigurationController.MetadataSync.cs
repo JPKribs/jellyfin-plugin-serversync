@@ -153,30 +153,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Updates the status of a metadata sync item.
-    /// </summary>
-    /// <param name="request">Status update request.</param>
-    /// <returns>Action result with success status.</returns>
-    [HttpPost("MetadataItems/UpdateStatus")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult UpdateMetadataSyncItemStatus(
-        [FromServices] MetadataSyncTableManager manager,
-        [FromBody] UpdateMetadataSyncItemStatusRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        ArgumentNullException.ThrowIfNull(request);
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status))
-        {
-            return BadRequest("Invalid status value");
-        }
-
-        // The same path as the bulk actions, so queueing one row clears its synced hashes exactly as
-        // queueing many does. Without that the sync skipped every category it last recorded as applied.
-        manager.BatchUpdateStatusByIdsWithDetails(new[] { request.Id }, status);
-        return Ok(new { Success = true });
-    }
-
-    /// <summary>
     /// Moves metadata sync items to Queued status. With no ids and a Status, queues every row in that
     /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
@@ -239,48 +215,6 @@ public partial class ConfigurationController
         {
             _logger.LogError(ex, "Failed to ignore metadata sync items by IDs");
             return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
-        }
-    }
-
-    /// <summary>
-    /// Manually triggers the refresh metadata sync table task.
-    /// </summary>
-    /// <returns>Action result with status message.</returns>
-    [HttpPost("TriggerMetadataRefresh")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerMetadataRefresh()
-        => ExecuteScheduledTaskByKey("ServerSyncRefreshMetadataTable", "Metadata refresh task started", "Metadata refresh task not found");
-
-    /// <summary>
-    /// Manually triggers the sync missing metadata task.
-    /// </summary>
-    /// <returns>Action result with status message.</returns>
-    [HttpPost("TriggerMetadataSync")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerMetadataSync()
-        => ExecuteScheduledTaskByKey("ServerSyncMissingMetadata", "Metadata sync task started", "Metadata sync task not found");
-
-    /// <summary>
-    /// Resets the metadata sync database, removing all tracked metadata sync items.
-    /// </summary>
-    /// <returns>Action result with success status.</returns>
-    [HttpPost("ResetMetadataSyncDatabase")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetMetadataSyncDatabase([FromServices] MetadataSyncTableManager manager)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        try
-        {
-            var deleted = manager.ResetTable();
-            _logger.LogInformation("Metadata sync database has been reset, {Count} rows deleted", deleted);
-            return Ok(new { Success = true, Message = "Metadata sync database reset successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to reset metadata sync database");
-            return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
         }
     }
 }

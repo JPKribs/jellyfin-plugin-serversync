@@ -36,8 +36,8 @@ export function createPeopleSyncTableModule(ctx, kit) {
         idKey: function(item) { return String(item.Id); },
         selectionBody: function(keys) { return { Ids: keys.map(function(k) { return parseInt(k, 10); }) }; },
         tasks: {
-            refresh: { endpoint: 'TriggerPeopleRefresh', key: 'ServerSyncRefreshPeopleTable' },
-            sync: { endpoint: 'TriggerPeopleSync', key: 'ServerSyncMissingPeople' }
+            refresh: { key: 'ServerSyncRefreshPeopleTable' },
+            sync: { key: 'ServerSyncMissingPeople' }
         },
         taskNoun: 'people',
         singularNoun: 'Person',

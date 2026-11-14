@@ -187,11 +187,15 @@
                                                 </button>
                                                 <span id="peerCheckStatus" class="jpk-status-text"></span>
                                             </div>
+                                            <div id="peerCheckResult" class="mt-md hidden">
+                                                <div id="peerCheckHeadline" class="mb-md"></div>
+                                                <div id="peerCheckRows" class="ssAccessGrid"></div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <!-- Step 3: Stream. Only for Stream, Push, and Sync servers, since a Pull server may never link here. -->
+                                <!-- Step 3: Stream. Only for Push and Sync servers, since a Pull server may never link here. -->
                                 <div class="jpk-collapsible-section hidden" id="serverStepStreamSection">
                                     <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepStream">
                                         <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">3</span> Stream</span>
@@ -236,7 +240,7 @@
                                     </div>
                                 </div>
 
-                                <!-- Step 4: Libraries. A Stream server maps none, so the step is hidden for it. -->
+                                <!-- Step 4: Libraries. -->
                                 <div class="jpk-collapsible-section" id="serverStepLibrariesSection">
                                     <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepLibraries">
                                         <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">4</span> Libraries</span>

@@ -83,6 +83,21 @@ public class SyncMissingUserTask
     /// <inheritdoc />
     public override string Category => "User Sync";
 
+    // The row holds what this server held when it was scanned. Once the other server's settings are
+    // applied, that is what this server holds, and the next scan tells a change made here by
+    // comparing against it.
+    /// <inheritdoc />
+    protected override void OnApplySucceeded(UserSyncItem record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.PropertyCategory != UserPropertyCategory.ProfileImage)
+        {
+            record.LocalValue = record.MergedValue;
+        }
+
+        base.OnApplySucceeded(record);
+    }
+
     /// <inheritdoc />
     protected override string ModuleMutexKey => "User";
 

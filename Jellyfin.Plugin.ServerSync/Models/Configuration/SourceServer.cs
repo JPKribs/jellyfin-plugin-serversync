@@ -202,7 +202,7 @@ public class SourceServer
     /// </summary>
     [XmlIgnore]
     [JsonIgnore]
-    public bool OffersLinks => IsEnabled && AllowLinking && Mode is ServerMode.Stream or ServerMode.Push or ServerMode.Sync;
+    public bool OffersLinks => IsEnabled && AllowLinking && Mode is ServerMode.Push or ServerMode.Sync;
 
     /// <summary>Gets the URL the browser should use for images from this peer.</summary>
     [XmlIgnore]

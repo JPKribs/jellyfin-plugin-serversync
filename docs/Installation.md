@@ -26,6 +26,10 @@ Restart your Jellyfin server completely and wait for it to start up.
 
 Go to **Dashboard → Plugins → Server Sync** and confirm the configuration page loads.
 
+## Updating
+
+A server on 12.4.13.0 or later updates from the catalog as usual. A server on anything older must run 12.4.13.0 for a day first, since this release no longer converts older databases or settings. See [Updating from an older release](Versioning.md#updating-from-an-older-release).
+
 Servers in a pool can run different Server Sync versions as long as their wire protocols overlap, so they can be updated one at a time. See [Versioning](Versioning.md). A server whose protocol does not overlap holds its changes until it does.
 
 Next: [Setup](Setup.md).

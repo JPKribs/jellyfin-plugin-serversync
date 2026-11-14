@@ -80,41 +80,6 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Updates the status of a history sync item.
-    /// </summary>
-    /// <param name="request">Status update request.</param>
-    /// <returns>Action result with success status.</returns>
-    [HttpPost("HistoryItems/UpdateStatus")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult UpdateHistoryItemStatus(
-        [FromServices] HistorySyncTableManager manager,
-        [FromBody] UpdateHistoryItemStatusRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        ArgumentNullException.ThrowIfNull(request);
-        if (!Enum.TryParse<SyncStatus>(request.Status, out var status) || !Enum.IsDefined(status))
-        {
-            return BadRequest("Invalid status value");
-        }
-
-        // Prefer database ID if provided
-        if (request.Id.HasValue)
-        {
-            manager.UpdateStatus(request.Id.Value, status);
-        }
-        else if (!string.IsNullOrEmpty(request.SourceUserId) && !string.IsNullOrEmpty(request.SourceItemId))
-        {
-            manager.UpdateStatusByKey((request.SourceUserId, request.SourceItemId), status);
-        }
-        else
-        {
-            return BadRequest("Either Id or both SourceUserId and SourceItemId must be provided");
-        }
-
-        return Ok(new { Success = true });
-    }
-
-    /// <summary>
     /// Moves history items to Queued status. With no ids and a Status, queues every row in that
     /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
@@ -199,24 +164,4 @@ public partial class ConfigurationController
 
         return Ok(new BulkOperationResult { Updated = successCount, Requested = request.Items.Count });
     }
-
-    /// <summary>
-    /// Manually triggers the refresh history sync table task.
-    /// </summary>
-    /// <returns>Action result with status message.</returns>
-    [HttpPost("TriggerHistoryRefresh")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerHistoryRefresh()
-        => ExecuteScheduledTaskByKey("ServerSyncRefreshHistoryTable", "History refresh task started", "History refresh task not found");
-
-    /// <summary>
-    /// Manually triggers the sync missing history task.
-    /// </summary>
-    /// <returns>Action result with status message.</returns>
-    [HttpPost("TriggerHistorySync")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerHistorySync()
-        => ExecuteScheduledTaskByKey("ServerSyncMissingHistory", "History sync task started", "History sync task not found");
 }

@@ -14,13 +14,16 @@ public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
     private readonly ILoggerFactory _loggerFactory;
     private readonly string _dataPath;
     private readonly object _lock = new();
+    private readonly IServiceProvider? _services;
     private volatile SyncDatabase? _database;
+    private volatile SchemaTooOldException? _tooOld;
     private volatile bool _disposed;
 
-    public SyncDatabaseProvider(ILoggerFactory loggerFactory, IApplicationPaths applicationPaths)
+    public SyncDatabaseProvider(ILoggerFactory loggerFactory, IApplicationPaths applicationPaths, IServiceProvider? services = null)
     {
         _loggerFactory = loggerFactory;
         _dataPath = applicationPaths.DataPath;
+        _services = services;
     }
 
     /// <inheritdoc />
@@ -35,13 +38,38 @@ public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
                 return _database;
             }
 
+            // A database from a release this one cannot read stays that way until Jellyfin restarts on
+            // another release, so it is not opened again on every use.
+            if (_tooOld is { } known)
+            {
+                throw known;
+            }
+
             lock (_lock)
             {
                 ObjectDisposedException.ThrowIf(_disposed, nameof(SyncDatabaseProvider));
+                if (_tooOld is { } found)
+                {
+                    throw found;
+                }
 
-                _database ??= new SyncDatabase(
-                    _loggerFactory.CreateLogger<SyncDatabase>(),
-                    _dataPath);
+                try
+                {
+                    _database ??= new SyncDatabase(
+                        _loggerFactory.CreateLogger<SyncDatabase>(),
+                        _dataPath);
+                }
+                catch (SchemaTooOldException ex)
+                {
+                    _tooOld = ex;
+                    if (_services?.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
+                    {
+                        _ = activity.LogAndWaitAsync("Server Sync Needs an Earlier Update First", "ServerSyncAttention", ex.Message, LogLevel.Error);
+                    }
+
+                    throw;
+                }
+
                 return _database;
             }
         }

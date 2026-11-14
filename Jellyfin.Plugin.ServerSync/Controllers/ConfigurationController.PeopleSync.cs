@@ -188,42 +188,4 @@ public partial class ConfigurationController
             return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
         }
     }
-
-    /// <summary>
-    /// Manually triggers the refresh people sync table task.
-    /// </summary>
-    [HttpPost("TriggerPeopleRefresh")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerPeopleRefresh()
-        => ExecuteScheduledTaskByKey("ServerSyncRefreshPeopleTable", "People refresh task started", "People refresh task not found");
-
-    /// <summary>
-    /// Manually triggers the sync missing people task.
-    /// </summary>
-    [HttpPost("TriggerPeopleSync")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult TriggerPeopleSync()
-        => ExecuteScheduledTaskByKey("ServerSyncMissingPeople", "People sync task started", "People sync task not found");
-
-    /// <summary>
-    /// Resets the people sync database, removing all tracked people sync items.
-    /// </summary>
-    [HttpPost("ResetPeopleSyncDatabase")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetPeopleSyncDatabase([FromServices] PeopleSyncTableManager manager)
-    {
-        try
-        {
-            var deleted = manager.ResetTable();
-            _logger.LogInformation("People sync database has been reset, {Count} rows deleted", deleted);
-            return Ok(new { Success = true, Message = "People sync database reset successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to reset people sync database");
-            return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
-        }
-    }
 }

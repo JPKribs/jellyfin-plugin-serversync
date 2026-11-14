@@ -47,8 +47,8 @@ public sealed class SchemaReaderVersionTests : IDisposable
     {
         Open().Dispose();
         using var conn = Raw();
-        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion, DatabaseSchema.GetVersion(conn));
-        Assert.Equal(DatabaseMigrationService.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(conn));
+        Assert.Equal(SyncSchema.CurrentSchemaVersion, DatabaseSchema.GetVersion(conn));
+        Assert.Equal(SyncSchema.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(conn));
     }
 
     /// <summary>
@@ -63,12 +63,12 @@ public sealed class SchemaReaderVersionTests : IDisposable
         using (var conn = Raw())
         {
             Exec(conn, "CREATE TABLE FutureTable (Id INTEGER)");
-            DatabaseSchema.SetVersion(conn, DatabaseMigrationService.CurrentSchemaVersion + 1);
+            DatabaseSchema.SetVersion(conn, SyncSchema.CurrentSchemaVersion + 1);
         }
 
         Open().Dispose();
         using var after = Raw();
-        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion + 1, DatabaseSchema.GetVersion(after));
+        Assert.Equal(SyncSchema.CurrentSchemaVersion + 1, DatabaseSchema.GetVersion(after));
         Assert.Equal(1L, Scalar(after, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'FutureTable'"));
         Assert.Empty(Backups());
     }
@@ -86,13 +86,13 @@ public sealed class SchemaReaderVersionTests : IDisposable
         Open().Dispose();
         using (var conn = Raw())
         {
-            Exec(conn, dropMarker ? "DROP TABLE SchemaInfo" : $"UPDATE SchemaInfo SET Value = {DatabaseMigrationService.CurrentSchemaVersion + 1}");
-            DatabaseSchema.SetVersion(conn, DatabaseMigrationService.CurrentSchemaVersion + 1);
+            Exec(conn, dropMarker ? "DROP TABLE SchemaInfo" : $"UPDATE SchemaInfo SET Value = {SyncSchema.CurrentSchemaVersion + 1}");
+            DatabaseSchema.SetVersion(conn, SyncSchema.CurrentSchemaVersion + 1);
         }
 
         Open().Dispose();
         using var after = Raw();
-        Assert.Equal(DatabaseMigrationService.CurrentSchemaVersion, DatabaseSchema.GetVersion(after));
+        Assert.Equal(SyncSchema.CurrentSchemaVersion, DatabaseSchema.GetVersion(after));
         Assert.NotEmpty(Backups());
     }
 
@@ -112,7 +112,7 @@ public sealed class SchemaReaderVersionTests : IDisposable
 
         Open().Dispose();
         using var after = Raw();
-        Assert.Equal(DatabaseMigrationService.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(after));
+        Assert.Equal(SyncSchema.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(after));
     }
 
     private SyncDatabase Open() => new(NullLogger<SyncDatabase>.Instance, _dataPath);

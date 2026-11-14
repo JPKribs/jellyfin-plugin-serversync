@@ -178,10 +178,12 @@ public sealed class HistoryHintHandler
         // come from a third server, the base no longer describes it, and a three way merge would read that
         // change as this server's own: a play taken from C would then beat a newer unmark from B. The edit
         // versions decide instead, as they do on first contact.
+        var itemType = HintProtocol.SplitHistoryItemType(hint.ItemType, out var parts);
+        var taken = HistoryParts.None;
         var decideByVersion = !record.HasNegotiatedBase || ChangedByThirdServer(localKey, origin);
         if (decideByVersion)
         {
-            DecideByVersion(record, hint, localKey);
+            taken = DecideByVersion(record, hint, localKey, parts);
         }
 
         if (!HistorySyncMergeService.HasChangesToSync(record))
@@ -210,7 +212,7 @@ public sealed class HistoryHintHandler
         NegotiationStep settled;
         try
         {
-            settled = await SettleWithOriginAsync(record, client, decideByVersion ? r => DecideByVersion(r, hint, localKey) : null, cancellationToken).ConfigureAwait(false);
+            settled = await SettleWithOriginAsync(record, client, decideByVersion ? r => taken = DecideByVersion(r, hint, localKey, parts) : null, cancellationToken).ConfigureAwait(false);
         }
         catch (PeerRefusedException ex) when (ex.KeyRefused)
         {
@@ -261,13 +263,23 @@ public sealed class HistoryHintHandler
 
         Store(record, now);
 
+        // The parts taken from the origin carry its version here, each on its own.
+        var incomingVersion = HintProtocol.IncomingVersion(hint, HintKind.History, localKey);
+        foreach (var part in new[] { HistoryParts.Played, HistoryParts.Favorite })
+        {
+            if (taken.HasFlag(part))
+            {
+                _versions.Set(new ObjectVersion { Kind = HintKind.History, Key = HintProtocol.HistoryPartKey(localKey, part), ServerId = incomingVersion.ServerId, Timestamp = incomingVersion.Timestamp });
+            }
+        }
+
         if (movedPastOrigin)
         {
             // This server contributed to the merged state, so the other peers hear about it from here.
             // The origin already holds it through the negotiation above, unless the origin refused this
             // server's key and nothing was negotiated, in which case the origin hears of it too.
             var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = now };
-            _publisher.PublishHistory(localUserId, userMapping.LocalUserName, localItemId, record.LocalPath ?? string.Empty, version, excludePeerKey: oneWay ? null : origin.Key, itemType: hint.ItemType);
+            _publisher.PublishHistory(localUserId, userMapping.LocalUserName, localItemId, record.LocalPath ?? string.Empty, version, excludePeerKey: oneWay ? null : origin.Key, itemType: HintProtocol.HistoryItemType(itemType, taken == HistoryParts.None ? parts : taken));
         }
         else
         {
@@ -313,17 +325,56 @@ public sealed class HistoryHintHandler
     /// rather than risk losing it, and the base recorded after this apply makes every later merge three
     /// way.
     /// </summary>
-    private void DecideByVersion(HistorySyncItem record, InboundHint hint, string localKey)
+    private HistoryParts DecideByVersion(HistorySyncItem record, InboundHint hint, string localKey, HistoryParts parts)
     {
         var localVersion = _versions.Get(HintKind.History, localKey);
         if (localVersion is null)
         {
-            return;
+            return HistoryParts.None;
         }
 
         var incoming = HintProtocol.IncomingVersion(hint, HintKind.History, localKey);
         var source = PeerHistoryNegotiator.SourceStateOf(record);
         var local = PeerHistoryNegotiator.LocalStateOf(record);
+
+        // The origin says which parts it changed. Only those are weighed, each against the version
+        // this server holds for that part, and the rest stay as they are here. The origin may never
+        // have heard of a change this server took from a third, so its other parts say nothing.
+        if (parts != HistoryParts.None)
+        {
+            var taken = HistoryParts.None;
+            var merged = local;
+            foreach (var part in new[] { HistoryParts.Played, HistoryParts.Favorite })
+            {
+                if (!parts.HasFlag(part))
+                {
+                    continue;
+                }
+
+                var mine = _versions.Get(HintKind.History, HintProtocol.HistoryPartKey(localKey, part)) ?? localVersion;
+                if (VersionDecider.SameVersion(incoming, mine) || !VersionDecider.IsNewer(incoming, mine))
+                {
+                    continue;
+                }
+
+                taken |= part;
+                if (part == HistoryParts.Favorite)
+                {
+                    merged.IsFavorite = source.IsFavorite;
+                }
+                else
+                {
+                    merged.Played = source.Played;
+                    merged.PlayCount = source.PlayCount;
+                    merged.PlaybackPositionTicks = source.PlaybackPositionTicks;
+                    merged.LastPlayedDate = source.LastPlayedDate;
+                }
+            }
+
+            PeerHistoryNegotiator.ApplyMergedState(record, merged);
+            _logger.LogDebug("Deciding {Item} by version, part by part: taking {Taken} of {Parts} from the origin", record.ItemName, taken, parts);
+            return taken;
+        }
 
         switch (VersionDecider.Decide(localVersion, incoming, PeerHistoryNegotiator.StatesMatch(source, local)))
         {
@@ -337,6 +388,8 @@ public sealed class HistoryHintHandler
                 _logger.LogDebug("Deciding {Item} by version: this server's edit is newer, keeping it", record.ItemName);
                 break;
         }
+
+        return HistoryParts.None;
     }
 
     private async Task<NegotiationStep> SettleWithOriginAsync(HistorySyncItem record, SourceServerClient client, Action<HistorySyncItem>? remerge, CancellationToken cancellationToken)

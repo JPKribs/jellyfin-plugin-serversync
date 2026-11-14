@@ -199,9 +199,28 @@ public class UserSyncItem : SyncRecord
         }
     }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether this run only recorded what the row's server holds.
+    /// Another server speaks for the user, so nothing is applied from this row and it agrees on nothing.
+    /// Not stored.
+    /// </summary>
+    public bool Observed { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the value the two servers last agreed on stays as it
+    /// is although nothing is left to apply. Set when this server's own change is kept: the other
+    /// server has not taken it yet, so the two have not agreed on it. Not stored.
+    /// </summary>
+    public bool KeepAgreedValue { get; set; }
+
     /// <inheritdoc />
     public override void MarkSynced()
     {
+        if (Observed || KeepAgreedValue)
+        {
+            return;
+        }
+
         if (PropertyCategory == UserPropertyCategory.ProfileImage)
         {
             SyncedImageHash = SourceImageHash;

@@ -93,6 +93,29 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             Logger,
             cancellationToken);
 
+    private HashSet<string> _versionedServers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    protected override async Task PrepareContestAsync(CancellationToken cancellationToken)
+        => _versionedServers = ConfigManager.Configuration.PeopleSyncPrecedence == Models.Configuration.SyncPrecedence.Rank
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : await _conflicts.ServersWithVersionsAsync(Sources, cancellationToken).ConfigureAwait(false);
+
+    // Among the servers offering one person, the one that holds the newest recorded edit speaks.
+    /// <inheritdoc />
+    protected override Task<IReadOnlyDictionary<string, PersonWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<PersonWork>> contested, CancellationToken cancellationToken)
+        => _conflicts.NewestOffersAsync(
+            contested,
+            Models.Queue.HintKind.People,
+            _versionedServers,
+            work => work.Source,
+            work => string.IsNullOrEmpty(work.Person.Name) ? null : HintProtocol.PeopleKey(work.Person.Name),
+            cancellationToken);
+
+    /// <inheritdoc />
+    protected override bool MayOutrankOwner(PeopleSyncItem record)
+        => record?.ServerKey is { } key && _versionedServers.Contains(key);
+
     /// <inheritdoc />
     public override string Name => "Refresh People Sync Table";
 

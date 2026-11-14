@@ -13,6 +13,8 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// </summary>
 public abstract class QueueStoreBase
 {
+    private readonly ISyncDatabaseProvider _databaseProvider;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="QueueStoreBase"/> class.
     /// </summary>
@@ -21,12 +23,15 @@ public abstract class QueueStoreBase
     protected QueueStoreBase(ISyncDatabaseProvider databaseProvider, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(databaseProvider);
-        Database = databaseProvider.Database;
+        _databaseProvider = databaseProvider;
         Logger = logger;
     }
 
-    /// <summary>Gets the database.</summary>
-    protected SyncDatabase Database { get; }
+    /// <summary>
+    /// Gets the database. It is opened on first use, never while a store is being built, so a database
+    /// that cannot be opened fails the call that needs it and not the start of everything that holds a store.
+    /// </summary>
+    protected SyncDatabase Database => _databaseProvider.Database;
 
     /// <summary>Gets the logger.</summary>
     protected ILogger Logger { get; }

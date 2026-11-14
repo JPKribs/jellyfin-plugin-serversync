@@ -171,6 +171,11 @@ public sealed class PeerMetadataSource
     {
         ArgumentNullException.ThrowIfNull(keys);
         var matches = new List<PeerMatch>();
+        if (Plugin.Held)
+        {
+            return matches;
+        }
+
         var parents = await _parents.ParentsAsync(cancellationToken).ConfigureAwait(false);
         if (parents.Count == 0)
         {

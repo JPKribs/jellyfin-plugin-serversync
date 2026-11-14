@@ -16,7 +16,7 @@ namespace Jellyfin.Plugin.ServerSync;
 /// </summary>
 /// <remarks>
 /// Sealed: the constructor calls the virtual <c>SaveConfiguration</c> to
-/// encrypt a pre-encryption API key at startup, and a derived override would
+/// encrypt an API key stored in plaintext, and a derived override would
 /// run against a half-built instance.
 /// </remarks>
 public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
@@ -27,26 +27,20 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
     private readonly ILogger<Plugin> _logger;
     private readonly Lazy<SecretProtector> _secrets;
+    private int _refusedSaveLogged;
 
     /// <summary>
-    /// Gets a value indicating whether the saved settings, read before they load, were written before
-    /// peer caller grants existed.
+    /// Gets why Server Sync is held, when its database was written by a release this one cannot read.
+    /// Null when it is not. While it is set nothing is saved, so the settings that release wrote are
+    /// still there for it to convert.
     /// </summary>
-    public bool PredatesWhitelist { get; }
+    public string? HeldReason { get; }
 
-    private static bool ReadPredatesWhitelist(string path, ILogger logger)
-    {
-        try
-        {
-            return File.Exists(path)
-                && !File.ReadAllText(path).Contains("<PeerCallerGrants", StringComparison.Ordinal);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(ex, "Could not read the saved Server Sync settings before loading them");
-            return false;
-        }
-    }
+    /// <summary>
+    /// Gets a value indicating whether Server Sync is held for a database an older release wrote. While
+    /// it is, nothing of the plugin runs: no background work, no change to playback, no metadata lookups.
+    /// </summary>
+    public static bool Held => Instance?.HeldReason is not null;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
@@ -61,7 +55,10 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         : base(applicationPaths, xmlSerializer)
     {
         _logger = logger;
-        PredatesWhitelist = ReadPredatesWhitelist(ConfigurationFilePath, logger);
+
+        // Before the settings are read. Reading settings an older release wrote can fail, and a failed
+        // read is answered by saving defaults over the file, so the hold has to be in place first.
+        HeldReason = HoldIfOlderDatabase(applicationPaths.DataPath, ConfigurationFilePath, logger);
 
         // Built by the same factory as the DI-registered protector, so both resolve the same key ring
         // (file based, safe to share).
@@ -75,21 +72,13 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
         try
         {
-            // A configuration written before servers became a list carries one source in the legacy
-            // fields. Move it into the list so every code path sees one shape.
-            var migrated = Configuration.MigrateLegacyServer();
-            if (migrated)
-            {
-                _logger.LogInformation("Moved the single source server into the server list");
-            }
-
-            // One-time upgrade: a pre-encryption config holds the key in
-            // plaintext, and the core config endpoint returns it verbatim on
-            // every settings-page load until something saves. Encrypt at startup
-            // instead of waiting. Protect() no-ops when Data Protection is
-            // unavailable, so this can't loop or throw the plugin out of load.
+            // A key is stored encrypted. One that could not be protected when it was saved, because
+            // Data Protection was unavailable then, is in plaintext, and the core config endpoint returns
+            // it verbatim on every settings-page load until something saves. Encrypt at startup instead
+            // of waiting. Protect() no-ops when Data Protection is unavailable, so this can't loop or
+            // throw the plugin out of load.
             var encrypted = false;
-            foreach (var server in Configuration.Servers)
+            foreach (var server in Configuration.Servers ?? new System.Collections.Generic.List<Models.Configuration.SourceServer>())
             {
                 if (string.IsNullOrEmpty(server.ApiKey) || SecretProtector.IsProtected(server.ApiKey))
                 {
@@ -104,7 +93,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
                 }
             }
 
-            if (migrated || encrypted)
+            if (encrypted)
             {
                 lock (Services.Configuration.ConfigurationSaveLock.Sync)
                 {
@@ -120,6 +109,55 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         _logger.LogInformation("Server Sync plugin initialized");
     }
 
+    // A database from a release this one cannot read means the settings beside it are that release's
+    // too. They are copied aside once, and the reason is returned so every save is turned away.
+    private static string? HoldIfOlderDatabase(string dataPath, string settingsPath, ILogger logger)
+    {
+        var stored = Services.SyncSchema.StoredVersion(dataPath);
+        if (!Services.SyncSchema.IsTooOld(stored))
+        {
+            return null;
+        }
+
+        var reason = new Services.SchemaTooOldException(stored!.Value).Message;
+        try
+        {
+            var copy = settingsPath + ".before-" + Services.SyncSchema.OldestUpgradableRelease;
+            if (File.Exists(settingsPath) && !File.Exists(copy))
+            {
+                File.Copy(settingsPath, copy);
+                logger.LogWarning("The Server Sync settings were copied to {Copy} before anything could change them", copy);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning("Could not copy the Server Sync settings aside: {Reason}", ex.Message);
+        }
+
+        logger.LogError("{Reason} Its settings are not saved until then.", reason);
+        return reason;
+    }
+
+    /// <summary>
+    /// Writes the settings, unless Server Sync is held for an older database. Jellyfin also calls this
+    /// with defaults when the settings file cannot be read, which is the write the hold exists to stop.
+    /// </summary>
+    /// <param name="config">The settings to write.</param>
+    public override void SaveConfiguration(PluginConfiguration config)
+    {
+        if (HeldReason is not null)
+        {
+            if (System.Threading.Interlocked.Exchange(ref _refusedSaveLogged, 1) == 0)
+            {
+                _logger.LogWarning("Server Sync settings were not saved. {Reason}", HeldReason);
+            }
+
+            return;
+        }
+
+        base.SaveConfiguration(config);
+    }
+
     /// <summary>
     /// Runs on every save from the settings page (Jellyfin core's plugin
     /// configuration endpoint), which otherwise bypasses all server-side
@@ -131,6 +169,10 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     {
         ArgumentNullException.ThrowIfNull(incoming);
         ArgumentNullException.ThrowIfNull(stored);
+        if (HeldReason is not null)
+        {
+            throw new InvalidOperationException(HeldReason);
+        }
 
         incoming.SanitizeValues();
 

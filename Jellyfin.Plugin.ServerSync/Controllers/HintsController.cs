@@ -104,7 +104,6 @@ public class HintsController : ControllerBase
         var result = new PeerCheckResult();
         var mode = string.Equals(request.Mode, "Sync", StringComparison.OrdinalIgnoreCase) ? ServerMode.Sync
             : string.Equals(request.Mode, "Push", StringComparison.OrdinalIgnoreCase) ? ServerMode.Push
-            : string.Equals(request.Mode, "Stream", StringComparison.OrdinalIgnoreCase) ? ServerMode.Push
             : ServerMode.Pull;
         if (string.IsNullOrWhiteSpace(request.ServerUrl) || string.IsNullOrWhiteSpace(request.ApiKey))
         {
@@ -171,6 +170,7 @@ public class HintsController : ControllerBase
             if (!HintProtocol.Compatible(capabilities, _configManager.PluginVersion))
             {
                 result.Severity = "error";
+                result.Incompatible = true;
                 result.Message = "Connected, but " + HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion) + ".";
                 return Ok(result);
             }
@@ -209,7 +209,7 @@ public class HintsController : ControllerBase
             result.PeerAccessLevel = link?.AccessLevel;
             result.PeerAccessUser = link?.AccessUser;
             result.PeerCanDownload = link?.CanDownload;
-            (result.Severity, result.Message) = Verdict(mode, link, capabilities.PluginVersion, result);
+            (result.Severity, result.Message, result.Headline) = Verdict(mode, link, capabilities.PluginVersion, result);
 
             if (mode is not ServerMode.Pull || result.SendsToThisServer)
             {
@@ -230,27 +230,157 @@ public class HintsController : ControllerBase
                 AppendWarning(result, $" It could not pair with this server: {link.PairingError ?? "no reason was given"}. Until it can, hints between the two are refused.");
             }
 
+            result.Details = Details(mode, link, capabilities, result, skew);
             return Ok(result);
         }
     }
 
     // The verdict for the chosen direction, given how the peer lists this server.
-    private static (string Severity, string Message) Verdict(ServerMode mode, PeerLinkResponse? link, string? version, PeerCheckResult result)
+    private static (string Severity, string Message, string Headline) Verdict(ServerMode mode, PeerLinkResponse? link, string? version, PeerCheckResult result)
     {
         var listing = link is { Listed: true }
             ? $"lists this server as {link.Mode}{(link.Enabled ? string.Empty : ", disabled")}"
             : "does not list this server";
         return mode switch
         {
-            ServerMode.Pull when result.SendsToThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so this server will pull on a schedule and changes will also arrive as they happen."),
-            ServerMode.Pull => ("warn", $"Server Sync {version} there {listing}. This server will pull on a schedule, but changes will not arrive as they happen until that server lists this one as Push or Sync."),
-            ServerMode.Push when result.ListsThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so it will pull the changes this server announces."),
-            ServerMode.Push => ("error", $"Server Sync {version} there {listing}. Push needs that server to list this one as Pull or Sync, enabled, with a URL and key."),
+            ServerMode.Pull when result.SendsToThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so this server will pull on a schedule and changes will also arrive as they happen.", "Ready. This server pulls on a schedule, and changes also arrive as they happen."),
+            ServerMode.Pull => ("warn", $"Server Sync {version} there {listing}. This server will pull on a schedule, but changes will not arrive as they happen until that server lists this one as Push or Sync.", "Ready on a schedule. Changes do not arrive as they happen."),
+            ServerMode.Push when result.ListsThisServer => ("ok", $"Ready. Server Sync {version} there {listing}, so it will pull the changes this server announces.", "Ready. That server pulls the changes this server announces."),
+            ServerMode.Push => ("error", $"Server Sync {version} there {listing}. Push needs that server to list this one as Pull or Sync, enabled, with a URL and key.", "Not ready. That server must list this one as Pull or Sync."),
             _ when link is { Listed: true, Enabled: true } && string.Equals(link.Mode, "Sync", StringComparison.OrdinalIgnoreCase)
-                => ("ok", $"Ready. Server Sync {version} there lists this server as Sync, so changes travel both ways as they happen."),
-            _ => ("error", $"Server Sync {version} there {listing}. Sync needs that server to list this one as Sync, enabled, with a URL and key.")
+                => ("ok", $"Ready. Server Sync {version} there lists this server as Sync, so changes travel both ways as they happen.", "Ready. Changes travel both ways as they happen."),
+            _ => ("error", $"Server Sync {version} there {listing}. Sync needs that server to list this one as Sync, enabled, with a URL and key.", "Not ready. That server must list this one as Sync.")
         };
     }
+
+    // The same answer as lines with badges: how the other server lists this one, which way changes
+    // travel, what it applies, the access it holds here, and anything that would stop the two talking.
+    private static List<PeerCheckDetail> Details(ServerMode mode, PeerLinkResponse? link, PeerCapabilities capabilities, PeerCheckResult result, TimeSpan skew)
+    {
+        var rows = new List<PeerCheckDetail>();
+        var listed = link is { Listed: true };
+        var needsListing = mode is not ServerMode.Pull;
+        var listedRight = mode switch
+        {
+            ServerMode.Push => result.ListsThisServer,
+            ServerMode.Sync => link is { Listed: true, Enabled: true } && string.Equals(link.Mode, "Sync", StringComparison.OrdinalIgnoreCase),
+            _ => result.SendsToThisServer
+        };
+        var wanted = mode switch { ServerMode.Push => "Pull or Sync", ServerMode.Sync => "Sync", _ => "Push or Sync" };
+        rows.Add(new PeerCheckDetail
+        {
+            Title = "Its entry for this server",
+            Text = !listed ? $"This server is not on its Servers tab. Add it there as {wanted}."
+                : link!.Enabled == false ? "Its entry for this server is switched off."
+                : listedRight ? $"Server Sync {capabilities.PluginVersion} there has this server on its Servers tab."
+                : $"{mode} here needs it to be {wanted} there.",
+            Badge = !listed ? "Not listed" : link!.Enabled ? link.Mode ?? "Listed" : "Disabled",
+            State = listedRight ? "ok" : needsListing ? "no" : "limited"
+        });
+
+        if (mode is not ServerMode.Pull)
+        {
+            var pulls = result.ListsThisServer;
+            rows.Add(new PeerCheckDetail
+            {
+                Title = "Changes made here",
+                Text = pulls ? "It pulls what this server announces, as it happens." : "Nothing is sent until it lists this server as Pull or Sync.",
+                Badge = pulls ? "Live" : "Not sent",
+                State = pulls ? "ok" : "no"
+            });
+        }
+
+        if (mode is not ServerMode.Push)
+        {
+            var live = result.SendsToThisServer;
+            rows.Add(new PeerCheckDetail
+            {
+                Title = "Changes made there",
+                Text = live ? "Pulled on a schedule, and announced to this server as they happen." : "Pulled on a schedule. They arrive as they happen once it lists this server as Push or Sync.",
+                Badge = live ? "Live" : "Scheduled",
+                State = live ? "ok" : mode is ServerMode.Sync ? "no" : "limited"
+            });
+        }
+
+        if (mode is not ServerMode.Pull || result.SendsToThisServer)
+        {
+            var kinds = Enum.GetNames<HintKind>();
+            var on = kinds.Where(k => capabilities.Accepts.Contains(k, StringComparer.OrdinalIgnoreCase)).Select(DescribeKind).ToList();
+            var off = kinds.Where(k => !capabilities.Accepts.Contains(k, StringComparer.OrdinalIgnoreCase)).Select(DescribeKind).ToList();
+            rows.Add(new PeerCheckDetail
+            {
+                Title = "What it applies from this server",
+                Text = on.Count == 0 ? "Every module is off there, so it applies no changes from this server."
+                    : off.Count == 0 ? Sentence(JoinWords(on)) + "."
+                    : $"{Sentence(JoinWords(on))}. Off there: {JoinWords(off)}.",
+                Badge = on.Count == kinds.Length ? "Everything" : on.Count == 0 ? "Nothing" : $"{on.Count} of {kinds.Length}",
+                State = on.Count == kinds.Length ? "ok" : on.Count == 0 ? "no" : "limited"
+            });
+        }
+
+        if (listed && !string.IsNullOrEmpty(link!.AccessLevel))
+        {
+            var standard = string.Equals(link.AccessLevel, SourceServer.StandardUserAccess, StringComparison.OrdinalIgnoreCase);
+            var who = string.IsNullOrWhiteSpace(link.AccessUser) ? "a standard user" : link.AccessUser;
+            rows.Add(new PeerCheckDetail
+            {
+                Title = "What it reads here",
+                Text = standard
+                    ? $"It signs in as {who}, so it reads only the libraries that user can see, and only that user's watch history, settings, and playlists."
+                    : "Every library and every user.",
+                Badge = standard ? "Standard user" : "Administrator",
+                State = standard ? "limited" : "ok"
+            });
+            if (link.CanDownload == false)
+            {
+                rows.Add(new PeerCheckDetail
+                {
+                    Title = "File downloads from here",
+                    Text = "The account it signs in with may not download media here, so no files are copied to it.",
+                    Badge = "Blocked",
+                    State = "no"
+                });
+            }
+        }
+
+        else if (listed)
+        {
+            rows.Add(new PeerCheckDetail
+            {
+                Title = "What it reads here",
+                Text = "Not known yet. It has not tested its connection to this server. Run Test Connection on its entry for this server.",
+                Badge = "Unknown",
+                State = "none"
+            });
+        }
+
+        if (listed)
+        {
+            rows.Add(new PeerCheckDetail
+            {
+                Title = "Pairing",
+                Text = result.Paired ? "The two servers have proved themselves to each other."
+                    : $"It could not pair with this server: {link!.PairingError ?? "no reason was given"}. Until it can, changes between the two are refused.",
+                Badge = result.Paired ? "Paired" : "Not paired",
+                State = result.Paired ? "ok" : "no"
+            });
+        }
+
+        if (skew > HintProtocol.ClockSkewWarning)
+        {
+            rows.Add(new PeerCheckDetail
+            {
+                Title = "Clocks",
+                Text = "Edits made on both servers within that window may be settled the wrong way round. Put both servers on NTP.",
+                Badge = FormatSkew(skew) + " apart",
+                State = "limited"
+            });
+        }
+
+        return rows;
+    }
+
+    private static string Sentence(string words) => words.Length == 0 ? words : char.ToUpperInvariant(words[0]) + words[1..];
 
     private static string PeerAccessNote(PeerLinkResponse link)
     {
@@ -397,7 +527,7 @@ public class HintsController : ControllerBase
             {
                 Title = title,
                 Subtitle = subtitle,
-                ItemType = row.ItemType ?? item?.GetType().Name,
+                ItemType = (row.Kind == HintKind.History ? HintProtocol.SplitHistoryItemType(row.ItemType, out _) : row.ItemType) ?? item?.GetType().Name,
                 ItemId = row.ItemId,
                 UserId = row.UserId,
                 Id = row.Id,

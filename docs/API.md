@@ -402,18 +402,23 @@ What the Servers tab's Check Link button calls. Judges a server entry against th
 ```json
 {
   "Reachable": true, "ServerName": "source-a", "ServerId": "…",
-  "HasPlugin": true, "PluginVersion": "12.2.1.0",
+  "HasPlugin": true, "PluginVersion": "12.2.1.0", "Incompatible": false,
   "ListsThisServer": true, "PeerMode": "Sync", "SendsToThisServer": true,
   "Accepts": ["History", "Metadata", "People"],
   "ClockSkewSeconds": 0,
   "Paired": true, "PairingError": null,
   "PeerAccessLevel": "Administrator", "PeerAccessUser": null, "PeerCanDownload": true,
   "Severity": "ok",
+  "Headline": "Ready. Changes travel both ways as they happen.",
+  "Details": [
+    { "Title": "Its entry for this server", "Text": "Server Sync 12.2.1.0 there has this server on its Servers tab.", "Badge": "Sync", "State": "ok" },
+    { "Title": "What it applies from this server", "Text": "Watch history, metadata, and people. Off there: files, user settings, and playlists.", "Badge": "3 of 6", "State": "limited" }
+  ],
   "Message": "Ready. Server Sync 12.2.1.0 there lists this server as Sync, so changes travel both ways as they happen."
 }
 ```
 
-`Severity` is `ok`, `warn`, or `error`, which the page shows as green, yellow, or red.
+`Severity` is `ok`, `warn`, or `error`, which the page shows as green, yellow, or red. `Headline` is the verdict in one line and `Details` holds one line for each thing learned: how the other server lists this one, which way changes travel, what it applies, the access it holds here, pairing, and the clocks when they differ. A line's `State` is `ok`, `limited`, or `no`, which colours its badge. `Details` is empty when the check ended before the link could be judged, and `Message` then says why. `Incompatible` is true when the two servers' protocols do not overlap, and the Servers tab then refuses to save the entry as Push or Sync, or with a library kept as links. `Message` always holds the whole answer as sentences.
 
 ### GET /Sync/Hints/Version?kind={kind}&localItemId={id}&localUserId={id}&name={name}
 
@@ -486,3 +491,41 @@ Removes every sync row and queued hint that came from one server entry, by the e
 ```json
 { "Content": 11, "History": 4, "Metadata": 11, "People": 1, "Users": 2, "Hints": 0 }
 ```
+
+### POST /Sync/Tasks/{taskKey}/Run
+
+Starts one of Server Sync's refresh or sync tasks now, as the **Refresh** and **Sync** buttons on the Sync tab do. Answers `404` for any other key.
+
+| Sync type | Refresh | Sync |
+| :--- | :--- | :--- |
+| Content | `ServerSyncUpdateTables` | `ServerSyncDownloadContent` |
+| History | `ServerSyncRefreshHistoryTable` | `ServerSyncMissingHistory` |
+| Metadata | `ServerSyncRefreshMetadataTable` | `ServerSyncMissingMetadata` |
+| People | `ServerSyncRefreshPeopleTable` | `ServerSyncMissingPeople` |
+| Users | `ServerSyncRefreshUserTable` | `ServerSyncMissingUserData` |
+
+### POST /Sync/Reset/{table}
+
+Empties one sync table, as the resets under **Settings > Troubleshooting** do. `table` is `Content`, `History`, `Metadata`, `People`, `Playlists`, or `Users`. `Playlists` forgets which playlists are copies of another server's, which the next playlist sync works out again from the copies themselves. `All` deletes the whole sync database and creates it again. Tracking is forgotten and media is never touched. Answers `404` for any other name.
+
+### Ignoring and queueing rows
+
+One row or many go through the same routes. Each takes the rows to act on and answers with how many it changed.
+
+| Sync type | Ignore | Queue | Body |
+| :--- | :--- | :--- | :--- |
+| Content | `POST /Sync/IgnoreItems` | `POST /Sync/QueueItems` | `{ "SourceItemIds": ["…"] }` |
+| History | `POST /Sync/HistoryItems/Ignore` | `POST /Sync/HistoryItems/Queue` | `{ "Ids": [12] }` |
+| Metadata | `POST /Sync/MetadataItems/Ignore` | `POST /Sync/MetadataItems/Queue` | `{ "Ids": [12] }` |
+| People | `POST /Sync/PeopleItems/Ignore` | `POST /Sync/PeopleItems/Queue` | `{ "Ids": [12] }` |
+| Users | `POST /Sync/UserSyncUsers/Ignore` | `POST /Sync/UserSyncUsers/Queue` | `{ "UserMappings": [{ "SourceUserId": "…", "LocalUserId": "…" }] }` |
+
+### GET /Sync/Health
+
+Whether Server Sync can run here. Every page asks, and shows `Message` at its top when it cannot.
+
+```json
+{ "Ready": false, "Message": "The Server Sync database is schema v35, written by a release before 12.4.13.0, …" }
+```
+
+`Ready` is false while the database is one an older release wrote. See [Updating from an older release](Versioning.md#updating-from-an-older-release).

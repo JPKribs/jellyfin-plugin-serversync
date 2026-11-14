@@ -281,5 +281,26 @@ export function createServerSyncShared(view) {
         });
     };
 
+    // A page cannot work while Server Sync is held for a database an older release wrote, so each
+    // one says so at its top instead of only failing to load its data.
+    shared.showHealth = function () {
+        return shared.apiRequest('Health', 'GET').then(function (health) {
+            var host = view.querySelector('.content-primary');
+            var banner = view.querySelector('.ssHealthBanner');
+            if (!health || health.Ready || !host) {
+                if (banner) banner.remove();
+                return;
+            }
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.className = 'ssHealthBanner jpk-error';
+                banner.setAttribute('role', 'alert');
+                host.insertBefore(banner, host.firstChild);
+            }
+            banner.textContent = health.Message || 'Server Sync cannot run on this database.';
+        }).catch(function () { });
+    };
+    shared.showHealth();
+
     return shared;
 }

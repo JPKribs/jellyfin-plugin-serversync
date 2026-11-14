@@ -18,7 +18,7 @@ Servers higher in the list win when two offer the same item. Drag a server to ch
 | 4. Libraries | Which library there maps to which library here, and their root folders. How each one keeps its files is set on the [Storage](#storage) tab |
 | 5. Users | Which user there maps to which user here, for history, user settings, and playlists, and, with Allow Linking on, that user's own link stream limit and speed |
 
-**The other server needs Server Sync for everything but a plain pull.** A server that runs plain Jellyfin can be a **Pull** server whose libraries are kept as copies, and nothing else. Saving an entry as Push or Sync, or with a library kept as links, is refused when that server answers and does not run Server Sync. A server that cannot be reached is saved, since it cannot be asked, and nothing is sent to it until it answers.
+**The other server needs Server Sync for everything but a plain pull.** A server that runs plain Jellyfin can be a **Pull** server whose libraries are kept as copies, and nothing else. Saving an entry as Push or Sync, or with a library kept as links, is refused when that server answers and does not run Server Sync, or runs one too far from this version for the two to talk. A server that cannot be reached is saved, since it cannot be asked, and nothing is sent to it until it answers.
 
 Steps are numbered in the order they show, so a Pull server's Libraries is step 3.
 
@@ -42,7 +42,9 @@ Steps are numbered in the order they show, so a Pull server's Libraries is step 
 | Push | Yes, listing this server as Pull or Sync | Changes made here are sent to that server as they happen, and it may download this server's files. This server reads nothing from it |
 | Sync | Yes, listing this server as Sync | Both, for a pool of equals |
 
-**Check Link** confirms the other server is set up for the chosen direction and reports the access it holds for this one.
+**Check Link** confirms the other server is set up for the chosen direction. It answers with a verdict and a line for each thing it learned: how that server lists this one, which way changes travel, what it applies from this server, what it reads here, and whether the two are paired.
+
+![Check Link](screenshots/settings/Check%20Link.png)
 
 ### Links
 
@@ -79,6 +81,3 @@ Below the cards, **Permanent Copies** lists the full copies held in that server'
 | Whitelist | Who may call this server's sync endpoints. Administrators and API keys calling from an enabled server on the Servers tab always may. Add users with the locations they may call from |
 | Content, History, Metadata, People, Playlists, Users | One section per sync type, each with a table of what a standard user and an administrator can do. Options that do not apply are hidden |
 | Troubleshooting | Table resets, which forget tracking but never touch media |
-
-!!! note "Updating from before 12.2.7.0"
-    Servers that pull from this one without being on its Servers tab need a Whitelist row here. The update adds API keys and every administrator with all locations so nothing breaks. Narrow those rows to lock it down.

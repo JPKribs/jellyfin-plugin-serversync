@@ -197,8 +197,7 @@ export default function (view) {
 
     function modeOf(server) {
         var mode = server.Mode;
-        // Stream was folded into Push. A configuration that still holds it reads as Push until it is saved.
-        return mode === 1 || mode === 3 || mode === 'Stream' ? 'Push' : mode === 2 ? 'Sync' : (typeof mode === 'string' ? mode : 'Pull');
+        return mode === 1 ? 'Push' : mode === 2 ? 'Sync' : (typeof mode === 'string' ? mode : 'Pull');
     }
 
     // A server's colour: green runs Server Sync and answers, orange answers without it, red does not
@@ -235,8 +234,7 @@ export default function (view) {
     // always in the same place: the servers this one pulls from on the left, the servers it pushes to
     // on the right, and the servers it syncs with below. A lane's pills join one trunk line, so
     // however many servers a lane holds, one line meets the card. The line's colour is the colour of
-    // that relationship's badge on the cards, and its arrow points the way things travel. A Stream
-    // entry gives and takes nothing back, as Push does, so it is drawn with Push.
+    // that relationship's badge on the cards, and its arrow points the way things travel.
     var POOL_LANES = [
         { key: 'Pull', side: 'left', color: '#6cc070' },
         { key: 'Push', side: 'right', color: '#52b5db' },
@@ -657,6 +655,39 @@ export default function (view) {
         reflectModeLimits(selectedServer());
         var statusEl = getEl('peerCheckStatus');
         if (statusEl) statusEl.textContent = '';
+        setVisible('peerCheckResult', false);
+    }
+
+    // The answer to a link check: a verdict in the colour of its severity, then one line for each
+    // thing learned, with a badge. A check that ended early has only a sentence, shown beside the button.
+    function showPeerCheck(result) {
+        var statusEl = getEl('peerCheckStatus');
+        var severity = (result && result.Severity) || 'error';
+        var rows = (result && result.Details) || [];
+        if (!rows.length) {
+            setVisible('peerCheckResult', false);
+            if (statusEl) statusEl.innerHTML = '<span class="' + (severity === 'ok' ? 'text-success' : severity === 'warn' ? 'text-warn' : 'text-error') + '">' + escapeHtml((result && result.Message) || 'No answer') + '</span>';
+            return;
+        }
+        if (statusEl) statusEl.textContent = '';
+        var headline = getEl('peerCheckHeadline');
+        if (headline) {
+            headline.className = 'mb-md ' + (severity === 'ok' ? 'jpk-success' : severity === 'warn' ? 'jpk-warn' : 'jpk-error');
+            headline.textContent = result.Headline || result.Message;
+        }
+        var grid = getEl('peerCheckRows');
+        if (grid) {
+            grid.innerHTML = rows.map(function (row) {
+                return '<div class="ssAccessRow">' +
+                    '<div class="ssAccessText">' +
+                        '<div class="ssAccessTitle">' + escapeHtml(row.Title) + '</div>' +
+                        '<div class="ssAccessDescription">' + escapeHtml(row.Text) + '</div>' +
+                    '</div>' +
+                    '<span class="jpk-badge ' + (ACCESS_BADGES[row.State] || 'gray') + '">' + escapeHtml(row.Badge) + '</span>' +
+                    '</div>';
+            }).join('');
+        }
+        setVisible('peerCheckResult', true);
     }
 
     // Asks the other server whether it runs Server Sync, accepts hints, and lists this server, so a
@@ -670,6 +701,7 @@ export default function (view) {
             return;
         }
         if (statusEl) statusEl.textContent = 'Checking...';
+        setVisible('peerCheckResult', false);
         var key = server.Key;
         var request = requestFor(server);
         request.Mode = getMode();
@@ -688,10 +720,7 @@ export default function (view) {
                 updateHealthDots();
                 return;
             }
-            if (statusEl) {
-                var severity = (result && result.Severity) || 'error';
-                statusEl.innerHTML = '<span class="' + (severity === 'ok' ? 'text-success' : severity === 'warn' ? 'text-warn' : 'text-error') + '">' + escapeHtml((result && result.Message) || 'No answer') + '</span>';
-            }
+            showPeerCheck(result);
             if (result && result.Reachable) renderServerList();
         }).catch(function () {
             if (!stillSelected(key)) return;
@@ -964,9 +993,9 @@ export default function (view) {
         });
     }
 
-    // Push and Sync, and a library kept as links, only work when the other server runs Server Sync.
-    // A plain Jellyfin server can only be pulled from, as copies. So a server that answers and does
-    // not run it is not saved that way. One that cannot be reached is saved, since it cannot be asked.
+    // Push and Sync, and a library kept as links, only work when the other server runs a Server Sync
+    // this one can talk to. A plain Jellyfin server can only be pulled from, as copies. So a server
+    // that answers and does not run it, or runs one too far from this version, is not saved that way. One that cannot be reached is saved, since it cannot be asked.
     function saveServerConfig() {
         var server = collectServerEditor();
         if (!server) return;
@@ -982,6 +1011,12 @@ export default function (view) {
             if (result && result.Reachable && !result.HasPlugin) {
                 peerPlugin[server.Key] = 'no';
                 Dashboard.alert(serverTitle(server) + ' does not run Server Sync, so it can only be a Pull server with libraries kept as copies. Install Server Sync there, or set this server to Pull and its libraries to Copy. Nothing was saved.');
+                return;
+            }
+            // Its Server Sync and this one cannot talk until one is updated, which leaves it where a
+            // server without Server Sync is: nothing sent to it would be taken, and no link would play.
+            if (result && result.Reachable && result.Incompatible) {
+                Dashboard.alert((result.Message || (serverTitle(server) + ' runs a Server Sync this one cannot talk to.')) + ' Until then it can only be a Pull server with libraries kept as copies. Nothing was saved.');
                 return;
             }
 

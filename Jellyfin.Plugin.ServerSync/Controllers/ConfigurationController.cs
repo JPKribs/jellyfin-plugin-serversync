@@ -13,6 +13,7 @@ using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Controllers;
@@ -183,24 +184,92 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// Looks up a scheduled task by its <see cref="IScheduledTask.Key"/>
-    /// and triggers it. Returns 200 OK with the supplied success message
-    /// or 404 with <paramref name="notFoundMessage"/> if the key isn't
-    /// registered. Centralizes the "trigger X task" pattern that every
-    /// per-module controller exposes.
+    /// Whether Server Sync can run here. It cannot while its database is one an older release wrote,
+    /// and every page shows the reason.
     /// </summary>
-    private ActionResult ExecuteScheduledTaskByKey(string taskKey, string successMessage, string notFoundMessage)
+    /// <returns>Ready, or the reason it is held.</returns>
+    [HttpGet("Health")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult GetHealth()
     {
-        var task = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask.Key == taskKey);
+        var held = Plugin.Instance?.HeldReason;
+        return Ok(new { Ready = held is null, Message = held });
+    }
 
+    // The scheduled tasks the Sync tab may start, by key.
+    private static readonly HashSet<string> RunnableTasks = new(StringComparer.Ordinal)
+    {
+        "ServerSyncUpdateTables", "ServerSyncDownloadContent",
+        "ServerSyncRefreshHistoryTable", "ServerSyncMissingHistory",
+        "ServerSyncRefreshMetadataTable", "ServerSyncMissingMetadata",
+        "ServerSyncRefreshPeopleTable", "ServerSyncMissingPeople",
+        "ServerSyncRefreshUserTable", "ServerSyncMissingUserData"
+    };
+
+    /// <summary>
+    /// Starts one of the plugin's refresh or sync tasks now.
+    /// </summary>
+    /// <param name="taskKey">The scheduled task's key, such as <c>ServerSyncUpdateTables</c>.</param>
+    /// <returns>Action result with status message.</returns>
+    [HttpPost("Tasks/{taskKey}/Run")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult RunTask([FromRoute] string taskKey)
+    {
+        var task = RunnableTasks.Contains(taskKey ?? string.Empty)
+            ? _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == taskKey)
+            : null;
         if (task == null)
         {
-            return NotFound(notFoundMessage);
+            return NotFound("Task not found");
         }
 
         _taskManager.Execute(task, new TaskOptions());
-        return Ok(new { Message = successMessage });
+        return Ok(new { Message = "Task started" });
+    }
+
+    /// <summary>
+    /// Empties one sync table, or with <c>All</c> deletes the whole sync database and creates it again.
+    /// </summary>
+    /// <param name="table">Content, History, Metadata, People, Playlists, Users, or All.</param>
+    /// <returns>Action result with success status.</returns>
+    [HttpPost("Reset/{table}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult Reset([FromRoute] string table)
+    {
+        var services = HttpContext.RequestServices;
+        Func<int>? reset = (table ?? string.Empty).ToUpperInvariant() switch
+        {
+            "CONTENT" => () => services.GetRequiredService<ContentSyncTableManager>().ResetTable(),
+            "HISTORY" => () => services.GetRequiredService<HistorySyncTableManager>().ResetTable(),
+            "METADATA" => () => services.GetRequiredService<MetadataSyncTableManager>().ResetTable(),
+            "PEOPLE" => () => services.GetRequiredService<PeopleSyncTableManager>().ResetTable(),
+            "PLAYLISTS" => () => services.GetRequiredService<Services.Playlists.PlaylistCopyStore>().Clear(),
+            "USERS" => () => services.GetRequiredService<UserSyncTableManager>().ResetTable(),
+            "ALL" => () =>
+            {
+                _databaseProvider.Database.ResetDatabase();
+                return 0;
+            },
+            _ => null
+        };
+        if (reset is null)
+        {
+            return NotFound("Unknown table");
+        }
+
+        try
+        {
+            var deleted = reset();
+            _logger.LogInformation("Sync reset of {Table} finished, {Count} rows deleted", SanitizeForLog(table), deleted);
+            return Ok(new { Success = true, Message = "Reset successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to reset {Table}", SanitizeForLog(table));
+            return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
+        }
     }
 
     /// <summary>
@@ -241,88 +310,5 @@ public partial class ConfigurationController : ControllerBase
         }
 
         return "Synced";
-    }
-
-    /// <summary>
-    /// Returns the plugin capabilities including whether deletion is supported.
-    /// </summary>
-    /// <returns>Capabilities response.</returns>
-    [HttpGet("Capabilities")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<CapabilitiesResponse> GetCapabilities()
-    {
-        // The library manager is injected and never null, so deletion is always available.
-        return Ok(new CapabilitiesResponse
-        {
-            CanDeleteItems = true,
-            SupportsCompanionFiles = true,
-            SupportsBandwidthScheduling = true
-        });
-    }
-
-    /// <summary>
-    /// Deletes all items from the sync database and recreates it with the latest schema.
-    /// </summary>
-    /// <returns>Action result with success status.</returns>
-    [HttpPost("ResetSyncDatabase")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetSyncDatabase()
-    {
-        try
-        {
-            _databaseProvider.Database.ResetDatabase();
-            _logger.LogInformation("Sync database has been reset");
-            return Ok(new { Success = true, Message = "Database reset successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to reset sync database");
-            return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
-        }
-    }
-
-    /// <summary>
-    /// Resets the content sync table only, removing all tracked content items.
-    /// Other tables (History, Metadata, User) are not affected.
-    /// </summary>
-    /// <returns>Action result with success status.</returns>
-    [HttpPost("ResetContentSyncDatabase")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetContentSyncDatabase([FromServices] ContentSyncTableManager manager)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        try
-        {
-            var deleted = manager.ResetTable();
-            _logger.LogInformation("Content sync table has been reset, {Count} rows deleted", deleted);
-            return Ok(new { Success = true, Message = "Content sync table reset successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to reset content sync table");
-            return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
-        }
-    }
-
-    /// <summary>
-    /// Resets the history sync database, removing all tracked history items.
-    /// </summary>
-    /// <returns>Action result with success status.</returns>
-    [HttpPost("ResetHistorySyncDatabase")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult ResetHistorySyncDatabase([FromServices] HistorySyncTableManager manager)
-    {
-        ArgumentNullException.ThrowIfNull(manager);
-        try
-        {
-            var deleted = manager.ResetTable();
-            _logger.LogInformation("History sync database has been reset, {Count} rows deleted", deleted);
-            return Ok(new { Success = true, Message = "History database reset successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to reset history sync database");
-            return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
-        }
     }
 }

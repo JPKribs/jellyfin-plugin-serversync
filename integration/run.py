@@ -14,6 +14,7 @@ import json
 import re
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -1283,6 +1284,412 @@ def scenario_content_and_user_hints(creds, apis):
     configure_local(creds, apis["local"], ["source-a", "source-b"])
 
 
+POOL_NAMES = ["source-a", "source-b", "local"]
+POOL_FLAGS = dict(EnableHistorySync=True, HistorySyncNegotiate=True, EnablePlaylistSync=True,
+                  EnableUserSync=True, UserSyncPolicy=True, UserSyncConfiguration=True,
+                  # Every choice at its default, so one scenario's choice never carries into the next.
+                  MetadataSyncPrecedence="Newest", PeopleSyncPrecedence="Newest", UserSyncPrecedence="Newest",
+                  PlaylistSyncPrecedence="Newest", UserSyncConflict="Newest", PlaylistRemovedAction="Delete", **INFO_FLAGS)
+
+
+def pool_shape(creds, apis, links, **flags):
+    """Sets who syncs with whom. Each server lists its partners in rank order, every link is Sync, and
+    every information type is on. A server with no partners is left with none."""
+    for n in POOL_NAMES:
+        peers = links.get(n, [])
+        # POOL_EXTRA holds settings to try a scenario under, as JSON, such as {"UserSyncPrecedence": "Rank"}.
+        extra = json.loads(os.environ.get("POOL_EXTRA") or "{}")
+        configure_server(creds, apis[n], n, peers, {p: "Sync" for p in peers}, **{**POOL_FLAGS, **flags, **extra})
+
+
+def pool_seed(creds, apis):
+    """The pool scenarios work on films every server holds. On a fresh pool local has none yet, so it
+    copies them the way the first content scenario does."""
+    local = apis["local"]
+    if find_item(local, "Movie", "Shared Movie") is not None and find_item(local, "Movie", "Only A") is not None:
+        return
+    configure_local(creds, local, ["source-a", "source-b"])
+    run_task(local, "ServerSyncUpdateTables")
+    run_task(local, "ServerSyncDownloadContent")
+    wait_items(local, "Movie", 3)
+
+
+def pool_quiet(apis):
+    return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in POOL_NAMES)
+
+
+def pool_scan(apis, names, rounds=1):
+    """Runs the scheduled comparison on each server in turn, which is the safety net under live changes."""
+    for _ in range(rounds):
+        for n in names:
+            run_task(apis[n], "ServerSyncInformation")
+
+
+def pool_restore(creds, apis):
+    for n in POOL_NAMES:
+        config = plugin_config(apis[n])
+        config.update(MetadataSyncPrecedence="Newest", PeopleSyncPrecedence="Newest", UserSyncPrecedence="Newest",
+                      PlaylistSyncPrecedence="Newest", UserSyncConflict="Newest", PlaylistRemovedAction="Delete")
+        save_plugin_config(apis[n], config)
+    for n in ("source-a", "source-b"):
+        configure_server(creds, apis[n], n, [])
+    configure_local(creds, apis["local"], ["source-a", "source-b"])
+
+
+class PoolProbe:
+    """Reads and changes one thing of each information type on any server of the pool: the shared
+    film's overview, the administrator's watch history of it, a playlist, and the viewer's session limit."""
+
+    def __init__(self, creds, apis, title):
+        pool_seed(creds, apis)
+        self.creds, self.apis, self.title = creds, apis, title
+        self.admin = {n: creds["servers"][n]["userId"] for n in POOL_NAMES}
+        self.viewer = {n: creds["servers"][n]["viewerId"] for n in POOL_NAMES}
+        self.film = {n: movie_id(apis[n], "Shared Movie") for n in POOL_NAMES}
+
+    def overview(self, n):
+        return overview(self.apis[n], "Movie", "Shared Movie")
+
+    def set_overview(self, n, text):
+        set_overview(self.apis[n], "Movie", "Shared Movie", text)
+
+    def editor(self, n):
+        status, version = self.apis[n].call("GET", f"/Sync/Hints/Version?kind=Metadata&localItemId={self.film[n]}")
+        return (version or {}).get("ServerId") if status == 200 else None
+
+    def history(self, n):
+        data = user_data(self.apis[n], self.admin[n], self.film[n])
+        return bool(data["Played"]), bool(data["IsFavorite"])
+
+    def play(self, n, on=True):
+        if on:
+            self.apis[n].post(f"/UserPlayedItems/{self.film[n]}?userId={self.admin[n]}&datePlayed={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}", expect=200)
+        else:
+            self.apis[n].call("DELETE", f"/UserPlayedItems/{self.film[n]}?userId={self.admin[n]}", expect=200)
+
+    def favorite(self, n, on=True):
+        if on:
+            self.apis[n].post(f"/UserFavoriteItems/{self.film[n]}?userId={self.admin[n]}", expect=200)
+        else:
+            self.apis[n].call("DELETE", f"/UserFavoriteItems/{self.film[n]}?userId={self.admin[n]}", expect=200)
+
+    def playlists(self, n):
+        return playlists_of(self.apis[n], self.admin[n], self.title)
+
+    def playlist_size(self, n):
+        """How many items the one playlist of this title holds, None when there is none, -1 when there are several."""
+        found = self.playlists(n)
+        if not found:
+            return None
+        if len(found) > 1:
+            return -1
+        try:
+            return len(playlist_paths(self.apis[n], self.admin[n], found[0]["Id"]))
+        except AssertionError:
+            # Deleted between being listed and being read.
+            return None
+
+    def make_playlist(self, n):
+        _, made = self.apis[n].post("/Playlists", {"Name": self.title, "Ids": [self.film[n]], "UserId": self.admin[n], "MediaType": "Video"}, expect=200)
+        return made["Id"]
+
+    def delete_playlists(self, n):
+        for p in self.playlists(n):
+            # Another server's deletion may take this copy first.
+            status, body = self.apis[n].call("DELETE", f"/Items/{p['Id']}", raw=True)
+            assert status in (204, 404), f"{n}: deleting playlist {p['Id']} returned {status}: {body[:200]!r}"
+
+    def limit(self, n):
+        return self.apis[n].get(f"/Users/{self.viewer[n]}")["Policy"].get("MaxActiveSessions")
+
+    def set_limit(self, n, value):
+        policy = self.apis[n].get(f"/Users/{self.viewer[n]}")["Policy"]
+        policy["MaxActiveSessions"] = value
+        self.apis[n].post(f"/Users/{self.viewer[n]}/Policy", policy, expect=204)
+
+    def reset_history(self):
+        for n in POOL_NAMES:
+            self.play(n, False)
+            self.favorite(n, False)
+
+
+def scenario_pool_chain(creds, apis):
+    """Source-a and source-b each sync with local and do not know each other. A change made at one end
+    reaches local as it happens and the far end on its next scan, carrying the name of the server that
+    made it, and nothing goes round again. Deleting follows the same road."""
+    probe = PoolProbe(creds, apis, "IT Chain " + uuid.uuid4().hex[:6])
+    pool_shape(creds, apis, {"source-a": ["local"], "source-b": ["local"], "local": ["source-a", "source-b"]})
+    probe.reset_history()
+    wait_until(lambda: pool_quiet(apis), 90, "the chain is quiet before the test")
+    pool_scan(apis, POOL_NAMES)
+    wait_until(lambda: pool_quiet(apis), 90, "the chain is quiet after a first scan of every server")
+    a_id = creds["servers"]["source-a"]["serverId"]
+
+    # Metadata: one hop live, the second by scan, and the editor's name travels with it.
+    text = f"{probe.title}, written on source-a"
+    probe.set_overview("source-a", text)
+    wait_until(lambda: probe.overview("local") == text, 60, "metadata: an edit on source-a reached local, its partner, as it happened")
+    wait_until(lambda: pool_quiet(apis), 60, "metadata: every queue drained")
+    time.sleep(8)
+    expect(probe.overview("source-b") != text, "metadata: it does not travel a second hop on its own")
+    pool_scan(apis, ["source-b"])
+    expect(probe.overview("source-b") == text, f"metadata: source-b took it from local on its next scan ({probe.overview('source-b')!r})")
+    expect(probe.editor("source-b") == a_id, "metadata: source-b records source-a, a server it does not know, as the editor")
+
+    # History: a favorite from one end and a play from the other meet in the middle and reach both ends.
+    probe.favorite("source-a")
+    wait_until(lambda: probe.history("local") == (False, True), 60, "history: a favorite on source-a reached local as it happened")
+    probe.play("source-b")
+    wait_until(lambda: probe.history("local") == (True, True), 60, "history: a play on source-b reached local as it happened, beside the favorite")
+    wait_until(lambda: pool_quiet(apis), 90, "history: every queue drained")
+    pool_scan(apis, ["source-a", "source-b"])
+    expect(probe.history("source-a") == (True, True), f"history: source-a holds the play made at the far end ({probe.history('source-a')})")
+    expect(probe.history("source-b") == (True, True), f"history: source-b holds the favorite made at the far end ({probe.history('source-b')})")
+
+    # Playlists: made at one end, one copy on every server, and no copy shrinks the original.
+    probe.make_playlist("source-a")
+    wait_until(lambda: probe.playlist_size("local") == 1, 60, "playlists: one made on source-a reached local as it happened")
+    wait_until(lambda: pool_quiet(apis), 60, "playlists: every queue drained")
+    pool_scan(apis, ["source-b"])
+    expect(probe.playlist_size("source-b") == 1, f"playlists: source-b made one copy from local's on its next scan ({probe.playlist_size('source-b')})")
+
+    # Users: no live change exists for these, so each hop is a scan.
+    limit = 10 + (int(time.time()) % 80)
+    probe.set_limit("source-a", limit)
+    pool_scan(apis, ["local"])
+    expect(probe.limit("local") == limit, f"users: a session limit set on source-a reached local on its scan ({probe.limit('local')})")
+    pool_scan(apis, ["source-b"])
+    expect(probe.limit("source-b") == limit, f"users: and source-b on its scan of local ({probe.limit('source-b')})")
+
+    # Nothing goes round again: more scans change nothing, and the servers that made each change keep it.
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained before the chain is left to settle")
+    pool_scan(apis, POOL_NAMES, rounds=2)
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained after two more scans of every server")
+    time.sleep(12)
+    expect(pool_quiet(apis), "settled: nothing is raised once the chain agrees")
+    expect(all(probe.overview(n) == text for n in POOL_NAMES), f"settled: every server holds source-a's overview ({[probe.overview(n) for n in POOL_NAMES]})")
+    expect(all(probe.history(n) == (True, True) for n in POOL_NAMES), f"settled: every server holds the play and the favorite ({[probe.history(n) for n in POOL_NAMES]})")
+    expect(all(probe.playlist_size(n) == 1 for n in POOL_NAMES), f"settled: every server holds exactly one copy of the playlist with its item ({[probe.playlist_size(n) for n in POOL_NAMES]})")
+    expect(all(probe.limit(n) == limit for n in POOL_NAMES), f"settled: every server holds the session limit ({[probe.limit(n) for n in POOL_NAMES]})")
+
+    # A deletion follows the same road.
+    probe.delete_playlists("source-a")
+    wait_until(lambda: probe.playlist_size("local") is None, 60, "playlists: deleting it on source-a deleted local's copy as it happened")
+    pool_scan(apis, ["source-b"])
+    expect(probe.playlist_size("source-b") is None, f"playlists: and source-b's copy on its next scan ({probe.playlist_size('source-b')})")
+    pool_scan(apis, POOL_NAMES)
+    expect(all(probe.playlist_size(n) is None for n in POOL_NAMES), f"playlists: no server brings it back ({[probe.playlist_size(n) for n in POOL_NAMES]})")
+
+    for n in POOL_NAMES:
+        probe.delete_playlists(n)
+    probe.reset_history()
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained before the chain is taken apart")
+    pool_restore(creds, apis)
+
+
+def scenario_pool_ring_missed(creds, apis):
+    """Three equals, each syncing with the other two. Source-b makes a change of every type while it
+    announces nothing, as when its changes are lost on the way, and both other servers rank it last.
+    The scheduled scans alone have to carry every change to every server."""
+    probe = PoolProbe(creds, apis, "IT Ring " + uuid.uuid4().hex[:6])
+    ring = {"local": ["source-a", "source-b"], "source-a": ["local", "source-b"], "source-b": ["local", "source-a"]}
+    pool_shape(creds, apis, ring)
+    probe.reset_history()
+    wait_until(lambda: pool_quiet(apis), 90, "the ring is quiet before the test")
+    pool_scan(apis, POOL_NAMES)
+    wait_until(lambda: pool_quiet(apis), 90, "the ring is quiet after a first scan of every server")
+
+    # Source-b is cut off, changes one thing of every type, and is restarted so nothing it gathered survives.
+    pool_shape(creds, apis, {"local": ring["local"], "source-a": ring["source-a"], "source-b": []})
+    text = f"{probe.title}, written on source-b"
+    limit = 10 + (int(time.time()) % 80)
+    probe.set_overview("source-b", text)
+    probe.favorite("source-b")
+    probe.make_playlist("source-b")
+    probe.set_limit("source-b", limit)
+    time.sleep(8)
+    restart_container("source-b", apis["source-b"])
+    pool_shape(creds, apis, ring)
+    wait_until(lambda: pool_quiet(apis), 90, "the ring is quiet once source-b is back")
+    time.sleep(8)
+    expect(probe.overview("local") != text and probe.overview("source-a") != text, "nothing source-b changed was announced, so only a scan can carry it")
+
+    pool_scan(apis, ["local", "source-a", "source-b"], rounds=2)
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained after two scans of every server")
+    for n in ("local", "source-a"):
+        expect(probe.overview(n) == text, f"metadata: {n} took the edit from source-b, the partner it ranks last ({probe.overview(n)!r})")
+        expect(probe.history(n) == (False, True), f"history: {n} took the favorite from source-b ({probe.history(n)})")
+        expect(probe.playlist_size(n) == 1, f"playlists: {n} made one copy of source-b's playlist ({probe.playlist_size(n)})")
+        expect(probe.limit(n) == limit, f"users: {n} took the session limit from source-b ({probe.limit(n)})")
+    expect(probe.overview("source-b") == text and probe.history("source-b") == (False, True) and probe.playlist_size("source-b") == 1 and probe.limit("source-b") == limit,
+           f"source-b kept every change it made ({probe.overview('source-b')!r}, {probe.history('source-b')}, {probe.playlist_size('source-b')}, {probe.limit('source-b')})")
+
+    # Two servers change the same thing within moments of each other. Every server ends on the later one.
+    wait_until(lambda: pool_quiet(apis), 90, "the ring is quiet before two servers edit at once")
+    first, second = f"{probe.title}, first on source-a", f"{probe.title}, second on source-b"
+    probe.set_overview("source-a", first)
+    time.sleep(1.5)
+    probe.set_overview("source-b", second)
+    probe.play("source-a")
+    wait_until(lambda: all(probe.overview(n) == second for n in POOL_NAMES), 90, "metadata: two edits a moment apart end on the later one everywhere")
+    wait_until(lambda: all(probe.history(n) == (True, True) for n in POOL_NAMES), 90, "history: a play on one server and a favorite on another both hold everywhere")
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained after the two edits")
+    pool_scan(apis, POOL_NAMES)
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained after one more scan of every server")
+    time.sleep(12)
+    expect(pool_quiet(apis), "settled: nothing is raised once the ring agrees")
+    expect(all(probe.overview(n) == second for n in POOL_NAMES), f"settled: a scan did not bring the earlier edit back ({[probe.overview(n) for n in POOL_NAMES]})")
+    expect(all(probe.history(n) == (True, True) for n in POOL_NAMES), f"settled: every server still holds the play and the favorite ({[probe.history(n) for n in POOL_NAMES]})")
+    expect(all(probe.playlist_size(n) == 1 for n in POOL_NAMES), f"settled: every server still holds exactly one copy of the playlist ({[probe.playlist_size(n) for n in POOL_NAMES]})")
+
+    for n in POOL_NAMES:
+        probe.delete_playlists(n)
+    probe.reset_history()
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained before the ring is taken apart")
+    pool_restore(creds, apis)
+
+
+def scenario_pool_rank(creds, apis):
+    """With Precedence set to Ranked, a scan hears only the highest ranked
+    server that holds a thing. A change on the server ranked last stays there, and a change on the
+    server ranked first arrives."""
+    probe = PoolProbe(creds, apis, "IT Rank " + uuid.uuid4().hex[:6])
+    by_rank = dict(MetadataSyncPrecedence="Rank", PeopleSyncPrecedence="Rank", UserSyncPrecedence="Rank", PlaylistSyncPrecedence="Rank")
+    ring = {"local": ["source-a", "source-b"], "source-a": ["local", "source-b"], "source-b": ["local", "source-a"]}
+    pool_shape(creds, apis, ring, **by_rank)
+    wait_until(lambda: pool_quiet(apis), 90, "the ring is quiet before the test")
+    pool_scan(apis, POOL_NAMES)
+    wait_until(lambda: pool_quiet(apis), 90, "the ring is quiet after a first scan of every server")
+    agreed_limit = probe.limit("local")
+
+    def unannounced(name, text, limit):
+        """Changes the overview and the session limit on one server while it announces nothing."""
+        pool_shape(creds, apis, {**ring, name: []}, **by_rank)
+        probe.set_overview(name, text)
+        probe.set_limit(name, limit)
+        time.sleep(8)
+        restart_container(name, apis[name])
+        pool_shape(creds, apis, ring, **by_rank)
+        wait_until(lambda: pool_quiet(apis), 90, f"the ring is quiet once {name} is back")
+
+    low = f"{probe.title}, written on the server ranked last"
+    low_limit = 10 + (int(time.time()) % 40)
+    unannounced("source-b", low, low_limit)
+    pool_scan(apis, ["local"], rounds=2)
+    expect(probe.overview("local") != low, f"metadata: by rank, local does not take the edit from the server it ranks last ({probe.overview('local')!r})")
+    expect(probe.limit("local") != low_limit, f"users: by rank, local does not take the session limit from the server it ranks last ({probe.limit('local')})")
+
+    high = f"{probe.title}, written on the server ranked first"
+    high_limit = 55 + (int(time.time()) % 40)
+    unannounced("source-a", high, high_limit)
+    pool_scan(apis, ["local"], rounds=2)
+    expect(probe.overview("local") == high, f"metadata: by rank, local takes the edit from the server it ranks first ({probe.overview('local')!r})")
+    expect(probe.limit("local") == high_limit, f"users: by rank, local takes the session limit from the server it ranks first ({probe.limit('local')})")
+
+    probe.set_limit("source-a", agreed_limit)
+    probe.set_limit("source-b", agreed_limit)
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained before the ring is taken apart")
+    pool_restore(creds, apis)
+
+
+def scenario_pool_user_conflict(creds, apis):
+    """Between two servers that sync, a user's permissions follow whichever server changed them since
+    the two last agreed. A change made on one alone carries to the other and is never undone by a scan.
+    Changed on both, Permissive ends with everything either allows and Restrictive with only what both do."""
+    probe = PoolProbe(creds, apis, "IT Users")
+    pair = {"local": ["source-a"], "source-a": ["local"]}
+    switches = ("EnableContentDownloading", "EnableMediaConversion", "EnableLiveTvAccess")
+
+    def policy(n):
+        held = apis[n].get(f"/Users/{probe.viewer[n]}")["Policy"]
+        return tuple(bool(held.get(k)) for k in switches)
+
+    def set_policy(n, **changes):
+        held = apis[n].get(f"/Users/{probe.viewer[n]}")["Policy"]
+        held.update(changes)
+        apis[n].post(f"/Users/{probe.viewer[n]}/Policy", held, expect=204)
+
+    def scan(*names):
+        for n in names:
+            run_task(apis[n], "ServerSyncInformation")
+
+    pool_shape(creds, apis, pair, UserSyncConflict="Permissive")
+    for n in ("local", "source-a"):
+        set_policy(n, EnableContentDownloading=False, EnableMediaConversion=False, EnableLiveTvAccess=True)
+    scan("local", "source-a", "local")
+    expect(policy("local") == policy("source-a") == (False, False, True), f"the two servers agree before the test ({policy('local')}, {policy('source-a')})")
+
+    # Changed here alone: it stays through this server's own scan, and the other server takes it.
+    set_policy("local", EnableContentDownloading=True)
+    scan("local")
+    expect(policy("local") == (True, False, True), f"a change made here is not undone by this server's scan of a server that has not changed ({policy('local')})")
+    scan("local")
+    expect(policy("local") == (True, False, True), f"nor by the scan after that ({policy('local')})")
+    scan("source-a", "local")
+    expect(policy("source-a") == (True, False, True) and policy("local") == (True, False, True), f"the other server took it on its own scan ({policy('source-a')}, {policy('local')})")
+
+    # Changed there alone: it arrives.
+    set_policy("source-a", EnableLiveTvAccess=False)
+    scan("local", "source-a")
+    expect(policy("local") == (True, False, False) and policy("source-a") == (True, False, False), f"a change made there alone is applied here ({policy('local')}, {policy('source-a')})")
+
+    # Changed on both, Permissive: each permission ends on the more generous of the two.
+    set_policy("local", EnableContentDownloading=False, EnableLiveTvAccess=True)
+    set_policy("source-a", EnableMediaConversion=True)
+    scan("local", "source-a", "local", "source-a")
+    expect(policy("local") == policy("source-a") == (True, True, True), f"Permissive: both servers end with everything either allowed ({policy('local')}, {policy('source-a')})")
+
+    # Changed on both, Restrictive: each permission ends on the stricter of the two.
+    pool_shape(creds, apis, pair, UserSyncConflict="Restrictive")
+    set_policy("local", EnableContentDownloading=False)
+    set_policy("source-a", EnableMediaConversion=False)
+    scan("local", "source-a", "local", "source-a")
+    expect(policy("local") == policy("source-a") == (False, False, True), f"Restrictive: both servers end with only what both allowed ({policy('local')}, {policy('source-a')})")
+
+    scan("local", "source-a")
+    time.sleep(8)
+    expect(pool_quiet(apis) and policy("local") == policy("source-a") == (False, False, True), "settled: more scans change nothing")
+
+    for n in ("local", "source-a"):
+        set_policy(n, EnableContentDownloading=True, EnableMediaConversion=True, EnableLiveTvAccess=True)
+    pool_restore(creds, apis)
+
+
+def scenario_pool_playlist_keep(creds, apis):
+    """With Removed Playlists set to keep, a copy stays when the server it came from deletes its
+    playlist. It is not handed back to that server, until it is edited here, which is a newer change."""
+    probe = PoolProbe(creds, apis, "IT Keep " + uuid.uuid4().hex[:6])
+    pair = {"local": ["source-a"], "source-a": ["local"]}
+    pool_shape(creds, apis, pair)
+    config = plugin_config(apis["local"])
+    config["PlaylistRemovedAction"] = "Keep"
+    save_plugin_config(apis["local"], config)
+    wait_until(lambda: pool_quiet(apis), 90, "the pair is quiet before the test")
+
+    probe.make_playlist("source-a")
+    wait_until(lambda: probe.playlist_size("local") == 1, 60, "a playlist made on source-a reached local")
+    wait_until(lambda: pool_quiet(apis), 60, "every queue drained after the playlist was made")
+
+    probe.delete_playlists("source-a")
+    wait_until(lambda: pool_quiet(apis), 60, "every queue drained after the deletion")
+    time.sleep(6)
+    expect(probe.playlist_size("local") == 1, f"local keeps its copy when source-a deletes the playlist ({probe.playlist_size('local')})")
+    pool_scan(apis, ["source-a", "local", "source-a"])
+    expect(probe.playlist_size("source-a") is None, f"the kept copy is not handed back to the server that deleted it ({probe.playlist_size('source-a')})")
+    expect(probe.playlist_size("local") == 1, f"and scans leave the kept copy alone ({probe.playlist_size('local')})")
+
+    # Edited here afterwards, it is a newer change than the deletion, and source-a takes it back.
+    kept = probe.playlists("local")[0]
+    apis["local"].post(f"/Playlists/{kept['Id']}/Items?ids={movie_id(apis['local'], 'Only A (2021)')}&userId={probe.admin['local']}", None, expect=204)
+    wait_until(lambda: probe.playlist_size("source-a") == 2, 90, "edited here after the deletion, the playlist goes back to source-a with both items")
+    wait_until(lambda: pool_quiet(apis), 60, "every queue drained after the edit")
+
+    for n in ("local", "source-a"):
+        probe.delete_playlists(n)
+    wait_until(lambda: pool_quiet(apis), 90, "every queue drained before the pair is taken apart")
+    pool_restore(creds, apis)
+
+
 def synced_count(api, server, limit=100):
     """How many changes from a server the activity log's summaries say were synced."""
     total = 0
@@ -1322,7 +1729,7 @@ def scenario_peer_endpoint_auth(creds, apis):
               ("DELETE", "/Sync/Servers/x/Rows"),
               ("GET", "/Sync/Items"), ("GET", "/Sync/ImageProxy?itemId=00000000000000000000000000000000"), ("GET", "/Sync/MetadataItems"),
               ("GET", "/Sync/HistoryItems"), ("GET", "/Sync/PeopleItems"), ("GET", "/Sync/UserSyncUsers"), ("POST", "/Sync/TestConnection"),
-              ("POST", "/Sync/TriggerSync"), ("POST", "/Sync/ResetSyncDatabase"))
+              ("POST", "/Sync/Tasks/ServerSyncDownloadContent/Run"), ("POST", "/Sync/Reset/All"))
     refused = 0
     for method, path in routes:
         status, _ = anon.call(method, path, {} if method == "POST" else None)
@@ -1674,7 +2081,7 @@ def scenario_removed_files_ignore(creds, apis):
 
     run_task(local, "ServerSyncUpdateTables")
     if (row() or {}).get("Status") != "Queued":
-        local.post("/Sync/UpdateItemStatus", {"SourceItemId": row()["SourceItemId"], "Status": "Queued"}, expect=200)
+        local.post("/Sync/QueueItems", {"SourceItemIds": [row()["SourceItemId"]]}, expect=200)
     run_task(local, "ServerSyncDownloadContent")
     expect(os.path.exists(os.path.join(copy, file_name)), "local downloaded the film")
 
@@ -1757,50 +2164,59 @@ def scenario_removed_files_ignore(creds, apis):
     run_task(local, "ServerSyncUpdateTables")
 
 
-def rewrite_settings(name, api, edit):
-    """Stops a pool server, rewrites its saved Server Sync settings, and starts it again."""
-    container = f"serversync-it-{name}"
-    path = os.path.join(STATE, f"{name}-settings.xml")
-    run(["docker", "stop", container])
-    run(["docker", "cp", f"{container}:/config/plugins/configurations/Jellyfin.Plugin.ServerSync.xml", path])
-    with open(path, encoding="utf-8") as f:
-        text = f.read()
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(edit(text))
-    run(["docker", "cp", path, f"{container}:/config/plugins/configurations/Jellyfin.Plugin.ServerSync.xml"])
-    run(["docker", "start", container])
-    api.wait_ready(180)
-    time.sleep(6)
-    os.remove(path)
-
-
-def scenario_whitelist_upgrade(creds, apis):
-    """Updating from 12.2.7.0 keeps its whitelist as it was, and updating from before it adds
-    API keys and every administrator once so pulling servers keep working."""
+def scenario_older_database_refused(creds, apis):
+    """A database from a release older than the oldest this one reads is refused and left exactly as
+    it was, and is used again untouched once it is back at this release's version."""
     local = apis["local"]
-    unseeded = lambda text: re.sub(r"\s*<PeerCallerWhitelistSeeded>[^<]*</PeerCallerWhitelistSeeded>", "", text)
-    no_grants = lambda text: re.sub(r"\s*<PeerCallerGrants\s*/>|\s*<PeerCallerGrants>.*?</PeerCallerGrants>", "", text, flags=re.S)
+    container = "serversync-it-local"
+    db = os.path.join(STATE, "local", "config", "data", "serversync", "sync.db")
+    held = len(content_rows(local))
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
 
-    config = plugin_config(local)
-    config["PeerCallerGrants"] = []
-    save_plugin_config(local, config)
-    rewrite_settings("local", local, unseeded)
-    local.token = local.post("/Users/AuthenticateByName", {"Username": "admin", "Pw": creds["password"]}, expect=200)[1]["AccessToken"]
-    config = plugin_config(local)
-    expect(config["PeerCallerGrants"] == [], "a 12.2.7.0 install keeps its empty whitelist after updating")
-    expect(config["PeerCallerWhitelistSeeded"] is True, "the update is recorded so it runs once")
+    def stamp(version):
+        """Stops local, writes the schema version into its database file, and starts it again."""
+        run(["docker", "stop", container])
+        conn = sqlite3.connect(db)
+        found = conn.execute("PRAGMA user_version").fetchone()[0]
+        rows = conn.execute("SELECT COUNT(*) FROM SyncItems").fetchone()[0]
+        conn.execute(f"PRAGMA user_version = {int(version)}")
+        conn.commit()
+        conn.close()
+        run(["docker", "start", container])
+        local.wait_ready(180)
+        time.sleep(6)
+        return found, rows
 
-    rewrite_settings("local", local, lambda text: no_grants(unseeded(text)))
-    local.token = local.post("/Users/AuthenticateByName", {"Username": "admin", "Pw": creds["password"]}, expect=200)[1]["AccessToken"]
-    grants = plugin_config(local)["PeerCallerGrants"]
-    admin = creds["servers"]["local"]["userId"].replace("-", "")
-    expect(any(g["UserId"] == "apikey" for g in grants), "an install from before 12.2.7.0 gets an API keys row")
-    expect(any(g["UserId"].replace("-", "") == admin for g in grants), "it also gets a row for the administrator")
-    expect(all(not g["Locations"] for g in grants), "the added rows allow every location")
-
-    config = plugin_config(local)
-    config["PeerCallerGrants"] = open_grants(creds, "local")
-    save_plugin_config(local, config)
+    current, rows_before = stamp(35)
+    try:
+        status, _ = local.call("GET", "/Sync/Status")
+        expect(status >= 500, f"the Sync tab's routes fail instead of reading an older database ({status})")
+        logs = run(["docker", "logs", "--since", since + "Z", container], capture=True, check=False)
+        expect("written by a release before 12.4.13.0" in logs.stdout + logs.stderr, "the log names the release to install first")
+        wait_until(lambda: bool(activity(local, "Earlier Update")), 30, "the Activity page says an earlier update is needed first")
+        status, health = local.call("GET", "/Sync/Health")
+        expect(status == 200 and health.get("Ready") is False and "12.4.13.0" in (health.get("Message") or ""), "every page is told why Server Sync is held")
+        expect(healthy(local) and local.call("GET", f"/Items?userId={creds['servers']['local']['userId']}&limit=1")[0] == 200, "Jellyfin itself starts and answers as usual")
+        settings = os.path.join(STATE, "local", "config", "plugins", "configurations", "Jellyfin.Plugin.ServerSync.xml")
+        with open(settings, encoding="utf-8") as f:
+            before = f.read()
+        config = plugin_config(local)
+        config["MaxConcurrentDownloads"] = 7
+        status, _ = local.call("POST", f"/Plugins/{PLUGIN_GUID}/Configuration", config)
+        with open(settings, encoding="utf-8") as f:
+            after = f.read()
+        expect(status >= 400 and after == before, f"a save is refused and the settings file is left as it was ({status})")
+        expect(os.path.exists(settings + ".before-12.4.13.0"), "the settings were copied aside before anything could change them")
+    finally:
+        found, rows_after = stamp(current)
+    expect(found == 35, f"the refused database kept its version ({found})")
+    expect(rows_after == rows_before, f"the refused database kept its rows ({rows_before} before, {rows_after} after)")
+    status, _ = local.call("GET", "/Sync/Status")
+    expect(status == 200 and len(content_rows(local)) == held, "back at this release's version it is used as it was")
+    expect(local.call("GET", "/Sync/Health")[1].get("Ready") is True, "and Server Sync is no longer held")
+    held_copy = os.path.join(STATE, "local", "config", "plugins", "configurations", "Jellyfin.Plugin.ServerSync.xml.before-12.4.13.0")
+    if os.path.exists(held_copy):
+        os.remove(held_copy)
 
 
 def set_linking(api, peer, allow):
@@ -3381,7 +3797,7 @@ def scenario_chaos_tampered_links(creds, apis):
             row = film.row() or {}
             expect(open(film.link, encoding="utf-8").read() == content, f"a .strm holding {label} is left as it is, since Server Sync no longer owns it")
             expect(row.get("Status") == "Errored" and "did not write" in (row.get("ErrorMessage") or ""), f"its row says why ({row.get('Status')})")
-            film.local.post("/Sync/UpdateItemStatus", {"SourceItemId": row.get("SourceItemId"), "Status": "Synced"}, expect=200)
+            film.local.post("/Sync/MarkSynced", {"SourceItemIds": [row.get("SourceItemId")]}, expect=200)
         # A .strm with nothing in it points nowhere, as one cut short by a power loss does, so it is written again.
         with open(film.link, "w", encoding="utf-8") as f:
             f.write("")
@@ -3685,7 +4101,6 @@ SCENARIOS = [
     ("playlist sharing and public access are copied", scenario_playlist_sharing),
     ("a standard user's key copies the playlists it can see", scenario_playlist_standard_user),
     ("removed files set to Ignore hide whole titles only", scenario_removed_files_ignore),
-    ("updating keeps a 12.2.7.0 whitelist and seeds older ones", scenario_whitelist_upgrade),
     ("links stream from the source and match across servers", scenario_links),
     ("links: seeking reads exactly the bytes asked for", scenario_link_ranges),
     ("links: media info, images, per user direct play, and the link check", scenario_link_care),
@@ -3716,6 +4131,12 @@ SCENARIOS = [
     ("chaos: a storm of plays and seeks", scenario_chaos_storm),
     ("chaos: malformed requests at every route", scenario_chaos_fuzz_routes),
     ("chaos: three hundred links at once", scenario_chaos_scale),
+    ("pool: a chain of servers that do not all know each other", scenario_pool_chain),
+    ("pool: a ring of equals carries a missed change by scan", scenario_pool_ring_missed),
+    ("pool: by rank, only the highest ranked server is heard", scenario_pool_rank),
+    ("pool: user settings go both ways, and Permissive and Restrictive settle a clash", scenario_pool_user_conflict),
+    ("pool: a kept playlist copy is not handed back", scenario_pool_playlist_keep),
+    ("a database from an older release is refused and left untouched", scenario_older_database_refused),
 ]
 
 _failures = []

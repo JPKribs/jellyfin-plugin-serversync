@@ -22,6 +22,12 @@ public class PeerCheckResult
     /// <summary>Gets or sets its Server Sync version.</summary>
     public string? PluginVersion { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether its Server Sync and this one speak protocols that do not
+    /// overlap, so neither takes the other's changes until one is updated.
+    /// </summary>
+    public bool Incompatible { get; set; }
+
     /// <summary>Gets or sets a value indicating whether it lists this server as Pull or Sync, which hints need.</summary>
     public bool ListsThisServer { get; set; }
 
@@ -49,7 +55,13 @@ public class PeerCheckResult
 
     public bool? PeerCanDownload { get; set; }
 
-    /// <summary>Gets or sets a sentence for the page.</summary>
+    /// <summary>Gets or sets a short verdict for the page, shown above the details.</summary>
+    public string Headline { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets what was learned, one line each. Empty when the check ended before the link could be judged.</summary>
+    public List<PeerCheckDetail> Details { get; set; } = new();
+
+    /// <summary>Gets or sets the whole answer as sentences.</summary>
     public string Message { get; set; } = string.Empty;
 
     /// <summary>Gets or sets how the page shows the message: ok, warn, or error.</summary>

@@ -84,6 +84,14 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             return;
         }
 
+        // Held for a database an older release wrote: the link table cannot be read, so Jellyfin's own
+        // routes are left exactly as they are.
+        if (Plugin.Held)
+        {
+            await next().ConfigureAwait(false);
+            return;
+        }
+
         var links = FindLinks(context, out var controller, out var versions);
         if (links.Count > 0)
         {
@@ -175,6 +183,12 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
+        if (Plugin.Held)
+        {
+            await next().ConfigureAwait(false);
+            return;
+        }
+
         try
         {
             if (context.Result is ObjectResult { Value: { } value } result)

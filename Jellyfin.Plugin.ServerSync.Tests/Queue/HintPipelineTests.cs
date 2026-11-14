@@ -22,6 +22,7 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Queue;
 
+[Collection("LoopBreaker")]
 public sealed class HintPipelineTests : IDisposable
 {
     private const string OriginId = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f";
@@ -403,6 +404,39 @@ public sealed class HintPipelineTests : IDisposable
         Assert.Equal(2, stored.Count);
         Assert.Contains(stored, r => r.ParkedPath == HintTriage.PathParkKey(LocalPath("missing.mkv")) && r.NextAttempt > DateTime.UtcNow.AddHours(5) && r.NextAttempt <= DateTime.UtcNow + HintProtocol.ParkWindow);
         Assert.Contains(stored, r => r.ParkedPath is null);
+    }
+
+    /// <summary>
+    /// A save event that arrives after its apply has ended is not known as that apply's echo, so it is
+    /// announced as an edit made here. One that keeps arriving late, as between two servers echoing one
+    /// change, is announced a set number of times and then held.
+    /// True: a late echo costs at most a few announcements and can never become an endless exchange.
+    /// False: two servers with slow disks could pass one change back and forth for good.
+    /// </summary>
+    [Fact]
+    public void Publisher_HoldsAnObjectThatKeepsEchoingAfterApplies()
+    {
+        var peer = Origin();
+        peer.Mode = ServerMode.Sync;
+        _config.Configuration.Servers.Add(peer);
+        var (host, hostStub) = InterfaceStub.Create<MediaBrowser.Controller.IServerApplicationHost>();
+        hostStub.Answer("get_SystemId", _ => "me");
+        var worker = new OutboundHintWorker(_outbound, _config, null!, null!, null!, new HintSuppression(), null!, NullLogger<OutboundHintWorker>.Instance);
+        var publisher = new LocalHintPublisher(_config, _outbound, _versions, worker, host, NullLogger<LocalHintPublisher>.Instance);
+        var echoing = "Echo " + Guid.NewGuid().ToString("N");
+        int Announce(string name) => publisher.PublishPeople(name, Guid.NewGuid(), new ObjectVersion { ServerId = "me", Timestamp = DateTime.UtcNow }, excludePeerKey: null);
+
+        // A peer's change to the person is applied, and the apply ends before its save event is seen.
+        new ApplyGuard().Enter(HintProtocol.GuardKey(HintKind.People, HintProtocol.PeopleKey(echoing))).Dispose();
+
+        Assert.Equal(1, Announce(echoing));
+        for (var i = 1; i < LoopBreaker.Limit; i++)
+        {
+            Assert.True(Announce(echoing) >= 0);
+        }
+
+        Assert.Equal(-1, Announce(echoing));
+        Assert.Equal(-1, Announce(echoing));
     }
 
     [Fact]

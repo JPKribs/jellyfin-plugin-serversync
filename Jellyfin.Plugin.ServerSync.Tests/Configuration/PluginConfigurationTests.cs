@@ -27,20 +27,21 @@ public class PluginConfigurationTests
             TempDownloadPath = "/tmp/ok\0bad",
             RecyclingBinPath = "/tmp/also\0bad"
         };
-        config.LibraryMappings.Add(new LibraryMapping
+        var server = new SourceServer { Url = "http://source:8096", ApiKey = "k" };
+        server.LibraryMappings.Add(new LibraryMapping
         {
             IsEnabled = true,
             SourceLibraryId = "s",
             LocalLibraryId = "l",
             LocalRootPath = "/media\0evil"
         });
+        config.Servers.Add(server);
 
         var exception = Xunit.Record.Exception(() => config.SanitizeValues());
 
         Assert.Null(exception);
         Assert.True(string.IsNullOrEmpty(config.TempDownloadPath));
         Assert.True(string.IsNullOrEmpty(config.RecyclingBinPath));
-        // The sanitizer also moves a legacy mapping list into the first server entry.
         Assert.Equal(string.Empty, config.Servers[0].LibraryMappings[0].LocalRootPath);
     }
 
@@ -134,50 +135,6 @@ public class PluginConfigurationTests
     }
 
     /// <summary>
-    /// Upgrade path for the removed 10.11.64.0 per-module flags: a config XML
-    /// carrying either legacy element must land as DeepImageVerification=true
-    /// instead of silently resetting the feature for users who enabled it.
-    /// </summary>
-    [Theory]
-    [InlineData("MetadataSyncDeepImageVerification")]
-    [InlineData("PeopleSyncDeepImageVerification")]
-    public void LegacyDeepImageVerificationElements_MigrateOnDeserialize(string legacyElement)
-    {
-        var xml = $"""
-            <?xml version="1.0" encoding="utf-8"?>
-            <PluginConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-              <{legacyElement}>true</{legacyElement}>
-            </PluginConfiguration>
-            """;
-
-        var serializer = new XmlSerializer(typeof(PluginConfiguration));
-        using var reader = new StringReader(xml);
-        var config = (PluginConfiguration)serializer.Deserialize(reader)!;
-
-        Assert.True(config.DeepImageVerification);
-    }
-
-    /// <summary>
-    /// The legacy shims are read-only compatibility: serializing a config
-    /// must not write the old element names back out (they'd shadow the new
-    /// setting forever).
-    /// </summary>
-    [Fact]
-    public void LegacyDeepImageVerificationElements_NeverSerialized()
-    {
-        var config = new PluginConfiguration { DeepImageVerification = true };
-
-        var serializer = new XmlSerializer(typeof(PluginConfiguration));
-        using var writer = new StringWriter();
-        serializer.Serialize(writer, config);
-        var xml = writer.ToString();
-
-        Assert.DoesNotContain("MetadataSyncDeepImageVerification", xml);
-        Assert.DoesNotContain("PeopleSyncDeepImageVerification", xml);
-        Assert.Contains("DeepImageVerification", xml);
-    }
-
-    /// <summary>
     /// Collection whitelist entries carry Type="BoxSet". The marker decides
     /// whether the Sync Collections task mirrors them, so it must survive the
     /// XML round-trip, and configs written before the field existed must
@@ -213,28 +170,6 @@ public class PluginConfigurationTests
         Assert.Equal("BoxSet", items[0].Type);
         Assert.Equal("Playlist", items[1].Type);
         Assert.Null(items[2].Type);
-    }
-
-    /// <summary>
-    /// A legacy element must not TURN OFF a new-style setting that is
-    /// already on (the shim is OR semantics, one-directional).
-    /// </summary>
-    [Fact]
-    public void LegacyElementFalse_DoesNotDisableNewSetting()
-    {
-        var xml = """
-            <?xml version="1.0" encoding="utf-8"?>
-            <PluginConfiguration>
-              <DeepImageVerification>true</DeepImageVerification>
-              <MetadataSyncDeepImageVerification>false</MetadataSyncDeepImageVerification>
-            </PluginConfiguration>
-            """;
-
-        var serializer = new XmlSerializer(typeof(PluginConfiguration));
-        using var reader = new StringReader(xml);
-        var config = (PluginConfiguration)serializer.Deserialize(reader)!;
-
-        Assert.True(config.DeepImageVerification);
     }
 
     /// <summary>

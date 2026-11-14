@@ -10,8 +10,6 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class MaintenanceStore : QueueStoreBase
 {
-    private static readonly string[] SyncTables = { "SyncItems", "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" };
-
     // Content keeps its own retry rules, since its applies download files and delete them.
     private static readonly string[] RetriedTables = { "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" };
 
@@ -23,33 +21,6 @@ public sealed class MaintenanceStore : QueueStoreBase
     public MaintenanceStore(ISyncDatabaseProvider databaseProvider, ILogger<MaintenanceStore> logger)
         : base(databaseProvider, logger)
     {
-    }
-
-    /// <summary>
-    /// Gives rows written before servers became a list the key of the server they already resolve to,
-    /// the first scan server, so removing that server removes them and no other server can claim them.
-    /// </summary>
-    /// <param name="serverKey">The first scan server's entry key.</param>
-    /// <returns>How many rows were given a key.</returns>
-    public int BackfillServerKey(string serverKey)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
-        return Write(conn =>
-        {
-            var updated = 0;
-            using var transaction = conn.BeginTransaction();
-            foreach (var table in SyncTables)
-            {
-                using var cmd = conn.CreateCommand();
-                cmd.Transaction = transaction;
-                cmd.CommandText = $"UPDATE {table} SET ServerKey = @key WHERE ServerKey IS NULL OR ServerKey = ''";
-                Add(cmd, "@key", serverKey);
-                updated += cmd.ExecuteNonQuery();
-            }
-
-            transaction.Commit();
-            return updated;
-        });
     }
 
     private static readonly (string Table, string Label)[] WatchedTables =

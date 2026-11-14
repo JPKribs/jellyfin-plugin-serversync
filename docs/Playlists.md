@@ -5,6 +5,8 @@ Playlist syncing copies the playlists of mapped users between servers. Users wit
 ## Settings
 
 * **Enable Playlist Sync** turns playlist syncing on.
+* **Precedence** chooses which server is heard for a playlist more than one holds. See [Several servers](SyncTypes.md#several-servers).
+* **Removed Playlists** chooses what happens to a copy when the server it came from deletes its playlist: delete it, or keep it.
 * **Sharing** shares each playlist here with the same mapped users it is shared with on the source, and copies whether it is open to everyone. This needs the exact owner, so it only applies when Server Sync on the source reports it.
 
 ## How Items Are Matched
@@ -25,13 +27,22 @@ Every playlist belongs to one user. A copied playlist belongs to the local user 
 
 | Direction | What happens |
 | :--- | :--- |
-| Pull | The other server's copy always wins. Local edits to a copied playlist are replaced on the next run, and a playlist deleted there is deleted here, unless that server lists no playlists at all for the mapped users, which is taken as a failed read. Changes arrive as they happen when that server pushes to this one, otherwise on the schedule |
+| Pull | The other server's copy always wins. Local edits to a copied playlist are replaced on the next run, and a playlist deleted there is deleted here, or kept when **Removed Playlists** says so, unless that server lists no playlists at all for the mapped users, which is taken as a failed read. Changes arrive as they happen when that server pushes to this one, otherwise on the schedule |
 | Push | This server's copy always wins on the other server. Every edit and deletion is sent as it happens |
-| Sync | The newest edit wins on either side. Edits and deletions travel both ways as they happen. The scheduled run creates copies that are missing and replaces a copy only when the other server holds a newer recorded edit. It never deletes, since deletions travel as hints |
+| Sync | The newest edit wins on either side. Edits and deletions travel both ways as they happen. The scheduled run creates copies that are missing, replaces a copy only when the other server holds a newer recorded edit, and settles a deletion that was not announced |
 
 Making a playlist, adding, removing, or moving items, renaming it, changing who it is shared with, and deleting it each send a hint. The other server then reads the whole playlist from this one and replaces its copy, or deletes its copy for a deletion. Changes made by Server Sync itself are never announced back, so a pair does not echo. A deletion that arrives just after an edit sticks: Jellyfin's refresh from the edit can save the playlist back as it finishes, so Server Sync deletes it again when that refresh completes. A new playlist made with the same name in the meantime is left alone.
 
-Server Sync records which local playlists are copies in its database, and tags them as well, so a database reset rebuilds the record from the tags. A copied playlist remembers the playlist it was first made as, so both copies stay one playlist across any number of servers. A local playlist that was never copied is only touched when the other server holds a copy made from it, and a hint or a scheduled run only changes or deletes a local playlist that belongs to the mapped owner. Every change holds the playlist lock, so a hint and the scheduled run never create the same copy twice.
+Server Sync records which local playlists are copies in its database, and tags them as well, so a database reset, or **Playlist Sync** under **Settings > Troubleshooting**, rebuilds the record from the tags. A copied playlist remembers the playlist it was first made as, so both copies stay one playlist across any number of servers. A local playlist that was never copied is only touched when the other server holds a copy made from it, and a hint or a scheduled run only changes or deletes a local playlist that belongs to the mapped owner. Every change holds the playlist lock, so a hint and the scheduled run never create the same copy twice.
+
+## Deletions
+
+A deletion is remembered, stamped with the server that made it and when, the way an edit is. It travels as it happens, and a scan settles one that was missed: a copy this server took from a Sync server, which that server no longer lists and holds a newer stamp for, was deleted there.
+
+* **Removed Playlists** set to delete removes the copy here. Set to keep, the copy stays. The deletion is recorded either way.
+* A playlist this server knew and no longer holds is not made again from another server's copy. It comes back only when that copy was edited after the deletion, since the newer change wins.
+* A kept copy is not handed back to the server that deleted it, for the same reason, unless it is edited here afterwards.
+* A copy edited here after the other server deleted its own is kept, and that server takes it back on its next scan.
 
 See [Permissions](Permissions.md) for what each kind of key can read.
 

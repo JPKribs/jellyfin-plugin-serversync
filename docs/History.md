@@ -28,10 +28,18 @@ Once both servers agree on a state, that state is remembered as the base for the
 
 Turning the setting off leaves the remembered base in place but stops writing to the Source Server. The merge keeps using the base, so history read from the Source Server still cannot overwrite a change made here.
 
+## Several servers
+
+History is merged, never replaced, so every server that holds a file has something to add. One server speaks for a file on each scan: the highest ranked one whose history of it has moved since this server last looked, or that this server has never looked at. When none has moved, rank decides. A server passed over on one scan is heard on the next, since what it holds still differs from what was last seen of it. Every server's history is merged in over a few scans, and none is merged against a state another merge has already changed.
+
+Each server's row is kept, since it records what was last seen of that server and holds the base agreed with it.
+
+A change announced as it happens says which part changed: playing, which covers played, play count, position, and last played date, or the favorite. The server that receives it takes that part and leaves the other as it holds it. A play made on one server therefore never undoes a favorite made on another that the first server had not heard of, which matters when two servers sync with a third and not with each other.
+
 ## Live changes between servers
 
 When a server entry is in Push or Sync mode, a change made here is announced to that server as it happens instead of waiting for the next scan. This server watches its own user data for plays, resume positions, and favorites, gathers the edits to one item into one notice once it has gone untouched for **Send Changes After (seconds)**, 60 by default, and queues a hint for every Push or Sync server whose mappings cover that user and that library. A hint says what changed and where, never the value. The other server runs Server Sync too, lists this server as a Pull or Sync server, and pulls the change from here through the same code the scan uses, including the negotiation above, so hints and scans can never disagree.
 
 Hints are stored on both ends until the work is done. A server that is down, refuses the key, or lacks the plugin is retried with backoff and shown on the dashboard with the reason, and a hint the other server accepted but never finished is checked and sent again. A hint is given up only after the retry limits under Settings > Processing, and the scheduled Sync Information task still runs the full comparison as the safety net for anything the hints missed.
 
-A write made because of a hint raises no hint of its own, and a value that already matches is never written, so a pool of three or more servers settles without echoing. When two servers have never exchanged a particular item, the newer edit wins on origin versions. After that the agreed base recorded on both sides makes every merge three way.
+A write made because of a hint raises no hint of its own, and a value that already matches is never written, so a pool of three or more servers settles without echoing. When two servers have never exchanged a particular item, the newer edit wins on origin versions, part by part when the sender says which part it changed. After that the agreed base recorded on both sides makes every merge three way.

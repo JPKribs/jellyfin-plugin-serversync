@@ -317,6 +317,13 @@ public static class HintProtocol
             return false;
         }
 
+        // A part's version is kept under the history key with the part's name after it.
+        var part = key.IndexOf('#', StringComparison.Ordinal);
+        if (part > 0)
+        {
+            key = key[..part];
+        }
+
         var split = key.IndexOf('|', StringComparison.Ordinal);
         if (split <= 0 || split == key.Length - 1)
         {
@@ -341,6 +348,56 @@ public static class HintProtocol
 
     /// <summary>The item type a playlist hint carries for a copy of a playlist.</summary>
     public const string PlaylistCopy = "PlaylistCopy";
+
+    private const string PlayedPart = "+Played";
+    private const string FavoritePart = "+Favorite";
+
+    /// <summary>
+    /// The item type a history hint carries: the item's Jellyfin type, then the parts of the history
+    /// that were changed. A receiver takes those parts and leaves the others as it holds them, so a
+    /// play made on one server does not undo a favorite the sender never heard of.
+    /// </summary>
+    /// <param name="itemType">The item's Jellyfin type, such as Movie.</param>
+    /// <param name="parts">The parts that were changed, or none when that is not known.</param>
+    /// <returns>The item type to send.</returns>
+    public static string? HistoryItemType(string? itemType, HistoryParts parts)
+        => parts == HistoryParts.None
+            ? itemType
+            : (itemType ?? string.Empty) + (parts.HasFlag(HistoryParts.Played) ? PlayedPart : string.Empty) + (parts.HasFlag(HistoryParts.Favorite) ? FavoritePart : string.Empty);
+
+    /// <summary>Reads a history hint's item type apart into the item's Jellyfin type and the parts that were changed.</summary>
+    /// <param name="itemType">The item type the hint carries.</param>
+    /// <param name="parts">The parts, or none when the sender did not say.</param>
+    /// <returns>The item's Jellyfin type.</returns>
+    public static string? SplitHistoryItemType(string? itemType, out HistoryParts parts)
+    {
+        parts = HistoryParts.None;
+        if (string.IsNullOrEmpty(itemType))
+        {
+            return itemType;
+        }
+
+        if (itemType.Contains(PlayedPart, StringComparison.Ordinal))
+        {
+            parts |= HistoryParts.Played;
+        }
+
+        if (itemType.Contains(FavoritePart, StringComparison.Ordinal))
+        {
+            parts |= HistoryParts.Favorite;
+        }
+
+        var cut = itemType.IndexOf('+', StringComparison.Ordinal);
+        var type = cut < 0 ? itemType : itemType[..cut];
+        return type.Length == 0 ? null : type;
+    }
+
+    /// <summary>The key one part of an object's history is versioned under on this server.</summary>
+    /// <param name="historyKey">The history key.</param>
+    /// <param name="part">One part.</param>
+    /// <returns>The key.</returns>
+    public static string HistoryPartKey(string historyKey, HistoryParts part)
+        => historyKey + (part == HistoryParts.Favorite ? "#favorite" : "#played");
 
     /// <summary>The item type a playlist hint carries when an original playlist was deleted.</summary>
     public const string PlaylistDeleted = "PlaylistDeleted";

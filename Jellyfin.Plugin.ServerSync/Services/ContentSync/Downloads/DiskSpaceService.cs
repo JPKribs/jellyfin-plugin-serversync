@@ -85,19 +85,6 @@ public static class DiskSpaceService
     }
 
     /// <summary>
-    /// Gets the minimum disk space info across all configured library paths.
-    /// </summary>
-    /// <param name="config">Plugin configuration containing library mappings.</param>
-    /// <returns>Disk space info for the path with least free space, or null if none configured.</returns>
-    public static DiskSpaceInfo? GetMinimumDiskSpaceInfo(PluginConfiguration config)
-    {
-        // An unmeasured path reports zero free bytes, which would always win the comparison and show
-        // the dashboard a full disk. Prefer the paths that were actually measured.
-        var allInfo = GetDiskSpaceInfo(config);
-        return allInfo.Where(i => i.TotalBytes > 0).MinBy(i => i.FreeBytes) ?? allInfo.FirstOrDefault();
-    }
-
-    /// <summary>
     /// Checks if there is sufficient disk space across all library paths. A path whose free space
     /// cannot be read does not fail the check.
     /// </summary>

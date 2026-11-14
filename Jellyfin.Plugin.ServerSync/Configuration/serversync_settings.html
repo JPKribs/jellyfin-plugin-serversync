@@ -387,6 +387,8 @@
                                 </div>
                             </div>
 
+                            <div id="historyNeedsMapping" class="jpk-warn hidden mb-md">Add a user mapping on the Servers tab first.</div>
+
                             <div id="historySyncOptions">
 
                                 <!-- Sync Parameters Subsection -->
@@ -471,6 +473,18 @@
                             </div>
 
                             <div id="metadataSyncOptions">
+
+                                <h3 class="jpk-subsection-title">Several Servers</h3>
+                                <div class="settingsGroup">
+                                    <div class="selectContainer">
+                                        <label for="selMetadataSyncPrecedence">Precedence</label>
+                                        <select is="emby-select" id="selMetadataSyncPrecedence">
+                                            <option value="Newest">Newest</option>
+                                            <option value="Rank">Ranked</option>
+                                        </select>
+                                        <div class="fieldDescription">Ranked follows the Servers tab order.</div>
+                                    </div>
+                                </div>
 
                                 <!-- Sync Parameters Subsection -->
                                 <h3 class="jpk-subsection-title">Sync Parameters</h3>
@@ -568,6 +582,18 @@
                             </div>
 
                             <div id="peopleSyncOptions">
+                                <h3 class="jpk-subsection-title">Several Servers</h3>
+                                <div class="settingsGroup">
+                                    <div class="selectContainer">
+                                        <label for="selPeopleSyncPrecedence">Precedence</label>
+                                        <select is="emby-select" id="selPeopleSyncPrecedence">
+                                            <option value="Newest">Newest</option>
+                                            <option value="Rank">Ranked</option>
+                                        </select>
+                                        <div class="fieldDescription">Ranked follows the Servers tab order.</div>
+                                    </div>
+                                </div>
+
                                 <h3 class="jpk-subsection-title">Sync Parameters</h3>
                                 <div class="settingsGroup">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -614,12 +640,30 @@
                                 </div>
                                 <div id="playlistNeedsMapping" class="jpk-warn hidden mb-md">Add a user mapping on the Servers tab first.</div>
 
-                                <div class="checkboxContainer checkboxContainer-withDescription">
-                                    <label class="emby-checkbox-label">
-                                        <input type="checkbox" is="emby-checkbox" id="chkPlaylistSyncShares" />
-                                        <span class="checkboxLabel">Sharing</span>
-                                    </label>
-                                    <div class="fieldDescription checkboxFieldDescription">Copies shares and public access.</div>
+                                <div id="playlistSyncOptions">
+                                    <div class="selectContainer">
+                                        <label for="selPlaylistSyncPrecedence">Precedence</label>
+                                        <select is="emby-select" id="selPlaylistSyncPrecedence">
+                                            <option value="Newest">Newest</option>
+                                            <option value="Rank">Ranked</option>
+                                        </select>
+                                        <div class="fieldDescription">Ranked follows the Servers tab order.</div>
+                                    </div>
+                                    <div class="selectContainer">
+                                        <label for="selPlaylistRemovedAction">Removed Playlists</label>
+                                        <select is="emby-select" id="selPlaylistRemovedAction">
+                                            <option value="Delete">Delete</option>
+                                            <option value="Keep">Keep</option>
+                                        </select>
+                                        <div class="fieldDescription">When the source deletes a playlist.</div>
+                                    </div>
+                                    <div class="checkboxContainer checkboxContainer-withDescription">
+                                        <label class="emby-checkbox-label">
+                                            <input type="checkbox" is="emby-checkbox" id="chkPlaylistSyncShares" />
+                                            <span class="checkboxLabel">Sharing</span>
+                                        </label>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies shares and public access.</div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -656,7 +700,30 @@
                                 </div>
                             </div>
 
+                            <div id="userNeedsMapping" class="jpk-warn hidden mb-md">Add a user mapping on the Servers tab first.</div>
+
                             <div id="userSyncOptions">
+
+                                <h3 class="jpk-subsection-title">Several Servers</h3>
+                                <div class="settingsGroup">
+                                    <div class="selectContainer">
+                                        <label for="selUserSyncPrecedence">Precedence</label>
+                                        <select is="emby-select" id="selUserSyncPrecedence">
+                                            <option value="Newest">Newest</option>
+                                            <option value="Rank">Ranked</option>
+                                        </select>
+                                        <div class="fieldDescription">Ranked follows the Servers tab order.</div>
+                                    </div>
+                                    <div class="selectContainer">
+                                        <label for="selUserSyncConflict">User Conflicts</label>
+                                        <select is="emby-select" id="selUserSyncConflict">
+                                            <option value="Newest">Other Server</option>
+                                            <option value="Permissive">Permissive</option>
+                                            <option value="Restrictive">Restrictive</option>
+                                        </select>
+                                        <div class="fieldDescription">Permissive allows the most. Restrictive allows the least.</div>
+                                    </div>
+                                </div>
 
                                 <!-- Sync Parameters Subsection -->
                                 <h3 class="jpk-subsection-title">Sync Parameters</h3>
@@ -744,19 +811,28 @@
                                 </div>
                                 <div class="resetButtonRow">
                                     <div class="resetButtonInfo">
-                                        <div>User Sync</div>
-                                        <div class="fieldDescription">Forgets user tracking.</div>
+                                        <div>People Sync</div>
+                                        <div class="fieldDescription">Forgets people tracking.</div>
                                     </div>
-                                    <button is="emby-button" type="button" id="btnResetUserTable" class="raised jpk-button-destructive jpk-button-small">
+                                    <button is="emby-button" type="button" id="btnResetPeopleTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
                                     </button>
                                 </div>
                                 <div class="resetButtonRow">
                                     <div class="resetButtonInfo">
-                                        <div>People Sync</div>
-                                        <div class="fieldDescription">Forgets people tracking.</div>
+                                        <div>Playlist Sync</div>
+                                        <div class="fieldDescription">Forgets playlist tracking.</div>
                                     </div>
-                                    <button is="emby-button" type="button" id="btnResetPeopleTable" class="raised jpk-button-destructive jpk-button-small">
+                                    <button is="emby-button" type="button" id="btnResetPlaylistTable" class="raised jpk-button-destructive jpk-button-small">
+                                        <span>Reset</span>
+                                    </button>
+                                </div>
+                                <div class="resetButtonRow">
+                                    <div class="resetButtonInfo">
+                                        <div>User Sync</div>
+                                        <div class="fieldDescription">Forgets user tracking.</div>
+                                    </div>
+                                    <button is="emby-button" type="button" id="btnResetUserTable" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Reset</span>
                                     </button>
                                 </div>

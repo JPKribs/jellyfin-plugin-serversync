@@ -28,14 +28,8 @@ public sealed class MetadataSyncTableManager
     /// Initializes a new instance.
     /// </summary>
     public MetadataSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<MetadataSyncTableManager> logger)
-        : base(GetDatabase(databaseProvider), logger)
+        : base(databaseProvider, logger)
     {
-    }
-
-    private static SyncDatabase GetDatabase(ISyncDatabaseProvider provider)
-    {
-        ArgumentNullException.ThrowIfNull(provider);
-        return provider.Database;
     }
 
     // Queuing a row clears every category's synced hash, so the next Sync run applies each category

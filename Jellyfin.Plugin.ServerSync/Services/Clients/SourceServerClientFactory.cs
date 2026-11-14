@@ -56,7 +56,7 @@ public class SourceServerClientFactory : ISourceServerClientFactory
 
     private SourceServerClient Create(string serverUrl, string apiKey, bool allowPrivateNetwork)
     {
-        // The stored key may be encrypted at rest. Decrypt for use. Plaintext (pre-migration) passes through.
+        // The stored key may be encrypted at rest. Decrypt for use. Plaintext passes through.
         apiKey = _secrets.Unprotect(apiKey);
 
         // Validate URL for SSRF protection (same checks as the controller endpoint). Private

@@ -236,13 +236,26 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
             // Versions are recorded whether or not any peer is sent to, so a server that only receives
             // still knows when its own values were edited when a first contact has to be decided.
-            Note(HintKind.History, HintProtocol.HistoryKey(e.UserId, e.Item.Id), e.UserId, e.Item.Id, itemPath: e.Item.Path);
+            Note(HintKind.History, HintProtocol.HistoryKey(e.UserId, e.Item.Id), e.UserId, e.Item.Id, itemPath: e.Item.Path, parts: PartsOf(e.SaveReason));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not record a local history change");
         }
     }
+
+    /// <summary>
+    /// Which parts of a user's history of an item a save changed. A favorite is saved on its own, and
+    /// so is everything about playing. A save that could have changed either counts as both.
+    /// </summary>
+    /// <param name="reason">Why Jellyfin saved the user's data.</param>
+    /// <returns>The parts.</returns>
+    public static HistoryParts PartsOf(MediaBrowser.Model.Entities.UserDataSaveReason reason) => reason switch
+    {
+        MediaBrowser.Model.Entities.UserDataSaveReason.UpdateUserRating => HistoryParts.Favorite,
+        MediaBrowser.Model.Entities.UserDataSaveReason.TogglePlayed or MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackStart or MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackProgress or MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackFinished => HistoryParts.Played,
+        _ => HistoryParts.All
+    };
 
     /// <summary>
     /// Sorts an item update into a hand made edit, a provider's work, or nothing to announce. Jellyfin's
@@ -443,7 +456,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     // A change gathers with the others to the same object. One hand made edit in the window makes the
     // whole hint a recorded edit. A window of nothing but provider work travels as provider work.
-    private void Note(HintKind kind, string localKey, Guid userId, Guid itemId, bool recorded = true, string? itemPath = null)
+    private void Note(HintKind kind, string localKey, Guid userId, Guid itemId, bool recorded = true, string? itemPath = null, HistoryParts parts = HistoryParts.None)
     {
         if (_guard.IsApplying(HintProtocol.GuardKey(kind, localKey)))
         {
@@ -457,6 +470,16 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         if (recorded)
         {
             _versions.Set(new ObjectVersion { Kind = kind, Key = localKey, ServerId = _applicationHost.SystemId, Timestamp = now });
+
+            // Each part of a user's history carries its own version as well, so a later change to
+            // one part from another server is weighed against this part alone.
+            foreach (var part in new[] { HistoryParts.Played, HistoryParts.Favorite })
+            {
+                if (kind == HintKind.History && parts.HasFlag(part))
+                {
+                    _versions.Set(new ObjectVersion { Kind = kind, Key = HintProtocol.HistoryPartKey(localKey, part), ServerId = _applicationHost.SystemId, Timestamp = now });
+                }
+            }
         }
 
         // Nothing gathers for a kind no peer will take, and the queue does not show it. The server entries
@@ -472,11 +495,12 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         var due = now + HintProtocol.Debounce(_configManager.Configuration);
         _pending.AddOrUpdate(
             HintProtocol.GuardKey(kind, localKey),
-            _ => new PendingChange(kind, localKey, userId, itemId, now, due, recorded, now),
+            _ => new PendingChange(kind, localKey, userId, itemId, now, due, recorded, now, parts),
             (_, existing) => existing with
             {
                 EditedAt = now,
                 Due = due,
+                Parts = existing.Parts | parts,
                 Recorded = existing.Recorded || recorded,
                 VersionAt = recorded || !existing.Recorded ? now : existing.VersionAt
             });
@@ -538,7 +562,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         {
             case HintKind.History when !string.IsNullOrEmpty(item.Path):
                 var user = _userManager.GetUserById(change.UserId);
-                NoteUnmatched(_publisher.PublishHistory(change.UserId, user?.Username, change.ItemId, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name), change, HintKind.History, item.Path, user?.Username);
+                NoteUnmatched(_publisher.PublishHistory(change.UserId, user?.Username, change.ItemId, item.Path, version, excludePeerKey: null, itemType: HintProtocol.HistoryItemType(item.GetType().Name, change.Parts)), change, HintKind.History, item.Path, user?.Username);
                 break;
 
             case HintKind.Metadata when !string.IsNullOrEmpty(item.Path):
@@ -590,7 +614,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     private sealed record UnmatchedChange(PendingChange Change, string Description, DateTime At);
 
-    private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, DateTime VersionAt);
+    private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, DateTime VersionAt, HistoryParts Parts = HistoryParts.None);
 }
 
 /// <summary>One change still gathering before it becomes a hint.</summary>

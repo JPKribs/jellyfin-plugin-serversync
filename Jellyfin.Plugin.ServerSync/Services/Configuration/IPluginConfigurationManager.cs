@@ -13,7 +13,7 @@ public interface IPluginConfigurationManager
     PluginConfiguration Configuration { get; }
 
     /// <summary>
-    /// Decrypts a stored API key for use. A key written before encryption existed passes through unchanged.
+    /// Decrypts a stored API key for use. A key stored in plaintext passes through unchanged.
     /// </summary>
     /// <param name="protectedKey">The key as stored on a server entry.</param>
     /// <returns>The usable key.</returns>
