@@ -7,27 +7,23 @@ using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 
 /// <summary>
-/// State transitions for content sync items. Change detection is size-only,
-/// since Jellyfin's ETag changes whenever UserData changes. <see cref="ProcessMissingItem"/> owns
-/// its own writes (delete vs upsert). Other Process* methods are pure and
-/// leave persistence to the caller.
+/// Decides each Content row's next status from what the source and the disk hold. A change is told by size alone, since Jellyfin's ETag moves with user data.
 /// </summary>
 public static class SyncStateService
 {
-    // Starts every reason written when a rename on the source could not be followed on disk, so a
-    // later successful move can clear its own reason without touching any other.
+    /// <summary>
+    /// Starts every reason for a rename that was not followed, so a later move clears only its own.
+    /// </summary>
     private const string RenameReasonPrefix = "Renamed on the source";
 
     /// <summary>
-    /// Builds a record for a new item discovered on the source server.
-    /// Returns null when downloads are disabled. The caller persists.
-    /// A file already at the local path with the source's size is taken as the same file. Any other
-    /// file there was not written by this plugin, so replacing it follows the changed files setting.
+    /// Builds the row for an item first seen on the source, which the caller saves. A file already at the path with the source's size counts as the same file, and any other follows <paramref name="replaceMode"/>.
     /// </summary>
     /// <param name="mapping">The library mapping the item came through.</param>
     /// <param name="sourceItemId">The item's id on the source.</param>
@@ -94,8 +90,7 @@ public static class SyncStateService
     }
 
     /// <summary>
-    /// Mutates an existing record based on current source-side state and
-    /// returns it. The caller persists.
+    /// Updates a row from what the source holds for its item, which the caller saves.
     /// </summary>
     /// <param name="existingItem">The row to update.</param>
     /// <param name="sourcePath">The item's path on the source.</param>
@@ -105,7 +100,7 @@ public static class SyncStateService
     /// <param name="replaceMode">Whether a changed file is replaced on its own, waits for approval, or is left alone.</param>
     /// <param name="detectUpdatedFiles">Whether a synced file is checked on disk.</param>
     /// <param name="sizeMatchToleranceBytes">How far a local size may differ from the source's and still match.</param>
-    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="logger">Writes what was decided and why.</param>
     /// <returns>The updated row.</returns>
     public static SyncItem ProcessExistingItem(
         SyncItem existingItem,
@@ -126,15 +121,14 @@ public static class SyncStateService
             return existingItem;
         }
 
+        // Back on the source, so deleting the file would only download it again.
         if (existingItem.Status == SyncStatus.Deleting)
         {
-            // Scheduled for deletion but back on the source: restore instead
-            // of deleting a file that would immediately re-download.
             existingItem.Status = SyncStatus.Queued;
             existingItem.PendingType = null;
             existingItem.StatusDate = DateTime.UtcNow;
             UpdateItemMetadata(existingItem, sourcePath, sourceSize, sourceCreateDate, localPath, logger);
-            logger.LogDebug("Restored {FileName} (reappeared on source before deletion ran)", Path.GetFileName(sourcePath));
+            logger.LogDebug("Restored {FileName} (reappeared on source before deletion ran)", FormatUtilities.SanitizeForLog(Path.GetFileName(sourcePath)));
             return existingItem;
         }
 
@@ -144,7 +138,7 @@ public static class SyncStateService
             existingItem.PendingType = null;
             existingItem.StatusDate = DateTime.UtcNow;
             UpdateItemMetadata(existingItem, sourcePath, sourceSize, sourceCreateDate, localPath, logger);
-            logger.LogDebug("Restored {FileName} (reappeared on source)", Path.GetFileName(sourcePath));
+            logger.LogDebug("Restored {FileName} (reappeared on source)", FormatUtilities.SanitizeForLog(Path.GetFileName(sourcePath)));
             return existingItem;
         }
 
@@ -162,8 +156,7 @@ public static class SyncStateService
 
         if (existingItem.Status == SyncStatus.Queued || existingItem.Status == SyncStatus.Errored)
         {
-            // Apply a source change before looking on disk, so a rename has moved the local file to
-            // its new path (or left the row on the old one) by the time the file is looked for.
+            // A rename must settle the row's path before the file is looked for.
             if (sourceChanged)
             {
                 UpdateItemMetadata(existingItem, sourcePath, sourceSize, sourceCreateDate, localPath, logger);
@@ -185,14 +178,14 @@ public static class SyncStateService
                             UpdateItemMetadata(existingItem, sourcePath, sourceSize, sourceCreateDate, localPath, logger);
                         }
 
-                        logger.LogDebug("Marked {FileName} as synced (local file found with matching size)", Path.GetFileName(pathToCheck));
+                        logger.LogDebug("Marked {FileName} as synced (local file found with matching size)", FormatUtilities.SanitizeForLog(Path.GetFileName(pathToCheck)));
                         return existingItem;
                     }
                 }
             }
             catch (IOException ex)
             {
-                logger.LogWarning(ex, "Failed to check local file status for {LocalPath}", pathToCheck);
+                logger.LogWarning(ex, "Failed to check local file status for {LocalPath}", FormatUtilities.SanitizeForLog(pathToCheck));
             }
 
             return existingItem;
@@ -203,27 +196,26 @@ public static class SyncStateService
             return HandleSourceChanged(existingItem, sourcePath, sourceSize, sourceCreateDate, localPath, replaceMode, sizeMatchToleranceBytes, logger);
         }
 
+        // After a rename that was not followed, the new path is empty and would queue a second copy.
         if (existingItem.Status == SyncStatus.Synced && detectUpdatedFiles)
         {
-            // Check the file the row tracks. After a rename that could not be followed on disk the row
-            // still points at the old path, and checking the new one would find nothing there and
-            // queue a second copy of a file that is already present.
             return VerifyLocalFileIntegrity(existingItem, existingItem.LocalPath ?? localPath, sourceSize, replaceMode, sizeMatchToleranceBytes, logger);
         }
 
         return existingItem;
     }
 
-    /// <summary>The reason a row carries once its file is hidden.</summary>
+    /// <summary>
+    /// The reason a row carries once its file is hidden.
+    /// </summary>
     public const string HiddenReason = "Hidden with a .ignore file because it is gone from the source";
 
     /// <summary>
-    /// Marks a row whose item is gone from the source as Ignored because its folder was hidden. A row whose
-    /// file is gone is dropped instead.
+    /// Marks a row whose item is gone from the source as Ignored because its folder was hidden. A row whose file is gone is dropped instead.
     /// </summary>
     /// <param name="manager">The content sync table.</param>
     /// <param name="item">The row to mark.</param>
-    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="logger">Writes what was decided and why.</param>
     /// <returns>What changed.</returns>
     public static TransitionResult MarkHidden(ContentSyncTableManager manager, SyncItem item, ILogger logger)
     {
@@ -245,19 +237,13 @@ public static class SyncStateService
     }
 
     /// <summary>
-    /// Processes an item that is missing from the source server. Owns its
-    /// own writes because the action varies, delete the row outright, or
-    /// upsert with a new soft-delete status, depending on prior state and
-    /// the configured deletion mode.
-    /// Whether the row goes is decided by the local file, not the row's status. A row whose file is
-    /// gone is dropped. A row whose file is still on disk stays so the deletion policy decides what
-    /// happens to the file, since dropping it would leave a file nothing tracks any more.
+    /// Settles a row whose item is gone from the source, and saves the result itself. A row whose file is gone is dropped, and a row whose file is still on disk stays so Removed files decides what happens to it.
     /// </summary>
     /// <param name="manager">The content sync table.</param>
     /// <param name="item">The row whose item is gone from the source.</param>
     /// <param name="deleteMode">How the deletion is approved.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="ownLink">The row's file is a .strm this plugin wrote, so it is removed without asking.</param>
+    /// <param name="logger">Writes what was decided and why.</param>
+    /// <param name="ownLink">Whether the row's file is a link, which is removed without asking.</param>
     /// <returns>What changed.</returns>
     public static TransitionResult ProcessMissingItem(
         ContentSyncTableManager manager,
@@ -270,7 +256,7 @@ public static class SyncStateService
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(logger);
 
-        // A scheduled row keeps its tracking until Sync removes the file, or the file would be stranded.
+        // A scheduled row keeps its tracking, or its file would be stranded.
         if (item.Status == SyncStatus.Ignored ||
             item.Status == SyncStatus.Deleting ||
             (item.Status == SyncStatus.Pending && item.PendingType == PendingType.Deletion))
@@ -280,13 +266,11 @@ public static class SyncStateService
 
         var localFileExists = !string.IsNullOrEmpty(item.LocalPath) && File.Exists(item.LocalPath);
 
-        // A file that was already here when it was matched is this server's own. Another server
-        // removing its file is no reason to remove this one, whatever Removed files says: only the
-        // tracking goes, and the file stays where it is.
+        // A file here before it was matched is this server's own, so only the tracking goes.
         if (localFileExists && item.Kept == KeptReason.Own && !ownLink)
         {
             manager.DeleteByKey(item.SourceItemId);
-            logger.LogInformation("Kept {FileName}: it was on this server before it was matched to a source's file, so the source removing its own leaves it here", Path.GetFileName(item.LocalPath));
+            logger.LogInformation("Kept {FileName}: it was on this server before it was matched to a source's file, so the source removing its own leaves it here", FormatUtilities.SanitizeForLog(Path.GetFileName(item.LocalPath)));
             return new TransitionResult(true, "Kept, since the file was this server's own");
         }
 
@@ -295,29 +279,23 @@ public static class SyncStateService
             manager.DeleteByKey(item.SourceItemId);
             if (item.Status == SyncStatus.Synced)
             {
-                logger.LogDebug("Removed tracking for {FileName} (gone from both source and local)", Path.GetFileName(item.LocalPath));
+                logger.LogDebug("Removed tracking for {FileName} (gone from both source and local)", FormatUtilities.SanitizeForLog(Path.GetFileName(item.LocalPath)));
                 return new TransitionResult(true, "Removed from tracking (no longer on source or local)");
             }
 
-            logger.LogDebug("Removed tracking for {FileName} (no longer on source)", Path.GetFileName(item.SourcePath));
+            logger.LogDebug("Removed tracking for {FileName} (no longer on source)", FormatUtilities.SanitizeForLog(Path.GetFileName(item.SourcePath)));
             return new TransitionResult(true, "Removed from tracking (not synced)");
         }
 
-        // A row that is not Synced but has a file on disk is usually an earlier download whose
-        // replacement failed or is still waiting. The plugin cannot be sure it wrote that file, so
-        // the deletion waits for the user's approval even when deletion is otherwise automatic.
-        // A link the link check flagged was settled until the source stopped having the file, and its
-        // .strm is this plugin's own, so it is removed as a settled row is.
-        // The caller passes ownLink for a .strm it has checked is this plugin's own, which holds
-        // nothing worth asking about whatever state its row is in.
         var settled = ownLink || item.Status == SyncStatus.Synced || (item.StorageMode == StorageMode.Link && Links.LinkVerifier.Flagged(item));
+        // An unsettled row's file may not be this plugin's, so its deletion waits for approval.
         if (deleteMode == ApprovalMode.RequireApproval || !settled)
         {
             item.Status = SyncStatus.Pending;
             item.PendingType = PendingType.Deletion;
             item.StatusDate = DateTime.UtcNow;
             manager.Upsert(item);
-            logger.LogDebug("Marked {FileName} for pending deletion (requires approval)", Path.GetFileName(item.LocalPath));
+            logger.LogDebug("Marked {FileName} for pending deletion (requires approval)", FormatUtilities.SanitizeForLog(Path.GetFileName(item.LocalPath)));
             return new TransitionResult(true, "Pending deletion approval");
         }
 
@@ -325,10 +303,13 @@ public static class SyncStateService
         item.PendingType = null;
         item.StatusDate = DateTime.UtcNow;
         manager.Upsert(item);
-        logger.LogDebug("Marked {FileName} for deletion (missing from source)", Path.GetFileName(item.LocalPath));
+        logger.LogDebug("Marked {FileName} for deletion (missing from source)", FormatUtilities.SanitizeForLog(Path.GetFileName(item.LocalPath)));
         return new TransitionResult(true, "Marked for deletion");
     }
 
+    /// <summary>
+    /// Applies a changed path or size to a synced row, and queues a replacement when the bytes changed.
+    /// </summary>
     private static SyncItem HandleSourceChanged(
         SyncItem existingItem,
         string sourcePath,
@@ -342,8 +323,7 @@ public static class SyncStateService
         var sizeChanged = existingItem.SourceSize != sourceSize;
         UpdateItemMetadata(existingItem, sourcePath, sourceSize, sourceCreateDate, localPath, logger);
 
-        // A rename alone changes no bytes. When the file the row tracks is present at the expected
-        // size, whether it moved along or stayed on the old path, there is nothing to download.
+        // A rename alone changes no bytes, so a file at the expected size needs no download.
         if (!sizeChanged && LocalFileMatches(existingItem.LocalPath, sourceSize, sizeMatchToleranceBytes, logger))
         {
             return existingItem;
@@ -359,17 +339,20 @@ public static class SyncStateService
             existingItem.Status = SyncStatus.Pending;
             existingItem.PendingType = PendingType.Replacement;
             existingItem.StatusDate = DateTime.UtcNow;
-            logger.LogDebug("Marked {FileName} for pending replacement (requires approval)", Path.GetFileName(sourcePath));
+            logger.LogDebug("Marked {FileName} for pending replacement (requires approval)", FormatUtilities.SanitizeForLog(Path.GetFileName(sourcePath)));
             return existingItem;
         }
 
         existingItem.Status = SyncStatus.Queued;
         existingItem.PendingType = null;
         existingItem.StatusDate = DateTime.UtcNow;
-        logger.LogDebug("Re-queued {FileName} (source size changed)", Path.GetFileName(sourcePath));
+        logger.LogDebug("Re-queued {FileName} (source size changed)", FormatUtilities.SanitizeForLog(Path.GetFileName(sourcePath)));
         return existingItem;
     }
 
+    /// <summary>
+    /// Queues a synced row again when its file is missing or its size does not match the source.
+    /// </summary>
     private static SyncItem VerifyLocalFileIntegrity(
         SyncItem existingItem,
         string localPath,
@@ -403,7 +386,7 @@ public static class SyncStateService
 
                     existingItem.StatusDate = DateTime.UtcNow;
                     logger.LogDebug("Re-queued {FileName} (local size {LocalSize} != source size {SourceSize})",
-                        Path.GetFileName(localPath), localInfo.Length, sourceSize);
+                        FormatUtilities.SanitizeForLog(Path.GetFileName(localPath)), localInfo.Length, sourceSize);
                     return existingItem;
                 }
             }
@@ -413,13 +396,13 @@ public static class SyncStateService
                 existingItem.PendingType = null;
                 existingItem.StatusDate = DateTime.UtcNow;
                 existingItem.LocalItemId = null;
-                logger.LogDebug("Re-queued {FileName} (local file missing)", Path.GetFileName(localPath));
+                logger.LogDebug("Re-queued {FileName} (local file missing)", FormatUtilities.SanitizeForLog(Path.GetFileName(localPath)));
                 return existingItem;
             }
         }
         catch (IOException ex)
         {
-            logger.LogWarning(ex, "Failed to check local file status for {LocalPath}", localPath);
+            logger.LogWarning(ex, "Failed to check local file status for {LocalPath}", FormatUtilities.SanitizeForLog(localPath));
         }
 
         return existingItem;
@@ -438,7 +421,7 @@ public static class SyncStateService
     /// <param name="sourceSize">The item's size on the source, in bytes.</param>
     /// <param name="sourceCreateDate">When the item was created on the source.</param>
     /// <param name="localPath">Where the file belongs on this server.</param>
-    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="logger">Writes what was decided and why.</param>
     internal static void UpdateItemMetadata(
         SyncItem item,
         string sourcePath,
@@ -475,17 +458,13 @@ public static class SyncStateService
         }
         catch (IOException ex)
         {
-            logger.LogWarning(ex, "Failed to check local file status for {LocalPath}", path);
+            logger.LogWarning(ex, "Failed to check local file status for {LocalPath}", FormatUtilities.SanitizeForLog(path));
             return false;
         }
     }
 
     /// <summary>
-    /// Follows a rename on the source by moving the local file to its new translated path. Simply
-    /// rewriting the row's path would leave the old file on disk with nothing tracking it, and the
-    /// next check would find no file at the new path and download a second copy. The move only happens into
-    /// a free path, and nothing is ever deleted here. When the new path is taken or the move fails,
-    /// the row keeps pointing at the old file and the reason says why.
+    /// Follows a rename on the source by moving the local file into a free path, so the old file is not left untracked and downloaded twice. When the path is taken or the move fails, the row keeps the old file and its reason says why.
     /// </summary>
     private static void FollowRename(SyncItem item, string newLocalPath, ILogger logger)
     {
@@ -500,18 +479,17 @@ public static class SyncStateService
         {
             if (!File.Exists(oldLocalPath))
             {
-                // Nothing on disk to carry along, so the row just follows the source.
                 item.LocalPath = newLocalPath;
                 return;
             }
 
-            // A path differing only in case can name the same file on a case insensitive disk, so it
-            // is not treated as taken. The move itself still refuses to overwrite a different file.
             var differsOnlyInCase = string.Equals(oldLocalPath, newLocalPath, StringComparison.OrdinalIgnoreCase);
+
+            // A path differing only in case can name the same file, so it is not taken.
             if (!differsOnlyInCase && (File.Exists(newLocalPath) || Directory.Exists(newLocalPath)))
             {
                 item.Reason = $"{RenameReasonPrefix} to {newLocalPath}, but something already exists there. This row keeps tracking {oldLocalPath} until that is resolved.";
-                logger.LogWarning("{Old} was renamed on the source to {New}, but that path is taken, so the local file stays where it is", oldLocalPath, newLocalPath);
+                logger.LogWarning("{Old} was renamed on the source to {New}, but that path is taken, so the local file stays where it is", FormatUtilities.SanitizeForLog(oldLocalPath), FormatUtilities.SanitizeForLog(newLocalPath));
                 return;
             }
 
@@ -521,13 +499,9 @@ public static class SyncStateService
                 Directory.CreateDirectory(newDirectory);
             }
 
-            // Companions are found by the main file's name, so list them before it moves.
             var companions = FileOperationUtilities.GetCompanionFiles(oldLocalPath);
             File.Move(oldLocalPath, newLocalPath);
             item.LocalPath = newLocalPath;
-
-            // Jellyfin indexes the moved file as a new item on its next scan, so the old id no longer
-            // names it. Clearing it lets the next resolve pass pick up the new one.
             item.LocalItemId = null;
             if (item.Reason != null && item.Reason.StartsWith(RenameReasonPrefix, StringComparison.Ordinal))
             {
@@ -535,20 +509,18 @@ public static class SyncStateService
             }
 
             MoveCompanionsAlong(companions, oldLocalPath, newLocalPath, logger);
-            logger.LogInformation("Moved {Old} to {New} to follow a rename on the source", oldLocalPath, newLocalPath);
+            logger.LogInformation("Moved {Old} to {New} to follow a rename on the source", FormatUtilities.SanitizeForLog(oldLocalPath), FormatUtilities.SanitizeForLog(newLocalPath));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             item.LocalPath = File.Exists(oldLocalPath) ? oldLocalPath : newLocalPath;
             item.Reason = $"{RenameReasonPrefix} to {newLocalPath}, but the local file could not be moved there: {ex.Message}";
-            logger.LogWarning(ex, "Could not move {Old} to {New} to follow a rename on the source", oldLocalPath, newLocalPath);
+            logger.LogWarning(ex, "Could not move {Old} to {New} to follow a rename on the source", FormatUtilities.SanitizeForLog(oldLocalPath), FormatUtilities.SanitizeForLog(newLocalPath));
         }
     }
 
     /// <summary>
-    /// Moves a renamed file's companions (subtitles, nfo, artwork) next to it under the new name.
-    /// Each one moves only into a free name, so an existing file is never overwritten, and a
-    /// companion that cannot move stays where it was.
+    /// Moves a renamed file's companions beside it under the new name. Each moves only into a free name, and one that cannot move stays where it was.
     /// </summary>
     private static void MoveCompanionsAlong(List<string> companions, string oldMainPath, string newMainPath, ILogger logger)
     {
@@ -575,7 +547,7 @@ public static class SyncStateService
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                logger.LogWarning(ex, "Could not move companion {Companion} to {Destination}", companion, destination);
+                logger.LogWarning(ex, "Could not move companion {Companion} to {Destination}", FormatUtilities.SanitizeForLog(companion), FormatUtilities.SanitizeForLog(destination));
             }
         }
     }

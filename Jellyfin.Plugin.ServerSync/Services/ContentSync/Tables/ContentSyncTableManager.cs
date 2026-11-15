@@ -15,10 +15,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 
 /// <summary>
-/// Per-table manager for content <see cref="SyncItem"/> records. Natural key
-/// is <see cref="SyncItem.SourceItemId"/>. Adds Content-specific surface
-/// (PendingType-aware queries, retry-count tracking, path collision checks,
-/// sync stats) on top of the universal <see cref="SyncTableManagerBase{TRecord, TKey}"/>.
+/// Reads and writes the Content sync table, keyed by <see cref="SyncItem.SourceItemId"/>.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, string>
@@ -27,7 +24,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// Initializes a new instance of the <see cref="ContentSyncTableManager"/> class.
     /// </summary>
     /// <param name="databaseProvider">Gives the sync database.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     public ContentSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<ContentSyncTableManager> logger)
         : base(databaseProvider, logger)
     {
@@ -39,8 +36,6 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// <inheritdoc />
     protected override string KeyColumn => "SourceItemId";
 
-    // Pending sorts first so the approval-workflow UX surfaces new items
-    // awaiting user decision before everything else.
     /// <inheritdoc />
     protected override string StatusPriorityOrderBy => @"
         CASE Status
@@ -133,16 +128,16 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     }
 
     /// <summary>
-    /// Returns the sync item for a source item, or null if none. Alias for <see cref="ISyncTableManager{TRecord, TKey}.GetByKey"/>.
+    /// Returns the row for a source item, or null when there is none.
     /// </summary>
     /// <param name="sourceItemId">The source item's id.</param>
     /// <returns>The row, or null.</returns>
     public SyncItem? GetBySourceItemId(string sourceItemId) => GetByKey(sourceItemId);
 
     /// <summary>
-    /// Returns the sync item with the given local path, or null if none.
+    /// Returns the row that records a local path, or null when there is none.
     /// </summary>
-    /// <param name="localPath">The local path.</param>
+    /// <param name="localPath">The local path to look up.</param>
     /// <returns>The row, or null.</returns>
     public SyncItem? GetByLocalPath(string localPath) => ExecuteRead(
         conn =>
@@ -158,7 +153,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// <summary>
     /// The row of another source item that records the same local path, or null when none does.
     /// </summary>
-    /// <param name="localPath">The local path.</param>
+    /// <param name="localPath">The local path to look up.</param>
     /// <param name="exceptSourceItemId">The source item whose own row is passed over.</param>
     /// <returns>The other row, or null.</returns>
     public SyncItem? GetOtherByLocalPath(string localPath, string exceptSourceItemId) => ExecuteRead(
@@ -174,8 +169,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: null);
 
     /// <summary>
-    /// Marks the database as readable only by builds that know links, once it holds one. An older build
-    /// then sets it aside instead of downloading media over a .strm it takes for a broken copy.
+    /// Marks the database as readable only by builds that know links, so an older build sets it aside instead of downloading over a link.
     /// </summary>
     public void RequireLinkAwareReaders() => ExecuteWrite(conn =>
     {
@@ -187,8 +181,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     });
 
     /// <summary>
-    /// Returns every link row with a local path, and throws when the table cannot be read. The link
-    /// cache drops the files of links that are gone, so it must never take a failed read for no links.
+    /// Returns every link row with a local path, and throws when the table cannot be read, so the link cache never takes a failed read for no links.
     /// </summary>
     /// <returns>The link rows.</returns>
     public IList<SyncItem> GetLinksStrict() => ReadStrict(conn =>
@@ -199,7 +192,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     });
 
     /// <summary>
-    /// Returns every link row with a local path. The link registry reads this as one snapshot.
+    /// Returns every link row with a local path.
     /// </summary>
     /// <returns>The link rows, or an empty list when the table cannot be read.</returns>
     public IList<SyncItem> GetLinks() => ExecuteRead<IList<SyncItem>>(
@@ -212,8 +205,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: new List<SyncItem>());
 
     /// <summary>
-    /// Returns every link row with a local path, or null when the table could not be read. A failed read
-    /// is not an empty list: a caller that took it for one would treat every link as a plain file.
+    /// Returns every link row with a local path, or null when the table cannot be read, so a failed read is never taken for no links.
     /// </summary>
     /// <returns>The link rows, or null.</returns>
     public IList<SyncItem>? TryGetLinks() => ExecuteRead<IList<SyncItem>?>(
@@ -226,11 +218,10 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: null);
 
     /// <summary>
-    /// Records that a copy this server was given by another was removed, with the server it first
-    /// came from, in the record of files that left the library.
+    /// Records that a copy from another server was removed, with its origin.
     /// </summary>
     /// <param name="path">Where the copy sat.</param>
-    /// <param name="originServerId">The server it first came from.</param>
+    /// <param name="originServerId">The copy's origin.</param>
     public void NoteRemovedCopy(string? path, string? originServerId)
     {
         if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(originServerId))
@@ -250,8 +241,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     }
 
     /// <summary>
-    /// The copies this server downloaded from another, each with the server it first came from. Null
-    /// when the table cannot be read, which is no answer.
+    /// Returns the copies that carry an origin, or null when the table cannot be read.
     /// </summary>
     /// <returns>The rows, or null.</returns>
     public IList<SyncItem>? TryGetCopiesWithOrigin() => ExecuteRead<IList<SyncItem>?>(
@@ -264,10 +254,10 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: null);
 
     /// <summary>
-    /// Returns <c>true</c> if another item already uses this local path.
+    /// Tells whether another row holds a local path. Of two rows that both want it, the one tracked first goes ahead so neither waits forever.
     /// </summary>
-    /// <param name="localPath">Path to check.</param>
-    /// <param name="excludeSourceItemId">Optional item ID to exclude from check.</param>
+    /// <param name="localPath">The local path to check.</param>
+    /// <param name="excludeSourceItemId">The source item asking, whose own row is passed over, or null.</param>
     /// <returns><c>true</c> when another row holds the path.</returns>
     public bool CheckPathCollision(string localPath, string? excludeSourceItemId = null) => ExecuteRead(
         conn =>
@@ -275,9 +265,6 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             using var cmd = conn.CreateCommand();
             if (excludeSourceItemId != null)
             {
-                // Another row holds the path when it is settled there, or when it was tracked first.
-                // Two rows that both still want the path would otherwise each refuse for the other
-                // and neither would ever land, so the earlier one goes ahead and the later one waits.
                 cmd.CommandText = @"SELECT COUNT(*) FROM SyncItems other WHERE other.LocalPath = @path AND other.SourceItemId != @excludeId
                     AND (other.Status = @synced OR other.Id < COALESCE((SELECT Id FROM SyncItems WHERE SourceItemId = @excludeId), 9223372036854775807))";
                 cmd.Parameters.AddWithValue("@excludeId", excludeSourceItemId);
@@ -294,16 +281,13 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: false);
 
     /// <summary>
-    /// Deletes the row for a source item. Alias for <see cref="ISyncTableManager{TRecord, TKey}.DeleteByKey"/>.
+    /// Deletes the row for a source item.
     /// </summary>
     /// <param name="sourceItemId">The source item's id.</param>
     public void Delete(string sourceItemId) => DeleteByKey(sourceItemId);
 
     /// <summary>
-    /// Searches sync items with pagination. Used by the Content admin UI
-    /// which can additionally filter by <see cref="PendingType"/>, and to a set of
-    /// items such as the links in the cache, beyond what the universal
-    /// <see cref="Paginate"/> exposes.
+    /// Returns one page of rows that match the Content sync table's filters.
     /// </summary>
     /// <param name="searchTerm">Text to find in the paths, or null.</param>
     /// <param name="status">Only rows with this status, or null.</param>
@@ -339,7 +323,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
                 conditions.Add("PendingType = @pendingType");
             }
 
-            // Links, including those on their way to copies, or copies, including those on their way back.
+            // A row changing storage counts under the storage it is leaving.
             if (links is { } wantLinks)
             {
                 conditions.Add(wantLinks ? "StorageMode IN (1, 2)" : "StorageMode IN (0, 3)");
@@ -370,8 +354,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: (Array.Empty<SyncItem>(), 0));
 
     /// <summary>
-    /// The copies one server's Link mappings hold, kept by a pick, by hand, or from before, and those on
-    /// their way back to links, a page at a time.
+    /// Returns one page of the permanent copies one server's Link libraries hold, with those turning back into links.
     /// </summary>
     /// <param name="serverKey">The server's entry key.</param>
     /// <param name="sourceLibraryIds">The server's libraries mapped as Link.</param>
@@ -462,8 +445,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: new Dictionary<PendingType, int>());
 
     /// <summary>
-    /// Returns the byte-size breakdown for the items that affect storage:
-    /// pending downloads/replacements + queued, minus pending deletions.
+    /// Returns the bytes waiting to download, replace, and delete, and their net total.
     /// </summary>
     /// <returns>The bytes under PendingDownload, PendingReplacement, PendingDeletion, Queued, and Total.</returns>
     public Dictionary<string, long> GetPendingSizes() => ExecuteRead(
@@ -482,8 +464,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: new Dictionary<string, long>());
 
     /// <summary>
-    /// Returns errored items that haven't exceeded the retry threshold,
-    /// the candidates for the next sync run's retry pass.
+    /// Returns the Errored rows that still have tries left.
     /// </summary>
     /// <param name="maxRetries">The tries a row gets.</param>
     /// <returns>The rows to retry.</returns>
@@ -499,8 +480,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: (IList<SyncItem>)Array.Empty<SyncItem>());
 
     /// <summary>
-    /// Rows that errored, used up their tries, and have sat that way since before a given time. A
-    /// link the link check flagged is not among them: the check looks at it again on every run.
+    /// Returns the rows that errored, used up their tries, and have sat that way since before a given time. A link the link check flagged is left out, since the check reads it on every run.
     /// </summary>
     /// <param name="maxRetries">The tries a row gets.</param>
     /// <param name="erroredBefore">Only rows errored before this.</param>
@@ -518,13 +498,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: (IList<SyncItem>)Array.Empty<SyncItem>());
 
     /// <summary>
-    /// Updates the status of a sync item by source-item ID, optionally
-    /// rewriting Content-specific fields (PendingType, local-side file
-    /// info, companion files). Uses
-    /// <see cref="SyncTableManagerBase{TRecord, TKey}.BuildStatusTransitionClauses"/>
-    /// with retry tracking, so retry semantics
-    /// (zero on Synced, increment on Errored) match the rest of the
-    /// universal transition logic.
+    /// Sets a row's status and any local details given with it. Synced and Queued clear the retry count, and Errored raises it.
     /// </summary>
     /// <param name="sourceItemId">The source item's id.</param>
     /// <param name="status">The new status.</param>
@@ -545,11 +519,8 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         string? companionFiles = null) => ExecuteWrite(conn =>
     {
         using var cmd = conn.CreateCommand();
-        // Queued through this path is an operator action (Queue / Retry), and
-        // the base transition clauses reset RetryCount for it.
         var clauses = BuildStatusTransitionClauses(status);
 
-        // PendingType is set when transitioning to Pending, otherwise cleared.
         clauses.Add(status == SyncStatus.Pending ? "PendingType = @pendingType" : "PendingType = NULL");
 
         if (localItemId != null)
@@ -601,10 +572,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     });
 
     /// <summary>
-    /// Updates status for many items by source-item ID in one transaction.
-    /// Uses the same transition logic as <see cref="UpdateStatus"/> with
-    /// retry tracking, Synced clears RetryCount, Errored increments it.
-    /// Always clears PendingType (these batch transitions don't carry one).
+    /// Sets the status of many rows in one transaction, as <see cref="UpdateStatus"/> does, and clears each pending type.
     /// </summary>
     /// <param name="sourceItemIds">The source items to update.</param>
     /// <param name="status">The new status.</param>
