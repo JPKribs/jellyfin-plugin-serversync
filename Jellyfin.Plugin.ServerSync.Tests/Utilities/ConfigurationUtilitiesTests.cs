@@ -135,11 +135,11 @@ public sealed class ConfigurationUtilitiesTests
     /// False: a peer could be pointed at the plugin's own host through an odd address.
     /// </summary>
     [Theory]
-    [InlineData("https://0.0.0.0:8096", "0.0.0.0/8 addresses are not allowed")]
-    [InlineData("https://0.1.2.3", "0.0.0.0/8 addresses are not allowed")]
-    [InlineData("https://[fe80::1]:8096", "Link-local addresses are not allowed")]
-    [InlineData("https://[fec0::1]:8096", "IPv6 site-local addresses are not allowed")]
-    [InlineData("https://169.254.0.1", "Link-local addresses are not allowed")]
+    [InlineData("https://0.0.0.0:8096", "The unspecified address range 0.0.0.0/8 is not allowed")]
+    [InlineData("https://0.1.2.3", "The unspecified address range 0.0.0.0/8 is not allowed")]
+    [InlineData("https://[fe80::1]:8096", "Link local addresses (fe80::/10) are not allowed")]
+    [InlineData("https://[fec0::1]:8096", "Site local addresses (fec0::/10) are not allowed")]
+    [InlineData("https://169.254.0.1", "Link local addresses (169.254.0.0/16, which includes the cloud metadata address) are not allowed")]
     public void ValidateServerUrlForSsrf_AlwaysClosedRanges_AreRefusedEvenWhenPrivateIsAllowed(string url, string expected)
     {
         var error = ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork: true);
@@ -267,5 +267,42 @@ public sealed class ConfigurationUtilitiesTests
         var same = ConfigurationUtilities.SameServerUrl(a, b);
 
         Assert.Equal(expected, same);
+    }
+
+    /// <summary>
+    /// Carrier NAT addresses, which Tailscale uses, count as a private network, and the broadcast and reserved ranges are always refused.
+    /// True: a server entry reaches 100.64.0.0/10 only with Allow Private Network Address on, and never the ranges no server lives in.
+    /// False: a public-only entry could be pointed at a private overlay network.
+    /// </summary>
+    [Theory]
+    [InlineData("https://100.64.0.1", true, true)]
+    [InlineData("https://100.64.0.1", false, false)]
+    [InlineData("https://100.127.255.254", false, false)]
+    [InlineData("https://100.128.0.1", false, true)]
+    [InlineData("https://255.255.255.255", true, false)]
+    [InlineData("https://240.0.0.1", true, false)]
+    public void ValidateServerUrlForSsrf_OverlayAndReservedRanges_FollowTheGuard(string url, bool allowPrivateNetwork, bool allowed)
+    {
+        var refusal = ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork);
+
+        Assert.Equal(allowed, refusal is null);
+    }
+
+    /// <summary>
+    /// Plain HTTP is allowed to a private or carrier NAT address and refused to a public one.
+    /// True: an API key travels unencrypted only inside a private network.
+    /// False: a key could be sent in the clear across the internet.
+    /// </summary>
+    [Theory]
+    [InlineData("192.168.1.10", true)]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("100.64.0.1", true)]
+    [InlineData("8.8.8.8", false)]
+    [InlineData("169.254.169.254", false)]
+    public void AllowsPlainHttp_OnlyToPrivateAddresses(string address, bool expected)
+    {
+        var allowed = ConfigurationUtilities.AllowsPlainHttp(System.Net.IPAddress.Parse(address));
+
+        Assert.Equal(expected, allowed);
     }
 }

@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
@@ -57,10 +58,10 @@ public static class ConfigurationUtilities
         var host = uri.Host.Trim('[', ']');
         if (IPAddress.TryParse(host, out var ipAddress))
         {
-            var rejection = ClassifyIpAddress(ipAddress, allowPrivateNetwork);
+            var rejection = SsrfGuard.Classify(ipAddress, allowPrivateNetwork);
             if (rejection != null)
             {
-                return rejection;
+                return char.ToUpperInvariant(rejection[0]) + rejection[1..];
             }
         }
 
@@ -82,24 +83,8 @@ public static class ConfigurationUtilities
     public static bool AllowsPlainHttp(IPAddress address)
     {
         ArgumentNullException.ThrowIfNull(address);
-        if (address.IsIPv4MappedToIPv6)
-        {
-            address = address.MapToIPv4();
-        }
-
-        if (address.AddressFamily == AddressFamily.InterNetwork)
-        {
-            var bytes = address.GetAddressBytes();
-
-            // 100.64.0.0/10 is carrier NAT space, private in practice.
-            if (bytes[0] == 100 && (bytes[1] & 0xC0) == 64)
-            {
-                return true;
-            }
-        }
-
-        return ClassifyIpAddress(address, allowPrivateNetwork: true) is null
-            && ClassifyIpAddress(address, allowPrivateNetwork: false) is not null;
+        return SsrfGuard.Classify(address, allowPrivateNetwork: true) is null
+            && SsrfGuard.Classify(address, allowPrivateNetwork: false) is not null;
     }
 
     /// <summary>
@@ -135,7 +120,7 @@ public static class ConfigurationUtilities
 
         foreach (var address in addresses)
         {
-            var rejection = ClassifyIpAddress(address, allowPrivateNetwork);
+            var rejection = SsrfGuard.Classify(address, allowPrivateNetwork);
             if (rejection is not null)
             {
                 return $"The name '{uri.Host}' resolves to {address}: {rejection}";
@@ -180,7 +165,7 @@ public static class ConfigurationUtilities
 
         foreach (var address in addresses)
         {
-            var rejection = ClassifyIpAddress(address, allowPrivateNetwork);
+            var rejection = SsrfGuard.Classify(address, allowPrivateNetwork);
             // Mixed answers are how a rebinding attack looks, so one refusal fails the name.
             if (rejection is not null)
             {
@@ -226,100 +211,5 @@ public static class ConfigurationUtilities
         }
 
         return string.Equals((a ?? string.Empty).Trim().TrimEnd('/'), (b ?? string.Empty).Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>Returns why an address is refused, or null when it is allowed.</summary>
-    private static string? ClassifyIpAddress(IPAddress ipAddress, bool allowPrivateNetwork)
-    {
-        // An IPv4 address written as IPv6 is judged as the IPv4 address it is.
-        if (ipAddress.IsIPv4MappedToIPv6)
-        {
-            ipAddress = ipAddress.MapToIPv4();
-        }
-
-        // The unspecified address reaches the local host on most systems.
-        if (ipAddress.Equals(IPAddress.IPv6Any) || ipAddress.Equals(IPAddress.IPv6None))
-        {
-            return "The unspecified address (::) is not allowed";
-        }
-
-        if (ipAddress.IsIPv6Multicast)
-        {
-            return "Multicast addresses are not allowed";
-        }
-
-        if (ipAddress.IsIPv6LinkLocal)
-        {
-            return "Link-local addresses are not allowed";
-        }
-
-        if (ipAddress.IsIPv6SiteLocal)
-        {
-            return "IPv6 site-local addresses are not allowed";
-        }
-
-        if (ipAddress.AddressFamily == AddressFamily.InterNetwork)
-        {
-            var bytes = ipAddress.GetAddressBytes();
-
-            if (bytes[0] == 0)
-            {
-                return "0.0.0.0/8 addresses are not allowed";
-            }
-
-            // 169.254.0.0/16 holds the cloud metadata address.
-            if (bytes[0] == 169 && bytes[1] == 254)
-            {
-                return "Link-local addresses are not allowed";
-            }
-
-            // 224.0.0.0/4 is multicast, a group and never one server.
-            if ((bytes[0] & 0xF0) == 0xE0)
-            {
-                return "Multicast addresses are not allowed";
-            }
-        }
-
-        if (allowPrivateNetwork)
-        {
-            return null;
-        }
-
-        if (IPAddress.IsLoopback(ipAddress))
-        {
-            return "Loopback addresses are not allowed when private-network access is disabled";
-        }
-
-        if (ipAddress.AddressFamily == AddressFamily.InterNetwork)
-        {
-            var bytes = ipAddress.GetAddressBytes();
-
-            if (bytes[0] == 10)
-            {
-                return "Private-network addresses (10.0.0.0/8) are not allowed when private-network access is disabled";
-            }
-
-            if (bytes[0] == 172 && (bytes[1] & 0xF0) == 16)
-            {
-                return "Private-network addresses (172.16.0.0/12) are not allowed when private-network access is disabled";
-            }
-
-            if (bytes[0] == 192 && bytes[1] == 168)
-            {
-                return "Private-network addresses (192.168.0.0/16) are not allowed when private-network access is disabled";
-            }
-        }
-        else if (ipAddress.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            var bytes = ipAddress.GetAddressBytes();
-
-            // fc00::/7 is the unique local range.
-            if ((bytes[0] & 0xFE) == 0xFC)
-            {
-                return "IPv6 unique-local addresses are not allowed when private-network access is disabled";
-            }
-        }
-
-        return null;
     }
 }

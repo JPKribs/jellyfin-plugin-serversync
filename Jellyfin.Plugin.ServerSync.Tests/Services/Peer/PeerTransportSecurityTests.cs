@@ -202,7 +202,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync(new Uri("http://169.254.169.254/latest")));
 
-        Assert.Contains("Link-local", Flatten(ex), StringComparison.Ordinal);
+        Assert.Contains("link local", Flatten(ex), StringComparison.Ordinal);
     }
 
     [Theory]
