@@ -45,7 +45,7 @@ public sealed class PlaylistMirror
     private readonly ILocalItems _localItems;
     private readonly ILogger<PlaylistMirror> _logger;
 
-    // Playlists this mirror deleted, with each one's creation date, watched for a while after.
+    /// <summary>Playlists this mirror deleted, with each one's creation date, watched for a while after.</summary>
     private readonly ConcurrentDictionary<Guid, (DateTime Created, DateTime Until)> _deleted = new();
 
     /// <summary>
@@ -58,18 +58,26 @@ public sealed class PlaylistMirror
     /// <summary>
     /// Initializes a new instance of the <see cref="PlaylistMirror"/> class.
     /// </summary>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="playlistManager">Playlist manager.</param>
-    /// <param name="userManager">User manager.</param>
+    /// <param name="libraryManager">Lists, updates, and deletes the playlists here.</param>
+    /// <param name="playlistManager">Creates and edits playlists.</param>
+    /// <param name="userManager">Finds the local owner and the users a playlist is shared with.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="providerManager">Provider manager.</param>
+    /// <param name="providerManager">Saves a copy's tags and reports each finished refresh.</param>
     /// <param name="guard">Marks a write as one a peer asked for, so it is not announced back.</param>
     /// <param name="copies">Holds which local playlists are copies.</param>
     /// <param name="localItems">Finds local items by path.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     public PlaylistMirror(ILibraryManager libraryManager, IPlaylistManager playlistManager, IUserManager userManager, IServerApplicationHost applicationHost, MediaBrowser.Controller.Providers.IProviderManager providerManager, ApplyGuard guard, PlaylistCopyStore copies, ILocalItems localItems, ILogger<PlaylistMirror> logger)
     {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(playlistManager);
+        ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+        ArgumentNullException.ThrowIfNull(providerManager);
+        ArgumentNullException.ThrowIfNull(guard);
         ArgumentNullException.ThrowIfNull(copies);
+        ArgumentNullException.ThrowIfNull(localItems);
+        ArgumentNullException.ThrowIfNull(logger);
         _providerManager = providerManager;
         _libraryManager = libraryManager;
         _playlistManager = playlistManager;
@@ -82,7 +90,7 @@ public sealed class PlaylistMirror
     }
 
     /// <summary>Gives the id of the playlist a playlist was first made as, which is its own id for an original.</summary>
-    /// <param name="playlist">The playlist.</param>
+    /// <param name="playlist">The playlist whose root is wanted.</param>
     /// <returns>The root key.</returns>
     public static string RootKey(BaseItem playlist)
     {
@@ -91,14 +99,18 @@ public sealed class PlaylistMirror
     }
 
     /// <summary>Writes an id in the form the keys use.</summary>
-    /// <param name="id">The id.</param>
+    /// <param name="id">The id to write.</param>
     /// <returns>The key.</returns>
     public static string IdKey(Guid id) => id.ToString("N", CultureInfo.InvariantCulture);
 
     /// <summary>Tells whether a playlist is a copy of another.</summary>
-    /// <param name="playlist">The playlist.</param>
+    /// <param name="playlist">The playlist to judge.</param>
     /// <returns><c>true</c> for a copy.</returns>
-    public static bool IsMirror(BaseItem playlist) => TaggedRoot(playlist) is not null;
+    public static bool IsMirror(BaseItem playlist)
+    {
+        ArgumentNullException.ThrowIfNull(playlist);
+        return TaggedRoot(playlist) is not null;
+    }
 
     /// <summary>Lists the playlists here.</summary>
     /// <returns>The playlists.</returns>
@@ -163,7 +175,7 @@ public sealed class PlaylistMirror
     }
 
     /// <summary>Maps the source users of a server entry to local users, for the user mappings that are on.</summary>
-    /// <param name="server">The server entry.</param>
+    /// <param name="server">The server entry whose user mappings are read.</param>
     /// <returns>The local user of each source user key.</returns>
     public Dictionary<string, Guid> UserMap(SourceServer server)
     {
@@ -181,14 +193,14 @@ public sealed class PlaylistMirror
     }
 
     /// <summary>
-    /// Reads the playlists a server offers. Server Sync there lists them with their owners. Without it, a
-    /// standard user's key lists only that user's playlists.
+    /// Reads the playlists a server offers. Server Sync there lists them with their owners, and without it
+    /// a standard user's key lists only that user's playlists.
     /// </summary>
-    /// <param name="server">The server entry.</param>
+    /// <param name="server">The server entry the playlists are read from.</param>
     /// <param name="client">The client for that server.</param>
     /// <param name="users">The local user of each source user key.</param>
     /// <param name="onlyId">The one playlist to read, or null for all.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The playlists.</returns>
     public async Task<List<SourcePlaylist>> ReadAsync(SourceServer server, SourceServerClient client, Dictionary<string, Guid> users, Guid? onlyId, CancellationToken cancellationToken)
     {
@@ -253,11 +265,11 @@ public sealed class PlaylistMirror
     }
 
     /// <summary>Creates or updates the local playlist for a source playlist.</summary>
-    /// <param name="server">The server entry.</param>
-    /// <param name="source">The source playlist.</param>
+    /// <param name="server">The server entry the playlist came from.</param>
+    /// <param name="source">The source playlist to apply.</param>
     /// <param name="users">The local user of each source user key.</param>
     /// <param name="syncShares"><c>true</c> to copy who the playlist is shared with.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the update.</param>
     /// <param name="local">The playlists here, or null to read them.</param>
     /// <returns>What was done.</returns>
     public async Task<PlaylistMirrorOutcome> ApplyAsync(SourceServer server, SourcePlaylist source, Dictionary<string, Guid> users, bool syncShares, CancellationToken cancellationToken, IReadOnlyList<Playlist>? local = null)
@@ -328,7 +340,7 @@ public sealed class PlaylistMirror
         var ownerChanged = !existing.OwnerUserId.Equals(ownerId);
         if (ownerChanged && !(source.OwnerKnown && IsMirror(existing)))
         {
-            _logger.LogWarning("Playlists: '{Name}' here belongs to another user than the one it maps to, so it is left alone", existing.Name);
+            _logger.LogWarning("Playlists: '{Name}' here belongs to another user than the one it maps to, so it is left alone", FormatUtilities.SanitizeForLog(existing.Name));
             return PlaylistMirrorOutcome.Skipped;
         }
 
@@ -390,7 +402,7 @@ public sealed class PlaylistMirror
     }
 
     /// <summary>Deletes a local playlist, and watches for a refresh that saves it back.</summary>
-    /// <param name="playlist">The playlist.</param>
+    /// <param name="playlist">The playlist to delete.</param>
     public void Delete(Playlist playlist)
     {
         ArgumentNullException.ThrowIfNull(playlist);
@@ -402,16 +414,15 @@ public sealed class PlaylistMirror
         PlaylistCopyStore.Remove(playlist.Id);
         _deleted[playlist.Id] = (playlist.DateCreated, DateTime.UtcNow + ResaveWindow);
 
-        _logger.LogInformation("Playlists: deleted '{Name}'", playlist.Name);
+        _logger.LogInformation("Playlists: deleted '{Name}'", FormatUtilities.SanitizeForLog(playlist.Name));
     }
 
     /// <summary>
-    /// Called when Jellyfin finishes refreshing an item. A playlist this mirror deleted moments ago that is
-    /// in the library again, with its old creation date, was saved back by a refresh from an edit just
-    /// before the delete, so it is deleted again. A new playlist with the same name has the same id, since
-    /// Jellyfin derives it from the name, but a creation date of its own, so it is left alone.
+    /// Deletes again a playlist this mirror deleted moments ago that a refresh saved back, told by its old
+    /// creation date. A new playlist with the same name has the same id, since Jellyfin derives it from the
+    /// name, but a creation date of its own, so it is left alone.
     /// </summary>
-    /// <param name="item">The item refreshed.</param>
+    /// <param name="item">The item Jellyfin finished refreshing.</param>
     public void OnRefreshCompleted(BaseItem? item)
     {
         if (item is not Playlist || !_deleted.TryGetValue(item.Id, out var deleted))
@@ -425,6 +436,7 @@ public sealed class PlaylistMirror
             return;
         }
 
+        // This runs in Jellyfin's refresh event, which must never see a throw.
         try
         {
             if (_libraryManager.GetItemById(item.Id) is not Playlist back || back.DateCreated != deleted.Created)
@@ -438,16 +450,16 @@ public sealed class PlaylistMirror
                 _libraryManager.DeleteItem(back, new DeleteOptions { DeleteFileLocation = true }, back.GetParent(), false);
             }
 
-            _logger.LogInformation("Playlists: deleted '{Name}' again, since a refresh from an edit just before the delete saved it back", back.Name);
+            _logger.LogInformation("Playlists: deleted '{Name}' again, since a refresh from an edit just before the delete saved it back", FormatUtilities.SanitizeForLog(back.Name));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Playlists: could not delete '{Name}' again after a refresh saved it back", item.Name);
+            _logger.LogWarning(ex, "Playlists: could not delete '{Name}' again after a refresh saved it back", FormatUtilities.SanitizeForLog(item.Name));
         }
     }
 
     /// <summary>Gives the server a playlist copy came from.</summary>
-    /// <param name="playlist">The playlist.</param>
+    /// <param name="playlist">The playlist whose source is wanted.</param>
     /// <returns>The server's key, or null for an original.</returns>
     public static string? CopyServer(BaseItem playlist)
     {
@@ -456,6 +468,7 @@ public sealed class PlaylistMirror
             ?? (playlist.ProviderIds.TryGetValue(SourceServerProviderKey, out var server) ? server : null);
     }
 
+    /// <summary>The root a copy records, in the copy store or else in its tags, or null for an original.</summary>
     private static string? TaggedRoot(BaseItem playlist)
     {
         if (PlaylistCopyStore.Get(playlist.Id) is { } copy && Guid.TryParse(copy.Root, out var registered))
@@ -466,6 +479,7 @@ public sealed class PlaylistMirror
         return playlist.ProviderIds.TryGetValue(SourcePlaylistProviderKey, out var tagged) && Guid.TryParse(tagged, out var root) ? IdKey(root) : null;
     }
 
+    /// <summary>Finds the local item for a source path, through the first library mapping that covers it.</summary>
     private BaseItem? Resolve(string? sourcePath, List<LibraryMapping> mappings)
     {
         if (string.IsNullOrWhiteSpace(sourcePath))
@@ -489,10 +503,12 @@ public sealed class PlaylistMirror
         return null;
     }
 
+    /// <summary>Whether a playlist is already shared with exactly the wanted users and rights.</summary>
     private static bool SameShares(IReadOnlyList<PlaylistUserPermissions> current, List<PlaylistUserPermissions> wanted)
         => current.Count == wanted.Count
             && wanted.All(w => current.Any(c => c.UserId.Equals(w.UserId) && c.CanEdit == w.CanEdit));
 
+    /// <summary>Reads a media type by name, or null when it names none.</summary>
     private static MediaType? ParseMediaType(string? value)
         => Enum.TryParse<MediaType>(value, true, out var parsed) && parsed != MediaType.Unknown ? parsed : null;
 }

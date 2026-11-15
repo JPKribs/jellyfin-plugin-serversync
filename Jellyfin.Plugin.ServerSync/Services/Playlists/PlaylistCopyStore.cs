@@ -23,7 +23,7 @@ public sealed class PlaylistCopyStore : QueueStoreBase
 
     /// <summary>Initializes a new instance of the <see cref="PlaylistCopyStore"/> class.</summary>
     /// <param name="databaseProvider">The provider of the sync database.</param>
-    /// <param name="logger">The logger.</param>
+    /// <param name="logger">Writes log entries.</param>
     public PlaylistCopyStore(ISyncDatabaseProvider databaseProvider, ILogger<PlaylistCopyStore> logger)
         : base(databaseProvider, logger)
     {
@@ -31,7 +31,7 @@ public sealed class PlaylistCopyStore : QueueStoreBase
     }
 
     /// <summary>Reads the record of one local playlist.</summary>
-    /// <param name="playlistId">The local playlist.</param>
+    /// <param name="playlistId">The id of the local playlist to look up.</param>
     /// <returns>The record, or null when the playlist is not a copy.</returns>
     public static PlaylistCopy? Get(Guid playlistId)
     {
@@ -52,7 +52,7 @@ public sealed class PlaylistCopyStore : QueueStoreBase
     }
 
     /// <summary>Records that a local playlist is a copy, replacing any earlier record of it.</summary>
-    /// <param name="playlistId">The local playlist.</param>
+    /// <param name="playlistId">The id of the local playlist that is a copy.</param>
     /// <param name="root">The id of the playlist the copy was first made as.</param>
     /// <param name="serverKey">The key of the server the copy came from.</param>
     public static void Set(Guid playlistId, string root, string serverKey)
@@ -79,7 +79,7 @@ public sealed class PlaylistCopyStore : QueueStoreBase
     }
 
     /// <summary>Forgets that a local playlist is a copy.</summary>
-    /// <param name="playlistId">The local playlist.</param>
+    /// <param name="playlistId">The id of the local playlist to forget.</param>
     public static void Remove(Guid playlistId)
     {
         var key = Key(playlistId);
@@ -128,10 +128,11 @@ public sealed class PlaylistCopyStore : QueueStoreBase
             return ids;
         }) ?? new List<Guid>();
 
+    /// <summary>Writes a playlist id in the form the table keys use.</summary>
     private static string Key(Guid id) => id.ToString("N", CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// Forgets which playlists here are copies of a peer's. Each copy also carries that on itself, so
+    /// Forgets which playlists here are copies of another server's. Each copy also carries that on itself, so
     /// the next playlist sync finds every copy again and none is made twice.
     /// </summary>
     /// <returns>How many copies were forgotten.</returns>

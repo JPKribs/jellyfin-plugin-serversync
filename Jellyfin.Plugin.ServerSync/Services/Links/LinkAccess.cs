@@ -118,7 +118,7 @@ public sealed class LinkAccess : ILinkAccess
 
         var streaming = Grants?.Streaming(null, link.LinkId, userId) ?? 0;
 
-        // This server's own limit on links streamed at once comes before any server is asked.
+        // This server's own limit on links streamed at once comes first.
         if (config.LinkMaxStreamsTotal > 0 && streaming >= config.LinkMaxStreamsTotal)
         {
             return new LinkChoice(null, $"this server is already streaming {streaming} link(s), the most it streams at once");
@@ -271,7 +271,7 @@ public sealed class LinkAccess : ILinkAccess
 
         bool Idle(SourceServer server, LinkStreamCheckResponse answer) => answer.StreamsInUse <= 0 && Taking(server) == 0;
 
-        // Returns the streams free between the two servers, where no limit is the most room.
+        // Returns the streams free between the two servers, with no limit as the most.
         long Room(SourceServer server, LinkStreamCheckResponse answer)
         {
             var theirs = (answer.StreamLimit > 0 ? answer.StreamLimit : int.MaxValue) - (long)Math.Max(0, answer.StreamsInUse);
@@ -279,7 +279,7 @@ public sealed class LinkAccess : ILinkAccess
             return Math.Min(theirs, mine);
         }
 
-        // Returns the first idle server that allows the play, else the one with the most room.
+        // Returns the first idle server that allows the play, else the roomiest.
         async Task<(SourceServer Server, LinkRoute Route)?> FirstAllowedAsync()
         {
             (SourceServer Server, LinkRoute Route)? busiest = null;

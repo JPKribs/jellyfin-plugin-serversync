@@ -151,7 +151,7 @@ public sealed class LinkProbe : IHostedService, IDisposable
             var now = _now();
             foreach (var (itemId, pending) in _pending.Where(p => p.Value.DueAt <= now).ToList())
             {
-                // Still waiting its turn to take its media info, which is not a failed try.
+                // Still waiting its turn for media info, which is not a failed try.
                 if (_inFlight.ContainsKey(itemId))
                 {
                     continue;

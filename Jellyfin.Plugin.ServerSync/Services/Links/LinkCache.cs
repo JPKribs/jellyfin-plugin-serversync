@@ -516,7 +516,7 @@ public sealed class LinkCache
                 var cutoff = _now() - TimeSpan.FromDays(config.LinkCacheRetentionDays);
                 foreach (var old in entries.Values.Where(e => (e.LastPlayedAt ?? e.CachedAt) < cutoff && keep?.Contains(e.LinkId) != true).ToList())
                 {
-                    _logger.LogInformation("Dropped {File} from the link cache: not played for {Days} day(s)", old.File, config.LinkCacheRetentionDays);
+                    _logger.LogInformation("Dropped {File} from the link cache: not played for {Days} day(s)", FormatUtilities.SanitizeForLog(old.File), config.LinkCacheRetentionDays);
                     entries.Remove(old.LinkId);
                     Delete(Path.Combine(Root, old.File));
                     changed = true;
@@ -531,7 +531,7 @@ public sealed class LinkCache
                     break;
                 }
 
-                _logger.LogInformation("Dropped {File} from the link cache to make room", next.File);
+                _logger.LogInformation("Dropped {File} from the link cache to make room", FormatUtilities.SanitizeForLog(next.File));
                 entries.Remove(next.LinkId);
                 Delete(Path.Combine(Root, next.File));
                 used -= next.Size;

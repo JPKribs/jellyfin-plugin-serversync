@@ -88,14 +88,14 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
 
-        // A download of a link hands out its .strm, and with it the link's secret.
+        // A download of a link hands out its .strm, and so its secret.
         if (DownloadsALink(context))
         {
             context.Result = new ObjectResult("This item streams from another server and cannot be downloaded from here") { StatusCode = StatusCodes.Status403Forbidden };
             return;
         }
 
-        // While the plugin is held the link table cannot be read, so routes pass through.
+        // While the plugin is held the link table cannot be read.
         if (Plugin.Held)
         {
             await next().ConfigureAwait(false);
@@ -479,7 +479,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             var named = NamedVersion(context);
             var all = new List<BaseItem> { item };
 
-            // A stream reads one version, so only a request to play looks up them all.
+            // A stream reads one version, so only a play request looks them all up.
             if (!PlayControllers.Contains(controller, StringComparer.Ordinal))
             {
                 if (named is { } one && one != item.Id && _libraryManager.GetItemById(one) is { } version)

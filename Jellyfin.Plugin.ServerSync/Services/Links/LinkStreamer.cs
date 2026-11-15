@@ -139,7 +139,7 @@ public sealed class LinkStreamer
             }
             catch (IOException) when (!context.Response.HasStarted)
             {
-                // Dropped from the cache between the lookup and the read, so it streams from the source.
+                // Dropped from the cache since the lookup, so it streams from the source.
             }
         }
 
@@ -351,7 +351,7 @@ public sealed class LinkStreamer
                         return (CopyEnd.Sent, null);
                     }
 
-                    // This server's own media probe reads a little of the file, never all of it.
+                    // This server's own media probe reads a little of the file, never all.
                     if (grant.Probe && !_grants.SpendProbe(link.LinkId, read))
                     {
                         return (CopyEnd.Refused, "this server's media probe read as much as it may");

@@ -363,7 +363,7 @@ public sealed class LinkCacheFiller : BackgroundService
 
         var name = FormatUtilities.SanitizeForLog(Path.GetFileName(row.SourcePath));
 
-        // Room is made for the size, so a file of unknown size is not cached.
+        // Room is made for the size, so a file of unknown size is skipped.
         if (row.SourceSize <= 0)
         {
             _logger.LogInformation("Did not cache {File}: its size on the source is not known", name);
@@ -396,7 +396,7 @@ public sealed class LinkCacheFiller : BackgroundService
                 return;
             }
 
-            // Room is made only once the source agrees, so a refusal costs the cache nothing.
+            // Room is made only once the source agrees, so a refusal costs nothing.
             if (!_cache.MakeRoom(row.SourceSize, Playing()))
             {
                 _logger.LogInformation("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));

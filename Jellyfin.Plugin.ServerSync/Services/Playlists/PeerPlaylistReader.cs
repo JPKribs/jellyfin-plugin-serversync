@@ -27,11 +27,13 @@ public sealed class PeerPlaylistReader
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerPlaylistReader"/> class.
     /// </summary>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="userManager">User manager.</param>
-    /// <param name="links">The link registry, or null.</param>
+    /// <param name="libraryManager">Lists the playlists here.</param>
+    /// <param name="userManager">Finds the user whose view limits the playlists.</param>
+    /// <param name="links">Tells which paths are this server's links, or null to send every path as it is.</param>
     public PeerPlaylistReader(ILibraryManager libraryManager, IUserManager userManager, ILinkRegistry? links = null)
     {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(userManager);
         _libraryManager = libraryManager;
         _userManager = userManager;
         _links = links;
@@ -83,8 +85,10 @@ public sealed class PeerPlaylistReader
         return response;
     }
 
-    // A link goes out under the path of the file it stands in for, as metadata and history do, so a peer
-    // matches its own copy of the film and never this server's .strm.
+    /// <summary>
+    /// The path an entry goes out under. A link goes out under the path of the file it stands in for, so a
+    /// peer matches its own copy of the film and never this server's .strm.
+    /// </summary>
     private string SentPath(string path)
         => _links is null || string.IsNullOrEmpty(path) ? path : LinkPaths.RowPathFor(path, _links);
 }
