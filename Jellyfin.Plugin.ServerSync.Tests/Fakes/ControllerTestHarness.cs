@@ -6,7 +6,9 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using Jellyfin.Plugin.ServerSync.Controllers;
+using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 using Jellyfin.Plugin.ServerSync.Services.Database;
 using Jellyfin.Plugin.ServerSync.Services.HistorySync;
@@ -39,6 +41,8 @@ public sealed class ControllerTestHarness : IDisposable
     /// <summary>The Jellyfin ID of the peer <see cref="AddPeer"/> lists.</summary>
     public const string PeerId = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f";
 
+    private PlaylistCopyStore? _playlistCopies;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ControllerTestHarness"/> class.
     /// </summary>
@@ -56,7 +60,6 @@ public sealed class ControllerTestHarness : IDisposable
         Outbound = new OutboundHintStore(Provider, NullLogger<OutboundHintStore>.Instance);
         Inbound = new InboundHintStore(Provider, NullLogger<InboundHintStore>.Instance);
         Versions = new VersionStore(Provider, NullLogger<VersionStore>.Instance);
-        PlaylistCopies = new PlaylistCopyStore(Provider, NullLogger<PlaylistCopyStore>.Instance);
         Removed = new RemovedItemsStore(Provider, NullLogger<RemovedItemsStore>.Instance);
         Pairings = new PeerPairingStore(Provider, new SecretProtector("tests", NullLogger.Instance), NullLogger<PeerPairingStore>.Instance);
 
@@ -110,8 +113,11 @@ public sealed class ControllerTestHarness : IDisposable
     /// <summary>Gets the stamps of edited objects.</summary>
     public VersionStore Versions { get; }
 
-    /// <summary>Gets the playlist copies.</summary>
-    public PlaylistCopyStore PlaylistCopies { get; }
+    /// <summary>
+    /// Gets the playlist copies, built on first use. The store registers itself process wide, so only a
+    /// test class in <see cref="PlaylistCopyStoreCollection"/> may read this.
+    /// </summary>
+    public PlaylistCopyStore PlaylistCopies => _playlistCopies ??= new PlaylistCopyStore(Provider, NullLogger<PlaylistCopyStore>.Instance);
 
     /// <summary>Gets the record of removed items.</summary>
     public RemovedItemsStore Removed { get; }
@@ -184,6 +190,34 @@ public sealed class ControllerTestHarness : IDisposable
     }
 
     /// <summary>
+    /// Adds a Content row and returns it as stored, with its row ID.
+    /// </summary>
+    /// <param name="sourceItemId">The item's ID on the source.</param>
+    /// <param name="status">The row's status.</param>
+    /// <param name="serverKey">The key of the entry the row came from.</param>
+    /// <param name="change">Edits the row before it is stored, or null.</param>
+    /// <returns>The stored row.</returns>
+    public SyncItem AddContent(string sourceItemId, SyncStatus status = SyncStatus.Synced, string serverKey = "peer", Action<SyncItem>? change = null)
+    {
+        var row = new SyncItem
+        {
+            SourceLibraryId = "lib",
+            LocalLibraryId = "local",
+            SourceItemId = sourceItemId,
+            SourcePath = "/src/" + sourceItemId + ".mkv",
+            SourceSize = 100,
+            SourceCreateDate = DateTime.UtcNow,
+            LocalPath = "/local/" + sourceItemId + ".mkv",
+            Status = status,
+            StatusDate = DateTime.UtcNow,
+            ServerKey = serverKey
+        };
+        change?.Invoke(row);
+        Content.Upsert(row);
+        return Content.GetBySourceItemId(sourceItemId)!;
+    }
+
+    /// <summary>
     /// Adds a scheduled task with a key to the task manager's list.
     /// </summary>
     /// <param name="key">The task's key.</param>
@@ -207,19 +241,22 @@ public sealed class ControllerTestHarness : IDisposable
         => WithContext(new ConfigurationController(Library, TaskManager, HttpClients, Config, Provider, Clients, NullLogger<ConfigurationController>.Instance), services ?? Services());
 
     /// <summary>
-    /// Builds a service provider holding the table managers and stores.
+    /// Builds a service provider holding the table managers and the record of removed items.
     /// </summary>
+    /// <param name="more">Adds further services, or null for none.</param>
     /// <returns>The provider.</returns>
-    public ServiceProvider Services()
-        => new ServiceCollection()
+    public ServiceProvider Services(Action<IServiceCollection>? more = null)
+    {
+        var services = new ServiceCollection()
             .AddSingleton(Content)
             .AddSingleton(History)
             .AddSingleton(Metadata)
             .AddSingleton(People)
             .AddSingleton(Users)
-            .AddSingleton(PlaylistCopies)
-            .AddSingleton(Removed)
-            .BuildServiceProvider();
+            .AddSingleton(Removed);
+        more?.Invoke(services);
+        return services.BuildServiceProvider();
+    }
 
     /// <summary>
     /// Gives a controller a request context, so its routes can read the request and write the response.
