@@ -12,13 +12,6 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Playlists;
 
 /// <summary>
-/// The record of one local playlist that is a copy of another server's.
-/// </summary>
-/// <param name="Root">The id of the playlist the copy was first made as, shared by every copy of it.</param>
-/// <param name="Server">The key of the server the copy came from.</param>
-public sealed record PlaylistCopy(string Root, string Server);
-
-/// <summary>
 /// Remembers which local playlists are copies of another server's, and which playlist each began as.
 /// The record lives in the sync database, and in memory alone before the database is available.
 /// </summary>

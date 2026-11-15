@@ -619,15 +619,6 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, DateTime VersionAt, HistoryParts Parts = HistoryParts.None);
 }
 
-/// <summary>One change still gathering before it becomes a hint.</summary>
-/// <param name="Kind">The kind.</param>
-/// <param name="UserId">The local user, for history.</param>
-/// <param name="ItemId">The local item.</param>
-/// <param name="EditedAt">When it was last edited, in UTC.</param>
-/// <param name="Due">When it is sent unless edited again, in UTC.</param>
-/// <param name="Recorded">Whether a hand made edit is among the gathered changes.</param>
-public sealed record GatheringChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded);
-
 /// <summary>What an item update is, as the observer sorts it.</summary>
 public enum ChangeOrigin
 {

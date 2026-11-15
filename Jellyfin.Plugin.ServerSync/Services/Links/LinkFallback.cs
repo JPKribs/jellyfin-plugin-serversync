@@ -2,15 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Models.Configuration;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
-
-/// <summary>Where a link streams from right now: a server entry here, and that server's id of the file.</summary>
-public sealed record LinkRoute(string ServerKey, string ItemId);
-
-/// <summary>Another server a link can fall back to, and the path the same file has there.</summary>
-public sealed record LinkAlternate(SourceServer Server, string SourcePath);
 
 /// <summary>
 /// A link streams from the server that won its file in sync. When that server is down, full, or

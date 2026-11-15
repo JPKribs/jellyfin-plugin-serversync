@@ -6,12 +6,6 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Who a link is being read for, a user or this server's own media probe, and the server it was
-/// routed to, or null for the link's own server.
-/// </summary>
-public sealed record LinkGrant(Guid? UserId, bool Probe, LinkRoute? Route = null);
-
-/// <summary>
 /// Ties a link to the users the source has allowed to play it. Jellyfin's ffmpeg and its stream proxy
 /// read a link with no token, so a user is recorded when the source allows them at PlaybackInfo, and
 /// the link route reads it from here. Only that approval makes a grant: a later stream request can

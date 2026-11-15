@@ -19,9 +19,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
-/// <summary>What one check of this server's links found.</summary>
-public sealed record LinkVerification(int Checked, int Dead, int Restored, int Described);
-
 /// <summary>
 /// Checks this server's links against the servers they stream from, as part of every content sync, so
 /// a link that can no longer play shows on the Sync tab with the reason before someone presses play.
