@@ -22,6 +22,8 @@ A server's place in the list is its rank, and servers higher in the list rank fi
 
 Steps are numbered in the order they show, so a Pull server's Libraries is step 3.
 
+**Allow Private Network Address** lets a server entry use a loopback, LAN, or carrier NAT address. Carrier NAT is 100.64.0.0/10, the range Tailscale uses. With it off, only public addresses are reached, and a plain `http://` URL is refused, since it would send the API Key unencrypted.
+
 | Connection | Authentication |
 | :--- | :--- |
 | ![Connection](screenshots/settings/Connection.png) | ![Authentication](screenshots/settings/Authentication.png) |
