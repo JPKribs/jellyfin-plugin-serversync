@@ -27,8 +27,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// API controller for Server Sync plugin operations. Operates only on the
-/// local server, never modifies the source server.
+/// The operator routes of the dashboard, which act only on this server and never change a source.
 /// </summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
@@ -51,8 +50,8 @@ public partial class ConfigurationController : ControllerBase
     /// <param name="taskManager">Runs Jellyfin's scheduled tasks.</param>
     /// <param name="httpClientFactory">Builds the named HTTP clients that carry the SSRF guard.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="databaseProvider">The sync database provider.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="databaseProvider">Opens the sync database.</param>
+    /// <param name="clientFactory">Builds the client for each source.</param>
     /// <param name="logger">Writes log entries.</param>
     public ConfigurationController(
         ILibraryManager libraryManager,
@@ -63,6 +62,14 @@ public partial class ConfigurationController : ControllerBase
         ISourceServerClientFactory clientFactory,
         ILogger<ConfigurationController> logger)
     {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(taskManager);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(databaseProvider);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _libraryManager = libraryManager;
         _taskManager = taskManager;
         _httpClientFactory = httpClientFactory;
@@ -73,23 +80,19 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// Resolves an API key posted from a settings page. The page shows the
-    /// kept-sentinel instead of the stored secret, so a request carrying the
-    /// sentinel means "use the configured key".
+    /// Resolves an API Key posted from a settings page, where the kept sentinel stands for the stored key.
     /// </summary>
     private string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl)
         => _configManager.ResolveRequestApiKey(requestApiKey, serverKey, requestUrl);
 
     /// <summary>
-    /// The URL the browser should load images from for a row that came from the given server entry.
-    /// A row with no key belongs to the first scan server.
+    /// Finds the URL the browser loads images from for a row of the given server entry. A row with no key belongs to the first source.
     /// </summary>
     private string? BrowserUrlFor(string? serverKey)
         => _configManager.Configuration.ResolveServer(serverKey)?.BrowserUrl;
 
     /// <summary>
-    /// A connected client for the server a row came from, or null when that entry is gone or not
-    /// configured. Callers dispose it.
+    /// Builds a client for the server a row came from, or null when that entry is gone or not set up. The caller disposes it.
     /// </summary>
     private SourceServerClient? ClientForRow(string? serverKey)
     {
@@ -105,16 +108,13 @@ public partial class ConfigurationController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Server '{Server}' rejected: {Error}", server.DisplayName, ex.Message);
+            _logger.LogWarning("Server '{Server}' rejected: {Error}", FormatUtilities.SanitizeForLog(server.DisplayName), FormatUtilities.SanitizeForLog(ex.Message, 300));
             return null;
         }
     }
 
     /// <summary>
-    /// Builds a <see cref="BulkOperationResult"/> from a manager's
-    /// <c>BulkUpdateStatusWithDetails</c> tuple. Logs at Warning if any
-    /// items were not found so log readers can correlate UI alerts to
-    /// server-side details.
+    /// Builds the result of a bulk status change, and logs a warning when some rows were not found.
     /// </summary>
     private BulkOperationResult BuildBulkResult(
         int updated,
@@ -140,10 +140,8 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// Queues every row of a module that is in the posted status, for the "Retry errors" actions,
-    /// which post an empty id list and a status. The update is one statement with no row cap, so it
-    /// reaches every matching row and not only those on the loaded page, and the Queued transition
-    /// resets each row's RetryCount.
+    /// Queues every row of a sync type that is in the posted status, for the retry actions.
+    /// One statement reaches every matching row, not only the loaded page, and resets each row's retry count.
     /// </summary>
     private ActionResult QueueAllWithStatus<TRecord, TKey>(SyncTableManagerBase<TRecord, TKey> manager, string status, string operation)
         where TRecord : SyncRecord
@@ -160,6 +158,7 @@ public partial class ConfigurationController : ControllerBase
             _logger.LogInformation("{Operation}: queued {Count} row(s) that were {Status}", operation, updated, fromStatus);
             return Ok(new BulkOperationResult { Updated = updated, Requested = updated });
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "{Operation}: failed to queue rows that were {Status}", operation, fromStatus);
@@ -168,9 +167,7 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// Populates the LastFailure* fields on a status response from the
-    /// per-module run-failure list on the plugin config. No-op when the
-    /// module's last run completed cleanly (no entry for this module).
+    /// Fills a status response with the sync type's last run failure, when it has one.
     /// </summary>
     private void PopulateLastFailure(BaseSyncStatusResponse response, string moduleKey)
     {
@@ -178,7 +175,6 @@ public partial class ConfigurationController : ControllerBase
         var failures = _configManager.Configuration.LastRunFailures;
         if (failures == null) return;
 
-        // A module can hold a Refresh and a Sync failure at once. The latest is the one worth showing.
         var failure = failures
             .Where(f => string.Equals(f.ModuleKey, moduleKey, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(f => f.Timestamp)
@@ -192,8 +188,7 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// Whether Server Sync can run here. It cannot while its database is one an older release wrote,
-    /// and every page shows the reason.
+    /// Reports whether Server Sync can run here, which it cannot while its database is one an older release wrote.
     /// </summary>
     /// <returns>Ready, or the reason it is held.</returns>
     [HttpGet("Health")]
@@ -217,10 +212,10 @@ public partial class ConfigurationController : ControllerBase
     };
 
     /// <summary>
-    /// Starts one of the plugin's refresh or sync tasks now.
+    /// Starts one of the plugin's scheduled tasks right away.
     /// </summary>
     /// <param name="taskKey">The scheduled task's key, such as <c>ServerSyncUpdateTables</c>.</param>
-    /// <returns>Action result with status message.</returns>
+    /// <returns>A message that the task started, or 404 for an unknown task.</returns>
     [HttpPost("Tasks/{taskKey}/Run")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -242,7 +237,7 @@ public partial class ConfigurationController : ControllerBase
     /// Empties one sync table, or with <c>All</c> deletes the whole sync database and creates it again.
     /// </summary>
     /// <param name="table">Content, History, Metadata, People, Playlists, Users, or All.</param>
-    /// <returns>Action result with success status.</returns>
+    /// <returns>Whether the reset worked, or 404 for an unknown table.</returns>
     [HttpPost("Reset/{table}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -275,6 +270,7 @@ public partial class ConfigurationController : ControllerBase
             _logger.LogInformation("Sync reset of {Table} finished, {Count} rows deleted", SanitizeForLog(table), deleted);
             return Ok(new { Success = true, Message = "Table reset." });
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to reset {Table}", SanitizeForLog(table));
@@ -283,18 +279,13 @@ public partial class ConfigurationController : ControllerBase
     }
 
     /// <summary>
-    /// Sanitizes user input to prevent log injection attacks.
+    /// Makes text from a request safe to log.
     /// </summary>
-    /// <param name="input">User input to sanitize.</param>
-    /// <returns>Sanitized string safe for logging.</returns>
     private static string SanitizeForLog(string? input) => FormatUtilities.SanitizeForLog(input, 100);
 
     /// <summary>
-    /// Computes the overall sync status from a set of individual status values using priority ordering:
-    /// Errored > Queued > Pending > Ignored > Synced.
+    /// Reduces several statuses to one, where Errored outranks Queued, then Pending, then Ignored, then Synced.
     /// </summary>
-    /// <param name="statusValues">Individual sync status values to aggregate.</param>
-    /// <returns>The computed overall status string.</returns>
     private static string ComputeOverallStatus(params SyncStatus?[] statusValues)
     {
         var statuses = statusValues.OfType<SyncStatus>().ToList();

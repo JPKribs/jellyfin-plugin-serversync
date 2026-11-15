@@ -14,17 +14,17 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// People sync endpoints for Server Sync plugin.
+/// The People routes of the Sync tab.
 /// </summary>
 public partial class ConfigurationController
 {
     /// <summary>
-    /// Gets a specific people sync item by its database ID.
+    /// Reads one People row with this server's live values and the source's measured image sizes.
     /// </summary>
-    /// <param name="id">The row id.</param>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="peopleService">Builds and compares people sync rows.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="id">The row's ID in the People sync table.</param>
+    /// <param name="manager">Reads and writes the People sync table.</param>
+    /// <param name="peopleService">Reads the live local values and measures the source's images.</param>
+    /// <param name="cancellationToken">Cancels the calls to the source.</param>
     /// <returns>The row, or 404 when there is none.</returns>
     [HttpGet("PeopleItems/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -45,15 +45,9 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
 
-        // Re-read live local state so the modal shows what's actually in
-        // Jellyfin right now, not the snapshot from the last People Refresh.
-        // Without this, a successful Sync apply doesn't show up here until
-        // the user re-runs the Refresh task.
         peopleService.RefreshLocalSnapshot(item, syncImages: config.PeopleSyncImages);
 
-        // Refresh builds source manifests from ImageTags only (no per-person
-        // HTTP call) for speed. The modal needs real sizes/dimensions to
-        // render Source as e.g. "623.4 KB" instead of "1 (0 B)".
+        // A scan stores tags only, and the dialog needs real sizes.
         if (config.PeopleSyncImages && !string.IsNullOrEmpty(item.Images.Source))
         {
             try
@@ -64,13 +58,9 @@ public partial class ConfigurationController
                     await peopleService.EnrichSourceImageSizesAsync(item, client, cancellationToken).ConfigureAwait(false);
                 }
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Source image enrichment failed for person {Name}. Modal will show tag-only sizes", item.PersonName);
+                _logger.LogWarning(ex, "Source image enrichment failed for person {Name}. Modal will show tag-only sizes", SanitizeForLog(item.PersonName));
             }
         }
 
@@ -78,13 +68,13 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets paginated people sync items with optional search and status filtering.
+    /// Lists a page of People rows, narrowed by search and status.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="manager">Reads and writes the People sync table.</param>
     /// <param name="search">Text to find in the item names, or null for no filter.</param>
     /// <param name="status">The item status to list, or null for every status.</param>
-    /// <param name="skip">How many rows to skip.</param>
-    /// <param name="take">How many rows to return.</param>
+    /// <param name="skip">How many rows to pass over before the page starts.</param>
+    /// <param name="take">The most rows the page holds, clamped to 200.</param>
     /// <returns>The requested page of rows.</returns>
     [HttpGet("PeopleItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -105,8 +95,6 @@ public partial class ConfigurationController
             statusFilter = parsedStatus;
         }
 
-        // Page by offset. Converting skip to a page number landed on the wrong rows whenever skip was
-        // not a multiple of take.
         var result = manager.SearchPaginated(search, statusFilter, skip, take);
 
         return Ok(new PagedResult<PeopleSyncItemDto>(
@@ -117,9 +105,9 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets people sync status counts.
+    /// Counts the People rows in each status.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="manager">Reads and writes the People sync table.</param>
     /// <returns>The row counts by status.</returns>
     [HttpGet("PeopleStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -141,12 +129,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Moves people sync items to Queued status. With no ids and a Status, queues every row in that
-    /// status, which is how "Retry errors" reaches every errored row.
+    /// Queues the selected People rows. With no IDs and a status, it queues every row in that status, which is how a retry reaches every errored row.
     /// </summary>
-    /// <param name="request">The request body.</param>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>The result of the bulk change.</returns>
+    /// <param name="request">The IDs of the selected rows.</param>
+    /// <param name="manager">Reads and writes the People sync table.</param>
+    /// <returns>How many rows changed and which did not, or 400 when none was selected.</returns>
     [HttpPost("PeopleItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -170,6 +157,7 @@ public partial class ConfigurationController
             var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Queued);
             return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "QueuePeopleSyncItems"));
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue people sync items by IDs");
@@ -178,11 +166,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Marks people sync items as ignored.
+    /// Marks the selected People rows as Ignored.
     /// </summary>
-    /// <param name="request">The request body.</param>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>The result of the bulk change.</returns>
+    /// <param name="request">The IDs of the selected rows.</param>
+    /// <param name="manager">Reads and writes the People sync table.</param>
+    /// <returns>How many rows changed and which did not, or 400 when none was selected.</returns>
     [HttpPost("PeopleItems/Ignore")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -201,6 +189,7 @@ public partial class ConfigurationController
             var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Ignored);
             return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "IgnorePeopleSyncItems"));
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore people sync items by IDs");

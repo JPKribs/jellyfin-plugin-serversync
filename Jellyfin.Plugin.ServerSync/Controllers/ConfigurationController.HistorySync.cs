@@ -13,20 +13,20 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// History sync endpoints for Server Sync plugin.
+/// The History routes of the Sync tab.
 /// </summary>
 public partial class ConfigurationController
 {
     /// <summary>
-    /// Gets paginated history sync items from the database with optional search and filter.
+    /// Lists a page of History rows, narrowed by search, status, and source user.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="search">Optional search term.</param>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="sourceUserId">Optional source user ID filter.</param>
-    /// <param name="skip">Number of items to skip (default 0).</param>
-    /// <param name="take">Maximum items to return (default 50, max 200).</param>
-    /// <returns>Paginated result of history sync item DTOs.</returns>
+    /// <param name="manager">Reads and writes the History sync table.</param>
+    /// <param name="search">Narrows the list to names that match, when given.</param>
+    /// <param name="status">Narrows the list to one status, when given.</param>
+    /// <param name="sourceUserId">Narrows the list to one user on the source, when given.</param>
+    /// <param name="skip">How many rows to pass over before the page starts.</param>
+    /// <param name="take">The most rows the page holds, clamped to 200.</param>
+    /// <returns>A page of rows with the total count.</returns>
     [HttpGet("HistoryItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PagedResult<HistorySyncItemDto>> GetHistoryItems(
@@ -58,10 +58,10 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets history sync status counts.
+    /// Counts the History rows in each status.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>History sync status response with counts.</returns>
+    /// <param name="manager">Reads and writes the History sync table.</param>
+    /// <returns>The counts, with the last run failure when there is one.</returns>
     [HttpGet("HistoryStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<BaseSyncStatusResponse> GetHistoryStatus([FromServices] HistorySyncTableManager manager)
@@ -82,12 +82,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Moves history items to Queued status. With no ids and a Status, queues every row in that
-    /// status, which is how "Retry errors" reaches every errored row.
+    /// Queues the selected History rows. With no IDs and a status, it queues every row in that status, which is how a retry reaches every errored row.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Bulk history items request.</param>
-    /// <returns>Action result with updated count.</returns>
+    /// <param name="manager">Reads and writes the History sync table.</param>
+    /// <param name="request">The selected rows, by ID or by user and item.</param>
+    /// <returns>How many rows changed and which did not, or 400 when none was selected.</returns>
     [HttpPost("HistoryItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -105,11 +104,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Marks history items as ignored.
+    /// Marks the selected History rows as Ignored.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Bulk history items request.</param>
-    /// <returns>Action result with updated count.</returns>
+    /// <param name="manager">Reads and writes the History sync table.</param>
+    /// <param name="request">The selected rows, by ID or by user and item.</param>
+    /// <returns>How many rows changed and which did not, or 400 when none was selected.</returns>
     [HttpPost("HistoryItems/Ignore")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -122,8 +121,7 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// The shared body of the history Queue and Ignore endpoints. Ids are the preferred way to name
-    /// rows. The composite key list is kept for older clients.
+    /// Sets the status of the selected History rows, named by ID or by user and item.
     /// </summary>
     private ActionResult UpdateHistoryItemsStatus(
         HistorySyncTableManager manager,
@@ -146,6 +144,7 @@ public partial class ConfigurationController
                 var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, status);
                 return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, operation));
             }
+            // Any failure becomes a 500 the page can show.
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to {Verb} history items by IDs", verb);
@@ -161,6 +160,7 @@ public partial class ConfigurationController
                 manager.UpdateStatusByKey((item.SourceUserId, item.SourceItemId), status);
                 successCount++;
             }
+            // One row's failure must not stop the rest.
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to {Verb} history item {SourceUserId}/{SourceItemId}",

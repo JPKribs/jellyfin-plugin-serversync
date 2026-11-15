@@ -17,22 +17,22 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// Content sync endpoints for Server Sync plugin.
+/// The Content routes of the Sync tab and the Storage tab.
 /// </summary>
 public partial class ConfigurationController
 {
     /// <summary>
-    /// Gets paginated sync items from the database with optional search and filter.
+    /// Lists a page of Content rows, narrowed by search, status, pending type, and Storage.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="search">Optional search term.</param>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="pendingType">Optional pending type filter.</param>
-    /// <param name="cached">Only links whose file is in the link cache.</param>
-    /// <param name="storage">The storage to list, Copy or Link, or null for both.</param>
-    /// <param name="skip">Number of items to skip (default 0).</param>
-    /// <param name="take">Maximum items to return (default 50, max 200).</param>
-    /// <returns>Paginated result of sync item DTOs.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="search">Narrows the list to paths that match, when given.</param>
+    /// <param name="status">Narrows the list to one status, when given.</param>
+    /// <param name="pendingType">Narrows the list to one pending type, when given.</param>
+    /// <param name="cached">Whether to list only links whose file is in the link cache.</param>
+    /// <param name="storage">The Storage to list, Copy or Link, or null for both.</param>
+    /// <param name="skip">How many rows to pass over before the page starts.</param>
+    /// <param name="take">The most rows the page holds, clamped to 200.</param>
+    /// <returns>A page of rows with the total count.</returns>
     [HttpGet("Items")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PagedResult<SyncItemDto>> GetSyncItems(
@@ -119,10 +119,10 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets sync status counts.
+    /// Counts the Content rows in each status.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>Sync status response with counts.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <returns>The counts, with the last run failure when there is one.</returns>
     [HttpGet("Status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<SyncStatusResponse> GetSyncStatus([FromServices] ContentSyncTableManager manager)
@@ -148,11 +148,10 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets the total size of pending items to be synced.
-    /// Calculates: PendingDownload + PendingReplacement + Queued - PendingDeletion
+    /// Sums the bytes waiting to sync, which is downloads plus replacements plus queued, less deletions.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>Pending size response with breakdown.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <returns>The total with each part.</returns>
     [HttpGet("PendingSize")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PendingSizeResponse> GetPendingSize([FromServices] ContentSyncTableManager manager)
@@ -171,9 +170,9 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets disk space information for configured library paths.
+    /// Reads the disk space of each mapped library's folder.
     /// </summary>
-    /// <returns>List of disk space info.</returns>
+    /// <returns>The disk space of each folder.</returns>
     [HttpGet("DiskSpace")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<List<DiskSpaceInfo>> GetDiskSpace()
@@ -182,11 +181,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Resets errored items for retry.
+    /// Queues errored rows again, which gives each its full retry allowance back.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Optional request with specific item IDs.</param>
-    /// <returns>Action result with success status.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="request">The rows to retry, or null for every errored row.</param>
+    /// <returns>Whether the rows were queued.</returns>
     [HttpPost("RetryErroredItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult RetryErroredItems(
@@ -194,8 +193,6 @@ public partial class ConfigurationController
         [FromBody] BulkItemsRequest? request = null)
     {
         ArgumentNullException.ThrowIfNull(manager);
-        // Queued via UpdateStatus is an operator action, so the transition
-        // clauses reset RetryCount, the row gets its full allowance back.
         if (request?.SourceItemIds?.Count > 0)
         {
             foreach (var itemId in request.SourceItemIds)
@@ -216,11 +213,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Marks multiple items as ignored.
+    /// Marks the selected rows as Ignored.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Bulk items request.</param>
-    /// <returns>Action result with updated count.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="request">The source item IDs of the selected rows.</param>
+    /// <returns>How many rows changed, or 400 when none was selected.</returns>
     [HttpPost("IgnoreItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -234,13 +231,12 @@ public partial class ConfigurationController
             return BadRequest("Select the items.");
         }
 
-        // Count the rows the update actually touched. Counting every posted id reported ids with no
-        // row behind them as updated.
         try
         {
             var updated = manager.BatchUpdateStatus(request.SourceItemIds, SyncStatus.Ignored);
             return Ok(new { Updated = updated });
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore {Count} content item(s)", request.SourceItemIds.Count);
@@ -249,11 +245,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Moves items to Queued status (works for Pending, Ignored, Errored, and Synced items).
+    /// Queues the selected rows, whatever status they are in.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Bulk items request.</param>
-    /// <returns>Action result with updated count.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="request">The source item IDs of the selected rows.</param>
+    /// <returns>How many rows changed, or 400 when none was selected.</returns>
     [HttpPost("QueueItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -267,13 +263,12 @@ public partial class ConfigurationController
             return BadRequest("Select the items.");
         }
 
-        // Count the rows the update actually touched. Counting every posted id reported ids with no
-        // row behind them as updated.
         try
         {
             var updated = manager.BatchUpdateStatus(request.SourceItemIds, SyncStatus.Queued);
             return Ok(new { Updated = updated });
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue {Count} content item(s)", request.SourceItemIds.Count);
@@ -281,9 +276,9 @@ public partial class ConfigurationController
         }
     }
 
-    /// <summary>What the link cache holds now: how many files, how much disk, and where.</summary>
-    /// <param name="cache">The link cache.</param>
-    /// <param name="filler">Fills the cache.</param>
+    /// <summary>Reports what the link cache holds, with its file count, disk use, and folder.</summary>
+    /// <param name="cache">Reads and empties the link cache.</param>
+    /// <param name="filler">Reports how many files wait to be cached.</param>
     /// <returns>The cache's state.</returns>
     [HttpGet("LinkCache")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -308,8 +303,8 @@ public partial class ConfigurationController
     }
 
     /// <summary>Empties the link cache. Links keep playing from their sources.</summary>
-    /// <param name="cache">The link cache.</param>
-    /// <returns>No content.</returns>
+    /// <param name="cache">Reads and empties the link cache.</param>
+    /// <returns>204 once the cache is empty.</returns>
     [HttpPost("LinkCache/Clear")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public ActionResult ClearLinkCache([FromServices] Services.Links.LinkCache cache)
@@ -321,14 +316,12 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Turns links into full copies, each link's .strm removed once its copy is in place. A link whose
-    /// whole file is in the link cache has the cached file moved into place, by a sync that starts now,
-    /// or right after the one already running. Any other copy downloads on the next sync. Rows that are
-    /// not links are skipped.
+    /// Turns links into permanent copies, skipping rows that are not links.
+    /// A link whose whole file is cached is moved into place by a run that starts at once, and any other downloads on the next run.
     /// </summary>
-    /// <param name="manager">The content table.</param>
-    /// <param name="cache">The link cache.</param>
-    /// <param name="request">Bulk items request.</param>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="cache">Reads and empties the link cache.</param>
+    /// <param name="request">The source item IDs of the selected rows.</param>
     /// <returns>How many links will be copied, how many of those come from the cache, and how many rows were skipped.</returns>
     [HttpPost("PromoteItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -356,7 +349,7 @@ public partial class ConfigurationController
                 && !(row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion)
                 && Services.Links.LinkStateService.MarkPromoting(row, requireApproval: false))
             {
-                // Kept by hand, so removing an Always Keep pick never turns it back into a link.
+                // Kept by hand, so removing an Always Keep pick never makes it a link.
                 row.Kept = Models.ContentSync.KeptReason.Hand;
                 manager.Upsert(row);
                 promoted++;
@@ -371,8 +364,7 @@ public partial class ConfigurationController
             }
         }
 
-        // A cached file moves in seconds, so it is not left waiting for the scheduled sync. A sync already
-        // running read its rows when it started, so another is queued to follow it.
+        // A cached file moves in seconds, so a run is queued at once.
         if (fromCache > 0 && _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ServerSyncDownloadContent") is { } sync)
         {
             _taskManager.QueueScheduledTask(sync.ScheduledTask, new TaskOptions());
@@ -382,16 +374,15 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// The full copies one server's Link mappings hold, for the Storage tab, with why each is a copy:
-    /// Pick for an Always Keep pick, Hand for Keep Local Copy, Unknown for a copy from before this was
-    /// recorded. Copies already going back to links are listed too.
+    /// Lists the permanent copies one server's Link libraries hold, for the Storage tab, with why each is a copy.
+    /// Copies already going back to links are listed too.
     /// </summary>
-    /// <param name="manager">The content table.</param>
-    /// <param name="serverKey">The server's entry key.</param>
-    /// <param name="search">Text to find in the paths.</param>
-    /// <param name="skip">Rows to skip.</param>
-    /// <param name="take">Rows to return, at most 200.</param>
-    /// <returns>A page of rows.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="serverKey">The key of the server entry whose copies are listed.</param>
+    /// <param name="search">Narrows the list to paths that match, when given.</param>
+    /// <param name="skip">How many rows to pass over before the page starts.</param>
+    /// <param name="take">The most rows the page holds, clamped to 200.</param>
+    /// <returns>A page of rows with the total count.</returns>
     [HttpGet("KeptCopies")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PagedResult<SyncItemDto>> GetKeptCopies(
@@ -448,13 +439,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Turns kept copies in Link mappings back into links. Each is queued, and the next sync checks the
-    /// source still has the file, writes the link, and moves the copy into the link cache, or removes it
-    /// when the cache is off or cannot take it. A copy an Always Keep pick still covers is skipped, since
-    /// the next refresh would only copy it again: the pick is removed instead.
+    /// Queues permanent copies in Link libraries to Turn Back Into Links, which the next run does after checking the source still has each file.
+    /// A copy an Always Keep pick still covers is skipped, since the next scan would only copy it again.
     /// </summary>
-    /// <param name="manager">The content table.</param>
-    /// <param name="request">The row ids.</param>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="request">The IDs of the selected rows.</param>
     /// <returns>How many were queued, and why any were skipped.</returns>
     [HttpPost("KeptCopies/Unkeep")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -509,19 +498,18 @@ public partial class ConfigurationController
         return Ok(new { Queued = queued, Skipped = skipped });
     }
 
+    /// <summary>Whether a path lies under a root folder, on either kind of separator.</summary>
     private static bool UnderRoot(string? path, string? root)
         => !string.IsNullOrEmpty(path) && !string.IsNullOrEmpty(root)
             && path.Replace('\\', '/').StartsWith(root.Replace('\\', '/').TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase);
 
 
     /// <summary>
-    /// Marks items as synced after verifying the local file exists.
-    /// Use this to resolve items that are stuck in Queued/Errored status
-    /// when the local file is already present.
+    /// Marks rows as Synced after checking each local file exists, to settle rows stuck in Queued or Errored.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Bulk items request.</param>
-    /// <returns>Action result with synced and not-found counts.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="request">The source item IDs of the selected rows.</param>
+    /// <returns>How many rows were marked, and how many had no file.</returns>
     [HttpPost("MarkSynced")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -567,6 +555,7 @@ public partial class ConfigurationController
                         SanitizeForLog(item.LocalPath));
                 }
             }
+            // One row's failure must not stop the rest.
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to mark item {ItemId} as synced", SanitizeForLog(itemId));
@@ -578,11 +567,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Deletes items' files from the LOCAL server only. Each handled row is kept as Ignored.
+    /// Deletes the selected rows' files from this server only, and keeps each handled row as Ignored.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Bulk items request.</param>
-    /// <returns>Action result with deletion counts.</returns>
+    /// <param name="manager">Reads and writes the Content sync table.</param>
+    /// <param name="request">The source item IDs of the selected rows.</param>
+    /// <returns>How many files were deleted, failed, and skipped.</returns>
     [HttpPost("DeleteLocalItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -653,10 +642,7 @@ public partial class ConfigurationController
                 localItem = _libraryManager.FindByPath(item.LocalPath, isFolder: false);
             }
 
-            // The id-based delete removes whatever file the Jellyfin item
-            // points at, and LocalItemId can go stale when a mapping's root
-            // changes, so the RESOLVED path must pass the same checks the
-            // tracked path did, and must actually be the tracked file.
+            // A stale LocalItemId may point elsewhere, so the resolved path must match.
             if (localItem != null)
             {
                 var resolvedPath = localItem.Path;
@@ -678,7 +664,6 @@ public partial class ConfigurationController
 
             if (!fileExists)
             {
-                // Nothing to delete, so the row is kept as Ignored.
                 _logger.LogWarning(
                     "SKIPPED DELETE: {FileName} - File not found in Jellyfin library or on disk, so the row is kept as Ignored. Source path: {SourcePath}",
                     sanitizedFileName,
@@ -688,9 +673,8 @@ public partial class ConfigurationController
                 continue;
             }
 
-            // The path actually deleted: the tracked one, or the Jellyfin item's own when the row tracks
-            // none. The item's path passed the library check above, and gets the symlink check here.
             var targetPath = !string.IsNullOrEmpty(item.LocalPath) ? item.LocalPath : localItem?.Path;
+            // An item path the row does not track still needs the symlink check.
             if (string.IsNullOrEmpty(item.LocalPath) && !string.IsNullOrEmpty(targetPath))
             {
                 var targetRoot = FileValidationService.GetContainingLibraryRoot(targetPath, config);
@@ -727,13 +711,11 @@ public partial class ConfigurationController
             }
             else
             {
-                // The file may have been deleted externally (manually or by another process).
-                // A folder item counts too, so a refused disc structure is reported as failed, never as gone.
+                // A folder counts too, so a refused disc structure is reported as failed.
                 var stillExists = !string.IsNullOrEmpty(targetPath)
                     && (System.IO.File.Exists(targetPath) || System.IO.Directory.Exists(targetPath));
                 if (!stillExists)
                 {
-                    // Deleted elsewhere, so the row is kept as Ignored.
                     _logger.LogInformation(
                         "DELETE (external): {FileName} - File no longer exists after deletion attempt, so the row is kept as Ignored. Local path: {LocalPath}",
                         sanitizedFileName,
@@ -759,6 +741,7 @@ public partial class ConfigurationController
         return Ok(new { Deleted = deletedCount, Failed = failedCount, Skipped = skippedCount });
     }
 
+    /// <summary>Keeps a row whose file is gone as Ignored, so the next scan does not download it again.</summary>
     private static void KeepAsIgnored(ContentSyncTableManager manager, SyncItem item)
     {
         item.Status = SyncStatus.Ignored;

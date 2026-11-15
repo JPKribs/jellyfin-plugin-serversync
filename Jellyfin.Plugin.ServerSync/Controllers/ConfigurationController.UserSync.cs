@@ -15,17 +15,14 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// User sync endpoints for Server Sync plugin.
+/// The Users routes of the Sync tab.
 /// </summary>
 public partial class ConfigurationController
 {
     /// <summary>
-    /// Gets user sync status counts. Counts distinct user mappings (one per
-    /// visible row) rather than raw category-row count, so the header
-    /// counter matches the list below. See
-    /// <see cref="UserSyncTableManager.CountUserMappingsByStatus"/>.
+    /// Counts the user mappings in each status, one per visible row, so the counter matches the list below it.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="manager">Reads and writes the Users sync table.</param>
     /// <returns>The row counts by status.</returns>
     [HttpGet("UserStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -45,12 +42,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Moves user sync items to Queued status. With no ids and a Status, queues every row in that
-    /// status, which is how "Retry errors" reaches every errored row.
+    /// Queues the selected Users rows. With no IDs and a status, it queues every row in that status, which is how a retry reaches every errored row.
     /// </summary>
-    /// <param name="request">The request body.</param>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>The result of the bulk change.</returns>
+    /// <param name="request">The IDs of the selected rows, or a status to queue every row of.</param>
+    /// <param name="manager">Reads and writes the Users sync table.</param>
+    /// <returns>How many rows changed and which did not, or 400 when none was selected.</returns>
     [HttpPost("UserItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -74,6 +70,7 @@ public partial class ConfigurationController
             var (updated, notFound) = manager.BulkUpdateStatusWithDetails(request.Ids, SyncStatus.Queued);
             return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "QueueUserSyncItems"));
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue user sync items by IDs");
@@ -82,14 +79,13 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets paginated list of user sync users (consolidated view).
-    /// Groups items by (SourceUserId, LocalUserId) showing one row per user.
+    /// Lists a page of user mappings, one row per pair of source user and local user.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="manager">Reads and writes the Users sync table.</param>
     /// <param name="search">Text to find in the item names, or null for no filter.</param>
     /// <param name="status">The item status to list, or null for every status.</param>
-    /// <param name="skip">How many rows to skip.</param>
-    /// <param name="take">How many rows to return.</param>
+    /// <param name="skip">How many rows to pass over before the page starts.</param>
+    /// <param name="take">The most rows the page holds, clamped to 200.</param>
     /// <returns>The requested page of users.</returns>
     [HttpGet("UserSyncUsers")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -100,6 +96,8 @@ public partial class ConfigurationController
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
+        ArgumentNullException.ThrowIfNull(manager);
+
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(0, skip);
 
@@ -121,11 +119,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets detailed information for a specific user mapping.
+    /// Reads every row of one user mapping.
     /// </summary>
     /// <param name="sourceUserId">The user's id on the source.</param>
     /// <param name="localUserId">The user's id on this server.</param>
-    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="manager">Reads and writes the Users sync table.</param>
     /// <returns>The user's rows, or 404 when there are none.</returns>
     [HttpGet("UserSyncUsers/{sourceUserId}/{localUserId}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -135,6 +133,8 @@ public partial class ConfigurationController
         string localUserId,
         [FromServices] UserSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
+
         var items = manager.GetByUserMapping(sourceUserId, localUserId);
         if (items.Count == 0)
         {
@@ -145,11 +145,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Ignores all categories for specified user mappings.
+    /// Marks every row of the selected user mappings as Ignored.
     /// </summary>
-    /// <param name="request">The request body.</param>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>The result of the bulk change.</returns>
+    /// <param name="request">The selected user mappings.</param>
+    /// <param name="manager">Reads and writes the Users sync table.</param>
+    /// <returns>How many rows changed, or 400 when no mapping was selected.</returns>
     [HttpPost("UserSyncUsers/Ignore")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -157,6 +157,8 @@ public partial class ConfigurationController
         [FromBody] BulkUserMappingsRequest request,
         [FromServices] UserSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
+
         if (request?.UserMappings == null || request.UserMappings.Count == 0)
         {
             return BadRequest("Select the user mappings.");
@@ -168,11 +170,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Queues all categories for specified user mappings.
+    /// Queues every row of the selected user mappings.
     /// </summary>
-    /// <param name="request">The request body.</param>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>The result of the bulk change.</returns>
+    /// <param name="request">The selected user mappings.</param>
+    /// <param name="manager">Reads and writes the Users sync table.</param>
+    /// <returns>How many rows changed, or 400 when no mapping was selected.</returns>
     [HttpPost("UserSyncUsers/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -180,6 +182,8 @@ public partial class ConfigurationController
         [FromBody] BulkUserMappingsRequest request,
         [FromServices] UserSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(manager);
+
         if (request?.UserMappings == null || request.UserMappings.Count == 0)
         {
             return BadRequest("Select the user mappings.");
@@ -190,6 +194,7 @@ public partial class ConfigurationController
         return Ok(new { Updated = successCount });
     }
 
+    /// <summary>Builds the list row for one user mapping from its rows.</summary>
     private static UserSyncUserDto MapToUserSyncUserDto(
         string sourceUserId,
         string localUserId,
@@ -245,6 +250,7 @@ public partial class ConfigurationController
         return dto;
     }
 
+    /// <summary>Builds the detail view of one user mapping from its rows.</summary>
     private static UserSyncUserDetailDto MapToUserSyncUserDetailDto(
         string sourceUserId,
         string localUserId,
@@ -285,6 +291,7 @@ public partial class ConfigurationController
         return dto;
     }
 
+    /// <summary>Describes how many policy, settings, and image changes a user mapping has.</summary>
     private static string ComputeTotalChangesDisplay(
         bool policyHasChanges, string? policySummary,
         bool configHasChanges, string? configSummary,
@@ -311,6 +318,7 @@ public partial class ConfigurationController
         return parts.Count == 0 ? "No Changes" : string.Join(", ", parts);
     }
 
+    /// <summary>Reads the number of differences from a changes summary, or 1 when it names none.</summary>
     private static int ExtractChangeCount(string? summary)
     {
         if (string.IsNullOrEmpty(summary))

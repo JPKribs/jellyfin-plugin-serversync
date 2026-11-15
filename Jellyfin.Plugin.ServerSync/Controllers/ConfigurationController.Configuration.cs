@@ -16,16 +16,16 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// Configuration and connection endpoints for Server Sync plugin.
+/// The routes that test a connection, sign in, and browse another server while a server entry is set up.
 /// </summary>
 public partial class ConfigurationController
 {
     /// <summary>
-    /// Tests connection to the source server using API key authentication.
+    /// Tests the connection to another server with its API Key.
     /// </summary>
-    /// <param name="request">Connection test request.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>Connection test response.</returns>
+    /// <param name="request">The Server URL and API Key to test.</param>
+    /// <param name="cancellationToken">Cancels the calls to the other server.</param>
+    /// <returns>What the server reported, or why the test failed.</returns>
     [HttpPost("TestConnection")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<ConnectionTestResult>> TestConnection([FromBody] TestConnectionRequest request, CancellationToken cancellationToken)
@@ -49,8 +49,6 @@ public partial class ConfigurationController
             });
         }
 
-        // The factory re-runs the SSRF gate and throws on rejection. Without this
-        // catch the settings page got an opaque 500 instead of the reason.
         SourceServerClient client;
         try
         {
@@ -61,6 +59,7 @@ public partial class ConfigurationController
                 AllowPrivateNetwork = request.AllowPrivateNetwork
             });
         }
+        // The factory runs the SSRF guard again, and the page shows its reason.
         catch (ArgumentException ex)
         {
             return Ok(new ConnectionTestResult
@@ -84,11 +83,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Authenticates with a source server using username and password to generate an access token.
+    /// Signs in to another server with a username and password to get an access token.
     /// </summary>
-    /// <param name="request">Authentication request with credentials.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>Authentication response with access token if successful.</returns>
+    /// <param name="request">The Server URL and the credentials to sign in with.</param>
+    /// <param name="cancellationToken">Cancels the calls to the other server.</param>
+    /// <returns>The access token when the sign in worked, or why it did not.</returns>
     [HttpPost("Authenticate")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<AuthenticateResponse>> Authenticate([FromBody] AuthenticateRequest request, CancellationToken cancellationToken)
@@ -171,11 +170,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets libraries from the source server.
+    /// Lists the libraries of another server.
     /// </summary>
-    /// <param name="request">Connection request with credentials.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>List of library DTOs.</returns>
+    /// <param name="request">The Server URL and API Key to connect with.</param>
+    /// <param name="cancellationToken">Cancels the calls to the other server.</param>
+    /// <returns>The libraries, or 400 with the reason.</returns>
     [HttpPost("GetSourceLibraries")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -203,7 +202,6 @@ public partial class ConfigurationController
                 AllowPrivateNetwork = request.AllowPrivateNetwork
             });
 
-            // The authenticated user id, when the key is a user token, enables the non admin fallback.
             var authenticatedUserId = request.AuthenticatedUserId
                 ?? _configManager.Configuration.FindServer(request.ServerKey)?.AuthenticatedUserId;
 
@@ -216,13 +214,9 @@ public partial class ConfigurationController
                 Locations = l.Locations?.ToList() ?? new List<string>()
             }).ToList());
         }
-        catch (OperationCanceledException)
-        {
-            throw; // Let ASP.NET Core handle cancellation
-        }
+        // The factory's SSRF guard refused the URL, and the page shows its reason.
         catch (ArgumentException ex)
         {
-            // SSRF gate in the factory rejected the URL. Surface the reason.
             return BadRequest(ex.Message);
         }
         catch (HttpRequestException ex)
@@ -233,11 +227,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets users from the source server.
+    /// Lists the users of another server.
     /// </summary>
-    /// <param name="request">Connection request with credentials.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>List of user info DTOs.</returns>
+    /// <param name="request">The Server URL and API Key to connect with.</param>
+    /// <param name="cancellationToken">Cancels the calls to the other server.</param>
+    /// <returns>The users, or 400 with the reason.</returns>
     [HttpPost("GetSourceUsers")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -276,13 +270,9 @@ public partial class ConfigurationController
                 Name = u.Name ?? string.Empty
             }).ToList());
         }
-        catch (OperationCanceledException)
-        {
-            throw; // Let ASP.NET Core handle cancellation
-        }
+        // The factory's SSRF guard refused the URL, and the page shows its reason.
         catch (ArgumentException ex)
         {
-            // SSRF gate in the factory rejected the URL. Surface the reason.
             return BadRequest(ex.Message);
         }
         catch (HttpRequestException ex)
@@ -293,19 +283,19 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets top-level items from a source server library for browsing/filtering.
+    /// Lists the top level items of a source library, or its collections or playlists, for the Library Filter picker.
     /// </summary>
-    /// <param name="libraryId">Source library ID.</param>
-    /// <param name="serverKey">The configured server entry to browse. Defaults to the first scan server.</param>
-    /// <param name="search">Optional search term.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
+    /// <param name="libraryId">The ID of the library on the source.</param>
+    /// <param name="serverKey">The key of the server entry to browse, which defaults to the first source.</param>
+    /// <param name="search">Narrows the list to names that match, when given.</param>
+    /// <param name="startIndex">The index of the first item of the page.</param>
+    /// <param name="limit">The most items one page holds, clamped to 200.</param>
     /// <param name="skip">Alias for <paramref name="startIndex"/>, used when present.</param>
     /// <param name="take">Alias for <paramref name="limit"/>, used when present.</param>
-    /// <param name="collections">Browse the server's collections instead of a library.</param>
-    /// <param name="playlists">Browse the server's playlists instead of a library.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>A page of top-level source items.</returns>
+    /// <param name="collections">Whether to browse the server's collections instead of a library.</param>
+    /// <param name="playlists">Whether to browse the server's playlists instead of a library.</param>
+    /// <param name="cancellationToken">Cancels the calls to the other server.</param>
+    /// <returns>A page of top level items, or 400 with the reason.</returns>
     [HttpGet("SourceLibraryItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -326,8 +316,6 @@ public partial class ConfigurationController
             return BadRequest("Select a library.");
         }
 
-        // Same clamps as every other list endpoint, an unclamped take pulls
-        // an entire source library into one response.
         startIndex = Math.Max(0, startIndex);
         limit = Math.Clamp(limit, 1, 200);
         if (skip.HasValue)
@@ -355,9 +343,6 @@ public partial class ConfigurationController
         {
             using var client = _clientFactory.Create(server);
 
-            // Collections and playlists live outside libraries (server-wide
-            // meta-folders), so the picker browses them without a parent
-            // library scope.
             var result = collections
                 ? await client.GetCollectionsAsync(
                     search,
@@ -398,11 +383,7 @@ public partial class ConfigurationController
                 TotalCount = result.TotalRecordCount ?? items.Count
             });
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Failed to get source files for library {LibraryId}", SanitizeForLog(libraryId));
             return BadRequest("Could not load the items from the server.");
@@ -410,19 +391,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Validates and normalizes a server URL. Classification is delegated to
-    /// <see cref="ConfigurationUtilities.ValidateServerUrlForSsrfAsync"/>, the same
-    /// gate <see cref="ISourceServerClientFactory.Create"/> enforces, so a URL that
-    /// passes here is not then rejected by the factory as an unhandled 500.
+    /// Checks a Server URL with the SSRF guard the client factory enforces and returns it normalized, keeping any sub path a reverse proxy serves Jellyfin at.
+    /// A name is resolved here, so a refused name is reported when the entry is saved.
     /// </summary>
-    /// <param name="url">URL to validate.</param>
-    /// <param name="allowPrivateNetwork">Whether a private network address is acceptable for this entry.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>Validation response with normalized URL.</returns>
     private static async Task<ValidateUrlResponse> ValidateServerUrlAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken)
     {
-        // A name is resolved here when private networks are disallowed, so the operator hears at save
-        // time that "localhost" or a LAN name is refused rather than at the first failed call.
         var ssrfError = await ConfigurationUtilities.ValidateServerUrlForSsrfAsync(url, allowPrivateNetwork, cancellationToken).ConfigureAwait(false);
         if (ssrfError != null)
         {
@@ -433,7 +406,6 @@ public partial class ConfigurationController
             };
         }
 
-        // Guaranteed to parse, the SSRF gate rejects anything that doesn't.
         var uri = new Uri(url, UriKind.Absolute);
 
         var isLocalhost = uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
@@ -446,9 +418,6 @@ public partial class ConfigurationController
             normalizedUrl += $":{uri.Port}";
         }
 
-        // Keep a sub-path (reverse proxy serving Jellyfin at /jellyfin).
-        // Dropping it made such servers impossible to configure, with a
-        // misleading "connection failed" as the only symptom.
         var path = uri.AbsolutePath.TrimEnd('/');
         if (!string.IsNullOrEmpty(path))
         {

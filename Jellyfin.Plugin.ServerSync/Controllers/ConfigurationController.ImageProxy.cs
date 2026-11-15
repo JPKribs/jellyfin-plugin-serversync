@@ -10,21 +10,19 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// Proxies source-server images for the admin pages. The decrypted source API key never appears in an
-/// image URL, so it never reaches browser devtools, caches, or the source server's access logs. The key
-/// stays server-side and the browser authenticates with its own local session.
+/// Proxies a source's images for the dashboard, so its API Key stays on this server and never appears in an image URL.
 /// </summary>
 public partial class ConfigurationController
 {
     /// <summary>
-    /// Streams an item or user primary image from the source server.
+    /// Streams an item's or a user's primary image from a source.
     /// </summary>
-    /// <param name="itemId">Source item (or user) ID.</param>
-    /// <param name="user">True to fetch a user profile image instead of an item image.</param>
-    /// <param name="maxHeight">Maximum image height in pixels.</param>
-    /// <param name="serverKey">The server entry the image lives on. Defaults to the first scan server.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>The image bytes, or 404 when the server or image is unavailable.</returns>
+    /// <param name="itemId">The ID of the item or user on the source.</param>
+    /// <param name="user">Whether to fetch a user's profile image instead of an item's image.</param>
+    /// <param name="maxHeight">The most pixels high the image may be, clamped to 600.</param>
+    /// <param name="serverKey">The key of the server entry the image lives on, which defaults to the first source.</param>
+    /// <param name="cancellationToken">Cancels the fetch from the source.</param>
+    /// <returns>The image, or 404 when the server or image is unavailable.</returns>
     [HttpGet("ImageProxy")]
     public async Task<ActionResult> GetSourceImage(
         [FromQuery] Guid itemId,
@@ -55,9 +53,9 @@ public partial class ConfigurationController
                 return NotFound();
             }
 
-            // Only serve images: anything else from a hostile "source server"
-            // would execute in this server's origin if opened directly.
             var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+
+            // Anything but an image would run in this server's origin if opened.
             if (!contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             {
                 return NotFound();
@@ -74,15 +72,9 @@ public partial class ConfigurationController
                 return NotFound();
             }
 
-            // Cacheable: the page fetches these with header auth, so the URL
-            // carries no credentials and caching by URL is safe.
             Response.Headers.CacheControl = "private, max-age=300";
             Response.Headers.XContentTypeOptions = "nosniff";
             return File(bytes, contentType);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or UriFormatException)
         {
@@ -92,11 +84,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Upper bound for a proxied thumbnail (maxHeight is clamped to 600, so
-    /// anything past this is not a real image answer).
+    /// The most bytes a proxied image may hold. A larger body is not a real thumbnail.
     /// </summary>
     private const int MaxImageBytes = 8 * 1024 * 1024;
 
+    /// <summary>Reads a body into memory, or returns null once it passes the cap.</summary>
     private static async Task<byte[]?> ReadCappedAsync(HttpContent content, CancellationToken cancellationToken)
     {
         var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);

@@ -16,18 +16,18 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// Metadata sync endpoints for Server Sync plugin.
+/// The Metadata routes of the Sync tab.
 /// </summary>
 public partial class ConfigurationController
 {
     /// <summary>
-    /// Gets a specific metadata sync item by its ID.
+    /// Reads one Metadata row with this server's live values and the source's measured image sizes.
     /// </summary>
-    /// <param name="id">The database ID of the metadata sync item.</param>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="metadataService">Builds and compares metadata sync rows.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>The metadata sync item DTO.</returns>
+    /// <param name="id">The row's ID in the Metadata sync table.</param>
+    /// <param name="manager">Reads and writes the Metadata sync table.</param>
+    /// <param name="metadataService">Reads the live local values and measures the source's images.</param>
+    /// <param name="cancellationToken">Cancels the calls to the source.</param>
+    /// <returns>The row, or 404 when there is none.</returns>
     [HttpGet("MetadataItems/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -47,8 +47,6 @@ public partial class ConfigurationController
 
         var config = _configManager.Configuration;
 
-        // Re-read live local state so the modal reflects what's actually on
-        // the server, not the snapshot from the last metadata Refresh.
         metadataService.RefreshLocalSnapshot(
             item,
             syncMetadata: config.MetadataSyncMetadata,
@@ -58,8 +56,7 @@ public partial class ConfigurationController
             syncGenres: config.MetadataSyncGenres,
             syncTags: config.MetadataSyncTags);
 
-        // Refresh builds tag-only manifests for speed. The modal needs real
-        // sizes/dimensions to render "623.4 KB" instead of "1 (0 B)".
+        // A scan stores tags only, and the dialog needs real sizes.
         if (config.MetadataSyncImages && !string.IsNullOrEmpty(item.Images.Source))
         {
             try
@@ -70,13 +67,9 @@ public partial class ConfigurationController
                     await metadataService.EnrichSourceImageSizesAsync(item, client, cancellationToken).ConfigureAwait(false);
                 }
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Source image enrichment failed for metadata item {Id} ({Name}). Modal will show tag-only sizes", id, item.ItemName);
+                _logger.LogWarning(ex, "Source image enrichment failed for metadata item {Id} ({Name}). Modal will show tag-only sizes", id, SanitizeForLog(item.ItemName));
             }
         }
 
@@ -84,16 +77,15 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets paginated metadata sync items from the database with optional search and filter.
-    /// One record per item containing all categories (Metadata, Images, People).
+    /// Lists a page of Metadata rows, narrowed by search, status, and source library.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="search">Optional search term (matches item names or paths).</param>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="sourceLibraryId">Optional source library ID filter.</param>
-    /// <param name="skip">Number of items to skip (default 0).</param>
-    /// <param name="take">Maximum items to return (default 50, max 200).</param>
-    /// <returns>Paginated result of metadata sync item DTOs.</returns>
+    /// <param name="manager">Reads and writes the Metadata sync table.</param>
+    /// <param name="search">Narrows the list to names or paths that match, when given.</param>
+    /// <param name="status">Narrows the list to one status, when given.</param>
+    /// <param name="sourceLibraryId">Narrows the list to one library on the source, when given.</param>
+    /// <param name="skip">How many rows to pass over before the page starts.</param>
+    /// <param name="take">The most rows the page holds, clamped to 200.</param>
+    /// <returns>A page of rows with the total count, without the large JSON blobs.</returns>
     [HttpGet("MetadataItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PagedResult<MetadataSyncItemDto>> GetMetadataSyncItems(
@@ -131,10 +123,10 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Gets metadata sync status counts.
+    /// Counts the Metadata rows in each status.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <returns>Metadata sync status response with counts.</returns>
+    /// <param name="manager">Reads and writes the Metadata sync table.</param>
+    /// <returns>The counts, with the last run failure when there is one.</returns>
     [HttpGet("MetadataStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<MetadataSyncStatusResponse> GetMetadataSyncStatus([FromServices] MetadataSyncTableManager manager)
@@ -158,12 +150,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Moves metadata sync items to Queued status. With no ids and a Status, queues every row in that
-    /// status, which is how "Retry errors" reaches every errored row.
+    /// Queues the selected Metadata rows. With no IDs and a status, it queues every row in that status, which is how a retry reaches every errored row.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Bulk metadata sync items request.</param>
-    /// <returns>Action result with updated count.</returns>
+    /// <param name="manager">Reads and writes the Metadata sync table.</param>
+    /// <param name="request">The IDs of the selected rows.</param>
+    /// <returns>How many rows changed and which did not, or 400 when none was selected.</returns>
     [HttpPost("MetadataItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -187,6 +178,7 @@ public partial class ConfigurationController
             var (updated, notFound) = manager.BatchUpdateStatusByIdsWithDetails(request.Ids, SyncStatus.Queued);
             return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "QueueMetadataSyncItems"));
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue metadata sync items by IDs");
@@ -195,11 +187,11 @@ public partial class ConfigurationController
     }
 
     /// <summary>
-    /// Marks metadata sync items as ignored.
+    /// Marks the selected Metadata rows as Ignored.
     /// </summary>
-    /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="request">Bulk metadata sync items request.</param>
-    /// <returns>Action result with updated count.</returns>
+    /// <param name="manager">Reads and writes the Metadata sync table.</param>
+    /// <param name="request">The IDs of the selected rows.</param>
+    /// <returns>How many rows changed and which did not, or 400 when none was selected.</returns>
     [HttpPost("MetadataItems/Ignore")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -218,6 +210,7 @@ public partial class ConfigurationController
             var (updated, notFound) = manager.BatchUpdateStatusByIdsWithDetails(request.Ids, SyncStatus.Ignored);
             return Ok(BuildBulkResult(updated, request.Ids.Count, notFound, "IgnoreMetadataSyncItems"));
         }
+        // Any failure becomes a 500 the page can show.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore metadata sync items by IDs");
