@@ -3,11 +3,8 @@ using System;
 namespace Jellyfin.Plugin.ServerSync.Models.Queue;
 
 /// <summary>
-/// One change notice sent from the server where a change happened to a peer that pulls it. A hint says
-/// what changed and where. It never carries the value: the receiver reads the live state from the
-/// origin. Paths and names are the origin's own and the receiver maps them through its mappings for
-/// that origin. The origin's ids are included so the receiver can fetch the object, but they are never
-/// used as keys on the receiver.
+/// One hint, sent from the server where a change happened to a peer, saying what changed and never the value.
+/// Paths, names, and IDs are the origin's own, so the receiver maps them through its mappings and never uses the IDs as keys.
 /// </summary>
 public class SyncHint
 {
@@ -45,10 +42,8 @@ public class SyncHint
     public DateTime VersionTimestamp { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the change was made by hand. A provider's work, such as
-    /// a poster fetched during a scan, is announced too but marked false: it fills in where the
-    /// receiver has recorded no edit of its own and never replaces one. Absent from older peers, which
-    /// is read as true.
+    /// Gets or sets a value indicating whether a person made the change. A peer that leaves it out is read as <c>true</c>.
+    /// A provider's change is marked <c>false</c>, so it only fills in where the receiver recorded no edit of its own.
     /// </summary>
     public bool Recorded { get; set; } = true;
 }

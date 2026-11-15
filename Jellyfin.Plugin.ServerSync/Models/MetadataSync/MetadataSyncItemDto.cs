@@ -129,11 +129,8 @@ public class MetadataSyncItemDto
     public string? ChangesSummary { get; set; }
 
     /// <summary>
-    /// Gets or sets the comparator's precise reason the image manifests
-    /// differ (e.g. which type and index, and both sizes). Null when images
-    /// match or on list views. The modal shows per-type size SUMS, which can
-    /// look identical while per-index sizes differ. Without this the
-    /// "Images: Changes" badge is unexplainable from the UI.
+    /// Gets or sets the comparator's reason the image manifests differ, such as the type and both sizes, or null when they match or on list views.
+    /// The page shows size totals per type, which can match while single images differ.
     /// </summary>
     public string? ImagesChangesDetail { get; set; }
 

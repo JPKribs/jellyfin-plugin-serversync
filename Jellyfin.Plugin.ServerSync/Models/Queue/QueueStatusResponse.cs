@@ -12,9 +12,8 @@ public class QueueStatusResponse
     public List<InboundHintDto> Inbound { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets the hints finished recently with the version each one applied. An origin only treats
-    /// a hint as done when the finished version is at least the one its row now carries, so a hint
-    /// re-sent with a newer edit is never closed by an older completion.
+    /// Gets or sets the hints finished recently, each with the stamp it applied.
+    /// An origin closes a hint only when that stamp is at least its row's, so an older completion never closes a newer edit.
     /// </summary>
     public List<CompletedHint> CompletedHints { get; set; } = new();
 }

@@ -50,7 +50,7 @@ public enum HintCode
     /// <summary>The receiver is set to leave the item alone.</summary>
     Ignored,
 
-    /// <summary>The file is no longer on the origin.</summary>
+    /// <summary>The file is gone from the origin.</summary>
     SourceGone,
 
     /// <summary>The origin did not say where the file is.</summary>

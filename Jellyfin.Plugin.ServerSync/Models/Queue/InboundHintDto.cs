@@ -50,7 +50,7 @@ public class InboundHintDto
 
     /// <summary>Builds the DTO for a row.</summary>
     /// <param name="row">The stored inbound row.</param>
-    /// <returns>The DTO.</returns>
+    /// <returns>The row as the dashboard reads it.</returns>
     public static InboundHintDto From(InboundHint row)
     {
         ArgumentNullException.ThrowIfNull(row);

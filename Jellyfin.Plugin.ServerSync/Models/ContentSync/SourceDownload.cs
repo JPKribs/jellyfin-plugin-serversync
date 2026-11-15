@@ -7,8 +7,7 @@ using System.Net.Http.Headers;
 namespace Jellyfin.Plugin.ServerSync.Models.ContentSync;
 
 /// <summary>
-/// One answer to a file download: the body, where its bytes start in the file, and the validator a
-/// later attempt presents to resume it.
+/// One answer to a file download, with the body, where its bytes start in the file, and the validator a later attempt resumes with.
 /// </summary>
 /// <param name="Stream">The body. The caller disposes it.</param>
 /// <param name="ContentLength">The body's length, when the source said.</param>
@@ -18,8 +17,8 @@ namespace Jellyfin.Plugin.ServerSync.Models.ContentSync;
 public sealed record SourceDownload(Stream Stream, long? ContentLength, long? TotalLength, long Offset, string? Validator)
 {
     /// <summary>Reads the validator a resume can be tied to. A weak ETag cannot be, so the date stands in.</summary>
-    /// <param name="response">The answer.</param>
-    /// <returns>The validator, or null.</returns>
+    /// <param name="response">The source's answer to the download request.</param>
+    /// <returns>The validator, or null when the source gave neither a strong ETag nor a date.</returns>
     public static string? ValidatorOf(HttpResponseMessage response)
     {
         ArgumentNullException.ThrowIfNull(response);
@@ -34,7 +33,7 @@ public sealed record SourceDownload(Stream Stream, long? ContentLength, long? To
     /// <summary>Turns a validator back into the If-Range condition for a resume.</summary>
     /// <param name="validator">The validator a download recorded, or null.</param>
     /// <param name="condition">The If-Range condition, set when the method returns <c>true</c>.</param>
-    /// <returns>True when the validator can be presented.</returns>
+    /// <returns><c>true</c> when the validator can be presented.</returns>
     public static bool TryParseIfRange(string? validator, out RangeConditionHeaderValue? condition)
     {
         condition = null;

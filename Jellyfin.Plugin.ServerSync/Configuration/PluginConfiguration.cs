@@ -13,13 +13,12 @@ using MediaBrowser.Model.Plugins;
 namespace Jellyfin.Plugin.ServerSync.Configuration;
 
 /// <summary>
-/// Configuration settings for the Server Sync plugin.
+/// The settings of the Server Sync plugin.
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
     /// <summary>
-    /// Gets or sets the configured peer servers in rank order. Index zero wins whenever two servers
-    /// offer the same item, and each later entry only adds what every earlier entry lacks.
+    /// Gets or sets the server entries in Rank order. The first wins when two offer the same item, and each later one adds only what the earlier lack.
     /// </summary>
     public List<SourceServer> Servers { get; set; } = new();
 
@@ -39,9 +38,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool TakeLinkImagesFromSource { get; set; } = true;
 
     /// <summary>
-    /// Whether a player's direct play of a link is streamed from the source by this plugin, for the
-    /// user who asked. Off, Jellyfin reads the link's own address instead, which works the same but
-    /// cannot tell two viewers of one link apart.
+    /// Gets or sets a value indicating whether this plugin streams a link's direct play from the source for the user who asked.
+    /// When off, Jellyfin reads the link's own address, which cannot tell two viewers of one link apart.
     /// </summary>
     public bool StreamLinksDirectly { get; set; } = true;
 
@@ -52,8 +50,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public int LinkMaxStreamsTotal { get; set; }
 
     /// <summary>
-    /// How much disk the link cache may use. Unset, the cache is off at a size of 0 and holds up to
-    /// <see cref="LinkCacheSizeGb"/> otherwise.
+    /// Gets or sets how the link cache is sized. Unset, the cache is off at a size of 0 and fixed at <see cref="LinkCacheSizeGb"/> otherwise.
     /// </summary>
     public LinkCacheSizing? LinkCacheSizing { get; set; }
 
@@ -100,12 +97,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public CacheRemovalOrder LinkCacheRemovalOrder { get; set; } = CacheRemovalOrder.LastPlayed;
 
     /// <summary>
-    /// The most disk the link cache may use, in bytes, or 0 when the cache is off. The room on the
-    /// cache's disk is what the cache holds now plus what is free, less the free space always kept.
+    /// Reads the most disk the link cache may use, in bytes, or 0 when the cache is off.
+    /// The room on the cache's disk is what the cache holds plus what is free, less the free space always kept.
     /// </summary>
-    /// <param name="usedBytes">What the cache holds now.</param>
+    /// <param name="usedBytes">The bytes the cache holds.</param>
     /// <param name="freeBytes">The free space on the cache's disk.</param>
-    /// <returns>The size in bytes.</returns>
+    /// <returns>The limit in bytes.</returns>
     public long GetLinkCacheLimitBytes(long usedBytes, long freeBytes)
     {
         const long Gb = 1024L * 1024L * 1024L;
@@ -123,14 +120,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxConcurrentDownloads { get; set; } = 2;
 
     /// <summary>
-    /// Gets or sets the most every download to this server together may use, in Mbps, like every other
-    /// speed in the plugin. 0 is no limit.
+    /// Gets or sets the most all downloads to this server together may use, in Mbps. 0 is no limit.
     /// </summary>
     public int MaxDownloadSpeed { get; set; } = 0;
 
     /// <summary>
-    /// Gets or sets the unit <see cref="MaxDownloadSpeed"/> is in. Always <see cref="Mbps"/> after
-    /// <see cref="SanitizeValues"/>, which converts a speed kept in KB, MB, or GB per second.
+    /// Gets or sets the unit <see cref="MaxDownloadSpeed"/> is in, which <see cref="SanitizeValues"/> always converts to <see cref="Mbps"/>.
     /// </summary>
     public string DownloadSpeedUnit { get; set; } = Mbps;
 
@@ -138,42 +133,40 @@ public class PluginConfiguration : BasePluginConfiguration
     public const string Mbps = "Mbps";
 
     /// <summary>
-    /// Calculates the max download speed in bytes per second.
+    /// Reads the download speed limit in bytes per second.
     /// </summary>
-    /// <returns>Speed in bytes per second.</returns>
+    /// <returns>The speed in bytes per second, or 0 for no limit.</returns>
     public long GetMaxDownloadSpeedBytes() => RateUtilities.MbpsToBytesPerSecond(MaxDownloadSpeed);
 
     /// <summary>
-    /// Calculates the scheduled download speed in bytes per second.
+    /// Reads the scheduled download speed limit in bytes per second.
     /// </summary>
-    /// <returns>Speed in bytes per second.</returns>
+    /// <returns>The speed in bytes per second, or 0 for no limit.</returns>
     public long GetScheduledDownloadSpeedBytes() => RateUtilities.MbpsToBytesPerSecond(ScheduledDownloadSpeed);
 
     /// <summary>
-    /// Returns the appropriate download speed based on current time and scheduling settings.
+    /// Reads the download speed limit that applies at this hour, given the bandwidth schedule.
     /// </summary>
-    /// <returns>Effective speed in bytes per second.</returns>
+    /// <returns>The speed in bytes per second, or 0 for no limit.</returns>
     public long GetEffectiveDownloadSpeedBytes() => GetEffectiveDownloadSpeedBytes(DateTime.Now.Hour);
 
     /// <summary>
-    /// Returns the download speed for a given local hour, so the schedule can be checked at any hour
-    /// rather than only the one it happens to be.
+    /// Reads the download speed limit that applies at a given local hour, given the bandwidth schedule.
     /// </summary>
     /// <param name="currentHour">The local hour, 0 to 23.</param>
-    /// <returns>Effective speed in bytes per second.</returns>
+    /// <returns>The speed in bytes per second, or 0 for no limit.</returns>
     public long GetEffectiveDownloadSpeedBytes(int currentHour)
         => IsInBandwidthSchedule(currentHour) ? GetScheduledDownloadSpeedBytes() : GetMaxDownloadSpeedBytes();
 
-    /// <summary>Whether the bandwidth schedule's hours apply now. False while scheduling is off.</summary>
-    /// <returns>True inside the scheduled hours.</returns>
+    /// <summary>Whether the bandwidth schedule's hours apply at this hour, which is never the case while scheduling is off.</summary>
+    /// <returns><c>true</c> inside the scheduled hours.</returns>
     public bool IsInBandwidthSchedule() => IsInBandwidthSchedule(DateTime.Now.Hour);
 
     /// <summary>
-    /// Whether the bandwidth schedule's hours apply at a given local hour. Downloads and link streams
-    /// share the schedule, each with its own scheduled speed.
+    /// Whether the bandwidth schedule's hours apply at a given local hour. Downloads and link streams share the schedule.
     /// </summary>
     /// <param name="currentHour">The local hour, 0 to 23.</param>
-    /// <returns>True inside the scheduled hours.</returns>
+    /// <returns><c>true</c> inside the scheduled hours.</returns>
     public bool IsInBandwidthSchedule(int currentHour)
     {
         if (!EnableBandwidthScheduling)
@@ -181,7 +174,7 @@ public class PluginConfiguration : BasePluginConfiguration
             return false;
         }
 
-        // Equal start and end means all day, since the same-day branch would never match.
+        // Equal start and end hours mean all day.
         return ScheduledStartHour == ScheduledEndHour
             || (ScheduledStartHour < ScheduledEndHour
                 ? currentHour >= ScheduledStartHour && currentHour < ScheduledEndHour
@@ -206,6 +199,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets what happens to a local file once its item is gone from the source. Null reads the value from <see cref="DeleteMissingContentMode"/>.</summary>
     public MissingContentAction? MissingContentAction { get; set; }
 
+    /// <summary>Gets what happens to a removed file, read from <see cref="DeleteMissingContentMode"/> when no action is set.</summary>
     [XmlIgnore]
     [JsonIgnore]
     public MissingContentAction EffectiveMissingContentAction
@@ -223,8 +217,7 @@ public class PluginConfiguration : BasePluginConfiguration
         };
 
     /// <summary>
-    /// Gets how a deletion of a removed file is approved, from <see cref="EffectiveMissingContentAction"/>:
-    /// at once for Delete, after approval for Delete After Approval, and never otherwise.
+    /// Gets how a deletion of a removed file is approved, from <see cref="EffectiveMissingContentAction"/>.
     /// </summary>
     public ApprovalMode DeletionApproval => EffectiveMissingContentAction switch
     {
@@ -270,12 +263,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MinimumFreeDiskSpaceGb { get; set; } = 10;
 
     /// <summary>
-    /// Timestamp when the last sync started.
+    /// Gets or sets the time the last Content run started.
     /// </summary>
     public DateTime? LastSyncStartTime { get; set; }
 
     /// <summary>
-    /// Timestamp when the last sync completed.
+    /// Gets or sets the time the last Content run ended.
     /// </summary>
     public DateTime? LastSyncEndTime { get; set; }
 
@@ -295,8 +288,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public int RecyclingBinRetentionDays { get; set; } = 7;
 
     /// <summary>
-    /// Remove empty parent folders after deleting content files.
-    /// Only removes folders if they are completely empty after deletion.
+    /// Gets or sets a value indicating whether a folder left empty by a deletion is removed.
     /// </summary>
     public bool RemoveEmptyFoldersOnDelete { get; set; }
 
@@ -306,9 +298,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxRetryCount { get; set; } = 3;
 
     /// <summary>
-    /// Gets or sets a value indicating whether items watched by every user in
-    /// <see cref="WatchedFilterUserIds"/> are skipped during content sync. It follows the list: on
-    /// while any user is picked, off while none is. A list with the switch off is cleared.
+    /// Gets or sets a value indicating whether items watched by every user in <see cref="WatchedFilterUserIds"/> are skipped by Content.
+    /// It is on exactly while any user is picked.
     /// </summary>
     public bool SkipWatchedByAllUsers { get; set; }
 
@@ -359,14 +350,13 @@ public class PluginConfiguration : BasePluginConfiguration
             | (HistorySyncFavorites ? Models.HistorySync.HistoryFields.Favorite : 0);
 
     /// <summary>
-    /// Timestamp when the last history sync completed.
+    /// Gets or sets the time the last History run ended.
     /// </summary>
     public DateTime? LastHistorySyncTime { get; set; }
 
     /// <summary>
-    /// Gets or sets a switch that turns history negotiation on for every server. <see cref="SanitizeValues"/>
-    /// moves it onto every library mapping (see <see cref="Models.Configuration.LibraryMapping.NegotiateHistory"/>),
-    /// which negotiates only for a Sync server, and sets it to false.
+    /// Gets or sets a switch that turns History negotiation on for every server.
+    /// <see cref="SanitizeValues"/> moves it onto every library mapping as <see cref="Models.Configuration.LibraryMapping.NegotiateHistory"/> and clears it.
     /// </summary>
     public bool HistorySyncNegotiate { get; set; }
 
@@ -402,7 +392,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public UserConflictRule UserSyncConflict { get; set; } = UserConflictRule.Newest;
 
     /// <summary>
-    /// Timestamp when the last user sync completed.
+    /// Gets or sets the time the last Users run ended.
     /// </summary>
     public DateTime? LastUserSyncTime { get; set; }
 
@@ -454,7 +444,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool MetadataSyncFolderItems { get; set; }
 
     /// <summary>
-    /// Timestamp when the last metadata sync completed.
+    /// Gets or sets the time the last Metadata run ended.
     /// </summary>
     public DateTime? LastMetadataSyncTime { get; set; }
 
@@ -475,15 +465,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool PeopleSyncImages { get; set; } = true;
 
     /// <summary>
-    /// Timestamp when the last people sync completed.
+    /// Gets or sets the time the last People run ended.
     /// </summary>
     public DateTime? LastPeopleSyncTime { get; set; }
 
     /// <summary>
-    /// Concurrent items processed during the Metadata and People refresh
-    /// build phases. Higher values finish refreshes faster but use more CPU
-    /// for the duration. The build work is mostly CPU-bound (blob
-    /// serialization, hashing, comparison). Default 8. Clamped 1 to 16.
+    /// Gets or sets how many items a Metadata or People scan builds at once, clamped 1 to 16.
+    /// A higher value ends a scan sooner and uses more CPU.
     /// </summary>
     public int RefreshParallelism { get; set; } = 8;
 
@@ -491,41 +479,36 @@ public class PluginConfiguration : BasePluginConfiguration
     public int FullScanIntervalHours { get; set; } = 24;
 
     /// <summary>
-    /// How long, in seconds, an object must go untouched after its last change before that change is
-    /// sent to the servers in Push or Sync mode. Every edit to the same object restarts the wait, and
-    /// one hint goes out at the end of it, so a poster changed twice a minute apart is sent once.
-    /// Default 60. Clamped 1 to 3600.
+    /// Gets or sets Send Changes After, the seconds an object must go untouched before its hint goes out, clamped 1 to 3600.
+    /// Every edit to the same object restarts the wait, so several edits send one hint.
     /// </summary>
     public int HintDebounceSeconds { get; set; } = 60;
 
     /// <summary>
-    /// How long, in seconds, to wait before sending a change again after a peer could not be reached or
-    /// answered with an error. Each further failure doubles the wait, up to
-    /// <see cref="HintRetryMaxMinutes"/>. Default 30. Clamped 5 to 3600.
+    /// Gets or sets the seconds to wait before sending a change again after a peer failed, clamped 5 to 3600.
+    /// Each further failure doubles the wait, up to <see cref="HintRetryMaxMinutes"/>.
     /// </summary>
     public int HintRetrySeconds { get; set; } = 30;
 
     /// <summary>
-    /// The longest wait, in minutes, between attempts to send a change to a peer that cannot be reached.
-    /// Default 60. Clamped 1 to 1440.
+    /// Gets or sets the longest wait, in minutes, between attempts to send a change to a peer that cannot be reached, clamped 1 to 1440.
     /// </summary>
     public int HintRetryMaxMinutes { get; set; } = 60;
 
     /// <summary>
-    /// How many times a change is sent to a peer that cannot be reached before it is marked failed.
-    /// Zero keeps trying for as long as the peer is configured. Default 0. Clamped 0 to 1000.
+    /// Gets or sets how many times a change is sent to a peer that cannot be reached before it is marked failed, clamped 0 to 1000.
+    /// Zero keeps trying for as long as the peer has a server entry.
     /// </summary>
     public int HintMaxRetries { get; set; }
 
     /// <summary>
-    /// How long, in minutes, hints to a peer are paused after it refused this server's key or answered
-    /// that it lacks the plugin. Default 15. Clamped 1 to 1440.
+    /// Gets or sets how many minutes hints to a peer are paused after it refused this server's key or lacks the plugin, clamped 1 to 1440.
     /// </summary>
     public int HintRefusedRetryMinutes { get; set; } = 15;
 
     /// <summary>
-    /// How many times a change is sent to a peer that keeps refusing before it is marked failed. Zero
-    /// keeps trying for as long as the peer is configured. Default 0. Clamped 0 to 1000.
+    /// Gets or sets how many times a change is sent to a peer that keeps refusing before it is marked failed, clamped 0 to 1000.
+    /// Zero keeps trying for as long as the peer has a server entry.
     /// </summary>
     public int HintRefusedMaxRetries { get; set; }
 
@@ -533,21 +516,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public List<PeerCallerGrant> PeerCallerGrants { get; set; } = new();
 
     /// <summary>
-    /// Verify source image sizes with live HTTP calls on every refresh, even
-    /// for images whose tag has not changed. Applies to all sync modules.
-    /// Catches the rare case of an image file replaced on the source's disk
-    /// without a metadata rescan, at the cost of one GET plus one HEAD per
-    /// image per item per refresh. Off by default, unchanged tags reuse the
-    /// previously measured sizes.
+    /// Gets or sets a value indicating whether every scan measures source images again, even those whose tag is unchanged.
+    /// It catches an image replaced on the source's disk under the same tag, at the cost of two calls per image.
     /// </summary>
     public bool DeepImageVerification { get; set; }
 
     /// <summary>
-    /// When enabled, whitelisted source collections are mirrored locally by
-    /// the Sync Collections task: a matching local collection is created and
-    /// its membership tracks the synced counterparts of the source
-    /// collection's items. Defaults to on, since the whole point of whitelisting
-    /// a collection is seeing it on this server.
+    /// Gets or sets a value indicating whether collections a Whitelist lists are mirrored here, each holding the synced copies of the source collection's items.
     /// </summary>
     public bool MirrorSyncedCollections { get; set; } = true;
 
@@ -569,7 +544,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public PlaylistRemovedAction PlaylistRemovedAction { get; set; } = PlaylistRemovedAction.Delete;
 
     /// <summary>
-    /// Clamps configuration values to valid ranges.
+    /// Clamps every setting to its valid range, repairs lists a damaged file left null, and moves each server wide value onto the mappings that hold it.
+    /// A path that cannot be parsed is dropped, since a throw would fail every save.
     /// </summary>
     public void SanitizeValues()
     {
@@ -597,15 +573,13 @@ public class PluginConfiguration : BasePluginConfiguration
         HintRefusedRetryMinutes = Math.Clamp(HintRefusedRetryMinutes, 1, 1440);
         HintRefusedMaxRetries = Math.Clamp(HintRefusedMaxRetries, 0, 1000);
 
-        // A hand edited or truncated XML file can deserialize a list as null or with null entries. Every
-        // reader walks these lists without checking, so they are repaired here before anything else runs.
         Servers ??= new List<SourceServer>();
         Servers.RemoveAll(entry => entry is null);
         foreach (var server in Servers)
         {
             server.LinkMaxStreams = Math.Clamp(server.LinkMaxStreams, 0, 1000);
             server.LinkTakeMaxStreams = Math.Clamp(server.LinkTakeMaxStreams, 0, 1000);
-            // The per user limit lives on each user mapping, so a server wide one is copied onto mappings that set none.
+            // The per user limit lives on each user mapping.
             if (server.LinkMaxStreamsPerUser > 0)
             {
                 foreach (var mapping in server.UserMappings ?? new List<UserMapping>())
@@ -621,7 +595,6 @@ public class PluginConfiguration : BasePluginConfiguration
         LastRunFailures ??= new List<SyncRunFailure>();
         WatchedFilterUserIds ??= new List<string>();
 
-        // Every speed is kept in Mbps, so one in KB, MB, or GB per second is converted.
         MaxDownloadSpeed = RateUtilities.ToMbps(MaxDownloadSpeed, DownloadSpeedUnit);
         ScheduledDownloadSpeed = RateUtilities.ToMbps(ScheduledDownloadSpeed, ScheduledDownloadSpeedUnit);
         DownloadSpeedUnit = Mbps;
@@ -635,7 +608,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
         SkipWatchedByAllUsers = WatchedFilterUserIds.Count > 0;
 
-        // History negotiation is chosen per library, so the server wide switch is copied onto each mapping.
+        // History negotiation is chosen per library mapping.
         if (HistorySyncNegotiate)
         {
             foreach (var mapping in Servers.SelectMany(s => s.LibraryMappings ?? new List<LibraryMapping>()))
@@ -646,7 +619,6 @@ public class PluginConfiguration : BasePluginConfiguration
             HistorySyncNegotiate = false;
         }
 
-        // What happens to a removed file is one value, so it is derived from the action and the approval mode.
         MissingContentAction = EffectiveMissingContentAction;
         DeleteMissingContentMode = MissingContentAction switch
         {
@@ -701,11 +673,11 @@ public class PluginConfiguration : BasePluginConfiguration
             }
         }
 
-        // An unparseable path is dropped because a throw would fail every save, including the settings page's.
         TempDownloadPath = NormalizePathOrNull(TempDownloadPath);
         RecyclingBinPath = NormalizePathOrNull(RecyclingBinPath);
     }
 
+    /// <summary>Returns the full form of a path, or null when it is relative or cannot be parsed.</summary>
     private static string? NormalizePathOrNull(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -715,8 +687,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
         try
         {
-            // A relative path would resolve against the server's working directory, which is not a place
-            // anyone chose, so it is treated as invalid rather than turned into a surprise location.
+            // A relative path would resolve against a folder nobody chose.
             if (!Path.IsPathFullyQualified(path))
             {
                 return null;
@@ -731,9 +702,8 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// Most-recent run failure per module, surfaced in the dashboard.
-    /// Stored as a list (not a dictionary) because Jellyfin's XML serialization
-    /// does not round-trip <see cref="Dictionary{TKey, TValue}"/> reliably.
+    /// Gets or sets the last run failure of each sync type, shown on the dashboard.
+    /// It is a list because Jellyfin's XML serialization does not round trip a dictionary.
     /// </summary>
     public List<SyncRunFailure> LastRunFailures { get; set; } = new();
 }

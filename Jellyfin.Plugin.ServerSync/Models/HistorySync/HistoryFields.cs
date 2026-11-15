@@ -3,9 +3,8 @@ using System;
 namespace Jellyfin.Plugin.ServerSync.Models.HistorySync;
 
 /// <summary>
-/// The parts of a user's watch history for one item that History Sync may copy. A part that is
-/// switched off is still read, so the rest merges as it would otherwise, but it is never written on
-/// this server, never proposed to another, and never counts as a difference.
+/// The parts of a user's History for one item that may be copied.
+/// A part that is off is still read so the rest merges as usual, but it is never written, proposed, or counted as a difference.
 /// </summary>
 [Flags]
 public enum HistoryFields

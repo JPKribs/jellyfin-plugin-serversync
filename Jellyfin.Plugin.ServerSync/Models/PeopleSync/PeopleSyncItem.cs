@@ -18,13 +18,12 @@ public class PeopleSyncItem : SyncRecord
     public string PersonName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the source server's person item ID.
+    /// Gets or sets the person's item ID on the source.
     /// </summary>
     public string? SourcePersonId { get; set; }
 
     /// <summary>
-    /// Gets or sets the local server's person item ID. Null when no local
-    /// match exists. The refresh skips writing rows in that case.
+    /// Gets or sets the person's item ID on this server. A scan writes no row for a person with no local match.
     /// </summary>
     public string? LocalPersonId { get; set; }
 
@@ -48,11 +47,9 @@ public class PeopleSyncItem : SyncRecord
     /// </summary>
     public bool HasImagesChanges => !string.IsNullOrEmpty(LocalPersonId) && Images.HasChanges;
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// No row should exist without a local match (Refresh skips them), but both
-    /// parts check for one anyway, so a stale row is never queued.
-    /// </remarks>
+    /// <summary>
+    /// Gets a value indicating whether the metadata or images differ. Both parts also need a local match, so a stale row is never queued.
+    /// </summary>
     public override bool HasChanges => HasMetadataChanges || HasImagesChanges;
 
     /// <inheritdoc />
@@ -62,14 +59,11 @@ public class PeopleSyncItem : SyncRecord
         Images.MarkSynced();
     }
 
-    // Used by apply paths that need to look up specific image entries.
-
     /// <summary>
-    /// Tries to deserialize <see cref="Images"/>.<see cref="SyncableValue{T}.Source"/>
-    /// as an image manifest. Returns false if missing or malformed.
+    /// Reads the source's image manifest from <see cref="Images"/>.
     /// </summary>
-    /// <param name="manifest">The parsed manifest, set when the method returns true.</param>
-    /// <returns><c>true</c> when the row holds a manifest that could be read.</returns>
+    /// <param name="manifest">The parsed manifest, set when the method returns <c>true</c>.</param>
+    /// <returns><c>true</c> when the row holds a manifest that could be read, and <c>false</c> when it is missing or malformed.</returns>
     public bool TryGetSourceImageManifest(out Dictionary<string, List<ImageInfoDto>>? manifest)
     {
         manifest = null;

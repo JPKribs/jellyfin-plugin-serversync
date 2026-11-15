@@ -9,6 +9,8 @@ public enum OutboundState
     /// <summary>The peer answered 200 and holds the hint. The row waits for the peer to report it done.</summary>
     Sent = 1,
 
-    /// <summary>The peer rejected the hint as malformed. Nothing will retry it. Shown to the operator.</summary>
+    /// <summary>
+    /// The peer refused the hint as malformed. It is not retried, and the operator is shown it.
+    /// </summary>
     Failed = 2
 }

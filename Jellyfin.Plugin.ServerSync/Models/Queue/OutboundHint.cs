@@ -3,9 +3,8 @@ using System;
 namespace Jellyfin.Plugin.ServerSync.Models.Queue;
 
 /// <summary>
-/// One hint waiting to reach one peer. Rows coalesce on peer, kind, and key, so several edits before
-/// delivery are one row carrying the newest version. The row is deleted when the peer reports the
-/// work complete.
+/// One hint waiting to reach one peer, deleted when the peer reports the work complete.
+/// Rows merge on peer, kind, and key, so several edits before delivery are one row carrying the newest stamp.
 /// </summary>
 public class OutboundHint
 {

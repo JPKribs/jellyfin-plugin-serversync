@@ -9,9 +9,7 @@ using JPKribs.Jellyfin.Base;
 namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 
 /// <summary>
-/// One configured peer server. The position of an entry in <see cref="Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration.Servers"/>
-/// is its rank: when two servers offer the same item, the earlier entry wins and the later one only
-/// contributes what the earlier lacks.
+/// One server entry. Its place in <see cref="Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration.Servers"/> is its Rank, so an earlier entry wins when two offer the same item.
 /// </summary>
 public class SourceServer
 {
@@ -22,30 +20,28 @@ public class SourceServer
     public const string StandardUserAccess = "User";
 
     /// <summary>
-    /// Gets or sets the stable key of this entry. Generated once when the entry is created and carried on
-    /// every sync table row that came from it, so reordering or renaming the entry never orphans rows.
+    /// Gets or sets the stable key of this entry, carried on every sync table row that came from it so a reorder or rename never orphans rows.
     /// </summary>
     public string Key { get; set; } = NewKey();
 
-    /// <summary>Gets or sets the admin facing name. Falls back to the server's reported name, then its URL.</summary>
+    /// <summary>Gets or sets the name an administrator gave the entry. It falls back to the server's reported name, then its Server URL.</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the URL this server connects to.</summary>
+    /// <summary>Gets or sets the Server URL this server connects to.</summary>
     public string Url { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the optional public URL used only for image display in the dashboard, for peers reached over
-    /// a VPN or internal address the browser cannot load from.
+    /// Gets or sets the External URL a browser loads images from, for a server reached over an address the browser cannot use.
     /// </summary>
     public string ExternalUrl { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets a value indicating whether the URL may point at a loopback, private, or unique local address.
-    /// Cloud metadata and link local ranges are always refused regardless.
+    /// Gets or sets a value indicating whether the Server URL may be a loopback, private, or unique local address.
+    /// Cloud metadata and link local ranges are always refused.
     /// </summary>
     public bool AllowPrivateNetwork { get; set; } = true;
 
-    /// <summary>Gets or sets the API key or access token, protected at rest.</summary>
+    /// <summary>Gets or sets the API Key or access token, protected at rest.</summary>
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>Gets or sets the username the token was generated for, or empty for a manually entered key.</summary>
@@ -61,25 +57,22 @@ public class SourceServer
     public string ServerId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets what the key can do there, as learned by the last connection test or sign in:
-    /// "Administrator", "User", or empty when not yet known. A standard user's key scans what that user
-    /// can see and carries that user's history only. Two way history, user sync, and Push or Sync need an
-    /// administrator, since Server Sync's own endpoints and the user APIs require elevation.
+    /// Gets or sets what the key can do there, "Administrator", "User", or empty when not yet known.
+    /// A standard user's key scans what that user sees and carries only that user's History, and Push, Sync, and Users need an administrator.
     /// </summary>
     public string AccessLevel { get; set; } = string.Empty;
 
     /// <summary>Gets or sets a value indicating whether the key's user may download files there, or null when not yet known.</summary>
     public bool? CanDownload { get; set; }
 
-    /// <summary>Gets or sets what this server does with the peer.</summary>
+    /// <summary>Gets or sets the Direction changes travel between this server and that one.</summary>
     public ServerMode Mode { get; set; } = ServerMode.Pull;
 
     /// <summary>Gets or sets a value indicating whether the entry takes part in any sync.</summary>
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets a value indicating whether that server may stream this server's files for its links.
-    /// Off by default, so no file is ever served as a link until an administrator allows it here.
+    /// Gets or sets a value indicating whether that server may stream this server's files for its links, which is off until an administrator allows it.
     /// </summary>
     public bool AllowLinking { get; set; }
 
@@ -87,15 +80,13 @@ public class SourceServer
     public int LinkMaxStreams { get; set; }
 
     /// <summary>
-    /// Gets or sets the most link streams this server takes from that server at once, or 0 for no
-    /// limit. It is this server's own choice, apart from whatever that server allows it.
+    /// Gets or sets the most link streams this server takes from that server at once, or 0 for no limit.
     /// </summary>
     public int LinkTakeMaxStreams { get; set; }
 
     /// <summary>
-    /// Gets or sets a server wide per user limit. <see cref="Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration.SanitizeValues"/>
-    /// copies it onto every user mapping that sets none and sets it to 0, since a per user limit lives
-    /// on a user mapping.
+    /// Gets or sets a per user stream limit for the whole entry.
+    /// <see cref="Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration.SanitizeValues"/> moves it onto every user mapping that sets none.
     /// </summary>
     public int LinkMaxStreamsPerUser { get; set; }
 
@@ -118,24 +109,22 @@ public class SourceServer
     public int LinkStreamSpeedMbps { get; set; }
 
     /// <summary>
-    /// Gets or sets the most each link stream is sent at during the bandwidth schedule's hours, in
-    /// megabits per second, or 0 for no limit. Only used while bandwidth scheduling is on.
+    /// Gets or sets the most each link stream is sent at during the bandwidth schedule's hours, in megabits per second, or 0 for no limit.
     /// </summary>
     public int LinkScheduledStreamSpeedMbps { get; set; }
 
-    /// <summary>The most each link stream to that server is sent at, in bytes per second, or 0 for no limit.</summary>
-    /// <param name="scheduled">Whether the bandwidth schedule's hours apply now.</param>
-    /// <returns>The rate.</returns>
+    /// <summary>Reads the most each link stream to that server is sent at, in bytes per second, or 0 for no limit.</summary>
+    /// <param name="scheduled">Whether the bandwidth schedule's hours apply at this moment.</param>
+    /// <returns>The rate in bytes per second.</returns>
     public long GetLinkStreamSpeedBytes(bool scheduled)
         => RateUtilities.MbpsToBytesPerSecond(scheduled ? LinkScheduledStreamSpeedMbps : LinkStreamSpeedMbps);
 
     /// <summary>
-    /// The most a link stream or cache download for one user here is sent at, in bytes per second, or
-    /// 0 for no limit: the lower of this entry's speed and the speed set on that user's mapping.
+    /// Reads the most a link stream or cache download for one user is sent at, the lower of this entry's speed and that user mapping's speed.
     /// </summary>
-    /// <param name="scheduled">Whether the bandwidth schedule's hours apply now.</param>
+    /// <param name="scheduled">Whether the bandwidth schedule's hours apply at this moment.</param>
     /// <param name="localUserId">The user here the stream runs as, or null for none.</param>
-    /// <returns>The rate.</returns>
+    /// <returns>The rate in bytes per second, or 0 for no limit.</returns>
     public long GetLinkStreamSpeedBytes(bool scheduled, Guid? localUserId)
     {
         var server = GetLinkStreamSpeedBytes(scheduled);
@@ -144,35 +133,32 @@ public class SourceServer
     }
 
     /// <summary>
-    /// The most link streams one user here may hold at once, or 0 for no limit: the limit on that
-    /// user's mapping when it sets one, otherwise this entry's per user limit.
+    /// Reads the most link streams one user here may hold at once, from that user's mapping and never above the entry's total.
     /// </summary>
     /// <param name="localUserId">The user here the stream runs as.</param>
-    /// <returns>The limit.</returns>
+    /// <returns>The limit, or 0 for no limit.</returns>
     public int GetLinkMaxStreamsFor(Guid? localUserId)
     {
-        // One user never gets more than the whole server, so a per user limit above the server's total
-        // is held to the total.
         var perUser = Math.Max(0, MappingForLocalUser(localUserId)?.LinkMaxStreams ?? 0);
         var total = Math.Max(0, LinkMaxStreams);
         return total > 0 && (perUser == 0 || perUser > total) ? total : perUser;
     }
 
+    /// <summary>Finds the enabled user mapping for a user on this server.</summary>
     private UserMapping? MappingForLocalUser(Guid? localUserId)
         => localUserId is { } user
             ? UserMappings?.FirstOrDefault(m => m.IsEnabled && Guid.TryParse(m.LocalUserId, out var id) && id == user)
             : null;
 
     /// <summary>
-    /// Gets or sets this server's user that streams for a user on that server with no user mapping here.
-    /// Empty refuses them. The linking server never chooses the user.
+    /// Gets or sets this server's user that streams for unmapped users of that server. Empty refuses them.
     /// </summary>
     public string LinkFallbackUserId { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the library mappings between this peer and the local server.</summary>
+    /// <summary>Gets or sets the library mappings between that server and this one.</summary>
     public List<LibraryMapping> LibraryMappings { get; set; } = new();
 
-    /// <summary>Gets or sets the user mappings between this peer and the local server.</summary>
+    /// <summary>Gets or sets the user mappings between that server and this one.</summary>
     public List<UserMapping> UserMappings { get; set; } = new();
 
     /// <summary>Gets the name shown in logs and the dashboard.</summary>
@@ -199,9 +185,7 @@ public class SourceServer
     public bool Pushes => IsEnabled && IsConfigured && Mode is ServerMode.Push or ServerMode.Sync;
 
     /// <summary>
-    /// Gets a value indicating whether the peer may link to this server's files: linking is allowed for
-    /// it, and it is a Push or Sync server. A Pull server only gives this server things to read, so it
-    /// may never link here.
+    /// Gets a value indicating whether the peer may link to this server's files, which takes Allow Linking and a Push or Sync direction.
     /// </summary>
     [XmlIgnore]
     [JsonIgnore]

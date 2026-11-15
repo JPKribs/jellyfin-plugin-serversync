@@ -3,10 +3,8 @@ using System;
 namespace Jellyfin.Plugin.ServerSync.Models.Queue;
 
 /// <summary>
-/// Where and when the value an object holds was last edited by a person. A local edit sets the
-/// version to this server and the time of the edit. A copy that came from a hint keeps the version
-/// the hint carried, so a copy can never look newer than the edit it came from. Saved dates from
-/// Jellyfin are never used for this.
+/// The Stamp, the server and time of the edit a person made that a value came from.
+/// A copy that came from a hint keeps the hint's stamp, so it never looks newer than the edit, and Jellyfin's saved dates are never used.
 /// </summary>
 public class ObjectVersion
 {

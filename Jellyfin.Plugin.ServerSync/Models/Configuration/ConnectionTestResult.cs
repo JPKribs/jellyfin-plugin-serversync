@@ -1,7 +1,7 @@
 namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 
 /// <summary>
-/// Result of a connection test containing server info.
+/// The outcome of Test Connection, with what the server reported about itself and the key.
 /// </summary>
 public class ConnectionTestResult
 {
@@ -15,8 +15,7 @@ public class ConnectionTestResult
     public string? ServerId { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the key belongs to an administrator. Decided by whether the
-    /// elevated system info call succeeded. Null when the test did not get that far.
+    /// Gets or sets a value indicating whether the key belongs to an administrator, or null when the test did not get that far.
     /// </summary>
     public bool? IsAdministrator { get; set; }
 
@@ -39,7 +38,7 @@ public class ConnectionTestResult
     public string? ErrorMessage { get; set; }
 
     /// <summary>
-    /// Gets or sets the user-facing message for the connection test result.
+    /// Gets or sets the message shown to the user for this result.
     /// </summary>
     public string? Message { get; set; }
 }

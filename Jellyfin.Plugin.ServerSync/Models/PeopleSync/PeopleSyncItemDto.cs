@@ -58,8 +58,7 @@ public class PeopleSyncItemDto
     public bool HasImagesChanges { get; set; }
 
     /// <summary>
-    /// Gets or sets the comparator's precise reason the image manifests
-    /// differ. Null when images match. See the metadata DTO counterpart.
+    /// Gets or sets the comparator's reason the image manifests differ, or null when they match.
     /// </summary>
     public string? ImagesChangesDetail { get; set; }
 

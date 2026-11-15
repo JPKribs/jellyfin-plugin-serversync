@@ -31,7 +31,7 @@ public class PeerInterest
     public string Revision { get; set; } = string.Empty;
 
     /// <summary>Builds what this server wants from one peer, from the settings and that peer's entry.</summary>
-    /// <param name="config">The plugin settings.</param>
+    /// <param name="config">The plugin settings, which decide the kinds of change this server accepts.</param>
     /// <param name="entry">The peer's server entry.</param>
     /// <returns>The interest, with its revision set.</returns>
     public static PeerInterest For(PluginConfiguration config, SourceServer entry)

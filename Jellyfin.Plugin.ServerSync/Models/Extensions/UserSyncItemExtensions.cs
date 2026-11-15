@@ -10,9 +10,9 @@ namespace Jellyfin.Plugin.ServerSync.Models.Extensions;
 public static class UserSyncItemExtensions
 {
     /// <summary>Projects a user sync item to its API DTO.</summary>
-    /// <param name="item">The user sync item.</param>
-    /// <param name="sourceServerUrl">The source server URL surfaced to the client.</param>
-    /// <returns>The DTO representation.</returns>
+    /// <param name="item">The row to show.</param>
+    /// <param name="sourceServerUrl">The source's URL the browser loads images and links from.</param>
+    /// <returns>The row as the dashboard reads it.</returns>
     public static UserSyncItemDto ToDto(this UserSyncItem item, string? sourceServerUrl = null)
     {
         ArgumentNullException.ThrowIfNull(item);

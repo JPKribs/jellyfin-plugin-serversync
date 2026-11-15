@@ -4,11 +4,8 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 namespace Jellyfin.Plugin.ServerSync.Models.ContentSync;
 
 /// <summary>
-/// Tracks one media file's sync state. The natural key is
-/// <see cref="SourceItemId"/>. Status is the standard lifecycle (Pending /
-/// Queued / Synced / Errored / Ignored / Deleting), and <see cref="PendingType"/>
-/// describes the operation (Download / Replacement / Deletion) that's
-/// awaiting approval or queued.
+/// Tracks one media file's sync state, keyed by <see cref="SourceItemId"/>.
+/// <see cref="PendingType"/> names the download, replacement, or deletion that waits for approval or is queued.
 /// </summary>
 public class SyncItem : SyncRecord
 {
@@ -74,26 +71,23 @@ public class SyncItem : SyncRecord
     public StorageMode StorageMode { get; set; }
 
     /// <summary>
-    /// Gets or sets the id of the server this copy first came from. Set when this server downloads the
-    /// file: the origin its source names for it, or the source itself. Empty for a file that was
-    /// already here when it was matched, and for a row from before origins were recorded.
+    /// Gets or sets the ID of the origin, the server this copy first came from.
+    /// It is empty for a file that was already here when it was matched.
     /// </summary>
     public string? OriginServerId { get; set; }
 
-    // Content sync's "needs work" signal is the PendingType, not a hash
-    // compare. Refresh sets PendingType when the file needs to be
-    // downloaded, replaced, or deleted, so this is true while the row is
-    // pending or queued and false once Synced.
-
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets a value indicating whether the row has work waiting, which Content reads from the status and <see cref="PendingType"/> and never from a hash.
+    /// </summary>
     public override bool HasChanges
         => Status == SyncStatus.Queued
             || Status == SyncStatus.Deleting
             || (Status == SyncStatus.Pending && PendingType.HasValue);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Records nothing, since a Content row holds no <see cref="SyncableValue{T}"/>.
+    /// </summary>
     public override void MarkSynced()
     {
-        // No SyncableValue<T> fields on Content, nothing to mark.
     }
 }

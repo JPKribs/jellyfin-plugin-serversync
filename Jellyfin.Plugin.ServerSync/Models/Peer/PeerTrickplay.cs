@@ -26,8 +26,8 @@ public class PeerTrickplay
     /// <summary>Gets or sets the peak bandwidth, in bits per second.</summary>
     public int Bandwidth { get; set; }
 
-    /// <summary>How many tile images the set is made of.</summary>
-    /// <returns>The count.</returns>
+    /// <summary>Counts the tile images the set is made of.</summary>
+    /// <returns>The number of tile images, or 0 when the set is empty.</returns>
     public int TileCount()
     {
         var perTile = TileWidth * TileHeight;

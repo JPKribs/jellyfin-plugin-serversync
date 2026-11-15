@@ -15,35 +15,29 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync;
 
 /// <summary>
-/// Main plugin entry point for Server Sync.
+/// The Server Sync plugin. It is sealed because its constructor calls the virtual <c>SaveConfiguration</c>.
 /// </summary>
-/// <remarks>
-/// Sealed: the constructor calls the virtual <c>SaveConfiguration</c> to
-/// encrypt an API key stored in plaintext, and a derived override would
-/// run against a half-built instance.
-/// </remarks>
 public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 {
     /// <summary>
-    /// The name the secret key folder, application name and purpose derive from. Changing it makes
-    /// every stored API key unreadable.
+    /// The name the secret key folder, application name, and purpose derive from. Changing it makes every stored API Key unreadable.
     /// </summary>
     public const string SecretsName = "Jellyfin.Plugin.ServerSync";
 
     private readonly ILogger<Plugin> _logger;
+    /// <summary>Protects API Keys with the same key ring as the protector registered for injection.</summary>
     private readonly Lazy<SecretProtector> _secrets;
+    /// <summary>Set to 1 once a refused save has been logged.</summary>
     private int _refusedSaveLogged;
 
     /// <summary>
-    /// Gets why Server Sync is held, when its database was written by a release this one cannot read.
-    /// Null when it is not. While it is set nothing is saved, so the settings that release wrote are
-    /// still there for it to convert.
+    /// Gets why Server Sync is held, when its database was written by a release this one cannot read, or null.
+    /// While it is set nothing is saved, so that release's settings stay for it to convert.
     /// </summary>
     public string? HeldReason { get; }
 
     /// <summary>
-    /// Gets a value indicating whether Server Sync is held for a database an older release wrote. While
-    /// it is, nothing of the plugin runs: no background work, no change to playback, no metadata lookups.
+    /// Gets a value indicating whether Server Sync is held for a database an older release wrote. While it is, nothing of the plugin runs.
     /// </summary>
     public static bool Held => Instance?.HeldReason is not null;
 
@@ -61,27 +55,18 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     {
         _logger = logger;
 
-        // Before the settings are read. Reading settings an older release wrote can fail, and a failed
-        // read is answered by saving defaults over the file, so the hold has to be in place first.
+        // The hold comes first, since a failed settings read saves defaults over the file.
         HeldReason = HoldIfOlderDatabase(applicationPaths.DataPath, ConfigurationFilePath, logger);
 
-        // Built by the same factory as the DI-registered protector, so both resolve the same key ring
-        // (file based, safe to share).
         _secrets = new Lazy<SecretProtector>(() => StableSecretProtection.CreateProtector(applicationPaths, SecretsName, logger));
 
-        // The history merge is static too, and reads which parts to copy from the live settings.
         HistorySyncMergeService.EnabledFields = () => Configuration.GetHistoryFields();
 
-        // The disk space checks are static and called from places with no logger of their own.
         DiskSpaceService.Logger = logger;
 
         try
         {
-            // A key is stored encrypted. One that could not be protected when it was saved, because
-            // Data Protection was unavailable then, is in plaintext, and the core config endpoint returns
-            // it verbatim on every settings-page load until something saves. Encrypt at startup instead
-            // of waiting. Protect() no-ops when Data Protection is unavailable, so this can't loop or
-            // throw the plugin out of load.
+            // A key saved while Data Protection was down is plaintext until it is protected here.
             var encrypted = false;
             foreach (var server in Configuration.Servers ?? new System.Collections.Generic.List<Models.Configuration.SourceServer>())
             {
@@ -106,6 +91,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
                 }
             }
         }
+        // No failure here may keep the plugin from loading.
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to prepare the stored server list at startup. It will be fixed on the next save");
@@ -115,8 +101,8 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     }
 
     /// <summary>
-    /// A database from a release this one cannot read means the settings beside it are that release's
-    /// too. They are copied aside once, and the reason is returned so every save is turned away.
+    /// Holds the plugin when the database is from a release this one cannot read, copying that release's settings aside once.
+    /// The reason is returned so every save is turned away.
     /// </summary>
     private static string? HoldIfOlderDatabase(string dataPath, string settingsPath, ILogger logger)
     {
@@ -133,12 +119,12 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
             if (File.Exists(settingsPath) && !File.Exists(copy))
             {
                 File.Copy(settingsPath, copy);
-                logger.LogWarning("The Server Sync settings were copied to {Copy} before anything could change them", copy);
+                logger.LogWarning("The Server Sync settings were copied to {Copy} before anything could change them", FormatUtilities.SanitizeForLog(copy));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning("Could not copy the Server Sync settings aside: {Reason}", ex.Message);
+            logger.LogWarning("Could not copy the Server Sync settings aside: {Reason}", FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
 
         logger.LogError("{Reason} Its settings are not saved until then.", reason);
@@ -146,8 +132,8 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     }
 
     /// <summary>
-    /// Writes the settings, unless Server Sync is held for an older database. Jellyfin also calls this
-    /// with defaults when the settings file cannot be read, which is the write the hold exists to stop.
+    /// Writes the settings, unless Server Sync is held for an older database.
+    /// Jellyfin also calls this with defaults when the settings file cannot be read, which is the write the hold stops.
     /// </summary>
     /// <param name="config">The settings to write.</param>
     public override void SaveConfiguration(PluginConfiguration config)
@@ -166,11 +152,8 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     }
 
     /// <summary>
-    /// Runs on every save from the settings page (Jellyfin core's plugin
-    /// configuration endpoint), which otherwise bypasses all server-side
-    /// hygiene: clamps/normalization via SanitizeValues, and at-rest
-    /// encryption of the API key. The kept-sentinel posted by the page
-    /// resolves to the already-stored secret so it never round-trips.
+    /// Sanitizes the settings and protects each API Key on every save from the settings page, which reaches no other server side check.
+    /// A key the page posts as kept resolves to the stored secret.
     /// </summary>
     /// <param name="incoming">The settings being saved.</param>
     /// <param name="stored">The settings already stored.</param>
@@ -185,9 +168,9 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
         incoming.SanitizeValues();
 
-        // The link cache is one folder. Turning the cache off, or pointing it somewhere else, empties
-        // the folder it leaves, so nothing is left behind using disk.
         var before = LinkCacheRoot(stored);
+
+        // A cache turned off or moved leaves its folder, which is emptied.
         if (stored.LinkCacheOn && (!incoming.LinkCacheOn || !string.Equals(before, LinkCacheRoot(incoming), StringComparison.Ordinal)))
         {
             try
@@ -196,31 +179,25 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not empty the link cache at {Root}: {Reason}", before, ex.Message);
+                _logger.LogWarning("Could not empty the link cache at {Root}: {Reason}", FormatUtilities.SanitizeForLog(before), FormatUtilities.SanitizeForLog(ex.Message, 300));
             }
         }
 
-        // The page posts the kept sentinel in place of a key it never saw. Resolve each entry
-        // against the stored entry with the same key, so a server can be renamed or reordered
-        // without the operator retyping its API key.
         foreach (var server in incoming.Servers)
         {
-            // A key posted in its protected form is the stored key coming back from the page. It is
-            // kept under the same rule as the sentinel, so it cannot be saved against a new address.
+            // A key posted in protected form is the stored key, kept like the sentinel.
             var incomingKey = SecretProtector.IsProtected(server.ApiKey) ? SecretProtector.KeptSentinel : server.ApiKey;
             server.ApiKey = _secrets.Value.ResolveIncoming(incomingKey, KeptApiKeyFor(server, stored));
         }
     }
 
     /// <summary>
-    /// The stored API key an incoming entry may keep: the key of the stored entry with the same key,
-    /// and only while its address is unchanged. The page never sees the key, so an edited address
-    /// with the kept sentinel would hand the old server's key to whatever the address now names. The
-    /// key is dropped instead and has to be entered again, the same rule the endpoints apply.
+    /// Finds the stored API Key an incoming entry may keep, which is the same entry's key while its Server URL is unchanged.
+    /// An edited address would hand the old server's key to whatever the address names, so the key is dropped.
     /// </summary>
     /// <param name="incoming">The entry being saved.</param>
-    /// <param name="stored">The configuration on disk.</param>
-    /// <returns>The stored (protected) key, or empty when there is none to keep.</returns>
+    /// <param name="stored">The stored settings, which hold the protected keys.</param>
+    /// <returns>The stored key in protected form, or empty when there is none to keep.</returns>
     public static string KeptApiKeyFor(SourceServer incoming, PluginConfiguration stored)
     {
         ArgumentNullException.ThrowIfNull(incoming);
@@ -235,8 +212,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     }
 
     /// <summary>
-    /// Saves from the settings page also take the plugin-wide save lock, so the write cannot
-    /// interleave with a task recording a run failure (see ConfigurationSaveLock).
+    /// Saves from the settings page under the plugin's save lock, so the write cannot interleave with a task recording a run failure.
     /// </summary>
     /// <param name="configuration">The settings that were saved.</param>
     public override void UpdateConfiguration(BasePluginConfiguration configuration)
@@ -247,12 +223,12 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         }
     }
 
+    /// <summary>Resolves the folder the link cache uses under the given settings.</summary>
     private string LinkCacheRoot(PluginConfiguration config)
         => Services.Links.LinkCache.RootFor(config.LinkCachePath, Path.Combine(ApplicationPaths.CachePath, Services.Links.LinkCache.DefaultFolder));
 
     /// <summary>
-    /// Empties the link cache when the plugin is uninstalled: the folder under Jellyfin's cache, and a
-    /// folder set in its place. Only the cache's own files are removed.
+    /// Empties the link cache when the plugin is uninstalled, removing only the cache's own files.
     /// </summary>
     public override void OnUninstalling()
     {
@@ -264,7 +240,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not empty the link cache at {Root} while uninstalling: {Reason}", root, ex.Message);
+                _logger.LogWarning("Could not empty the link cache at {Root} while uninstalling: {Reason}", FormatUtilities.SanitizeForLog(root), FormatUtilities.SanitizeForLog(ex.Message, 300));
             }
         }
 

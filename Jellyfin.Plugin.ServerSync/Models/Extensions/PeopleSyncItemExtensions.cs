@@ -11,9 +11,9 @@ namespace Jellyfin.Plugin.ServerSync.Models.Extensions;
 public static class PeopleSyncItemExtensions
 {
     /// <summary>Projects a people sync item to its API DTO.</summary>
-    /// <param name="item">The people sync item.</param>
-    /// <param name="sourceServerUrl">The source server URL surfaced to the client.</param>
-    /// <returns>The DTO representation.</returns>
+    /// <param name="item">The row to show.</param>
+    /// <param name="sourceServerUrl">The source's URL the browser loads images and links from.</param>
+    /// <returns>The row as the dashboard reads it.</returns>
     public static PeopleSyncItemDto ToDto(this PeopleSyncItem item, string? sourceServerUrl)
     {
         ArgumentNullException.ThrowIfNull(item);

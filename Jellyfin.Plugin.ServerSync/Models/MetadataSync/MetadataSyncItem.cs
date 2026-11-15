@@ -6,14 +6,8 @@ using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 
 /// <summary>
-/// One sync record per (source library, source item). Carries four parallel
-/// JSON-blob fields, <see cref="Metadata"/>, <see cref="Images"/>,
-/// <see cref="People"/>, <see cref="Studios"/>, each with its own
-/// Source/Local/Synced snapshots and content hashes recording what was last
-/// applied. Refresh populates the source side and recomputes hashes.
-/// Sync applies the source values to local and calls
-/// <see cref="SyncableValue{T}.MarkSynced"/> on each successfully-applied
-/// category.
+/// One row per source library and source item, holding the metadata, images, people, and studios as separate JSON values.
+/// Each value keeps its own source, local, and synced copies with the hashes of what was last applied.
 /// </summary>
 public class MetadataSyncItem : SyncRecord
 {
@@ -65,32 +59,27 @@ public class MetadataSyncItem : SyncRecord
     public bool IsFolder { get; set; }
 
     /// <summary>
-    /// Gets the metadata blob (name, overview, ratings, dates, genres, tags,
-    /// provider IDs, etc.). JSON-equality comparison.
+    /// Gets the metadata blob, such as the name, overview, ratings, dates, genres, tags, and provider IDs.
     /// </summary>
     public SyncableValue<string> Metadata { get; } = new() { Comparator = new JsonBlobComparator() };
 
     /// <summary>
-    /// Gets the image manifest. Per-type counts and file sizes. Uses the
-    /// dedicated <see cref="ImageManifestComparator"/>.
+    /// Gets the image manifest, compared by the count and file sizes of each image type.
     /// </summary>
     public SyncableValue<string> Images { get; } = new() { Comparator = new ImageManifestComparator() };
 
     /// <summary>
-    /// Gets the people array (cast / crew, by Name+Role+Type, in billing
-    /// order). Uses the dedicated <see cref="PeopleListComparator"/>.
+    /// Gets the people array, the cast and crew by name, role, and type in billing order.
     /// </summary>
     public SyncableValue<string> People { get; } = new() { Comparator = new PeopleListComparator() };
 
     /// <summary>
-    /// Gets the studios array (just studio names). JSON-equality comparison.
+    /// Gets the studio names.
     /// </summary>
     public SyncableValue<string> Studios { get; } = new() { Comparator = new JsonBlobComparator() };
 
     /// <summary>
-    /// Gets a value indicating whether the metadata blob has changes worth
-    /// syncing. False until a local match exists, since metadata can't be
-    /// applied without a local item.
+    /// Gets a value indicating whether the metadata blob has changes to sync, which takes a local item to apply them to.
     /// </summary>
     public bool HasMetadataChanges
         => !string.IsNullOrEmpty(LocalItemId) && !string.IsNullOrEmpty(Metadata.Source) && Metadata.HasChanges;
@@ -174,11 +163,10 @@ public class MetadataSyncItem : SyncRecord
     }
 
     /// <summary>
-    /// Tries to deserialize <see cref="Images"/>.<see cref="SyncableValue{T}.Source"/>
-    /// as an image manifest. Returns false if missing or malformed.
+    /// Reads the source's image manifest from <see cref="Images"/>.
     /// </summary>
-    /// <param name="manifest">The parsed manifest, set when the method returns true.</param>
-    /// <returns><c>true</c> when the row holds a manifest that could be read.</returns>
+    /// <param name="manifest">The parsed manifest, set when the method returns <c>true</c>.</param>
+    /// <returns><c>true</c> when the row holds a manifest that could be read, and <c>false</c> when it is missing or malformed.</returns>
     public bool TryGetSourceImageManifest(out Dictionary<string, List<ImageInfoDto>>? manifest)
     {
         manifest = null;

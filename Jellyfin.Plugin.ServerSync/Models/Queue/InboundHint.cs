@@ -3,9 +3,8 @@ using System;
 namespace Jellyfin.Plugin.ServerSync.Models.Queue;
 
 /// <summary>
-/// One hint received from a peer and not yet applied. The row stays until the work is done, then it
-/// is removed and the origin is told. Rows coalesce on origin, kind, and key, so a second notice for
-/// the same object before the first is applied just refreshes the version.
+/// One hint received from a peer and not yet applied, removed once the work is done and the origin is told.
+/// Rows merge on origin, kind, and key, so a second hint for the same object only raises the stamp.
 /// </summary>
 public class InboundHint
 {

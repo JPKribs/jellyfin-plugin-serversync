@@ -1,8 +1,7 @@
 namespace Jellyfin.Plugin.ServerSync.Models.ContentSync;
 
 /// <summary>
-/// Result of a deletion operation. AlreadyGone means the file was not on disk any more, so only the
-/// stale library entry was removed.
+/// The result of deleting a file. AlreadyGone means the file was not on disk, so only its library entry was removed.
 /// </summary>
 /// <param name="Success">Whether the file is gone.</param>
 /// <param name="ErrorMessage">Why the deletion failed, when it did.</param>

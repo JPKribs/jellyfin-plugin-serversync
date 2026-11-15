@@ -7,11 +7,8 @@ using Jellyfin.Plugin.ServerSync.Services.HistorySync;
 namespace Jellyfin.Plugin.ServerSync.Models.HistorySync;
 
 /// <summary>
-/// One row of synced watch-history state per (source user, source item),
-/// carrying Source / Local / Merged triples for IsPlayed, PlayCount,
-/// PlaybackPositionTicks, LastPlayedDate, and IsFavorite. The five
-/// source-side primitives are also bundled into <see cref="SourceState"/>,
-/// whose hashes are stored with the row.
+/// One row of History per source user and source item, with source, local, and merged values for each part.
+/// The source values are also bundled into <see cref="SourceState"/>, whose hashes are stored with the row.
 /// </summary>
 public class HistorySyncItem : SyncRecord
 {
@@ -161,16 +158,13 @@ public class HistorySyncItem : SyncRecord
     public bool HasNegotiatedBase => NegotiatedAt.HasValue;
 
     /// <summary>
-    /// Gets or sets a value indicating whether this row will be offered to the source as well as
-    /// written locally. Set by the refresh from the configuration and not stored, since it only
-    /// changes which differences count as work: in one way mode only the local side can be out of
-    /// date, in two way mode the source can be too.
+    /// Gets or sets a value indicating whether this row is offered to the source as well as written locally, so a stale source also counts as work.
+    /// The scan sets it from the settings, and it is not stored.
     /// </summary>
     public bool NegotiateWithSource { get; set; }
 
     /// <summary>
-    /// Records the current merged values as the state both servers now hold. Called once the source has
-    /// accepted the merged state and the local write has been verified.
+    /// Records the merged values as the state both servers hold, once the source accepted them and the local write was verified.
     /// </summary>
     /// <param name="utcNow">The time of agreement.</param>
     public void RecordNegotiatedBase(DateTime utcNow)
@@ -183,8 +177,8 @@ public class HistorySyncItem : SyncRecord
         NegotiatedAt = utcNow;
     }
 
-    /// <summary>Copies the negotiated base from a previously stored row.</summary>
-    /// <param name="previous">The stored row.</param>
+    /// <summary>Copies the negotiated base from a stored row.</summary>
+    /// <param name="previous">The stored row whose base is kept.</param>
     public void CarryNegotiatedBaseFrom(HistorySyncItem previous)
     {
         ArgumentNullException.ThrowIfNull(previous);
@@ -197,11 +191,7 @@ public class HistorySyncItem : SyncRecord
     }
 
     /// <summary>
-    /// Source-side watch state rolled into one JSON blob. Its
-    /// <see cref="SyncableValue{T}.SourceHash"/> and
-    /// <see cref="SyncableValue{T}.SyncedHash"/> are stored with the row as a
-    /// record of what was last applied. Change detection does not consult
-    /// them, see <see cref="HasChanges"/>.
+    /// Gets the source's values as one JSON blob, whose hashes record what was last applied and are never read to detect changes.
     /// </summary>
     public SyncableValue<string> SourceState { get; } = new SyncableValue<string>
     {
@@ -209,10 +199,7 @@ public class HistorySyncItem : SyncRecord
     };
 
     /// <summary>
-    /// Recomputes the <see cref="SourceState"/> bundle from the current
-    /// <c>Source*</c> fields and updates the source-hash. Call after
-    /// populating <c>Source*</c> in the Refresh path so the stored hash
-    /// stays current.
+    /// Builds <see cref="SourceState"/> again from the source values and updates its hash. A scan calls it after setting them.
     /// </summary>
     public void UpdateSourceStateBundle()
     {
@@ -227,13 +214,9 @@ public class HistorySyncItem : SyncRecord
         SourceState.UpdateSource(bundle);
     }
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// Always the merged-vs-local check, never a <c>SourceHash == SyncedHash</c>
-    /// short-circuit, which would only say whether the SOURCE had moved and
-    /// would leave a local playback after a sync unreconciled. See
-    /// <see cref="SyncableValue{T}.HasChanges"/>.
-    /// </remarks>
+    /// <summary>
+    /// Gets a value indicating whether the merged values differ from what a server holds, which always compares values so playback on this server is never missed.
+    /// </summary>
     public override bool HasChanges => HistorySyncMergeService.HasChangesToSync(this);
 
     /// <inheritdoc />

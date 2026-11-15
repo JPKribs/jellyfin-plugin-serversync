@@ -11,8 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync;
 
 /// <summary>
-/// Registers plugin services with the Jellyfin DI container by scanning the
-/// plugin assembly for classes annotated with <see cref="PluginServiceAttribute"/>.
+/// Registers every class marked with <see cref="PluginServiceAttribute"/>, the gated background services, and the secret protector.
+/// It also registers the two HTTP clients for other servers, each with a connect timeout, the address check, the redirect refusal, and retries.
 /// </summary>
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
@@ -28,38 +28,22 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             serviceCollection.Add(new ServiceDescriptor(serviceType, impl, attr.Lifetime));
         }
 
-        // Encrypts the source-server API key at rest (base helper, which degrades to plaintext and a
-        // logged warning when no provider is available). Keys live in a fixed directory under the Jellyfin
-        // data folder with a pinned application name, otherwise a host launch-context change (app
-        // update, desktop-app vs service, Docker) shifts the Data Protection discriminator and every
-        // stored secret fails to decrypt. See StableSecretProtection.
         serviceCollection.AddPluginSecretProtector(Plugin.SecretsName);
 
-        // The shared writer for Jellyfin's activity log, from the base package.
         serviceCollection.AddActivityLogger();
 
-        // Links: the filter on Jellyfin's own playback routes, which does nothing for any item that is
-        // not one of this server's links, and the probe that gives a new link its media info.
         serviceCollection.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.AddService<Services.Links.LinkPlaybackFilter>());
         serviceCollection.AddHostedService<Gate<Services.Links.LinkProbe>>();
         serviceCollection.AddHostedService<Gate<Services.Links.LinkPlaybackReporter>>();
         serviceCollection.AddHostedService<Gate<Services.Links.LinkSessionSweeper>>();
         serviceCollection.AddHostedService<Gate<Services.Links.LinkCacheFiller>>();
 
-        // The hint pipeline runs for the life of the server. Each worker is registered once as itself,
-        // by the attribute scan above, and once more as a hosted service that resolves that same
-        // instance, so the controllers and the publisher talk to the running worker.
         serviceCollection.AddHostedService<Gate<Services.Queue.OutboundHintWorker>>();
         serviceCollection.AddHostedService<Gate<Services.Queue.InboundHintWorker>>();
         serviceCollection.AddHostedService<Gate<Services.Queue.LocalChangeObserver>>();
         serviceCollection.AddHostedService<Tasks.HiddenTaskScheduleCleaner>();
         serviceCollection.AddHostedService<Gate<Services.Queue.QueueMaintenanceService>>();
 
-        // Named HttpClient for source server communication.
-        // HandlerLifetime caps DNS staleness for the long-lived plugin process.
-        // A connect timeout keeps one unreachable peer from holding a worker for the operating system's
-        // own connect timeout, which runs to minutes. Reads that time out or meet a busy server are
-        // tried again before the caller sees a failure.
         serviceCollection
             .AddHttpClient(SourceServerClient.HttpClientName, c =>
             {
@@ -75,8 +59,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             .AddHttpMessageHandler(() => new RedirectRefusingHandler())
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
 
-        // The same client for entries that disallow private networks, with the rule enforced on every
-        // address a name resolves to, so a name cannot stand in for an address the URL check refuses.
         serviceCollection
             .AddHttpClient(SourceServerClient.PublicHttpClientName, c =>
             {
@@ -93,6 +75,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
     }
 
+    /// <summary>Finds every concrete class in the assembly that carries the service attribute.</summary>
     private static IEnumerable<(Type Impl, PluginServiceAttribute Attr)> DiscoverAnnotatedServices(Assembly assembly)
     {
         foreach (var type in assembly.GetTypes())
@@ -113,10 +96,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     }
 
     /// <summary>
-    /// Starts one of the plugin's background services unless Server Sync is held for a database an older
-    /// release wrote, since building the service would read that database and a hosted service that
-    /// cannot be built stops Jellyfin itself. The wrapped service is the one instance the controllers and
-    /// the publisher use.
+    /// Starts one of the plugin's background services unless Server Sync is held, since a hosted service that cannot be built stops Jellyfin itself.
+    /// The wrapped service is the one instance the controllers and the publisher use.
     /// </summary>
     /// <typeparam name="T">The wrapped hosted service.</typeparam>
     private sealed class Gate<T> : Microsoft.Extensions.Hosting.IHostedService

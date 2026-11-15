@@ -11,7 +11,7 @@ public enum PeerHistoryOutcome
     /// <summary>The receiver already held the proposed state, so nothing was written.</summary>
     Unchanged,
 
-    /// <summary>The receiver's live state no longer matched the sender's expectation. Nothing was written.</summary>
+    /// <summary>The receiver's live state did not match what the sender expected. Nothing was written.</summary>
     Stale,
 
     /// <summary>The user or item does not exist on the receiver.</summary>

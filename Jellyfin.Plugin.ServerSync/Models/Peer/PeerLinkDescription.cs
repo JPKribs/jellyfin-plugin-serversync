@@ -7,8 +7,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.Peer;
 public class PeerLinkDescription
 {
     /// <summary>
-    /// The reason a source gives when the file is still its item but could not be read just now. Unlike
-    /// every other reason, it does not say the file is gone.
+    /// The reason a source gives when the file is still its item but could not be read. It alone does not say the file is gone.
     /// </summary>
     public const string Unreadable = "the source cannot read the file";
 

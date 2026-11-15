@@ -6,10 +6,8 @@ using JPKribs.Jellyfin.Base;
 namespace Jellyfin.Plugin.ServerSync.Models.UserSync;
 
 /// <summary>
-/// One property sync record per (user mapping, category). Policy and
-/// Configuration use an internal <see cref="SyncableValue{T}"/> for change
-/// detection. ProfileImage uses its own hash-pair since its "value" is the
-/// image bytes' fingerprint.
+/// One row per user mapping and property category.
+/// Policy and Configuration detect changes through a <see cref="SyncableValue{T}"/>, and ProfileImage through its own pair of image hashes.
 /// </summary>
 public class UserSyncItem : SyncRecord
 {
@@ -39,17 +37,12 @@ public class UserSyncItem : SyncRecord
     public string PropertyCategory { get; set; } = string.Empty;
 
     /// <summary>
-    /// Raw source value (JSON for Policy/Config, display string for ProfileImage).
-    /// Display-only. Change detection uses <see cref="Value"/> for
-    /// Policy/Config and the image-hash fields for ProfileImage.
+    /// Gets or sets the source's raw value, for display only.
     /// </summary>
     public string? SourceValue { get; set; }
 
     /// <summary>
-    /// Local value extracted at refresh time. Delegated to
-    /// <see cref="Value"/>'s <see cref="SyncableValue{T}.Local"/> so the
-    /// comparator path on <see cref="SyncableValue{T}.HasChanges"/> works
-    /// uniformly with the other modules.
+    /// Gets or sets the value the scan read from this server, held as the local side of <see cref="Value"/>.
     /// </summary>
     public string? LocalValue
     {
@@ -58,11 +51,8 @@ public class UserSyncItem : SyncRecord
     }
 
     /// <summary>
-    /// Computed apply target (source-wins with library-ID translation for
-    /// Policy, identical to source for Configuration). Delegated to
-    /// <see cref="Value"/>'s <see cref="SyncableValue{T}.Source"/>. Use
-    /// <see cref="UpdateMergedValue"/> in the refresh build path so the
-    /// source-hash gets recomputed via the comparator.
+    /// Gets or sets the value to apply, held as the source side of <see cref="Value"/>.
+    /// A scan sets it through <see cref="UpdateMergedValue"/> so the source hash is computed too.
     /// </summary>
     public string? MergedValue
     {
@@ -101,10 +91,7 @@ public class UserSyncItem : SyncRecord
     };
 
     /// <summary>
-    /// Sets <see cref="MergedValue"/> and recomputes its hash via the
-    /// comparator. Call from the refresh build path so
-    /// <see cref="SyncableValue{T}.SourceHash"/> stays consistent with
-    /// the format the rest of the SyncableValue plumbing produces.
+    /// Sets <see cref="MergedValue"/> and computes its hash through the comparator.
     /// </summary>
     /// <param name="mergedValue">The value after merging both sides.</param>
     public void UpdateMergedValue(string? mergedValue) => Value.UpdateSource(mergedValue);
@@ -149,7 +136,7 @@ public class UserSyncItem : SyncRecord
                 var sourceHasImage = !string.IsNullOrEmpty(SourceImageHash) || (SourceImageSize ?? 0) > 0;
                 var localHasImage = !string.IsNullOrEmpty(LocalImageHash) || (LocalImageSize ?? 0) > 0;
 
-                // Source removed its image but local still has one: queue the deletion.
+                // An image the source removed but this server still holds is queued for removal.
                 if (!sourceHasImage)
                 {
                     return localHasImage;
@@ -163,23 +150,19 @@ public class UserSyncItem : SyncRecord
                 return SourceImageSize != LocalImageSize;
             }
 
-            // Policy / Configuration: the SyncableValue compares the merged
-            // source blob against the local blob through the comparator.
             return Value.HasChanges;
         }
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether this run only recorded what the row's server holds.
-    /// Another server speaks for the user, so nothing is applied from this row and it agrees on nothing.
-    /// Not stored.
+    /// Gets or sets a value indicating whether this run only recorded what the row's server holds, because another server speaks for the user.
+    /// It is not stored.
     /// </summary>
     public bool Observed { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the value the two servers last agreed on stays as it
-    /// is although nothing is left to apply. Set when this server's own change is kept: the other
-    /// server has not taken it yet, so the two have not agreed on it. Not stored.
+    /// Gets or sets a value indicating whether the last agreed value is kept because this server's own change has not reached the other server yet.
+    /// It is not stored.
     /// </summary>
     public bool KeepAgreedValue { get; set; }
 

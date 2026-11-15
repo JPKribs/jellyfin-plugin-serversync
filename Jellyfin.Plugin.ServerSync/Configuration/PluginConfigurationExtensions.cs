@@ -6,17 +6,15 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Configuration;
 
 /// <summary>
-/// Helpers over the server list: which servers scan, which entry a row belongs to, and the mappings
-/// across every scan server in rank order.
+/// Reads the server entries, such as which are sources, which entry a row belongs to, and the mappings across every source in Rank order.
 /// </summary>
 public static class PluginConfigurationExtensions
 {
     /// <summary>
-    /// Returns the servers this installation scans, in rank order: enabled, with a URL and key, and in
-    /// Pull or Sync mode. Never returns null.
+    /// Returns the sources in Rank order, the enabled entries with a Server URL and API Key in the Pull or Sync direction.
     /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The scan servers, highest ranked first.</returns>
+    /// <param name="config">The plugin settings to read.</param>
+    /// <returns>The sources, highest ranked first, never null.</returns>
     public static List<SourceServer> GetPullServers(this PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -24,20 +22,19 @@ public static class PluginConfigurationExtensions
     }
 
     /// <summary>
-    /// Returns the servers this installation sends hints to: enabled, with a URL and key, and in Push or
-    /// Sync mode. Never returns null.
+    /// Returns the servers this one sends hints to, the enabled entries with a Server URL and API Key in the Push or Sync direction.
     /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The send servers, in list order.</returns>
+    /// <param name="config">The plugin settings to read.</param>
+    /// <returns>The servers hints go to, in list order, never null.</returns>
     public static List<SourceServer> GetPushServers(this PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
         return config.Servers?.Where(s => s.Pushes).ToList() ?? new List<SourceServer>();
     }
 
-    /// <summary>Returns every server that takes part in sync in any direction. Never returns null.</summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The active servers, in list order.</returns>
+    /// <summary>Returns every server that takes part in sync in any direction.</summary>
+    /// <param name="config">The plugin settings to read.</param>
+    /// <returns>The active servers, in list order, never null.</returns>
     public static List<SourceServer> GetActiveServers(this PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -45,10 +42,10 @@ public static class PluginConfigurationExtensions
     }
 
     /// <summary>
-    /// Whether watch history for a row of this server and library is negotiated: written back to that
-    /// server as well. Only a Sync server negotiates, and only for a library mapping that chose to.
+    /// Whether History for a row of this server and library is also written back to that server.
+    /// Only the Sync direction negotiates, and only for a library mapping that chose to.
     /// </summary>
-    /// <param name="config">The configuration.</param>
+    /// <param name="config">The plugin settings to read.</param>
     /// <param name="serverKey">The row's server.</param>
     /// <param name="sourceLibraryId">The row's library on that server.</param>
     /// <returns><c>true</c> when negotiated.</returns>
@@ -57,15 +54,18 @@ public static class PluginConfigurationExtensions
             && (server.LibraryMappings ?? new List<LibraryMapping>()).Any(m => m.IsEnabled && m.NegotiateHistory
                 && string.Equals(m.SourceLibraryId, sourceLibraryId, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Whether any library of any Sync server negotiates watch history.</summary>
-    /// <param name="config">The configuration.</param>
+    /// <summary>Whether any library of any Sync server negotiates History.</summary>
+    /// <param name="config">The plugin settings to read.</param>
     /// <returns><c>true</c> when one does.</returns>
     public static bool NegotiatesAnyHistory(this PluginConfiguration config)
-        => (config.Servers ?? new List<SourceServer>()).Any(s => s.IsEnabled && s.Mode == ServerMode.Sync
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return (config.Servers ?? new List<SourceServer>()).Any(s => s.IsEnabled && s.Mode == ServerMode.Sync
             && (s.LibraryMappings ?? new List<LibraryMapping>()).Any(m => m.IsEnabled && m.NegotiateHistory));
+    }
 
-    /// <summary>Finds a server entry by key, or null.</summary>
-    /// <param name="config">The configuration.</param>
+    /// <summary>Finds a server entry by key.</summary>
+    /// <param name="config">The plugin settings to read.</param>
     /// <param name="key">The entry key carried on a sync row.</param>
     /// <returns>The entry, or null when no entry has that key.</returns>
     public static SourceServer? FindServer(this PluginConfiguration config, string? key)
@@ -79,8 +79,8 @@ public static class PluginConfigurationExtensions
         return config.Servers?.FirstOrDefault(s => string.Equals(s.Key, key, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>Finds a server entry by the server's own id, or null.</summary>
-    /// <param name="config">The configuration.</param>
+    /// <summary>Finds a server entry by the server's own ID.</summary>
+    /// <param name="config">The plugin settings to read.</param>
     /// <param name="serverId">The Jellyfin server id, as a peer names itself.</param>
     /// <returns>The entry, or null when no entry has that id.</returns>
     public static SourceServer? FindServerById(this PluginConfiguration config, string? serverId)
@@ -95,19 +95,19 @@ public static class PluginConfigurationExtensions
     }
 
     /// <summary>
-    /// Resolves the server a sync row came from. A row that carries no key belongs to the first scan server.
+    /// Resolves the server a sync row came from. A row that carries no key belongs to the first source.
     /// </summary>
-    /// <param name="config">The configuration.</param>
+    /// <param name="config">The plugin settings to read.</param>
     /// <param name="key">The entry key carried on the row, or null.</param>
     /// <returns>The entry, or null when none applies.</returns>
     public static SourceServer? ResolveServer(this PluginConfiguration config, string? key)
         => config.FindServer(key) ?? config.GetPullServers().FirstOrDefault();
 
     /// <summary>
-    /// Returns the enabled library mappings of every scan server, in rank order. Never returns null.
+    /// Returns the enabled library mappings of every source, in Rank order.
     /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The enabled mappings across all scan servers.</returns>
+    /// <param name="config">The plugin settings to read.</param>
+    /// <returns>The enabled mappings across all sources, never null.</returns>
     public static List<LibraryMapping> GetEnabledLibraryMappings(this PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -115,10 +115,10 @@ public static class PluginConfigurationExtensions
     }
 
     /// <summary>
-    /// Returns the enabled user mappings of every scan server, in rank order. Never returns null.
+    /// Returns the enabled user mappings of every source, in Rank order.
     /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The enabled mappings across all scan servers.</returns>
+    /// <param name="config">The plugin settings to read.</param>
+    /// <returns>The enabled mappings across all sources, never null.</returns>
     public static List<UserMapping> GetEnabledUserMappings(this PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -126,11 +126,10 @@ public static class PluginConfigurationExtensions
     }
 
     /// <summary>
-    /// Returns every library mapping of every server, enabled or not, in rank order. For code that
-    /// only cares about local folders, such as disk space and recycling, where a disabled mapping's
-    /// folder still exists.
+    /// Returns every library mapping of every server, enabled or not, in Rank order.
+    /// It serves code that only needs local folders, such as disk space and recycling.
     /// </summary>
-    /// <param name="config">The configuration.</param>
+    /// <param name="config">The plugin settings to read.</param>
     /// <returns>All library mappings.</returns>
     public static List<LibraryMapping> GetAllLibraryMappings(this PluginConfiguration config)
     {
