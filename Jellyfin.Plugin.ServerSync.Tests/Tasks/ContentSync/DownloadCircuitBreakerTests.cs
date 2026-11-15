@@ -2,6 +2,7 @@ using System;
 using Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging.Abstractions;
+using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Tasks.ContentSync;
@@ -25,7 +26,7 @@ public class DownloadCircuitBreakerTests
         public static void Settle(CircuitBreaker breaker, bool downloadsAttempted) => SettleAfterRun(breaker, downloadsAttempted);
     }
 
-    private static CircuitBreaker Breaker(TimeSpan cooldown) => new(NullLogger.Instance, "SourceServer", failureThreshold: 5, cooldownPeriod: cooldown);
+    private static CircuitBreaker Breaker(TimeSpan cooldown, TimeProvider? clock = null) => new(NullLogger.Instance, "SourceServer", failureThreshold: 5, cooldownPeriod: cooldown, timeProvider: clock);
 
     /// <summary>
     /// Admitting a server to a run keeps the failures recorded before it.
@@ -61,21 +62,22 @@ public class DownloadCircuitBreakerTests
     [Fact]
     public void Admit_AfterCooldown_OneFailureReopens_AndOnlyASuccessCloses()
     {
-        var cooldown = TimeSpan.FromMilliseconds(300);
-        var breaker = Breaker(cooldown);
+        var cooldown = TimeSpan.FromMinutes(5);
+        var clock = new ManualTimeProvider();
+        var breaker = Breaker(cooldown, clock);
         for (var i = 0; i < 5; i++)
         {
             breaker.RecordFailure("download failed");
         }
 
-        System.Threading.Thread.Sleep(cooldown + TimeSpan.FromMilliseconds(100));
+        clock.Advance(cooldown + TimeSpan.FromSeconds(1));
         Assert.True(Probe.Admit(breaker, out _));
         Assert.Equal(5, breaker.ConsecutiveFailures);
 
         breaker.RecordFailure("still failing");
         Assert.True(breaker.IsOpen);
 
-        System.Threading.Thread.Sleep(cooldown + TimeSpan.FromMilliseconds(100));
+        clock.Advance(cooldown + TimeSpan.FromSeconds(1));
         Assert.True(Probe.Admit(breaker, out _));
         breaker.RecordSuccess();
 

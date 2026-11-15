@@ -2,6 +2,7 @@ using System;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -66,7 +67,13 @@ public partial class ConfigurationController
                 return NotFound();
             }
 
-            var bytes = await ReadCappedAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            byte[]? bytes;
+            await using (body.ConfigureAwait(false))
+            {
+                bytes = await StreamLimits.ReadCappedAsync(body, MaxImageBytes, cancellationToken).ConfigureAwait(false);
+            }
+
             if (bytes == null)
             {
                 return NotFound();
@@ -87,26 +94,4 @@ public partial class ConfigurationController
     /// The most bytes a proxied image may hold. A larger body is not a real thumbnail.
     /// </summary>
     private const int MaxImageBytes = 8 * 1024 * 1024;
-
-    /// <summary>Reads a body into memory, or returns null once it passes the cap.</summary>
-    private static async Task<byte[]?> ReadCappedAsync(HttpContent content, CancellationToken cancellationToken)
-    {
-        var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using (stream.ConfigureAwait(false))
-        {
-            using var buffer = new System.IO.MemoryStream();
-            var chunk = new byte[81920];
-            int read;
-            while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                if (buffer.Length > MaxImageBytes)
-                {
-                    return null;
-                }
-            }
-
-            return buffer.ToArray();
-        }
-    }
 }
