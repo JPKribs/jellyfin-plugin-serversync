@@ -10,8 +10,8 @@ globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
 globalThis.setInterval = function () { return 1; };
 
-var IDS = ['settingsStatus', 'resetStatus', 'saveBandwidthStatus', 'streamSpeedRows', 'linkTakeRows', 'linkCacheStatus', 'bandwidthTable'];
-var BUTTONS = ['btnResetEntireDatabase', 'btnResetContentTable', 'btnClearLinkCache', 'btnSaveBandwidth'];
+var IDS = ['settingsStatus', 'resetStatus', 'saveBandwidthStatus', 'streamSpeedRows', 'linkTakeRows', 'linkCacheStatus', 'bandwidthTable', 'watchedFilterUsersList', 'saveContentSettingsStatus'];
+var BUTTONS = ['btnResetEntireDatabase', 'btnResetContentTable', 'btnClearLinkCache', 'btnSaveBandwidth', 'btnSaveContentSettings'];
 
 // openPage
 // Loads the Settings controller over a view that holds the elements it uses, and shows the page.
@@ -24,6 +24,7 @@ async function openPage(opts) {
         .concat([page.dom.el('input', { id: 'txtMaxDownloadSpeed' })]);
     var view = page.dom.el('div', {}, children);
     page.dom.document.documentElement.appendChild(view);
+    if (opts.answer) globalThis.ApiClient.fetch = function (options) { page.requests.push(options); return opts.answer(options); };
     if (opts.fail) globalThis.ApiClient.getPluginConfiguration = function () { return Promise.reject(new Error('refused')); };
     var mod = await loadScript('serversync_settings.js');
     mod.default(view);
@@ -163,4 +164,35 @@ test('a bandwidth save that fails says so and does not claim success', async fun
     var status = opened.view.querySelector('#saveBandwidthStatus');
     assert.equal(statusText(status), 'Could not save the bandwidth.');
     assert.ok(status.classList.contains('base-status-bad'));
+});
+
+// usersAnswer
+// Answers the user list of each scan server with two users.
+function usersAnswer(options) {
+    if (String(options.url).indexOf('GetSourceUsers') < 0) return Promise.resolve({});
+    return Promise.resolve([{ Id: 'u1', Name: '<i>Ann</i>' }, { Id: 'u2', Name: 'Ben' }]);
+}
+
+var SCAN = { Key: 'a', Name: 'source-a', Url: 'http://source-a:8096', ApiKey: 'k', Mode: 'Pull', IsEnabled: true };
+
+test('Skip Items Watched By lists each scan server user in a Checkbox List, with the saved users picked', async function () {
+    var opened = await openPage({ config: { Servers: [SCAN], WatchedFilterUserIds: ['u2'] }, answer: usersAnswer });
+    await settle(20);
+    var list = opened.view.querySelector('#watchedFilterUsersList');
+    assert.equal(list.querySelectorAll('.base-check-row').length, 2);
+    assert.match(list.textContent, /<i>Ann<\/i>/);
+    assert.match(list.textContent, /Ben/);
+    assert.match(list.textContent, /source-a/);
+    assert.equal(list.querySelector('i'), null);
+});
+
+test('saving Content keeps the picked users, keeps a saved user whose server did not answer, and turns skipping on', async function () {
+    var opened = await openPage({ config: { Servers: [SCAN], WatchedFilterUserIds: ['u2', 'gone'] }, answer: usersAnswer });
+    await settle(20);
+    var saved = null;
+    globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
+    opened.view.querySelector('#btnSaveContentSettings').click();
+    await settle(20);
+    assert.deepEqual(saved.WatchedFilterUserIds, ['u2', 'gone']);
+    assert.equal(saved.SkipWatchedByAllUsers, true);
 });

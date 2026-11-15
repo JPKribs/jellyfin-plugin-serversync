@@ -568,6 +568,57 @@ export default function (view) {
         });
     }
 
+    // The Pie Chart of synced files, or null before the first draw.
+    var filesChart = null;
+
+    // countSynced
+    // Counts the synced Content rows that match a query.
+    //
+    // Inputs
+    // query [string]: The Items filters, such as storage=Link.
+    //
+    // Output
+    // [Promise]: Resolves to the count.
+    function countSynced(query) {
+        return apiRequest('Items?status=Synced&skip=0&take=1&' + query, 'GET').then(function (page) {
+            return (page && page.TotalCount) || 0;
+        });
+    }
+
+    // loadFilesChart
+    // Draws how many synced files are copies, links, and cached links. A failed count hides the chart.
+    function loadFilesChart() {
+        if (!contentOn) {
+            setVisible('storageFilesSection', false);
+            return;
+        }
+        Promise.all([countSynced('storage=Copy'), countSynced('storage=Link'), countSynced('storage=Link&cached=true')]).then(function (counts) {
+            var cached = Math.min(counts[2], counts[1]);
+            var slices = [
+                { label: 'Copies', value: counts[0] },
+                { label: 'Links', value: counts[1] - cached },
+                { label: 'Cached Links', value: cached }
+            ];
+            var holder = getEl('storageFilesChart');
+            if (!holder) return;
+            if (filesChart) filesChart.destroy();
+            holder.innerHTML = '';
+            filesChart = serverSyncModule.createPieChart({
+                slices: slices,
+                label: 'Synced files by storage',
+                donut: true,
+                centerText: String(counts[0] + counts[1]),
+                centerLabel: 'Files',
+                valueName: 'Files',
+                emptyText: 'No files are synced yet.'
+            });
+            holder.appendChild(filesChart.element);
+            setVisible('storageFilesSection', true);
+        }).catch(function () {
+            setVisible('storageFilesSection', false);
+        });
+    }
+
     function loadConfig() {
         ServerSyncShared.getConfig().then(function (config) {
             currentConfig = config;
@@ -584,6 +635,7 @@ export default function (view) {
                 clearCards();
                 return;
             }
+            loadFilesChart();
             renderServerPicker();
             renderLibraries();
             reloadKeptCopies();

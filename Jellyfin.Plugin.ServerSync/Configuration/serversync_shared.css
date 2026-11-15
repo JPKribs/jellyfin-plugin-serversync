@@ -823,13 +823,6 @@ div:not(.serversync-form-row) + .serversync-form-row {
     color: rgba(255, 255, 255, 0.2);
     font-size: 18px;
 }
-.serversync-filter-item-thumb.serversync-filter-item-thumb-square,
-.serversync-filter-item-thumb-placeholder.serversync-filter-item-thumb-square {
-    width: 50px;
-    height: 50px;
-    flex: 0 0 50px;
-    border-radius: 50%;
-}
 .serversync-filter-item-info {
     flex: 1;
     min-width: 0;

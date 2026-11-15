@@ -13,6 +13,8 @@ import {
     createPaginatedTable,
     createSortableCardList,
     createChoiceGroup,
+    createCheckboxList,
+    createPieChart,
     generateGuid,
     bindDialog,
     confirmDialog,
@@ -23,7 +25,7 @@ import {
 
 // Re-exports
 // The Base builders and the kept secret sentinel, so a page takes everything from this one module.
-export { createPaginatedTable, createSortableCardList, createChoiceGroup, generateGuid, bindDialog, confirmDialog, SECRET_KEPT };
+export { createPaginatedTable, createSortableCardList, createChoiceGroup, createCheckboxList, createPieChart, generateGuid, bindDialog, confirmDialog, SECRET_KEPT };
 
 var PLUGIN_ID = 'ebd650b5-6f4c-4ccb-b10d-23dffb3a7286';
 

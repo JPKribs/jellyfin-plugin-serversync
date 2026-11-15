@@ -66,6 +66,14 @@ export default function (view) {
         });
     }
 
+    // The Checkbox List that holds the users, or null before the first draw.
+    var watchedFilterList = null;
+
+    // getCurrentWatchedFilterUserIds
+    // Reads the picked users from the list, or from the config while the list has none.
+    //
+    // Output
+    // [string[]]: The picked user ids.
     function getCurrentWatchedFilterUserIds() {
         var rendered = collectWatchedFilterUsers();
         if (rendered.length > 0) {
@@ -75,71 +83,46 @@ export default function (view) {
         return (currentConfig && currentConfig.WatchedFilterUserIds) || [];
     }
 
+    // renderWatchedFilterUsers
+    // Draws the users of every scan server as a Checkbox List, each with its server and its picture.
+    //
+    // Inputs
+    // selectedIds [string[]]: The users to draw as picked.
     function renderWatchedFilterUsers(selectedIds) {
         var container = view.querySelector('#watchedFilterUsersList');
         if (!container) return;
 
-        var selectedSet = {};
-        (selectedIds || []).forEach(function(id) { selectedSet[id] = true; });
-
+        if (watchedFilterList) watchedFilterList.destroy();
         container.innerHTML = '';
 
-        if (watchedFilterUsers.length === 0) {
-            container.innerHTML = ServerSyncShared.emptySection('No source users available. Add a server and connect to it to load users.', { inline: true });
-            return;
-        }
-
-        var list = document.createElement('div');
-        list.className = 'serversync-filter-items-list';
-
-        watchedFilterUsers.forEach(function(user) {
-            var isSelected = !!selectedSet[user.Id];
-
-            var itemEl = document.createElement('div');
-            itemEl.className = 'serversync-filter-item serversync-watched-user-item' + (isSelected ? ' serversync-selected' : '');
-            itemEl.dataset.userId = user.Id;
-
-            var thumbHtml;
-            if (user.Id) {
-                var userThumbId = 'ss-user-thumb-' + escapeHtml(String(user.Id));
-                ServerSyncShared.scheduleProxyImage(userThumbId, user.Id, true, 120, user.ServerKey);
-                thumbHtml = '<img id="' + userThumbId + '" class="serversync-filter-item-thumb serversync-filter-item-thumb-square" />' +
-                    '<div class="serversync-filter-item-thumb-placeholder serversync-filter-item-thumb-square hidden"><span class="material-icons">person</span></div>';
-            } else {
-                thumbHtml = '<div class="serversync-filter-item-thumb-placeholder serversync-filter-item-thumb-square"><span class="material-icons">person</span></div>';
+        watchedFilterList = serverSyncModule.createCheckboxList({
+            items: watchedFilterUsers,
+            idKey: 'Id',
+            value: selectedIds || [],
+            searchKeys: ['Name', 'ServerName'],
+            placeholder: 'Search Users',
+            emptyMessage: 'No source users available. Add a server and connect to it to load users.',
+            renderRow: function (user) {
+                return {
+                    label: user.Name || '',
+                    sublabel: user.ServerName || '',
+                    image: ServerSyncShared.proxyImage(user.Id, true, user.ServerKey)
+                };
             }
-
-            itemEl.innerHTML = thumbHtml +
-                '<div class="serversync-filter-item-info">' +
-                    '<div class="serversync-filter-item-name">' + escapeHtml(user.Name || '') + '</div>' +
-                    '<div class="serversync-filter-item-meta">' + escapeHtml(user.ServerName || '') + '</div>' +
-                '</div>' +
-                '<div class="serversync-filter-item-check"><span class="material-icons">' + (isSelected ? 'check_box' : 'check_box_outline_blank') + '</span></div>';
-
-            itemEl.addEventListener('click', function() {
-                toggleWatchedFilterUser(itemEl);
-            });
-
-            list.appendChild(itemEl);
         });
-
-        container.appendChild(list);
+        container.appendChild(watchedFilterList.element);
     }
 
-    function toggleWatchedFilterUser(itemEl) {
-        var selected = itemEl.classList.toggle('serversync-selected');
-        var icon = itemEl.querySelector('.serversync-filter-item-check .material-icons');
-        if (icon) icon.textContent = selected ? 'check_box' : 'check_box_outline_blank';
-    }
-
+    // collectWatchedFilterUsers
+    // Reads the picked users that are on screen.
+    //
+    // Output
+    // [string[]]: The picked ids of the users the list shows.
     function collectWatchedFilterUsers() {
-        var ids = [];
-        view.querySelectorAll('.serversync-watched-user-item.serversync-selected').forEach(function(row) {
-            if (row.dataset.userId) {
-                ids.push(row.dataset.userId);
-            }
-        });
-        return ids;
+        if (!watchedFilterList) return [];
+        var shown = {};
+        watchedFilterUsers.forEach(function (u) { shown[u.Id] = true; });
+        return watchedFilterList.getValue().filter(function (id) { return shown[id]; });
     }
 
     function loadContentSettings(config) {
