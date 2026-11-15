@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
@@ -14,15 +15,10 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Jellyfin never probes a .strm during a library scan, so a new link would show no runtime or codecs
-/// until someone played it. When the library adds one of this server's links, this gives it the media
-/// info its source already holds for the file. When the source cannot give it, this queues the same
-/// refresh Jellyfin runs before playing a .strm, which probes the file through the link.
+/// Gives a new link the media info its source holds, since Jellyfin never probes a .strm during a library
+/// scan, and queues Jellyfin's own probe through the link when the source cannot give it. The probe waits
+/// until the item has settled, since a scan still refreshing it can save over the result, and is tried a few times.
 /// </summary>
-/// <remarks>
-/// The probe waits until the item has settled, since a scan still refreshing a new item can save over
-/// the probe's result. It then checks the item has its media info and tries again a few times if not.
-/// </remarks>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkProbe : IHostedService, IDisposable
 {
@@ -54,29 +50,29 @@ public sealed class LinkProbe : IHostedService, IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkProbe"/> class.
     /// </summary>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="providerManager">Provider manager.</param>
-    /// <param name="fileSystem">File system.</param>
-    /// <param name="links">The link registry.</param>
-    /// <param name="grants">The plays in progress.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="mediaInfo">Takes the source's media info, or null.</param>
+    /// <param name="libraryManager">Raises the item added event and finds the items to probe.</param>
+    /// <param name="providerManager">Queues the refresh that probes a link.</param>
+    /// <param name="fileSystem">Backs the directory service of each refresh.</param>
+    /// <param name="links">Tells which paths are this server's links.</param>
+    /// <param name="grants">Grants the probe its read of a link.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="mediaInfo">Takes the source's media info before a probe is tried.</param>
     public LinkProbe(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, ILinkRegistry links, LinkGrants grants, ILogger<LinkProbe> logger, LinkMediaInfo mediaInfo)
         : this(libraryManager, providerManager, fileSystem, links, grants, logger, () => DateTime.UtcNow, mediaInfo)
     {
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="LinkProbe"/> class, for tests.
+    /// Initializes a new instance of the <see cref="LinkProbe"/> class.
     /// </summary>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="providerManager">Provider manager.</param>
-    /// <param name="fileSystem">File system.</param>
-    /// <param name="links">The link registry.</param>
-    /// <param name="grants">The plays in progress.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="now">Gives the current time.</param>
-    /// <param name="mediaInfo">Takes the source's media info, or null.</param>
+    /// <param name="libraryManager">Raises the item added event and finds the items to probe.</param>
+    /// <param name="providerManager">Queues the refresh that probes a link.</param>
+    /// <param name="fileSystem">Backs the directory service of each refresh.</param>
+    /// <param name="links">Tells which paths are this server's links.</param>
+    /// <param name="grants">Grants the probe its read of a link.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="now">Reads the current time, so a test can move it.</param>
+    /// <param name="mediaInfo">Takes the source's media info before a probe is tried, or null to always probe.</param>
     public LinkProbe(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, ILinkRegistry links, LinkGrants grants, ILogger<LinkProbe> logger, Func<DateTime> now, LinkMediaInfo? mediaInfo = null)
     {
         _mediaInfo = mediaInfo;
@@ -119,6 +115,7 @@ public sealed class LinkProbe : IHostedService, IDisposable
     /// <param name="item">The item the library added, or null.</param>
     public void Track(BaseItem? item)
     {
+        // This runs in Jellyfin's item added event, which must never see a throw.
         try
         {
             var path = item?.Path;
@@ -127,7 +124,6 @@ public sealed class LinkProbe : IHostedService, IDisposable
                 return;
             }
 
-            // The writer refreshed the registry when it wrote the link, so a user's own .strm costs one lookup.
             if (_links.Find(path) is not { } link)
             {
                 return;
@@ -149,6 +145,7 @@ public sealed class LinkProbe : IHostedService, IDisposable
             return;
         }
 
+        // A throw from a timer callback would take the server down.
         try
         {
             var now = _now();
@@ -169,15 +166,14 @@ public sealed class LinkProbe : IHostedService, IDisposable
 
                 if (pending.Attempts >= MaxAttempts)
                 {
-                    _logger.LogInformation("Gave up probing the link {Path} after {Attempts} tries. It is probed when someone plays it", item.Path, pending.Attempts);
+                    _logger.LogInformation("Gave up probing the link {Path} after {Attempts} tries. It is probed when someone plays it", FormatUtilities.SanitizeForLog(item.Path), pending.Attempts);
                     _pending.TryRemove(itemId, out _);
                     continue;
                 }
 
                 _pending[itemId] = pending with { DueAt = now + CheckAfter, Attempts = pending.Attempts + 1 };
 
-                // The source already holds the file's media info, so it is asked first. The file is only
-                // probed across the network when the source cannot give it.
+                // The source already holds the media info, so it is asked before probing.
                 if (_mediaInfo is not null && item.Path is { } path && _links.Find(path) is { } link && _inFlight.TryAdd(itemId, 0))
                 {
                     _ = ShipOrProbeAsync(item, link, pending.LinkId);
@@ -198,10 +194,15 @@ public sealed class LinkProbe : IHostedService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Takes a link's media info from its source, or probes it when the source cannot give it. Only a few
+    /// run at once, since a large sync adds many links and each may take images too.
+    /// </summary>
     private async Task ShipOrProbeAsync(BaseItem item, LinkEntry link, string linkId)
     {
-        // A large sync adds many links at once, and each may take images from the source too.
         await _shipping.WaitAsync().ConfigureAwait(false);
+
+        // Any failure to take the media info falls back to the probe.
         try
         {
             if (await _mediaInfo!.ShipAsync(item, link, CancellationToken.None).ConfigureAwait(false))
@@ -211,13 +212,13 @@ public sealed class LinkProbe : IHostedService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not take the media info for the link {Path} from its source, so it is probed", link.LinkPath);
+            _logger.LogDebug(ex, "Could not take the media info for the link {Path} from its source, so it is probed", FormatUtilities.SanitizeForLog(link.LinkPath));
         }
         finally
         {
             _shipping.Release();
 
-            // The check of whether it stuck counts from now, not from when it joined the queue.
+            // The check counts from now, not from when it joined the queue.
             if (_pending.TryGetValue(item.Id, out var waiting))
             {
                 _pending[item.Id] = waiting with { DueAt = _now() + CheckAfter };
@@ -226,17 +227,18 @@ public sealed class LinkProbe : IHostedService, IDisposable
             _inFlight.TryRemove(item.Id, out _);
         }
 
+        // Nothing awaits this task, so a throw would go unobserved.
         try
         {
             Probe(item.Id, linkId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not probe the link {Path}", link.LinkPath);
+            _logger.LogWarning(ex, "Could not probe the link {Path}", FormatUtilities.SanitizeForLog(link.LinkPath));
         }
     }
 
-    // Nobody is playing it, so the probe reads it on this server's own behalf.
+    /// <summary>Queues Jellyfin's probe of a link under a probe grant, since nobody is playing it.</summary>
     private void Probe(Guid itemId, string linkId)
     {
         _grants.GrantProbe(linkId);
@@ -252,5 +254,6 @@ public sealed class LinkProbe : IHostedService, IDisposable
 
     private void OnItemAdded(object? sender, ItemChangeEventArgs e) => Track(e.Item);
 
+    /// <summary>A link waiting for its probe or its check, with when that is due and the tries made.</summary>
     private sealed record Pending(string LinkId, DateTime DueAt, int Attempts);
 }

@@ -12,6 +12,7 @@ using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -19,9 +20,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Settles a link whose own server no longer has the file. A film is there for as long as any server
-/// this one reads from holds a real copy, so the other servers are asked first: the link moves to the
-/// first that holds the file, in rank order, and goes only when none does.
+/// Settles a link whose own server no longer has the file. The link moves to the first other source
+/// that holds the file, in rank order, and goes only when none does.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkRehomer
@@ -38,10 +38,10 @@ public sealed class LinkRehomer
     /// </summary>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
-    /// <param name="table">The content sync table.</param>
+    /// <param name="table">Holds the link's row.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="writer">Rewrites a link, or null.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="writer">Rewrites the .strm when the link's id changes, or null to leave it for the next run.</param>
     public LinkRehomer(
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
@@ -50,6 +50,11 @@ public sealed class LinkRehomer
         ILogger<LinkRehomer> logger,
         LinkWriter? writer = null)
     {
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+        ArgumentNullException.ThrowIfNull(logger);
         _configManager = configManager;
         _clientFactory = clientFactory;
         _table = table;
@@ -61,8 +66,8 @@ public sealed class LinkRehomer
     /// <summary>
     /// Moves the link to another server that holds its file, or marks it for removal when none does.
     /// </summary>
-    /// <param name="row">The link's row. Its own server has said the file is gone.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="row">The row of a link whose own server has said the file is gone.</param>
+    /// <param name="cancellationToken">Cancels the asking.</param>
     /// <returns>The name of the server the link streams from now, or null when it was marked for removal.</returns>
     public async Task<string?> SettleGoneAsync(SyncItem row, CancellationToken cancellationToken)
     {
@@ -85,7 +90,7 @@ public sealed class LinkRehomer
                 }
                 catch (Exception ex) when (ex is HttpRequestException or IOException or ArgumentException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
                 {
-                    _logger.LogDebug(ex, "Could not ask '{Server}' whether it holds {Path}", alternate.Server.DisplayName, alternate.SourcePath);
+                    _logger.LogDebug(ex, "Could not ask '{Server}' whether it holds {Path}", alternate.Server.DisplayName, FormatUtilities.SanitizeForLog(alternate.SourcePath));
                     continue;
                 }
 
@@ -115,18 +120,17 @@ public sealed class LinkRehomer
                 row.StatusDate = DateTime.UtcNow;
                 _table.Upsert(row);
 
-                // The .strm names the link by its id, so it is written now when the id changed, rather
-                // than leave it naming a link nobody holds until the next run.
+                // The .strm names the link by its id, so a changed id cannot wait.
                 try
                 {
                     _writer?.Write(row, _table, config);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
                 {
-                    _logger.LogDebug(ex, "The link {Path} is written again on the next run", row.LocalPath);
+                    _logger.LogDebug(ex, "The link {Path} is written again on the next run", FormatUtilities.SanitizeForLog(row.LocalPath));
                 }
 
-                _logger.LogInformation("The link {Path} now streams from '{Server}', since the server it streamed from no longer has the file", row.LocalPath, alternate.Server.DisplayName);
+                _logger.LogInformation("The link {Path} now streams from '{Server}', since the server it streamed from no longer has the file", FormatUtilities.SanitizeForLog(row.LocalPath), alternate.Server.DisplayName);
                 return alternate.Server.DisplayName;
             }
         }

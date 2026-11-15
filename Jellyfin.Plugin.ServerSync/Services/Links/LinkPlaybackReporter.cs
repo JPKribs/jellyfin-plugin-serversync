@@ -10,6 +10,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
@@ -22,11 +23,8 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
 /// Tells the source about playback of this server's links that it streams, so it shows there as a live
-/// session, lands in its activity log, and updates played state there through Jellyfin's own handling.
-/// Playback from the link cache is not reported, since the source has no part in it, and a transcode
-/// here shows on the source as a direct stream, since the source only sends the file. Progress goes
-/// at most every 30 seconds, and at once when playback pauses or resumes. Reports are sent in the
-/// background in the order they happened, so Jellyfin's playback events never wait on the network.
+/// session and updates played state there, while playback from the link cache is not reported. Reports go
+/// in the background in order, progress at most every 30 seconds, so Jellyfin's playback events never wait.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPlaybackReporter : BackgroundService
@@ -34,7 +32,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// <summary>The longest gap between two progress reports for one viewer.</summary>
     public static readonly TimeSpan ProgressEvery = TimeSpan.FromSeconds(30);
 
-    // Reports go one at a time, so a source that stops answering only holds the queue this long per report.
+    /// <summary>How long one report may hold the queue, since reports go one at a time.</summary>
     private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ISessionManager _sessionManager;
@@ -48,13 +46,13 @@ public sealed class LinkPlaybackReporter : BackgroundService
     private readonly Channel<(LinkEntry Link, LinkRoute Route, PeerPlaybackReport Report, int Attempt)> _queue = Channel.CreateBounded<(LinkEntry, LinkRoute, PeerPlaybackReport, int)>(
         new BoundedChannelOptions(1000) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
 
-    // The last progress sent per viewer and link, and whether it was paused.
+    /// <summary>The last progress sent per viewer and link, and whether it was paused.</summary>
     private readonly ConcurrentDictionary<string, (DateTime At, bool Paused)> _lastProgress = new(StringComparer.Ordinal);
 
-    // The link each session last reported, so a stop that names no item still reaches the source.
+    /// <summary>The link each session last reported, so a stop that names no item still reaches the source.</summary>
     private readonly ConcurrentDictionary<string, LinkEntry> _playing = new(StringComparer.Ordinal);
 
-    // The viewers whose playback the source has been told about, so it also hears their stop.
+    /// <summary>The viewers whose playback the source has been told about, so it also hears their stop.</summary>
     private readonly ConcurrentDictionary<string, byte> _reported = new(StringComparer.Ordinal);
 
     private readonly LinkCache? _cache;
@@ -62,15 +60,15 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkPlaybackReporter"/> class.
     /// </summary>
-    /// <param name="sessionManager">Session manager.</param>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="links">The link registry.</param>
+    /// <param name="sessionManager">Raises the playback events that are reported.</param>
+    /// <param name="libraryManager">Finds the version an event names.</param>
+    /// <param name="links">Tells which paths are this server's links.</param>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="grants">The plays in progress.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="cache">The link cache, or null.</param>
+    /// <param name="grants">Tells which server each viewer streams from.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="cache">The link cache, whose playback is not reported, or null.</param>
     public LinkPlaybackReporter(
         ISessionManager sessionManager,
         ILibraryManager libraryManager,
@@ -94,23 +92,21 @@ public sealed class LinkPlaybackReporter : BackgroundService
     }
 
     /// <summary>
-    /// Whether a progress report is due: the first for a viewer, a pause or resume, or 30 seconds after
+    /// Whether a progress report is due, as the first for a viewer, a pause or resume, or 30 seconds after
     /// the last one sent.
     /// </summary>
     /// <param name="last">The last report sent for the viewer, or null when none was.</param>
     /// <param name="paused">Whether the viewer is paused now.</param>
-    /// <param name="now">The current time.</param>
+    /// <param name="now">The time to measure the gap since the last report from.</param>
     /// <returns><c>true</c> when a report is due.</returns>
     public static bool ProgressDue((DateTime At, bool Paused)? last, bool paused, DateTime now)
         => last is not { } sent || sent.Paused != paused || now - sent.At >= ProgressEvery;
 
     /// <summary>
-    /// How long to wait before each retry of a report that failed. A stop is retried, since no later
-    /// report makes up for it and the source would keep the session listed. Start and progress are not:
-    /// the next progress report makes up for either. A retry waits outside the queue, so a source that
-    /// is down never holds up reports to the others.
+    /// How long to wait before each retry of a report that failed. Only a stop is retried, since a lost
+    /// stop leaves the session listed on the source and the next progress report makes up for anything else.
     /// </summary>
-    /// <param name="kind">The kind of report.</param>
+    /// <param name="kind">The kind of report that failed.</param>
     /// <returns>The wait before each retry, or none.</returns>
     public static TimeSpan[] RetryDelays(LinkPlaybackEvent kind)
         => kind == LinkPlaybackEvent.Stop
@@ -118,8 +114,8 @@ public sealed class LinkPlaybackReporter : BackgroundService
             : Array.Empty<TimeSpan>();
 
     /// <summary>
-    /// Whether a failed report may succeed if sent again: the source did not answer in time, could not be
-    /// reached, or failed itself. A refusal, such as a user the source does not map, is final.
+    /// Whether a failed report may succeed if sent again, as when the source did not answer in time, could
+    /// not be reached, or failed itself. A refusal, such as a user the source does not map, is final.
     /// </summary>
     /// <param name="ex">What the send threw.</param>
     /// <returns><c>true</c> when a retry may help.</returns>
@@ -128,9 +124,8 @@ public sealed class LinkPlaybackReporter : BackgroundService
             || (ex is HttpRequestException http && (http.StatusCode is null || (int)http.StatusCode >= 500));
 
     /// <summary>
-    /// How playback of a link shows on the source. The source only ever sends the file as it is, and
-    /// any transcode runs on the server holding the link, so the source shows direct play or direct
-    /// stream, never a transcode it is not running.
+    /// How playback of a link shows on the source. The source only sends the file as it is and any transcode
+    /// runs on the linking server, so the source shows direct play or direct stream.
     /// </summary>
     /// <param name="method">How the viewer here plays it.</param>
     /// <returns>DirectPlay, or DirectStream for anything else.</returns>
@@ -140,17 +135,17 @@ public sealed class LinkPlaybackReporter : BackgroundService
             : nameof(PlayMethod.DirectStream);
 
     /// <summary>
-    /// Whether a viewer's playback stays off the source. A viewer whose link is in the cache when they
-    /// are first seen plays from this server's disk and asks nothing of the source, so the source is
-    /// not told about them. Once the source has been told about a viewer it hears every report through
+    /// Whether a viewer's playback stays off the source, which is so when their link is in the link cache
+    /// when they are first seen. Once the source has been told about a viewer it hears every report through
     /// their stop, so it never keeps a session that was started there.
     /// </summary>
-    /// <param name="kind">The event.</param>
-    /// <param name="viewer">The viewer and link.</param>
-    /// <param name="cached">Whether the link's file is in the cache now.</param>
+    /// <param name="kind">The kind of playback event.</param>
+    /// <param name="viewer">The key of the viewer's session and link.</param>
+    /// <param name="cached">Tells whether the link's file is in the link cache.</param>
     /// <returns><c>true</c> when nothing is sent to the source.</returns>
     public bool PlaysLocally(LinkPlaybackEvent kind, string viewer, Func<bool> cached)
     {
+        ArgumentNullException.ThrowIfNull(viewer);
         ArgumentNullException.ThrowIfNull(cached);
         if (kind == LinkPlaybackEvent.Stop)
         {
@@ -173,17 +168,17 @@ public sealed class LinkPlaybackReporter : BackgroundService
 
     /// <summary>
     /// The link a playback event is reported for, or null when it is not one. Start and progress name
-    /// their link and are remembered per session. A player that quits without naming what it played
-    /// stops with no item, and the link that session last reported is what stopped, so the source is
-    /// told about that one.
+    /// their link and are remembered per session, so a stop that names no item is reported for the link
+    /// that session last played.
     /// </summary>
-    /// <param name="kind">The event.</param>
+    /// <param name="kind">The kind of playback event.</param>
     /// <param name="sessionKey">The viewer's session here.</param>
     /// <param name="named">The link the event's item is, or null.</param>
     /// <param name="namesItem">Whether the event names an item at all.</param>
     /// <returns>The link, or null.</returns>
     public LinkEntry? Track(LinkPlaybackEvent kind, string sessionKey, LinkEntry? named, bool namesItem)
     {
+        ArgumentNullException.ThrowIfNull(sessionKey);
         if (kind != LinkPlaybackEvent.Stop)
         {
             if (named is not null)
@@ -237,12 +232,15 @@ public sealed class LinkPlaybackReporter : BackgroundService
 
     private void OnStopped(object? sender, PlaybackStopEventArgs e) => Enqueue(e, LinkPlaybackEvent.Stop);
 
+    /// <summary>
+    /// Queues a report of one playback event when it is for a link the source streams. A film held in several
+    /// versions names the version played as its media source, and that version is what the source is told about.
+    /// </summary>
     private void Enqueue(PlaybackProgressEventArgs e, LinkPlaybackEvent kind)
     {
+        // This runs in Jellyfin's playback events, which must never see a throw.
         try
         {
-            // A film held in several versions reports the film, and names the version being played as
-            // its media source. The version is what streams, so it is what the source is told about.
             var sessionKey = e.Session?.Id ?? e.DeviceId ?? string.Empty;
             var path = (Guid.TryParse(e.MediaSourceId, out var version) && version != e.Item?.Id ? _libraryManager.GetItemById(version) : null)?.Path ?? e.Item?.Path;
             var named = path is not null && path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) ? _links.Find(path) : null;
@@ -253,7 +251,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
 
             var viewer = sessionKey + "|" + link.LinkId;
 
-            // Playback from the cache is this server's alone, so the source is not told about it.
+            // Playback from the link cache is this server's alone, so it is not reported.
             if (PlaysLocally(kind, viewer, () => _cache?.Holds(link.LinkId) == true))
             {
                 return;
@@ -278,7 +276,6 @@ public sealed class LinkPlaybackReporter : BackgroundService
                 _lastProgress.TryRemove(viewer, out _);
             }
 
-            // Reported to the server the viewer streams from, under its own id of the file.
             var viewerUser = e.Users?.FirstOrDefault();
             var userId = viewerUser?.Id;
             var route = (userId is { } viewerId ? _grants.RouteFor(link.LinkId, viewerId) : null) ?? LinkFallback.PrimaryOf(link);
@@ -303,6 +300,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
         }
     }
 
+    /// <summary>Sends one report to the server the viewer streams from, and queues a retry of a stop that may yet succeed.</summary>
     private async Task SendAsync(LinkEntry link, LinkRoute route, PeerPlaybackReport report, int attempt, CancellationToken cancellationToken)
     {
         if (_configManager.Configuration.FindServer(route.ServerKey) is not { IsEnabled: true, IsConfigured: true } server)
@@ -324,21 +322,22 @@ public sealed class LinkPlaybackReporter : BackgroundService
         }
         catch (Exception ex) when (Retryable(ex) && RetryDelays(report.Event) is { } delays && attempt < delays.Length)
         {
-            _logger.LogDebug(ex, "Could not report the {Event} of {Path} to '{Server}', trying again", report.Event, link.LinkPath, server.DisplayName);
+            _logger.LogDebug(ex, "Could not report the {Event} of {Path} to '{Server}', trying again", report.Event, FormatUtilities.SanitizeForLog(link.LinkPath), server.DisplayName);
             _ = RequeueAsync((link, route, report, attempt + 1), delays[attempt], cancellationToken);
         }
         catch (Exception ex) when (report.Event == LinkPlaybackEvent.Stop)
         {
             // The source stops the playback itself ten minutes after the last report it had.
-            _logger.LogWarning("Could not report the stop of {Path} to '{Server}', so it lists the viewer until it gives up on them: {Reason}", link.LinkPath, server.DisplayName, ex.Message);
+            _logger.LogWarning("Could not report the stop of {Path} to '{Server}', so it lists the viewer until it gives up on them: {Reason}", FormatUtilities.SanitizeForLog(link.LinkPath), server.DisplayName, FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
         catch (Exception ex)
         {
-            // A lost start or progress is made good by the next report, and history sync settles played state either way.
-            _logger.LogDebug(ex, "Could not report playback of {Path} to '{Server}'", link.LinkPath, server.DisplayName);
+            // A lost start or progress is made good by the next report.
+            _logger.LogDebug(ex, "Could not report playback of {Path} to '{Server}'", FormatUtilities.SanitizeForLog(link.LinkPath), server.DisplayName);
         }
     }
 
+    /// <summary>Puts a report back on the queue after a wait, outside the queue so other reports are not held up.</summary>
     private async Task RequeueAsync((LinkEntry Link, LinkRoute Route, PeerPlaybackReport Report, int Attempt) retry, TimeSpan delay, CancellationToken cancellationToken)
     {
         try

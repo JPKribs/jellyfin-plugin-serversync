@@ -15,11 +15,10 @@ public static class LinkPaths
     public const string Extension = ".strm";
 
     /// <summary>
-    /// Whether a source item can be held as a link. Jellyfin only follows a .strm for video. It serves
-    /// an audio or book .strm as a plain file, which would hand a player the link's text, secret and
-    /// all, so only video is ever linked.
+    /// Whether a source item can be held as a link, which only video can. Jellyfin serves an audio or
+    /// book .strm as a plain file, which would hand a player the link's secret.
     /// </summary>
-    /// <param name="item">The source item.</param>
+    /// <param name="item">The source item to judge, or null.</param>
     /// <returns><c>true</c> when it can be a link.</returns>
     public static bool CanLink(BaseItemDto item)
         => item?.Type is BaseItemDto_Type.Movie
@@ -30,10 +29,8 @@ public static class LinkPaths
 
     /// <summary>
     /// The other versions of a source film or episode, such as a 1080p file beside a 4K one, each as
-    /// an item of its own with that version's id, path, and size. Jellyfin lists a film once, under
-    /// its first version, with the rest as further media sources. A Link mapping links every version,
-    /// which costs a small file each, so a user the source refuses one version can play another.
-    /// Copies are made of the first version only, as they always were.
+    /// an item of its own with that version's id, path, and size. A Link library mapping links every
+    /// version so a user the source refuses one can play another, and copies are made of the first only.
     /// </summary>
     /// <param name="item">The source item, as Jellyfin lists it.</param>
     /// <returns>One item per further version held as a file.</returns>
@@ -44,9 +41,9 @@ public static class LinkPaths
             yield break;
         }
 
-        // Two versions that differ only by extension would be the same .strm, so only the first is
-        // linked, as when Jellyfin lists such files as one item.
         var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Versions differing only by extension share one .strm, so the first wins.
         if (LinkPathFor(item.Path) is { } own)
         {
             taken.Add(own);
@@ -98,10 +95,10 @@ public static class LinkPaths
     }
 
     /// <summary>
-    /// The path a full copy would have where a link row's .strm sits: the .strm path with the source
-    /// file's extension. Null when the row has no local path.
+    /// The path a full copy would have where a link row's .strm sits, the .strm path with the source
+    /// file's extension, or null when the row has no local path.
     /// </summary>
-    /// <param name="row">The link's row.</param>
+    /// <param name="row">The row of the link whose copy path is wanted.</param>
     /// <returns>The copy's path, or null.</returns>
     public static string? CopiedPathOf(Models.ContentSync.SyncItem row)
     {
@@ -114,22 +111,28 @@ public static class LinkPaths
     /// same path a refresh translates from the source, so rows from either agree on which file they cover.
     /// </summary>
     /// <param name="localPath">The local item's path.</param>
-    /// <param name="links">The link registry.</param>
+    /// <param name="links">Tells which paths are this server's links.</param>
     /// <returns>The path the row records.</returns>
     public static string RowPathFor(string localPath, ILinkRegistry links)
-        => links.CopiedPathFor(localPath) ?? localPath;
+    {
+        ArgumentNullException.ThrowIfNull(links);
+        return links.CopiedPathFor(localPath) ?? localPath;
+    }
 
     /// <summary>
     /// Translates a local path back to the source. A link translates as the copy it stands in for, so it
-    /// keeps the source file's real extension and the peer matches its own file by path.
+    /// keeps the source file's real extension and the source matches its own file by path.
     /// </summary>
     /// <param name="localPath">The local item's path.</param>
     /// <param name="localRoot">The local library root.</param>
     /// <param name="sourceRoot">The source library root.</param>
-    /// <param name="links">The link registry.</param>
+    /// <param name="links">Tells which paths are this server's links.</param>
     /// <returns>The source path.</returns>
     public static string SourcePathFor(string localPath, string localRoot, string sourceRoot, ILinkRegistry links)
-        => PathUtilities.TranslatePath(RowPathFor(localPath, links), localRoot, sourceRoot);
+    {
+        ArgumentNullException.ThrowIfNull(links);
+        return PathUtilities.TranslatePath(RowPathFor(localPath, links), localRoot, sourceRoot);
+    }
 
     /// <summary>
     /// Adds each link in <paramref name="index"/> again under the path its copy would have, so a source
@@ -137,9 +140,11 @@ public static class LinkPaths
     /// a real file always wins over a link standing in for the same name.
     /// </summary>
     /// <param name="index">The index of local items by path.</param>
-    /// <param name="links">The link registry.</param>
+    /// <param name="links">Tells which paths are this server's links.</param>
     public static void AddAliases(Dictionary<string, BaseItem> index, ILinkRegistry links)
     {
+        ArgumentNullException.ThrowIfNull(index);
+        ArgumentNullException.ThrowIfNull(links);
         foreach (var (path, item) in index.ToList())
         {
             if (links.CopiedPathFor(path) is { } copied)

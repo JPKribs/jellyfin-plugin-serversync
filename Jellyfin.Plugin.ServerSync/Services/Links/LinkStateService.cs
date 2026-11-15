@@ -5,6 +5,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
@@ -28,7 +29,7 @@ public static class LinkStateService
     /// <param name="sourceCreateDate">When the file was created on the source.</param>
     /// <param name="linkPath">Where the link sits here.</param>
     /// <param name="downloadMode">Whether new files are added on their own, wait for approval, or are left alone.</param>
-    /// <param name="files">Reads and writes the link files.</param>
+    /// <param name="files">Tells whether the link's .strm already holds the current URL.</param>
     /// <returns>The new row, or null.</returns>
     public static SyncItem? ProcessNewLink(
         LibraryMapping mapping,
@@ -75,15 +76,14 @@ public static class LinkStateService
     /// <summary>
     /// Brings an existing link row up to date with the source and returns it. The caller persists.
     /// </summary>
-    /// <param name="row">The link's row.</param>
+    /// <param name="row">The link's row, which is changed in place.</param>
     /// <param name="sourcePath">The file's path on the source.</param>
     /// <param name="sourceSize">The file's size on the source, in bytes.</param>
     /// <param name="sourceCreateDate">When the file was created on the source.</param>
     /// <param name="linkPath">Where the link sits here.</param>
-    /// <param name="files">Reads and writes the link files.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="promoteMode">The new files approval when the mapping now copies, so the link is
-    /// turned into a copy under that approval, or null when the mapping links.</param>
+    /// <param name="files">Tells whether the link's .strm already holds the current URL.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="promoteMode">The approval a new file needs when the library mapping copies, or null when it links.</param>
     /// <returns>The updated row.</returns>
     public static SyncItem ProcessExistingLink(
         SyncItem row,
@@ -104,7 +104,7 @@ public static class LinkStateService
             return row;
         }
 
-        // Back on the source before its deletion ran: write it again rather than remove it.
+        // Back on the source before its deletion ran, so it is written again.
         if (row.Status == SyncStatus.Deleting || (row.Status == SyncStatus.Pending && row.PendingType == PendingType.Deletion))
         {
             row.Status = SyncStatus.Queued;
@@ -112,25 +112,22 @@ public static class LinkStateService
             row.StatusDate = DateTime.UtcNow;
         }
 
-        // The file was replaced on the source under the same name, such as a re-encode. The .strm is
-        // still right, but the media info and subtitles taken with it describe the old file.
         var replaced = row.StorageMode == StorageMode.Link && row.Status == SyncStatus.Synced
             && row.SourceSize > 0 && sourceSize > 0 && row.SourceSize != sourceSize;
 
-        // A rename on the source moves the .strm and its companions along, the same way a copy moves.
         SyncStateService.UpdateItemMetadata(row, sourcePath, sourceSize, sourceCreateDate, linkPath, logger);
 
-        // The mapping now copies: the link becomes a copy, under the same approval a new file needs.
+        // The library mapping copies, so the link becomes a copy under approval.
         if (row.StorageMode == StorageMode.Link && promoteMode is { } mode && mode != ApprovalMode.Disabled && row.Status != SyncStatus.Pending)
         {
             MarkPromoting(row, mode == ApprovalMode.RequireApproval);
-            logger.LogDebug("Marked the link {FileName} to become a copy", Path.GetFileName(row.LocalPath));
+            logger.LogDebug("Marked the link {FileName} to become a copy", FormatUtilities.SanitizeForLog(Path.GetFileName(row.LocalPath)));
             return row;
         }
 
         if (row.StorageMode == StorageMode.Promoting)
         {
-            // Switched back to Link before anyone approved the copy: it stays a link.
+            // Switched back to Link before the copy was approved, so it stays a link.
             if (promoteMode is null && row.Status == SyncStatus.Pending)
             {
                 row.StorageMode = StorageMode.Link;
@@ -139,8 +136,7 @@ public static class LinkStateService
             }
             else if (row.Status == SyncStatus.Synced)
             {
-                // Marked synced by hand while it waited: it stays a link for now, and under a Copy mapping
-                // the next refresh asks for approval again rather than copying it unasked.
+                // Marked synced by hand while waiting, so the next refresh asks again.
                 row.StorageMode = StorageMode.Link;
                 row.PendingType = null;
                 return row;
@@ -156,29 +152,26 @@ public static class LinkStateService
             return row;
         }
 
-        // Applied again, which writes nothing over a link that is current and takes the source's
-        // subtitles and media info for the file as it is now.
+        // A file replaced on the source needs its subtitles and media info taken again.
         if (replaced && row.Status == SyncStatus.Synced)
         {
             row.Status = SyncStatus.Queued;
             row.PendingType = null;
             row.StatusDate = DateTime.UtcNow;
-            logger.LogDebug("Re-queued the link {FileName} (the file changed on the source)", Path.GetFileName(row.LocalPath));
+            logger.LogDebug("Re-queued the link {FileName} (the file changed on the source)", FormatUtilities.SanitizeForLog(Path.GetFileName(row.LocalPath)));
             return row;
         }
 
         var current = !string.IsNullOrEmpty(row.LocalPath) && files.IsCurrent(row.LocalPath, row.SourceItemId);
-
-        // An .nfo of this plugin's from before rows recorded them is recorded now, so removing it later
-        // is seen as the user's choice.
         var hasNfo = !string.IsNullOrEmpty(row.LocalPath) && File.Exists(LinkNfo.PathFor(row.LocalPath));
+
+        // Recording this plugin's .nfo makes a later removal count as the user's choice.
         if (hasNfo && !LinkNfo.Recorded(row) && LinkNfo.IsOurs(LinkNfo.PathFor(row.LocalPath!)))
         {
             LinkNfo.Record(row);
         }
 
-        // A link the link check found could not play is settled again by that check, not by its file
-        // being in place, which it was all along.
+        // A link flagged by the link check is settled only by that check.
         if (current && row.Status is SyncStatus.Queued or SyncStatus.Errored && !LinkVerifier.Flagged(row))
         {
             row.Status = SyncStatus.Synced;
@@ -188,23 +181,21 @@ public static class LinkStateService
         }
         else if (row.Status == SyncStatus.Synced && (!current || (!hasNfo && !LinkNfo.Recorded(row))))
         {
-            // Missing, stale, or never given its .nfo, such as a link from before links had one. Writing
-            // it again is cheap, and leaves anything already right as it is. An .nfo the user removed
-            // after it was written stays removed.
+            // Missing, stale, or never given its .nfo, and writing it again is cheap.
             row.Status = SyncStatus.Queued;
             row.PendingType = null;
             row.StatusDate = DateTime.UtcNow;
-            logger.LogDebug("Re-queued the link {FileName} (missing or out of date)", Path.GetFileName(row.LocalPath));
+            logger.LogDebug("Re-queued the link {FileName} (missing or out of date)", FormatUtilities.SanitizeForLog(Path.GetFileName(row.LocalPath)));
         }
 
         return row;
     }
 
     /// <summary>
-    /// Marks a link to be turned into a full copy. It keeps playing as a link until the copy is in place.
-    /// Returns <c>false</c> for a row that is not a link.
+    /// Marks a link to be turned into a full copy, or returns <c>false</c> for a row that is not a link.
+    /// It keeps playing as a link until the copy is in place.
     /// </summary>
-    /// <param name="row">The link's row.</param>
+    /// <param name="row">The row of the link to turn into a copy.</param>
     /// <param name="requireApproval"><c>true</c> when the copy waits for approval.</param>
     /// <returns><c>true</c> when the row was marked.</returns>
     public static bool MarkPromoting(SyncItem row, bool requireApproval)

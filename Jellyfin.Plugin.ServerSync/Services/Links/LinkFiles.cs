@@ -10,9 +10,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Writes and reads this server's .strm links. A link holds one line, a loopback URL to this server's
-/// own link route, so no source credential is ever on disk. The URL carries a secret derived from a key
-/// only this server holds, so a link cannot be guessed from its id.
+/// Writes and reads this server's .strm links, each one line holding a loopback URL to this server's own
+/// link route, so no source credential is ever on disk. The URL carries a secret derived from a key only
+/// this server holds, so a link cannot be guessed from its id.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkFiles
@@ -31,17 +31,18 @@ public sealed class LinkFiles
     /// Initializes a new instance of the <see cref="LinkFiles"/> class.
     /// </summary>
     /// <param name="host">Names this server.</param>
-    /// <param name="paths">Jellyfin's folders.</param>
+    /// <param name="paths">Gives the data folder the link key is kept in.</param>
     public LinkFiles(IServerApplicationHost host, IApplicationPaths paths)
     {
+        ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(paths);
         _host = host;
         _keyPath = Path.Combine(paths.DataPath, KeyFile);
     }
 
     /// <summary>The URL a link with <paramref name="linkId"/> holds.</summary>
-    /// <param name="linkId">The link's id.</param>
-    /// <returns>The URL.</returns>
+    /// <param name="linkId">The id the URL names and the secret is derived from.</param>
+    /// <returns>The loopback URL, with the link's secret.</returns>
     public string UrlFor(string linkId)
         => $"{_host.GetLocalApiUrl("127.0.0.1", "http", _host.HttpPort)}/{Route}/{linkId}?k={Secret(linkId)}";
 
@@ -154,6 +155,7 @@ public sealed class LinkFiles
         }
     }
 
+    /// <summary>Derives a link's secret from its id and this server's key.</summary>
     private string Secret(string linkId)
     {
         using var hmac = new HMACSHA256(Key());
@@ -161,6 +163,7 @@ public sealed class LinkFiles
         return Convert.ToBase64String(hash).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
+    /// <summary>Reads this server's link key, making and storing one on first use.</summary>
     private byte[] Key()
     {
         if (_key is { } key)
