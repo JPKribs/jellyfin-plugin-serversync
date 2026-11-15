@@ -5,31 +5,25 @@ using System.Threading;
 namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 
 /// <summary>
-/// Per-module async mutex shared between a module's Refresh task and its
-/// Sync task. Without this, both tasks can run concurrently and stomp on each
-/// other's row writes, a Refresh upsert can revert a row from Synced back
-/// to Queued by overwriting status with stale in-memory state.
+/// An async mutex for each sync type, shared by its scan task and its sync task.
+/// It stops a scan upsert from overwriting a row the sync task marked Synced with stale state.
 /// </summary>
 internal static class SyncModuleMutex
 {
     private static readonly Dictionary<string, SemaphoreSlim> _semaphores = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// How long a single row refresh or apply, run for a hint, waits for the module before giving up. A
-    /// scheduled run holds the module for its whole length, which can be an hour. The hint is put off and
-    /// tried again rather than holding its lane for that long.
+    /// How long a single row refresh or apply, run for a hint, waits for the sync type before giving up.
+    /// A scheduled run can hold it for an hour, so the hint is put off and tried again.
     /// </summary>
     public static readonly TimeSpan SingleRowWait = TimeSpan.FromSeconds(5);
     private static readonly object _lock = new();
 
     /// <summary>
-    /// Returns the singleton semaphore for a module key (e.g. "Content",
-    /// "History"). The same key always returns the same instance, so a
-    /// Refresh and a Sync task using the same key serialize against each
-    /// other.
+    /// Returns the one semaphore for a sync type key, such as Content or History, so tasks that share the key run one at a time.
     /// </summary>
-    /// <param name="moduleKey">Module key (typically the module name).</param>
-    /// <returns>Semaphore with capacity 1.</returns>
+    /// <param name="moduleKey">The sync type's key.</param>
+    /// <returns>The semaphore, which admits one holder.</returns>
     public static SemaphoreSlim ForModule(string moduleKey)
     {
         ArgumentException.ThrowIfNullOrEmpty(moduleKey);

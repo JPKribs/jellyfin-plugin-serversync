@@ -11,10 +11,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks.Information;
 
 /// <summary>
-/// The scheduled content pass: refresh the content table from every scan server, download what is
-/// queued, process deletions, then sync collections, under one progress bar. Content hints bring
-/// new files over between runs. This task is the safety net that also handles replacements,
-/// removals, and anything that arrived while the plugin was down.
+/// Scans every source for content, downloads what is queued, processes deletions, then syncs collections, under one progress bar.
+/// It is the scheduled safety net for replacements, removals, and anything that arrived while the plugin was down.
 /// </summary>
 public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
 {
@@ -30,6 +28,10 @@ public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
     /// <param name="logger">Writes log entries.</param>
     public SyncContentTask(IServiceProvider services, IPluginConfigurationManager configManager, ILogger<SyncContentTask> logger)
     {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _services = services;
         _configManager = configManager;
         _logger = logger;
@@ -68,14 +70,9 @@ public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
             return;
         }
 
-        // The refresh and the download get most of the bar. Collections are quick.
-        // Each step is caught on its own so one failure does not skip the
-        // rest, and the failures are raised together at the end so the task
-        // still shows failed. The download is skipped when the refresh threw,
-        // since the queue it would drain was not rebuilt. Collections mirror
-        // what is already local, so they run either way.
         var failures = new List<Exception>();
         var refreshed = await RunStepAsync(() => ActivatorUtilities.CreateInstance<UpdateSyncTablesTask>(_services), 0, 25, progress, failures, cancellationToken).ConfigureAwait(false);
+        // A failed scan leaves the queue stale, so the download is skipped.
         if (refreshed)
         {
             await RunStepAsync(() => ActivatorUtilities.CreateInstance<SyncMissingContentTask>(_services), 25, 65, progress, failures, cancellationToken).ConfigureAwait(false);
@@ -91,6 +88,7 @@ public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
         }
     }
 
+    /// <summary>Runs one step and collects its failure, so the remaining steps still run and the task still shows failed.</summary>
     private async Task<bool> RunStepAsync(
         Func<IScheduledTask> create,
         double offset,
@@ -109,11 +107,7 @@ public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
             await task.ExecuteAsync(new Progress<double>(p => progress.Report(offset + (share * Math.Clamp(p, 0, 100) / 100.0))), cancellationToken).ConfigureAwait(false);
             return true;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, "{Task}: {Step} failed, continuing with the remaining steps", Name, stepName);
             failures.Add(ex);

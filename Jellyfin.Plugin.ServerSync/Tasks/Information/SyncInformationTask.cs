@@ -16,10 +16,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks.Information;
 
 /// <summary>
-/// The scheduled safety net under the hint pipeline. Runs the full comparison for metadata, people,
-/// users, and history, refresh then apply for each, under one progress bar, so anything the hints
-/// missed, including changes made while the plugin was down, is caught on a schedule. The per module
-/// tasks it runs are hidden from the task list and keep no schedule of their own.
+/// Runs the full comparison for metadata, people, users, history, and playlists, scan then apply for each, under one progress bar.
+/// It is the scheduled safety net for anything the hints missed, including changes made while the plugin was down.
 /// </summary>
 public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
 {
@@ -35,6 +33,10 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
     /// <param name="logger">Writes log entries.</param>
     public SyncInformationTask(IServiceProvider services, IPluginConfigurationManager configManager, ILogger<SyncInformationTask> logger)
     {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _services = services;
         _configManager = configManager;
         _logger = logger;
@@ -108,10 +110,6 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
             return;
         }
 
-        // One module failing must not starve the others, so each step is
-        // caught on its own and the failures are raised together at the end,
-        // which keeps the task marked failed. A module whose refresh threw
-        // skips its apply, since the queue it would drain was not rebuilt.
         var failures = new List<Exception>();
         var share = 100.0 / modules.Sum(m => m.Sync is null ? 1 : 2);
         var offset = 0.0;
@@ -124,6 +122,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
                 continue;
             }
 
+            // A failed scan leaves the queue stale, so the apply is skipped.
             if (refreshed)
             {
                 await RunStepAsync(sync, offset, share, progress, failures, cancellationToken).ConfigureAwait(false);
@@ -140,6 +139,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
         }
     }
 
+    /// <summary>Runs one step and collects its failure, so the remaining steps still run and the task still shows failed.</summary>
     private async Task<bool> RunStepAsync(
         Func<IScheduledTask> create,
         double offset,
@@ -158,11 +158,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
             await task.ExecuteAsync(new Progress<double>(p => progress.Report(offset + (share * Math.Clamp(p, 0, 100) / 100.0))), cancellationToken).ConfigureAwait(false);
             return true;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, "{Task}: {Step} failed, continuing with the remaining modules", Name, stepName);
             failures.Add(ex);

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,15 +11,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Removes the schedules of this plugin's hidden per module tasks. Jellyfin keeps a task's timer in
-/// its own files across upgrades, so a stale timer would run a hidden task beside Sync Content and
-/// Sync Information. The tasks stay registered for the dashboard's run buttons.
+/// Removes the schedules of this plugin's hidden per sync type tasks, whose stale timers would run them beside Sync Content and Sync Information.
+/// The work waits in the background for startup to finish, since Jellyfin registers scheduled tasks after it starts hosted services.
 /// </summary>
-/// <remarks>
-/// Jellyfin starts hosted services before it registers scheduled tasks, so the task list is empty
-/// when <see cref="StartAsync"/> runs. The work waits in the background for startup to finish, which
-/// Jellyfin marks only after every task is registered.
-/// </remarks>
 public sealed class HiddenTaskScheduleCleaner : IHostedService, IDisposable
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
@@ -38,6 +33,10 @@ public sealed class HiddenTaskScheduleCleaner : IHostedService, IDisposable
     /// <param name="logger">Writes log entries.</param>
     public HiddenTaskScheduleCleaner(ITaskManager taskManager, IServerApplicationHost applicationHost, ILogger<HiddenTaskScheduleCleaner> logger)
     {
+        ArgumentNullException.ThrowIfNull(taskManager);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _taskManager = taskManager;
         _applicationHost = applicationHost;
         _logger = logger;
@@ -67,7 +66,7 @@ public sealed class HiddenTaskScheduleCleaner : IHostedService, IDisposable
             }
             catch (OperationCanceledException)
             {
-                // Expected on stop.
+                // Stopping cancels the work.
             }
         }
     }
@@ -75,7 +74,7 @@ public sealed class HiddenTaskScheduleCleaner : IHostedService, IDisposable
     /// <inheritdoc />
     public void Dispose() => _stopping?.Dispose();
 
-    /// <summary>Clears the schedule of every hidden task of this plugin that still has one.</summary>
+    /// <summary>Clears the schedule of every hidden task of this plugin that still has one, which Jellyfin saves to the task's file.</summary>
     /// <returns>How many schedules were cleared.</returns>
     public int ClearHiddenSchedules()
     {
@@ -90,7 +89,6 @@ public sealed class HiddenTaskScheduleCleaner : IHostedService, IDisposable
                 continue;
             }
 
-            // Writes an empty schedule to Jellyfin's file for the task, so it stays cleared.
             worker.Triggers = Array.Empty<TaskTriggerInfo>();
             cleared++;
         }
@@ -98,6 +96,7 @@ public sealed class HiddenTaskScheduleCleaner : IHostedService, IDisposable
         return cleared;
     }
 
+    /// <summary>Waits for Jellyfin to register the tasks, then clears the hidden schedules.</summary>
     private async Task CleanWhenReadyAsync(CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + GiveUpAfter;
@@ -120,7 +119,7 @@ public sealed class HiddenTaskScheduleCleaner : IHostedService, IDisposable
                 _logger.LogInformation("Removed the schedules of {Count} per module task(s). Sync Content and Sync Information run them now", cleared);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             _logger.LogWarning(ex, "Could not clear the schedules of the hidden per module tasks");
         }

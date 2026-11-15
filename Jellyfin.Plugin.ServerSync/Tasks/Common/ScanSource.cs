@@ -5,17 +5,16 @@ using Jellyfin.Plugin.ServerSync.Services.Clients;
 namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 
 /// <summary>
-/// One scan server for the duration of a run: the configured entry, a connected client for it, and its
-/// rank, which is its position in the configured list. Lower is better.
+/// One source for the length of a run: its server entry, a connected client, and its rank.
 /// </summary>
 public sealed class ScanSource : IDisposable
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ScanSource"/> class.
     /// </summary>
-    /// <param name="server">The configured entry.</param>
-    /// <param name="client">A client bound to that entry.</param>
-    /// <param name="priority">The entry's rank, which is its position in the configured list.</param>
+    /// <param name="server">The server entry the run reads from.</param>
+    /// <param name="client">A client bound to that entry, which this instance disposes.</param>
+    /// <param name="priority">The entry's rank, which is its place in the configured list.</param>
     public ScanSource(SourceServer server, SourceServerClient client, int priority)
     {
         Server = server ?? throw new ArgumentNullException(nameof(server));
