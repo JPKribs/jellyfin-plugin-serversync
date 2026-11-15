@@ -199,7 +199,7 @@ public sealed class LocalHintPublisher
     {
         version.Kind = kind;
         version.Key = localKey;
-        // Provider work leaves no stamp, so a hand made edit anywhere in the pool beats it.
+        // Provider work leaves no stamp, so any hand made edit beats it.
         if (recorded)
         {
             _versions.Set(version);

@@ -254,7 +254,7 @@ public sealed class ItemHintHandler
             return HintApplyResult.Kept(HintCode.AwaitingApproval, "waiting for approval on this server");
         }
 
-        // A row that is not queued already matches, so the hint's stamp is this value's too.
+        // A row that is not queued already matches, so the hint's stamp applies here.
         if (record.Status != SyncStatus.Queued)
         {
             if (hint.Recorded)
@@ -265,7 +265,7 @@ public sealed class ItemHintHandler
             return HintApplyResult.Unchanged;
         }
 
-        // A lock protects edits no stamp records, so provider work never replaces a locked item.
+        // A lock protects edits no stamp records, so provider work never replaces them.
         if (!hint.Recorded && localItem() is { IsLocked: true })
         {
             record.MarkKept($"kept: the item is locked here, so a provider's work on '{origin.DisplayName}' does not replace it");

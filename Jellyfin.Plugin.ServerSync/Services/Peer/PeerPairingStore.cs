@@ -56,7 +56,7 @@ public sealed class PeerPairingStore : QueueStoreBase
         return new Expectation(this, peerKey);
     }
 
-    /// <summary>Whether this server is asking an entry to pair right now.</summary>
+    /// <summary>Whether this server has an open question asking an entry to pair.</summary>
     /// <param name="peerKey">The server entry's key.</param>
     /// <returns><c>true</c> while a question to it is open.</returns>
     public bool Expecting(string peerKey) => _expected.TryGetValue(peerKey, out var open) && open > 0;

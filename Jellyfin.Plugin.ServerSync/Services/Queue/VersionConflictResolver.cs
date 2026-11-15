@@ -49,17 +49,17 @@ public sealed class VersionConflictResolver
     }
 
     /// <summary>Reads the stamp of this server's value.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="localKey">This server's key.</param>
     /// <returns>The stamp, or null when no edit was ever recorded for it.</returns>
     public ObjectVersion? Recorded(HintKind kind, string localKey) => _versions.Get(kind, localKey);
 
-    /// <summary>Records the stamp of a value this server now holds.</summary>
+    /// <summary>Records the stamp of a value this server holds.</summary>
     /// <param name="version">The stamp to record, keyed by this server's key.</param>
     public void Record(ObjectVersion version) => _versions.Set(version);
 
     /// <summary>Builds a stamp for an edit made here at this moment.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="localKey">This server's key.</param>
     /// <returns>The stamp.</returns>
     public ObjectVersion LocalEditNow(HintKind kind, string localKey) => new()
@@ -127,12 +127,12 @@ public sealed class VersionConflictResolver
     public void RecordPending(ObjectVersion version) => _versions.SetPending(version);
 
     /// <summary>Forgets any pending stamp for an object.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="localKey">This server's key.</param>
     public void ClearPending(HintKind kind, string localKey) => _versions.ClearPending(kind, localKey);
 
     /// <summary>Records the pending stamp of a value that was applied.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="localKey">This server's key.</param>
     /// <returns><c>true</c> when one was pending.</returns>
     public bool PromotePending(HintKind kind, string localKey) => _versions.PromotePending(kind, localKey);
@@ -141,7 +141,7 @@ public sealed class VersionConflictResolver
     /// Reads the stamps a peer holds for a batch of its own keys, in requests of the size the peer accepts.
     /// </summary>
     /// <param name="source">The connected peer.</param>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="peerKeys">The peer's keys for the objects.</param>
     /// <param name="cancellationToken">Cancels the requests.</param>
     /// <returns>The stamps by peer key, without keys the peer never stamped, or null when the peer did not answer.</returns>
@@ -189,7 +189,7 @@ public sealed class VersionConflictResolver
     }
 
     /// <summary>Decides between this server's value and a peer's by their stamps, for values known to differ.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="localKey">This server's key.</param>
     /// <param name="peerVersion">The stamp the peer's value carries, or null when the peer never recorded an edit for it.</param>
     /// <returns>Apply when the peer's value wins, Keep when this server's does.</returns>

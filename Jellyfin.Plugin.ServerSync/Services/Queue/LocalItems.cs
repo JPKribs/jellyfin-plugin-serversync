@@ -38,7 +38,7 @@ public sealed class LocalItems : ILocalItems
             return null;
         }
 
-        // An item at the exact path always wins over a link standing in for it.
+        // An item at the exact path wins over a link standing in for it.
         var item = _libraryManager.FindByPath(path, isFolder);
         if (item is not null || isFolder == true)
         {

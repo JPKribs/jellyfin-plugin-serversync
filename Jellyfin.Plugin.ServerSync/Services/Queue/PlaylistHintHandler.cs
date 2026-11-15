@@ -124,7 +124,7 @@ public sealed class PlaylistHintHandler
                 return HintApplyResult.Kept(HintCode.NotMapped, "the local copy belongs to another user, so it is kept");
             }
 
-            // Recording the deletion keeps the playlist from going back to the server that deleted it.
+            // Recording the deletion keeps the playlist from returning to the server that deleted it.
             if (config.PlaylistRemovedAction == PlaylistRemovedAction.Keep)
             {
                 _resolver.Record(incoming);

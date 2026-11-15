@@ -65,7 +65,7 @@ public static class HintDelivery
                 return "the peer refused this server's key: " + text + ". Add this server or its user to the whitelist there";
             }
         }
-        // A body that is not JSON carries no message, so the plain reason is used.
+        // A body that is not JSON carries no message, so the plain reason stands.
         catch (JsonException)
         {
         }

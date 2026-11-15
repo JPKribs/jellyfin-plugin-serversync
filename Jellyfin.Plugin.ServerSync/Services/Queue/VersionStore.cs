@@ -30,7 +30,7 @@ public sealed class VersionStore : QueueStoreBase
     }
 
     /// <summary>Reads the stamp of one object.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="key">This server's key.</param>
     /// <returns>The stamp, or null when none is recorded.</returns>
     public ObjectVersion? Get(HintKind kind, string key) => Read(conn =>
@@ -51,7 +51,7 @@ public sealed class VersionStore : QueueStoreBase
     /// <summary>
     /// Reads the stamps of several objects in one statement per chunk, since a peer may ask for hundreds at once.
     /// </summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="keys">This server's keys for the objects.</param>
     /// <returns>The stamps found, without keys that have none.</returns>
     public IList<ObjectVersion> GetMany(HintKind kind, IEnumerable<string> keys)
@@ -138,7 +138,7 @@ public sealed class VersionStore : QueueStoreBase
     }
 
     /// <summary>Forgets a pending stamp, for a value the scan read with no stamp or kept here.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="key">This server's key.</param>
     public void ClearPending(HintKind kind, string key) => Write(conn =>
     {
@@ -152,7 +152,7 @@ public sealed class VersionStore : QueueStoreBase
     /// <summary>
     /// Records the pending stamp of a value that was applied, and forgets it.
     /// </summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="key">This server's key.</param>
     /// <returns><c>true</c> when a stamp was pending, or <c>false</c> when the source never recorded an edit.</returns>
     public bool PromotePending(HintKind kind, string key)
@@ -188,7 +188,7 @@ public sealed class VersionStore : QueueStoreBase
     });
 
     /// <summary>Lists the keys held for one kind, for pruning stamps of objects that no longer exist.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <returns>The keys.</returns>
     public IList<string> GetKeys(HintKind kind) => Read(conn =>
     {
@@ -206,7 +206,7 @@ public sealed class VersionStore : QueueStoreBase
     });
 
     /// <summary>Removes the stamps of objects that no longer exist here.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="keys">This server's keys for the objects that are gone.</param>
     /// <returns>How many were removed.</returns>
     public int Remove(HintKind kind, IEnumerable<string> keys)

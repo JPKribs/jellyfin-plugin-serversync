@@ -179,7 +179,7 @@ public sealed class HistoryHintHandler
         var taken = HistoryParts.None;
         var decideByVersion = !record.HasNegotiatedBase || ChangedByThirdServer(localKey, origin);
 
-        // A base no longer describes a value taken from a third server, so the stamps decide.
+        // A base cannot describe a value taken from a third server, so stamps decide.
         if (decideByVersion)
         {
             taken = DecideByVersion(record, hint, localKey, parts);
@@ -209,7 +209,7 @@ public sealed class HistoryHintHandler
         {
             settled = await SettleWithOriginAsync(record, client, decideByVersion ? r => taken = DecideByVersion(r, hint, localKey, parts) : null, cancellationToken).ConfigureAwait(false);
         }
-        // A refused API Key cannot negotiate, so the merge is written here only and no base is recorded.
+        // A refused API Key cannot negotiate, so the merge is written here only.
         catch (PeerRefusedException ex) when (ex.KeyRefused)
         {
             oneWay = true;
@@ -267,7 +267,7 @@ public sealed class HistoryHintHandler
             }
         }
 
-        // This server added to the merge, so the peers that did not negotiate it hear of it from here.
+        // This server added to the merge, so the other peers hear it from here.
         if (movedPastOrigin)
         {
             var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = now };
@@ -327,7 +327,7 @@ public sealed class HistoryHintHandler
         var source = PeerHistoryNegotiator.SourceStateOf(record);
         var local = PeerHistoryNegotiator.LocalStateOf(record);
 
-        // Only the parts the origin says it changed are weighed, each against its own stamp here.
+        // Only the parts the origin changed are weighed, each against its own stamp.
         if (parts != HistoryParts.None)
         {
             var taken = HistoryParts.None;

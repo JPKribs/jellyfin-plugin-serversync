@@ -31,7 +31,7 @@ public static class PeerHistoryNegotiator
             return PeerHistoryOutcome.Unchanged;
         }
 
-        // A sender with no reading cannot know what it overwrites, so it is asked again.
+        // A sender with no reading cannot know what it overwrites, so it asks again.
         if (expected is null || IsEmpty(expected) || !StatesMatch(current, expected))
         {
             return PeerHistoryOutcome.Stale;

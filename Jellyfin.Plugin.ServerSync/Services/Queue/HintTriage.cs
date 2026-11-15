@@ -34,7 +34,7 @@ public sealed class HintTriage
         _versions = versions;
     }
 
-    /// <summary>Whether the local object a parked hint waits for exists now.</summary>
+    /// <summary>Whether the local object a parked hint waits for exists.</summary>
     /// <param name="parkKey">The key the hint waits under.</param>
     /// <param name="personName">The person's name, for a people hint.</param>
     /// <returns><c>true</c> when the object exists.</returns>
@@ -125,7 +125,7 @@ public sealed class HintTriage
         ArgumentNullException.ThrowIfNull(hint);
         ArgumentNullException.ThrowIfNull(senderServerId);
 
-        // A hint is stored as it arrives, so an unbounded field could fill the disk.
+        // Hints are stored on arrival, so an unbounded field could fill the disk.
         if (hint.Key is not null && TooLong(hint))
         {
             return new(HintCode.Invalid, "a field of the hint is longer than this server accepts");
@@ -147,7 +147,7 @@ public sealed class HintTriage
             return new(HintCode.Invalid, "a hint's version must be the sender's own edit");
         }
 
-        // Completions are remembered by hint id, so a peer may only use ids of its own.
+        // Completions are remembered by hint id, so a peer may use only its own.
         if (hint.HintId?.StartsWith(senderServerId + ":", StringComparison.OrdinalIgnoreCase) != true)
         {
             return new(HintCode.Invalid, "a hint's id must be one the sender made");

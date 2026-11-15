@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.Database;
@@ -21,22 +22,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Listens for changes made on this server and raises hints for them. User data saves raise history
-/// hints, item updates raise metadata and people hints, and items added raise content hints. User
-/// settings are not announced, since Jellyfin raises no event for policy and configuration changes,
-/// and the scheduled Sync Information task carries them.
-/// <para>
-/// A hint goes only to peers that apply its kind and have the object mapped. An edit someone makes in
-/// Jellyfin's editor or image dialog is recorded with its time the moment it is made. Anything else,
-/// a refresh, a scan, Jellyfin's own housekeeping, travels marked as a provider's work, which fills in
-/// where nothing was edited by hand and never replaces a recorded edit.
-/// </para>
-/// <para>
-/// Each object's changes gather until it has gone untouched for the configured wait, so a poster
-/// changed twice or a playback that reports progress every few seconds becomes one hint. An event
-/// raised while a peer's hint is being applied, or for a file a sync downloaded, is the sync's own
-/// write and raises nothing. See <see cref="ApplyGuard"/> and <see cref="WrittenFiles"/>.
-/// </para>
+/// Listens for changes made on this server and raises one hint for each object once it has gone untouched for Send Changes After.
+/// A hand made edit is stamped the moment it is made, and a save that is the sync's own write raises nothing.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LocalChangeObserver : IHostedService, IDisposable
@@ -58,8 +45,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private CancellationTokenSource? _stopping;
     private Task? _flushLoop;
 
-    // The most unmatched changes kept to check again. A server whose mappings miss a whole library
-    // would otherwise hold every change made there.
+    /// <summary>The most unmatched changes kept to check again, so mappings that miss a whole library do not hold every change made there.</summary>
     private const int MaxUnmatched = 1000;
 
     private readonly ConcurrentDictionary<string, UnmatchedChange> _unmatched = new(StringComparer.Ordinal);
@@ -67,20 +53,21 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalChangeObserver"/> class.
     /// </summary>
-    /// <param name="userDataManager">User data manager, for the save event.</param>
-    /// <param name="userManager">User manager.</param>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="httpContext">The request in progress, which tells an edit someone made from Jellyfin's own background work.</param>
-    /// <param name="configManager">Plugin configuration.</param>
-    /// <param name="publisher">The publisher that writes the outbound rows.</param>
-    /// <param name="worker">The delivery worker, which knows what each peer accepts.</param>
-    /// <param name="guard">The apply guard.</param>
-    /// <param name="versions">The version store, for edits no peer is told about.</param>
-    /// <param name="suppression">The hints peers declined, forgotten when the configuration changes.</param>
-    /// <param name="inboundWorker">The inbound worker, woken when an item or person a parked hint waits for arrives.</param>
-    /// <param name="applicationHost">The server host, for this server's id.</param>
-    /// <param name="playlistCopies">The playlist copy store.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="userDataManager">Raises the event for each history save.</param>
+    /// <param name="userManager">Names the user a history hint is for.</param>
+    /// <param name="libraryManager">Raises the events for items added, updated, and removed.</param>
+    /// <param name="httpContext">Tells an edit someone made in a request from Jellyfin's own background work.</param>
+    /// <param name="configManager">Reads Send Changes After and the server entries.</param>
+    /// <param name="publisher">Queues a hint for each peer once a change is raised.</param>
+    /// <param name="worker">Tells what each peer accepts.</param>
+    /// <param name="guard">Tells a save that is the echo of an apply.</param>
+    /// <param name="versions">Records the stamp of each hand made edit, even one no peer is told about.</param>
+    /// <param name="suppression">Holds the objects peers declined, which are forgotten when the configuration changes.</param>
+    /// <param name="inboundWorker">Wakes the hints parked for an item or person that arrives.</param>
+    /// <param name="applicationHost">Gives this server's id.</param>
+    /// <param name="playlistCopies">Ensures the list of playlist copies is loaded before a playlist is removed.</param>
+    /// <param name="logger">Writes a change that could not be recorded or raised.</param>
+    /// <param name="removed">Writes down each media file that leaves the library, or null.</param>
     public LocalChangeObserver(
         IUserDataManager userDataManager,
         IUserManager userManager,
@@ -98,8 +85,22 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         ILogger<LocalChangeObserver> logger,
         RemovedItemsStore? removed = null)
     {
-        _removed = removed;
+        ArgumentNullException.ThrowIfNull(userDataManager);
+        ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(httpContext);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(publisher);
+        ArgumentNullException.ThrowIfNull(worker);
+        ArgumentNullException.ThrowIfNull(guard);
+        ArgumentNullException.ThrowIfNull(versions);
+        ArgumentNullException.ThrowIfNull(suppression);
+        ArgumentNullException.ThrowIfNull(inboundWorker);
+        ArgumentNullException.ThrowIfNull(applicationHost);
         ArgumentNullException.ThrowIfNull(playlistCopies);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _removed = removed;
         _suppression = suppression;
         _inboundWorker = inboundWorker;
         _worker = worker;
@@ -119,9 +120,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     public int PendingCount => _pending.Count;
 
     /// <summary>
-    /// Gets how many objects changed here since start that no Push or Sync server mapped, so nothing
-    /// was sent. The usual reason is a server entry whose Libraries or Users step does not cover the
-    /// changed item or user. Saving the configuration checks them again.
+    /// Gets how many objects changed here since start that no Push or Sync server mapped, so nothing was sent.
+    /// Saving the configuration checks them again.
     /// </summary>
     public int UnmatchedCount => _unmatched.Count;
 
@@ -131,8 +131,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <summary>Forgets the unmatched changes once the operator has seen them and accepts them.</summary>
     public void DismissUnmatched() => _unmatched.Clear();
 
-    /// <summary>Gets the changes still gathering, newest edit first, for the dashboard.</summary>
-    /// <returns>A snapshot.</returns>
+    /// <summary>Lists the changes still gathering, newest edit first, for the dashboard.</summary>
+    /// <returns>A snapshot of the gathering changes.</returns>
     public IReadOnlyList<GatheringChange> Gathering()
         => _pending.Values.Select(c => new GatheringChange(c.Kind, c.UserId, c.ItemId, c.EditedAt, c.Due, c.Recorded)).OrderByDescending(c => c.EditedAt).ToList();
 
@@ -177,26 +177,24 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             {
                 await _flushLoop.ConfigureAwait(false);
             }
+            // The loop ends by cancellation when the service stops.
             catch (OperationCanceledException)
             {
-                // Expected on stop.
             }
         }
 
-        // Whatever was still gathering is raised now so a restart does not lose it.
         Flush(DateTime.MaxValue);
     }
 
-    /// <summary>Raises every gathered change whose Send Changes After wait has ended. Public so tests and the dashboard can force it.</summary>
-    /// <param name="utcNow">Now. Pass <see cref="DateTime.MaxValue"/> to raise everything.</param>
+    /// <summary>Raises every gathered change whose Send Changes After wait has ended.</summary>
+    /// <param name="utcNow">Changes due at or before this time are raised, so <see cref="DateTime.MaxValue"/> raises everything.</param>
     /// <returns>How many changes were raised.</returns>
     public int Flush(DateTime utcNow)
     {
         var raised = 0;
         foreach (var entry in _pending.ToArray())
         {
-            // Due moves with every edit, so the change is raised once the object has gone untouched for
-            // the configured wait, and only then.
+            // Due moves with every edit, so a change still being edited keeps gathering.
             if (entry.Value.Due > utcNow)
             {
                 continue;
@@ -212,9 +210,10 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 Raise(entry.Value);
                 raised++;
             }
+            // One change that cannot be raised must not stop the rest of the flush.
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Could not raise a {Kind} hint for {Key}", entry.Value.Kind, entry.Key);
+                _logger.LogError(ex, "Could not raise a {Kind} hint for {Key}", entry.Value.Kind, FormatUtilities.SanitizeForLog(entry.Key));
             }
         }
 
@@ -227,6 +226,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _stopping?.Dispose();
     }
 
+    /// <summary>Notes a history change when a user's data for a media file is saved.</summary>
     private void OnUserDataSaved(object? sender, UserDataSaveEventArgs e)
     {
         try
@@ -236,10 +236,9 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
-            // Versions are recorded whether or not any peer is sent to, so a server that only receives
-            // still knows when its own values were edited when a first contact has to be decided.
             Note(HintKind.History, HintProtocol.HistoryKey(e.UserId, e.Item.Id), e.UserId, e.Item.Id, itemPath: e.Item.Path, parts: PartsOf(e.SaveReason));
         }
+        // A Jellyfin event handler must never throw into the save that raised it.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not record a local history change");
@@ -247,8 +246,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Which parts of a user's history of an item a save changed. A favorite is saved on its own, and
-    /// so is everything about playing. A save that could have changed either counts as both.
+    /// Tells which parts of a user's history of an item a save changed.
+    /// A save that could have changed either part counts as both.
     /// </summary>
     /// <param name="reason">Why Jellyfin saved the user's data.</param>
     /// <returns>The parts.</returns>
@@ -260,14 +259,10 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     };
 
     /// <summary>
-    /// Sorts an item update into a hand made edit, a provider's work, or nothing to announce. Jellyfin's
-    /// item editor and image endpoints save with one flag alone, metadata edit or image update, and
-    /// raise the event on the request's own thread. Such a save made inside a request is someone's edit.
-    /// The same save outside one is Jellyfin's own work, linking versions, dating extras, aligning
-    /// seasons, or a provider's download during a scan. Any save carrying more than one flag comes from a
-    /// refresh, which starts from <see cref="ItemUpdateType.None"/> and adds flags, roll ups included.
+    /// Sorts an item update into a hand made edit, a provider's work, or nothing to announce.
+    /// Only a save with the metadata edit or image update flag alone, made inside a request, is someone's edit.
     /// </summary>
-    /// <param name="reason">The update reason.</param>
+    /// <param name="reason">The flags Jellyfin saved the item with.</param>
     /// <param name="inRequest">Whether the save was made while handling an HTTP request.</param>
     /// <returns>Where the change came from.</returns>
     public static ChangeOrigin Classify(ItemUpdateType reason, bool inRequest)
@@ -282,6 +277,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             : ChangeOrigin.None;
     }
 
+    /// <summary>Notes a playlist, people, or metadata change when an item is updated.</summary>
     private void OnItemUpdated(object? sender, ItemChangeEventArgs e)
     {
         try
@@ -299,6 +295,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
             var recorded = origin == ChangeOrigin.Edit;
 
+            // A value this server's provider copied from a source is not announced back.
             if (!recorded && ProviderFills.WasFilled(e.Item.Path, e.Item is Person ? e.Item.Name : null, DateTime.UtcNow))
             {
                 return;
@@ -329,13 +326,14 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 Note(HintKind.Metadata, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id, recorded, e.Item.Path);
             }
         }
+        // A Jellyfin event handler must never throw into the save that raised it.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not record a local item change");
         }
     }
 
-    // A file the library just picked up. Folders, people, and virtual items are not files.
+    /// <summary>Wakes the hints parked for an item that arrived, and notes a new media file or playlist.</summary>
     private void OnItemAdded(object? sender, ItemChangeEventArgs e)
     {
         try
@@ -369,8 +367,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
-            // A file this server downloaded while syncing is the sync's own write, like any apply, and is
-            // not announced back to the peers.
+            // A file this server downloaded while syncing is the sync's own write.
             if (WrittenFiles.WasWritten(e.Item.Path))
             {
                 return;
@@ -383,6 +380,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
             Note(HintKind.Content, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id, itemPath: e.Item.Path);
         }
+        // A Jellyfin event handler must never throw into the save that raised it.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not record a local item addition");
@@ -391,10 +389,10 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
     private readonly RemovedItemsStore? _removed;
 
-    // A media file that left the library is written down, so a server reading this one can ask what
-    // was removed since it last looked, and is announced to the servers this one sends changes to,
-    // so their links to it move to another holder or go without waiting for a scan. A .strm is not a
-    // file anyone was offered, so its leaving is nobody's news.
+    /// <summary>
+    /// Writes down a media file that left the library and announces it, so links to it move or go without waiting for a scan.
+    /// It is announced even when Content is off here, since a server that only gives still has servers linking to its files.
+    /// </summary>
     private void NoteMediaRemoved(BaseItem item)
     {
         if (item is Folder || item.IsVirtualItem || string.IsNullOrEmpty(item.Path)
@@ -406,12 +404,11 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
         var now = DateTime.UtcNow;
         _removed?.Note(item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture), now);
-        // Announced whether or not this server syncs content itself, as a new file is: a server that
-        // only gives still has servers linking to its files.
         var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = now };
         _publisher.PublishContent(item.Id, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name, removed: true);
     }
 
+    /// <summary>Notes a media file leaving the library, and announces a playlist someone deleted.</summary>
     private void OnItemRemoved(object? sender, ItemChangeEventArgs e)
     {
         try
@@ -421,6 +418,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 NoteMediaRemoved(e.Item);
             }
         }
+        // A Jellyfin event handler must never throw into the save that raised it.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not record a media file leaving the library");
@@ -450,14 +448,17 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = DateTime.UtcNow };
             _publisher.PublishPlaylist(playlist.Id, rootKey, playlist.Name ?? string.Empty, playlist.OwnerUserId, version, excludePeerKey: null, recorded: true, deleted: true, copy: copy);
         }
+        // A Jellyfin event handler must never throw into the save that raised it.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not record a local playlist deletion");
         }
     }
 
-    // A change gathers with the others to the same object. One hand made edit in the window makes the
-    // whole hint a recorded edit. A window of nothing but provider work travels as provider work.
+    /// <summary>
+    /// Adds a change to those gathering for the same object, where one hand made edit makes the whole hint a recorded edit.
+    /// A hand made edit is stamped at once, so a peer's older edit arriving during the wait loses to it.
+    /// </summary>
     private void Note(HintKind kind, string localKey, Guid userId, Guid itemId, bool recorded = true, string? itemPath = null, HistoryParts parts = HistoryParts.None)
     {
         if (_guard.IsApplying(HintProtocol.GuardKey(kind, localKey)))
@@ -465,18 +466,14 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             return;
         }
 
-        // A hand made edit's version is written now, not when the wait ends. A peer's older edit arriving
-        // in the meantime then loses to it, and a restart or crash during the wait cannot lose when it was
-        // made. Only the hint to the peers waits.
         var now = DateTime.UtcNow;
         if (recorded)
         {
             _versions.Set(new ObjectVersion { Kind = kind, Key = localKey, ServerId = _applicationHost.SystemId, Timestamp = now });
 
-            // Each part of a user's history carries its own version as well, so a later change to
-            // one part from another server is weighed against this part alone.
             foreach (var part in new[] { HistoryParts.Played, HistoryParts.Favorite })
             {
+                // Each part of history carries its own stamp, which later changes are weighed against.
                 if (kind == HintKind.History && parts.HasFlag(part))
                 {
                     _versions.Set(new ObjectVersion { Kind = kind, Key = HintProtocol.HistoryPartKey(localKey, part), ServerId = _applicationHost.SystemId, Timestamp = now });
@@ -484,16 +481,12 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             }
         }
 
-        // Nothing gathers for a kind no peer will take, and the queue does not show it. The server entries
-        // are few, so this is a short scan on every event rather than a row that waits for nothing.
+        // Nothing gathers for a change no peer will take.
         if (!AnyPeerAccepts(kind, itemPath, userId, localKey))
         {
             return;
         }
 
-        // The hint carries the time of the last hand made edit in the window. Provider work that lands
-        // after a hand made edit restarts the wait but does not move that time, so it cannot pass itself
-        // off as the edit.
         var due = now + HintProtocol.Debounce(_configManager.Configuration);
         _pending.AddOrUpdate(
             HintProtocol.GuardKey(kind, localKey),
@@ -508,6 +501,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             });
     }
 
+    /// <summary>Raises the changes that are due once every second until stopped.</summary>
     private async Task FlushLoopAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
@@ -520,8 +514,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
-    // A saved mapping may now cover a change that matched nothing, so each is raised again. One that
-    // still matches nothing is noted again by the raise.
+    /// <summary>Forgets what peers declined and raises each unmatched change again, since a saved mapping may cover it.</summary>
     private void OnConfigurationChanged(object? sender, BasePluginConfiguration e)
     {
         _suppression.Clear();
@@ -532,20 +525,21 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             {
                 Raise(entry.Change);
             }
+            // A configuration event handler must never throw into the save that raised it.
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not check an unmatched change again: {Change}", entry.Description);
+                _logger.LogWarning(ex, "Could not check an unmatched change again: {Change}", FormatUtilities.SanitizeForLog(entry.Description));
             }
         }
     }
 
+    /// <summary>Publishes one gathered change as a hint, with the time of its last hand made edit as its stamp.</summary>
     private void Raise(PendingChange change)
     {
         _unmatched.TryRemove(HintProtocol.GuardKey(change.Kind, change.LocalKey), out _);
         var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = change.VersionAt };
 
-        // A peer's newer edit that applied during the wait supersedes this one, and this server now holds
-        // that peer's value. Announcing the older edit would only send peers to fetch it again.
+        // A peer's newer edit applied during the wait, so this one is not announced.
         if (change.Recorded
             && _versions.Get(change.Kind, change.LocalKey) is { } current
             && !string.Equals(current.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase)
@@ -585,8 +579,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         }
     }
 
-    // A change raised to no peer is only worth counting when there is a peer to send to. A server
-    // with no Push or Sync entry is not misconfigured, it just does not send.
+    /// <summary>Whether any Push or Sync server maps the object and takes its kind.</summary>
     private bool AnyPeerAccepts(HintKind kind, string? itemPath = null, Guid userId = default, string? localKey = null)
     {
         foreach (var server in _configManager.Configuration.Servers)
@@ -602,6 +595,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         return false;
     }
 
+    /// <summary>Remembers a change that was queued for no peer although a peer takes its kind.</summary>
     private void NoteUnmatched(int queued, PendingChange change, HintKind kind, string? itemPath, string? userName)
     {
         if (queued != 0 || !AnyPeerAccepts(kind, itemPath, change.UserId) || _unmatched.Count >= MaxUnmatched)
@@ -611,11 +605,13 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
 
         var description = HintActivityLog.Describe(kind, itemPath, userName, itemPath ?? userName ?? string.Empty);
         _unmatched[HintProtocol.GuardKey(change.Kind, change.LocalKey)] = new UnmatchedChange(change, description, DateTime.UtcNow);
-        _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", description);
+        _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", FormatUtilities.SanitizeForLog(description));
     }
 
+    /// <summary>A change that matched no mapping, with its description and when it was raised.</summary>
     private sealed record UnmatchedChange(PendingChange Change, string Description, DateTime At);
 
+    /// <summary>One object's gathering changes, with when it is due and the time its stamp carries.</summary>
     private sealed record PendingChange(HintKind Kind, string LocalKey, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, DateTime VersionAt, HistoryParts Parts = HistoryParts.None);
 }
 
@@ -625,9 +621,9 @@ public enum ChangeOrigin
     /// <summary>Nothing hints carry.</summary>
     None,
 
-    /// <summary>A change made by hand. Travels as a recorded edit.</summary>
+    /// <summary>A change made by hand, which travels as a recorded edit.</summary>
     Edit,
 
-    /// <summary>A provider's work during a scan or a refresh. Travels marked, and never replaces a recorded edit.</summary>
+    /// <summary>A provider's work during a scan or a refresh, which travels marked and never replaces a recorded edit.</summary>
     Provider
 }

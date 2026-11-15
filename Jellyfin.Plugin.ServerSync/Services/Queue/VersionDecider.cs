@@ -11,8 +11,8 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 public static class VersionDecider
 {
     /// <summary>Decides what to do with an incoming value.</summary>
-    /// <param name="local">The version this server holds, or null when the object was never versioned here.</param>
-    /// <param name="incoming">The version the peer's value carries.</param>
+    /// <param name="local">The stamp this server holds, or null when the object was never stamped here.</param>
+    /// <param name="incoming">The stamp the peer's value carries.</param>
     /// <param name="valuesEqual">Whether the two values are already the same.</param>
     /// <returns>The decision.</returns>
     public static VersionDecision Decide(ObjectVersion? local, ObjectVersion incoming, bool valuesEqual)
@@ -49,9 +49,9 @@ public static class VersionDecider
         return UtcTime.AsUtc(a.Timestamp) == UtcTime.AsUtc(b.Timestamp) && string.Equals(a.ServerId, b.ServerId, StringComparison.Ordinal);
     }
 
-    /// <summary>Whether one version is newer than another, with the server id breaking ties.</summary>
-    /// <param name="candidate">The version being tested.</param>
-    /// <param name="other">The version it is compared to.</param>
+    /// <summary>Whether one stamp is newer than another, with the server id breaking ties.</summary>
+    /// <param name="candidate">The stamp being tested.</param>
+    /// <param name="other">The stamp it is compared to.</param>
     /// <returns><c>true</c> when the candidate wins.</returns>
     public static bool IsNewer(ObjectVersion candidate, ObjectVersion other)
     {

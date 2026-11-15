@@ -376,7 +376,7 @@ public sealed class OutboundHintStore : QueueStoreBase
 
     /// <summary>Makes every waiting row for a peer due now, used when the reason it was paused may be gone.</summary>
     /// <param name="peerKey">The peer's entry key.</param>
-    /// <param name="utcNow">The current time.</param>
+    /// <param name="utcNow">The time the rows become due.</param>
     /// <returns>How many rows were brought forward.</returns>
     public int BringForward(string peerKey, DateTime utcNow) => Write(conn =>
     {

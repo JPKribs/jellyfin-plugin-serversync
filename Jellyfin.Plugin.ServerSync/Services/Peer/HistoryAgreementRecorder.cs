@@ -63,7 +63,7 @@ public sealed class HistoryAgreementRecorder
     /// <param name="itemId">This server's item id.</param>
     /// <param name="senderUserId">The peer's own user id, needed to create a row that does not exist yet.</param>
     /// <param name="senderItemId">The peer's own item id, needed to create a row that does not exist yet.</param>
-    /// <param name="agreed">The state both servers now hold.</param>
+    /// <param name="agreed">The state both servers hold after the negotiation.</param>
     public void Record(string? senderServerId, Guid userId, Guid itemId, string? senderUserId, string? senderItemId, PeerHistoryState agreed)
     {
         ArgumentNullException.ThrowIfNull(agreed);
@@ -107,7 +107,7 @@ public sealed class HistoryAgreementRecorder
             row.MarkApplied(now);
             _table.Upsert(row);
         }
-        // The peer already holds the agreed state, so a failed record must not fail its request.
+        // The peer already holds the agreed state, so a failed record is only logged.
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not record the history agreement with {Sender} for user {User}, item {Item}", FormatUtilities.SanitizeForLog(senderServerId), userId, itemId);

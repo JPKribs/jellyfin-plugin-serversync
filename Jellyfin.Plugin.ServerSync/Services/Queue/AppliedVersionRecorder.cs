@@ -80,7 +80,7 @@ public sealed class AppliedVersionRecorder
 
             var versions = await _resolver.PeerVersionsAsync(source, kind, new[] { peerKey }, cancellationToken).ConfigureAwait(false);
 
-            // A value the peer never stamped leaves none here, so any hand made edit beats it.
+            // A value the peer never stamped leaves none here, so any edit beats it.
             if (versions is null || !versions.TryGetValue(peerKey, out var peerVersion))
             {
                 return;

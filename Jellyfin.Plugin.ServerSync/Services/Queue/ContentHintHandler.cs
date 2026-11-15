@@ -82,12 +82,12 @@ public sealed class ContentHintHandler
         }
 
         var dto = await client.FindItemDetailsAsync(originItemId, cancellationToken).ConfigureAwait(false);
-        // An answer with no item means the file is gone, while a failed read throws and is retried.
+        // An answer with no item means the file is gone. A failed read throws.
         if (dto is null || !dto.Id.HasValue)
         {
             var held = _table.GetByKey(originItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture));
 
-            // A link holds nothing, so it is settled at once. A copy waits for the scan's safety limits.
+            // A link holds nothing, so it is settled without the scan's safety limits.
             if (held is { StorageMode: StorageMode.Link }
                 && string.Equals(held.ServerKey, origin.Key, StringComparison.OrdinalIgnoreCase)
                 && held.Status is not (SyncStatus.Ignored or SyncStatus.Deleting)
@@ -128,7 +128,7 @@ public sealed class ContentHintHandler
                 : "the file is on the library mapping's block list");
         }
 
-        // A .strm points at a file somewhere else, so it is not the origin's to pass on.
+        // A .strm points at a file the origin does not hold.
         if (UpdateSyncTablesTask.IsStrm(dto))
         {
             return HintApplyResult.Dropped(HintCode.Filtered, "the item is a .strm on the origin, which points at a file it does not hold");
@@ -156,7 +156,7 @@ public sealed class ContentHintHandler
         var refresh = ActivatorUtilities.CreateInstance<UpdateSyncTablesTask>(_services);
 
         var record = await refresh.RefreshOneAsync(new ContentRefreshWork(source, mapping, dto, watchedByAll), cancellationToken).ConfigureAwait(false);
-        // When the hinted item is passed over, its other versions are passed over with it.
+        // When the hinted item is passed over, its other versions are passed over too.
         if (record is null)
         {
             return refresh.LinkingRefusedBy(origin.Key)
@@ -196,7 +196,7 @@ public sealed class ContentHintHandler
             }
         }
 
-        // Versions apply one by one, so a retry finds the finished ones synced and applies the rest.
+        // Versions apply one by one, so a retry applies only the ones that failed.
         if (failure is not null)
         {
             return HintApplyResult.RetryLater(failure);
@@ -260,7 +260,7 @@ public sealed class ContentHintHandler
             .Select(id => Guid.TryParse(id, out var parsed) ? parsed : Guid.Empty)
             .Where(originUsers.Contains)
             .ToList();
-        // The filter names users of several servers, and an origin with none of them has no filter.
+        // An origin with none of the filter's users has no filter to apply.
         if (filterUsers.Count == 0)
         {
             return false;

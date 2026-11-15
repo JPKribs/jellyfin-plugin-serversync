@@ -307,7 +307,7 @@ public static class HintProtocol
             return false;
         }
 
-        // A part's stamp is keyed by the history key with the part's name after it.
+        // A part's stamp is keyed by the history key followed by the part's name.
         var part = key.IndexOf('#', StringComparison.Ordinal);
         if (part > 0)
         {

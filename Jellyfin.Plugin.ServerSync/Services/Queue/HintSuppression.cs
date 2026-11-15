@@ -45,7 +45,7 @@ public sealed class HintSuppression
     /// <param name="code">The peer's answer.</param>
     /// <param name="revision">The revision of the peer's settings the answer was given under.</param>
     /// <param name="utcNow">The time the hold is measured from.</param>
-    /// <returns><c>true</c> when the object is now held back.</returns>
+    /// <returns><c>true</c> when the object is held back.</returns>
     public bool Note(string peerKey, HintKind kind, string key, HintCode code, string? revision, DateTime utcNow)
     {
         if (!Suppresses(code) || string.IsNullOrEmpty(peerKey) || string.IsNullOrEmpty(key))

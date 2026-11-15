@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
@@ -19,12 +20,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Applies inbound hints. Runs for the life of the server, in two lanes: content, whose applies
-/// download files and can take a long time, and everything else, so a slow download never delays a
-/// history or metadata change. Each due row is handed to the handler for its kind, then removed and
-/// reported complete to its origin. A failure keeps the row and tries again with backoff, keeping the
-/// error for the dashboard, until about a day of attempts has passed. A row for an origin that is not a
-/// scan source here cannot be applied, since there is nothing to pull from, and waits with that reason.
+/// Applies received hints in two lanes, so a slow content download never delays a history or metadata change.
+/// Each due row goes to the handler for its kind, then is removed and reported complete to its origin, or retried with backoff.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class InboundHintWorker : IHostedService, IDisposable
@@ -55,17 +52,17 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="InboundHintWorker"/> class.
     /// </summary>
-    /// <param name="inbound">The inbound store.</param>
-    /// <param name="configManager">Plugin configuration.</param>
-    /// <param name="clientFactory">Client factory for origins.</param>
-    /// <param name="history">The history handler.</param>
-    /// <param name="items">The metadata and people handler.</param>
-    /// <param name="content">The content handler.</param>
-    /// <param name="playlists">The playlist handler.</param>
-    /// <param name="activity">Writes each conclusion to Jellyfin's activity log.</param>
+    /// <param name="inbound">Holds the received hints that are due.</param>
+    /// <param name="configManager">Finds the server entry for each origin.</param>
+    /// <param name="clientFactory">Builds one client for each origin in a pass.</param>
+    /// <param name="history">Applies history hints.</param>
+    /// <param name="items">Applies metadata and people hints.</param>
+    /// <param name="content">Applies content hints.</param>
+    /// <param name="playlists">Applies playlist hints.</param>
+    /// <param name="activity">Writes how hints ended to the Activity page.</param>
     /// <param name="triage">Finds the local object a parked hint waits for.</param>
-    /// <param name="applicationHost">The server host, for this server's id.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="applicationHost">Gives this server's id.</param>
+    /// <param name="logger">Writes how each hint ended.</param>
     public InboundHintWorker(
         InboundHintStore inbound,
         IPluginConfigurationManager configManager,
@@ -93,9 +90,8 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Gets the hints finished in the last day, each with the version it applied, for the status a peer
-    /// reads. Kept in memory only: after a restart an origin that never heard back sends the hint again
-    /// and it applies as unchanged.
+    /// Gets the hints finished in the last day, each with the stamp it applied, for the status a peer reads.
+    /// They are kept in memory only, so after a restart an origin sends the hint again and it applies as unchanged.
     /// </summary>
     public IReadOnlyList<CompletedHint> RecentlyCompleted
     {
@@ -111,14 +107,12 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
-    // Finished ids are kept for a day and never more than the cap. Past it the oldest go first, and an
-    // origin that then asks sends the hint again, which applies as unchanged.
+    /// <summary>Remembers a finished hint, dropping the oldest once the list runs past its cap.</summary>
     private void Remember(CompletedHint done)
     {
         _completed[done.HintId] = (DateTime.UtcNow, done.VersionTimestamp, done.Code, done.Reason);
 
-        // Trimmed back to the cap only once it runs a tenth over, so the sort runs once per thousand
-        // completions rather than on every one.
+        // Trimming only once a tenth over the cap keeps the sort off most completions.
         if (_completed.Count <= HintProtocol.MaxRememberedCompletions + (HintProtocol.MaxRememberedCompletions / 10))
         {
             return;
@@ -131,10 +125,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Discards one row at the operator's word. It is remembered as finished, so the server that sent
-    /// it hears that it is done and does not send it again.
+    /// Discards one row for the operator, remembering it as finished so its origin does not send it again.
     /// </summary>
-    /// <param name="id">The row id.</param>
+    /// <param name="id">The id of the row to discard.</param>
     /// <returns><c>true</c> when the row was there and is gone.</returns>
     public bool Dismiss(long id) => _inbound.Get(id) is { } row && Dismiss(row);
 
@@ -142,7 +135,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     /// <returns>How many rows were discarded.</returns>
     public int DismissFailing() => _inbound.GetFailing().Count(Dismiss);
 
-    // Only the version read is removed. A newer hint that arrived meanwhile stays and is applied.
+    /// <summary>Discards a row while it still carries the stamp that was read, so a newer hint stays and is applied.</summary>
     private bool Dismiss(InboundHint row)
     {
         if (!_inbound.Remove(row.Id, row.VersionTimestamp))
@@ -154,7 +147,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         return true;
     }
 
-    /// <summary>Asks the worker to apply now rather than at its next idle tick.</summary>
+    /// <summary>Asks the worker to apply at once and not at its next idle tick.</summary>
     public void Wake()
     {
         foreach (var gate in new[] { _wake, _wakeContent })
@@ -163,22 +156,23 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             {
                 gate.Release();
             }
+            // A full gate means the lane is already awake.
             catch (SemaphoreFullException)
             {
-                // Already awake.
             }
         }
     }
 
-    /// <summary>Makes the rows parked under a key due now and wakes the worker to apply them.</summary>
-    /// <param name="parkKey">The park key.</param>
+    /// <summary>Makes the rows parked under a key due and wakes the worker to apply them.</summary>
+    /// <param name="parkKey">The key the rows wait under.</param>
     /// <returns>How many rows were made due.</returns>
     public int WakeParked(string parkKey)
     {
+        ArgumentNullException.ThrowIfNull(parkKey);
         var woken = _inbound.WakeParked(parkKey, DateTime.UtcNow);
         if (woken > 0)
         {
-            _logger.LogDebug("{Count} parked hint(s) for {Key} are due now", woken, parkKey);
+            _logger.LogDebug("{Count} parked hint(s) for {Key} are due now", woken, FormatUtilities.SanitizeForLog(parkKey));
             Wake();
         }
 
@@ -189,8 +183,6 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _stopping = new CancellationTokenSource();
-
-        // Hints parked under an older, longer window are brought into the current one.
         try
         {
             var shortened = _inbound.ShortenParked(DateTime.UtcNow, HintProtocol.ParkWindow);
@@ -199,6 +191,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 _logger.LogDebug("{Count} parked hint(s) moved into the {Hours}-hour wait", shortened, HintProtocol.ParkWindow.TotalHours);
             }
         }
+        // The worker must start even when the parked hints cannot be shortened.
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not shorten the wait of parked hints");
@@ -228,25 +221,25 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             {
                 await loop.ConfigureAwait(false);
             }
+            // The loops end by cancellation when the service stops.
             catch (OperationCanceledException)
             {
-                // Expected on stop.
             }
         }
     }
 
-    /// <summary>One apply pass over every due row in both lanes. Public so the dashboard and tests can run it on demand.</summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <summary>Runs one apply pass over every due row in both lanes.</summary>
+    /// <param name="cancellationToken">Cancels the pass.</param>
     /// <returns>How many rows were finished.</returns>
     public async Task<int> ApplyAsync(CancellationToken cancellationToken)
         => (await ApplyLaneAsync(content: false, cancellationToken).ConfigureAwait(false)).Finished
            + (await ApplyLaneAsync(content: true, cancellationToken).ConfigureAwait(false)).Finished;
 
     /// <summary>
-    /// What the dashboard's Run does: applies what is due in the lane of quick changes now, and wakes the
-    /// lane that downloads files, so a download never runs inside the request that asked for it.
+    /// Applies what is due in the lane of quick changes and wakes the lane that downloads files.
+    /// A download therefore never runs inside the request that asked for it.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the pass.</param>
     /// <returns>How many rows of the quick lane finished.</returns>
     public async Task<int> ApplyNowAsync(CancellationToken cancellationToken)
     {
@@ -255,11 +248,9 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         return finished;
     }
 
-    // Returns how many rows finished and whether the lane read a full batch, so its loop goes again at
-    // once rather than after the idle wait.
+    /// <summary>Runs one pass of a lane, one at a time, and says how many rows finished and whether it read a full batch.</summary>
     private async Task<(int Finished, bool Full)> ApplyLaneAsync(bool content, CancellationToken cancellationToken)
     {
-        // One pass per lane at a time, whether the lane's loop or the dashboard starts it.
         var laneLock = content ? _contentPass : _quickPass;
         await laneLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -272,14 +263,13 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
+    /// <summary>Applies every due row of a lane with one client for each origin, then reports the completions to each origin in one request.</summary>
     private async Task<(int Finished, bool Full)> ApplyLanePassAsync(bool content, CancellationToken cancellationToken)
     {
         var finished = 0;
         var full = false;
         var config = _configManager.Configuration;
 
-        // One client per origin for the pass, and the completions for each origin gathered into one
-        // report at the end, rather than a client and a request per row.
         var clients = new Dictionary<string, SourceServerClient>(StringComparer.OrdinalIgnoreCase);
         var completions = new Dictionary<string, (SourceServer Origin, List<CompletedHint> Done)>(StringComparer.OrdinalIgnoreCase);
         var neverArrived = new Dictionary<string, (SourceServer Origin, int Count)>(StringComparer.OrdinalIgnoreCase);
@@ -295,12 +285,11 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 var origin = config.Servers.FirstOrDefault(s => s.Pulls && string.Equals(s.ServerId, row.OriginServerId, StringComparison.OrdinalIgnoreCase));
                 if (origin is null)
                 {
-                    // Tried for as long as any failing notice, then dropped: the server may be added
-                    // back, but a notice from one that never is would otherwise be retried for good.
+                    // The server may be added back, so the hint is retried for a day.
                     if (row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
                     {
                         _inbound.Remove(row.Id, row.VersionTimestamp);
-                        _logger.LogInformation("Dropped a change from server {Origin}, which is not set up as a Pull or Sync server here", row.OriginServerId);
+                        _logger.LogInformation("Dropped a change from server {Origin}, which is not set up as a Pull or Sync server here", FormatUtilities.SanitizeForLog(row.OriginServerId));
                         continue;
                     }
 
@@ -313,7 +302,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                     if (row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
                     {
                         _inbound.Remove(row.Id, row.VersionTimestamp);
-                        _logger.LogInformation("Dropped a change from '{Origin}', whose address here is not valid: {Error}", origin.DisplayName, clientError);
+                        _logger.LogInformation("Dropped a change from '{Origin}', whose address here is not valid: {Error}", FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(clientError, 300));
                         continue;
                     }
 
@@ -334,7 +323,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                     continue;
                 }
 
-                // A row refreshed with a newer version during the apply stays and is applied again.
+                // A row refreshed with a newer stamp during the apply stays to apply again.
                 if (_inbound.Remove(row.Id, row.VersionTimestamp))
                 {
                     finished++;
@@ -352,7 +341,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
 
             foreach (var (origin, count) in neverArrived.Values)
             {
-                _logger.LogInformation("Item never arrived; dropped {Count} hint(s) from '{Origin}'", count, origin.DisplayName);
+                _logger.LogInformation("Item never arrived; dropped {Count} hint(s) from '{Origin}'", count, FormatUtilities.SanitizeForLog(origin.DisplayName));
             }
 
             foreach (var (origin, done) in completions.Values)
@@ -381,6 +370,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         _stopping?.Dispose();
     }
 
+    /// <summary>Runs a lane until stopped, going again at once after a full batch and waiting otherwise.</summary>
     private async Task RunAsync(SemaphoreSlim gate, bool content, CancellationToken cancellationToken)
     {
         var more = false;
@@ -399,17 +389,16 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             {
                 return;
             }
+            // The loop must outlive a failed pass, which then waits like an idle one.
             catch (Exception ex)
             {
-                // A failed pass waits like an idle one. Left set, a full batch before the failure would
-                // have the loop go again at once, and keep failing without a pause.
                 more = false;
                 _logger.LogError(ex, "Inbound hint worker pass failed");
             }
         }
     }
 
-    // One client per origin for a pass. An address the factory refuses yields the reason instead.
+    /// <summary>Gets the pass's client for an origin, or the reason when the factory refuses its address.</summary>
     private bool TryGetClient(SourceServer origin, Dictionary<string, SourceServerClient> clients, out SourceServerClient client, out string? error)
     {
         error = null;
@@ -431,39 +420,32 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
-    // Applies one row. Null means the module's scheduled run holds it: nothing failed, so the row is put
-    // off for a minute without counting an attempt.
+    /// <summary>
+    /// Applies one row, turning a failure into a retry so one hint never stops the pass.
+    /// Null means the scheduled task holds the sync type, so the row is put off without counting an attempt.
+    /// </summary>
     private async Task<HintApplyResult?> TryApplyAsync(InboundHint row, SourceServer origin, SourceServerClient client, BaseItemDto? prefetched, CancellationToken cancellationToken)
     {
         try
         {
             return await ApplyOneAsync(row, origin, client, prefetched, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
         catch (Tasks.Common.ModuleBusyException ex)
         {
             _inbound.Postpone(row, DateTime.UtcNow + TimeSpan.FromMinutes(1), ex.Message);
-            _logger.LogDebug("Hint {Hint} from '{Origin}' waits: {Reason}", row.HintId, origin.DisplayName, ex.Message);
+            _logger.LogDebug("Hint {Hint} from '{Origin}' waits: {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(ex.Message, 300));
             return null;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             return HintApplyResult.RetryLater(ex.Message);
         }
     }
 
-    // Records how a row ended and says whether it is finished. A retry keeps the row with its backoff
-    // until about a day of attempts has passed. A hint dropped on its first try is routine, a mapping that
-    // does not cover it or a file that has not arrived yet, and goes to the server log only, while one
-    // dropped after failing is worth a line on the Activity page. An applied hand made edit is worth a
-    // line too. Provider work is not, since a scan on the peer would otherwise write one entry here per
-    // item it refreshed.
-    // A parked hint whose item never arrived is routine, since the metadata provider brings a new item's
-    // metadata with it. It is counted into neverArrived for one line per origin, not logged or recorded on
-    // the Activity page one by one.
+    /// <summary>
+    /// Records how a row ended and returns the result when it is finished, or null when it stays to be retried or parked.
+    /// Only a hint dropped after failing and an applied hand made edit reach the Activity page, since the rest is routine.
+    /// </summary>
     private async Task<HintApplyResult?> ConcludeAsync(InboundHint row, SourceServer origin, HintApplyResult result, Dictionary<string, (SourceServer Origin, int Count)> neverArrived)
     {
         if (result.Outcome == HintApplyOutcome.Retry && row.Attempts + 1 >= HintProtocol.MaxInboundAttempts)
@@ -483,13 +465,13 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                 }
                 else
                 {
-                    _logger.LogDebug("Hint {Hint} from '{Origin}' waits for {Key}", row.HintId, origin.DisplayName, result.ParkKey);
+                    _logger.LogDebug("Hint {Hint} from '{Origin}' waits for {Key}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(result.ParkKey));
                 }
 
                 return null;
             }
 
-            _logger.LogDebug("Hint {Hint} from '{Origin}' dropped: its item never arrived", row.HintId, origin.DisplayName);
+            _logger.LogDebug("Hint {Hint} from '{Origin}' dropped: its item never arrived", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName));
             neverArrived[origin.Key] = (origin, neverArrived.GetValueOrDefault(origin.Key).Count + 1);
             return HintApplyResult.Dropped(HintCode.NoLocalItem, "the item never arrived");
         }
@@ -498,12 +480,12 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         {
             case HintApplyOutcome.Retry:
                 _inbound.Defer(row, DateTime.UtcNow + HintProtocol.NextDelay(row.Attempts + 1), result.Reason ?? "failed");
-                _logger.LogWarning("Hint {Hint} from '{Origin}' will be retried: {Reason}", row.HintId, origin.DisplayName, result.Reason);
+                _logger.LogWarning("Hint {Hint} from '{Origin}' will be retried: {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(result.Reason, 300));
                 await _activity.RetryingAsync(row, origin.DisplayName, result.Reason).ConfigureAwait(false);
                 return null;
 
             case HintApplyOutcome.Dropped:
-                _logger.LogInformation("Hint {Hint} from '{Origin}' dropped as {Code}: {Reason}", row.HintId, origin.DisplayName, result.Code, result.Reason);
+                _logger.LogInformation("Hint {Hint} from '{Origin}' dropped as {Code}: {Reason}", FormatUtilities.SanitizeForLog(row.HintId), FormatUtilities.SanitizeForLog(origin.DisplayName), result.Code, FormatUtilities.SanitizeForLog(result.Reason, 300));
                 if (row.Attempts > 0)
                 {
                     await _activity.DroppedAsync(row, origin.DisplayName, result.Code).ConfigureAwait(false);
@@ -520,12 +502,13 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         }
     }
 
+    /// <summary>Builds the key a prefetched item is found under.</summary>
     private static string PrefetchKey(string originServerId, string key) => originServerId.ToUpperInvariant() + ":" + key.ToUpperInvariant();
 
-    // The scheduled scan reads items in pages. A pass of hints reads them the same way, one request per
-    // page per origin, instead of one request per hint. A bulk provider refresh on a peer then costs the
-    // receiver no more fetches than its own scan would. A page that cannot be read falls back to the
-    // per hint fetch, which says why.
+    /// <summary>
+    /// Reads the items a pass's metadata hints name in one page for each origin, as the scan does.
+    /// A page that cannot be read leaves each hint to read its own item, which says why.
+    /// </summary>
     private async Task<Dictionary<string, BaseItemDto>> PrefetchItemsAsync(
         IList<InboundHint> due,
         PluginConfiguration config,
@@ -566,19 +549,16 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
                     items[PrefetchKey(origin.ServerId, dto.Id!.Value.ToString("N"))] = dto;
                 }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Could not read {Count} item(s) from '{Origin}' in one page, each hint will read its own", ids.Count, origin.DisplayName);
+                _logger.LogDebug(ex, "Could not read {Count} item(s) from '{Origin}' in one page, each hint will read its own", ids.Count, FormatUtilities.SanitizeForLog(origin.DisplayName));
             }
         }
 
         return items;
     }
 
+    /// <summary>Hands a row to the handler for its kind.</summary>
     private async Task<HintApplyResult> ApplyOneAsync(InboundHint row, SourceServer origin, SourceServerClient client, BaseItemDto? prefetched, CancellationToken cancellationToken)
     {
         return row.Kind switch
@@ -593,25 +573,21 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
         };
     }
 
+    /// <summary>Tells an origin which of its hints finished, without failing the pass when it cannot be told.</summary>
     private async Task ReportCompleteAsync(List<CompletedHint> done, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken)
     {
         try
         {
             var request = new CompleteRequest { SenderServerId = _applicationHost.SystemId, Items = done };
+            // A standard user's API Key cannot reach the route, so the origin reads status.
             if (!await client.CompleteHintsAsync(request, cancellationToken).ConfigureAwait(false))
             {
-                // A standard user's key cannot reach the origin's endpoint. The origin reads the
-                // completions from this server's status with its own key instead.
-                _logger.LogInformation("Could not tell '{Origin}' that {Count} hint(s) are complete. It will read them from this server's status", origin.DisplayName, done.Count);
+                _logger.LogInformation("Could not tell '{Origin}' that {Count} hint(s) are complete. It will read them from this server's status", FormatUtilities.SanitizeForLog(origin.DisplayName), done.Count);
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not tell '{Origin}' that {Count} hint(s) are complete. It will check back later", origin.DisplayName, done.Count);
+            _logger.LogWarning(ex, "Could not tell '{Origin}' that {Count} hint(s) are complete. It will check back later", FormatUtilities.SanitizeForLog(origin.DisplayName), done.Count);
         }
     }
 }
