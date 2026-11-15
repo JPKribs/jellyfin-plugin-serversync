@@ -6,7 +6,7 @@ Base is [JPKribs.Jellyfin.Base](https://github.com/JPKribs/jellyfin-plugin-base)
 
 ## Principles
 
-1. **One component per concept.** When Base has it, use it. When Base lacks it and a second plugin needs it, add it to Base. Never build a second version.
+1. **One component per concept.** When Base has it, use it. Look before you build, per [Find the Component](#find-the-component). When Base lacks it and a second plugin needs it, add it to Base. Never build a second version.
 2. **Short beats complete.** A label is a few words. A description is one sentence. A message is one sentence.
 3. **The page explains itself.** A reader understands a setting from its label and its one line description, without the docs.
 4. **The same thing has the same name everywhere.** The label, the docs, the message, and the activity log use one word for one concept.
@@ -262,13 +262,16 @@ Every config page uses Jellyfin's page shell.
 | Need | Component |
 | :--- | :--- |
 | A page with several independent groups of settings | `base-collapsible-section`, one per group |
-| A group that is always open | `base-section` with `base-section-title` |
+| A group that is always open | `base-collapsible-section fixed`, whose header is a `div` with no icon, so it matches the collapsible sections around it |
 | A heading inside a section | `base-subsection-title` |
 | An ordered setup, such as a server editor | `base-collapsible-section numbered`, which Base numbers in order |
 | Settings that only matter when a checkbox is on | `base-indent` under the checkbox, shown with `shared.bindReveal` |
 
 * A collapsible header is a `button.base-collapsible-header` holding `base-collapsible-title` and `base-collapsible-icon`. Base replaces the icon with `expand_more`.
 * Start collapsibles closed, except the first one on a page someone opens to act on.
+* Give every top level group on one page the same header. A chart or a summary takes the `fixed` section, never a bare `base-subsection-title`.
+* Hide a whole section while its feature is off or it has nothing to show. Never show an empty section.
+* Put anything that depends on a picker under that picker, and redraw it when the pick changes.
 
 ### Saving
 
@@ -289,6 +292,19 @@ Pick one model per page and keep it.
 
 Every component below is in Base. Use it as Base ships it. When it does not fit, change Base.
 
+### Find the Component
+
+Before writing markup for a list, a row editor, a chart, or a picker, look for it in Base.
+
+```bash
+grep -o "export function create[A-Za-z]*" ~/.nuget/packages/jpkribs.jellyfin.base/<version>/assets/jpkribs_shared.d.ts
+```
+
+* The typings in that file document every option of every component. Read the component's block before using it.
+* Rows of fields with Add and Remove are a `createRepeater`. A list of checkboxes is a `createCheckboxList`. A used amount out of a limit is a `createUsageMeter`. Parts of a whole are a `createPieChart`.
+* A hand built version of any of these is a defect, even when it looks the same.
+* When a Base component lacks one thing the page needs, use the component and report the gap to Base. Never fall back to building it by hand.
+
 ### Fields
 
 | Need | Use |
@@ -299,7 +315,10 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 | A mode that needs a sentence per option | `createChoiceGroup` with `base-choice` cards |
 | Several on or off options in a row | `base-toggle-group` with `base-toggle` pills |
 | Many checkboxes | `base-check-grid` |
-| Many items from a long or searchable list | `createCheckboxList` |
+| Many items from a long or searchable list | `createCheckboxList`, with `renderRow` giving each row a `label`, a `sublabel`, and an `image` loader |
+| Rows of several fields that are added and removed | `createRepeater` |
+| Pairs of a name and a value | `createKeyValueEditor` |
+| A list of plain text values | `createStringList` or `createTagInput` |
 | Typeahead with removable chips | `createChipSelect`, with `single: true` for one choice |
 | One user | `createUserSelector` |
 | Several users | `createUserMultiSelector` |
@@ -351,6 +370,8 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 | A large searchable list | `createPaginatedTable` |
 | Edit table rows in place | `base-bulk-edit-bar` and `base-edit-row` |
 | Uploaded files | `base-asset-list` |
+| A thumbnail in a table row | A column `image(item)` loader with `imageShape`, one shape for each column |
+| A mark on a table row, such as picked | The table's `rowClass(item, index)` |
 
 * A record picker's actions read **New**, **Rename**, **Remove**, then **Import** and **Export**, in that order.
 * Use `createPaginatedTable` for any list that can grow past one screen. Rows open with `actions.onRowClick`.
@@ -370,6 +391,22 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 
 * Never use `Dashboard.alert` for a result. It blocks the page. Use `setStatus`.
 * A notice holds one sentence. Use a callout for something the reader must know before acting, not for a result.
+
+### Charts
+
+| Need | Use |
+| :--- | :--- |
+| Parts of a whole, such as files by Storage | `createPieChart`, with `donut` and the total in `centerText` |
+| How much of a limit is used, such as a cache | `createUsageMeter`, with `bytes: true` for sizes |
+| Values compared across names | `createBarChart` |
+| A value over time | `createLineChart` or `createSparkline` |
+| One number with a label | `createStatCard` |
+
+* Pick the chart by the question it answers. A single used of total bar is a Usage Meter, never a Bar Chart.
+* Name each slice with a glossary term in Title Case, such as **Cached Links**.
+* Take colors from Base's series colors. Set a color only when it carries a [meaning](#meaning).
+* Give every chart a `label`, and an `emptyText` sentence for when it has nothing to draw.
+* Scope a chart to what the page shows. A chart beside a server picker counts that server only.
 
 ### Progress
 
@@ -395,6 +432,7 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 
 * Use Base's breakpoints, 768 px for tablet and 600 px for phone. Use 700 px only where Base does, for dialogs.
 * Test every page at 375 px wide. Nothing scrolls sideways except a table.
+* Look at every changed page in the pool before calling it done. Reload the page after `run.py up`, since the dashboard caches scripts.
 * Spacing comes from `--base-gap-wide` and `--base-gap-narrow`. Never add margins between fields.
 * Never set a width in pixels on a field. Let it fill its container.
 
@@ -410,47 +448,25 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 * Plugin classes use the `serversync-` prefix in kebab case. `base-` is reserved for Base.
 * Keep plugin CSS for layout that only this plugin has. A component another plugin could use goes to Base.
 * Never override a `base-` class. Change Base instead.
+* When Base has a defect that breaks a page, report it and add one marked stopgap rule under a comment that names the defect. Delete the rule in the commit that moves to the Base version with the fix.
+* Size a column in `rem` or `fr`. An `em` width changes with the font size of each row, so a smaller heading row falls out of line with its columns.
 * Never define a color token. Use Base's.
 
-## Consolidation
+## Hand Built Pieces
 
-These ServerSync pieces duplicate Base or another plugin. Replace each with the listed component, and promote the ones Base lacks.
+These pieces are still built by hand in this plugin while Base has a component for them. Replace each when its page is next changed, and delete its `serversync-` styles in the same commit. Add nothing to this list.
 
-### Replace With Base
-
-| ServerSync today | Replace with |
+| Hand built today | Replace with |
 | :--- | :--- |
-| `LibraryMenu.setTabs` and a `getTabs` copy in each page | `createConfigPage` and one tab list in the shared module |
-| `Dashboard.alert` through `showAlert` and `saveSection` | `shared.setStatus` and `shared.saveConfigWith` |
-| `window.confirm` in `serversync_settings.js` | `confirmDialog` |
-| Inline `<span class="text-error">` errors in `serversync_servers.js` | `shared.setStatus` |
 | `.serversync-queue-chip` and `.serversync-storage-mode-badge` | `shared.badge` |
-| Hand written `<span class="base-badge">` strings | `shared.badge` |
-| `.text-success`, `.text-error`, `.text-warn` | `base-ok`, `base-bad`, or a callout |
-| `.serversync-health-card` panel | `base-cards` or `base-record-card` |
-| `.serversync-filter-item*` and `.serversync-queue-row*` thumbnail rows | `base-table-row` with a column `image` loader |
-| `#mainStatusRow .base-card.hidden` | `base-cards`, which gives a hidden card no place |
-| `serversync-modal-field-value` | `base-record-card` |
-| "✕" close glyph in the queue | `&times;` in `base-row-btn` |
-| Sentence long button titles in `serversync_sync.html` | One to three word titles |
-
-### Promote to Base
-
-These are built two or more times across the plugins and belong in Base.
-
-| Component | Built today in |
-| :--- | :--- |
-| `base-panel`, a bordered sub card | ServerSync `.serversync-panel` and `.serversync-mapping`, plus Live Channels, Remote Access, User Management |
-| `base-static-table`, a simple scrolling table | ServerSync `.serversync-compare-table`, `.serversync-form-table`, `.serversync-role-table`, plus Remote Access, Artwork Generator |
-| A single choice pill group | ServerSync `.serversync-filter-pills`, plus YouTube Audio, Remote Access |
-| `.btn-progress` styling for `pollTaskProgress` | ServerSync `.serversync-action-button` |
-| A section intro line | ServerSync `fieldDescription mb-md`, plus Scripts, Artwork Generator, Remote Access |
-| A JS plural helper | ServerSync and YouTube Audio "(s)", plus hand written plurals in four plugins |
-| A light ordered list with up and down buttons | User Management, YouTube Audio, Requests |
-| An inline editor footer | ServerSync `.serversync-editor-footer` |
-| `flashSaved` on `createChangeTracker` | Artwork Generator, four copies |
-| Date input styling in `form.css` | User Management |
-| `.sr-only` | Remote Access |
+| `.serversync-health-card` | `base-cards` or `createStatCard` |
+| `.serversync-filter-item*` rows in the Library Filter picker | A table column `image` loader, or `createMediaCard` |
+| `.serversync-queue-row*` | `createFilteredList` with `createMediaCard` |
+| `.serversync-panel` and `.serversync-mapping` | `base-panel` |
+| `.serversync-compare-table` | `createCompareTable` |
+| `.serversync-form-table` and `.serversync-role-table` | `base-static-table`, or `createMatrixGrid` for the permission table |
+| `.serversync-filter-pills` | `createPillGroup` |
+| `.serversync-editor-footer` | `createSaveBar` |
 
 ## Checklist
 
@@ -463,6 +479,7 @@ Run every new or changed string through this list.
 * [ ] Title Case for labels, buttons, titles, tabs, and badges. Sentence case for sentences.
 * [ ] No "please", "successfully", exclamation marks, ALL CAPS, "(s)", or contractions.
 * [ ] The word matches [Words to Use](#words-to-use).
+* [ ] Base's typings were searched before any markup was built by hand.
 * [ ] The component comes from Base, unchanged.
 * [ ] Colors come from Base tokens and mean what [Meaning](#meaning) says.
 * [ ] The docs use the same label.

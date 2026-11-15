@@ -77,7 +77,9 @@ public void Decide_EqualValues_Adopts()
 * Assert one behavior per test. Several asserts are fine when they check one outcome.
 * Use `[Theory]` with `[InlineData]` for one rule over several inputs.
 * Test the edges. Null, empty, the largest value, a cancelled token, a peer that answers with an error, and a peer that never answers.
-* Never sleep. Pass a clock or a delay in, and control it from the test.
+* Never sleep. Pass a clock or a delay in, and control it from the test. `ManualTimeProvider` in `Fakes/` is the clock.
+* A test that must use real time joins `RealTimeCollection`, which runs its members one at a time. Real timing fails under parallel load.
+* A test that fails once in many runs has found a race. Fix the source or the test, and never run it again until it passes.
 * A test never reaches the network. Use a stub `HttpMessageHandler`.
 
 ### Stores
@@ -96,6 +98,8 @@ Write fakes by hand and share them.
 | `FakeClientFactory` | The factory that builds a `SourceServerClient` |
 | `StubHandler` | An `HttpMessageHandler` that answers from a table |
 | `ScriptedHandler` | An `HttpMessageHandler` that answers in sequence |
+| `ManualTimeProvider` | The clock, moved by the test |
+| `InterfaceStub` | Any interface a test needs but does not exercise |
 
 * Keep each fake in `Fakes/`, one per file, with a header comment like any other class.
 * Never copy a fake into a test file. Extend the shared one.
@@ -126,6 +130,11 @@ node --test 'Jellyfin.Plugin.ServerSync.Tests/js/*.test.mjs'
 * Name each test as a sentence about the behavior.
 * Test logic, not layout. Move logic out of event handlers into exported functions so a test can call them.
 * Use Base's `fake-dom.mjs` when a function needs elements.
+* The tests load Base's bundle from `../Shared/jellyfin-plugin-base/dist/`. Keep that checkout on the Base version the csproj names, or the tests run against a different Base than the plugin ships.
+* Test a page through `installPage` and `loadScript` in `support.mjs`. Dispatch `viewshow` on the view, since Base sets the tabs and loads the page when it shows.
+* Answer the page's requests by replacing `ApiClient.fetch` before the script loads, and assert on the requests it recorded.
+* Read a status line with `statusText`, which leaves out the icon Base adds.
+* Assert on what a Base component shows or saves, such as its text and the saved config. Never assert on Base's inner markup beyond a documented class.
 
 ## API Integration Tests
 
@@ -158,7 +167,9 @@ python3 integration/run.py reset
 python3 integration/run.py test
 ```
 
-`scenarios` runs every scenario whose title holds any of the words. `test` builds, seeds, runs every scenario, then runs the API suite against `source-a`. A full run takes about 45 minutes.
+`scenarios` runs every scenario whose title holds any of the words. `test` builds, seeds, runs every scenario, then runs the API suite against `source-a`. A full run takes about 45 minutes. Docker must be running first.
+
+`up` also rebuilds the plugin into a running pool, which is how to look at a page change at `http://localhost:8113`.
 
 ### Writing a Scenario
 
@@ -183,6 +194,9 @@ def scenario_reorder_rehomes(creds, apis):
 * Never sign in as admin from another script during a run. It revokes the harness token.
 * Never open `sync.db` with sqlite on the host while the pool is up.
 * Run `reset`, then `test`, before every release.
+* `GET /Sync/Items` returns at most 200 rows a page. A scenario that needs more pages through them.
+* When one scenario fails, read the server logs for that moment before anything else. Then run it alone with `scenarios`. Call it a timing fault only when the logs show the cause and the scenario passes alone, and report it either way.
+* A run on an earlier build proves nothing about this one. Run the pool again after any change to C#, to the Base version, or to a page script.
 
 ## Matrix
 

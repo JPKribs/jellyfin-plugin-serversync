@@ -23,7 +23,7 @@ Read [Architecture](docs/Architecture.md) before changing how the parts connect.
 
 ## Ground Rules
 
-* **Base comes first.** Anything reusable lives in [JPKribs.Jellyfin.Base](https://github.com/JPKribs/jellyfin-plugin-base). Use it, and never copy or override it locally.
+* **Base comes first.** Anything reusable lives in [JPKribs.Jellyfin.Base](https://github.com/JPKribs/jellyfin-plugin-base). Search it before you build anything, use what it has, and never copy or override it locally.
 * **Describe the current release only.** Docs, labels, and comments say what the plugin does today. Release notes are the only place for what changed.
 * **Keep it short.** Every label, message, and comment is as brief as it can be while staying clear.
 * **One word per concept.** Use the term in the glossary, everywhere.
@@ -33,7 +33,8 @@ Read [Architecture](docs/Architecture.md) before changing how the parts connect.
 
 Work is done when it has been checked, not when it has been written.
 
-* Run every check the change needs, and read its output. A check that did not run has not passed.
+* Run every check the change needs, and read its output. A check that did not run has not passed, and neither has one that ran before the last change.
+* Look at every changed page in the running pool.
 * Read the whole diff before reporting, using [skills/review.md](skills/review.md).
 * Check every new string against the style checklist and the glossary.
 * Check every claim in a doc against the code or the running plugin.
@@ -65,4 +66,4 @@ Explain what you would change, why, and what it risks. Wait for an answer before
 | `docs/` | The documentation site, built with MkDocs. |
 | `build.yaml` | The version, the artifacts, and the release notes. |
 | `skills/` | The guides. |
-| `../Shared/jellyfin-plugin-base/` | A local checkout of Base, when present. |
+| `../Shared/jellyfin-plugin-base/` | A local checkout of Base, when present. Read it, and never change it from work on this plugin. |

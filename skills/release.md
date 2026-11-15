@@ -16,7 +16,7 @@ Raising a part sets every part after it to `0`. `12.4.13.2` becomes `12.4.14.0` 
 
 ## Before the Release
 
-1. **Base.** When the release needs a Base change, release Base first with its **Release** workflow, then raise `JPKribs.Jellyfin.Base` in `Jellyfin.Plugin.ServerSync/Jellyfin.Plugin.ServerSync.csproj` and delete any local copy Base replaces.
+1. **Base.** When the release needs a Base change, release Base first with its **Release** workflow, then raise `JPKribs.Jellyfin.Base` in `Jellyfin.Plugin.ServerSync/Jellyfin.Plugin.ServerSync.csproj` and delete any local copy Base replaces. Wait until NuGet serves the version, and never release against a local package. Raise Base on a branch, and merge it once every check below has passed on it.
 2. **Protocol.** When a hint, a peer route, or a conflict rule changed in a way an older server would misread, raise `HintProtocol.ProtocolVersion`. Raise `HintProtocol.MinProtocolVersion` only when this release can no longer talk to the protocol before it.
 3. **Database.** When the schema changed, raise `SyncSchema.CurrentSchemaVersion`. Raise `SyncSchema.MinReaderVersion` only when a migration changes or removes something older releases rely on.
 4. **Build.**
@@ -45,9 +45,11 @@ Raising a part sets every part after it to `0`. `12.4.13.2` becomes `12.4.14.0` 
     python3 integration/run.py test
     ```
 
-    Run the matrix too when the release changes how content or links follow file changes. See [testing.md](testing.md#matrix).
+    Run the matrix too when the release changes how content or links follow file changes, or how files are downloaded or written. See [testing.md](testing.md#matrix).
 
-7. **Docs.** Every page describes this release. Retake any screenshot whose subject changed. Update [Versioning](../docs/Versioning.md) when the protocol, the schema reader, or the upgrade path changed, and [Architecture](../docs/Architecture.md) when the parts or their connections changed.
+    Every check must run on the commit that is released. Run them again after any later change.
+
+7. **Docs.** Every page describes this release. Retake any screenshot whose subject changed, and all of them when the Base version changed. Update [Versioning](../docs/Versioning.md) when the protocol, the schema reader, or the upgrade path changed, and [Architecture](../docs/Architecture.md) when the parts or their connections changed.
 
     ```bash
     mkdocs build --strict
@@ -62,7 +64,7 @@ Edit `build.yaml`.
 1. Set `version` to the new version.
 2. Replace the whole `changelog` with this release's entries. Each release lists only its own changes. See [documentation.md](documentation.md#release-notes) for how to write them.
 3. Say in `changed` when the protocol changed, so a user knows to update every server in the pool.
-4. Name the Base version in `developer` when it changed, such as "Uses JPKribs.Jellyfin.Base 2026.11.13.3".
+4. Name the Base version in `developer` when it changed, such as "Uses JPKribs.Jellyfin.Base 2026.11.17", with what it replaced locally.
 5. Keep `description` and `overview` true for this release. `manifest.json` takes its own description, so update both together.
 
 Commit it on its own.
@@ -99,7 +101,7 @@ git push
 * [ ] The version follows `JJ.JJ.F.B`, and later parts are `0`.
 * [ ] Base is released and referenced, with local copies deleted.
 * [ ] The protocol and schema versions are raised when needed.
-* [ ] `dotnet build`, `dotnet test`, and the JS tests pass.
+* [ ] `dotnet build`, `dotnet test`, and the JS tests pass on the released commit.
 * [ ] The pool passes from `reset`, and the matrix when needed.
 * [ ] Docs, screenshots, Versioning, and Architecture describe this release.
 * [ ] `mkdocs build --strict` passes.

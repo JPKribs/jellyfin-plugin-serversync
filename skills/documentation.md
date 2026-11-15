@@ -218,7 +218,7 @@ Save every capture as PNG. Crop out the browser frame and the Jellyfin header un
 
 ### When to Retake
 
-Retake a screenshot in the same commit as any change that alters what it shows, including a label, a tab, a layout, or the Jellyfin version in the header. A screenshot that shows a tab or label the plugin no longer has is a bug.
+Retake a screenshot in the same commit as any change that alters what it shows, including a label, a tab, a layout, or the Jellyfin version in the header. A new Base version changes how every component looks, so retake every screenshot when it is raised. A screenshot that shows a tab or label the plugin no longer has is a bug.
 
 ## The Docker Pool
 
@@ -252,7 +252,9 @@ python3 integration/run.py reset
 * Never sign in as admin from another script while `test` or `scenarios` runs. It revokes the harness token.
 * Never open `sync.db` with sqlite on the host while the pool is up. The container gets disk I/O errors.
 
-To take screenshots, run `up`, sign in to `local` at port 8113, and trigger the syncs you need from the **Sync** tab.
+To take screenshots, run `up`, sign in to `local` at port 8113, and trigger the syncs you need from the **Sync** tab. Take them only while no `test` or `scenarios` run is going, since a sign in revokes the harness token.
+
+`up` on a running pool rebuilds the plugin into it. Reload the page afterward, since the dashboard caches scripts.
 
 ## Installing a Build by Hand
 
@@ -301,6 +303,8 @@ changelog:
 * Write full sentences with no closing period.
 * Write one entry per change a user would notice. Fold internal steps into the change they serve.
 * Name UI labels exactly as the page shows them, without bold or backticks.
+* Name the Base version in `developer`, with what it replaced locally.
+* Give a new or changed route or query parameter a `developer` line, and document it in [API](../docs/API.md) in the same commit.
 
 ## Commit Messages
 

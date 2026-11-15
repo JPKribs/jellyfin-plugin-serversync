@@ -300,6 +300,7 @@ Try these in order. Each is cheaper and safer than the next.
 * Reuse the named `HttpClient`s in `PluginServiceRegistrator`. Never build a new one per call.
 * Make fewer, larger calls over many small ones when the source offers a bulk route.
 * Never loosen the SSRF guard, the redirect refusal, or the retry handler for speed.
+* Copy a download with Base's `StreamUtilities.CopyThrottledAsync` inside `CopyWithIdleTimeoutAsync`. Never write a copy loop, a speed limit, or a stall check by hand.
 
 ### Logging
 

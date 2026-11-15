@@ -27,8 +27,10 @@ The check to run on your own changes before you call them done. People and AI as
 
 ## Base
 
+* [ ] Base's typings and source were searched for each new list, row editor, chart, picker, and helper.
 * [ ] Nothing duplicates a Base component, helper, or style.
-* [ ] No `base-` class is overridden.
+* [ ] No `base-` class is overridden, apart from a marked stopgap for a reported Base defect.
+* [ ] Every local copy the current Base version replaces is deleted, with its tests and styles.
 * [ ] Anything another plugin could use went to Base, per [code.md](code.md#move-code-into-base).
 
 ## Words
@@ -42,6 +44,8 @@ The check to run on your own changes before you call them done. People and AI as
 * [ ] Each component is the one [style.md](style.md#components) names for the need.
 * [ ] Colors come from Base tokens and keep their [meaning](style.md#meaning).
 * [ ] The page works at 375 px wide.
+* [ ] Every changed page was opened in the pool and looked at, after a reload.
+* [ ] Every top level group on a page has the same header, and a section with nothing to show is hidden.
 * [ ] Results use `setStatus`, confirms use `confirmDialog`, and nothing uses `Dashboard.alert` or `window.confirm`.
 
 ## Code
@@ -56,7 +60,7 @@ The check to run on your own changes before you call them done. People and AI as
 
 * [ ] Every changed source file has tests in the mirrored folder, per [testing.md](testing.md).
 * [ ] A bug fix has a test that fails without it.
-* [ ] Every layer the change touches was run, and passed.
+* [ ] Every layer the change touches was run on this build, and passed. A run from before the last change does not count.
 
 ## Docs
 
@@ -73,7 +77,7 @@ Report in this order.
 
 1. **What changed.** One line per change, with the files.
 2. **What was checked.** Each command that ran and its result. Quote the failure when one failed.
-3. **What was not checked.** Anything left unverified, and why, such as a pool scenario that was not run.
+3. **What was not checked.** Anything left unverified, and why, such as a pool scenario that was not run, or a section the pool's settings keep hidden.
 4. **What needs a decision.** Anything on the stop and ask list, or any rule this change could not follow.
 
 Never report a check as passed without running it. Never call work done while a check fails.

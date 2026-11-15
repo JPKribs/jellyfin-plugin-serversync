@@ -12,23 +12,36 @@ How to write, comment, and test code in this plugin. It covers C#, JavaScript, H
 * When Base almost fits, change Base. Never patch around it locally.
 * Delete a local copy as soon as Base offers the same thing. Do it in the commit that moves to that Base version.
 * Never shadow a Base name. A local `FormatUtilities` beside Base's `FormatUtilities` is ambiguous.
+* Read Base from the package this plugin builds against. The C# source is in `~/.nuget/packages/jpkribs.jellyfin.base/<version>/src/`, and the JS typings are in `assets/jpkribs_shared.d.ts` beside it.
+* Treat the local Base checkout as read only. Base has its own owner and its own release, so report a gap and wait for the version that closes it.
+* When Base differs from the local code it replaces, keep the local behavior in a small step around the Base call, and cover it with a test. `ConfigurationUtilities` refuses `..` in a Server URL before it asks `SsrfGuard`.
 
 | Need | Use from Base |
 | :--- | :--- |
 | Plugin class and config lock | `PluginBase<TPlugin, TConfiguration>` |
 | Scheduled task | `PluginScheduledTask` |
 | Outbound HTTP | `JpkHttp` and `HttpResult` |
+| HTTP handlers | `JpkRetryHandler` with `JpkRetryOptions`, and `RedirectRefusingHandler` |
+| Addresses another server or a user supplied | `SsrfGuard`, with `requireHttpsForPublic: true` |
 | Retry and backoff | `RetryPolicy`, `BackoffPolicy`, `CircuitBreaker` |
 | Parallel work | `ConcurrentTaskRunner` |
 | Secrets | `SecretProtector`, `AddPluginSecretProtector` |
+| Comparing a presented secret | `SecretCompare.FixedTimeEquals` |
+| Writing a file whole or not at all | `AtomicFile`, with `ownerOnly: true` for a key or secret |
+| Paths inside a folder | `PathContainment` |
+| Streams | `StreamUtilities.CopyWithIdleTimeoutAsync` and `CopyThrottledAsync`, `SpeedBucket`, `ThrottledReadStream`, `CappedReadStream`, `ProgressReportingStream`, `StreamLimits` |
+| Hashes and sizes | `HashUtilities`, `ByteSize` |
+| The clock | `TimeProvider`, and `UtcTime` for stored times |
 | Activity log | `ActivityLogger`, `ActivitySummary`, `ActivityText` |
 | Paged lists | `PagedResult<T>`, `PagedQuery` |
 | SQLite versioning | `DatabaseSchema` |
 | JSON state file | `JsonFileStore<T>` |
 | Formatting and names | `FormatUtilities`, `ItemTitles`, `RateUtilities`, `FileNameSanitizer` |
-| Config page lifecycle | `createConfigPage` |
+| Config page lifecycle | `createConfigPage`, through `createServerSyncPage` in `serversync_shared.js` |
 | Page helpers | `createShared` |
 | Tables | `createPaginatedTable` |
+| Lists and row editors | `createCheckboxList`, `createRepeater`, `createSortableCardList` |
+| Charts | `createPieChart`, `createUsageMeter`, `createBarChart` |
 | Dialogs | `openDialog`, `confirmDialog`, `promptDialog`, `openEditorDialog`, `bindDialog` |
 
 ### Move Code Into Base
@@ -134,7 +147,7 @@ export function createSyncTableModule(view, shared) {
 * Comment every top level function, every function assigned to `shared`, and every exported function.
 * Do not comment the methods inside a returned handle. List them in the Output line instead.
 * Open each file with a header naming the file and saying what it holds in one sentence. Use no `// ====` banners.
-* Import Base by a relative path, `./configurationpage?name=serversync_jpkribs_shared.js`.
+* Only `serversync_shared.js` imports Base, by the relative path `./configurationpage?name=serversync_jpkribs_shared.js`. It exports each Base builder a page uses, and every page imports from `serversync_shared.js`.
 
 ### HTML
 
@@ -177,11 +190,15 @@ export function createSyncTableModule(view, shared) {
 * Guard public arguments with `ArgumentNullException.ThrowIfNull`.
 * Log through `ILogger<T>` with static, named templates. Pass untrusted text through `FormatUtilities.SanitizeForLog`.
 * Catch a specific exception, or filter with `when`. Rethrow `OperationCanceledException` when the token was cancelled.
+* Read the clock once in a method and reuse the value. Two reads can straddle a second and disagree.
+* Take a `TimeProvider` wherever time decides an outcome, so a test can move it.
 * Register services with `[PluginService]`.
 
 ## JavaScript Conventions
 
-* Each config page is an ES module whose default export calls Base's `createConfigPage`.
+* Each config page is an ES module whose default export calls `createServerSyncPage`, which wraps Base's `createConfigPage` and holds the tab list.
+* Keep one handle for each Base component a page draws. Call `destroy` before drawing it again, and `setValue` when only its numbers change.
+* Drop an answer that arrives after the page moved on. Remember the picked key before the request and compare it when the answer lands.
 * Use `const` and `let`, never `var`. Arrow functions are fine for callbacks.
 * Escape every value placed in HTML with `escapeHtml`.
 * Report results with `shared.setStatus`, and errors with `shared.errorText`.
@@ -194,6 +211,9 @@ export function createSyncTableModule(view, shared) {
 * Pass every value from a request, a peer, or a file through `FormatUtilities.SanitizeForLog` before logging it.
 * Call another server only through a `SourceServerClient` from `SourceServerClientFactory`. Its named `HttpClient`s carry the SSRF guard, the redirect refusal, and the retry handler.
 * Never follow a redirect to another host, and never call an address a peer supplied without the SSRF guard.
+* Check a Server URL with `ConfigurationUtilities.ValidateServerUrlForSsrfAsync`, which refuses plain HTTP to a public address.
+* Compare a secret a caller presents with `SecretCompare.FixedTimeEquals`, never `==`.
+* Write a key or secret file with `AtomicFile` and `ownerOnly: true`, so it is never readable by others, even for a moment.
 * Guard every peer route with `PeerCallerGuardAttribute`, check the sender with `PeerController.Sender`, and add `RequireCompatibleProtocolAttribute` to every route but `Capabilities`. Guard every operator route with `[Authorize(Policy = "RequiresElevation")]`.
 * Check the caller's user mapping before returning or streaming anything for a user.
 * Build SQL with parameters only. Never put a value into SQL text.
@@ -207,7 +227,7 @@ Every source file has a test file. See [testing.md](testing.md) for each layer, 
 
 ## Checklist
 
-* [ ] Nothing here duplicates Base, and anything reusable went to Base first.
+* [ ] Base's source and typings were searched, nothing here duplicates Base, and anything reusable went to Base first.
 * [ ] Every class, method, function, and component has a header.
 * [ ] Inline comments appear only above branches, and say why.
 * [ ] Every changed source file has tests that pass, per [testing.md](testing.md).

@@ -108,6 +108,7 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | Linking server | The server that holds the link | | Client, consumer |
 | Allow Linking | The source's switch that lets a server link its files | | Sharing |
 | Link cache | Local copies of links that were played | `LinkCache` | Cache, buffer |
+| Cached link | A link whose file is in the link cache | `Cached` | Downloaded link, local link |
 | Link check | The check during **Sync Content** that each link still streams | | Validation, health check |
 | Always Keep | Shows and films a Link library holds as copies | | Pin, keep local |
 | Permanent copy | A full copy held in a Link library, with the reason | `KeptCopies` | Kept copy, local override |
@@ -120,4 +121,6 @@ The agreed name for every concept in this plugin. The UI, the docs, messages, an
 | Activity page | Jellyfin's dashboard activity log | Activity feed, log page |
 | Server log | Jellyfin's log files | Debug log |
 | Reset | Forgets a sync table's tracking, never media | Wipe, purge |
+| Files | The **Storage** tab's chart of one server's synced files as copies, links, and cached links | File stats, breakdown |
+| Usage | The **Storage** tab's bar of how much of the link cache is used | Disk usage, capacity |
 | Prune safety limit | The stop that refuses to remove a large share of links or rows in one run | Breaker, guard |
