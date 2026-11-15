@@ -29,12 +29,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Decides what goes into the link cache and downloads it, one file at a time, in the background.
-/// Two things put a link's file in the cache: someone plays the link, or it is an episode ahead of the
-/// one a user is watching. Items picked to always keep are full copies in the library instead, see
-/// <see cref="AlwaysKeep"/>. Each download reads the file from the link's own server through the route
-/// links stream from, so that server's speed limits apply, and this server's own download speed limit
-/// applies as well.
+/// Decides what goes into the link cache and downloads it in the background, one file at a time, when
+/// someone plays a link or it is an episode ahead of the one a user is watching. Each download reads the
+/// file through the route links stream from, so the source's speed limits apply as well as this server's.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkCacheFiller : BackgroundService
@@ -50,21 +47,25 @@ public sealed class LinkCacheFiller : BackgroundService
     private readonly ILogger<LinkCacheFiller> _logger;
     private readonly Channel<Fill> _queue = Channel.CreateUnbounded<Fill>(new UnboundedChannelOptions { SingleReader = true });
     private readonly ConcurrentDictionary<string, byte> _waiting = new(StringComparer.OrdinalIgnoreCase);
-    // Per link, the sessions playing it now. A file someone is watching is never dropped to make room.
+
+    /// <summary>
+    /// The sessions playing each link, noted even while the cache is off. A file someone is watching is
+    /// never dropped to make room.
+    /// </summary>
     private readonly Dictionary<string, HashSet<string>> _playing = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkCacheFiller"/> class.
     /// </summary>
-    /// <param name="cache">The link cache.</param>
-    /// <param name="links">The link registry.</param>
-    /// <param name="services">Resolves services on demand.</param>
+    /// <param name="cache">The link cache to fill.</param>
+    /// <param name="links">Tells which paths are this server's links.</param>
+    /// <param name="services">Resolves the content sync table on demand.</param>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="sessionManager">Session manager.</param>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="sessionManager">Raises the playback events that queue a file.</param>
+    /// <param name="libraryManager">Finds the version played and the episodes ahead.</param>
+    /// <param name="logger">Writes log entries.</param>
     public LinkCacheFiller(
         LinkCache cache,
         ILinkRegistry links,
@@ -76,6 +77,15 @@ public sealed class LinkCacheFiller : BackgroundService
         ILibraryManager libraryManager,
         ILogger<LinkCacheFiller> logger)
     {
+        ArgumentNullException.ThrowIfNull(cache);
+        ArgumentNullException.ThrowIfNull(links);
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+        ArgumentNullException.ThrowIfNull(sessionManager);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(logger);
         _cache = cache;
         _links = links;
         _services = services;
@@ -118,7 +128,7 @@ public sealed class LinkCacheFiller : BackgroundService
 
     /// <summary>The library mapping a link row came through, or null when it is no longer set up.</summary>
     /// <param name="config">The plugin configuration that holds the mappings.</param>
-    /// <param name="row">The link's row.</param>
+    /// <param name="row">The link's row, which names its server and source library.</param>
     /// <returns>The mapping, or null.</returns>
     public static LibraryMapping? MappingFor(PluginConfiguration config, SyncItem row)
     {
@@ -132,7 +142,7 @@ public sealed class LinkCacheFiller : BackgroundService
     /// <inheritdoc />
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        // Downloads a stopped server cut short are cleared. Whole cached files are kept.
+        // A cache that cannot be tidied must not stop the server from starting.
         try
         {
             _cache.Tidy();
@@ -157,8 +167,9 @@ public sealed class LinkCacheFiller : BackgroundService
     }
 
     /// <summary>
-    /// Brings the cache in line with the settings: forgets files whose link is gone or became a copy,
-    /// and applies retention and the size limit. Run by every content sync.
+    /// Brings the cache in line with the settings by forgetting files whose link is gone or became a copy
+    /// and applying retention and the size limit. A table that cannot be read throws, since taking it for
+    /// no links would empty the cache.
     /// </summary>
     public void Reconcile()
     {
@@ -168,17 +179,11 @@ public sealed class LinkCacheFiller : BackgroundService
         }
 
         var config = _configManager.Configuration;
-        // Read so that a table that cannot be read throws. Taken for no links, it would empty the cache.
-        // A link on its way to a copy keeps its cached file until the copy is in place.
         var rows = Table().GetLinksStrict().Where(r => r.StorageMode.IsLink()).ToList();
         var byId = rows.ToDictionary(r => r.SourceItemId, StringComparer.OrdinalIgnoreCase);
         foreach (var entry in _cache.List())
         {
-            // The link was removed, became a copy, or its library left the cache. A link the link check
-            // found the source will not stream, such as with linking turned off there, is dropped too,
-            // so a cached file does not outlive the source's say for longer than one content sync. A
-            // cached file that is not the size the source now reports is an older version of a file
-            // replaced there under the same name, and would keep playing in place of the new one.
+            // A link gone, excluded, flagged, or changed in size loses its cached file.
             if (!byId.TryGetValue(entry.LinkId, out var row) || MappingFor(config, row) is not { ExcludeFromLinkCache: false } || LinkVerifier.Flagged(row)
                 || (row.SourceSize > 0 && entry.Size != row.SourceSize))
             {
@@ -189,7 +194,7 @@ public sealed class LinkCacheFiller : BackgroundService
         _cache.MakeRoom(0, Playing());
     }
 
-    /// <summary>Queues a link's file to be cached. <c>false</c> when it is cached or waiting already.</summary>
+    /// <summary>Queues a link's file to be cached, unless it is cached or waiting already.</summary>
     /// <param name="linkId">The link's id.</param>
     /// <param name="reason">Why the file is cached.</param>
     /// <param name="userId">The user whose play asked for it, or null.</param>
@@ -217,17 +222,14 @@ public sealed class LinkCacheFiller : BackgroundService
         {
             await foreach (var fill in _queue.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
+                // One file that fails must not stop the others from caching.
                 try
                 {
                     await FillAsync(fill, stoppingToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
                 {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Could not cache the link {LinkId}", fill.LinkId);
+                    _logger.LogWarning(ex, "Could not cache the link {LinkId}", FormatUtilities.SanitizeForLog(fill.LinkId));
                 }
                 finally
                 {
@@ -240,8 +242,10 @@ public sealed class LinkCacheFiller : BackgroundService
         }
     }
 
+    /// <summary>Resolves the content sync table, which is not built when this service is.</summary>
     private ContentSyncTableManager Table() => _services.GetRequiredService<ContentSyncTableManager>();
 
+    /// <summary>The links being played, which must not be dropped to make room.</summary>
     private HashSet<string> Playing()
     {
         lock (_playing)
@@ -250,17 +254,22 @@ public sealed class LinkCacheFiller : BackgroundService
         }
     }
 
-    // The item a playback event is about. A film held in several versions reports the film, and names
-    // the version being played as its media source.
+    /// <summary>
+    /// The item a playback event is about. A film held in several versions reports the film, and names
+    /// the version being played as its media source.
+    /// </summary>
     private BaseItem? Played(PlaybackProgressEventArgs e)
         => Guid.TryParse(e.MediaSourceId, out var version) && version != e.Item?.Id && _libraryManager.GetItemById(version) is { } item
             ? item
             : e.Item;
 
+    /// <summary>The key of the session a playback event came from.</summary>
     private static string SessionOf(PlaybackProgressEventArgs e) => e.Session?.Id ?? e.DeviceId ?? e.PlaySessionId ?? string.Empty;
 
+    /// <summary>Notes who is playing a link, and queues it and the episodes ahead for the cache.</summary>
     private void OnStart(object? sender, PlaybackProgressEventArgs e)
     {
+        // This runs in Jellyfin's playback event, which must never see a throw.
         try
         {
             var played = Played(e);
@@ -269,8 +278,6 @@ public sealed class LinkCacheFiller : BackgroundService
                 return;
             }
 
-            // Noted whether or not the cache is on, so a viewer who started before it was switched on
-            // is still known to be watching.
             lock (_playing)
             {
                 if (!_playing.TryGetValue(link.LinkId, out var sessions))
@@ -290,7 +297,6 @@ public sealed class LinkCacheFiller : BackgroundService
             var user = e.Users?.FirstOrDefault();
             Enqueue(link.LinkId, CacheReason.Played, user?.Id);
 
-            // The episodes after this one are cached ahead, so the next press of play is local.
             var ahead = _configManager.Configuration.LinkCachePreCacheEpisodes;
             if (ahead > 0 && played is Episode episode && episode.SeriesId != Guid.Empty)
             {
@@ -316,8 +322,10 @@ public sealed class LinkCacheFiller : BackgroundService
         }
     }
 
+    /// <summary>Notes that a session stopped playing a link.</summary>
     private void OnStopped(object? sender, PlaybackStopEventArgs e)
     {
+        // This runs in Jellyfin's playback event, which must never see a throw.
         try
         {
             if (Played(e)?.Path is { } path && path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) && _links.Find(path) is { } link)
@@ -338,6 +346,10 @@ public sealed class LinkCacheFiller : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Downloads one link's file into the cache through the route links stream from, marked as a cache
+    /// download so the source applies its speed limits and counts no viewer.
+    /// </summary>
     private async Task FillAsync(Fill fill, CancellationToken cancellationToken)
     {
         var config = _configManager.Configuration;
@@ -349,9 +361,9 @@ public sealed class LinkCacheFiller : BackgroundService
             return;
         }
 
-        var name = Path.GetFileName(row.SourcePath);
-        // The size is what room is made for and what the download is held to, so a file whose size
-        // the source never gave is not cached.
+        var name = FormatUtilities.SanitizeForLog(Path.GetFileName(row.SourcePath));
+
+        // Room is made for the size, so a file of unknown size is not cached.
         if (row.SourceSize <= 0)
         {
             _logger.LogInformation("Did not cache {File}: its size on the source is not known", name);
@@ -369,8 +381,6 @@ public sealed class LinkCacheFiller : BackgroundService
         using var client = _clientFactory.Create(server);
         try
         {
-            // Read through the route links stream from, marked as a cache download: the source applies
-            // its speed limits, and does not count it as someone watching.
             using var response = await client.OpenPeerStreamAsync(
                 fill.LinkId,
                 _applicationHost.SystemId,
@@ -386,8 +396,7 @@ public sealed class LinkCacheFiller : BackgroundService
                 return;
             }
 
-            // Room is made only once the source has agreed to send the file, so a source that is down
-            // or refuses never costs the cache what it already holds.
+            // Room is made only once the source agrees, so a refusal costs the cache nothing.
             if (!_cache.MakeRoom(row.SourceSize, Playing()))
             {
                 _logger.LogInformation("Did not cache {File} ({Size}): the link cache has no room for it", name, FormatUtilities.FormatBytes(row.SourceSize));
@@ -421,7 +430,7 @@ public sealed class LinkCacheFiller : BackgroundService
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Did not cache {File}: {Reason}", name, ex.Message);
+            _logger.LogInformation("Did not cache {File}: {Reason}", name, FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
         finally
         {
@@ -436,5 +445,6 @@ public sealed class LinkCacheFiller : BackgroundService
         }
     }
 
+    /// <summary>One file waiting to be cached, why, and the user whose play asked for it.</summary>
     private sealed record Fill(string LinkId, CacheReason Reason, Guid? UserId);
 }

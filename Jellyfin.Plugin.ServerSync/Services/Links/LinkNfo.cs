@@ -25,7 +25,7 @@ public static class LinkNfo
         ItemFields.OriginalTitle, ItemFields.Tags, ItemFields.Taglines
     };
 
-    /// <summary>Where the .nfo for a link sits: beside it, under the same name.</summary>
+    /// <summary>Where the .nfo for a link sits, beside it under the same name.</summary>
     /// <param name="linkPath">The link's .strm path.</param>
     /// <returns>The .nfo path.</returns>
     public static string PathFor(string linkPath) => Path.ChangeExtension(linkPath, ".nfo");
@@ -49,7 +49,7 @@ public static class LinkNfo
     /// Whether a link's row records that its .nfo was written. A recorded .nfo that is gone was removed
     /// by the user, to hand the metadata to Jellyfin, and is not written again.
     /// </summary>
-    /// <param name="row">The link's row.</param>
+    /// <param name="row">The link's row, whose companion files are read.</param>
     /// <returns><c>true</c> when the row records the .nfo.</returns>
     public static bool Recorded(Models.ContentSync.SyncItem row)
     {
@@ -59,7 +59,7 @@ public static class LinkNfo
     }
 
     /// <summary>Records on a link's row that its .nfo was written.</summary>
-    /// <param name="row">The link's row.</param>
+    /// <param name="row">The link's row, whose companion files gain the .nfo.</param>
     public static void Record(Models.ContentSync.SyncItem row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -70,7 +70,7 @@ public static class LinkNfo
     }
 
     /// <summary>Whether the user removed a link's .nfo after it was written.</summary>
-    /// <param name="row">The link's row.</param>
+    /// <param name="row">The link's row, which says whether the .nfo was written.</param>
     /// <returns><c>true</c> when it was removed.</returns>
     public static bool RemovedByUser(Models.ContentSync.SyncItem row)
     {
@@ -78,6 +78,7 @@ public static class LinkNfo
         return Recorded(row) && !File.Exists(PathFor(row.LocalPath!));
     }
 
+    /// <summary>The companion file names a row records.</summary>
     private static string[] Names(Models.ContentSync.SyncItem row)
         => row.CompanionFiles?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
 
@@ -103,8 +104,11 @@ public static class LinkNfo
         return true;
     }
 
-    /// <summary>The .nfo for an item, in the form Jellyfin's own reader expects for its type.</summary>
-    /// <param name="item">The source item.</param>
+    /// <summary>
+    /// The .nfo for an item, in the form Jellyfin's own reader expects for its type. Each id keeps its name
+    /// as the source spells it, since a lowered name would leave the item holding the id twice.
+    /// </summary>
+    /// <param name="item">The source item the .nfo describes.</param>
     /// <returns>The .nfo text.</returns>
     public static string Build(BaseItemDto item)
     {
@@ -171,9 +175,6 @@ public static class LinkNfo
                 }
 
                 writer.WriteStartElement("uniqueid");
-                // The id's name as the source spells it. Jellyfin reads the names it knows whatever
-                // their case, and stores any other exactly as written here, so a lowered name would
-                // leave the item holding the id twice, once under each spelling.
                 writer.WriteAttributeString("type", name);
                 if (first)
                 {
@@ -192,6 +193,7 @@ public static class LinkNfo
         return text.ToString();
     }
 
+    /// <summary>Writes an element when it has a value.</summary>
     private static void Element(XmlWriter writer, string name, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value))
@@ -200,8 +202,10 @@ public static class LinkNfo
         }
     }
 
-    // XML 1.0 cannot carry most control characters or half of a surrogate pair, and a source's text may
-    // hold either. Whole pairs, such as emoji, are kept.
+    /// <summary>
+    /// Drops what XML 1.0 cannot carry, most control characters and half of a surrogate pair, which a
+    /// source's text may hold. Whole pairs, such as emoji, are kept.
+    /// </summary>
     private static string Clean(string value)
     {
         var text = new StringBuilder(value.Length);
@@ -221,9 +225,11 @@ public static class LinkNfo
         return text.ToString();
     }
 
+    /// <summary>Writes a date the way an .nfo holds it.</summary>
     private static string? Date(DateTimeOffset? value)
         => value?.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
+    /// <summary>A string writer that declares UTF-8, so the XML declaration names it.</summary>
     private sealed class StringWriterWithEncoding : StringWriter
     {
         public StringWriterWithEncoding(StringBuilder builder)

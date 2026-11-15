@@ -15,15 +15,10 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// The link cache: full local copies of the files behind some of this server's links, kept in one
-/// folder under one size limit, wherever the links stream from. A link's .strm never changes. While
-/// its file is here it plays from here under this server's own rules, and when it is not it streams
-/// from the source. So a file can come and go without Jellyfin or a player noticing.
+/// The link cache, full local copies of the files behind some of this server's links, kept with their
+/// index in one folder under one size limit. A link's .strm never changes, so its file can come and go,
+/// playing from here under this server's own rules while held and streaming from the source when not.
 /// </summary>
-/// <remarks>
-/// The index sits in the folder with the files, so the folder is the whole cache: emptying it empties
-/// the cache, and pointing the setting somewhere else starts a new one.
-/// </remarks>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkCache
 {
@@ -33,7 +28,7 @@ public sealed class LinkCache
     /// <summary>How a file being downloaded is named until it is whole.</summary>
     public const string PartExtension = ".part";
 
-    // A cached file on its way into the library, beside where its copy goes.
+    /// <summary>How a cached file is named on its way into the library, beside where its copy goes.</summary>
     private const string MovePartExtension = ".serversync-move";
 
     private const string IndexFile = "index.json";
@@ -51,16 +46,16 @@ public sealed class LinkCache
     private int _loadedAtWipe;
     private bool _indexUnreadable;
 
-    // Counts every folder emptied, by any caller, so an index held in memory is read again afterwards.
+    /// <summary>Counts every folder emptied, by any caller, so an index held in memory is read again afterwards.</summary>
     private static int _wipes;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkCache"/> class.
     /// </summary>
     /// <param name="configManager">Reads the plugin configuration.</param>
-    /// <param name="paths">Jellyfin's folders.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="libraryManager">Library manager, or null.</param>
+    /// <param name="paths">Gives Jellyfin's cache folder, where the default cache folder sits.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="libraryManager">Lists the library folders the cache must stay out of, or null to skip that check.</param>
     public LinkCache(IPluginConfigurationManager configManager, IApplicationPaths paths, ILogger<LinkCache> logger, ILibraryManager? libraryManager = null)
         : this(configManager, Path.Combine((paths ?? throw new ArgumentNullException(nameof(paths))).CachePath, DefaultFolder), logger, () => DateTime.UtcNow)
     {
@@ -68,14 +63,18 @@ public sealed class LinkCache
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="LinkCache"/> class, for tests.
+    /// Initializes a new instance of the <see cref="LinkCache"/> class.
     /// </summary>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="defaultRoot">The cache folder used when none is set.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="now">Gives the current time.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="now">Reads the current time, so a test can move it.</param>
     public LinkCache(IPluginConfigurationManager configManager, string defaultRoot, ILogger<LinkCache> logger, Func<DateTime> now)
     {
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(defaultRoot);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(now);
         _configManager = configManager;
         _defaultRoot = defaultRoot;
         _logger = logger;
@@ -85,7 +84,7 @@ public sealed class LinkCache
     /// <summary>Gets a value indicating whether the cache is on.</summary>
     public bool Enabled => _configManager.Configuration.LinkCacheOn;
 
-    /// <summary>Gets or sets how the free space on a folder's disk is read. Tests set it.</summary>
+    /// <summary>Gets or sets how the free space on a folder's disk is read.</summary>
     public Func<string, long> FreeSpace { get; set; } = DiskFreeSpace;
 
     /// <summary>
@@ -104,10 +103,10 @@ public sealed class LinkCache
         };
     }
 
-    // What the cache's own downloads in progress hold on the disk. They have already come out of the
-    // free space and are not yet counted as cached, so without them the limit would dip while a file
-    // downloads and come back when it finishes. With them, nothing the cache does moves its own limit:
-    // a byte it takes leaves the free space and joins what it holds, and the two together stay the same.
+    /// <summary>
+    /// What the cache's own downloads in progress hold on the disk. Counting them keeps the limit steady while
+    /// a file downloads, since those bytes have left the free space and are not yet counted as cached.
+    /// </summary>
     private long DownloadingBytes()
     {
         try
@@ -123,8 +122,10 @@ public sealed class LinkCache
         }
     }
 
-    // The free space on the disk a folder is on, or on its nearest parent that exists. 0 when it
-    // cannot be read, so a cache sized by its disk takes nothing new until it can.
+    /// <summary>
+    /// The free space on the disk a folder is on, or on its nearest parent that exists. It is 0 when it
+    /// cannot be read, so a cache sized by its disk takes nothing new until it can.
+    /// </summary>
     private static long DiskFreeSpace(string folder)
     {
         try
@@ -153,10 +154,10 @@ public sealed class LinkCache
         }
     }
 
-    // A cache folder inside a library would have its files scanned in as items, and a peer could then
-    // stream or copy them like any file here. They are another server's files, so such a folder is not
-    // used and the cache stays under Jellyfin's own cache. The library folders are read at most once a
-    // minute.
+    /// <summary>
+    /// Whether a cache folder is inside a library, where its files would be scanned in as items another
+    /// server could then stream or copy. The library folders are read at most once a minute.
+    /// </summary>
     private bool InsideALibrary(string root)
     {
         if (_libraryManager is null)
@@ -198,12 +199,12 @@ public sealed class LinkCache
         return false;
     }
 
+    /// <summary>The library folders, and when they were read.</summary>
     private sealed record LibraryRoots(List<string> Roots, DateTime ReadAt);
 
     /// <summary>
-    /// The folder a cache uses for a location setting. A location the administrator chose gets a folder
-    /// of the cache's own inside it, so the cache never shares a folder with anything else and never
-    /// removes a file that is not its own.
+    /// The folder a cache uses for a location setting. A chosen location gets a folder of the cache's own
+    /// inside it, so the cache never shares a folder and never removes a file that is not its own.
     /// </summary>
     /// <param name="location">The Cache Location setting, or empty.</param>
     /// <param name="defaultRoot">The folder under Jellyfin's cache.</param>
@@ -244,8 +245,7 @@ public sealed class LinkCache
                 return null;
             }
 
-            // Removed or cut short behind the cache's back: it is forgotten, and may be cached again.
-            // A file left at the wrong size is the cache's own and plays as nothing, so it goes too.
+            // A file removed or cut short behind the cache's back is forgotten.
             Delete(path);
             Entries().Remove(linkId);
             Save();
@@ -269,7 +269,7 @@ public sealed class LinkCache
 
         lock (_lock)
         {
-            // A player reports often, and once a few minutes is enough to order the cache by.
+            // A player reports often, and once every few minutes is enough.
             if (Entries().TryGetValue(linkId, out var entry) && (entry.LastPlayedAt is not { } last || _now() - last > TimeSpan.FromMinutes(5)))
             {
                 entry.LastPlayedAt = _now();
@@ -284,13 +284,14 @@ public sealed class LinkCache
     /// <returns>The path of the partial file.</returns>
     public string PartPathFor(string linkId, string extension)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         Directory.CreateDirectory(Root);
         return Path.Combine(Root, FileNameFor(linkId, extension) + PartExtension);
     }
 
     /// <summary>
-    /// Takes a finished download into the cache. <c>false</c> when the file is not the size it should be, in
-    /// which case it is deleted.
+    /// Takes a finished download into the cache, or deletes it and returns <c>false</c> when the file is
+    /// not the size it should be.
     /// </summary>
     /// <param name="linkId">The link's id.</param>
     /// <param name="extension">The source file's extension.</param>
@@ -299,6 +300,7 @@ public sealed class LinkCache
     /// <returns><c>true</c> when the file is now in the cache.</returns>
     public bool Complete(string linkId, string extension, long expectedSize, CacheReason reason)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         var name = FileNameFor(linkId, extension);
         var part = Path.Combine(Root, name + PartExtension);
         var path = Path.Combine(Root, name);
@@ -320,7 +322,7 @@ public sealed class LinkCache
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not take {File} into the link cache: {Reason}", name, ex.Message);
+                _logger.LogWarning("Could not take {File} into the link cache: {Reason}", name, FormatUtilities.SanitizeForLog(ex.Message, 300));
                 return false;
             }
         }
@@ -339,11 +341,9 @@ public sealed class LinkCache
     }
 
     /// <summary>
-    /// Moves a link's cached file out of the cache to <paramref name="destination"/>, where it becomes
-    /// the link's copy. The cache forgets the file first, under its lock, and the move runs outside it,
-    /// so a move that is a copy between two disks never holds up playback. A move that fails is undone
-    /// and the file is cached again. <c>false</c>, with nothing moved, when the cache does not hold the whole
-    /// file at <paramref name="expectedSize"/>, or something is already at the destination.
+    /// Moves a link's cached file to <paramref name="destination"/>, where it becomes the link's copy, or
+    /// returns <c>false</c> when the cache does not hold the whole file or something is already there. The
+    /// move runs outside the lock so a copy between two disks never holds up playback, and a failed move is undone.
     /// </summary>
     /// <param name="linkId">The link's id.</param>
     /// <param name="destination">Where the copy belongs.</param>
@@ -365,9 +365,9 @@ public sealed class LinkCache
             Save();
         }
 
-        // Moved under a name of its own beside the copy first, which between two disks is a copy, then
-        // renamed into place, so a failure only ever leaves this move's own file to clear.
         var part = destination + MovePartExtension;
+
+        // Moving under its own name first leaves only this move's file to clear.
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -377,7 +377,7 @@ public sealed class LinkCache
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("Could not move {File} out of the link cache: {Reason}", Path.GetFileName(cached), ex.Message);
+            _logger.LogWarning("Could not move {File} out of the link cache: {Reason}", Path.GetFileName(cached), FormatUtilities.SanitizeForLog(ex.Message, 300));
             lock (_lock)
             {
                 try
@@ -389,7 +389,7 @@ public sealed class LinkCache
                 }
                 catch (Exception back) when (back is IOException or UnauthorizedAccessException)
                 {
-                    _logger.LogWarning("Could not return {File} to the link cache: {Reason}", Path.GetFileName(cached), back.Message);
+                    _logger.LogWarning("Could not return {File} to the link cache: {Reason}", Path.GetFileName(cached), FormatUtilities.SanitizeForLog(back.Message, 300));
                 }
 
                 Delete(part);
@@ -405,12 +405,12 @@ public sealed class LinkCache
     }
 
     /// <summary>
-    /// Takes a kept copy into the cache when it goes back to being a link, so it still plays from this
-    /// server until the cache needs the room. <c>false</c>, with the file left where it was, when the cache is
-    /// off, the file is larger than the whole cache, room cannot be made, or the move fails.
+    /// Takes a permanent copy into the cache when it goes back to being a link, so it still plays from this
+    /// server until the cache needs the room. Returns <c>false</c>, with the file left where it was, when the
+    /// cache is off, the file is larger than the whole cache, room cannot be made, or the move fails.
     /// </summary>
     /// <param name="linkId">The link's id.</param>
-    /// <param name="file">The copy.</param>
+    /// <param name="file">The path of the permanent copy to take in.</param>
     /// <param name="size">The size the source reports for the file.</param>
     /// <returns><c>true</c> when the file is now in the cache.</returns>
     public bool Adopt(string linkId, string file, long size)
@@ -423,17 +423,17 @@ public sealed class LinkCache
             return false;
         }
 
-        // Moved under the cache's download name first, which between two disks is a copy, so a move cut
-        // short is cleared as an unfinished download and the copy is still where it was.
         var extension = Path.GetExtension(file);
         var part = PartPathFor(linkId, extension);
+
+        // A move cut short under the download name is cleared as an unfinished download.
         try
         {
             File.Move(file, part, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("Could not move {File} into the link cache: {Reason}", Path.GetFileName(file), ex.Message);
+            _logger.LogWarning("Could not move {File} into the link cache: {Reason}", FormatUtilities.SanitizeForLog(Path.GetFileName(file)), FormatUtilities.SanitizeForLog(ex.Message, 300));
             if (File.Exists(file))
             {
                 Delete(part);
@@ -497,8 +497,8 @@ public sealed class LinkCache
 
     /// <summary>
     /// Drops what retention says is too old, then drops files in the removal order until the cache,
-    /// with <paramref name="incoming"/> more bytes, fits its size. <c>false</c> when it still does not fit,
-    /// because what is left may not be dropped.
+    /// with <paramref name="incoming"/> more bytes, fits its size. Returns <c>false</c> when it still does
+    /// not fit, because what is left may not be dropped.
     /// </summary>
     /// <param name="incoming">The size of a file about to be cached, or 0.</param>
     /// <param name="keep">Links that must not be dropped now, such as one being played.</param>
@@ -508,8 +508,6 @@ public sealed class LinkCache
         var config = _configManager.Configuration;
         lock (_lock)
         {
-            // Read before anything is dropped. Dropping a file frees what it used, so the room on the
-            // disk, and with it a limit taken from that room, stays the same through the loop.
             var limit = LimitBytes();
             var entries = Entries();
             var changed = false;
@@ -566,8 +564,7 @@ public sealed class LinkCache
 
             var entries = Entries();
 
-            // With an index that could not be read, every file would look unlisted. They are left for
-            // a start where the index reads.
+            // With an unreadable index every file would look unlisted, so all are left.
             if (_indexUnreadable)
             {
                 return;
@@ -580,6 +577,7 @@ public sealed class LinkCache
                 foreach (var file in Directory.EnumerateFiles(root))
                 {
                     var name = Path.GetFileName(file);
+
                     // Only files named the way this cache names them are its to remove.
                     if (OwnName(name) && !known.Contains(name))
                     {
@@ -595,7 +593,7 @@ public sealed class LinkCache
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not tidy the link cache at {Root}: {Reason}", root, ex.Message);
+                _logger.LogWarning("Could not tidy the link cache at {Root}: {Reason}", root, FormatUtilities.SanitizeForLog(ex.Message, 300));
             }
 
             if (changed)
@@ -606,10 +604,10 @@ public sealed class LinkCache
     }
 
     /// <summary>
-    /// Empties a cache folder: every cached file, download, and the index. Only files this cache names
+    /// Empties a cache folder of every cached file, download, and the index. Only files this cache names
     /// are removed, so a folder shared with anything else keeps the rest.
     /// </summary>
-    /// <param name="root">The folder.</param>
+    /// <param name="root">The cache folder to empty.</param>
     public static void WipeFolder(string root)
     {
         Interlocked.Increment(ref _wipes);
@@ -644,7 +642,7 @@ public sealed class LinkCache
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("Could not empty the link cache at {Root}: {Reason}", Root, ex.Message);
+                _logger.LogWarning("Could not empty the link cache at {Root}: {Reason}", Root, FormatUtilities.SanitizeForLog(ex.Message, 300));
             }
 
             _entries = null;
@@ -652,8 +650,10 @@ public sealed class LinkCache
         }
     }
 
-    // A cached file is named by its link's id, which is 32 hex characters, so files this cache did not
-    // write are never taken for its own.
+    /// <summary>
+    /// Names a cached file by its link's id, which is 32 hex characters, so files this cache did not
+    /// write are never taken for its own.
+    /// </summary>
     private static string FileNameFor(string linkId, string extension)
     {
         if (linkId.Length != 32 || !linkId.All(Uri.IsHexDigit))
@@ -665,12 +665,14 @@ public sealed class LinkCache
         return clean.Length == 0 ? linkId.ToLowerInvariant() : linkId.ToLowerInvariant() + "." + clean.ToLowerInvariant();
     }
 
+    /// <summary>Whether a file is named the way this cache names its files.</summary>
     private static bool OwnName(string name)
     {
         var stem = name.Split('.')[0];
         return stem.Length == 32 && stem.All(Uri.IsHexDigit);
     }
 
+    /// <summary>Deletes one of the cache's files, leaving it for the next tidy when it cannot be deleted.</summary>
     private void Delete(string path)
     {
         try
@@ -679,12 +681,12 @@ public sealed class LinkCache
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Left for the next tidy, such as a file a player still has open on Windows.
-            _logger.LogDebug("Could not delete {Path} from the link cache: {Reason}", path, ex.Message);
+            // Left for the next tidy, as when a player still has the file open.
+            _logger.LogDebug("Could not delete {Path} from the link cache: {Reason}", path, FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
     }
 
-    // The index of the folder in use, read again when the setting points somewhere else.
+    /// <summary>The index of the folder in use, read again when the setting points elsewhere or a folder was emptied.</summary>
     private Dictionary<string, CacheEntry> Entries()
     {
         var root = Root;
@@ -712,16 +714,14 @@ public sealed class LinkCache
         }
         catch (JsonException ex)
         {
-            // The index is there and is not an index: cut short by a power loss, most likely. It will
-            // not read on a later start either, so the cache starts over. The files it listed are
-            // cleared as unlisted and cached again as they are played.
+            // A damaged index will not read later either, so the cache starts over.
             entries.Clear();
-            _logger.LogWarning("The link cache's index at {Root} is damaged, so the cache starts over: {Reason}", root, ex.Message);
+            _logger.LogWarning("The link cache's index at {Root} is damaged, so the cache starts over: {Reason}", root, FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _indexUnreadable = true;
-            _logger.LogWarning("Could not read the link cache's index at {Root}, so it starts empty: {Reason}", root, ex.Message);
+            _logger.LogWarning("Could not read the link cache's index at {Root}, so it starts empty: {Reason}", root, FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
 
         _entries = entries;
@@ -730,6 +730,7 @@ public sealed class LinkCache
         return entries;
     }
 
+    /// <summary>Writes the index beside the files, replacing it only once the new one is whole.</summary>
     private void Save()
     {
         try
@@ -742,7 +743,7 @@ public sealed class LinkCache
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("Could not save the link cache's index at {Root}: {Reason}", _loadedRoot, ex.Message);
+            _logger.LogWarning("Could not save the link cache's index at {Root}: {Reason}", _loadedRoot, FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
     }
 }

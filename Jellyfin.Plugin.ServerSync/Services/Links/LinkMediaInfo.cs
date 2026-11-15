@@ -12,6 +12,7 @@ using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Chapters;
 using MediaBrowser.Controller.Entities;
@@ -26,19 +27,17 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Gives a link the media info its source already holds for the file: runtime, container, streams,
-/// attachments, and chapters, saved the way Jellyfin's own probe saves them. The link then shows its
-/// details without the file being probed across the network. It also takes the chapter images and
-/// trickplay tiles the source made, since Jellyfin makes neither for a .strm.
+/// Gives a link the media info its source already holds for the file, saved the way Jellyfin's own probe
+/// saves it, so the link shows its details without being probed across the network. It also takes the
+/// chapter images and trickplay tiles the source made, since Jellyfin makes neither for a .strm.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkMediaInfo
 {
-    // The most one image from the source may weigh. A trickplay tile is a few hundred kilobytes.
+    /// <summary>The most one image from the source may weigh, far above a trickplay tile.</summary>
     private const long MaxImageBytes = 32L * 1024 * 1024;
 
-    // The most of each kind a source's answer is taken for. A real file is far inside these, so an
-    // answer past them is cut off rather than followed.
+    /// <summary>The most streams a source's answer is taken for, as with each limit below, since a real file is far inside them.</summary>
     private const int MaxStreams = 200;
     private const int MaxChapters = 500;
     private const int MaxTrickplaySets = 8;
@@ -56,12 +55,12 @@ public sealed class LinkMediaInfo
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkMediaInfo"/> class.
     /// </summary>
-    /// <param name="services">Resolves services on demand.</param>
-    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="services">Resolves Jellyfin's media info stores on first use.</param>
+    /// <param name="libraryManager">Reads where a library keeps its trickplay images.</param>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     public LinkMediaInfo(
         IServiceProvider services,
         ILibraryManager libraryManager,
@@ -70,6 +69,12 @@ public sealed class LinkMediaInfo
         IServerApplicationHost applicationHost,
         ILogger<LinkMediaInfo> logger)
     {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+        ArgumentNullException.ThrowIfNull(logger);
         _services = services;
         _libraryManager = libraryManager;
         _configManager = configManager;
@@ -80,7 +85,7 @@ public sealed class LinkMediaInfo
     }
 
     /// <summary>Whether a link's item has no media info yet.</summary>
-    /// <param name="item">The local item.</param>
+    /// <param name="item">The link's item here.</param>
     /// <returns><c>true</c> when it has none.</returns>
     public static bool Lacks(BaseItem item)
     {
@@ -89,9 +94,9 @@ public sealed class LinkMediaInfo
     }
 
     /// <summary>
-    /// The streams to save for a link: the ones inside the source's file, between this server's own
-    /// external audio and its other external files, numbered in that order, which is the order
-    /// Jellyfin's probe saves them in.
+    /// The streams to save for a link, the ones inside the source's file between this server's own external
+    /// audio and its other external files, numbered in the order Jellyfin's probe saves them. Any path or
+    /// address a source's stream carries is dropped, since it names nothing on this server.
     /// </summary>
     /// <param name="local">The streams the link's item has now.</param>
     /// <param name="shipped">The streams the source holds for the file.</param>
@@ -100,8 +105,6 @@ public sealed class LinkMediaInfo
     {
         ArgumentNullException.ThrowIfNull(local);
         ArgumentNullException.ThrowIfNull(shipped);
-        // A stream from the source names nothing on this server: it is a track inside the file, so any
-        // path or address it carries is dropped rather than saved for Jellyfin to open later.
         var inside = shipped.Where(s => s is not null && !s.IsExternal).Take(MaxStreams).ToList();
         foreach (var stream in inside)
         {
@@ -126,16 +129,17 @@ public sealed class LinkMediaInfo
         return merged;
     }
 
+    /// <summary>Cuts text from the source to the longest length saved.</summary>
     private static string? Short(string? text)
         => text is { Length: > MaxTextLength } ? text[..MaxTextLength] : text;
 
     /// <summary>
-    /// Asks a link's own server for the file's media info and saves it on the link's item. <c>false</c> when
-    /// the server could not give it, so the caller can fall back to probing the file.
+    /// Asks a link's own server for the file's media info and saves it on the link's item. Returns
+    /// <c>false</c> when the server could not give it, so the caller can fall back to probing the file.
     /// </summary>
     /// <param name="item">The link's item here.</param>
-    /// <param name="link">The link.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="link">The link whose server is asked.</param>
+    /// <param name="cancellationToken">Cancels the asking and the saving.</param>
     /// <returns><c>true</c> when the item now has the source's media info.</returns>
     public async Task<bool> ShipAsync(BaseItem item, LinkEntry link, CancellationToken cancellationToken)
     {
@@ -146,6 +150,7 @@ public sealed class LinkMediaInfo
             return false;
         }
 
+        // Any failure leaves the link to the probe, so only cancellation gets out.
         try
         {
             using var client = _clientFactory.Create(server);
@@ -155,25 +160,21 @@ public sealed class LinkMediaInfo
             return answer?.Items.FirstOrDefault() is { Exists: true } description
                 && await ApplyAsync(item, description, client, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Could not take the media info for the link {Path} from '{Server}'", link.LinkPath, server.DisplayName);
+            _logger.LogDebug(ex, "Could not take the media info for the link {Path} from '{Server}'", FormatUtilities.SanitizeForLog(link.LinkPath), server.DisplayName);
             return false;
         }
     }
 
     /// <summary>
     /// Saves the source's media info for a file on the link's item, and takes the source's chapter
-    /// images and trickplay tiles when that setting is on. <c>false</c> when the answer holds nothing to save.
+    /// images and trickplay tiles when that setting is on. Returns <c>false</c> when the answer holds nothing to save.
     /// </summary>
     /// <param name="item">The link's item here.</param>
     /// <param name="description">The source's answer for the file.</param>
     /// <param name="client">The source, for its images, or null to take none.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the saving and the image downloads.</param>
     /// <returns><c>true</c> when the media info was saved.</returns>
     public async Task<bool> ApplyAsync(BaseItem item, PeerLinkDescription description, SourceServerClient? client, CancellationToken cancellationToken)
     {
@@ -228,12 +229,14 @@ public sealed class LinkMediaInfo
             await TakeTrickplayAsync(stores.Trickplay, client!, video, description, cancellationToken).ConfigureAwait(false);
         }
 
-        _logger.LogInformation("Took the media info for the link {Path} from its source", video.Path);
+        _logger.LogInformation("Took the media info for the link {Path} from its source", FormatUtilities.SanitizeForLog(video.Path));
         return true;
     }
 
-    // Jellyfin's own stores for media info. They are looked up when first needed, so a Jellyfin that
-    // lacks one leaves links to the probe rather than stopping this plugin from loading.
+    /// <summary>
+    /// Finds Jellyfin's own stores for media info. They are looked up when first needed, so a Jellyfin that
+    /// lacks one leaves links to the probe rather than stopping this plugin from loading.
+    /// </summary>
     private Stores? FindStores()
     {
         if (_services.GetService<IMediaSourceManager>() is { } mediaSources
@@ -250,9 +253,13 @@ public sealed class LinkMediaInfo
         return null;
     }
 
+    /// <summary>Jellyfin's own stores for media info.</summary>
     private sealed record Stores(IMediaSourceManager MediaSources, IMediaStreamRepository Streams, IMediaAttachmentRepository Attachments, IChapterManager Chapters, ITrickplayManager Trickplay, IPathManager Paths);
 
-    // A set is recorded only once every one of its tiles is here, so a player never asks for one that is missing.
+    /// <summary>
+    /// Takes the source's trickplay tiles. A set is recorded only once every one of its tiles is here, so a
+    /// player never asks for one that is missing.
+    /// </summary>
     private async Task TakeTrickplayAsync(ITrickplayManager trickplay, SourceServerClient client, Video video, PeerLinkDescription description, CancellationToken cancellationToken)
     {
         if (description.Trickplay is not { Count: > 0 })
@@ -264,8 +271,7 @@ public sealed class LinkMediaInfo
         var withMedia = _libraryManager.GetLibraryOptions(video)?.SaveTrickplayWithMedia ?? false;
         foreach (var set in description.Trickplay.Take(MaxTrickplaySets))
         {
-            // The source's numbers decide how many images are fetched, so numbers no real set has are
-            // passed over rather than followed.
+            // The source's numbers decide how many images are fetched, so unreal ones are skipped.
             if (set is null || set.Width is <= 0 or > 4096 || set.Height is <= 0 or > 4096
                 || set.TileWidth is <= 0 or > 100 || set.TileHeight is <= 0 or > 100 || set.Interval <= 0
                 || set.TileCount() is 0 or > MaxTilesPerSet || held?.ContainsKey(set.Width) == true)
@@ -282,7 +288,7 @@ public sealed class LinkMediaInfo
 
             if (!complete)
             {
-                _logger.LogDebug("Left the {Width} wide trickplay images for {Path}: the source did not send them all", set.Width, video.Path);
+                _logger.LogDebug("Left the {Width} wide trickplay images for {Path}: the source did not send them all", set.Width, FormatUtilities.SanitizeForLog(video.Path));
                 continue;
             }
 
@@ -300,7 +306,7 @@ public sealed class LinkMediaInfo
         }
     }
 
-    // Writes one image from the source to a path, whole or not at all. False when the source has none.
+    /// <summary>Writes one image from the source to a path, whole or not at all, and says whether the source had one.</summary>
     private async Task<bool> FetchImageAsync(SourceServerClient client, string sourceItemId, string kind, int index, int width, string path, CancellationToken cancellationToken)
     {
         var temp = path + ".serversync-tmp";
