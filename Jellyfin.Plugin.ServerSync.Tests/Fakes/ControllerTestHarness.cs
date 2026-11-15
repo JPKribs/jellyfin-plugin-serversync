@@ -42,6 +42,8 @@ public sealed class ControllerTestHarness : IDisposable
     public const string PeerId = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f";
 
     private PlaylistCopyStore? _playlistCopies;
+    private OutboundHintWorker? _outboundWorker;
+    private InboundHintWorker? _inboundWorker;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ControllerTestHarness"/> class.
@@ -71,6 +73,9 @@ public sealed class ControllerTestHarness : IDisposable
         (Host, HostStub) = InterfaceStub.Create<IServerApplicationHost>();
         HostStub.Answer("get_SystemId", _ => ThisServerId);
         HostStub.Answer("get_FriendlyName", _ => "This Server");
+
+        (LocalItems, LocalItemsStub) = InterfaceStub.Create<ILocalItems>();
+        Triage = new HintTriage(Config, LocalItems, Versions);
 
         PeerHandler = new StubHandler(request => PeerAnswer(request));
         Clients = new ControllerClientFactory(PeerHandler);
@@ -151,6 +156,23 @@ public sealed class ControllerTestHarness : IDisposable
 
     /// <summary>Gets the recorder behind <see cref="Host"/>.</summary>
     public InterfaceStub HostStub { get; }
+
+    /// <summary>Gets the stubbed lookup of local items, which finds nothing until a test answers it.</summary>
+    public ILocalItems LocalItems { get; }
+
+    /// <summary>Gets the recorder behind <see cref="LocalItems"/>.</summary>
+    public InterfaceStub LocalItemsStub { get; }
+
+    /// <summary>Gets the triage that assesses each hint a peer sends.</summary>
+    public HintTriage Triage { get; }
+
+    /// <summary>Gets the worker that delivers hints, built on first use and never started.</summary>
+    public OutboundHintWorker OutboundWorker
+        => _outboundWorker ??= new OutboundHintWorker(Outbound, Config, Clients, Host, null!, new HintSuppression(), Library, NullLogger<OutboundHintWorker>.Instance);
+
+    /// <summary>Gets the worker that applies hints, built on first use and never started.</summary>
+    public InboundHintWorker InboundWorker
+        => _inboundWorker ??= new InboundHintWorker(Inbound, Config, Clients, null!, null!, null!, null!, null!, Triage, Host, NullLogger<InboundHintWorker>.Instance);
 
     /// <summary>Gets the handler every client to another server sends through.</summary>
     public StubHandler PeerHandler { get; }
@@ -241,6 +263,48 @@ public sealed class ControllerTestHarness : IDisposable
         => WithContext(new ConfigurationController(Library, TaskManager, HttpClients, Config, Provider, Clients, NullLogger<ConfigurationController>.Instance), services ?? Services());
 
     /// <summary>
+    /// Builds the Change Queue controller over the harness. It reads <see cref="PlaylistCopies"/>, so only a
+    /// test class in <see cref="PlaylistCopyStoreCollection"/> may call this.
+    /// </summary>
+    /// <returns>The controller and the observer it reads.</returns>
+    public (HintsController Controller, LocalChangeObserver Observer) Hints()
+    {
+        var (userData, _) = InterfaceStub.Create<IUserDataManager>();
+        var (accessor, _) = InterfaceStub.Create<IHttpContextAccessor>();
+        var publisher = new LocalHintPublisher(Config, Outbound, Versions, OutboundWorker, Host, NullLogger<LocalHintPublisher>.Instance);
+        var observer = new LocalChangeObserver(userData, UserManager, Library, accessor, Config, publisher, OutboundWorker, new ApplyGuard(), Versions, new HintSuppression(), InboundWorker, Host, PlaylistCopies, NullLogger<LocalChangeObserver>.Instance);
+        var controller = new HintsController(Outbound, Inbound, OutboundWorker, InboundWorker, observer, Config, Clients, Host, Versions, Library, UserManager);
+        return (WithContext(controller), observer);
+    }
+
+    /// <summary>
+    /// Builds the peer controller over the harness, as called by a peer that presents a pairing secret.
+    /// </summary>
+    /// <param name="presentedSecret">The secret in the pairing header, or null to send none.</param>
+    /// <param name="scopedUser">The user the caller's key is scoped to, as the guard would attach it, or null for a full caller.</param>
+    /// <param name="services">The services the request resolves, or null for the table managers.</param>
+    /// <returns>The controller.</returns>
+    public PeerController PeerRoutes(string? presentedSecret = null, Guid? scopedUser = null, IServiceProvider? services = null)
+    {
+        var (historyStore, _) = InterfaceStub.Create<IUserHistoryStore>();
+        var history = new PeerHistoryService(historyStore, NullLogger<PeerHistoryService>.Instance);
+        var controller = WithContext(
+            new PeerController(history, Config, Host, Inbound, Outbound, Versions, InboundWorker, OutboundWorker, Pairings, Clients, Triage, new PeerItemLookup(Library, LocalItems), NullLogger<PeerController>.Instance),
+            services ?? Services());
+        if (presentedSecret is not null)
+        {
+            controller.Request.Headers[HintProtocol.PairingHeader] = presentedSecret;
+        }
+
+        if (scopedUser is { } user)
+        {
+            controller.HttpContext.Items[PeerCallerGuard.ScopedUserKey] = user;
+        }
+
+        return controller;
+    }
+
+    /// <summary>
     /// Builds a service provider holding the table managers and the record of removed items.
     /// </summary>
     /// <param name="more">Adds further services, or null for none.</param>
@@ -281,6 +345,8 @@ public sealed class ControllerTestHarness : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
+        _outboundWorker?.Dispose();
+        _inboundWorker?.Dispose();
         PeerHandler.Dispose();
         Database.Dispose();
         try
