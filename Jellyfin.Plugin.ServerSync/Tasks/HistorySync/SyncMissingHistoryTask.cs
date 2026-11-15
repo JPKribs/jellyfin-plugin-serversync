@@ -14,21 +14,15 @@ using Jellyfin.Plugin.ServerSync.Services.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks.HistorySync;
 
 /// <summary>
-/// Apply phase for History sync. Reads queued <see cref="HistorySyncItem"/>
-/// rows, applies the merged play-state to the local server via
-/// <see cref="LocalServerClient.UpdateUserItemData"/>, then verifies the
-/// write by re-reading the user-data and confirming the merged values
-/// landed. A row that fails verification is recorded as Errored with a
-/// precise <see cref="Models.Common.SyncRecord.Reason"/> rather than being
-/// silently marked Synced.
-/// When the configuration asks for negotiation, the merged state is first offered to the source
-/// server's own Server Sync plugin, and the local write only happens once the source has accepted it.
+/// Applies queued <see cref="HistorySyncItem"/> rows by writing the merged play state to this server, then reads it back and errors the row with a precise reason when it did not land.
+/// When a library negotiates, the merged state is offered to the source's Server Sync first, and the local write happens only once the source accepts it.
 /// </summary>
 public class SyncMissingHistoryTask
     : SyncQueueTaskBase<HistorySyncItem, (string SourceUserId, string SourceItemId)>
@@ -42,7 +36,7 @@ public class SyncMissingHistoryTask
     /// </summary>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="clientFactory">Builds the client for each source.</param>
     /// <param name="localClient">Calls this server's own API.</param>
     /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="applicationHost">Gives this server's id and name.</param>
@@ -63,9 +57,8 @@ public class SyncMissingHistoryTask
     }
 
     /// <summary>
-    /// A scheduled history write is a copy, not an edit made here. Registered with the guard so the
-    /// change observer does not turn the save event into a hint back to every peer, which would also
-    /// record this server as the editor of a value it only received.
+    /// Registers a scheduled history write with the guard, since it is a copy and not an edit made here.
+    /// Without it the change observer would send a hint to every peer and record this server as the editor.
     /// </summary>
     /// <inheritdoc />
     protected override IDisposable? EnterApplyGuard(HistorySyncItem record)
@@ -81,8 +74,8 @@ public class SyncMissingHistoryTask
     }
 
     /// <summary>
-    /// Answers from the group offer, consumed by ApplyAsync one row at a time. Keyed by reference
-    /// because the same row instance flows from GetApplyGroups through PrepareGroupAsync to ApplyAsync.
+    /// The answers from the group offer, which ApplyAsync takes one row at a time.
+    /// It is keyed by reference, because the same row instance flows from GetApplyGroups through PrepareGroupAsync to ApplyAsync.
     /// </summary>
     private readonly ConcurrentDictionary<HistorySyncItem, PeerHistoryResult> _peerAnswers = new(ReferenceEqualityComparer.Instance);
 
@@ -92,8 +85,8 @@ public class SyncMissingHistoryTask
     private readonly Dictionary<string, string> _negotiationBlocked = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Servers whose Server Sync refuses this server's key. History from them is applied one way, the
-    /// way it was before negotiation existed, and no base is recorded.
+    /// Servers whose Server Sync refuses this server's key.
+    /// History from them is applied one way, and no base is recorded.
     /// </summary>
     private readonly HashSet<string> _oneWay = new(StringComparer.OrdinalIgnoreCase);
 
@@ -103,6 +96,7 @@ public class SyncMissingHistoryTask
     /// </summary>
     private bool Negotiating => ConfigManager.Configuration.NegotiatesAnyHistory();
 
+    /// <summary>Says whether a row's own library negotiates history.</summary>
     private bool NegotiatesFor(HistorySyncItem record)
         => ConfigManager.Configuration.NegotiatesHistory(record.ServerKey, record.SourceLibraryId);
 
@@ -129,9 +123,7 @@ public class SyncMissingHistoryTask
     }
 
     /// <summary>
-    /// Confirms the source runs a Server Sync that can negotiate history before any row is touched,
-    /// so a missing plugin on the source shows up as one clear run failure rather than a row of
-    /// identical errors.
+    /// Confirms each source runs a Server Sync that can negotiate history before any row is touched, so a missing plugin shows as one clear run failure and not a row of identical errors.
     /// </summary>
     /// <inheritdoc />
     protected override async Task<bool> BeforeRunAsync(CancellationToken cancellationToken)
@@ -146,9 +138,7 @@ public class SyncMissingHistoryTask
             return true;
         }
 
-        // Every connected server is asked whether it can negotiate. One that cannot is remembered so
-        // its rows error with the reason instead of being written one sided, and the run only aborts
-        // when no server at all can negotiate.
+        // A server that cannot negotiate errors its rows, and the others go on.
         _peerAnswers.Clear();
         _negotiationBlocked.Clear();
         _oneWay.Clear();
@@ -159,17 +149,13 @@ public class SyncMissingHistoryTask
             {
                 capabilities = await source.Client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
             catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             {
                 _oneWay.Add(source.Key);
-                Logger.LogWarning("{Task}: Server Sync on '{Server}' refused this server's key ({Reason}), so it cannot be asked to negotiate. History from it is applied one way. Add this server or its user to the whitelist there", Name, source.Name, ex.Message);
+                Logger.LogWarning("{Task}: Server Sync on '{Server}' refused this server's key ({Reason}), so it cannot be asked to negotiate. History from it is applied one way. Add this server or its user to the whitelist there", Name, source.Name, FormatUtilities.SanitizeForLog(ex.Message, 300));
                 continue;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 _negotiationBlocked[source.Key] = $"could not reach the Server Sync plugin on '{source.Name}': {ex.Message}";
                 continue;
@@ -187,7 +173,7 @@ public class SyncMissingHistoryTask
                 continue;
             }
 
-            Logger.LogInformation("{Task}: negotiating history with Server Sync {Version} on '{Server}'", Name, capabilities.PluginVersion, source.Name);
+            Logger.LogInformation("{Task}: negotiating history with Server Sync {Version} on '{Server}'", Name, FormatUtilities.SanitizeForLog(capabilities.PluginVersion), source.Name);
         }
 
         if (_negotiationBlocked.Count == Sources.Count)
@@ -198,7 +184,7 @@ public class SyncMissingHistoryTask
 
         foreach (var reason in _negotiationBlocked.Values)
         {
-            Logger.LogError("{Task}: {Reason}", Name, reason);
+            Logger.LogError("{Task}: {Reason}", Name, FormatUtilities.SanitizeForLog(reason, 300));
         }
 
         return true;
@@ -233,10 +219,8 @@ public class SyncMissingHistoryTask
     }
 
     /// <summary>
-    /// Offers a whole group to the source in one request. The peer's answer for each row is kept for
-    /// <see cref="ApplyAsync(HistorySyncItem, CancellationToken)"/> to consume, so a large first sync
-    /// costs a few hundred round trips rather than one per row. A transport failure is recorded
-    /// against every row in the group and surfaces as that row's error.
+    /// Offers a whole group to the source in one request and keeps each row's answer for <see cref="ApplyAsync(HistorySyncItem, CancellationToken)"/>, which saves a round trip for each row.
+    /// A transport failure is recorded against every row in the group and surfaces as that row's error.
     /// </summary>
     /// <inheritdoc />
     protected override async Task PrepareGroupAsync(IList<HistorySyncItem> group, CancellationToken cancellationToken)
@@ -248,7 +232,7 @@ public class SyncMissingHistoryTask
             return;
         }
 
-        // Groups never mix servers, see GetApplyGroups, so the first row's source serves the group.
+        // Groups never mix servers, so the first row's source serves the group.
         var groupSource = SourceFor(group[0]);
         if (groupSource is null || _negotiationBlocked.ContainsKey(groupSource.Key) || _oneWay.Contains(groupSource.Key))
         {
@@ -271,11 +255,7 @@ public class SyncMissingHistoryTask
                     : new PeerHistoryResult { Outcome = PeerHistoryOutcome.Failed, Reason = "source returned no result for this row" };
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             foreach (var record in group)
             {
@@ -285,11 +265,8 @@ public class SyncMissingHistoryTask
     }
 
     /// <summary>
-    /// Settles one row with the source before it is written locally. The group answer is consumed
-    /// first. A stale answer means the source moved since refresh: the row is merged again against the
-    /// source's live state and offered once more on its own. A second refusal, a missing item, or a
-    /// failed write on the source errors the row with the source's reason, and the local write is
-    /// skipped so the two servers never diverge further.
+    /// Settles one row with the source before it is written locally, and merges and offers it once more when the source moved since the scan.
+    /// A second refusal, a missing item, or a failed write on the source errors the row and skips the local write, so the two servers never diverge further.
     /// </summary>
     private async Task NegotiateWithSourceAsync(HistorySyncItem record, CancellationToken cancellationToken)
     {
@@ -306,14 +283,14 @@ public class SyncMissingHistoryTask
 
         if (!_peerAnswers.TryRemove(record, out var answer))
         {
-            // Not prepared as part of a group, so ask for this row alone.
+            // Not prepared as part of a group, so this row is offered alone.
             answer = await OfferAloneAsync(record, cancellationToken).ConfigureAwait(false);
         }
 
         var step = PeerHistoryNegotiator.ResolveOutcome(record, answer, allowRetry: true);
         if (step.Action == NegotiationAction.Retry)
         {
-            Logger.LogInformation("Source state for {ItemName} changed since refresh, merging again", record.ItemName);
+            Logger.LogInformation("Source state for {ItemName} changed since refresh, merging again", FormatUtilities.SanitizeForLog(record.ItemName));
             answer = await OfferAloneAsync(record, cancellationToken).ConfigureAwait(false);
             step = PeerHistoryNegotiator.ResolveOutcome(record, answer, allowRetry: false);
         }
@@ -324,6 +301,7 @@ public class SyncMissingHistoryTask
         }
     }
 
+    /// <summary>Offers one row to its source on its own.</summary>
     private async Task<PeerHistoryResult> OfferAloneAsync(HistorySyncItem record, CancellationToken cancellationToken)
     {
         var request = new PeerHistoryRequest
@@ -338,6 +316,7 @@ public class SyncMissingHistoryTask
             : new PeerHistoryResult { Outcome = PeerHistoryOutcome.Failed, Reason = "source returned no result for this row" };
     }
 
+    /// <summary>Builds the offer for one row.</summary>
     private static PeerHistoryEntry EntryFor(HistorySyncItem record) => new()
     {
         UserId = record.SourceUserId,
@@ -349,8 +328,8 @@ public class SyncMissingHistoryTask
     };
 
     /// <summary>
-    /// When negotiating, rows are offered to the source in batches no larger than the peer endpoint
-    /// accepts. One way mode keeps the base behavior.
+    /// Splits the rows into batches no larger than the peer route accepts when negotiating, each for one server.
+    /// Without negotiation the base grouping is kept.
     /// </summary>
     /// <inheritdoc />
     protected override IEnumerable<IList<HistorySyncItem>> GetApplyGroups(IList<HistorySyncItem> items)
@@ -367,7 +346,7 @@ public class SyncMissingHistoryTask
             yield break;
         }
 
-        // Groups never mix servers: each batch is offered to the server its rows came from.
+        // Each batch is offered to the server its rows came from.
         foreach (var rows in items.GroupBy(i => i.ServerKey ?? string.Empty, StringComparer.OrdinalIgnoreCase).Select(byServer => byServer.ToList()))
         {
             for (var offset = 0; offset < rows.Count; offset += PeerHistoryNegotiator.MaxEntriesPerRequest)
@@ -385,25 +364,21 @@ public class SyncMissingHistoryTask
 
         var (localUserId, localItemId) = ParseLocalIds(record);
 
-        // Re-read the user-data and compare against what was just merged.
-        // Mismatches surface as a precise Errored reason rather than a
-        // silent green badge.
         var (ok, reason) = VerifyApplied(record, localUserId, localItemId);
         if (!ok)
         {
             throw new InvalidOperationException(reason ?? "verification failed");
         }
 
-        // The summary only names local changes. In two way mode the row may have queued for the
-        // source's benefit alone, so say that the source was written too.
         Logger.LogInformation("Apply History verified for {ItemName}: {Changes}{Peer}",
-            record.ItemName,
+            FormatUtilities.SanitizeForLog(record.ItemName),
             HistorySyncMergeService.GetChangeSummary(record),
             NegotiatesFor(record) ? " (source updated as well)" : string.Empty);
 
         return Task.CompletedTask;
     }
 
+    /// <summary>Parses the row's local user and item ids, or throws with the reason the row carries.</summary>
     private static (Guid LocalUserId, Guid LocalItemId) ParseLocalIds(HistorySyncItem record)
     {
         if (string.IsNullOrEmpty(record.LocalItemId))
@@ -425,6 +400,7 @@ public class SyncMissingHistoryTask
         return (localUserId, localItemId);
     }
 
+    /// <summary>Reads the user data back and lists every merged value that did not land.</summary>
     private (bool Succeeded, string? FailureReason) VerifyApplied(HistorySyncItem record, Guid localUserId, Guid localItemId)
     {
         var fresh = _localClient.GetUserItemData(localUserId, localItemId);
@@ -455,10 +431,7 @@ public class SyncMissingHistoryTask
             diffs.Add($"Favorite wanted={record.MergedIsFavorite.Value}, got={fresh.IsFavorite}");
         }
 
-        // LastPlayedDate is harder, Jellyfin does not round-trip sub-second
-        // precision. Shares its definition of "the same instant" with
-        // HasChangesToSync, so the change detector and this verifier can never
-        // disagree about whether the write landed.
+        // Jellyfin drops sub second precision, so dates are compared to the second.
         if (record.MergedLastPlayedDate.HasValue
             && !HistorySyncMergeService.SameInstantToSecond(record.MergedLastPlayedDate, fresh.LastPlayedDate))
         {
@@ -481,11 +454,8 @@ public class SyncMissingHistoryTask
     }
 
     /// <summary>
-    /// HistorySyncItem has no SyncableValue fields (its base MarkSynced is
-    /// a no-op), so on success the merged values are copied into the local
-    /// snapshot. The next Refresh will re-pull the actual local state, but
-    /// in the meantime <see cref="HistorySyncMergeService.HasChangesToSync"/>
-    /// will see local == merged and not requeue.
+    /// Copies the merged values into the row's local snapshot, since a history row has no values to mark synced.
+    /// Until the next scan reads the real local state, the row then sees local equal to merged and is not queued again.
     /// </summary>
     /// <inheritdoc />
     protected override void OnApplySucceeded(HistorySyncItem record)
@@ -493,10 +463,7 @@ public class SyncMissingHistoryTask
         ArgumentNullException.ThrowIfNull(record);
         PeerHistoryNegotiator.ApplyLocalState(record, PeerHistoryNegotiator.MergedStateOf(record));
 
-        // Both servers now hold the merged state, so it becomes the base the next merge compares
-        // against, and the row's picture of the source is brought up to date so the table and any
-        // manual retry before the next refresh describe the source as it now is. Only recorded when
-        // negotiating, so a one way install keeps its old merge rules.
+        // Both servers hold the merged state now, so it becomes the next merge's base.
         if (NegotiatesFor(record) && !_oneWay.Contains(record.ServerKey ?? string.Empty))
         {
             PeerHistoryNegotiator.ApplySourceState(record, PeerHistoryNegotiator.MergedStateOf(record));

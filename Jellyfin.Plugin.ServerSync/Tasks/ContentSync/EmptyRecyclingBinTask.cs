@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
 
 /// <summary>
-/// Scheduled task to permanently delete expired files from the recycling bin.
+/// Deletes files that have been in the Recycling Bin longer than it keeps them.
 /// </summary>
 public class EmptyRecyclingBinTask : IScheduledTask
 {
@@ -19,9 +19,12 @@ public class EmptyRecyclingBinTask : IScheduledTask
 
     /// <summary>Initializes a new instance of the <see cref="EmptyRecyclingBinTask"/> class.</summary>
     /// <param name="logger">Writes log entries.</param>
-    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="configManager">Supplies the Recycling Bin settings.</param>
     public EmptyRecyclingBinTask(ILogger<EmptyRecyclingBinTask> logger, IPluginConfigurationManager configManager)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(configManager);
+
         _logger = logger;
         _configManager = configManager;
     }
@@ -41,6 +44,8 @@ public class EmptyRecyclingBinTask : IScheduledTask
     /// <inheritdoc />
     public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(progress);
+
         var config = _configManager.Configuration;
 
         if (!config.EnableContentSync)

@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
 
 /// <summary>
-/// Scheduled task to clean up orphaned temporary files from failed downloads.
+/// Deletes temporary files that failed downloads left behind.
 /// </summary>
 public class CleanupTempFilesTask : IScheduledTask
 {
@@ -22,22 +22,24 @@ public class CleanupTempFilesTask : IScheduledTask
     private readonly IPluginConfigurationManager _configManager;
 
     /// <summary>
-    /// Maximum age in hours before a temp file is considered orphaned.
+    /// How many hours a temp file goes unwritten before it counts as left behind.
     /// </summary>
     private const int MaxTempFileAgeHours = 24;
 
     /// <summary>
-    /// Subfolders of the temp directory where the Metadata and People sync
-    /// buffer image downloads. Those files are deleted after each apply, so
-    /// only a crash mid apply leaves one behind, and the same age rule clears it.
+    /// The temp subfolders where Metadata and People buffer image downloads.
+    /// Only a crash in the middle of an apply leaves a file there, and the same age rule clears it.
     /// </summary>
     private static readonly string[] ImageTempSubdirectories = { "metadata-images", "person-images" };
 
     /// <summary>Initializes a new instance of the <see cref="CleanupTempFilesTask"/> class.</summary>
     /// <param name="logger">Writes log entries.</param>
-    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="configManager">Supplies the settings and the temp download path.</param>
     public CleanupTempFilesTask(ILogger<CleanupTempFilesTask> logger, IPluginConfigurationManager configManager)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(configManager);
+
         _logger = logger;
         _configManager = configManager;
     }
@@ -57,6 +59,8 @@ public class CleanupTempFilesTask : IScheduledTask
     /// <inheritdoc />
     public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(progress);
+
         var config = _configManager.Configuration;
         // Content downloads and the metadata and people image downloads all stage files here.
         if (!config.EnableContentSync && !config.EnableMetadataSync && !config.EnablePeopleSync)
@@ -72,9 +76,7 @@ public class CleanupTempFilesTask : IScheduledTask
             return Task.CompletedTask;
         }
 
-        // Same hazard class as the recycling bin: this task deletes every
-        // stale top-level file in the directory and in its image buffer
-        // folders, so a temp path overlapping a library root would delete media.
+        // A temp path overlapping a library root would delete media.
         if (RecyclingBinService.OverlapsLibraryRoot(tempPath, config))
         {
             _logger.LogError(
@@ -105,7 +107,7 @@ public class CleanupTempFilesTask : IScheduledTask
 
                 tempFiles = files.ToArray();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 _logger.LogError(ex, "Failed to enumerate temp directory: {TempPath}", tempPath);
                 return Task.CompletedTask;
@@ -139,29 +141,20 @@ public class CleanupTempFilesTask : IScheduledTask
                 {
                     var fileInfo = new FileInfo(file);
 
-                    // Never delete a file that an active worker is still
-                    // writing to, regardless of age. A slow throttled download
-                    // (e.g. 100 KB/s on a 50 GB file) can run for days, but
-                    // its on-disk LastWriteTimeUtc only advances when bytes
-                    // are flushed, long throttle sleeps make a healthy file
-                    // look stale. On Linux/macOS, deleting an open file
-                    // succeeds (unlink while open) and silently strands the
-                    // writer with a handle pointing to nothing visible.
+                    // An active download can look stale, and deleting it strands the writer.
                     if (activeTempFiles.Contains(file.ToLowerInvariant()))
                     {
-                        _logger.LogDebug("Skipping active download: {FileName}", fileInfo.Name);
+                        _logger.LogDebug("Skipping active download: {FileName}", FormatUtilities.SanitizeForLog(fileInfo.Name));
                         skippedCount++;
                         continue;
                     }
 
                     if (fileInfo.LastWriteTimeUtc < cutoffTime)
                     {
-                        // The snapshot above can be minutes old on big dirs. A
-                        // download that started mid-scan reuses deterministic
-                        // temp names, so re-check right before the unlink.
+                        // A download may have started since the snapshot, so it is checked again.
                         if (ActiveDownloadTracker.IsTempFileInUse(file))
                         {
-                            _logger.LogDebug("Skipping newly-active download: {FileName}", fileInfo.Name);
+                            _logger.LogDebug("Skipping newly-active download: {FileName}", FormatUtilities.SanitizeForLog(fileInfo.Name));
                             skippedCount++;
                             continue;
                         }
@@ -170,12 +163,12 @@ public class CleanupTempFilesTask : IScheduledTask
                         fileInfo.Delete();
                         deletedCount++;
                         totalBytes += fileSize;
-                        _logger.LogDebug("Deleted orphaned temp file: {FileName}", fileInfo.Name);
+                        _logger.LogDebug("Deleted orphaned temp file: {FileName}", FormatUtilities.SanitizeForLog(fileInfo.Name));
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    _logger.LogWarning(ex, "Failed to delete temp file: {FilePath}", file);
+                    _logger.LogWarning(ex, "Failed to delete temp file: {FilePath}", FormatUtilities.SanitizeForLog(file));
                     errorCount++;
                 }
 
@@ -196,7 +189,7 @@ public class CleanupTempFilesTask : IScheduledTask
                 _logger.LogWarning("Failed to delete {Count} temp files", errorCount);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Failed to clean up temp directory: {TempPath}", tempPath);
         }

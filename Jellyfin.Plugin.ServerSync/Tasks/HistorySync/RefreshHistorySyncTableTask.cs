@@ -23,13 +23,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks.HistorySync;
 
 /// <summary>
-/// Refresh phase for History sync. Local-first discovery: enumerate the
-/// items in each mapped local library, then for each (enabled user mapping
-/// × enabled library mapping) batch-fetch user-data for the source items
-/// whose translated path exists locally. User-data is never fetched for items
-/// that aren't in the local library. The previous bulk per-(user × library)
-/// approach pulled tens of thousands of records over the wire just to
-/// throw most of them away on path mismatch.
+/// Scans History, starting from the items in each mapped local library.
+/// User data is fetched only for source items whose translated path exists here, for each enabled user mapping and library mapping.
 /// </summary>
 public class RefreshHistorySyncTableTask
     : RefreshSyncTaskBase<HistorySyncItem, HistoryWork, (string SourceUserId, string SourceItemId)>
@@ -44,7 +39,7 @@ public class RefreshHistorySyncTableTask
     /// </summary>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="clientFactory">Builds the client for each source.</param>
     /// <param name="historyService">Builds and compares history sync rows.</param>
     /// <param name="libraryManager">Reads and changes Jellyfin's library.</param>
     /// <param name="links">Looks up which files are links.</param>
@@ -80,7 +75,7 @@ public class RefreshHistorySyncTableTask
     protected override string ModuleMutexKey => "History";
 
     /// <summary>
-    /// The local users found for the mappings are forgotten, so a user added or removed between runs is seen.
+    /// Forgets the local users found for the mappings, so a user added or removed between runs is seen.
     /// </summary>
     /// <inheritdoc />
     protected override void OnRunStarting() => _localUsers.Clear();
@@ -103,17 +98,8 @@ public class RefreshHistorySyncTableTask
     }
 
     /// <summary>
-    /// Three-phase fetch:
-    ///   <list type="number">
-    ///   <item>Enumerate local items per mapped library, building a path
-    ///   lookup. In-process, no HTTP.</item>
-    ///   <item>For each enabled library, do a lightweight source discovery
-    ///   pass (paths only) and collect the IDs whose translated path exists
-    ///   locally. One library-level call, not one per user.</item>
-    ///   <item>For each (enabled user × library), batch-fetch user-data for
-    ///   the matched IDs only. Per-batch ~50 IDs, all with EnableUserData=true
-    ///   and the source user's UserId.</item>
-    ///   </list>
+    /// Lists one server's history in three steps: map the local items of each library by path, find the source items whose translated path exists here, then fetch user data for those in batches.
+    /// The second step makes one pass for each library, not one for each user.
     /// </summary>
     /// <inheritdoc />
     protected override async Task<IList<HistoryWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
@@ -132,7 +118,6 @@ public class RefreshHistorySyncTableTask
 
         progress.Report(2);
 
-        // Phase 1: enumerate local items per library. Path → BaseItem map.
         var localPathsByLibrary = new Dictionary<string, Dictionary<string, BaseItem>>();
         foreach (var mapping in libraryMappings)
         {
@@ -155,11 +140,6 @@ public class RefreshHistorySyncTableTask
 
         progress.Report(8);
 
-        // Phase 2: light source discovery, find source IDs of items whose
-        // translated path exists locally. One pass per library, regardless
-        // of how many users are synced.
-        // Per-page reporting into the 8 to 30 band. Without it the bar froze at
-        // 8% for the entire discovery pagination.
         var discoveryProgress = new ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
         void ReportDiscovery(string key, long fetched, long total)
         {
@@ -205,24 +185,18 @@ public class RefreshHistorySyncTableTask
                     {
                         page = await client.GetLibraryItemPathsAsync(sourceLibraryId, leafTypes, startIndex, pageSize, cancellationToken: ct).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                     {
                         page = null;
                         pageError = ex;
                     }
 
-                    // A missing page is a failed page, not the end of the
-                    // library. Only an answer with no items ends the walk.
+                    // A missing page is a failed page, not the end of the library.
                     if (page is null)
                     {
                         Logger.LogWarning(pageError, "Discovery page failed for library {Library} at index {Index}", mapping.SourceLibraryName, startIndex);
 
-                        // Any source error means this run can't be sure it
-                        // enumerated every item, so the whole run skips pruning.
+                        // A source error means items may be missing, so the run skips pruning.
                         MarkSourceUnavailable($"source server unavailable during '{mapping.SourceLibraryName}' discovery");
 
                         if (++consecutiveErrors >= maxConsecutiveErrors)
@@ -280,7 +254,6 @@ public class RefreshHistorySyncTableTask
             return Array.Empty<HistoryWork>();
         }
 
-        // Phase 3: per (user × library), batch-fetch user-data for matched IDs.
         var work = new ConcurrentBag<HistoryWork>();
         var pairsTotal = Math.Max(userMappings.Count * libraryMappings.Count, 1);
         var pairsDone = 0;
@@ -314,17 +287,12 @@ public class RefreshHistorySyncTableTask
                     var chunk = ids.Skip(i).Take(batchSize).Cast<Guid?>().ToArray();
                     var page = await client.GetItemsWithUserDataByIdsAsync(sourceUserId, chunk, cancellationToken).ConfigureAwait(false);
 
-                    // Sub-pair reporting: a pair covering a large library runs
-                    // many 50-item batches, and per-pair ticks left the bar
-                    // frozen through all of them.
                     batchesDone++;
                     progress.Report(Math.Min(100, 30 + (70.0 * (pairsDone + ((double)batchesDone / batchesForPair)) / pairsTotal)));
 
                     if (page?.Items == null)
                     {
-                        // Batch fetch failed (logged as warning by the client
-                        // wrapper). Those items won't be in the seen set, so the
-                        // run skips pruning rather than treat them as deleted.
+                        // A failed batch leaves items unseen, so the run skips pruning.
                         MarkSourceUnavailable($"source server unavailable fetching user-data for '{libraryMapping.SourceLibraryName}'");
                         continue;
                     }
@@ -363,20 +331,14 @@ public class RefreshHistorySyncTableTask
         {
             record.ServerKey = source.Source.Key;
 
-            // Carry forward the Synced baseline from the existing row, same as
-            // the Metadata refresh: the service builds a fresh record with a
-            // null SyncedHash, and without this the SourceHash == SyncedHash
-            // short-circuit in HasChanges can never fire and every refresh
-            // destroys the baseline the Sync task recorded via MarkSynced.
+            // Without the synced baseline carried over, every scan would discard it.
             if (existing.TryGetValue((record.SourceUserId, record.SourceItemId), out var prev))
             {
                 CarryForwardRowState(record, prev);
                 record.SourceState.Synced = prev.SourceState.Synced;
                 record.SourceState.SyncedHash = prev.SourceState.SyncedHash;
 
-                // The service merged without knowing what the two servers last agreed on. With the base
-                // restored the merge becomes three way, which is what lets a change made only on this
-                // server survive instead of being overwritten by an unchanged source.
+                // The restored base makes the merge three way, so a local change survives.
                 record.CarryNegotiatedBaseFrom(prev);
                 if (record.HasNegotiatedBase)
                 {
@@ -417,12 +379,8 @@ public class RefreshHistorySyncTableTask
     }
 
     /// <summary>
-    /// History is merged, not replaced, so every server that holds a file has something to add. One
-    /// server speaks for a file on each run: the highest ranked one whose history of it has moved since
-    /// this server last looked, or that this server has never looked at. When none has moved, rank
-    /// decides. A server passed over this run is heard on the next, since what it holds still differs
-    /// from what was last seen of it, so every server's history is merged in over a few runs and none
-    /// is merged against a state another merge has already changed.
+    /// Picks the server that speaks for a file this run: the highest ranked one whose history of it has moved since this server last looked, and by rank when none has.
+    /// History is merged, not replaced, so a server passed over is heard on a later run.
     /// </summary>
     /// <inheritdoc />
     protected override Task<IReadOnlyDictionary<string, HistoryWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<HistoryWork>> contested, CancellationToken cancellationToken)
@@ -447,6 +405,7 @@ public class RefreshHistorySyncTableTask
     /// <inheritdoc />
     protected override bool MayOutrankOwner(HistorySyncItem record) => true;
 
+    /// <summary>Says whether a server's history of a file differs from what this server last saw of it.</summary>
     private bool HasMovedSinceSeen(HistoryWork offer)
     {
         if (offer.SourceItem.Id is not { } id
@@ -464,18 +423,16 @@ public class RefreshHistorySyncTableTask
     }
 
     /// <summary>
-    /// A history row is kept when another server speaks for its file. It records what was last seen of
-    /// its own server, which is how that server is known to have moved, and a negotiated base belongs
-    /// to this server and that row's server alone.
+    /// Keeps a history row when another server speaks for its file.
+    /// The row records what was last seen of its own server, and a negotiated base belongs to that pair of servers alone.
     /// </summary>
-    /// <param name="record">The row.</param>
-    /// <returns>Always false.</returns>
+    /// <param name="record">The row another server covers.</param>
+    /// <returns>Always <c>false</c>.</returns>
     protected override bool CanRetire(HistorySyncItem record) => false;
 
     /// <summary>
-    /// In scope when both the row's library mapping AND its user mapping are
-    /// currently enabled. Disabling either preserves history rows instead of
-    /// pruning them, so the user's Ignored overrides survive a toggle.
+    /// Says whether both the row's library mapping and its user mapping are on.
+    /// Turning either off keeps the history rows, so Ignored rows survive it.
     /// </summary>
     /// <inheritdoc />
     protected override bool IsInScope(HistorySyncItem record)
@@ -498,8 +455,6 @@ public class RefreshHistorySyncTableTask
         return false;
     }
 
-    // DecideStatus is not overridden, so the base's retry ceiling holds. An Errored history row at
-    // MaxRetryCount is not re-queued on every refresh.
 
     /// <inheritdoc />
     protected override void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)

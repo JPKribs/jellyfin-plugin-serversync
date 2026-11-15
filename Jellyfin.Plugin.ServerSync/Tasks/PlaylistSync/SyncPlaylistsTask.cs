@@ -11,6 +11,7 @@ using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.Playlists;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
@@ -35,9 +36,9 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
     /// <summary>Initializes a new instance of the <see cref="SyncPlaylistsTask"/> class.</summary>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
-    /// <param name="mirror">The service that makes a local playlist match another server's.</param>
-    /// <param name="resolver">The resolver that decides which of two edits wins.</param>
+    /// <param name="clientFactory">Builds the client for each source.</param>
+    /// <param name="mirror">Makes a local playlist match another server's.</param>
+    /// <param name="resolver">Decides which of two edits wins.</param>
     public SyncPlaylistsTask(
         ILogger<SyncPlaylistsTask> logger,
         IPluginConfigurationManager configManager,
@@ -45,6 +46,12 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
         PlaylistMirror mirror,
         VersionConflictResolver resolver)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(mirror);
+        ArgumentNullException.ThrowIfNull(resolver);
+
         _logger = logger;
         _configManager = configManager;
         _clientFactory = clientFactory;
@@ -110,16 +117,12 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
                 {
                     await MirrorServerAsync(server, i, config.PlaylistSyncShares, cancellationToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
                 catch (System.Net.Http.HttpRequestException ex) when ((int?)ex.StatusCode == 426)
                 {
                     waiting++;
                     _logger.LogWarning("{Task}: '{Server}' runs another Server Sync version, so its playlists wait until both match", Name, server.DisplayName);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
                     failures++;
                     _logger.LogWarning(ex, "{Task}: could not read the playlists of '{Server}'. Its local copies are left as they are", Name, server.DisplayName);
@@ -139,6 +142,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
         }
     }
 
+    /// <summary>Reads one server's playlists and applies each one this server should take, then settles the ones that server deleted.</summary>
     private async Task MirrorServerAsync(SourceServer server, int priority, bool syncShares, CancellationToken cancellationToken)
     {
         using var source = new ScanSource(server, _clientFactory.Create(server), priority);
@@ -175,7 +179,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // By rank, the highest ranked server that holds a playlist is the only one heard for it.
+            // By rank, only the highest ranked server holding a playlist is heard.
             if (byRank && !_spokenFor.Add(playlist.RootId))
             {
                 continue;
@@ -202,9 +206,7 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
                 else if (_resolver.Recorded(HintKind.Playlists, localKey) is { } gone
                     && (peerVersion is null || VersionDecider.SameVersion(peerVersion, gone) || !VersionDecider.IsNewer(peerVersion, gone)))
                 {
-                    // This server knew the playlist and no longer holds it, so it was deleted here or
-                    // by a server this one syncs with. It comes back only when the other server's copy
-                    // was edited after that.
+                    // A playlist deleted here returns only after a newer edit there.
                     continue;
                 }
             }
@@ -222,13 +224,9 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
                     _resolver.Record(peerVersion);
                 }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "{Task}: could not mirror the playlist '{Name}' from '{Server}'", Name, playlist.Name, server.DisplayName);
+                _logger.LogWarning(ex, "{Task}: could not mirror the playlist '{Name}' from '{Server}'", Name, FormatUtilities.SanitizeForLog(playlist.Name), server.DisplayName);
             }
         }
 
@@ -249,12 +247,8 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
     }
 
     /// <summary>
-    /// A copy this server took from a Sync server that the server no longer lists was deleted there,
-    /// when that server also holds a newer version of it than this one does: the deletion. A deletion
-    /// announced as it happened is settled the same way, so this only catches the ones that were missed.
-    /// The copy is deleted or kept by Removed Playlists, and the deletion is recorded either way, so
-    /// the playlist is not handed back to the server that deleted it. A copy edited here since is kept
-    /// and stays this server's newer edit, which that server takes back on its own scan.
+    /// Settles copies taken from a Sync server that the server no longer lists and holds a newer stamp for, which means it deleted them.
+    /// The copy is deleted or kept by Removed Playlists, and the deletion is recorded either way, so the playlist is not handed back.
     /// </summary>
     private async Task SettleDeletedAsync(ScanSource source, List<SourcePlaylist> listed, Dictionary<string, Guid> users, PlaylistRemovedAction action, CancellationToken cancellationToken)
     {
@@ -295,18 +289,19 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
             theirs.Key = localKey;
             if (action == PlaylistRemovedAction.Delete)
             {
-                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}', so the copy here is deleted", Name, source.Name, playlist.Name);
+                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}', so the copy here is deleted", Name, source.Name, FormatUtilities.SanitizeForLog(playlist.Name));
                 _mirror.Delete(playlist);
             }
             else
             {
-                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}'. The copy here is kept, as Removed Playlists is set to Keep", Name, source.Name, playlist.Name);
+                _logger.LogInformation("{Task}: '{Server}' deleted the playlist '{Name}'. The copy here is kept, as Removed Playlists is set to Keep", Name, source.Name, FormatUtilities.SanitizeForLog(playlist.Name));
             }
 
             _resolver.Record(theirs);
         }
     }
 
+    /// <summary>Deletes the copies of playlists a Pull server no longer lists, unless it listed none at all.</summary>
     private void PruneDeleted(SourceServer server, List<SourcePlaylist> playlists, Dictionary<string, Guid> users)
     {
         var roots = new HashSet<string>(playlists.Select(p => p.RootId), StringComparer.OrdinalIgnoreCase);
