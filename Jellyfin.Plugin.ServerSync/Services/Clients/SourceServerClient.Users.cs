@@ -5,21 +5,23 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Sdk.Generated.Models;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
-/// Users, their profile images, and item image details.
+/// Reads users, their profile images, and item images from the source.
 /// </summary>
 public partial class SourceServerClient
 {
     /// <summary>
-    /// Gets a user's full details including Policy and Configuration.
+    /// Gets a source user's full details, including policy and configuration.
     /// </summary>
-    /// <param name="userId">User ID on the source server.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>User details or null if not found.</returns>
+    /// <param name="userId">The source user to read.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The user, or null when the request failed without an error status.</returns>
+    /// <exception cref="Microsoft.Kiota.Abstractions.ApiException">Thrown when the source answers with an error status, so the Users scan skips pruning.</exception>
     public async Task<UserDto?> GetUserAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         try
@@ -27,19 +29,12 @@ public partial class SourceServerClient
             var client = GetApiClient();
             return await client.Users[userId].GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx: bubble up so the User Refresh treats it as source-
-            // unavailable and skips pruning, rather than deleting rows for a
-            // user it merely couldn't fetch.
             _logger.LogWarning(ex, "Source server {Status} getting user details for {UserId}. Refresh will skip pruning to protect tracking rows", ex.ResponseStatusCode, userId);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to get user details for {UserId}", userId);
             return null;
@@ -47,13 +42,12 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Gets a user's profile image as a stream. Only a 404 answers null. Every other failure throws,
-    /// because callers read null as "the source removed this image" and clear the local one, so a
-    /// passing 503 would otherwise delete a profile picture.
+    /// Opens a source user's profile image as a stream.
+    /// Only a 404 answers null and every other failure throws, since callers clear the image here on null.
     /// </summary>
-    /// <param name="userId">User ID on the source server.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Image stream, or null when the source answers that the user has no image.</returns>
+    /// <param name="userId">The source user whose image is read.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The image stream, or null when the source answers that the user has no image.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the image could not be read.</exception>
     public async Task<Stream?> GetUserImageAsync(Guid userId, CancellationToken cancellationToken = default)
     {
@@ -82,11 +76,7 @@ public partial class SourceServerClient
             ownershipTransferred = true;
             return wrapper;
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Failed to get profile image for user {UserId}", userId);
             throw new InvalidOperationException($"Failed to get profile image for user {userId}: {ex.Message}", ex);
@@ -101,12 +91,11 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Gets both the SHA256 hash and content length of a user's profile image in a single download.
-    /// This avoids the overhead of separate GET (for hash) and HEAD (for size) requests.
+    /// Gets the hash and the size of a source user's profile image from one download.
     /// </summary>
-    /// <param name="userId">User ID on the source server.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A tuple of (hash, size), or (null, null) when the source answers that the user has no image.</returns>
+    /// <param name="userId">The source user whose image is read.</param>
+    /// <param name="cancellationToken">Cancels the download.</param>
+    /// <returns>The hash and the size in bytes, or two nulls when the source answers that the user has no image.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the image could not be read, so a failure is never taken for a removed image.</exception>
     public async Task<(string? Hash, long? Size)> GetUserImageHashAndSizeAsync(Guid userId, CancellationToken cancellationToken = default)
     {
@@ -133,16 +122,8 @@ public partial class SourceServerClient
 
             return (hash, totalBytes);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (InvalidOperationException)
-        {
-            // GetUserImageAsync already logged and wrapped the cause.
-            throw;
-        }
-        catch (Exception ex)
+        // The image opener already logs and wraps its InvalidOperationException.
+        catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException)
         {
             _logger.LogWarning(ex, "Failed to get profile image hash and size for user {UserId}", userId);
             throw new InvalidOperationException($"Failed to read profile image for user {userId}: {ex.Message}", ex);
@@ -150,11 +131,11 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Gets image info for an item, including sizes and dimensions.
+    /// Lists a source item's images with their sizes and dimensions.
     /// </summary>
-    /// <param name="itemId">Item ID on the source server.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of image info or null if failed.</returns>
+    /// <param name="itemId">The source item whose images are listed.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The images, or null when the request failed, in which case image changes may go unseen.</returns>
     public async Task<List<ImageInfo>?> GetItemImageInfoAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
         try
@@ -162,33 +143,20 @@ public partial class SourceServerClient
             var client = GetApiClient();
             return await client.Items[itemId].Images.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Warning, not Debug: without sizes the manifest stays tag-only,
-            // image comparison degrades to count-only, and genuine image
-            // changes stop being detected. A 403 here (non-admin token) is
-            // silent otherwise.
             _logger.LogWarning(ex, "Failed to get image info for item {ItemId}. Image sizes will be unavailable and image changes may go undetected", itemId);
             return null;
         }
     }
 
     /// <summary>
-    /// HEADs the image endpoint and returns the byte size from Content-Length,
-    /// or null if the request fails or the server omits the header. Bypasses
-    /// the source server's cached <see cref="ImageInfo.Size"/> (which is
-    /// populated from Jellyfin's in-memory item state and goes stale when an
-    /// image file is replaced on disk without re-scanning), so the
-    /// post-replacement size shows up in the table on the next refresh.
+    /// Reads an image's size from a HEAD request, since the source's <see cref="ImageInfo.Size"/> goes stale when the file is replaced on disk.
     /// </summary>
     /// <param name="itemId">The source item the image belongs to.</param>
     /// <param name="imageType">The image type, such as Primary.</param>
     /// <param name="imageIndex">The image's index, or null for the first.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The size in bytes, or null when it cannot be read.</returns>
     public async Task<long?> GetItemImageContentLengthAsync(
         Guid itemId,
@@ -196,6 +164,8 @@ public partial class SourceServerClient
         int? imageIndex,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(imageType);
+
         using var request = new HttpRequestMessage(HttpMethod.Head,
             imageIndex.HasValue
                 ? $"{_serverUrl}/Items/{itemId}/Images/{imageType}/{imageIndex.Value}"
@@ -212,36 +182,31 @@ public partial class SourceServerClient
 
             return response.Content.Headers.ContentLength;
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "HEAD for image size failed: {ImageType}/{Index} on {ItemId}", imageType, imageIndex, itemId);
+            _logger.LogDebug(ex, "HEAD for image size failed: {ImageType}/{Index} on {ItemId}", FormatUtilities.SanitizeForLog(imageType), imageIndex, itemId);
             return null;
         }
     }
 
     /// <summary>
-    /// Downloads an item image from the source server as a stream.
+    /// Opens a source item's image as a stream that also disposes the request and response.
     /// </summary>
-    /// <param name="itemId">Item ID on the source server.</param>
-    /// <param name="imageType">Image type name (e.g., "Primary", "Backdrop").</param>
-    /// <param name="imageIndex">Image index (for multi-image types like Backdrop). Null for single images.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Tuple of (stream, contentType) or (null, null) on failure.</returns>
+    /// <param name="itemId">The source item the image belongs to.</param>
+    /// <param name="imageType">The image type, such as Primary or Backdrop.</param>
+    /// <param name="imageIndex">The image's index for a type that holds several, or null for the first.</param>
+    /// <param name="cancellationToken">Cancels the download.</param>
+    /// <returns>The stream and its content type, or two nulls on failure.</returns>
     public async Task<(Stream? Stream, string? ContentType)> DownloadItemImageAsync(
         Guid itemId,
         string imageType,
         int? imageIndex,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(imageType);
+
         HttpResponseMessage? response = null;
         HttpRequestMessage? request = null;
-
-        // Ownership flips to the returned stream wrapper only on the success
-        // path. The finally cleans up every other exit.
         var ownershipTransferred = false;
         try
         {
@@ -257,7 +222,7 @@ public partial class SourceServerClient
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failed to download image {ImageType}/{Index} for item {ItemId}: {StatusCode}",
-                    imageType, imageIndex, itemId, response.StatusCode);
+                    FormatUtilities.SanitizeForLog(imageType), imageIndex, itemId, response.StatusCode);
                 return (null, null);
             }
 
@@ -268,19 +233,14 @@ public partial class SourceServerClient
             ownershipTransferred = true;
             return (wrapper, contentType);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Warning, not Debug: at the default log level a failure here
-            // would otherwise leave an empty local image with no trace of why.
-            _logger.LogWarning(ex, "Failed to download image {ImageType}/{Index} for item {ItemId}", imageType, imageIndex, itemId);
+            _logger.LogWarning(ex, "Failed to download image {ImageType}/{Index} for item {ItemId}", FormatUtilities.SanitizeForLog(imageType), imageIndex, itemId);
             return (null, null);
         }
         finally
         {
+            // The returned stream owns the request and response once it is handed out.
             if (!ownershipTransferred)
             {
                 DisposeQuiet(response);

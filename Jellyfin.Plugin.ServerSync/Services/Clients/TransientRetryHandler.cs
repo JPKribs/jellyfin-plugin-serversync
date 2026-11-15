@@ -7,10 +7,8 @@ using System.Threading.Tasks;
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
-/// Retries a read that failed for a reason worth trying again: no answer within
-/// <see cref="AttemptTimeout"/>, a dropped connection, or a busy or restarting server. Only GET and
-/// HEAD requests without a body are retried, since they change nothing on the other side. Peer
-/// writes carry their own retry through the hint queue.
+/// Retries a read that got no answer within <see cref="AttemptTimeout"/>, lost its connection, or met a busy
+/// server. Only GET and HEAD requests without a body are retried, since they change nothing on the other side.
 /// </summary>
 public sealed class TransientRetryHandler : DelegatingHandler
 {
@@ -18,12 +16,12 @@ public sealed class TransientRetryHandler : DelegatingHandler
     public const int MaxAttempts = 3;
 
     /// <summary>
-    /// How long one attempt may wait for the answer's headers. The client's own timeout covers every
-    /// attempt together, so a single slow answer is cut off here and tried again instead of using it up.
+    /// How long one attempt may wait for the answer's headers. The client's own timeout covers every attempt
+    /// together, so one slow answer is cut off here and tried again.
     /// </summary>
     public static readonly TimeSpan AttemptTimeout = TimeSpan.FromSeconds(90);
 
-    /// <summary>The longest a server's Retry-After is honoured for.</summary>
+    /// <summary>The longest wait a server's Retry-After can ask for.</summary>
     public static readonly TimeSpan MaxRetryAfter = TimeSpan.FromSeconds(30);
 
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -37,17 +35,21 @@ public sealed class TransientRetryHandler : DelegatingHandler
     {
     }
 
-    /// <summary>Initializes a new instance of the <see cref="TransientRetryHandler"/> class, for tests.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TransientRetryHandler"/> class.
+    /// </summary>
     /// <param name="delay">Waits between attempts.</param>
     /// <param name="attemptTimeout">How long one attempt may wait for headers.</param>
     public TransientRetryHandler(Func<TimeSpan, CancellationToken, Task> delay, TimeSpan attemptTimeout)
     {
+        ArgumentNullException.ThrowIfNull(delay);
+
         _delay = delay;
         _attemptTimeout = attemptTimeout;
     }
 
     /// <summary>Whether a status means the server may answer if asked again shortly.</summary>
-    /// <param name="status">The status.</param>
+    /// <param name="status">The status a server answered with.</param>
     /// <returns><c>true</c> for a timeout, throttling, or a gateway or availability failure.</returns>
     public static bool IsTransient(HttpStatusCode status)
         => status is HttpStatusCode.RequestTimeout
@@ -57,8 +59,7 @@ public sealed class TransientRetryHandler : DelegatingHandler
             or HttpStatusCode.GatewayTimeout;
 
     /// <summary>
-    /// Set on a request whose caller does its own failover, such as a link stream, which tries another
-    /// server at once rather than waiting on this one.
+    /// Set on a request whose caller tries another server at once, such as a link stream.
     /// </summary>
     public static readonly HttpRequestOptionsKey<bool> NoRetry = new("ServerSync.NoRetry");
 
@@ -93,10 +94,9 @@ public sealed class TransientRetryHandler : DelegatingHandler
                 await _delay(Backoff(attempt), cancellationToken).ConfigureAwait(false);
                 continue;
             }
+            // No status means the connection failed. Anything the server answered is not retried.
             catch (HttpRequestException ex) when (!last && ex.StatusCode is null)
             {
-                // No status: the connection failed or dropped. Refused redirects carry their status
-                // and are not retried, nor is anything the server actually answered.
                 await _delay(Backoff(attempt), cancellationToken).ConfigureAwait(false);
                 continue;
             }
@@ -112,7 +112,6 @@ public sealed class TransientRetryHandler : DelegatingHandler
         }
     }
 
-    // One second, then three, with up to a quarter more at random so many workers do not retry together.
     /// <summary>
     /// Gives how long to wait after a failed attempt, one second then three, with up to a quarter more at
     /// random so many workers do not retry together.

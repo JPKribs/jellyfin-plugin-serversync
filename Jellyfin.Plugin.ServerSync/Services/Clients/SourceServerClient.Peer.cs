@@ -16,8 +16,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 /// </summary>
 public partial class SourceServerClient
 {
-    // Jellyfin serializes with Pascal case names and enums as strings. Reading is case insensitive so
-    // either casing on the wire is accepted.
+    /// <summary>
+    /// Reads peer JSON in either casing and writes enums as strings, as Jellyfin serializes them.
+    /// </summary>
     private static readonly System.Text.Json.JsonSerializerOptions PeerJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -25,13 +26,11 @@ public partial class SourceServerClient
     };
 
     /// <summary>
-    /// Asks the source whether it runs Server Sync and what it can negotiate. Returns null when the
-    /// source answers 404, which means the plugin is not installed there.
-    /// Any other failure is raised with its status, so a caller can tell a refused key from a peer
-    /// that is down.
+    /// Asks the source whether it runs Server Sync and what it can negotiate.
+    /// Any failure but a 404 is raised with its status, so a caller can tell a refused key from a peer that is down.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The peer's capabilities, or null when the source has no peer endpoint.</returns>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The peer's capabilities, or null when the source answers 404 because Server Sync is not installed there.</returns>
     public async Task<PeerCapabilities?> GetPeerCapabilitiesAsync(CancellationToken cancellationToken = default)
     {
         var (status, parsed, body) = await PeerRequestAsync<PeerCapabilities>(HttpMethod.Get, "/Sync/Peer/Capabilities", null, cancellationToken).ConfigureAwait(false);
@@ -51,7 +50,7 @@ public partial class SourceServerClient
     /// <summary>
     /// Asks the peer whether its Server Sync lets this server's key use the sync routes.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>A result code, such as Allowed or NotInstalled, and a message that says it.</returns>
     public async Task<(string Code, string Message)> CheckSyncAccessAsync(CancellationToken cancellationToken = default)
     {
@@ -61,11 +60,8 @@ public partial class SourceServerClient
         {
             (status, _, body) = await PeerRequestAsync<PeerCapabilities>(HttpMethod.Get, "/Sync/Peer/Capabilities", null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        // Any failure to reach the peer is a result to show, not an error.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             return ("Unknown", "Could not reach Server Sync there: " + ex.Message);
         }
@@ -98,6 +94,7 @@ public partial class SourceServerClient
                     return (code.GetString() ?? "Refused", message.GetString() ?? "Refused");
                 }
             }
+            // A body that is not JSON falls through to the plain refusal.
             catch (System.Text.Json.JsonException)
             {
             }
@@ -111,7 +108,7 @@ public partial class SourceServerClient
     /// </summary>
     /// <param name="callerServerId">This server's id.</param>
     /// <param name="onlyId">The one playlist to read, or null for all.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The playlists, or null when the peer's Server Sync does not list them.</returns>
     public async Task<PeerPlaylistsResponse?> GetPeerPlaylistsAsync(string callerServerId, Guid? onlyId = null, CancellationToken cancellationToken = default)
     {
@@ -141,7 +138,7 @@ public partial class SourceServerClient
     /// Lists the playlists a source user can see through Jellyfin's own API.
     /// </summary>
     /// <param name="userId">The source user whose playlists are listed.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The playlists, sorted by name.</returns>
     public async Task<List<BaseItemDto>> GetVisiblePlaylistsAsync(Guid userId, CancellationToken cancellationToken = default)
     {
@@ -165,7 +162,7 @@ public partial class SourceServerClient
     /// </summary>
     /// <param name="playlistId">The source playlist.</param>
     /// <param name="userId">The source user the playlist is read as.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The playlist's entries.</returns>
     public Task<List<BaseItemDto>> GetPlaylistEntriesAsync(Guid playlistId, Guid userId, CancellationToken cancellationToken = default)
         => GetPlaylistItemsAsync(playlistId, userId, cancellationToken, distinct: false);
@@ -175,7 +172,7 @@ public partial class SourceServerClient
     /// if its live state still matches what this server expected, and reports the outcome per entry.
     /// </summary>
     /// <param name="peerRequest">The entries to negotiate.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The source's per entry results.</returns>
     public async Task<PeerHistoryResponse> NegotiateHistoryAsync(PeerHistoryRequest peerRequest, CancellationToken cancellationToken = default)
     {
@@ -193,8 +190,8 @@ public partial class SourceServerClient
     /// Offers a batch of hints to the peer's Server Sync. Never throws on an HTTP answer: the status
     /// code is returned so the caller can decide between done, paused, and retry.
     /// </summary>
-    /// <param name="queueRequest">The hints.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="queueRequest">The hints to offer.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The status code, the parsed answer on 200, and the body text otherwise.</returns>
     public async Task<(int StatusCode, Models.Queue.QueueResponse? Response, string? Body)> SendHintsAsync(Models.Queue.QueueRequest queueRequest, CancellationToken cancellationToken = default)
     {
@@ -203,22 +200,24 @@ public partial class SourceServerClient
         return status == 200 ? (status, parsed ?? new Models.Queue.QueueResponse(), null) : (status, null, body);
     }
 
-    /// <summary>Asks the peer whether it lists this server, and how.</summary>
+    /// <summary>
+    /// Asks the peer whether it lists this server, and accepts the secret the peer hands over only while the call is open.
+    /// </summary>
     /// <param name="thisServerId">This server's id.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The listing, or null when the peer has no Server Sync that can answer.</returns>
     public async Task<Models.Peer.PeerLinkResponse?> GetPeerLinkAsync(string thisServerId, CancellationToken cancellationToken = default)
     {
-        // The peer answers this by handing over its secret before it returns, so the secret is only
-        // taken while this call is open.
         using var expecting = Pairing?.Expect();
         var (_, parsed, _) = await PeerRequestAsync<Models.Peer.PeerLinkResponse>(HttpMethod.Get, "/Sync/Peer/Link?serverId=" + Uri.EscapeDataString(thisServerId ?? string.Empty), null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         return parsed;
     }
 
-    /// <summary>Hands the peer the secret it must present on requests that name it as the sender to this server.</summary>
+    /// <summary>
+    /// Hands the peer the secret it must present on requests that name it as the sender to this server.
+    /// </summary>
     /// <param name="pairRequest">This server's id and the secret.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The status the peer answered and its body when it refused.</returns>
     public async Task<(int StatusCode, string? Body)> PairAsync(Models.Peer.PairRequest pairRequest, CancellationToken cancellationToken = default)
     {
@@ -227,9 +226,11 @@ public partial class SourceServerClient
         return (status, body);
     }
 
-    /// <summary>Reads one person by name with the fields the people module compares.</summary>
+    /// <summary>
+    /// Reads one person by name with the fields the people module compares.
+    /// </summary>
     /// <param name="name">The person's name.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The person, or null when the peer has none by that name.</returns>
     public async Task<BaseItemDto?> GetPersonByNameAsync(string name, CancellationToken cancellationToken = default)
     {
@@ -249,9 +250,11 @@ public partial class SourceServerClient
         }
     }
 
-    /// <summary>Asks the peer which versions it holds for a batch of its own keys.</summary>
-    /// <param name="versionsRequest">The kind and keys.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <summary>
+    /// Asks the peer which versions it holds for a batch of its own keys.
+    /// </summary>
+    /// <param name="versionsRequest">The kind and the keys to ask about.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The versions by key, or null when the peer did not answer with versions.</returns>
     public async Task<Dictionary<string, Models.Queue.ObjectVersion>?> GetPeerVersionsAsync(Models.Queue.VersionsRequest versionsRequest, CancellationToken cancellationToken = default)
     {
@@ -271,9 +274,11 @@ public partial class SourceServerClient
         return map;
     }
 
-    /// <summary>Tells the origin of some hints that they are done.</summary>
+    /// <summary>
+    /// Tells the origin of some hints that they are done.
+    /// </summary>
     /// <param name="completeRequest">The finished hints.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns><c>true</c> when the origin accepted the report.</returns>
     public async Task<bool> CompleteHintsAsync(Models.Queue.CompleteRequest completeRequest, CancellationToken cancellationToken = default)
     {
@@ -286,7 +291,7 @@ public partial class SourceServerClient
     /// Reads which hints the peer wants this server to send it.
     /// </summary>
     /// <param name="thisServerId">This server's id.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The peer's interest, or null when it gave none.</returns>
     public async Task<PeerInterest?> GetPeerInterestAsync(string thisServerId, CancellationToken cancellationToken = default)
     {
@@ -304,7 +309,7 @@ public partial class SourceServerClient
     /// Asks the peer to find an item by its ids or path.
     /// </summary>
     /// <param name="lookupRequest">What to find.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The peer's answer, or null when it gave none.</returns>
     public async Task<PeerLookupResponse?> LookupPeerItemAsync(PeerLookupRequest lookupRequest, CancellationToken cancellationToken = default)
     {
@@ -322,7 +327,7 @@ public partial class SourceServerClient
     /// Sends an authorized GET to an address on this server entry's server.
     /// </summary>
     /// <param name="url">The address, which must start with the server URL.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The response, which the caller disposes.</returns>
     public async Task<HttpResponseMessage> GetAuthorizedAsync(string url, CancellationToken cancellationToken = default)
     {
@@ -337,12 +342,16 @@ public partial class SourceServerClient
         return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Gets the base address this client calls.</summary>
+    /// <summary>
+    /// Gets the base address this client calls.
+    /// </summary>
     public string ServerUrl => _serverUrl;
 
-    /// <summary>Reads the hints this server sent the peer that it still holds, and those it finished.</summary>
+    /// <summary>
+    /// Reads the hints this server sent the peer that it still holds, and those it finished.
+    /// </summary>
     /// <param name="fromServerId">This server's id.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The status, or null when it could not be read.</returns>
     public async Task<Models.Queue.QueueStatusResponse?> GetPeerQueueStatusAsync(string fromServerId, CancellationToken cancellationToken)
     {
@@ -352,21 +361,21 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Opens a stream of one of the peer's files for a link here, passing <paramref name="range"/> on.
-    /// The caller owns the response and reads the body as it arrives. A peer that no longer holds this
-    /// server's pairing is paired again once.
+    /// Opens a stream of one of the peer's files for a link here, which the caller owns and disposes.
+    /// A peer that does not hold this server's pairing is paired once and asked again.
     /// </summary>
     /// <param name="sourceItemId">The peer's id of the item.</param>
     /// <param name="callerServerId">This server's Jellyfin id.</param>
     /// <param name="grant">Who the stream is for.</param>
     /// <param name="sourceUserId">The peer's user this server maps the user to, or null.</param>
-    /// <param name="range">The Range header to pass on, or null.</param>
+    /// <param name="range">The Range header to pass on to the peer, or null.</param>
     /// <param name="head">Whether to ask for the headers only.</param>
     /// <param name="fill">Whether this downloads the file into this server's link cache, rather than playing it.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The peer's answer.</returns>
     public async Task<HttpResponseMessage> OpenPeerStreamAsync(string sourceItemId, string callerServerId, Links.LinkGrant grant, string? sourceUserId, string? range, bool head, bool fill, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(sourceItemId);
         ArgumentNullException.ThrowIfNull(grant);
         var path = "/Sync/Peer/Stream/" + Uri.EscapeDataString(sourceItemId)
             + "?serverId=" + Uri.EscapeDataString(callerServerId ?? string.Empty)
@@ -387,12 +396,11 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Asks the peer whether a user here may stream one of its files through a link, before playback
-    /// starts. A refusal carries the peer's reason.
+    /// Asks the peer, before playback starts, whether a user here may stream one of its files through a link.
     /// </summary>
     /// <param name="request">The item and user.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The peer's answer.</returns>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The peer's answer, which carries its reason when it refuses.</returns>
     public async Task<LinkStreamCheckResponse> CheckLinkStreamAsync(LinkStreamCheckRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -406,10 +414,12 @@ public partial class SourceServerClient
         return parsed;
     }
 
-    /// <summary>Reports playback of a link to the peer that holds the file. Throws when the peer refuses.</summary>
-    /// <param name="report">The report.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A task.</returns>
+    /// <summary>
+    /// Reports playback of a link to the peer that holds the file, and throws when the peer refuses.
+    /// </summary>
+    /// <param name="report">The playback state to report.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task that ends when the peer has answered.</returns>
     public async Task ReportLinkPlaybackAsync(PeerPlaybackReport report, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(report);
@@ -421,10 +431,12 @@ public partial class SourceServerClient
         }
     }
 
-    /// <summary>Passes a remote control command to the peer for a viewer of a link there. Throws when refused.</summary>
-    /// <param name="request">The command.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A task.</returns>
+    /// <summary>
+    /// Passes a remote control command to the peer for a viewer of a link there, and throws when the peer refuses.
+    /// </summary>
+    /// <param name="request">The command and the viewer it is for.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task that ends when the peer has answered.</returns>
     public async Task SendLinkControlAsync(PeerControlRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -437,13 +449,12 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Asks the peer about files this server holds links to. Null when the peer runs a Server Sync
-    /// from before it answered this. Throws with the peer's reason when it refuses, such as when
-    /// linking is not allowed for this server there.
+    /// Asks the peer about files this server holds links to.
+    /// Throws with the peer's reason when it refuses, such as when Allow Linking is off for this server there.
     /// </summary>
-    /// <param name="request">The items.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>One answer per item, or null.</returns>
+    /// <param name="request">The items to describe.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>One answer per item, or null when the peer's Server Sync has no such route.</returns>
     public async Task<PeerLinkDescribeResponse?> DescribeLinksAsync(PeerLinkDescribeRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -463,29 +474,34 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Opens an image the peer made for a file this server links to: a chapter's image or a trickplay
-    /// tile. The caller disposes the response.
+    /// Opens a chapter image or a trickplay tile the peer made for a file this server links to, which the caller disposes.
     /// </summary>
     /// <param name="sourceItemId">The peer's id of the item.</param>
     /// <param name="kind">Chapter or Trickplay.</param>
     /// <param name="index">The chapter's index, or the tile's.</param>
     /// <param name="width">For a trickplay tile, the width of its set.</param>
     /// <param name="callerServerId">This server's Jellyfin id.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The peer's response.</returns>
     public Task<HttpResponseMessage> OpenLinkImageAsync(string sourceItemId, string kind, int index, int width, string callerServerId, CancellationToken cancellationToken = default)
-        => SendPeerStreamAsync(
+    {
+        ArgumentNullException.ThrowIfNull(sourceItemId);
+        ArgumentNullException.ThrowIfNull(kind);
+
+        return SendPeerStreamAsync(
             "/Sync/Peer/Links/" + Uri.EscapeDataString(sourceItemId) + "/Images/" + Uri.EscapeDataString(kind) + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)
                 + "?serverId=" + Uri.EscapeDataString(callerServerId ?? string.Empty) + "&width=" + width.ToString(System.Globalization.CultureInfo.InvariantCulture),
             null,
             false,
             cancellationToken);
+    }
 
+    /// <summary>
+    /// Sends one signed stream request with no retry, since a stream's caller falls back to another server itself.
+    /// </summary>
     private async Task<HttpResponseMessage> SendPeerStreamAsync(string path, string? range, bool head, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(head ? HttpMethod.Head : HttpMethod.Get, _serverUrl + path);
-
-        // A stream's caller falls back to another server itself, so this server is asked once.
         request.Options.Set(TransientRetryHandler.NoRetry, true);
         AddAuthorizationHeader(request);
         request.Headers.TryAddWithoutValidation(Services.Queue.HintProtocol.VersionHeader, _pluginVersion);
@@ -506,18 +522,16 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Reads the peer's links, each with the path its full copy would have. Null when the peer refuses or
-    /// has no such route, so a caller goes on with paths as they arrive. Throws on a server error.
+    /// Reads the peer's links, each with the path its copy would have.
+    /// Throws on any answer but success or a 404, since a refusal or an error does not say the peer has no links.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The peer's links, or null.</returns>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The peer's links, or null when the peer has no links route.</returns>
     public async Task<PeerLinksResponse?> GetPeerLinksAsync(CancellationToken cancellationToken = default)
     {
         var (status, parsed, body) = await PeerRequestAsync<PeerLinksResponse>(HttpMethod.Get, "/Sync/Peer/Links", null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
 
-        // Only a missing route says the peer has no links: it runs a version from before them. A refusal,
-        // a protocol mismatch, or a server error is no answer, so it is raised and asked again, and until
-        // then the peer's .strm files are left alone.
+        // Only a missing route says the peer has no links.
         if (status == 404)
         {
             _logger.LogDebug("The peer has no links route: {Body}", FormatUtilities.SanitizeForLog(body));
@@ -533,13 +547,11 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Reads what left the peer's library since a time. Null when the peer has no such route or
-    /// refuses, in which case removals are found the way they always were, by a full listing. Throws
-    /// on a server error, which is no answer.
+    /// Reads what left the peer's library since a time, and throws on a server error, which is no answer.
     /// </summary>
     /// <param name="since">The time to ask from, in UTC.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The peer's removals, or null.</returns>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The peer's removals, or null when the peer has no such route or refuses, so a full listing finds them.</returns>
     public async Task<PeerChangesResponse?> GetPeerChangesAsync(DateTime since, CancellationToken cancellationToken = default)
     {
         var path = "/Sync/Peer/Changes?since=" + Uri.EscapeDataString(since.ToUniversalTime().ToString("o", System.Globalization.CultureInfo.InvariantCulture));
@@ -559,14 +571,10 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Reads the copies the peer downloaded from other servers, each with its origin. Null when the peer
-    /// has no such route, as a server without Server Sync or a version from before origins has none,
-    /// and when it refuses the request, as it does for a key it will not answer peer calls for. Such a
-    /// server is read as it always was, with every file taken as its own. Throws on a server error,
-    /// which is no answer.
+    /// Reads the copies the peer downloaded from other servers, each with its origin, and throws on a server error, which is no answer.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The peer's copies, or null.</returns>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The peer's copies, or null when the peer has no such route or refuses, so every file is taken as its own.</returns>
     public async Task<PeerCopiesResponse?> GetPeerCopiesAsync(CancellationToken cancellationToken = default)
     {
         var (status, parsed, body) = await PeerRequestAsync<PeerCopiesResponse>(HttpMethod.Get, "/Sync/Peer/Copies", null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
@@ -585,20 +593,16 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// One call to the peer's Server Sync endpoints. Builds the request, signs it, sends it, and on a
-    /// success parses the answer, otherwise reads the body as text. Every peer method is a short rule
-    /// over this, so the transport and its error handling live in one place.
+    /// Makes one signed call to the peer's Server Sync routes, parsing a success and reading a failure's body as text.
+    /// A peer that answers "not paired" is asked to pair and the request goes once more.
     /// </summary>
     /// <typeparam name="TResponse">The shape of a successful answer.</typeparam>
     /// <param name="method">GET or POST.</param>
     /// <param name="pathAndQuery">The path under the server URL.</param>
     /// <param name="body">The request body to send as JSON, or null for none.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
     /// <param name="pairOnRefusal">Whether a "not paired" answer leads to pairing and one more try.</param>
     /// <returns>The status, the parsed answer on success, and the body text on failure.</returns>
-    // A peer that answers "not paired" is asked to pair, which lands the new secret here before the
-    // link call returns, and the request goes once more. Reads are capped so a peer cannot hand back
-    // more than the plugin is prepared to hold.
     private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken, bool pairOnRefusal = true)
         where TResponse : class
     {
@@ -608,8 +612,6 @@ public partial class SourceServerClient
             return answer;
         }
 
-        // The link call makes the peer issue a secret, or note that it cannot, and either way it
-        // decides afresh on the next request.
         _logger.LogInformation("The peer at {Url} does not hold a pairing for this server, pairing now", FormatUtilities.SanitizeForLog(_serverUrl));
         var link = await GetPeerLinkAsync(Pairing.ThisServerId, cancellationToken).ConfigureAwait(false);
         if (link is null)
@@ -620,9 +622,10 @@ public partial class SourceServerClient
         return await PeerRequestOnceAsync<TResponse>(method, pathAndQuery, body, cancellationToken).ConfigureAwait(false);
     }
 
-    // One call with its own deadline over sending and reading. A deadline that passes is reported as a
-    // failed request rather than a cancellation, since only the caller's own token means "stop": the
-    // hint workers treat a cancellation as shutdown, and one slow peer must never stop them.
+    /// <summary>
+    /// Makes one call under its own deadline, reporting a passed deadline as a failed request.
+    /// Only the caller's own token cancels, since hint workers treat a cancellation as shutdown.
+    /// </summary>
     private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestOnceAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
         where TResponse : class
     {
@@ -638,6 +641,9 @@ public partial class SourceServerClient
         }
     }
 
+    /// <summary>
+    /// Builds, signs, and sends one peer request, reading no more of the answer than the plugin is prepared to hold.
+    /// </summary>
     private async Task<(int Status, TResponse? Parsed, string? Body)> PeerRequestCoreAsync<TResponse>(HttpMethod method, string pathAndQuery, object? body, CancellationToken cancellationToken)
         where TResponse : class
     {
@@ -676,8 +682,9 @@ public partial class SourceServerClient
         return (status, System.Text.Json.JsonSerializer.Deserialize<TResponse>(content, PeerJsonOptions), null);
     }
 
-    // A refusal's body ends up in logs, row reasons and the dashboard, and the peer wrote it. It is
-    // cut to a short single line, which still holds every refusal Server Sync itself sends.
+    /// <summary>
+    /// Cuts a refusal's body, which the peer wrote, to a short single line fit for logs, row reasons, and the dashboard.
+    /// </summary>
     private static string RefusalText(byte[] content)
     {
         const int Most = 2048;
@@ -696,6 +703,9 @@ public partial class SourceServerClient
         return line.ToString();
     }
 
+    /// <summary>
+    /// Reads a response body, throwing once it passes the largest answer the plugin reads from a peer.
+    /// </summary>
     private static async Task<byte[]> ReadCappedAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var cap = Services.Queue.HintProtocol.MaxPeerResponseBytes;

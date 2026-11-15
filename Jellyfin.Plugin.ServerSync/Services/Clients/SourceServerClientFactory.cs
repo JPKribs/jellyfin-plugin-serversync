@@ -10,8 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
-/// Factory for creating <see cref="SourceServerClient"/> instances using DI-provided dependencies.
-/// Validates the server URL for SSRF protection before creating the client.
+/// Builds a <see cref="SourceServerClient"/> for a server entry, after checking its Server URL against the SSRF guard.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton, ServiceType = typeof(ISourceServerClientFactory))]
 public class SourceServerClientFactory : ISourceServerClientFactory
@@ -40,6 +39,13 @@ public class SourceServerClientFactory : ISourceServerClientFactory
         Services.Peer.PeerPairingStore pairings,
         MediaBrowser.Controller.IServerApplicationHost applicationHost)
     {
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(secrets);
+        ArgumentNullException.ThrowIfNull(pairings);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+
         _httpClientFactory = httpClientFactory;
         _loggerFactory = loggerFactory;
         _configManager = configManager;
@@ -54,8 +60,7 @@ public class SourceServerClientFactory : ISourceServerClientFactory
         ArgumentNullException.ThrowIfNull(server);
         var client = Create(server.Url, server.ApiKey, server.AllowPrivateNetwork);
 
-        // Only a saved entry can hold a pairing, and its secret only goes to the address saved on it. A
-        // check of an edited address is a new server as far as pairing goes.
+        // A pairing secret only goes to the address saved on the server entry.
         if (_configManager.Configuration.FindServer(server.Key) is { } saved && ConfigurationUtilities.SameServerUrl(saved.Url, server.Url))
         {
             client.Pairing = new PeerPairing(_pairings, server.Key, _applicationHost.SystemId);
@@ -64,21 +69,19 @@ public class SourceServerClientFactory : ISourceServerClientFactory
         return client;
     }
 
+    /// <summary>
+    /// Builds a client for an address after the SSRF guard accepts it. The named client it picks applies the
+    /// private network rule again at connect time, when a name resolves.
+    /// </summary>
     private SourceServerClient Create(string serverUrl, string apiKey, bool allowPrivateNetwork)
     {
-        // The stored key may be encrypted at rest. Decrypt for use. Plaintext passes through.
         apiKey = _secrets.Unprotect(apiKey);
-
-        // Validate URL for SSRF protection (same checks as the controller endpoint). Private
-        // networks are allowed per server entry, since home installs run peers on the same LAN.
         var ssrfError = ConfigurationUtilities.ValidateServerUrlForSsrf(serverUrl, allowPrivateNetwork);
         if (ssrfError != null)
         {
             throw new ArgumentException($"Invalid source server URL: {ssrfError}", nameof(serverUrl));
         }
 
-        // Names resolve at connect time, so the private network rule is enforced there too. The
-        // validator above only classifies an address written into the URL.
         var httpClient = _httpClientFactory.CreateClient(allowPrivateNetwork ? SourceServerClient.HttpClientName : SourceServerClient.PublicHttpClientName);
         var logger = _loggerFactory.CreateLogger<SourceServerClient>();
         return new SourceServerClient(

@@ -8,26 +8,17 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
-/// People.
+/// Reads People from the source.
 /// </summary>
 public partial class SourceServerClient
 {
     /// <summary>
-    /// Bulk-fetches every Person from the source server in a single
-    /// <c>/Persons?fields=…</c> call so callers can do a local name-keyed
-    /// join instead of one HTTP call per person. <c>/Persons</c> ignores
-    /// <c>StartIndex</c> so the catalog cannot be paginated, but unlike
-    /// <c>/Items?recursive=true</c> it is not scoped to the requesting
-    /// user's libraries, Person items live outside library folders, so the
-    /// Items route returns an empty 200 for non-admin tokens (which is how
-    /// 10.11.64.0 wiped the People tracking table). Response can be tens of
-    /// MB on libraries with 100k+ persons, but it is the only route that
-    /// answers correctly for every token type. Throws on any failure: a
-    /// partial catalog would make the People refresh prune rows for persons
-    /// it never saw.
+    /// Reads every person from the source in one unpaged <c>/Persons</c> call, the only route that answers in full for every API Key.
+    /// Throws on any failure, since a partial list would make the People scan prune rows for people it never saw.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>All persons returned by the source server.</returns>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>Every person the source holds, with the fields the People scan compares, lock state included.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the source gave no answer.</exception>
     public async Task<IReadOnlyList<BaseItemDto>> GetAllPersonsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -37,7 +28,6 @@ public partial class SourceServerClient
             var result = await client.Persons.GetAsync(
                 config =>
                 {
-                    // No searchTerm and no Limit, request the entire catalog.
                     config.QueryParameters.Fields = new[]
                     {
                         ItemFields.Overview,
@@ -47,44 +37,27 @@ public partial class SourceServerClient
                         ItemFields.SortName,
                         ItemFields.DateCreated,
                         ItemFields.ProductionLocations,
-                        // Settings populates LockData and LockedFields.
-                        // Without it those come back null while local has
-                        // them populated, producing a perpetual false diff.
                         ItemFields.Settings
                     };
                 },
                 cancellationToken).ConfigureAwait(false);
 
+            // A missing answer read as no people would prune every row.
             if (result?.Items == null)
             {
-                // A null response is a failure, not an empty catalog.
-                // Treating it as empty would prune every tracking row.
                 throw new InvalidOperationException(
                     "Source server returned no response fetching the Persons catalog");
             }
 
             return result.Items;
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx means the source gave no real answer, not that it
-            // has no persons. Returning empty here makes the People refresh
-            // prune every local tracking row. Bubble up so the refresh aborts
-            // before prune.
             _logger.LogWarning(ex, "Source server {Status} bulk-fetching Persons. Aborting refresh to protect tracking rows", ex.ResponseStatusCode);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Same reasoning as the 4xx/5xx case: a transport fault, timeout, or
-            // deserialization error is "no real answer," not "source has no
-            // persons." The People refresh has no incomplete-discovery prune
-            // guard, so returning empty here would prune every tracking row.
-            // Bubble up so the refresh aborts before prune.
             _logger.LogWarning(ex, "Failed to bulk-fetch Persons from source server. Aborting refresh to protect tracking rows");
             throw;
         }

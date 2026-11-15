@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Sdk.Generated.Models;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
@@ -18,17 +19,12 @@ namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 public partial class SourceServerClient
 {
     /// <summary>
-    /// Fetches the Content-sync leaves for a single whitelisted item: returns
-    /// the item itself if it's a leaf, or walks its descendants folder-by-
-    /// folder if it's a folder type. The folder walk avoids the
-    /// <c>ParentId</c>+<c>Recursive=true</c> path because Jellyfin keeps the
-    /// literal <c>ParentId</c> filter on recursive queries, which returns
-    /// nothing for a Series since episodes carry the Season's ID, not the
-    /// Series'.
+    /// Lists the media files one whitelisted item stands for, the item itself or every file under it. It walks
+    /// one folder at a time, since a recursive query by parent returns nothing for a series.
     /// </summary>
     /// <param name="whitelistedId">The source id of the whitelisted item.</param>
     /// <param name="playlistUserId">The source user a playlist is read as, or null for any other item.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the walk.</param>
     /// <returns>The leaf items the whitelisted item stands for.</returns>
     public async Task<List<BaseItemDto>> GetWhitelistedItemLeavesAsync(
         Guid whitelistedId,
@@ -47,6 +43,8 @@ public partial class SourceServerClient
         var seen = new HashSet<Guid>();
 
         BaseItemDto? rootItem;
+
+        // Every failure rethrows, since an empty answer would read as files removed.
         try
         {
             var client = GetApiClient();
@@ -59,36 +57,20 @@ public partial class SourceServerClient
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             rootItem = rootPage?.Items?.FirstOrDefault();
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
             _logger.LogWarning(ex, "Source server {Status} on whitelist root {Id}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, whitelistedId);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Transport faults (connection reset, DNS, TLS) and deserialization
-            // errors land here, Kiota only wraps HTTP status errors as
-            // ApiException. Returning an empty list would make every leaf under
-            // this entry look "missing from source" and schedule its files for
-            // deletion, so bubble up instead.
             _logger.LogWarning(ex, "Whitelist: failed to fetch item {Id}; aborting to protect tracking rows", whitelistedId);
             throw;
         }
 
+        // An entry gone from the source fails, so its files are not read as removed.
         if (rootItem == null || !rootItem.Id.HasValue)
         {
-            // An entry that no longer exists on the source (deleted
-            // collection, deleted item) returns 200-with-nothing, treating
-            // that as an empty expansion would mark every leaf under it as
-            // removed and schedule the files for deletion. Fail the entry
-            // instead. The refresh marks the source unavailable, keeps
-            // syncing the other entries, and skips pruning until the user
-            // removes the dead entry from the whitelist.
             throw new InvalidOperationException(
                 $"Whitelist entry {whitelistedId} no longer exists on the source server, remove it from the mapping's whitelist to resume pruning");
         }
@@ -100,12 +82,9 @@ public partial class SourceServerClient
             return result;
         }
 
-        // Folder-like (Series / Season / BoxSet / Album / Artist): walk
-        // children breadth-first one folder at a time, collecting leaves.
-        // Playlists are user-scoped and don't answer ParentId child queries,
-        // so their members come from the playlist endpoint and seed the same
-        // walk (members are usually leaves already. Folders still expand).
         var queue = new Queue<Guid>();
+
+        // A playlist does not answer child queries, so its members seed the walk.
         if (rootItem.Type == BaseItemDto_Type.Playlist)
         {
             var members = await GetPlaylistItemsAsync(rootItem.Id.Value, playlistUserId, cancellationToken).ConfigureAwait(false);
@@ -144,6 +123,7 @@ public partial class SourceServerClient
             await PageThroughAsync(
                 async (startIndex, pageSize, ct) =>
                 {
+                    // Every failure rethrows, since a list cut short would read as files removed.
                     try
                     {
                         return await client.Items.GetAsync(
@@ -157,24 +137,13 @@ public partial class SourceServerClient
                             },
                             cancellationToken: ct).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
                     catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
                     {
-                        // Any 4xx/5xx: bubble up. Ending the list here would silently
-                        // truncate the leaf list, which the caller can't tell
-                        // apart from "this folder really has no more children",
-                        // and the prune would read the missing leaves as removed.
                         _logger.LogWarning(ex, "Source server {Status} listing whitelist children of {ParentId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, parentId);
                         throw;
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        // Transport faults reach here as HttpRequestException, not
-                        // ApiException. Ending the list would truncate it the
-                        // same way a swallowed 5xx would, bubble up instead.
                         _logger.LogWarning(ex, "Whitelist: failed to fetch children of {ParentId}; aborting to protect tracking rows", parentId);
                         throw;
                     }
@@ -187,18 +156,14 @@ public partial class SourceServerClient
                         return;
                     }
 
-                    // A repeated ID within one parent means page boundaries
-                    // shifted mid-scan. The matching skip on the other side is
-                    // invisible and would be pruned as "removed". Throwing
-                    // marks the source unavailable, which skips pruning.
+                    // A repeat within one folder means the pages shifted and an item was skipped.
                     if (!parentSeen.Add(child.Id.Value))
                     {
                         throw new InvalidOperationException(
                             $"Whitelist children of {parentId} changed during enumeration (duplicate item across pages)");
                     }
 
-                    // Global dedupe stays separate: BoxSet children legitimately
-                    // repeat across whitelist entries.
+                    // A collection's children may rightly repeat across whitelist entries.
                     if (!seen.Add(child.Id.Value))
                     {
                         return;
@@ -210,7 +175,6 @@ public partial class SourceServerClient
                     }
                     else
                     {
-                        // Folder, descend.
                         queue.Enqueue(child.Id.Value);
                     }
                 },
@@ -224,14 +188,15 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Gets items from a library with pagination support.
+    /// Reads one page of a library's media files. The order is stable on ties, and callers compare the
+    /// reported total with what they fetched to catch a library that changed during the scan.
     /// </summary>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
+    /// <param name="libraryId">The source library to list.</param>
+    /// <param name="startIndex">The index of the page's first item.</param>
+    /// <param name="limit">The page size.</param>
     /// <param name="changedSince">Only items saved since this time, or null for all.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with items.</returns>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The page, or null when it could not be read for a reason other than an HTTP error.</returns>
     public async Task<BaseItemDtoQueryResult?> GetLibraryItemsAsync(
         Guid libraryId,
         int startIndex = 0,
@@ -250,28 +215,18 @@ public partial class SourceServerClient
                     config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
                     config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
                     config.QueryParameters.MinDateLastSaved = changedSince.HasValue ? new DateTimeOffset(Utilities.UtcTime.AsUtc(changedSince.Value)) : null;
-                    // The API has no by-Id sort, so a fully stable order isn't
-                    // possible. The multi-key sort makes tie order deterministic
-                    // and PaginatedFetchUtility's TotalRecordCount check catches
-                    // mid-enumeration catalog changes so they can't turn into
-                    // silent skips that the prune would read as removals.
                     config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
             _logger.LogWarning(ex, "Source server {Status} getting items from library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to get items from library {LibraryId}", libraryId);
             return null;
@@ -279,15 +234,14 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Lists collections (BoxSets) on the source server for the whitelist
-    /// picker. Collections live outside libraries, so this is a server-wide
-    /// recursive BoxSet query.
+    /// Lists the source server's collections for the Library Filter picker. Collections live outside libraries,
+    /// so the whole server is searched.
     /// </summary>
-    /// <param name="searchTerm">Optional search term.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with collections.</returns>
+    /// <param name="searchTerm">Text the collection names must match, or null for all.</param>
+    /// <param name="startIndex">The index of the page's first collection.</param>
+    /// <param name="limit">The page size.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The page of collections, or null when it could not be read.</returns>
     public async Task<BaseItemDtoQueryResult?> GetCollectionsAsync(
         string? searchTerm = null,
         int startIndex = 0,
@@ -314,11 +268,7 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to list collections from source server");
             return null;
@@ -326,9 +276,8 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Fetches a playlist's members, paged, failing loud on any error or
-    /// mid-scan inconsistency, a truncated member list would mark the
-    /// missing items as removed and schedule their files for deletion.
+    /// Reads a playlist's members, throwing on any error or change during the walk, since a list cut short
+    /// would read as items removed from the source.
     /// </summary>
     private async Task<List<BaseItemDto>> GetPlaylistItemsAsync(Guid playlistId, Guid? userId, CancellationToken cancellationToken, bool distinct = true)
     {
@@ -350,16 +299,12 @@ public partial class SourceServerClient
                         },
                         cancellationToken: ct).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
                 catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
                 {
                     _logger.LogWarning(ex, "Source server {Status} listing playlist {Id} members. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, playlistId);
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger.LogWarning(ex, "Playlist: failed to fetch members of {Id}; aborting to protect tracking rows", playlistId);
                     throw;
@@ -368,11 +313,7 @@ public partial class SourceServerClient
             1000,
             item =>
             {
-                // A playlist may legitimately hold the same item more than
-                // once, so dedupe the returned members. The mid-scan
-                // consistency check uses the RAW count (which includes
-                // those legitimate duplicates) against TotalRecordCount, so a
-                // duplicate never looks like a shifted catalog.
+                // A playlist may hold an item twice, which is not a shifted page.
                 if (item.Id.HasValue && (!distinct || memberIds.Add(item.Id.Value)))
                 {
                     members.Add(item);
@@ -388,14 +329,14 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Lists playlists on the source server for the whitelist picker.
-    /// Playlists, like collections, live outside libraries.
+    /// Lists the source server's playlists for the Library Filter picker. Playlists live outside libraries,
+    /// so the whole server is searched.
     /// </summary>
-    /// <param name="searchTerm">Optional search term.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with playlists.</returns>
+    /// <param name="searchTerm">Text the playlist names must match, or null for all.</param>
+    /// <param name="startIndex">The index of the page's first playlist.</param>
+    /// <param name="limit">The page size.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The page of playlists, or null when it could not be read.</returns>
     public async Task<BaseItemDtoQueryResult?> GetPlaylistsAsync(
         string? searchTerm = null,
         int startIndex = 0,
@@ -422,11 +363,7 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to list playlists from source server");
             return null;
@@ -434,15 +371,14 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Gets top-level items from a library (non-recursive) for browsing/filtering UI.
-    /// Returns series, movies, or top-level folders depending on library type.
+    /// Lists a library's top level items, such as series, films, and albums, for the Library Filter picker.
     /// </summary>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="searchTerm">Optional search term to filter results.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with top-level items.</returns>
+    /// <param name="libraryId">The source library to browse.</param>
+    /// <param name="searchTerm">Text the item names must match, or null to browse.</param>
+    /// <param name="startIndex">The index of the page's first item.</param>
+    /// <param name="limit">The page size.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The page of items, or null when it could not be read.</returns>
     public async Task<BaseItemDtoQueryResult?> GetTopLevelLibraryItemsAsync(
         Guid libraryId,
         string? searchTerm = null,
@@ -465,10 +401,9 @@ public partial class SourceServerClient
                     config.QueryParameters.EnableImageTypes = new[] { ImageType.Primary };
                     config.QueryParameters.ImageTypeLimit = 1;
 
+                    // Search only works recursively, so it is limited to top level types.
                     if (!string.IsNullOrWhiteSpace(searchTerm))
                     {
-                        // When searching, use recursive so Jellyfin's search engine works,
-                        // but restrict to top-level container types only (no episodes/seasons/tracks)
                         config.QueryParameters.SearchTerm = searchTerm;
                         config.QueryParameters.Recursive = true;
                         config.QueryParameters.IncludeItemTypes = new[]
@@ -479,8 +414,6 @@ public partial class SourceServerClient
                     }
                     else
                     {
-                        // Non-recursive browse, include standalone files too (Audio, Video)
-                        // since they appear at the top level in some library types
                         config.QueryParameters.Recursive = false;
                         config.QueryParameters.IncludeItemTypes = new[]
                         {
@@ -492,11 +425,7 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to get top-level items from library {LibraryId}", libraryId);
             return null;
@@ -504,11 +433,11 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Gets the total count of items in a library without fetching item details.
+    /// Counts a library's media files without reading them.
     /// </summary>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Total item count or 0 if failed.</returns>
+    /// <param name="libraryId">The source library to count.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The count, or 0 when it could not be read for a reason other than an HTTP error.</returns>
     public async Task<int> GetLibraryItemCountAsync(Guid libraryId, CancellationToken cancellationToken = default)
     {
         try
@@ -527,17 +456,12 @@ public partial class SourceServerClient
 
             return result?.TotalRecordCount ?? 0;
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
             _logger.LogWarning(ex, "Source server {Status} getting item count for library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Failed to get item count for library {LibraryId}", libraryId);
             return 0;
@@ -545,22 +469,15 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Lightweight discovery fetch, returns only Id and Path for items in a
-    /// library. Used by Metadata refresh to determine which source items have
-    /// a local correlate before paying for the full metadata payload. The
-    /// per-page response is far smaller than a full metadata page (no
-    /// Genres/Studios/Tags/People/Overview/etc.), so the discovery scan is
-    /// cheap even on huge libraries.
-    /// Every failure throws rather than answering null. Callers page until a short or empty page, so
-    /// a null read as the end of the library would make every item past a failed page look removed
-    /// from the source and be pruned.
+    /// Reads one page of a library's item ids and paths, a cheap listing a scan uses to find what this server
+    /// holds. Every failure throws, since a null read as the end would make later items look removed.
     /// </summary>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="includeTypes">Item kinds to list.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
+    /// <param name="libraryId">The source library to list.</param>
+    /// <param name="includeTypes">The item kinds to list.</param>
+    /// <param name="startIndex">The index of the page's first item.</param>
+    /// <param name="limit">The page size.</param>
     /// <param name="changedSince">Only items saved since this time, or null for all.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The page the server answered with.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the server could not be asked or gave no answer.</exception>
     public async Task<BaseItemDtoQueryResult> GetLibraryItemPathsAsync(
@@ -591,20 +508,13 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx: bubble up so the Refresh aborts before prune.
             _logger.LogWarning(ex, "Source server {Status} getting item paths from library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, libraryId);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // A transport fault is no answer at all, the same as a 5xx. Swallowing it handed callers a
-            // null they read as the end of the library.
             _logger.LogWarning(ex, "Failed to get item paths from library {LibraryId} at index {Index}. Aborting refresh to protect tracking rows", libraryId, startIndex);
             throw new InvalidOperationException($"Failed to get item paths from library {libraryId} at index {startIndex}: {ex.Message}", ex);
         }
@@ -613,15 +523,13 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Batch-fetches full metadata for a specific set of item IDs. Used by
-    /// Metadata refresh after the discovery pass: only items that exist
-    /// locally are fetched with their heavy <see cref="ItemFields"/>, so the
-    /// refresh doesn't pay for source items the user doesn't have.
+    /// Reads full details for a set of items in batches. Every failure throws, since a partial answer would
+    /// make the missing items look removed from the source.
     /// </summary>
     /// <param name="ids">The source item ids to fetch.</param>
     /// <param name="fields">The fields to read for each item.</param>
     /// <param name="batchSize">How many ids go in one request.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the fetch between and during batches.</param>
     /// <returns>The items the source returned.</returns>
     public async Task<List<BaseItemDto>> GetItemsByIdsAsync(
         IReadOnlyList<Guid> ids,
@@ -660,25 +568,13 @@ public partial class SourceServerClient
                     result.AddRange(response.Items);
                 }
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
             catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
             {
-                // Any 4xx/5xx means the source gave no real answer, not that
-                // the requested items don't exist. Swallowing it returns a
-                // partial result and downstream pruning then deletes every
-                // local row that "wasn't seen this run."
-                // Bubble up so the refresh aborts before the prune step.
                 _logger.LogWarning(ex, "Source server {Status} fetching items batch at index {Index}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, i);
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Transport faults (HttpRequestException, deserialization) are
-                // "no real answer" just like a 5xx, a swallowed chunk here
-                // gets its rows pruned and loses the user's Ignored overrides.
                 _logger.LogWarning(ex, "Failed to fetch items batch starting at index {Index}. Aborting refresh to protect tracking rows", i);
                 throw;
             }
@@ -688,12 +584,11 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Reads one item's details, failing when the server cannot be asked and answering null only when it
-    /// answers that it holds no such item. A caller can then tell an item that is gone, which needs
-    /// nothing more, from one it could not reach, which is worth asking again.
+    /// Reads one item's details, throwing when the server cannot be asked. Null means only that the server
+    /// holds no such item, so a caller can tell a gone item from an unreachable one.
     /// </summary>
-    /// <param name="itemId">The item id.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="itemId">The source id of the item to read.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The item, or null when the server holds none by that id.</returns>
     public async Task<BaseItemDto?> FindItemDetailsAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
@@ -710,11 +605,11 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Downloads a file from the source server.
+    /// Downloads an item's file from the source server, from its first byte.
     /// </summary>
-    /// <param name="itemId">Item ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Stream of file content and the response Content-Length when the server provided one.</returns>
+    /// <param name="itemId">The source id of the item whose file is downloaded.</param>
+    /// <param name="cancellationToken">Cancels the download.</param>
+    /// <returns>The file's content, and its length when the server gave one.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the download could not start, with the cause in the message.</exception>
     public async Task<(Stream Stream, long? ContentLength)> DownloadFileAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
@@ -723,14 +618,13 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Downloads a file from the source server, from a byte offset when the source can resume it. The
-    /// range is asked for only with the validator an earlier answer carried, through If-Range, so a file
-    /// that changed on the source since then comes back whole instead of being stitched onto stale bytes.
+    /// Downloads an item's file from the source server, from a byte offset when the source can resume it. The
+    /// range is sent with the earlier answer's validator, so a file that changed since then comes back whole.
     /// </summary>
-    /// <param name="itemId">Item ID.</param>
+    /// <param name="itemId">The source id of the item whose file is downloaded.</param>
     /// <param name="from">The byte to start from, 0 for the whole file.</param>
     /// <param name="validator">The validator from the earlier answer, or null when there was none.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the download.</param>
     /// <returns>The download, saying where its bytes start.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the download could not start, with the cause in the message.</exception>
     public async Task<SourceDownload> DownloadFileFromAsync(Guid itemId, long from, string? validator, CancellationToken cancellationToken = default)
@@ -740,12 +634,6 @@ public partial class SourceServerClient
         var ownershipTransferred = false;
         try
         {
-            // /Items/{id}/Download, direct-download URL. Authentication is
-            // via the Authorization header only. Do NOT mix in api_key /
-            // ApiKey query parameters or X-Emby-Token headers. Per the
-            // Jellyfin auth spec (10.11+), sending multiple tokens in one
-            // request has undefined precedence and may be rejected outright
-            // when EnableLegacyAuthorization=false on the source.
             var url = $"{_serverUrl}/Items/{itemId}/Download";
             RangeConditionHeaderValue? ifRange = null;
             var resume = from > 0 && SourceDownload.TryParseIfRange(validator, out ifRange);
@@ -758,9 +646,10 @@ public partial class SourceServerClient
             }
 
             response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+
+            // The file is shorter than the bytes kept, so it changed and starts over.
             if (resume && response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable)
             {
-                // The file is shorter than what was kept, so it changed. Start over.
                 DisposeQuiet(response);
                 DisposeQuiet(request);
                 response = null;
@@ -781,24 +670,13 @@ public partial class SourceServerClient
             var contentLength = response.Content.Headers.ContentLength;
             var total = offset > 0 ? range?.Length ?? (contentLength + offset) : contentLength;
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-
-            // Transfer ownership of request and response to the stream wrapper
             var wrapper = new ResponseDisposingStream(stream, response, request);
             ownershipTransferred = true;
             return new SourceDownload(wrapper, contentLength, total, offset, SourceDownload.ValidatorOf(response));
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to download item {ItemId}", itemId);
-            // Re-throw with a context-rich message so the per-row Reason
-            // field surfaces what actually went wrong (timeout, 5xx,
-            // connection refused, SSL handshake, etc.) instead of the
-            // generic "No response from server". Original exception is
-            // preserved as InnerException for stack-trace logging.
             throw new InvalidOperationException(
                 $"Source download failed for item {itemId}: {ex.GetType().Name}: {ex.Message}",
                 ex);
@@ -814,20 +692,12 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Gets external subtitle companion files for an item. Restricted to
-    /// subtitle streams: they are the only external stream type Jellyfin
-    /// exposes a download route for
-    /// (<c>/Videos/{item}/{mediaSource}/Subtitles/{index}/Stream.{format}</c>).
-    /// External audio tracks are skipped with a log, since a path-parameter
-    /// route would serve the item's main video file in their place and
-    /// corrupt the companion on disk.
-    /// A failure to read the item throws instead of answering an empty list. An empty list means the
-    /// source has no external subtitles, and a caller replacing a file needs to tell that apart from
-    /// a source it could not ask.
+    /// Lists an item's external subtitle files, the only external streams Jellyfin can serve for download. A
+    /// failure to read the item throws, so an empty list always means the source has none.
     /// </summary>
-    /// <param name="itemId">Item ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of companion file info, empty when the item has none or the source holds no such item.</returns>
+    /// <param name="itemId">The source id of the item whose subtitles are listed.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The subtitle files, empty when the item has none or the source holds no such item.</returns>
     public async Task<List<CompanionFileInfo>> GetCompanionFilesAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
         var companions = new List<CompanionFileInfo>();
@@ -852,6 +722,7 @@ public partial class SourceServerClient
                 continue;
             }
 
+            // No route serves external audio, and asking for one returns the main file.
             if (stream.Type != MediaStream_Type.Subtitle)
             {
                 skippedNonSubtitle++;
@@ -881,17 +752,13 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Downloads an external subtitle via the canonical
-    /// <c>/Videos/{item}/{mediaSource}/Subtitles/{index}/Stream.{format}</c>
-    /// route. The <c>/Videos/{id}/Subtitles/Stream?path=…</c> shape returns
-    /// 405 on Jellyfin 10.11, and <c>/Items/{id}/File?path=…</c> ignores the
-    /// path parameter and serves the item's main media file, which writes
-    /// video bytes into <c>.srt</c> companions.
+    /// Downloads an external subtitle in its own format through the subtitle stream route. Routes that take a
+    /// path serve the item's main file instead, which would write video into the subtitle.
     /// </summary>
-    /// <param name="itemId">Item ID.</param>
-    /// <param name="companion">Companion stream to download.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Stream of file content or null on failure.</returns>
+    /// <param name="itemId">The source id of the item the subtitle belongs to.</param>
+    /// <param name="companion">The subtitle stream to download.</param>
+    /// <param name="cancellationToken">Cancels the download.</param>
+    /// <returns>The subtitle's content, or null when it could not be downloaded.</returns>
     public async Task<Stream?> DownloadCompanionFileAsync(Guid itemId, CompanionFileInfo companion, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(companion);
@@ -900,11 +767,9 @@ public partial class SourceServerClient
         var ownershipTransferred = false;
         try
         {
-            // Stream.{format}: use the source file's own extension so the
-            // server returns the subtitle in its original format instead of
-            // converting. Codec name is the fallback for extension-less paths
-            // (subrip files carry the .srt extension, so map that one).
             var format = Path.GetExtension(companion.SourcePath).TrimStart('.').ToLowerInvariant();
+
+            // A path without an extension falls back to the codec, so nothing is converted.
             if (string.IsNullOrEmpty(format))
             {
                 format = string.Equals(companion.Codec, "subrip", StringComparison.OrdinalIgnoreCase)
@@ -919,19 +784,13 @@ public partial class SourceServerClient
             response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-
-            // Transfer ownership of request and response to the stream wrapper
             var wrapper = new ResponseDisposingStream(stream, response, request);
             ownershipTransferred = true;
             return wrapper;
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to download companion subtitle {FilePath} (stream {Index}) for {ItemId}", companion.SourcePath, companion.StreamIndex, itemId);
+            _logger.LogError(ex, "Failed to download companion subtitle {FilePath} (stream {Index}) for {ItemId}", FormatUtilities.SanitizeForLog(companion.SourcePath), companion.StreamIndex, itemId);
             return null;
         }
         finally
@@ -955,19 +814,16 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Walks a paged listing to its end. The fetch owns its error handling, which differs by caller:
-    /// most throw rather than end early, since a list cut short reads as items removed from the source.
-    /// The loop stops on an empty page, a short page, or, unless told otherwise, once the reported
-    /// total is reached. With <paramref name="describeShift"/> set, it also throws when the number of
-    /// items fetched differs from the total the first page reported, which means the listing changed
-    /// underneath the walk and an item may have been skipped at a page boundary.
+    /// Walks a paged listing until an empty page, a short page, or the reported total. With
+    /// <paramref name="describeShift"/> set, it throws when the fetched count differs from the first total,
+    /// which means the listing changed and an item may have been skipped.
     /// </summary>
-    /// <param name="fetchPage">Fetches one page from a start index and size.</param>
+    /// <param name="fetchPage">Fetches one page from a start index and size, and owns its error handling.</param>
     /// <param name="pageSize">The page size.</param>
     /// <param name="onItem">Handles each item, in order. It may throw to abort the walk.</param>
     /// <param name="end">How an answer with no items is read.</param>
     /// <param name="describeShift">Describes a changed listing from the expected and fetched counts, or null to skip the check.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the walk between pages.</param>
     /// <param name="stopAtTotal">Whether reaching the reported total ends the walk before a short page does.</param>
     /// <returns>A task that completes when the walk ends.</returns>
     private static async Task PageThroughAsync(

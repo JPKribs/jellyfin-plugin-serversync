@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Database.Implementations.Entities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
@@ -11,8 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
-/// Client for accessing local Jellyfin server APIs.
-/// Used by History Sync to read and update user data on the local server.
+/// Reads and writes items, users, and user data on this server for History sync.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public class LocalServerClient
@@ -25,16 +25,21 @@ public class LocalServerClient
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalServerClient"/> class.
     /// </summary>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="userManager">User manager.</param>
-    /// <param name="userDataManager">User data manager.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="libraryManager">Finds this server's items by id and by path.</param>
+    /// <param name="userManager">Finds this server's users.</param>
+    /// <param name="userDataManager">Reads and saves each user's history for an item.</param>
     public LocalServerClient(
         ILogger<LocalServerClient> logger,
         ILibraryManager libraryManager,
         IUserManager userManager,
         IUserDataManager userDataManager)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(userDataManager);
+
         _logger = logger;
         _libraryManager = libraryManager;
         _userManager = userManager;
@@ -42,34 +47,38 @@ public class LocalServerClient
     }
 
     /// <summary>
-    /// Finds a local item by its file path.
+    /// Finds an item on this server by its file path.
     /// </summary>
-    /// <param name="path">File path to search for.</param>
-    /// <returns>The local item if found, null otherwise.</returns>
+    /// <param name="path">The file's path on this server.</param>
+    /// <returns>The item, or null when none has that path or the lookup failed.</returns>
     public BaseItem? GetItemByPath(string path)
     {
+        ArgumentNullException.ThrowIfNull(path);
+
         try
         {
             return _libraryManager.FindByPath(path, isFolder: false);
         }
+        // A failed lookup reads as not found, so one item never stops a sync.
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to find item at path: {Path}", path);
+            _logger.LogDebug(ex, "Failed to find item at path: {Path}", FormatUtilities.SanitizeForLog(path));
             return null;
         }
     }
 
     /// <summary>
-    /// Gets the user by their GUID.
+    /// Gets a user on this server by id.
     /// </summary>
-    /// <param name="userId">User ID.</param>
-    /// <returns>User if found, null otherwise.</returns>
+    /// <param name="userId">The id of the user on this server.</param>
+    /// <returns>The user, or null when there is none or the lookup failed.</returns>
     public User? GetUser(Guid userId)
     {
         try
         {
             return _userManager.GetUserById(userId);
         }
+        // A failed lookup reads as not found, so one item never stops a sync.
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to get user: {UserId}", userId);
@@ -78,11 +87,11 @@ public class LocalServerClient
     }
 
     /// <summary>
-    /// Gets a user's playback data for a specific item.
+    /// Gets a user's history for an item on this server.
     /// </summary>
-    /// <param name="userId">User ID.</param>
-    /// <param name="itemId">Item ID.</param>
-    /// <returns>User item data if found, null otherwise.</returns>
+    /// <param name="userId">The user whose history is read.</param>
+    /// <param name="itemId">The item the history belongs to.</param>
+    /// <returns>The history, or null when the user or item is missing or the read failed.</returns>
     public UserItemData? GetUserItemData(Guid userId, Guid itemId)
     {
         try
@@ -101,6 +110,7 @@ public class LocalServerClient
 
             return _userDataManager.GetUserData(user, item);
         }
+        // A failed lookup reads as not found, so one item never stops a sync.
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to get user data for user {UserId}, item {ItemId}", userId, itemId);
@@ -109,13 +119,15 @@ public class LocalServerClient
     }
 
     /// <summary>
-    /// Gets a user's playback data for an item by path.
+    /// Gets a user's history for the item at a file path on this server.
     /// </summary>
-    /// <param name="userId">User ID.</param>
-    /// <param name="path">Item file path.</param>
-    /// <returns>User item data if found, null otherwise.</returns>
+    /// <param name="userId">The user whose history is read.</param>
+    /// <param name="path">The item's file path on this server.</param>
+    /// <returns>The history, or null when the user or item is missing or the read failed.</returns>
     public UserItemData? GetUserItemDataByPath(Guid userId, string path)
     {
+        ArgumentNullException.ThrowIfNull(path);
+
         try
         {
             var user = _userManager.GetUserById(userId);
@@ -132,28 +144,26 @@ public class LocalServerClient
 
             return _userDataManager.GetUserData(user, item);
         }
+        // A failed lookup reads as not found, so one item never stops a sync.
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to get user data for user {UserId}, path {Path}", userId, path);
+            _logger.LogDebug(ex, "Failed to get user data for user {UserId}, path {Path}", userId, FormatUtilities.SanitizeForLog(path));
             return null;
         }
     }
 
     /// <summary>
-    /// Updates user playback data for an item.
+    /// Writes the given parts of a user's history for an item, leaving each null part as it is.
     /// </summary>
-    /// <param name="userId">User ID.</param>
-    /// <param name="itemId">Item ID.</param>
-    /// <param name="played">Played status.</param>
-    /// <param name="playCount">Play count.</param>
-    /// <param name="playbackPositionTicks">Playback position in ticks.</param>
-    /// <param name="lastPlayedDate">Last played date.</param>
-    /// <param name="isFavorite">Favorite status.</param>
-    /// <param name="clearLastPlayedDate">
-    /// When <c>true</c> and <paramref name="lastPlayedDate"/> is null, the stored date is removed instead
-    /// of left alone. Used when the target state is "unplayed", which Jellyfin records with no date.
-    /// </param>
-    /// <returns><c>true</c> if update succeeded.</returns>
+    /// <param name="userId">The user whose history is written.</param>
+    /// <param name="itemId">The item the history belongs to.</param>
+    /// <param name="played">The played state to set, or null to keep it.</param>
+    /// <param name="playCount">The play count to set, or null to keep it.</param>
+    /// <param name="playbackPositionTicks">The resume position to set, in ticks, or null to keep it.</param>
+    /// <param name="lastPlayedDate">The last played date to set, or null to keep it.</param>
+    /// <param name="isFavorite">The favorite state to set, or null to keep it.</param>
+    /// <param name="clearLastPlayedDate">Whether a null <paramref name="lastPlayedDate"/> removes the stored date, as Jellyfin records an unplayed item.</param>
+    /// <returns><c>true</c> when the history was saved.</returns>
     public bool UpdateUserItemData(
         Guid userId,
         Guid itemId,
@@ -224,6 +234,7 @@ public class LocalServerClient
 
             return true;
         }
+        // A failed save reports false, so one item never stops a sync.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to update user data for user {UserId}, item {ItemId}", userId, itemId);
@@ -232,13 +243,13 @@ public class LocalServerClient
     }
 
     /// <summary>
-    /// Sets the played status for an item.
+    /// Sets whether a user has played an item.
     /// </summary>
-    /// <param name="userId">User ID.</param>
-    /// <param name="itemId">Item ID.</param>
+    /// <param name="userId">The user whose history is written.</param>
+    /// <param name="itemId">The item to mark.</param>
     /// <param name="played">Whether the item is played.</param>
-    /// <param name="datePlayed">Date when played (if marking as played).</param>
-    /// <returns><c>true</c> if successful.</returns>
+    /// <param name="datePlayed">The last played date to store when marking as played, or null to keep it.</param>
+    /// <returns><c>true</c> when the history was saved.</returns>
     public bool SetPlayed(Guid userId, Guid itemId, bool played, DateTime? datePlayed = null)
     {
         try
@@ -271,6 +282,7 @@ public class LocalServerClient
             _userDataManager.SaveUserData(user, item, userData, UserDataSaveReason.UpdateUserData, default);
             return true;
         }
+        // A failed save reports false, so one item never stops a sync.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to set played status for user {UserId}, item {ItemId}", userId, itemId);
@@ -279,12 +291,12 @@ public class LocalServerClient
     }
 
     /// <summary>
-    /// Sets the favorite status for an item.
+    /// Sets whether an item is a user's favorite.
     /// </summary>
-    /// <param name="userId">User ID.</param>
-    /// <param name="itemId">Item ID.</param>
+    /// <param name="userId">The user whose history is written.</param>
+    /// <param name="itemId">The item to mark.</param>
     /// <param name="isFavorite">Whether the item is a favorite.</param>
-    /// <returns><c>true</c> if successful.</returns>
+    /// <returns><c>true</c> when the history was saved.</returns>
     public bool SetFavorite(Guid userId, Guid itemId, bool isFavorite)
     {
         try
@@ -312,6 +324,7 @@ public class LocalServerClient
             _userDataManager.SaveUserData(user, item, userData, UserDataSaveReason.UpdateUserData, default);
             return true;
         }
+        // A failed save reports false, so one item never stops a sync.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to set favorite status for user {UserId}, item {ItemId}", userId, itemId);
@@ -320,10 +333,10 @@ public class LocalServerClient
     }
 
     /// <summary>
-    /// Gets all items in a library folder.
+    /// Gets every item that is not a folder in a library on this server.
     /// </summary>
-    /// <param name="libraryId">Library folder ID.</param>
-    /// <returns>List of items in the library.</returns>
+    /// <param name="libraryId">The id of the library on this server.</param>
+    /// <returns>The library's items, or none when the library is missing or the read failed.</returns>
     public List<BaseItem> GetLibraryItems(Guid libraryId)
     {
         try
@@ -337,6 +350,7 @@ public class LocalServerClient
                 .Where(i => i is not Folder)
                 .ToList();
         }
+        // A failed lookup reads as not found, so one item never stops a sync.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get files for {LibraryId}", libraryId);
@@ -345,11 +359,11 @@ public class LocalServerClient
     }
 
     /// <summary>
-    /// Gets items with user data (played, favorites, etc.) for a specific user in a library.
+    /// Gets every item in a library on this server with a user's history for it.
     /// </summary>
-    /// <param name="userId">User ID.</param>
-    /// <param name="libraryId">Library ID.</param>
-    /// <returns>List of items with their user data.</returns>
+    /// <param name="userId">The user whose history is read.</param>
+    /// <param name="libraryId">The id of the library on this server.</param>
+    /// <returns>Each item with its history, or none when the user is missing.</returns>
     public List<(BaseItem Item, UserItemData? UserData)> GetLibraryItemsWithUserData(Guid userId, Guid libraryId)
     {
         var result = new List<(BaseItem, UserItemData?)>();
@@ -367,6 +381,7 @@ public class LocalServerClient
                 result.Add((item, _userDataManager.GetUserData(user, item)));
             }
         }
+        // A failed lookup reads as not found, so one item never stops a sync.
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get files with user data for user {UserId}, library {LibraryId}", userId, libraryId);

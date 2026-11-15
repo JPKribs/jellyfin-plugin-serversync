@@ -15,23 +15,22 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
-/// Client for communicating with the source Jellyfin server using the official SDK.
-/// The HttpClient is externally owned (via IHttpClientFactory) and must NOT be disposed by this class.
+/// Calls one source server through the Jellyfin SDK. The <see cref="HttpClient"/> belongs to the factory that
+/// made it and is never disposed here.
 /// </summary>
 public partial class SourceServerClient : IDisposable
 {
-    // Client identification constants
     private const string DefaultClientName = "Server Sync";
     private static readonly string DefaultDeviceId = "serversync-plugin-" + Environment.MachineName.ToLowerInvariant();
 
     /// <summary>
-    /// Named HttpClient identifier for IHttpClientFactory.
+    /// The named <see cref="HttpClient"/> for server entries that allow private network addresses.
     /// </summary>
     public const string HttpClientName = "ServerSyncSource";
 
     /// <summary>
-    /// Named HttpClient for entries that disallow private networks. Its handler classifies every address a
-    /// name resolves to at connect time, so a name cannot reach what an address could not.
+    /// The named <see cref="HttpClient"/> for server entries that disallow private network addresses. Its
+    /// handler checks every address a name resolves to at connect time.
     /// </summary>
     public const string PublicHttpClientName = "ServerSyncSourcePublic";
 
@@ -47,21 +46,20 @@ public partial class SourceServerClient : IDisposable
     private volatile bool _disposed;
 
     /// <summary>
-    /// Gets or sets the pairing with this peer, when the peer is a configured server entry. It supplies
-    /// the secret presented on requests that name this server as the sender, and pairs again when the
-    /// peer answers that the pairing is missing.
+    /// Gets or sets the pairing with this peer, when the peer is a saved server entry. It supplies the
+    /// secret sent with peer requests and pairs again when the peer reports the pairing missing.
     /// </summary>
     public PeerPairing? Pairing { get; set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SourceServerClient"/> class.
     /// </summary>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="httpClient">HttpClient instance (externally owned, e.g. from IHttpClientFactory).</param>
-    /// <param name="serverUrl">Source server URL.</param>
-    /// <param name="apiKey">API key for authentication.</param>
-    /// <param name="localServerName">Local server name for client identification.</param>
-    /// <param name="pluginVersion">Plugin version string for client identification.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="httpClient">Sends every request. The caller owns it.</param>
+    /// <param name="serverUrl">The Server URL of the source.</param>
+    /// <param name="apiKey">The API Key sent with every request.</param>
+    /// <param name="localServerName">This server's name, sent as the device name.</param>
+    /// <param name="pluginVersion">The plugin version, sent as the client version.</param>
     public SourceServerClient(
         ILogger<SourceServerClient> logger,
         HttpClient httpClient,
@@ -70,6 +68,10 @@ public partial class SourceServerClient : IDisposable
         string localServerName,
         string pluginVersion)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentNullException.ThrowIfNull(serverUrl);
+
         _logger = logger;
         _serverUrl = serverUrl.TrimEnd('/');
         _apiKey = apiKey;
@@ -88,18 +90,15 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Tests connection to the source server and returns server info.
+    /// Calls the source server and reports who it is and what access the API Key has.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Connection test result with server info.</returns>
+    /// <param name="cancellationToken">Cancels the test.</param>
+    /// <returns>The outcome, with the server's name and id on success.</returns>
     public async Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var client = GetApiClient();
-
-            // Try the authenticated /System/Info endpoint first (validates token and gets full info).
-            // If the token belongs to a non-admin user, this may return 403, fall back to /System/Info/Public.
             try
             {
                 var info = await client.System.Info.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -116,17 +115,12 @@ public partial class SourceServerClient : IDisposable
                     Message = access.IsAdministrator ? "Connection successful" : "Connection successful, with a standard user's access"
                 };
             }
+            // Only 403 proves a valid API Key, so nothing else may fall back.
             catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode == 403)
             {
-                // 403 is the only legitimate fallback case (valid token, non-
-                // admin user). /System/Info/Public is anonymous, so falling
-                // back on 401 or transport errors would report "connection
-                // successful" for a revoked/expired API key, the user sees a
-                // green check while every sync silently fails.
                 _logger.LogDebug(ex, "Authenticated /System/Info returned 403 (non-admin token), falling back to /System/Info/Public");
             }
 
-            // Fallback: use /System/Info/Public (available to all authenticated users)
             var publicInfo = await client.System.Info.Public.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
             return new ConnectionTestResult
@@ -149,16 +143,6 @@ public partial class SourceServerClient : IDisposable
                 Message = errorMsg
             };
         }
-        catch (OperationCanceledException)
-        {
-            // Propagate rather than reporting a failed connection. Both task
-            // bases treat a false result as "unreachable or credentials
-            // invalid" and pin that on the dashboard until a clean run clears
-            // it, so a cancelled task would tell the user their API key was
-            // bad. The genuine-timeout case is caught by the
-            // TaskCanceledException/TimeoutException clause above.
-            throw;
-        }
         catch (HttpRequestException ex)
         {
             var errorMsg = $"HTTP error: {ex.Message}";
@@ -170,7 +154,8 @@ public partial class SourceServerClient : IDisposable
                 Message = errorMsg
             };
         }
-        catch (Exception ex)
+        // A cancelled test propagates, since a failed result would blame the API Key.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var errorMsg = $"Connection failed: {ex.Message}";
             _logger.LogError(ex, "Failed to connect to source server");
@@ -184,19 +169,17 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Authenticates with a Jellyfin server using username and password.
-    /// Returns an access token that can be used for subsequent API calls.
-    /// This is a static method that doesn't require an existing client instance.
+    /// Signs in to a Jellyfin server with a username and password to obtain an access token.
     /// </summary>
-    /// <param name="httpClientFactory">HTTP client factory for creating clients.</param>
-    /// <param name="serverUrl">Server URL.</param>
-    /// <param name="username">Username.</param>
-    /// <param name="password">Password.</param>
-    /// <param name="localServerName">Local server name for client identification.</param>
-    /// <param name="pluginVersion">Plugin version string for client identification.</param>
-    /// <param name="allowPrivateNetwork">Whether the server may sit on a private network. When it may not, the request goes through the client that checks every resolved address at connect time.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Authentication result with access token if successful.</returns>
+    /// <param name="httpClientFactory">Builds the named client that carries the SSRF guard.</param>
+    /// <param name="serverUrl">The Server URL to sign in to.</param>
+    /// <param name="username">The user to sign in as.</param>
+    /// <param name="password">That user's password.</param>
+    /// <param name="localServerName">This server's name, sent as the device name.</param>
+    /// <param name="pluginVersion">The plugin version, sent as the client version.</param>
+    /// <param name="allowPrivateNetwork">Whether the server may use a private network address. When it may not, every resolved address is checked at connect time.</param>
+    /// <param name="cancellationToken">Cancels the sign in.</param>
+    /// <returns>The outcome, with the access token on success.</returns>
     public static async Task<AuthenticateResponse> AuthenticateAsync(
         IHttpClientFactory httpClientFactory,
         string serverUrl,
@@ -208,12 +191,9 @@ public partial class SourceServerClient : IDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(serverUrl);
 
         serverUrl = serverUrl.TrimEnd('/');
-
-        // The URL check only classifies an address written into the URL. A name resolves at connect
-        // time, so an entry that disallows private networks needs the client whose handler checks the
-        // resolved address too, the same choice the client factory makes.
         var httpClient = httpClientFactory.CreateClient(allowPrivateNetwork ? HttpClientName : PublicHttpClientName);
 
         var authRequest = new
@@ -225,18 +205,10 @@ public partial class SourceServerClient : IDisposable
         var json = System.Text.Json.JsonSerializer.Serialize(authRequest);
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-        // Per Jellyfin auth spec, AuthenticateByName requires client
-        // identification via the Authorization header, with no Token since
-        // this call is what obtains it. Format must be the canonical
-        // `MediaBrowser key="value", ...` scheme. `X-Emby-Authorization` is
-        // deprecated and rejected when `EnableLegacyAuthorization=false`.
-        // Header lives on the request, not on Content (Authorization is not a
-        // content-level header).
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{serverUrl}/Users/AuthenticateByName")
         {
             Content = content
         };
-        // The device name is this server's name, which may hold characters a header cannot carry.
         var authHeader = $"Client=\"{DefaultClientName}\", Device=\"{HeaderSafe(localServerName)}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{pluginVersion}\"";
         request.Headers.Authorization = new AuthenticationHeaderValue("MediaBrowser", authHeader);
 
@@ -314,10 +286,6 @@ public partial class SourceServerClient : IDisposable
                 Message = "Connection timed out - server may be unreachable"
             };
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (HttpRequestException ex)
         {
             return new AuthenticateResponse
@@ -326,7 +294,7 @@ public partial class SourceServerClient : IDisposable
                 Message = $"Connection error: {ex.Message}"
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new AuthenticateResponse
             {
@@ -337,35 +305,26 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets all libraries from the source server.
-    /// Tries the admin /Library/VirtualFolders endpoint first.
-    /// If that fails (e.g. non-admin user token), falls back to /Users/{userId}/Views.
+    /// Lists the source server's libraries, falling back to one user's views when the administrator route refuses.
     /// </summary>
-    /// <param name="authenticatedUserId">Optional authenticated user ID for fallback to user-scoped endpoint.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of virtual folder info.</returns>
+    /// <param name="authenticatedUserId">The source user whose views are the fallback, or null for no fallback.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
+    /// <returns>The libraries, or an empty list when they could not be read.</returns>
     public async Task<List<VirtualFolderInfo>> GetLibrariesAsync(string? authenticatedUserId = null, CancellationToken cancellationToken = default)
     {
         try
         {
             var client = GetApiClient();
-
-            // Try admin endpoint first (returns libraries with file-system Locations)
             try
             {
                 var folders = await client.Library.VirtualFolders.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
                 return folders ?? new List<VirtualFolderInfo>();
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogDebug(ex, "Admin /Library/VirtualFolders failed, attempting user-scoped fallback");
             }
 
-            // Fallback: use /Users/{userId}/Views (available to non-admin users)
             if (!string.IsNullOrEmpty(authenticatedUserId))
             {
                 return await GetUserViewsAsLibrariesAsync(authenticatedUserId, cancellationToken).ConfigureAwait(false);
@@ -374,11 +333,7 @@ public partial class SourceServerClient : IDisposable
             _logger.LogWarning("Cannot fall back to user views, no authenticated user ID available");
             return new List<VirtualFolderInfo>();
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to get libraries from source server");
             return new List<VirtualFolderInfo>();
@@ -386,8 +341,7 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets user-accessible libraries via /Users/{userId}/Views and maps them to VirtualFolderInfo.
-    /// This endpoint works for non-admin users but does not include file-system Locations.
+    /// Lists the libraries one user can see, which carry no folder locations.
     /// </summary>
     private async Task<List<VirtualFolderInfo>> GetUserViewsAsLibrariesAsync(string userId, CancellationToken cancellationToken)
     {
@@ -409,7 +363,7 @@ public partial class SourceServerClient : IDisposable
             {
                 var collectionType = item.TryGetProperty("CollectionType", out var ctProp) ? ctProp.GetString() : null;
 
-                // Only include media libraries (skip non-library views like playlists, live TV)
+                // These views are not media libraries.
                 if (string.Equals(collectionType, "playlists", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(collectionType, "livetv", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(collectionType, "boxsets", StringComparison.OrdinalIgnoreCase))
@@ -437,12 +391,11 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets all users from the source server.
-    /// Falls back to fetching only the authenticated user if the admin endpoint is forbidden.
+    /// Lists the source server's users, falling back to the signed in user alone when the administrator route refuses.
     /// </summary>
-    /// <param name="authenticatedUserId">Optional authenticated user ID for non-admin fallback.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of user DTOs.</returns>
+    /// <param name="authenticatedUserId">The source user to fall back to, or null for no fallback.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
+    /// <returns>The users, or an empty list when they could not be read.</returns>
     public async Task<List<UserDto>> GetUsersAsync(string? authenticatedUserId = null, CancellationToken cancellationToken = default)
     {
         try
@@ -453,16 +406,11 @@ public partial class SourceServerClient : IDisposable
                 var users = await client.Users.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
                 return users ?? new List<UserDto>();
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogDebug(ex, "Admin /Users endpoint failed, attempting user-scoped fallback");
             }
 
-            // Fallback: fetch just the authenticated user via /Users/{userId}
             if (!string.IsNullOrEmpty(authenticatedUserId))
             {
                 return await GetSingleUserAsync(authenticatedUserId, cancellationToken).ConfigureAwait(false);
@@ -471,11 +419,7 @@ public partial class SourceServerClient : IDisposable
             _logger.LogWarning("Cannot fall back to single user, no authenticated user ID available");
             return new List<UserDto>();
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to get users from source server");
             return new List<UserDto>();
@@ -483,8 +427,7 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Gets a single user by ID via /Users/{userId}.
-    /// This endpoint is accessible to the authenticated user themselves.
+    /// Reads one user by id, a route a user may call for themselves.
     /// </summary>
     private async Task<List<UserDto>> GetSingleUserAsync(string userId, CancellationToken cancellationToken)
     {
@@ -504,7 +447,7 @@ public partial class SourceServerClient : IDisposable
 
         if (!string.IsNullOrEmpty(id) && Guid.TryParse(id, out var parsedId))
         {
-            _logger.LogInformation("Fetched single user via fallback: {UserName} ({UserId})", name, id);
+            _logger.LogInformation("Fetched single user via fallback: {UserName} ({UserId})", FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(id));
             return new List<UserDto>
             {
                 new UserDto
@@ -520,8 +463,7 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Disposes a request/response without letting a disposal fault mask the
-    /// original outcome, and without stopping the next disposal from running.
+    /// Disposes a request or response without letting a disposal fault hide the original outcome.
     /// </summary>
     private static void DisposeQuiet(IDisposable? disposable)
     {
@@ -531,38 +473,26 @@ public partial class SourceServerClient : IDisposable
         }
         catch (Exception)
         {
-            // Already disposed or shutting down, nothing useful to do.
+            // Runs in cleanup and cancellation callbacks, where no disposal fault may escape.
         }
     }
 
     /// <summary>
-    /// Adds the canonical Jellyfin <c>Authorization: MediaBrowser ...</c>
-    /// header to a request. Format per Jellyfin's auth spec:
-    /// <c>MediaBrowser key="value", key2="value2"</c>. Per Jellyfin docs,
-    /// the Authorization header is the only non-deprecated method for
-    /// transmitting credentials. <c>X-Emby-Token</c>, <c>X-MediaBrowser-Token</c>,
-    /// <c>X-Emby-Authorization</c>, and the <c>api_key</c> query parameter
-    /// are all deprecated and may be rejected by Jellyfin servers with
-    /// <c>EnableLegacyAuthorization=false</c>.
+    /// Adds the <c>Authorization: MediaBrowser</c> header, the only credential form Jellyfin does not deprecate.
+    /// The header value must not repeat the scheme name, which some routes refuse with 400.
     /// </summary>
-    /// <param name="request">HTTP request message.</param>
+    /// <param name="request">The request that receives the header.</param>
     private void AddAuthorizationHeader(HttpRequestMessage request)
     {
-        // The parameter passed to AuthenticationHeaderValue must NOT start
-        // with the scheme name. `AuthenticationHeaderValue("MediaBrowser", x)`
-        // emits `Authorization: MediaBrowser <x>`, and a double-scheme header
-        // is rejected by some Jellyfin endpoints (notably Download) with 400.
-        // The device name is this server's name, which may hold characters a header cannot carry.
         var authValue = $"Client=\"{DefaultClientName}\", Device=\"{HeaderSafe(_localServerName)}\", DeviceId=\"{DefaultDeviceId}\", Version=\"{_pluginVersion}\", Token=\"{_apiKey}\"";
         request.Headers.Authorization = new AuthenticationHeaderValue("MediaBrowser", authValue);
     }
 
     /// <summary>
-    /// Reduces a name to what an HTTP header value can carry: printable ASCII without quotes or
-    /// backslashes. A server named with emoji otherwise makes every hand built request fail with
-    /// "request headers must contain only ASCII characters", while the SDK's own requests go through.
+    /// Reduces a name to printable ASCII without quotes or backslashes, which is all an HTTP header value can
+    /// carry. A request built with any other character fails before it is sent.
     /// </summary>
-    /// <param name="name">The name.</param>
+    /// <param name="name">The server name to send as the device name.</param>
     /// <returns>The safe name, or a fixed fallback when nothing printable is left.</returns>
     public static string HeaderSafe(string? name)
     {
@@ -581,12 +511,10 @@ public partial class SourceServerClient : IDisposable
         return safe.Length == 0 ? DefaultClientName : safe;
     }
 
-    // Any signed in user may read the system info, so that call says nothing about elevation. The
-    // current user's own policy does. An API key has no user behind it and the call fails, and an API
-    // key is always elevated, so a failure there means administrator. Callers use the answer for the
-    // access label and to explain a limited link, while the peer's own whitelist still decides
-    // access, so guessing administrator on failure grants nothing. A failure that is not the
-    // expected API key answer is logged so a wrong label can be traced.
+    /// <summary>
+    /// Reads the access behind the token from the current user's policy. A failure reports administrator,
+    /// since an API Key has no user, and the answer only labels access and grants none.
+    /// </summary>
     private async Task<(bool IsAdministrator, string? UserId, string? UserName, bool? CanDownload)> ReadAccessAsync(JellyfinApiClient client, CancellationToken cancellationToken)
     {
         try
@@ -603,33 +531,27 @@ public partial class SourceServerClient : IDisposable
                 me.Name,
                 me.Policy?.EnableContentDownloading);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
+        // An API Key has no user, so a refusal here means the token is elevated.
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode is >= 400 and < 500)
         {
-            // An API key has no user, so the server refuses this call. That is the expected answer for
-            // an API key and says the token is elevated.
             _logger.LogDebug(ex, "Reading the current user returned {Status}, treating the token as an API key with administrator rights", ex.ResponseStatusCode);
             return (true, null, null, true);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Could not read the current user's policy, reporting administrator access without confirming it: {Reason}", ex.Message);
+            _logger.LogWarning(ex, "Could not read the current user's policy, reporting administrator access without confirming it: {Reason}", FormatUtilities.SanitizeForLog(ex.Message, 300));
             return (true, null, null, null);
         }
     }
 
     /// <summary>
-    /// Returns the API client, creating it lazily if needed.
+    /// Returns the SDK client, creating it on first use.
     /// </summary>
-    /// <returns>Jellyfin API client instance.</returns>
+    /// <returns>The SDK client bound to this source.</returns>
     private JellyfinApiClient GetApiClient()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // Fast path: client already created
         var client = _apiClient;
         if (client != null)
         {
@@ -659,7 +581,7 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// Releases the API client once.
+    /// Releases the SDK client once. The <see cref="HttpClient"/> is left to the factory that owns it.
     /// </summary>
     /// <param name="disposing"><c>true</c> when called from <see cref="Dispose()"/>.</param>
     protected virtual void Dispose(bool disposing)
@@ -671,9 +593,6 @@ public partial class SourceServerClient : IDisposable
                 if (!_disposed)
                 {
                     _disposed = true;
-
-                    // Do NOT dispose _httpClient, it is externally owned (from IHttpClientFactory).
-                    // Dispose the API client wrapper if it was created.
                     (_apiClient as IDisposable)?.Dispose();
                     _apiClient = null;
                 }
@@ -682,8 +601,8 @@ public partial class SourceServerClient : IDisposable
     }
 
     /// <summary>
-    /// A stream wrapper that disposes the underlying HttpResponseMessage and HttpRequestMessage when the stream is closed.
-    /// This ensures the HTTP connection is properly released when the caller is done reading.
+    /// Wraps a response body so closing the stream also releases its response and request. A cancelled
+    /// read disposes the response, since a hung server can otherwise hold the read past cancellation.
     /// </summary>
     private sealed class ResponseDisposingStream : Stream
     {
@@ -691,6 +610,12 @@ public partial class SourceServerClient : IDisposable
         private readonly HttpResponseMessage _response;
         private readonly HttpRequestMessage? _request;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ResponseDisposingStream"/> class.
+        /// </summary>
+        /// <param name="inner">The response body to read.</param>
+        /// <param name="response">The response released with the stream.</param>
+        /// <param name="request">The request released with the stream, when there is one.</param>
         public ResponseDisposingStream(Stream inner, HttpResponseMessage response, HttpRequestMessage? request = null)
         {
             _inner = inner;
@@ -698,6 +623,7 @@ public partial class SourceServerClient : IDisposable
             _request = request;
         }
 
+        /// <inheritdoc />
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -710,6 +636,7 @@ public partial class SourceServerClient : IDisposable
             base.Dispose(disposing);
         }
 
+        /// <inheritdoc />
         public override async ValueTask DisposeAsync()
         {
             await _inner.DisposeAsync().ConfigureAwait(false);
@@ -719,40 +646,48 @@ public partial class SourceServerClient : IDisposable
             await base.DisposeAsync().ConfigureAwait(false);
         }
 
+        /// <inheritdoc />
         public override bool CanRead => _inner.CanRead;
 
+        /// <inheritdoc />
         public override bool CanSeek => _inner.CanSeek;
 
+        /// <inheritdoc />
         public override bool CanWrite => _inner.CanWrite;
 
+        /// <inheritdoc />
         public override long Length => _inner.Length;
 
+        /// <inheritdoc />
         public override long Position
         {
             get => _inner.Position;
             set => _inner.Position = value;
         }
 
+        /// <inheritdoc />
         public override void Flush() => _inner.Flush();
 
+        /// <inheritdoc />
         public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
 
+        /// <inheritdoc />
         public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
 
+        /// <inheritdoc />
         public override void SetLength(long value) => _inner.SetLength(value);
 
+        /// <inheritdoc />
         public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
 
+        /// <inheritdoc />
         public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
-            // Wrap the inner read with a cancellation registration that
-            // forcibly disposes the response. Without this, a hung server can
-            // keep an inner HttpConnection read blocked past cancellation, as
-            // HttpClient.Timeout doesn't apply once response headers are in.
             using var registration = cancellationToken.Register(static state => DisposeQuiet((HttpResponseMessage)state!), _response);
             return await _inner.ReadAsync(buffer.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
         }
 
+        /// <inheritdoc />
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             using var registration = cancellationToken.Register(static state => DisposeQuiet((HttpResponseMessage)state!), _response);

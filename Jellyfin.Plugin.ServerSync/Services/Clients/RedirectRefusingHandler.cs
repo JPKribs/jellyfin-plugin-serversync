@@ -15,6 +15,7 @@ public sealed class RedirectRefusingHandler : DelegatingHandler
     /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var status = (int)response.StatusCode;
         if (status is < 300 or >= 400 || response.Headers.Location is null)

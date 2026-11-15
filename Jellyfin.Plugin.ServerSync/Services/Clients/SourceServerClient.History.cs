@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
-/// Watch history: changed and played items, and items with their user data.
+/// Reads History from the source, as changed items, played items, and items with their user data.
 /// </summary>
 public partial class SourceServerClient
 {
@@ -19,7 +19,7 @@ public partial class SourceServerClient
     /// <param name="libraryId">The source library to look in.</param>
     /// <param name="includeTypes">The item kinds to list.</param>
     /// <param name="changedSince">The time after which a change counts.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
     /// <returns>The ids of the items changed since then.</returns>
     public async Task<HashSet<Guid>> GetItemIdsChangedForUserAsync(Guid userId, Guid libraryId, BaseItemKind[] includeTypes, DateTime changedSince, CancellationToken cancellationToken = default)
     {
@@ -49,11 +49,7 @@ public partial class SourceServerClient
                         },
                         cancellationToken: ct).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     throw new InvalidOperationException($"Failed to list items changed for user {userId} in library {libraryId}: {ex.Message}", ex);
                 }
@@ -77,15 +73,13 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Batch-fetches items by ID with the specified user's UserData populated.
-    /// Used by the History refresh task after the local-first discovery pass,
-    /// so only items whose translated path exists locally get user data
-    /// fetched, rather than every played item per user and library.
+    /// Reads a batch of source items by id with one user's history, so a scan asks only for items this server holds.
     /// </summary>
     /// <param name="userId">The source user whose user data is read.</param>
     /// <param name="ids">The source item ids to fetch.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The items with their user data, or null when the source gave no answer.</returns>
+    /// <exception cref="Microsoft.Kiota.Abstractions.ApiException">Thrown when the source answers with an error status, so the scan stops before it prunes.</exception>
     public async Task<BaseItemDtoQueryResult?> GetItemsWithUserDataByIdsAsync(
         Guid userId,
         Guid?[] ids,
@@ -115,17 +109,12 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx: bubble up so the History Refresh aborts before prune.
             _logger.LogWarning(ex, "Source server {Status} fetching user-data items for user {UserId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Failed to fetch user-data items for user {UserId}", userId);
             return null;
@@ -133,19 +122,13 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Fetches every item ID a user has played within a library, paginated.
-    /// Throws on transient failure so callers don't conflate "error" with
-    /// "user played nothing", a silent empty return would let downstream
-    /// filters skip items they shouldn't.
+    /// Lists the id of every item a source user has played in a library, throwing on a failed page so a failure never reads as nothing played.
     /// </summary>
     /// <param name="userId">The source user whose plays are listed.</param>
     /// <param name="libraryId">The source library to look in.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
     /// <returns>The ids of the played items.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when the source server returns a null page (failure) rather
-    /// than an explicit empty page.
-    /// </exception>
+    /// <exception cref="InvalidOperationException">Thrown when a page could not be read.</exception>
     public async Task<HashSet<Guid>> GetUserPlayedItemIdsAsync(
         Guid userId,
         Guid libraryId,
@@ -155,9 +138,6 @@ public partial class SourceServerClient
         await PageThroughAsync(
             async (startIndex, pageSize, ct) =>
                 await GetUserPlayedItemsAsync(userId, libraryId, startIndex, pageSize, ct).ConfigureAwait(false)
-                    // GetUserPlayedItemsAsync returns null on a logged transient
-                    // failure. Treating that as end-of-list would silently classify
-                    // every item as "user did not play this", wrong answer.
                     ?? throw new InvalidOperationException(
                         $"Failed to fetch played items page for user {userId} in library {libraryId} at index {startIndex}"),
             200,
@@ -176,14 +156,15 @@ public partial class SourceServerClient
     }
 
     /// <summary>
-    /// Gets items that have been played by a specific user in a library.
+    /// Reads one page of the items a source user has played in a library, with their user data.
     /// </summary>
-    /// <param name="userId">User ID on the source server.</param>
-    /// <param name="libraryId">Library ID.</param>
-    /// <param name="startIndex">Starting index for pagination.</param>
-    /// <param name="limit">Maximum items to return.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Query result with played items.</returns>
+    /// <param name="userId">The source user whose plays are listed.</param>
+    /// <param name="libraryId">The source library to look in.</param>
+    /// <param name="startIndex">The index of the first item of the page.</param>
+    /// <param name="limit">The most items the page may hold.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The page, or null when the request failed without an error status.</returns>
+    /// <exception cref="Microsoft.Kiota.Abstractions.ApiException">Thrown when the source answers with an error status, so the scan stops before it prunes.</exception>
     public async Task<BaseItemDtoQueryResult?> GetUserPlayedItemsAsync(
         Guid userId,
         Guid libraryId,
@@ -214,19 +195,12 @@ public partial class SourceServerClient
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Microsoft.Kiota.Abstractions.ApiException ex) when (ex.ResponseStatusCode >= 400)
         {
-            // Any 4xx/5xx: bubble up so the History Refresh aborts before prune.
-            // GetUserPlayedItemIdsAsync already throws on null page, so a rethrow
-            // here propagates the same way.
             _logger.LogWarning(ex, "Source server {Status} getting played items for user {UserId} in library {LibraryId}. Aborting refresh to protect tracking rows", ex.ResponseStatusCode, userId, libraryId);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to get played items for user {UserId} in library {LibraryId}", userId, libraryId);
             return null;

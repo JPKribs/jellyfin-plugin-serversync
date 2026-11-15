@@ -1,10 +1,11 @@
+using System;
 using Jellyfin.Plugin.ServerSync.Services.Peer;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
-/// The pairing a client holds with one configured peer: where its secret lives and which server this
-/// is, so the client can present the secret and pair again when the peer no longer holds it.
+/// The pairing a client holds with one peer, which lets it send the secret and pair again when the peer
+/// has lost it.
 /// </summary>
 public sealed class PeerPairing
 {
@@ -19,6 +20,10 @@ public sealed class PeerPairing
     /// <param name="thisServerId">This server's id, which the peer pairs against.</param>
     public PeerPairing(PeerPairingStore store, string peerKey, string thisServerId)
     {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(peerKey);
+        ArgumentNullException.ThrowIfNull(thisServerId);
+
         _store = store;
         _peerKey = peerKey;
         ThisServerId = thisServerId;
@@ -27,11 +32,11 @@ public sealed class PeerPairing
     /// <summary>Gets this server's id.</summary>
     public string ThisServerId { get; }
 
-    /// <summary>The secret the peer issued to this server, or null when it never did.</summary>
-    /// <returns>The secret.</returns>
+    /// <summary>Reads the secret the peer issued to this server.</summary>
+    /// <returns>The secret, or null when the peer never issued one.</returns>
     public string? CurrentSecret() => _store.GetOutbound(_peerKey);
 
     /// <summary>Notes that this server is asking the peer to pair, until the result is disposed.</summary>
     /// <returns>Ends the wait when disposed.</returns>
-    public System.IDisposable Expect() => _store.Expect(_peerKey);
+    public IDisposable Expect() => _store.Expect(_peerKey);
 }
