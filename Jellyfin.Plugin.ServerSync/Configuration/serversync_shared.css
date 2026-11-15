@@ -794,7 +794,6 @@ div:not(.serversync-form-row) + .serversync-form-row {
 .base-table-cell .serversync-filter-item { padding: 0; border-bottom: none; }
 .base-table-cell .serversync-filter-item:hover,
 .base-table-cell .serversync-filter-item.serversync-selected { background: transparent; }
-.base-table-row:has(.serversync-filter-item.serversync-selected) { background: var(--base-accent-wash); }
 .serversync-filter-item-thumb {
     flex: 0 0 40px;
     width: 40px;

@@ -297,6 +297,7 @@ export default function (view) {
             pickerContainer.querySelectorAll('.base-table-row').forEach(function (rowEl) {
                 if (rowEl.getAttribute('data-id') !== String(item.Id)) return;
                 var wrap = rowEl.querySelector('.serversync-filter-item');
+                rowEl.classList.toggle('selected', sel);
                 if (wrap) wrap.classList.toggle('serversync-selected', sel);
                 var icon = rowEl.querySelector('.serversync-filter-item-check .material-icons');
                 if (icon) icon.textContent = sel ? 'check_box' : 'check_box_outline_blank';
@@ -313,6 +314,7 @@ export default function (view) {
                 emptyState: { message: 'No items found.' },
                 filters: { buildParams: function () { var mode = browse(); return { libraryId: libraryId, serverKey: serverKey, collections: mode === 'collections', playlists: mode === 'playlists' }; } },
                 columns: [{ key: 'Id', type: 'custom', render: function (item) { return renderPickerItem(item, selected); } }],
+                rowClass: function (item) { return selected[item.Id] ? 'selected' : ''; },
                 actions: { onRowClick: function (item) { onPickerItemClick(item, selected, section); } }
             });
             // A non-empty filter value makes the table send the buildParams values.
