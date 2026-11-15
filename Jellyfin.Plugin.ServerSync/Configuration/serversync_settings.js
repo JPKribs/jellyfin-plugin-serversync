@@ -1,6 +1,8 @@
 // serversync_settings.js
 // The Settings tab: bandwidth, processing, the whitelist, one section for each sync type, and table resets.
 
+import * as serverSyncModule from './configurationpage?name=serversync_shared.js';
+
 // serversync_settings
 // Builds the Settings tab. It loads the config into each section, saves a section on its own, and resets
 // sync tables after a question.
@@ -10,61 +12,18 @@
 export default function (view) {
     'use strict';
 
-    // storageTabShown
-    // Tells whether the Storage tab shows. The last known answer is kept per browser and refreshed whenever
-    // the shared module loads or saves the config (see serversync_shared.js). An unknown answer shows the tab.
-    function storageTabShown() {
-        try {
-            return window.localStorage.getItem('serversync.storageTab') !== '0';
-        } catch (e) {
-            return true;
-        }
-    }
-
-    // getTabs
-    // Lists the dashboard tabs in order.
-    //
-    // Output
-    // [object[]]: Each tab's href and name.
-    function getTabs() {
-        var tabs = [
-            { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
-            { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
-        ];
-        if (storageTabShown()) tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
-        tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
-        return tabs;
-    }
-
-    // settingsTabIndex
-    // Finds this tab's place in the list. Settings is the last tab, after Storage when that shows.
-    //
-    // Output
-    // [number]: The tab index.
-    function settingsTabIndex() {
-        return getTabs().length - 1;
-    }
-
     var ServerSyncShared = null;
     var confirmDialog = null;
 
-    // Helpers called by bare name, taken from the shared module once it loads. Every call happens after
-    // the load, from a viewshow handler that waits for it.
+    // Helpers called by bare name, taken from the shared bag.
     var escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor, getEl, setVisible;
 
-    // Relative specifier so a server hosted under a base URL still resolves it.
-    var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
-        ServerSyncShared = shared.createServerSyncShared(view);
-        // A config load that turns content sync on or off adds or drops the Storage tab. A page the
-        // dashboard keeps hidden leaves the tabs to the page on screen.
-        ServerSyncShared.onTabsChanged = function () {
-            if (!view.classList.contains('hide')) LibraryMenu.setTabs('serversync', settingsTabIndex(), getTabs);
-        };
-        confirmDialog = shared.confirmDialog;
-        ({ escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor, getEl, setVisible } = ServerSyncShared.pageHelpers());
-    });
+    // Base runs bindPage once and loadConfig each time the page shows, and sets the tabs.
+    var made = serverSyncModule.createServerSyncPage(view, { page: 'serversync_settings', bind: function () { bindPage(); }, load: function () { loadConfig(); } });
+    ServerSyncShared = made.shared;
+    confirmDialog = serverSyncModule.confirmDialog;
+    ({ escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor, getEl, setVisible } = ServerSyncShared.pageHelpers());
 
-    var _initialized = false;
 
     var currentConfig = null;
 
@@ -704,38 +663,30 @@ export default function (view) {
         });
     }
 
-    view.addEventListener('viewshow', function () {
-        LibraryMenu.setTabs('serversync', settingsTabIndex(), getTabs);
+    // bindPage
+    // Wires the page's buttons and controls. Base calls it once, the first time the page shows.
+    function bindPage() {
+        ServerSyncShared.initCollapsibles();
 
-        _sharedPromise.then(function() {
-            if (!_initialized) {
-                _initialized = true;
+        bindClick('btnSaveProcessing', saveProcessingSettings);
+        bindClick('btnSaveCallerAccess', saveCallerAccessSettings);
+        bindClick('btnAddCallerGrant', function () { if (grantsLoaded) addGrantRow(); });
 
-                ServerSyncShared.initCollapsibles();
+        bindClick('btnSaveContentSettings', saveContentSettings);
+        bindClick('btnSaveBandwidth', saveBandwidthSettings);
+        bindClick('btnClearLinkCache', clearLinkCache);
+        bindClick('btnSaveHistorySettings', saveHistorySettings);
+        bindClick('btnSaveMetadataSettings', saveMetadataSettings);
+        bindClick('btnSavePeopleSettings', savePeopleSettings);
+        bindClick('btnSaveUserSyncSettings', saveUserSyncSettings);
+        bindClick('btnSavePlaylistSettings', savePlaylistSettings);
 
-                bindClick('btnSaveProcessing', saveProcessingSettings);
-                bindClick('btnSaveCallerAccess', saveCallerAccessSettings);
-                bindClick('btnAddCallerGrant', function () { if (grantsLoaded) addGrantRow(); });
-
-                bindClick('btnSaveContentSettings', saveContentSettings);
-                bindClick('btnSaveBandwidth', saveBandwidthSettings);
-                bindClick('btnClearLinkCache', clearLinkCache);
-                bindClick('btnSaveHistorySettings', saveHistorySettings);
-                bindClick('btnSaveMetadataSettings', saveMetadataSettings);
-                bindClick('btnSavePeopleSettings', savePeopleSettings);
-                bindClick('btnSaveUserSyncSettings', saveUserSyncSettings);
-                bindClick('btnSavePlaylistSettings', savePlaylistSettings);
-
-                bindClick('btnResetContentTable', function() { resetTable('Content', 'content sync'); });
-                bindClick('btnResetHistoryTable', function() { resetTable('History', 'history sync'); });
-                bindClick('btnResetMetadataTable', function() { resetTable('Metadata', 'metadata sync'); });
-                bindClick('btnResetPeopleTable', function() { resetTable('People', 'people sync'); });
-                bindClick('btnResetPlaylistTable', function() { resetTable('Playlists', 'playlist sync'); });
-                bindClick('btnResetUserTable', function() { resetTable('Users', 'user sync'); });
-                bindClick('btnResetEntireDatabase', resetEntireDatabase);
-            }
-
-            loadConfig();
-        });
-    });
+        bindClick('btnResetContentTable', function() { resetTable('Content', 'content sync'); });
+        bindClick('btnResetHistoryTable', function() { resetTable('History', 'history sync'); });
+        bindClick('btnResetMetadataTable', function() { resetTable('Metadata', 'metadata sync'); });
+        bindClick('btnResetPeopleTable', function() { resetTable('People', 'people sync'); });
+        bindClick('btnResetPlaylistTable', function() { resetTable('Playlists', 'playlist sync'); });
+        bindClick('btnResetUserTable', function() { resetTable('Users', 'user sync'); });
+        bindClick('btnResetEntireDatabase', resetEntireDatabase);
+    }
 }

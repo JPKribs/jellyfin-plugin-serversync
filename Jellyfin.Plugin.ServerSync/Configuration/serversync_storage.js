@@ -3,6 +3,8 @@
 // Library Filter, plus the permanent copies of the Link libraries. The mappings themselves are made on
 // the Servers tab. A save here changes only these fields of the matching stored mapping.
 
+import * as serverSyncModule from './configurationpage?name=serversync_shared.js';
+
 // serversync_storage
 // Builds the Storage tab. It draws a card for each enabled library mapping of the picked server, saves
 // their storage settings, and lists the permanent copies of its Link libraries.
@@ -12,36 +14,18 @@
 export default function (view) {
     'use strict';
 
-    // getTabs
-    // Lists the dashboard tabs in order. This page always lists itself, so opening it while content sync is
-    // off still marks a tab.
-    //
-    // Output
-    // [object[]]: Each tab's href and name.
-    function getTabs() {
-        return [
-            { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
-            { href: 'configurationpage?name=serversync_servers', name: 'Servers' },
-            { href: 'configurationpage?name=serversync_storage', name: 'Storage' },
-            { href: 'configurationpage?name=serversync_settings', name: 'Settings' }
-        ];
-    }
-
     var ServerSyncShared = null;
     var createPaginatedTable = null;
 
-    // Helpers called by bare name, taken from the shared module once it loads. Every call happens after
-    // the load, from a viewshow handler that waits for it.
+    // Helpers called by bare name, taken from the shared bag.
     var escapeHtml, apiRequest, setVisible, bindClick, getEl;
 
-    // Relative specifier so a server hosted under a base URL still resolves it.
-    var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function (shared) {
-        ServerSyncShared = shared.createServerSyncShared(view);
-        createPaginatedTable = shared.createPaginatedTable;
-        ({ escapeHtml, apiRequest, setVisible, bindClick, getEl } = ServerSyncShared.pageHelpers());
-    });
+    // Base runs bindPage once and loadConfig each time the page shows, and sets the tabs.
+    var made = serverSyncModule.createServerSyncPage(view, { page: 'serversync_storage', alwaysStorage: true, bind: function () { bindPage(); }, load: function () { loadConfig(); }, onHide: function () { hidePage(); } });
+    ServerSyncShared = made.shared;
+    createPaginatedTable = serverSyncModule.createPaginatedTable;
+    ({ escapeHtml, apiRequest, setVisible, bindClick, getEl } = ServerSyncShared.pageHelpers());
 
-    var _initialized = false;
     var contentOn = true;
     var currentConfig = null;
     var selectedKey = '';
@@ -606,32 +590,26 @@ export default function (view) {
         });
     }
 
-    view.addEventListener('viewshow', function () {
-        LibraryMenu.setTabs('serversync', 2, getTabs);
+    // bindPage
+    // Wires the page's buttons and controls. Base calls it once, the first time the page shows.
+    function bindPage() {
+        ServerSyncShared.initCollapsibles();
+        bindClick('btnSaveStorage', saveStorage);
 
-        _sharedPromise.then(function () {
-            if (!_initialized) {
-                _initialized = true;
+        var select = getEl('selStorageServer');
+        if (select) {
+            select.addEventListener('change', function () {
+                selectedKey = select.value;
+                renderLibraries();
+                reloadKeptCopies();
+            });
+        }
+    }
 
-                ServerSyncShared.initCollapsibles();
-                bindClick('btnSaveStorage', saveStorage);
-
-                var select = getEl('selStorageServer');
-                if (select) {
-                    select.addEventListener('change', function () {
-                        selectedKey = select.value;
-                        renderLibraries();
-                        reloadKeptCopies();
-                    });
-                }
-            }
-
-            loadConfig();
-        });
-    });
-
-    view.addEventListener('viewhide', function () {
+    // hidePage
+    // Stops the observers of the cards and tables when the page hides.
+    function hidePage() {
         cards.forEach(function (card) { card.disconnect(); });
         if (keptTable && keptTable.disconnectObserver) keptTable.disconnectObserver();
-    });
+    }
 }

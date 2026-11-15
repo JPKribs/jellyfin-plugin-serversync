@@ -1,6 +1,8 @@
 // serversync_sync.js
 // The Sync tab: picks the sync type to show and builds each view from the page context.
 
+import * as serverSyncModule from './configurationpage?name=serversync_shared.js';
+
 // serversync_sync
 // Builds the Sync tab. It sets the tabs, loads the page's modules, switches between the sync type views, and
 // stops every task poller, queue refresh, and table observer when the page hides.
@@ -10,46 +12,14 @@
 export default function (view) {
     'use strict';
 
-    // storageTabShown
-    // Tells whether the Storage tab shows. The last known answer is kept per browser and refreshed whenever
-    // the shared module loads or saves the config (see serversync_shared.js). An unknown answer shows the tab.
-    function storageTabShown() {
-        try {
-            return window.localStorage.getItem('serversync.storageTab') !== '0';
-        } catch (e) {
-            return true;
-        }
-    }
-
-    // getTabs
-    // Lists the dashboard tabs in order.
-    //
-    // Output
-    // [object[]]: Each tab's href and name.
-    function getTabs() {
-        var tabs = [
-            { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
-            { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
-        ];
-        if (storageTabShown()) tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
-        tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
-        return tabs;
-    }
-
     var _pageReady = false;
 
-    function onViewShow() {
-        LibraryMenu.setTabs('serversync', 0, getTabs);
-        if (_pageReady) {
-            SyncViewManager.init();
-        }
-    }
-
-    // Active task-progress pollers, stopped on viewhide. pollTaskProgress returns a { cancel } handle.
+    // Active task-progress pollers, stopped when the page hides. pollTaskProgress returns a { cancel } handle.
     var _activePollIntervals = [];
 
-    view.addEventListener('viewshow', onViewShow);
-    view.addEventListener('viewhide', function () {
+    // hidePage
+    // Stops every task poller, the queue refresh, and the table observers when the page hides.
+    function hidePage() {
         _activePollIntervals.forEach(function(handle) {
             if (handle && typeof handle.cancel === 'function') handle.cancel();
         });
@@ -62,6 +32,13 @@ export default function (view) {
                 mod.table.disconnectObserver();
             }
         });
+    }
+
+    // Base sets the tabs and runs load each time the page shows.
+    var made = serverSyncModule.createServerSyncPage(view, {
+        page: 'serversync_sync',
+        load: function () { if (_pageReady) SyncViewManager.init(); },
+        onHide: function () { hidePage(); }
     });
 
     // The shared helpers and each part of this page live in their own resource. Every part is built
@@ -80,7 +57,7 @@ export default function (view) {
 
     // Relative specifiers so a server hosted under a base URL still resolves them.
     var _sharedPromise = Promise.all([
-        import('./configurationpage?name=serversync_shared.js'),
+        Promise.resolve(serverSyncModule),
         import('./configurationpage?name=serversync_sync_table.js'),
         import('./configurationpage?name=serversync_sync_content.js'),
         import('./configurationpage?name=serversync_sync_history.js'),
@@ -90,12 +67,7 @@ export default function (view) {
         import('./configurationpage?name=serversync_sync_queue.js')
     ]).then(function(loaded) {
         var shared = loaded[0];
-        ServerSyncShared = shared.createServerSyncShared(view);
-        // A config load that turns content sync on or off adds or drops the Storage tab. A page the
-        // dashboard keeps hidden leaves the tabs to the page on screen.
-        ServerSyncShared.onTabsChanged = function () {
-            if (!view.classList.contains('hide')) LibraryMenu.setTabs('serversync', 0, getTabs);
-        };
+        ServerSyncShared = made.shared;
 
         var ctx = {
             view: view,
@@ -336,10 +308,7 @@ export default function (view) {
         }
     };
 
-    // viewshow may have fired before this module ran, so the first load sets the tabs and
-    // initializes right away.
-
+    // The page may already be showing, so the first load starts right away.
     _pageReady = true;
-    LibraryMenu.setTabs('serversync', 0, getTabs);
     SyncViewManager.init();
 }

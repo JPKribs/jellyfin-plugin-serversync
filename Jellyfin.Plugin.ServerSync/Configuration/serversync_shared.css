@@ -44,22 +44,6 @@
     margin-bottom: 16px;
 }
 
-/* serversync-action-button */
-/* Equal width buttons in a row, each able to show task progress along its bottom edge. */
-/* Example: <div class="serversync-action-button-row"><button class="raised serversync-action-button"><span>Refresh</span></button></div> */
-.serversync-action-button-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-}
-.serversync-action-button {
-    flex: 1;
-    text-align: center;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
-}
-
 /* serversync-compare-table */
 /* Four column table that sets a property's source, local, and merged values side by side. */
 /* Example: <table class="serversync-compare-table"><tr><td class="serversync-compare-table-property">Played</td></tr></table> */
@@ -176,9 +160,6 @@
     .base-table-cell .serversync-item-error {
         font-size: 0.7em;
         max-width: 140px;
-    }
-    .serversync-action-button-row {
-        flex-wrap: wrap;
     }
     .serversync-health-row {
         flex-wrap: wrap;

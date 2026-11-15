@@ -11,7 +11,7 @@ globalThis.setInterval = function () { return 1; };
 globalThis.clearInterval = function () {};
 
 // openPage
-// Loads the page controller over a view and returns the setTabs calls it made.
+// Loads the page controller over a view, shows it, and returns the setTabs calls it made.
 async function openPage(storage) {
     var calls = [];
     var page = installPage({ calls: calls, storage: storage });
@@ -19,6 +19,7 @@ async function openPage(storage) {
     page.dom.document.documentElement.appendChild(view);
     var mod = await loadScript('serversync_sync.js');
     mod.default(view);
+    view.dispatch('viewshow');
     await flush();
     return { calls: calls, view: view, page: page };
 }
@@ -45,6 +46,7 @@ test('the Sync tab shows the Storage tab when storage is blocked', async functio
     page.dom.document.documentElement.appendChild(view);
     var mod = await loadScript('serversync_sync.js');
     mod.default(view);
+    view.dispatch('viewshow');
     assert.equal(calls[0].tabs.length, 4);
 });
 

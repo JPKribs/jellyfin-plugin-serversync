@@ -1,6 +1,8 @@
 // serversync_servers.js
 // The Servers tab: the map of servers, each server's steps, and its library and user mappings.
 
+import * as serverSyncModule from './configurationpage?name=serversync_shared.js';
+
 // urlWasCleared
 // Says whether a saved entry's Server URL was emptied in the editor.
 //
@@ -23,56 +25,22 @@ export function urlWasCleared(storedUrl, editedUrl) {
 export default function (view) {
     'use strict';
 
-    // storageTabShown
-    // Tells whether the Storage tab shows. The last known answer is kept per browser and refreshed whenever
-    // the shared module loads or saves the config (see serversync_shared.js). An unknown answer shows the tab.
-    function storageTabShown() {
-        try {
-            return window.localStorage.getItem('serversync.storageTab') !== '0';
-        } catch (e) {
-            return true;
-        }
-    }
-
-    // getTabs
-    // Lists the dashboard tabs in order.
-    //
-    // Output
-    // [object[]]: Each tab's href and name.
-    function getTabs() {
-        var tabs = [
-            { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
-            { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
-        ];
-        if (storageTabShown()) tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
-        tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
-        return tabs;
-    }
-
     var ServerSyncShared = null;
     var createSortableCardList = null;
     var createChoiceGroup = null;
     var confirmDialog = null;
 
-    // Helpers called by bare name, taken from the shared module once it loads. Every call happens after
-    // the load, from a viewshow handler that waits for it.
+    // Helpers called by bare name, taken from the shared bag.
     var escapeHtml, apiRequest, setVisible, bindClick, getEl, setChecked, getChecked, setValue, getValue, requestFor;
 
-    // Relative specifier so a server hosted under a base URL still resolves it.
-    var _sharedPromise = import('./configurationpage?name=serversync_shared.js').then(function(shared) {
-        ServerSyncShared = shared.createServerSyncShared(view);
-        // A config load that turns content sync on or off adds or drops the Storage tab. A page the
-        // dashboard keeps hidden leaves the tabs to the page on screen.
-        ServerSyncShared.onTabsChanged = function () {
-            if (!view.classList.contains('hide')) LibraryMenu.setTabs('serversync', 1, getTabs);
-        };
-        createSortableCardList = shared.createSortableCardList;
-        createChoiceGroup = shared.createChoiceGroup;
-        confirmDialog = shared.confirmDialog;
-        ({ escapeHtml, apiRequest, setVisible, bindClick, getEl, setChecked, getChecked, setValue, getValue, requestFor } = ServerSyncShared.pageHelpers());
-    });
+    // Base runs bindPage once and loadConfig each time the page shows, and sets the tabs.
+    var made = serverSyncModule.createServerSyncPage(view, { page: 'serversync_servers', bind: function () { bindPage(); }, load: function () { loadConfig(); } });
+    ServerSyncShared = made.shared;
+    createSortableCardList = serverSyncModule.createSortableCardList;
+    createChoiceGroup = serverSyncModule.createChoiceGroup;
+    confirmDialog = serverSyncModule.confirmDialog;
+    ({ escapeHtml, apiRequest, setVisible, bindClick, getEl, setChecked, getChecked, setValue, getValue, requestFor } = ServerSyncShared.pageHelpers());
 
-    var _initialized = false;
 
     var currentConfig = null;
     var sourceLibraries = [];
@@ -1686,53 +1654,45 @@ export default function (view) {
         });
     }
 
-    view.addEventListener('viewshow', function () {
-        LibraryMenu.setTabs('serversync', 1, getTabs);
+    // bindPage
+    // Wires the page's buttons and controls. Base calls it once, the first time the page shows.
+    function bindPage() {
+        ServerSyncShared.initCollapsibles();
 
-        _sharedPromise.then(function() {
-            if (!_initialized) {
-                _initialized = true;
+        bindClick('btnTestConnection', testConnection);
+        bindClick('btnSaveServer', saveServerConfig);
+        bindClick('btnGenerateToken', generateToken);
+        bindClick('btnAddServer', addServer);
+        bindClick('btnDeleteServer', deleteServer);
+        bindClick('btnCheckPeer', checkPeer);
 
-                ServerSyncShared.initCollapsibles();
-
-                bindClick('btnTestConnection', testConnection);
-                bindClick('btnSaveServer', saveServerConfig);
-                bindClick('btnGenerateToken', generateToken);
-                bindClick('btnAddServer', addServer);
-                bindClick('btnDeleteServer', deleteServer);
-                bindClick('btnCheckPeer', checkPeer);
-
-                // The stored key shows as a placeholder. Focusing the field clears it, so typing enters a
-                // new key rather than adding to the placeholder. Leaving it empty keeps the stored key.
-                var keyField = getEl('txtSourceServerApiKey');
-                if (keyField) {
-                    keyField.addEventListener('focus', function () {
-                        if (keyField.value === ServerSyncShared.SECRET_KEPT) keyField.value = '';
-                    });
-                    keyField.addEventListener('blur', function () {
-                        var open = selectedServer();
-                        if (!keyField.value && open && open.ApiKey && !savedSecretLeftBehind(open)) keyField.value = ServerSyncShared.SECRET_KEPT;
-                    });
-                }
-                var urlField = getEl('txtSourceServerUrl');
-                if (urlField) urlField.addEventListener('input', reflectAddressChange);
-                var linkingField = getEl('chkAllowLinking');
-                if (linkingField) linkingField.addEventListener('change', reflectLinking);
-                var totalField = getEl('txtLinkMaxStreams');
-                if (totalField) totalField.addEventListener('input', clampUserStreams);
-                view.addEventListener('change', function(e) {
-                    if (e.target && ((e.target.classList && e.target.classList.contains('serversync-user-link-max-streams')))) clampUserStreams();
-                });
-                modeGroup = createChoiceGroup(getEl('modeChoices'), { onChange: reflectMode });
-                authGroup = createChoiceGroup(getEl('authChoices'), { onChange: reflectAuthMethod });
-
-                // The buttons are disabled while the open server's lists load. The check here covers a
-                // click that lands before the disabled state does.
-                bindClick('btnAddMapping', function() { if (mappingsLoaded) addLibraryMappingRow(); });
-                bindClick('btnAddUserMapping', function() { if (mappingsLoaded) addUserMappingRow(); });
-            }
-
-            loadConfig();
+        // The stored key shows as a placeholder. Focusing the field clears it, so typing enters a
+        // new key rather than adding to the placeholder. Leaving it empty keeps the stored key.
+        var keyField = getEl('txtSourceServerApiKey');
+        if (keyField) {
+            keyField.addEventListener('focus', function () {
+                if (keyField.value === ServerSyncShared.SECRET_KEPT) keyField.value = '';
+            });
+            keyField.addEventListener('blur', function () {
+                var open = selectedServer();
+                if (!keyField.value && open && open.ApiKey && !savedSecretLeftBehind(open)) keyField.value = ServerSyncShared.SECRET_KEPT;
+            });
+        }
+        var urlField = getEl('txtSourceServerUrl');
+        if (urlField) urlField.addEventListener('input', reflectAddressChange);
+        var linkingField = getEl('chkAllowLinking');
+        if (linkingField) linkingField.addEventListener('change', reflectLinking);
+        var totalField = getEl('txtLinkMaxStreams');
+        if (totalField) totalField.addEventListener('input', clampUserStreams);
+        view.addEventListener('change', function(e) {
+            if (e.target && ((e.target.classList && e.target.classList.contains('serversync-user-link-max-streams')))) clampUserStreams();
         });
-    });
+        modeGroup = createChoiceGroup(getEl('modeChoices'), { onChange: reflectMode });
+        authGroup = createChoiceGroup(getEl('authChoices'), { onChange: reflectAuthMethod });
+
+        // The buttons are disabled while the open server's lists load. The check here covers a
+        // click that lands before the disabled state does.
+        bindClick('btnAddMapping', function() { if (mappingsLoaded) addLibraryMappingRow(); });
+        bindClick('btnAddUserMapping', function() { if (mappingsLoaded) addUserMappingRow(); });
+    }
 }

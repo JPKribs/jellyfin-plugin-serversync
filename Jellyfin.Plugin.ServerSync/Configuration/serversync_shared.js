@@ -16,6 +16,8 @@ import {
     generateGuid,
     bindDialog,
     confirmDialog,
+    createConfigPage,
+    setTabs,
     SECRET_KEPT
 } from './configurationpage?name=serversync_jpkribs_shared.js';
 
@@ -56,6 +58,61 @@ function writeStorageTabFlag(value) {
     }
 }
 
+// serverSyncTabs
+// Lists the dashboard tabs in order. The Storage tab shows unless the last config read said no sync type uses it.
+//
+// Inputs
+// alwaysStorage [boolean]: Whether to list Storage whatever is stored, as the Storage page does for itself.
+//
+// Output
+// [object[]]: Each tab's href and name.
+export function serverSyncTabs(alwaysStorage) {
+    var tabs = [
+        { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
+        { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
+    ];
+    if (alwaysStorage || readStorageTabFlag() !== '0') tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
+    tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
+    return tabs;
+}
+
+// createServerSyncPage
+// Wires a Server Sync page through Base's page lifecycle, with the Server Sync helper bag and the shared tabs.
+//
+// Inputs
+// view [HTMLElement]: The page the dashboard passes to the controller.
+// opts [object]: page is the tab's own page name. alwaysStorage lists the Storage tab whatever is stored.
+//   bind, load, and onHide are Base's, and each is given the Server Sync bag and the page handle.
+//
+// Output
+// [object]: shared is the Server Sync helper bag, and page is Base's page handle with addCleanup and createPoller.
+export function createServerSyncPage(view, opts) {
+    var bag = null;
+    var tabs = function () { return serverSyncTabs(opts.alwaysStorage); };
+    var tabIndex = function () {
+        var href = 'configurationpage?name=' + opts.page;
+        var index = tabs().findIndex(function (tab) { return tab.href === href; });
+        return index < 0 ? 0 : index;
+    };
+    var pass = function (fn) { return fn ? function (shared, page) { fn(bag, page); } : undefined; };
+    var page = createConfigPage(view, {
+        pluginId: PLUGIN_ID,
+        apiPrefix: 'Sync',
+        tabsKey: 'serversync',
+        get tabIndex() { return tabIndex(); },
+        tabs: tabs,
+        bind: pass(opts.bind),
+        load: pass(opts.load),
+        onHide: pass(opts.onHide)
+    });
+    bag = createServerSyncShared(view, page.shared);
+    // A config load that turns a sync type on or off adds or drops the Storage tab. A hidden page leaves the tabs to the one on screen.
+    bag.onTabsChanged = function () {
+        if (!view.classList.contains('hide')) setTabs('serversync', tabIndex(), tabs);
+    };
+    return { shared: bag, page: page };
+}
+
 // createServerSyncShared
 // Builds the helper bag a Server Sync page uses. It is Base's bag for the Sync route, plus the config
 // readers, the thumbnail renderers, the save helpers, and the health banner. Loading it also checks the
@@ -63,11 +120,12 @@ function writeStorageTabFlag(value) {
 //
 // Inputs
 // view [HTMLElement]: The page the helpers work in.
+// bag [object]: Base's bag to add the helpers to, such as a page handle's. A new one is built when left out.
 //
 // Output
 // [object]: The helper bag, with every Base helper and the Server Sync helpers below.
-export function createServerSyncShared(view) {
-    var shared = baseCreateShared(view, PLUGIN_ID, 'Sync');
+export function createServerSyncShared(view, bag) {
+    var shared = bag || baseCreateShared(view, PLUGIN_ID, 'Sync');
 
     shared.SECRET_KEPT = SECRET_KEPT;
 
