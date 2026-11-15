@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 using Jellyfin.Plugin.ServerSync.Services.Database;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;

@@ -882,11 +882,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             var mark = _watermarks.Get(Key, source.Key);
             why = mark is null ? $"'{source.Name}' has not been fully scanned yet"
                 : !string.Equals(mark.ScopeHash, ScopeOf(source), StringComparison.Ordinal) ? $"the settings for '{source.Name}' changed"
-                : _runStartedAt - Utilities.UtcTime.AsUtc(mark.FullAt) >= TimeSpan.FromHours(intervalHours) ? $"the last full scan of '{source.Name}' was over {intervalHours} hours ago"
+                : _runStartedAt - JPKribs.Jellyfin.Base.UtcTime.AsUtc(mark.FullAt) >= TimeSpan.FromHours(intervalHours) ? $"the last full scan of '{source.Name}' was over {intervalHours} hours ago"
                 : null;
             if (why is null)
             {
-                since[source.Key] = Utilities.UtcTime.AsUtc(mark!.ListedFrom) - IncrementalOverlap;
+                since[source.Key] = JPKribs.Jellyfin.Base.UtcTime.AsUtc(mark!.ListedFrom) - IncrementalOverlap;
             }
         }
 

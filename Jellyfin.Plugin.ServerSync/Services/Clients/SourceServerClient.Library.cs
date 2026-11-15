@@ -214,7 +214,7 @@ public partial class SourceServerClient
                     config.QueryParameters.Recursive = true;
                     config.QueryParameters.IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.Video };
                     config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources };
-                    config.QueryParameters.MinDateLastSaved = changedSince.HasValue ? new DateTimeOffset(Utilities.UtcTime.AsUtc(changedSince.Value)) : null;
+                    config.QueryParameters.MinDateLastSaved = changedSince.HasValue ? new DateTimeOffset(JPKribs.Jellyfin.Base.UtcTime.AsUtc(changedSince.Value)) : null;
                     config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;
@@ -501,7 +501,7 @@ public partial class SourceServerClient
                     config.QueryParameters.Recursive = true;
                     config.QueryParameters.IncludeItemTypes = includeTypes;
                     config.QueryParameters.Fields = new[] { ItemFields.Path };
-                    config.QueryParameters.MinDateLastSaved = changedSince.HasValue ? new DateTimeOffset(Utilities.UtcTime.AsUtc(changedSince.Value)) : null;
+                    config.QueryParameters.MinDateLastSaved = changedSince.HasValue ? new DateTimeOffset(JPKribs.Jellyfin.Base.UtcTime.AsUtc(changedSince.Value)) : null;
                     config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };
                     config.QueryParameters.StartIndex = startIndex;
                     config.QueryParameters.Limit = limit;

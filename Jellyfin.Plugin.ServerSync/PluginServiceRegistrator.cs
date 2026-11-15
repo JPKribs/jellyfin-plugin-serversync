@@ -16,6 +16,9 @@ namespace Jellyfin.Plugin.ServerSync;
 /// </summary>
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
+    /// <summary>What a refused redirect tells the administrator to do.</summary>
+    private const string RedirectAdvice = "Set the server URL to the address it redirects to.";
+
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
@@ -56,7 +59,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPrivateAllowedAsync
             })
             .AddHttpMessageHandler(() => new JPKribs.Jellyfin.Base.JpkRetryHandler())
-            .AddHttpMessageHandler(() => new RedirectRefusingHandler())
+            .AddHttpMessageHandler(() => new RedirectRefusingHandler(RedirectAdvice))
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
 
         serviceCollection
@@ -71,7 +74,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPublicOnlyAsync
             })
             .AddHttpMessageHandler(() => new JPKribs.Jellyfin.Base.JpkRetryHandler())
-            .AddHttpMessageHandler(() => new RedirectRefusingHandler())
+            .AddHttpMessageHandler(() => new RedirectRefusingHandler(RedirectAdvice))
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
     }
 

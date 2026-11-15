@@ -625,7 +625,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// </summary>
     /// <param name="value">The time to format.</param>
     /// <returns>The text.</returns>
-    protected static string FormatTimestamp(DateTime value) => Utilities.UtcTime.Format(value);
+    protected static string FormatTimestamp(DateTime value) => JPKribs.Jellyfin.Base.UtcTime.Format(value);
 
     /// <summary>
     /// Parses a timestamp written by <see cref="FormatTimestamp"/>.
@@ -633,7 +633,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <param name="value">The text to parse.</param>
     /// <returns>The time, or <see cref="DateTime.MinValue"/> when the text does not parse.</returns>
     protected static DateTime ParseTimestamp(string value)
-        => Utilities.UtcTime.TryParse(value, out var dt) ? dt : DateTime.MinValue;
+        => JPKribs.Jellyfin.Base.UtcTime.TryParse(value, out var dt) ? dt : DateTime.MinValue;
 
     /// <summary>
     /// Reads all rows from <paramref name="cmd"/> using <see cref="MapFromReader"/>.

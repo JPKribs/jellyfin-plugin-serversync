@@ -182,7 +182,7 @@ public class HintsController : ControllerBase
                 return Ok(result);
             }
 
-            var skew = capabilities.ServerTime.HasValue ? (DateTime.UtcNow - Utilities.UtcTime.AsUtc(capabilities.ServerTime.Value)).Duration() : TimeSpan.Zero;
+            var skew = capabilities.ServerTime.HasValue ? (DateTime.UtcNow - JPKribs.Jellyfin.Base.UtcTime.AsUtc(capabilities.ServerTime.Value)).Duration() : TimeSpan.Zero;
             result.ClockSkewSeconds = (int)Math.Round(skew.TotalSeconds);
             var skewNote = skew > HintProtocol.ClockSkewWarning
                 ? $" Its clock is about {FormatSkew(skew)} off from this server's, so edits made on both within that window may be settled the wrong way round. Put both servers on NTP."

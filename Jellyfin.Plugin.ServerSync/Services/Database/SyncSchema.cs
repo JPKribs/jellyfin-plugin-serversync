@@ -450,7 +450,7 @@ public static class SyncSchema
             CREATE INDEX IF NOT EXISTS idx_removed_items_at ON RemovedItems(RemovedAt);
             CREATE TABLE IF NOT EXISTS RemovedItemsLog (StartedAt TEXT NOT NULL);
             INSERT INTO RemovedItemsLog (StartedAt) SELECT @now WHERE NOT EXISTS (SELECT 1 FROM RemovedItemsLog);";
-        cmd.Parameters.AddWithValue("@now", Utilities.UtcTime.Format(DateTime.UtcNow));
+        cmd.Parameters.AddWithValue("@now", JPKribs.Jellyfin.Base.UtcTime.Format(DateTime.UtcNow));
         cmd.ExecuteNonQuery();
     }
 }

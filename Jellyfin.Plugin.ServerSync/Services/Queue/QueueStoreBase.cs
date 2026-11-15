@@ -74,12 +74,12 @@ public abstract class QueueStoreBase
     /// <summary>Formats a UTC time the way every table stores it, as fixed width text whose order is time order.</summary>
     /// <param name="value">The UTC time to format.</param>
     /// <returns>The ISO 8601 text.</returns>
-    protected static string Stamp(DateTime value) => Utilities.UtcTime.Format(value);
+    protected static string Stamp(DateTime value) => JPKribs.Jellyfin.Base.UtcTime.Format(value);
 
     /// <summary>Parses a stored time.</summary>
     /// <param name="value">The stored text.</param>
     /// <returns>The UTC time.</returns>
-    protected static DateTime Unstamp(string value) => Utilities.UtcTime.Parse(value);
+    protected static DateTime Unstamp(string value) => JPKribs.Jellyfin.Base.UtcTime.Parse(value);
 
     /// <summary>Reads a nullable text column.</summary>
     /// <param name="reader">The row to read from.</param>

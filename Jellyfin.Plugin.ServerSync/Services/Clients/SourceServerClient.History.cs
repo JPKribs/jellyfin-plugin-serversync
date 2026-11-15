@@ -40,7 +40,7 @@ public partial class SourceServerClient
                             config.QueryParameters.ParentId = libraryId;
                             config.QueryParameters.Recursive = true;
                             config.QueryParameters.IncludeItemTypes = includeTypes;
-                            config.QueryParameters.MinDateLastSavedForUser = new DateTimeOffset(Utilities.UtcTime.AsUtc(changedSince));
+                            config.QueryParameters.MinDateLastSavedForUser = new DateTimeOffset(JPKribs.Jellyfin.Base.UtcTime.AsUtc(changedSince));
                             config.QueryParameters.EnableImages = false;
                             config.QueryParameters.EnableUserData = false;
                             config.QueryParameters.SortBy = new[] { ItemSortBy.DateCreated, ItemSortBy.SortName, ItemSortBy.IndexNumber };

@@ -288,7 +288,7 @@ public static class JsonComparisonUtility
         }
 
         // A time with no zone reads as UTC, as Jellyfin stores date fields.
-        return Utilities.UtcTime.AsUtc(a.Value).Date == Utilities.UtcTime.AsUtc(b.Value).Date;
+        return JPKribs.Jellyfin.Base.UtcTime.AsUtc(a.Value).Date == JPKribs.Jellyfin.Base.UtcTime.AsUtc(b.Value).Date;
     }
 
     /// <summary>
@@ -299,7 +299,7 @@ public static class JsonComparisonUtility
     /// <returns>The date as text, or null when there is none.</returns>
     public static string? ToDateOnlyString(DateTime? value) =>
         value.HasValue
-            ? Utilities.UtcTime.AsUtc(value.Value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            ? JPKribs.Jellyfin.Base.UtcTime.AsUtc(value.Value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
             : null;
 
     /// <summary>

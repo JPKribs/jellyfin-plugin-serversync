@@ -113,12 +113,12 @@ public sealed class UpsertBuilder
     /// <summary>Formats a time the way every table stores it.</summary>
     /// <param name="value">The time to store.</param>
     /// <returns>The stored text.</returns>
-    public static string Time(DateTime value) => Utilities.UtcTime.Format(value);
+    public static string Time(DateTime value) => JPKribs.Jellyfin.Base.UtcTime.Format(value);
 
     /// <summary>Formats a time the way every table stores it, or null.</summary>
     /// <param name="value">The time to store, or null.</param>
     /// <returns>The stored text, or null.</returns>
-    public static string? Time(DateTime? value) => value.HasValue ? Utilities.UtcTime.Format(value.Value) : null;
+    public static string? Time(DateTime? value) => value.HasValue ? JPKribs.Jellyfin.Base.UtcTime.Format(value.Value) : null;
 
     /// <summary>Stores a flag as SQLite stores booleans, or null.</summary>
     /// <param name="value">The flag to store, or null.</param>

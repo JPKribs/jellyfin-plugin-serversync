@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
