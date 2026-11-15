@@ -1,6 +1,6 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Fakes;
 

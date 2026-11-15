@@ -8,14 +8,16 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.HistorySync;
 
 /// <summary>
 /// Apply phase for History sync. Reads queued <see cref="HistorySyncItem"/>

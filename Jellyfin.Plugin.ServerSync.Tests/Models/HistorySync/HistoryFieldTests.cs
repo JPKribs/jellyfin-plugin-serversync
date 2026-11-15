@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.HistorySync;
 using Jellyfin.Plugin.ServerSync.Services.Peer;
 using Xunit;
 

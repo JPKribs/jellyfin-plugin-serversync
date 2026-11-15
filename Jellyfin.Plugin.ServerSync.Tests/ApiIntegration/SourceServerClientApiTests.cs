@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Sdk.Generated.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;

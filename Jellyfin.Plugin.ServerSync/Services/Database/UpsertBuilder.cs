@@ -5,7 +5,7 @@ using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Microsoft.Data.Sqlite;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// Builds the insert-or-update every sync table writes its rows with, from one list of columns and

@@ -5,7 +5,7 @@ using System.Reflection;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.UserSync;
 
 /// <summary>
 /// Service for merging user data using a source-wins strategy.

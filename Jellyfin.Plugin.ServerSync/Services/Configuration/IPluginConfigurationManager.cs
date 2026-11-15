@@ -1,6 +1,6 @@
 using Jellyfin.Plugin.ServerSync.Configuration;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Configuration;
 
 /// <summary>
 /// Provides access to plugin configuration and related operations.

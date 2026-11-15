@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Session;

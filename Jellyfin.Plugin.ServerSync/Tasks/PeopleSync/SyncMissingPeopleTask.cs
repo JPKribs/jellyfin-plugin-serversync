@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
@@ -18,7 +20,7 @@ using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.PeopleSync;
 
 /// <summary>
 /// Sync phase for People. Reads Queued rows and applies metadata + image

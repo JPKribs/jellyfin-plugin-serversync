@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
 
 /// <summary>
 /// Scheduled task to permanently delete expired files from the recycling bin.

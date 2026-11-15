@@ -1,4 +1,4 @@
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// Provides access to the shared <see cref="SyncDatabase"/> singleton.

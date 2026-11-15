@@ -4,13 +4,16 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
+using Jellyfin.Plugin.ServerSync.Services.HistorySync;
+using Jellyfin.Plugin.ServerSync.Services.MetadataSync;
+using Jellyfin.Plugin.ServerSync.Services.UserSync;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
 using JPKribs.Jellyfin.Base;
 using LocalImageType = MediaBrowser.Model.Entities.ImageType;
 using MediaBrowser.Controller.Entities;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.PeopleSync;
 
 /// <summary>
 /// Per-category merge logic for People Sync. Builds the comparable

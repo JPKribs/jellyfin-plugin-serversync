@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Jellyfin.Sdk.Generated.Models;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
 /// A peer's links. When the peer holds a link, its Jellyfin reports the .strm path, which matches

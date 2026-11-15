@@ -1,7 +1,7 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Services.ContentSync.Cleanup;

@@ -3,10 +3,11 @@ using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 
 /// <summary>
 /// Service for validating file operations before execution.

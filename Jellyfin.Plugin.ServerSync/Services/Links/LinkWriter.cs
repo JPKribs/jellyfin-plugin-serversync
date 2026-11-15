@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

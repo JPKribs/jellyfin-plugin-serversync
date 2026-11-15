@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

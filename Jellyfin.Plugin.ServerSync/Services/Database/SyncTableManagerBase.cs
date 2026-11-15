@@ -9,7 +9,7 @@ using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// Universal operations on a sync table, the parts that depend only on the

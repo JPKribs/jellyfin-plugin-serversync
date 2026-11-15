@@ -1,6 +1,6 @@
 using Jellyfin.Plugin.ServerSync.Services.Peer;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
 /// The pairing a client holds with one configured peer: where its secret lives and which server this

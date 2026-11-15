@@ -5,11 +5,12 @@ using System.Data;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.PeopleSync;
 
 /// <summary>
 /// Per-table manager for <see cref="PeopleSyncItem"/>. Natural key is the

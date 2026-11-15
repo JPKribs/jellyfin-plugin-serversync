@@ -1,7 +1,7 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 
-namespace Jellyfin.Plugin.ServerSync.Models;
+namespace Jellyfin.Plugin.ServerSync.Models.Extensions;
 
 /// <summary>
 /// Mapping helpers for <see cref="HistorySyncItem"/>.

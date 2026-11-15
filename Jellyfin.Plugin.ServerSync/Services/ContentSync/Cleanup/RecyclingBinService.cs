@@ -6,7 +6,7 @@ using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 
 /// <summary>
 /// Handles moving files to the recycling bin and cleaning up old files.

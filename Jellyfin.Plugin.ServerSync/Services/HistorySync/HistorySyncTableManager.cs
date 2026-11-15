@@ -6,12 +6,14 @@ using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.HistorySync;
 
 /// <summary>
 /// Per-table manager for <see cref="HistorySyncItem"/>. Natural key is the

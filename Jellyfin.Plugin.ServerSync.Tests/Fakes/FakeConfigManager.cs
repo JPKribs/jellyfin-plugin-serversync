@@ -1,5 +1,5 @@
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Fakes;
 

@@ -4,12 +4,14 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
 
 /// <summary>
 /// Scheduled task to clean up orphaned temporary files from failed downloads.

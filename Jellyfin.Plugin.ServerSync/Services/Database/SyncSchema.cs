@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 
 #pragma warning disable CA2100 // SQL commands use only internal constants and safe parameterized queries
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// The sync database's schema: every table as this release reads and writes it, and the version that

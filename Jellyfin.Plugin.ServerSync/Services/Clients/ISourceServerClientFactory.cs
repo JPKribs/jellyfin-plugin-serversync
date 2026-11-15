@@ -1,4 +1,4 @@
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
 /// Factory for creating <see cref="SourceServerClient"/> instances.

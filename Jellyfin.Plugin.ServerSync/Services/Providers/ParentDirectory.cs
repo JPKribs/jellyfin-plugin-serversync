@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.DependencyInjection;

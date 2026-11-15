@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 
 #pragma warning disable CA2100 // SQL commands use only internal constants and safe parameterized queries
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// SQLite database for tracking sync items between servers.

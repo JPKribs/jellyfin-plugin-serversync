@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Jellyfin.Sdk.Generated.Models;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
 /// Users, their profile images, and item image details.

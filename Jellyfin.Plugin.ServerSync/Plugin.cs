@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
+using Jellyfin.Plugin.ServerSync.Services.Database;
+using Jellyfin.Plugin.ServerSync.Services.HistorySync;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Model.Plugins;
@@ -67,10 +70,10 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         _secrets = new Lazy<SecretProtector>(() => StableSecretProtection.CreateProtector(applicationPaths, SecretsName, logger));
 
         // The history merge is static too, and reads which parts to copy from the live settings.
-        Services.HistorySyncMergeService.EnabledFields = () => Configuration.GetHistoryFields();
+        HistorySyncMergeService.EnabledFields = () => Configuration.GetHistoryFields();
 
         // The disk space checks are static and called from places with no logger of their own.
-        Services.DiskSpaceService.Logger = logger;
+        DiskSpaceService.Logger = logger;
 
         try
         {
@@ -117,16 +120,16 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     /// </summary>
     private static string? HoldIfOlderDatabase(string dataPath, string settingsPath, ILogger logger)
     {
-        var stored = Services.SyncSchema.StoredVersion(dataPath);
-        if (!Services.SyncSchema.IsTooOld(stored))
+        var stored = SyncSchema.StoredVersion(dataPath);
+        if (!SyncSchema.IsTooOld(stored))
         {
             return null;
         }
 
-        var reason = new Services.SchemaTooOldException(stored!.Value).Message;
+        var reason = new SchemaTooOldException(stored!.Value).Message;
         try
         {
-            var copy = settingsPath + ".before-" + Services.SyncSchema.OldestUpgradableRelease;
+            var copy = settingsPath + ".before-" + SyncSchema.OldestUpgradableRelease;
             if (File.Exists(settingsPath) && !File.Exists(copy))
             {
                 File.Copy(settingsPath, copy);

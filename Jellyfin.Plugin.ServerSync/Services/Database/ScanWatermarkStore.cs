@@ -4,7 +4,7 @@ using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// Where a clean scan of one server reached, so the next scan can list only what changed since.

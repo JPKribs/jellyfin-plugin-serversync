@@ -5,7 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.PeopleSync;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
@@ -14,7 +16,7 @@ using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 using SdkBaseItemDto = Jellyfin.Sdk.Generated.Models.BaseItemDto;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.PeopleSync;
 
 /// <summary>
 /// Refresh phase for People sync. Fetches all source persons, looks up each

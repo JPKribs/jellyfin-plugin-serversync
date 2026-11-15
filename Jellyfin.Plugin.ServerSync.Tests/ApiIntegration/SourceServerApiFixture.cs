@@ -4,7 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Sdk.Generated.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;

@@ -1,4 +1,4 @@
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Fakes;
 

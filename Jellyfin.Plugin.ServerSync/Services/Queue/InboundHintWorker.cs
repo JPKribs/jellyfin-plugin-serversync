@@ -7,6 +7,9 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Tasks.MetadataSync;
 using Jellyfin.Sdk.Generated.Models;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.DependencyInjection;
@@ -556,7 +559,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
             var ids = group.Select(r => Guid.Parse(r.Key)).Distinct().ToList();
             try
             {
-                var fields = Tasks.RefreshMetadataSyncTableTask.BuildRequestedFields(config);
+                var fields = RefreshMetadataSyncTableTask.BuildRequestedFields(config);
                 var fetched = await client.GetItemsByIdsAsync(ids, fields, cancellationToken: cancellationToken).ConfigureAwait(false);
                 foreach (var dto in fetched.Where(d => d.Id.HasValue))
                 {

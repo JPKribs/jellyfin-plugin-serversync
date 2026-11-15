@@ -1,7 +1,7 @@
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.UserSync;
 
 /// <summary>
 /// One unit of refresh work for Users, a single mapping and category pairing that carries the data

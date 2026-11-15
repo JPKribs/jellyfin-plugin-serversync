@@ -2,7 +2,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Sdk.Generated.Models;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.HistorySync;
 
 /// <summary>
 /// Source side work item for the History refresh task, which <see cref="RefreshHistorySyncTableTask"/> turns into a sync row.

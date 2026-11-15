@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.HistorySync;
 
 /// <summary>
 /// Merges watch history from the source and local servers. Before the two servers have agreed on

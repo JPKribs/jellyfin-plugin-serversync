@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using Xunit;
 

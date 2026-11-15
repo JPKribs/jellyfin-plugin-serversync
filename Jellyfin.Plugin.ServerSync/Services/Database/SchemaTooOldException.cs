@@ -1,6 +1,6 @@
 using System;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// The sync database was written by a release this one cannot read. It is left exactly as it is, so

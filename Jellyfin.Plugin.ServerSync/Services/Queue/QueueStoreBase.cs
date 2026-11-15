@@ -1,6 +1,7 @@
 #pragma warning disable CA2100 // SQL is internal and parameterized.
 using System;
 using System.Data;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 

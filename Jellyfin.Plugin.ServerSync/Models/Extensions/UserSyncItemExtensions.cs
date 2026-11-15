@@ -2,7 +2,7 @@ using System;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using JPKribs.Jellyfin.Base;
 
-namespace Jellyfin.Plugin.ServerSync.Models;
+namespace Jellyfin.Plugin.ServerSync.Models.Extensions;
 
 /// <summary>
 /// Mapping helpers for <see cref="UserSyncItem"/>.

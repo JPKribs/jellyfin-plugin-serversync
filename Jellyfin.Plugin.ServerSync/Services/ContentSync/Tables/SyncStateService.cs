@@ -5,10 +5,11 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 
 /// <summary>
 /// State transitions for content sync items. Change detection is size-only,

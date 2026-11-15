@@ -1,5 +1,5 @@
 using System;
-using Jellyfin.Plugin.ServerSync.Tasks;
+using Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;

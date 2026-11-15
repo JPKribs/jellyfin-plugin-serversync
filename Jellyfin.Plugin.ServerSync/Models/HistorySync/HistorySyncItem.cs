@@ -2,7 +2,7 @@ using System;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.HistorySync;
 
 namespace Jellyfin.Plugin.ServerSync.Models.HistorySync;
 

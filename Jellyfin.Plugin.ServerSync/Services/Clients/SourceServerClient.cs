@@ -12,7 +12,7 @@ using Jellyfin.Sdk.Generated.Models;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
 /// Client for communicating with the source Jellyfin server using the official SDK.

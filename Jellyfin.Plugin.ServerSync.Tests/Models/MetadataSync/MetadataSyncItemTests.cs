@@ -1,4 +1,4 @@
-using Jellyfin.Plugin.ServerSync.Models;
+using Jellyfin.Plugin.ServerSync.Models.Extensions;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Xunit;
 

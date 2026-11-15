@@ -5,6 +5,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using Jellyfin.Plugin.ServerSync.Services.Playlists;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;

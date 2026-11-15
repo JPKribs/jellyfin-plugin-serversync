@@ -6,12 +6,13 @@ using System.Globalization;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.ContentSync;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 
 /// <summary>
 /// Per-table manager for content <see cref="SyncItem"/> records. Natural key

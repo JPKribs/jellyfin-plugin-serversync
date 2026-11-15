@@ -3,7 +3,7 @@ using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;

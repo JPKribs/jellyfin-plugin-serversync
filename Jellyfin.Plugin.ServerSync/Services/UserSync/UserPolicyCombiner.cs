@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.UserSync;
 
 /// <summary>
 /// Combines two servers' versions of one user's permissions when both changed since they last agreed,

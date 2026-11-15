@@ -1,6 +1,7 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using Jellyfin.Plugin.ServerSync.Services.HistorySync;
 using MediaBrowser.Controller.Entities;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Peer;

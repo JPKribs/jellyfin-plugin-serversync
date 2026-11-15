@@ -1,6 +1,6 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.HistorySync;
 using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Services.HistorySync;

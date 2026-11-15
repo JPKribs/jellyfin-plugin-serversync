@@ -1,13 +1,12 @@
 using System;
 using System.IO;
 using Jellyfin.Plugin.ServerSync.Configuration;
-using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using JPKribs.Jellyfin.Base;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Configuration;
 
 /// <summary>
 /// Provides access to plugin configuration by delegating to the Plugin singleton.

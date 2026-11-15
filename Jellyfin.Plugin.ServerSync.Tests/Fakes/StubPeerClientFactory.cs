@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Fakes;

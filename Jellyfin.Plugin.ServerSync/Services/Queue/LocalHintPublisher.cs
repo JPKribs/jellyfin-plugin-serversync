@@ -2,6 +2,8 @@ using System;
 using System.Globalization;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 using Jellyfin.Plugin.ServerSync.Services.Links;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.DependencyInjection;

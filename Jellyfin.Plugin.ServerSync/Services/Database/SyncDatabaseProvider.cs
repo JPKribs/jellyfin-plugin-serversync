@@ -3,7 +3,7 @@ using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// Provides lazy-initialized access to the shared <see cref="SyncDatabase"/> singleton.

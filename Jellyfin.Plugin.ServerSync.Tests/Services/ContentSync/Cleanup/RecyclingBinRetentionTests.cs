@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;

@@ -1,6 +1,6 @@
 using System;
 using System.Linq;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using Jellyfin.Plugin.ServerSync.Services.Playlists;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;

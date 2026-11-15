@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;

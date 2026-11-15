@@ -1,4 +1,5 @@
 using System;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Xunit;
 
@@ -142,7 +143,7 @@ public class HintProtocolTests
     [InlineData("", "Server Sync")]
     public void HeaderSafe_KeepsPrintableAscii(string name, string expected)
     {
-        Assert.Equal(expected, Jellyfin.Plugin.ServerSync.Services.SourceServerClient.HeaderSafe(name));
+        Assert.Equal(expected, SourceServerClient.HeaderSafe(name));
     }
 
     /// <summary>

@@ -11,7 +11,7 @@ using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services;
 using Jellyfin.Plugin.ServerSync.Services.Playlists;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
-using Jellyfin.Plugin.ServerSync.Tasks;
+using Jellyfin.Plugin.ServerSync.Tasks.PlaylistSync;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;

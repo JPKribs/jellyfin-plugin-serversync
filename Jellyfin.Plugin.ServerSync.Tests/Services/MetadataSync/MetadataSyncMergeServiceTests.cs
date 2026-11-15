@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.MetadataSync;
 using Jellyfin.Sdk.Generated.Models;
 using Xunit;
 

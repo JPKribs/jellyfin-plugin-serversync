@@ -9,7 +9,7 @@ using Jellyfin.Sdk.Generated.Models;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
 /// Calls to a peer that runs Server Sync: capabilities, pairing, hints, history negotiation, and versions.

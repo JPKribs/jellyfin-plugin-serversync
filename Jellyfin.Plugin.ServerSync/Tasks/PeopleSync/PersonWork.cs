@@ -1,7 +1,7 @@
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using SdkBaseItemDto = Jellyfin.Sdk.Generated.Models.BaseItemDto;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.PeopleSync;
 
 /// <summary>
 /// Source side work item for the People refresh task, one source person and the server it came from.

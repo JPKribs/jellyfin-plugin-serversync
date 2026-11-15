@@ -10,7 +10,7 @@ using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Sdk.Generated.Models;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Clients;
 
 /// <summary>
 /// Library listings, item lookups, file and companion downloads, and the shared paging loop.

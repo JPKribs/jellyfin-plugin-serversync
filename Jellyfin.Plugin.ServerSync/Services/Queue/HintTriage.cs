@@ -1,6 +1,7 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Microsoft.Extensions.DependencyInjection;
 

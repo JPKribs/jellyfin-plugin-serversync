@@ -5,7 +5,7 @@ using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// The media files that left this server's library, each with when. Jellyfin answers what was added

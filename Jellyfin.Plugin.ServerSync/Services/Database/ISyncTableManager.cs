@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using JPKribs.Jellyfin.Base;
 
-namespace Jellyfin.Plugin.ServerSync.Services;
+namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
 /// Per-table CRUD surface for sync records. One implementation per record

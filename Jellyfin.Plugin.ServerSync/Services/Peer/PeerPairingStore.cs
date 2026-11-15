@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;

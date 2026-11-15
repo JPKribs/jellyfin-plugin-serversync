@@ -1,6 +1,7 @@
 #pragma warning disable CA2100 // SQL is internal and table names come from a fixed list.
 using System;
 using System.Collections.Generic;
+using Jellyfin.Plugin.ServerSync.Services.Database;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

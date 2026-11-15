@@ -3,7 +3,7 @@ using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
 
-namespace Jellyfin.Plugin.ServerSync.Models;
+namespace Jellyfin.Plugin.ServerSync.Models.Extensions;
 
 /// <summary>
 /// Mapping helpers for <see cref="PeopleSyncItem"/>.

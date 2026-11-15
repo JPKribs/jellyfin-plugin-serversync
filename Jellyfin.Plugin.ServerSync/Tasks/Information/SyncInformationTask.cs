@@ -3,12 +3,17 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.ServerSync.Services;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Tasks.HistorySync;
+using Jellyfin.Plugin.ServerSync.Tasks.MetadataSync;
+using Jellyfin.Plugin.ServerSync.Tasks.PeopleSync;
+using Jellyfin.Plugin.ServerSync.Tasks.PlaylistSync;
+using Jellyfin.Plugin.ServerSync.Tasks.UserSync;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ServerSync.Tasks;
+namespace Jellyfin.Plugin.ServerSync.Tasks.Information;
 
 /// <summary>
 /// The scheduled safety net under the hint pipeline. Runs the full comparison for metadata, people,
