@@ -21,9 +21,10 @@ public sealed class TableLinkRegistry : ILinkRegistry
     /// <summary>
     /// Initializes a new instance of the <see cref="TableLinkRegistry"/> class.
     /// </summary>
-    /// <param name="services">Resolves services on demand.</param>
+    /// <param name="services">Resolves the content sync table on first use.</param>
     public TableLinkRegistry(IServiceProvider services)
     {
+        ArgumentNullException.ThrowIfNull(services);
         _services = services;
     }
 
@@ -52,8 +53,9 @@ public sealed class TableLinkRegistry : ILinkRegistry
     /// <inheritdoc />
     public void Invalidate() => _snapshot = null;
 
-    // Readers never wait on the database while a fresh snapshot is in place. Only one caller reloads
-    // at a time, and it swaps the whole snapshot in when done.
+    /// <summary>
+    /// Returns the links by path, reloading a stale snapshot under a lock so readers of a fresh one never wait on the database.
+    /// </summary>
     private IReadOnlyDictionary<string, LinkEntry> Snapshot()
     {
         if (_snapshot is { } current && DateTime.UtcNow - current.LoadedAt < MaxAge)
@@ -68,8 +70,7 @@ public sealed class TableLinkRegistry : ILinkRegistry
                 return loaded.ByLinkPath;
             }
 
-            // A failed read keeps the last snapshot, or none, and is tried again on the next lookup. It is
-            // never stored as a table with no links.
+            // A failed read is retried on the next lookup, never stored as no links.
             if (_services.GetRequiredService<ContentSyncTableManager>().TryGetLinks() is not { } rows)
             {
                 return _snapshot?.ByLinkPath ?? new Dictionary<string, LinkEntry>(StringComparer.OrdinalIgnoreCase);
@@ -89,5 +90,6 @@ public sealed class TableLinkRegistry : ILinkRegistry
         }
     }
 
+    /// <summary>The links read from the table, and when they were read.</summary>
     private sealed record LoadedLinks(IReadOnlyDictionary<string, LinkEntry> ByLinkPath, DateTime LoadedAt);
 }

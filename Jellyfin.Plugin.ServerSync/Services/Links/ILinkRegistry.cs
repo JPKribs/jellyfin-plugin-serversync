@@ -1,9 +1,8 @@
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// This server's links: the .strm files Server Sync wrote in place of a full copy. A link sits where the
-/// copy would have gone, under the same name with only the extension changed, so a path that misses
-/// here can still find its link. A .strm the user made is never a link.
+/// This server's links, the .strm files Server Sync wrote in place of a full copy. A link sits where the
+/// copy would have gone with only the extension changed, and a .strm the user made is never a link.
 /// </summary>
 public interface ILinkRegistry
 {

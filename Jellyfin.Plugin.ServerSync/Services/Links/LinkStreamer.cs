@@ -20,10 +20,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Streams the file a link stands in for into a response: from the link cache when the file is held
-/// there, and otherwise from the server its grant is routed to. A server that is down, full, or refuses
-/// hands the read to another that holds the same file. A stream that drops or stalls partway is picked
-/// up again where it stopped, from the same server or another, so the player never sees the break.
+/// Streams the file a link stands in for into a response, from the link cache when the file is held
+/// there and otherwise from the server its grant is routed to. A server that is down, full, or refuses
+/// hands the read to another that holds the file, and a stream that drops partway is picked up where it stopped.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkStreamer
@@ -36,7 +35,7 @@ public sealed class LinkStreamer
 
     private const int BufferBytes = 81920;
 
-    // The most of a refusal's text that is read and logged.
+    /// <summary>The most of a refusal's text that is read and logged.</summary>
     private const int MaxReasonBytes = 2048;
 
     private static readonly string[] PassedHeaders = { "Content-Range", "Accept-Ranges", "Last-Modified", "ETag" };
@@ -59,9 +58,9 @@ public sealed class LinkStreamer
     /// <param name="applicationHost">Names this server.</param>
     /// <param name="access">Picks the server a link streams from.</param>
     /// <param name="grants">The plays in progress.</param>
-    /// <param name="health">Which servers are down.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="cache">The link cache.</param>
+    /// <param name="health">Remembers which servers did not answer.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="cache">The link cache a held file plays from.</param>
     public LinkStreamer(
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
@@ -76,17 +75,17 @@ public sealed class LinkStreamer
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="LinkStreamer"/> class, for tests.
+    /// Initializes a new instance of the <see cref="LinkStreamer"/> class.
     /// </summary>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
     /// <param name="applicationHost">Names this server.</param>
     /// <param name="access">Picks the server a link streams from.</param>
     /// <param name="grants">The plays in progress.</param>
-    /// <param name="health">Which servers are down.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="stallTimeout">How long a stream may stall.</param>
-    /// <param name="cache">The link cache, or null.</param>
+    /// <param name="health">Remembers which servers did not answer.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="stallTimeout">How long a source may send nothing before its stream counts as stalled.</param>
+    /// <param name="cache">The link cache a held file plays from, or null to always stream.</param>
     public LinkStreamer(
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
@@ -116,21 +115,21 @@ public sealed class LinkStreamer
     public static TimeSpan StallTimeout { get; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Streams a link for a grant into the response. Returns <see cref="Written"/> once the response
-    /// has been written, otherwise the status to answer with.
+    /// Streams a link for a grant into the response, with the content type taken from the file's name
+    /// here and never from what the other server sent.
     /// </summary>
     /// <param name="context">The request to answer.</param>
-    /// <param name="link">The link.</param>
+    /// <param name="link">The link to stream.</param>
     /// <param name="grant">Who the link is read for, and the server it is routed to.</param>
-    /// <param name="sourcePath">The file's path, for the log: its path on the source, or where its copy would sit here.</param>
-    /// <returns><see cref="Written"/>, or a status code.</returns>
+    /// <param name="sourcePath">The file's path for the log, on the source or where its copy would sit here.</param>
+    /// <returns><see cref="Written"/> once the response has been written, otherwise the status to answer with.</returns>
     public async Task<int> StreamAsync(HttpContext context, LinkEntry link, LinkGrant grant, string sourcePath)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(link);
         ArgumentNullException.ThrowIfNull(grant);
-        // A link whose file is in the cache plays from here, under this server's own rules, and
-        // asks nothing of the source.
+
+        // A cached link plays from here and asks nothing of the source.
         if (_cache?.PathFor(link.LinkId) is { } cached)
         {
             try
@@ -144,7 +143,6 @@ public sealed class LinkStreamer
             }
         }
 
-        // Counted as streaming while this request is open, so this server's own stream limits see it.
         using var playing = grant.Probe ? null : _grants.Hold(link.LinkId, grant.UserId ?? Guid.Empty);
         var head = HttpMethods.IsHead(context.Request.Method);
         var aborted = context.RequestAborted;
@@ -154,16 +152,16 @@ public sealed class LinkStreamer
         HttpResponseMessage? response = null;
         try
         {
-            // A server that did not answer a moment ago is not waited on again while another may hold the file.
             var passedOver = _health.IsDown(route.ServerKey);
             var failure = StatusCodes.Status502BadGateway;
+
+            // A server that just failed to answer is not waited on again.
             if (!passedOver)
             {
                 (response, failure) = await OpenAsync(route, grant, head, range, sourcePath, clients, aborted).ConfigureAwait(false);
             }
 
-            // The server it streams from is down, full, or refused, so another that holds the same file
-            // stands in, and later reads of this playback go to it too.
+            // Another server that holds the file stands in, for later reads too.
             if (response is null || FailsOver(response.StatusCode))
             {
                 if (await StandInAsync(link, grant, route, head, range, sourcePath, clients, aborted).ConfigureAwait(false) is { } stoodIn)
@@ -189,7 +187,6 @@ public sealed class LinkStreamer
 
             var http = context.Response;
             http.StatusCode = (int)response.StatusCode;
-            // The type comes from the file's own name here, never from what the other server sent.
             http.ContentType = MimeTypes.GetMimeType(string.IsNullOrEmpty(link.CopiedPath) ? sourcePath : link.CopiedPath);
             http.Headers["X-Content-Type-Options"] = "nosniff";
             http.ContentLength = response.Content.Headers.ContentLength;
@@ -224,10 +221,11 @@ public sealed class LinkStreamer
                     return Written;
                 }
 
-                // The source dropped the stream partway. What is left is asked for again, from where it stopped.
                 var serverName = _configManager.Configuration.FindServer(route.ServerKey)?.DisplayName;
                 response!.Dispose();
                 response = null;
+
+                // A dropped stream is asked for again from where it stopped.
                 if (window is { } w && w.Start + sent <= w.End && resumes < MaxResumes)
                 {
                     resumes++;
@@ -254,8 +252,7 @@ public sealed class LinkStreamer
                     }
                 }
 
-                // The response has begun, so the connection is closed to tell the player rather than
-                // sending an error it cannot read.
+                // The response has begun, so only closing the connection can tell the player.
                 _logger.LogWarning("'{Server}' stopped sending {Path} partway and the rest could not be had: {Reason}", FormatUtilities.SanitizeForLog(serverName), FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(outcome, 300));
                 context.Abort();
                 return Written;
@@ -276,12 +273,14 @@ public sealed class LinkStreamer
         }
     }
 
-    // A server that is down, refuses, or no longer has the file hands the read to another that holds it.
-    // A bad range or request would fail the same way anywhere, so it goes back to the player.
+    /// <summary>
+    /// Whether a status hands the read to another server, as when one is down, refuses, or lacks the file.
+    /// A bad range or request would fail the same way anywhere, so it goes back to the player.
+    /// </summary>
     private static bool FailsOver(HttpStatusCode status)
         => status is HttpStatusCode.Forbidden or HttpStatusCode.NotFound or HttpStatusCode.TooManyRequests || (int)status >= 500;
 
-    // The bytes of the file a response carries: where they start and end, or null when it does not say.
+    /// <summary>The bytes of the file a response carries, by where they start and end, or null when it does not say.</summary>
     private static (long Start, long End, long? Total)? WindowOf(HttpResponseMessage response)
     {
         if (response.StatusCode == HttpStatusCode.PartialContent)
@@ -292,8 +291,7 @@ public sealed class LinkStreamer
         return response.Content.Headers.ContentLength is > 0 and var length ? (0, length - 1, length) : null;
     }
 
-    // Whether a reopened response carries exactly the bytes still owed, of a file the same length as
-    // the one the stream began from.
+    /// <summary>Whether a reopened response carries exactly the bytes still owed, of a file the same length as the first.</summary>
     private static bool Continues(HttpResponseMessage? response, (long Start, long End, long? Total) window, long sent)
         => response is { StatusCode: HttpStatusCode.PartialContent }
             && response.Content.Headers.ContentRange is { From: { } from, To: { } to } range
@@ -301,6 +299,7 @@ public sealed class LinkStreamer
             && to == window.End
             && (window.Total is null || range.Length is null || range.Length == window.Total);
 
+    /// <summary>Reads the start of a refusal's text, up to <see cref="MaxReasonBytes"/>.</summary>
     private static async Task<string> ReadReasonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var buffer = new byte[MaxReasonBytes];
@@ -320,9 +319,10 @@ public sealed class LinkStreamer
         }
     }
 
-    // Copies a response's body to the player, and says how it ended and why. Only the wait for the
-    // source is timed, so a player that stops reading, such as while paused, is never taken for a
-    // stalled source.
+    /// <summary>
+    /// Copies a response's body to the player, and says how it ended and why. Only the wait for the source
+    /// is timed, so a player that stops reading, such as while paused, is never taken for a stalled source.
+    /// </summary>
     private async Task<(CopyEnd End, string? Why)> CopyAsync(HttpResponseMessage response, Stream destination, LinkEntry link, LinkGrant grant, Action<int> onSent, CancellationToken aborted)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(BufferBytes);
@@ -372,6 +372,7 @@ public sealed class LinkStreamer
         }
     }
 
+    /// <summary>How a copy of a response's body ended.</summary>
     private enum CopyEnd
     {
         Sent,
@@ -379,8 +380,10 @@ public sealed class LinkStreamer
         Refused
     }
 
-    // Asks the other servers that hold the file, opens it on the first that allows the play, and moves
-    // the grant there. Null when none can stand in.
+    /// <summary>
+    /// Asks the other servers that hold the file, opens it on the first that allows the play, and moves
+    /// the grant there, or returns null when none can stand in.
+    /// </summary>
     private async Task<(HttpResponseMessage Response, LinkRoute Route)?> StandInAsync(LinkEntry link, LinkGrant grant, LinkRoute failed, bool head, string? range, string sourcePath, List<IDisposable> clients, CancellationToken aborted)
     {
         var choice = await _access.ChooseAsync(link, grant.UserId, new[] { failed.ServerKey }, aborted).ConfigureAwait(false);
@@ -400,18 +403,19 @@ public sealed class LinkStreamer
         return (response, next);
     }
 
-    // Opens the file on one server. A refusal is logged and its answer returned unread past its reason,
-    // so the caller can fall back. Null with the status to send when the server cannot be used at all.
+    /// <summary>
+    /// Opens the file on one server, whose client stays open in <paramref name="clients"/> since the response reads through it.
+    /// A refusal is logged and returned so the caller can fall back, and null comes with the status to send when the server cannot be used.
+    /// </summary>
     private async Task<(HttpResponseMessage? Response, int Failure)> OpenAsync(LinkRoute route, LinkGrant grant, bool head, string? range, string sourcePath, List<IDisposable> clients, CancellationToken aborted)
     {
         var server = _configManager.Configuration.FindServer(route.ServerKey);
         if (server is null || !server.IsEnabled || !server.IsConfigured)
         {
-            _logger.LogWarning("Could not stream {Path}: the server it links to is no longer configured or is off", sourcePath);
+            _logger.LogWarning("Could not stream {Path}: the server it links to is no longer configured or is off", FormatUtilities.SanitizeForLog(sourcePath));
             return (null, StatusCodes.Status503ServiceUnavailable);
         }
 
-        // Kept open until the stream is sent, since the response reads through it.
         var client = _clientFactory.Create(server);
         clients.Add(client);
         try
@@ -421,7 +425,7 @@ public sealed class LinkStreamer
             if (!response.IsSuccessStatusCode)
             {
                 var reason = await ReadReasonAsync(response, aborted).ConfigureAwait(false);
-                _logger.LogWarning("'{Server}' refused to stream {Path} ({Status}): {Reason}", server.DisplayName, sourcePath, (int)response.StatusCode, FormatUtilities.SanitizeForLog(reason, 300));
+                _logger.LogWarning("'{Server}' refused to stream {Path} ({Status}): {Reason}", server.DisplayName, FormatUtilities.SanitizeForLog(sourcePath), (int)response.StatusCode, FormatUtilities.SanitizeForLog(reason, 300));
             }
 
             return (response, (int)response.StatusCode);
@@ -429,7 +433,7 @@ public sealed class LinkStreamer
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !aborted.IsCancellationRequested)
         {
             _health.Failed(server.Key);
-            _logger.LogWarning("Could not reach '{Server}' to stream {Path}: {Reason}", server.DisplayName, sourcePath, ex.Message);
+            _logger.LogWarning("Could not reach '{Server}' to stream {Path}: {Reason}", server.DisplayName, FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(ex.Message, 300));
             return (null, StatusCodes.Status502BadGateway);
         }
     }

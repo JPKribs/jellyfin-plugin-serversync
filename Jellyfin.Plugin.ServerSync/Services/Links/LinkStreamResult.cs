@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
 /// Answers a player's direct play of a link by streaming the file from the source, for the user who
-/// asked. Jellyfin would otherwise read the link's own address to do the same, without saying who for.
+/// asked. Jellyfin would otherwise read the link's own address without saying who for.
 /// </summary>
 public sealed class LinkStreamResult : IActionResult
 {
@@ -18,10 +18,13 @@ public sealed class LinkStreamResult : IActionResult
     /// Initializes a new instance of the <see cref="LinkStreamResult"/> class.
     /// </summary>
     /// <param name="streamer">Streams the file.</param>
-    /// <param name="link">The link.</param>
+    /// <param name="link">The link to stream.</param>
     /// <param name="grant">The grant that allows the stream.</param>
     public LinkStreamResult(LinkStreamer streamer, LinkEntry link, LinkGrant grant)
     {
+        ArgumentNullException.ThrowIfNull(streamer);
+        ArgumentNullException.ThrowIfNull(link);
+        ArgumentNullException.ThrowIfNull(grant);
         _streamer = streamer;
         _link = link;
         _grant = grant;

@@ -12,10 +12,10 @@ public interface ILinkAccess
     /// Asks the link's own server, then the others that hold the same file, until one allows it.
     /// A null user is this server's own media probe.
     /// </summary>
-    /// <param name="link">The link.</param>
+    /// <param name="link">The link to find a route for.</param>
     /// <param name="userId">The user here, or null for the probe.</param>
     /// <param name="skip">Server entries not to ask, such as one that just failed.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the asking.</param>
     /// <returns>The route to stream from, or why none would.</returns>
     Task<LinkChoice> ChooseAsync(LinkEntry link, Guid? userId, IReadOnlyCollection<string>? skip, CancellationToken cancellationToken);
 }

@@ -19,13 +19,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Shows playback of a link on this server, the source, as a session of its own. Each viewer on the
-/// server holding the link is a device here under the client name Server Sync, so the dashboard lists
-/// it, the activity log and playback plugins see it, and Jellyfin's own stop handling updates played
-/// state and resume position for the user it streams as. A stop report ends the playback and leaves
-/// the session idle, since the dashboard keeps showing a session that vanishes while it plays.
-/// <see cref="SweepAsync"/> stops playback that went ten minutes without a report, and removes a
-/// session twenty minutes after its last report, since Jellyfin itself never removes it.
+/// Shows playback of a link on this server, the source, as a session under the client name Server Sync,
+/// so the dashboard lists it and Jellyfin updates played state for the user it streams as. A stop report
+/// leaves the session idle, and <see cref="SweepAsync"/> stops and removes sessions that get no reports.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPlaybackSessions
@@ -41,13 +37,13 @@ public sealed class LinkPlaybackSessions
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkPlaybackSessions"/> class.
     /// </summary>
-    /// <param name="sessionManager">Session manager.</param>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="userManager">User manager.</param>
+    /// <param name="sessionManager">Holds the sessions and takes the playback reports.</param>
+    /// <param name="libraryManager">Finds the item a report names.</param>
+    /// <param name="userManager">Finds the user a report streams as.</param>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="controllerLogger">Logger for each session controller.</param>
+    /// <param name="controllerLogger">Writes log entries for the sessions and their controllers.</param>
     public LinkPlaybackSessions(
         ISessionManager sessionManager,
         ILibraryManager libraryManager,
@@ -77,11 +73,11 @@ public sealed class LinkPlaybackSessions
         return "serversync-link-" + hash.ToLowerInvariant();
     }
 
-    /// <summary>Applies one report. Null when applied, otherwise why not.</summary>
+    /// <summary>Applies one playback report to its session here.</summary>
     /// <param name="peer">The reporting server's entry here.</param>
-    /// <param name="report">The report.</param>
-    /// <param name="remoteEndPoint">The reporting server's address.</param>
-    /// <returns>Null, or the refusal.</returns>
+    /// <param name="report">The playback report to apply.</param>
+    /// <param name="remoteEndPoint">The reporting server's address, shown on the session.</param>
+    /// <returns>Null when applied, otherwise why the report is refused.</returns>
     public async Task<string?> ApplyAsync(SourceServer peer, PeerPlaybackReport report, string remoteEndPoint)
     {
         ArgumentNullException.ThrowIfNull(peer);
@@ -101,7 +97,7 @@ public sealed class LinkPlaybackSessions
             return "the user is not mapped to a user here";
         }
 
-        // A report may only move played state the user could reach by playing the item here.
+        // A report may only move played state the user could reach here.
         if (!item.IsVisible(user))
         {
             return "the user cannot see that item here";
@@ -120,7 +116,6 @@ public sealed class LinkPlaybackSessions
             remoteEndPoint,
             user).ConfigureAwait(false);
 
-        // The dashboard's remote control reaches the viewer through the server holding the link.
         var (controller, isNew) = session.EnsureController<LinkSessionController>(_ => new LinkSessionController(peer.Key, report.SessionKey, _configManager, _clientFactory, _applicationHost, _controllerLogger)).ToValueTuple();
         (controller as LinkSessionController)?.Touch();
         if (isNew)
@@ -134,8 +129,6 @@ public sealed class LinkPlaybackSessions
         }
 
         var mediaSourceId = item.Id.ToString("N", CultureInfo.InvariantCulture);
-        // This server only sends the file, so a transcode reported by an older linking server shows as
-        // the direct stream it is here.
         var method = Enum.Parse<PlayMethod>(LinkPlaybackReporter.ReportedMethod(report.PlayMethod));
         switch (report.Event)
         {
@@ -172,7 +165,7 @@ public sealed class LinkPlaybackSessions
                 }).ConfigureAwait(false);
                 break;
             case LinkPlaybackEvent.Stop:
-                // A stop that throws is still answered as applied, since sending it again would not help.
+                // Resending a stop that throws would not help, so it counts as applied.
                 try
                 {
                     await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
@@ -198,11 +191,9 @@ public sealed class LinkPlaybackSessions
     }
 
     /// <summary>
-    /// Tidies the link sessions whose server stopped reporting on them. Playback with no report for
-    /// <see cref="LinkSessionController.ActiveFor"/> is stopped, so played state and resume position
-    /// are kept and the dashboard shows the session idle. A session with no report for
-    /// <see cref="LinkSessionController.RemoveAfter"/> is removed, since nothing in Jellyfin removes a
-    /// session that has no websocket.
+    /// Stops playback with no report for <see cref="LinkSessionController.ActiveFor"/>, which keeps played
+    /// state and resume position. Removes a session with no report for
+    /// <see cref="LinkSessionController.RemoveAfter"/>, since Jellyfin never removes one that has no websocket.
     /// </summary>
     /// <param name="now">The time to judge staleness by.</param>
     /// <returns>How many sessions were removed.</returns>
@@ -218,6 +209,7 @@ public sealed class LinkPlaybackSessions
                 continue;
             }
 
+            // One session that will not stop must not end the sweep.
             try
             {
                 if (session.NowPlayingItem is { } playing)
@@ -242,6 +234,7 @@ public sealed class LinkPlaybackSessions
                 continue;
             }
 
+            // One session that will not go must not end the sweep.
             try
             {
                 await _sessionManager.ReportSessionEnded(session.Id).ConfigureAwait(false);
@@ -257,12 +250,12 @@ public sealed class LinkPlaybackSessions
     }
 
     /// <summary>
-    /// The name a viewer's session shows under here: their client and their user on the server holding
-    /// the link, as in <c>Jellyfin Web (Joe)</c>. A linking server that sends no user name is named instead.
+    /// The name a viewer's session shows under here, their client and their user on the linking server,
+    /// as in <c>Jellyfin Web (Joe)</c>. A linking server that sends no user name is named instead.
     /// </summary>
     /// <param name="peer">The linking server.</param>
-    /// <param name="report">The playback report.</param>
-    /// <returns>The name.</returns>
+    /// <param name="report">The playback report that names the client and the user.</param>
+    /// <returns>The device name.</returns>
     public static string DeviceName(SourceServer peer, PeerPlaybackReport report)
     {
         ArgumentNullException.ThrowIfNull(peer);
@@ -278,7 +271,7 @@ public sealed class LinkPlaybackSessions
         };
     }
 
-    // Names come from another server, so they are held to a length and kept to one plain line.
+    /// <summary>Holds a name from another server to one plain line of 64 characters.</summary>
     private static string Clean(string? name)
         => new string((name ?? string.Empty).Where(c => !char.IsControl(c)).Take(64).ToArray()).Trim();
 }

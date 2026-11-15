@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Trickplay;
@@ -22,29 +23,23 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// A filter on Jellyfin's own routes, for this server's links only. When a user asks to play a link, it
-/// asks the source whether they may, or another server that holds the same file when the source will
-/// not, refuses at once if none will, and records the user and that server so the link route streams
-/// as them from it. A film held in several versions is asked about version by version, and the versions
-/// the source refuses, such as one above the user's bitrate limit, are left out of what the player is
-/// offered. It clears the link's loopback URL from every response, so clients play through this
-/// server's own stream route and never see the link's secret, and stops universal audio from
-/// redirecting a client to it. A player's direct play is answered here, streamed from the source for
-/// that user, so two viewers of one link are each streamed, counted, and limited as themselves. Every
-/// other request passes through untouched, and a failure in the link lookup never breaks playback.
+/// A filter on Jellyfin's own routes, for this server's links only, that asks the source whether a user
+/// may play a link, refuses at once when no server allows it, and records the user and server the link
+/// route streams as. It also clears the link's loopback URL from every response so clients never see the
+/// link's secret, and answers a player's direct play by streaming from the source for that user.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
 {
     private const string UserIdClaim = "Jellyfin-UserId";
 
-    // Where a user asks to play: these ask the source, then probe the link and decide how it plays.
+    /// <summary>The controllers where a user asks to play, which ask the source before the link is probed.</summary>
     private static readonly string[] PlayControllers = { "MediaInfo", "UniversalAudio" };
 
-    // Routes that hand out the item's file itself, which for a link is the .strm and its secret.
+    /// <summary>The actions that hand out the item's file itself, which for a link is the .strm and its secret.</summary>
     private static readonly string[] FileActions = { "GetFile", "GetDownload" };
 
-    // Where the versions the source refused are kept for one request, so its response leaves them out.
+    /// <summary>The request item that keeps the versions the source refused, so the response leaves them out.</summary>
     private const string RefusedVersions = "ServerSync.Link.RefusedVersions";
 
     private readonly ILibraryManager _libraryManager;
@@ -60,17 +55,22 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkPlaybackFilter"/> class.
     /// </summary>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="links">The link registry.</param>
-    /// <param name="grants">The plays in progress.</param>
+    /// <param name="libraryManager">Finds the item and versions a request names.</param>
+    /// <param name="links">Tells which paths are this server's links.</param>
+    /// <param name="grants">Records the users the source allowed to play a link.</param>
     /// <param name="access">Picks the server a link streams from.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="streamer">Streams the file, or null.</param>
-    /// <param name="configManager">Reads the plugin configuration, or null.</param>
-    /// <param name="services">Resolves services on demand, or null.</param>
-    /// <param name="cache">The link cache, or null.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="streamer">Streams a direct play for its user, or null to leave it to Jellyfin.</param>
+    /// <param name="configManager">Reads whether links stream directly, or null to stream them directly.</param>
+    /// <param name="services">Resolves the user and trickplay managers on demand, or null.</param>
+    /// <param name="cache">The link cache a held file plays from, or null.</param>
     public LinkPlaybackFilter(ILibraryManager libraryManager, ILinkRegistry links, LinkGrants grants, ILinkAccess access, ILogger<LinkPlaybackFilter> logger, LinkStreamer? streamer = null, IPluginConfigurationManager? configManager = null, IServiceProvider? services = null, LinkCache? cache = null)
     {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(links);
+        ArgumentNullException.ThrowIfNull(grants);
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(logger);
         _cache = cache;
         _services = services;
         _streamer = streamer;
@@ -88,17 +88,14 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
 
-        // A download of a link hands out its .strm, and with it the link's address and secret. The check
-        // reads the file itself rather than the link table, so it holds while the table cannot be read
-        // and for a version named in place of the route's item.
+        // A download of a link hands out its .strm, and with it the link's secret.
         if (DownloadsALink(context))
         {
             context.Result = new ObjectResult("This item streams from another server and cannot be downloaded from here") { StatusCode = StatusCodes.Status403Forbidden };
             return;
         }
 
-        // Held for a database an older release wrote: the link table cannot be read, so Jellyfin's own
-        // routes are left exactly as they are.
+        // While the plugin is held the link table cannot be read, so routes pass through.
         if (Plugin.Held)
         {
             await next().ConfigureAwait(false);
@@ -109,9 +106,8 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         if (links.Count > 0)
         {
             var userId = Guid.TryParse(context.HttpContext.User.FindFirst(UserIdClaim)?.Value, out var id) && id != Guid.Empty ? id : (Guid?)null;
-            // Jellyfin serves a non-video .strm as a plain file, its text and secret included, so a link
-            // reached through the audio routes is refused outright. Only video is linked, so this only
-            // guards against a link made some other way.
+
+            // Jellyfin serves a non-video .strm as a plain file, secret included.
             if (string.Equals(controller, "Library", StringComparison.Ordinal)
                 || (controller is "Audio" or "UniversalAudio" && _libraryManager.GetItemById(LinkItemId(context)) is not Video))
             {
@@ -127,12 +123,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                     return;
                 }
 
-                // A film held in several versions is asked about version by version, so a user refused
-                // one, such as a file above their bitrate limit, is offered the versions they may play.
-                // A version whose file is in the link cache plays from here under this server's own
-                // rules, so the source is not asked about it and need not be up.
-                // This runs before Jellyfin has checked the user against the item, so that check is made
-                // here first. The source only knows the user it maps them to, who may see more.
+                // Each version is checked here first, since Jellyfin has not yet checked the user.
                 var choices = await Task.WhenAll(links.Select(l => !MaySeeHere(l.VersionId, userId.Value)
                     ? Task.FromResult(new LinkChoice(null, "this server does not let you play this item"))
                     : MayPlayFromCache(l.VersionId, userId.Value, l.Link)
@@ -147,12 +138,12 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                     }
                     else
                     {
-                        _logger.LogInformation("Refused to play the link {Path}: {Reason}", links[i].Link.LinkPath, choices[i].Refusal);
+                        _logger.LogInformation("Refused to play the link {Path}: {Reason}", FormatUtilities.SanitizeForLog(links[i].Link.LinkPath), FormatUtilities.SanitizeForLog(choices[i].Refusal, 300));
                         refused.Add(links[i].VersionId);
                     }
                 }
 
-                // Nothing is left to play only when every version is a link that was refused.
+                // Nothing is left to play when every version is a refused link.
                 if (refused.Count == versions)
                 {
                     context.Result = Refused(choices[0].Refusal ?? "no server that holds the file allowed it");
@@ -164,8 +155,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                     context.HttpContext.Items[RefusedVersions] = refused;
                 }
 
-                // Set even when the client left it out: an argument at its default is not in the
-                // dictionary, and its default is to redirect the client to the link's URL.
+                // An argument left at its default would redirect the client to the link's URL.
                 if (string.Equals(controller, "UniversalAudio", StringComparison.Ordinal))
                 {
                     context.ActionArguments["enableRedirection"] = false;
@@ -173,16 +163,13 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             }
             else if (userId is not { } streaming || !_grants.Refresh(links[0].Link.LinkId, streaming))
             {
-                // A stream nobody asked to play through PlaybackInfo would read the link as whoever
-                // last did, so it is refused before Jellyfin opens the link.
+                // A stream nobody asked to play would read the link as whoever last did.
                 context.Result = Refused("press play again, so this server can ask the source");
                 return;
             }
             else if (_streamer is not null && _configManager?.Configuration.StreamLinksDirectly != false && IsDirectPlay(context, controller))
             {
-                // Direct play needs nothing from Jellyfin but the bytes, and here the user is known. So
-                // the file is streamed from the source for exactly this user, rather than through the
-                // link's own address, which cannot tell two viewers of one link apart.
+                // Streaming here names the user, which the link's own address cannot.
                 context.Result = new LinkStreamResult(_streamer, links[0].Link, new LinkGrant(streaming, false, _grants.RouteFor(links[0].Link.LinkId, streaming)));
                 return;
             }
@@ -202,12 +189,12 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             return;
         }
 
+        // A failure here must never break one of Jellyfin's own responses.
         try
         {
             if (context.Result is ObjectResult { Value: { } value } result)
             {
-                // A list still being built would be built again when it is written, and the copy
-                // written would be one nothing here had touched. It is held as a list instead.
+                // A lazy list would be rebuilt when written, losing the changes made here.
                 if (value is IEnumerable<BaseItemDto> lazyItems and not ICollection<BaseItemDto>)
                 {
                     value = lazyItems.ToList();
@@ -250,7 +237,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         await next().ConfigureAwait(false);
     }
 
-    // The items a response carries.
+    /// <summary>The items a response carries.</summary>
     private static IEnumerable<BaseItemDto> Items(object value)
         => value switch
         {
@@ -263,7 +250,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             _ => Enumerable.Empty<BaseItemDto>()
         };
 
-    // Media sources in a response whose path is a link's URL. Only those are ever changed.
+    /// <summary>The media sources in a response whose path is a link's URL, the only ones ever changed.</summary>
     private static IEnumerable<MediaSourceInfo> LinkSources(object value)
     {
         var sources = value is PlaybackInfoResponse playback
@@ -273,8 +260,10 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         return sources?.Where(s => LinkFiles.PointsAtLinkRoute(s?.Path)).ToList() ?? Enumerable.Empty<MediaSourceInfo>();
     }
 
-    // Jellyfin leaves trickplay out of an item whose file is remote, which a .strm is, so the images a
-    // link took from its source are listed here, the way Jellyfin lists them for a file.
+    /// <summary>
+    /// Lists the trickplay images a link took from its source, since Jellyfin leaves trickplay out of an
+    /// item whose file is remote, which a .strm is.
+    /// </summary>
     private async Task ListTrickplayAsync(BaseItemDto item)
     {
         if (_services?.GetService<ITrickplayManager>() is not { } trickplay)
@@ -298,27 +287,30 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         }
     }
 
-    // The actions that play, stream, or hand out a link. Everything else on these controllers, such as
-    // merging versions, passes through.
+    /// <summary>
+    /// Whether an action plays, streams, or hands out a link. Everything else on these controllers, such
+    /// as merging versions, passes through.
+    /// </summary>
     private static bool Watched(ControllerActionDescriptor descriptor)
         => descriptor.ControllerName switch
         {
             "MediaInfo" => descriptor.ActionName.Contains("PlaybackInfo", StringComparison.Ordinal),
             "UniversalAudio" or "DynamicHls" => true,
-            // Where a player reads the stream. Only a user the source already allowed may, which keeps their grant alive.
+
+            // Only a user the source already allowed may read the stream.
             "Videos" or "Audio" => descriptor.ActionName.Contains("Stream", StringComparison.Ordinal),
 
-            // Subtitles and fonts held inside the file are extracted by reading it through the link, so
-            // they are held to the same rule as the stream.
+            // Subtitles and fonts inside the file are read through the link.
             "Subtitle" => descriptor.ActionName is "GetSubtitle" or "GetSubtitleWithTicks" or "GetSubtitlePlaylist",
             "VideoAttachments" => true,
             "Library" => FileActions.Contains(descriptor.ActionName, StringComparer.Ordinal),
             _ => false
         };
 
-    // A cached link plays under this server's own rules, and this filter runs before Jellyfin has
-    // applied them to the request. So they are applied here: the user may play media and may see the
-    // item. Anyone else is asked about at the source, as for a link that is not cached.
+    /// <summary>
+    /// Whether a user may play a cached link under this server's own rules, which Jellyfin has not yet
+    /// applied when this filter runs. Anyone else is asked about at the source.
+    /// </summary>
     private bool MayPlayFromCache(Guid versionId, Guid userId, LinkEntry link)
     {
         if (_cache?.Holds(link.LinkId) != true)
@@ -333,8 +325,10 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             && _libraryManager.GetItemById(versionId)?.IsVisible(user) == true;
     }
 
-    // This server's own rules for a user and an item: the user is enabled, may play media and may see
-    // the item. With no user manager to ask, which is only so outside a running server, nothing is refused.
+    /// <summary>
+    /// Whether this server's own rules let a user play an item, being enabled, allowed to play media, and able
+    /// to see it. With no user manager to ask, which is only so outside a running server, nothing is refused.
+    /// </summary>
     private bool MaySeeHere(Guid versionId, Guid userId)
     {
         if (_services?.GetService<IUserManager>() is not { } users)
@@ -349,17 +343,20 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             && _libraryManager.GetItemById(versionId)?.IsVisible(user) == true;
     }
 
-    // A player's direct play: the video stream route asked for the file as it is.
+    /// <summary>Whether a request is a player's direct play, the video stream route asked for the file as it is.</summary>
     private static bool IsDirectPlay(FilterContext context, string? controller)
         => string.Equals(controller, "Videos", StringComparison.Ordinal)
             && bool.TryParse(context.HttpContext.Request.Query["static"].ToString(), out var asIs)
             && asIs;
 
+    /// <summary>The item a route names, or the empty id when it names none.</summary>
     private static Guid LinkItemId(FilterContext context) => RouteItemId(context) ?? Guid.Empty;
 
-    // Whether a request for Jellyfin's download or file route reaches a .strm that points at the link
-    // route: the route's item, or a version the request names. A file that cannot be read is refused,
-    // since it cannot be shown not to be a link.
+    /// <summary>
+    /// Whether Jellyfin's download or file route reaches a .strm that points at the link route, judged from the
+    /// file itself so it holds while the link table cannot be read. A file that cannot be read is refused,
+    /// since it cannot be shown not to be a link.
+    /// </summary>
     private bool DownloadsALink(ActionExecutingContext context)
     {
         if (context.ActionDescriptor is not ControllerActionDescriptor { ControllerName: "Library" } descriptor
@@ -385,7 +382,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogDebug(ex, "Could not read {Path} to tell whether it is a link, so its download is refused", path);
+                _logger.LogDebug(ex, "Could not read {Path} to tell whether it is a link, so its download is refused", FormatUtilities.SanitizeForLog(path));
                 return true;
             }
         }
@@ -393,7 +390,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         return false;
     }
 
-    // Jellyfin names the item differently on some routes: routeItemId for subtitles, videoId for attachments.
+    /// <summary>The item a route names, which Jellyfin calls routeItemId for subtitles and videoId for attachments.</summary>
     private static Guid? RouteItemId(FilterContext context)
     {
         // The subtitle route names its item routeItemId and lets a query itemId replace it.
@@ -414,18 +411,19 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         return null;
     }
 
+    /// <summary>Builds the 403 answer that tells the player why the source refused.</summary>
     private static ObjectResult Refused(string reason)
         => new($"This item streams from another server, which refused: {reason}") { StatusCode = StatusCodes.Status403Forbidden };
 
-    // The version of the item a request names, when it names one: a query value, a route value, or
-    // the posted playback request.
+    /// <summary>
+    /// The version of the item a request names in a query value, a route value, or the posted playback request,
+    /// read in the order Jellyfin reads them so the version checked is the version Jellyfin goes on to read.
+    /// </summary>
     private static Guid? NamedVersion(FilterContext context)
     {
-        // Jellyfin's subtitle route takes the query's value over the route's, so the same order is
-        // used here: the version checked is always the version Jellyfin goes on to read.
-        // Its attachment route reads the route's value only, so a query value there names nothing
-        // Jellyfin reads and must not decide which version is checked.
         var routeOnly = string.Equals(context.RouteData.Values["controller"]?.ToString(), "VideoAttachments", StringComparison.OrdinalIgnoreCase);
+
+        // Jellyfin's attachment route reads only the route value, so a query value is ignored.
         if (!routeOnly && Guid.TryParse(context.HttpContext.Request.Query["mediaSourceId"].ToString(), out var queried))
         {
             return queried;
@@ -455,14 +453,18 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
         return null;
     }
 
-    // The links a request touches, each with the version of the item it is. Asking to play a film held
-    // in several versions touches every version's link, unless the request names one. A stream reads
-    // the version it names, or the item's own. Also says how many versions were looked at, links or not.
+    /// <summary>
+    /// Finds the links a request touches, each with the version of the item it is, and counts the versions
+    /// looked at. A request to play touches every version's link unless it names one, and a stream reads
+    /// the version it names or the item's own.
+    /// </summary>
     private List<(Guid VersionId, LinkEntry Link)> FindLinks(FilterContext context, out string? controller, out int versions)
     {
         controller = null;
         versions = 0;
         var found = new List<(Guid, LinkEntry)>();
+
+        // A failed lookup must never break playback of anything else.
         try
         {
             if (context.ActionDescriptor is not ControllerActionDescriptor descriptor
@@ -477,8 +479,7 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
             var named = NamedVersion(context);
             var all = new List<BaseItem> { item };
 
-            // A stream reads one version: the one it names, or the item's own. Only a request to play
-            // needs every version, so only it looks them up.
+            // A stream reads one version, so only a request to play looks up them all.
             if (!PlayControllers.Contains(controller, StringComparer.Ordinal))
             {
                 if (named is { } one && one != item.Id && _libraryManager.GetItemById(one) is { } version)

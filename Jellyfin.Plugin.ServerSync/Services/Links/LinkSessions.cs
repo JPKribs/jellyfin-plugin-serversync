@@ -48,10 +48,13 @@ public sealed class LinkSessions
     {
     }
 
-    /// <summary>Initializes a new instance of the <see cref="LinkSessions"/> class, for tests.</summary>
-    /// <param name="now">The clock.</param>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkSessions"/> class.
+    /// </summary>
+    /// <param name="now">Reads the current time, so a test can move it.</param>
     public LinkSessions(Func<DateTime> now)
     {
+        ArgumentNullException.ThrowIfNull(now);
         _now = now;
     }
 
@@ -62,6 +65,7 @@ public sealed class LinkSessions
     /// <returns>Ends the request when disposed.</returns>
     public IDisposable Open(string peerKey, Guid userId, Guid itemId)
     {
+        ArgumentNullException.ThrowIfNull(peerKey);
         var key = (peerKey.ToUpperInvariant(), userId, itemId);
         lock (_lock)
         {
@@ -79,19 +83,19 @@ public sealed class LinkSessions
     }
 
     /// <summary>
-    /// Opens a request for a stream when the limits allow it, checking and opening under one lock so two
-    /// first requests at once cannot both slip under a limit. A stream already running always opens.
-    /// Null when a limit is reached.
+    /// Opens a request for a stream, or returns null when a limit is reached and the stream is not already
+    /// running. The check and the open share one lock, so two first requests cannot both slip under a limit.
     /// </summary>
     /// <param name="peerKey">The calling server's entry key.</param>
     /// <param name="userId">The user streamed as.</param>
-    /// <param name="itemId">The item.</param>
+    /// <param name="itemId">The item streamed.</param>
     /// <param name="maxForPeer">The calling server's limit, or 0 for none.</param>
     /// <param name="maxForUser">The user's limit, or 0 for none.</param>
     /// <param name="userElsewhere">Streams the user holds outside links, counted toward their limit.</param>
     /// <returns>The handle, or null.</returns>
     public IDisposable? TryOpen(string peerKey, Guid userId, Guid itemId, int maxForPeer, int maxForUser, int userElsewhere)
     {
+        ArgumentNullException.ThrowIfNull(peerKey);
         var peer = peerKey.ToUpperInvariant();
         lock (_lock)
         {
@@ -109,7 +113,7 @@ public sealed class LinkSessions
 
     /// <summary>
     /// Charges bytes of a file to the calling server's probe allowance for it. A probe is served
-    /// without a user, a stream count or a speed, so the allowance is what keeps the probe flag from
+    /// without a user, a stream count, or a speed, so the allowance is what keeps the probe flag from
     /// being a way to copy whole files past every limit.
     /// </summary>
     /// <param name="peerKey">The calling server's entry key.</param>
@@ -118,6 +122,7 @@ public sealed class LinkSessions
     /// <returns><c>true</c> while the allowance holds.</returns>
     public bool TakeProbe(string peerKey, Guid itemId, int bytes)
     {
+        ArgumentNullException.ThrowIfNull(peerKey);
         var key = (peerKey.ToUpperInvariant(), itemId);
         var now = _now();
         lock (_lock)
@@ -146,13 +151,14 @@ public sealed class LinkSessions
     }
 
     /// <summary>
-    /// Opens a download into that server's link cache, when it holds fewer than it may. Null when it
-    /// is at the limit.
+    /// Opens a download into the calling server's link cache, or returns null when it already holds
+    /// <see cref="MaxFillsPerPeer"/>.
     /// </summary>
     /// <param name="peerKey">The calling server's entry key.</param>
-    /// <returns>The handle, or null.</returns>
+    /// <returns>The handle that ends the download when disposed, or null.</returns>
     public IDisposable? TryOpenFill(string peerKey)
     {
+        ArgumentNullException.ThrowIfNull(peerKey);
         var peer = peerKey.ToUpperInvariant();
         lock (_lock)
         {
@@ -169,9 +175,8 @@ public sealed class LinkSessions
     }
 
     /// <summary>
-    /// The speed everything sent to one server for one user shares: every request of a stream, however
-    /// many a player opens at once, or the downloads into that server's cache made for that user. So a
-    /// limit holds for the user as a whole, not for each request on its own.
+    /// The speed everything sent to one server for one user shares, whether every request of a stream or
+    /// the downloads into that server's link cache. A limit so holds for the user as a whole, not for each request.
     /// </summary>
     /// <param name="peerKey">The calling server's entry key.</param>
     /// <param name="userId">The user streamed as, or null for none.</param>
@@ -180,6 +185,7 @@ public sealed class LinkSessions
     /// <returns>The shared speed.</returns>
     public SpeedBucket SpeedFor(string peerKey, Guid? userId, bool fill, long bytesPerSecond)
     {
+        ArgumentNullException.ThrowIfNull(peerKey);
         var key = peerKey.ToUpperInvariant() + "|" + (userId?.ToString("N") ?? string.Empty) + (fill ? "|fill" : string.Empty);
         lock (_lock)
         {
@@ -209,6 +215,7 @@ public sealed class LinkSessions
     /// <returns><c>true</c> when the stream is already open.</returns>
     public bool IsActive(string peerKey, Guid userId, Guid itemId)
     {
+        ArgumentNullException.ThrowIfNull(peerKey);
         lock (_lock)
         {
             Prune();
@@ -216,11 +223,12 @@ public sealed class LinkSessions
         }
     }
 
-    /// <summary>The streams that server holds.</summary>
+    /// <summary>Counts the streams one linking server holds.</summary>
     /// <param name="peerKey">The linking server's key.</param>
     /// <returns>The number of streams.</returns>
     public int CountForPeer(string peerKey)
     {
+        ArgumentNullException.ThrowIfNull(peerKey);
         var peer = peerKey.ToUpperInvariant();
         lock (_lock)
         {
@@ -229,8 +237,8 @@ public sealed class LinkSessions
         }
     }
 
-    /// <summary>The streams one user holds, through any server.</summary>
-    /// <param name="userId">The user.</param>
+    /// <summary>Counts the streams one user holds, through any server.</summary>
+    /// <param name="userId">The user whose streams are counted.</param>
     /// <returns>The number of streams.</returns>
     public int CountForUser(Guid userId)
     {
@@ -241,6 +249,7 @@ public sealed class LinkSessions
         }
     }
 
+    /// <summary>Ends one request of a stream, which then lingers before it stops counting.</summary>
     private void Close((string, Guid, Guid) key)
     {
         lock (_lock)
@@ -253,6 +262,7 @@ public sealed class LinkSessions
         }
     }
 
+    /// <summary>Drops streams with no open request whose linger has run out.</summary>
     private void Prune()
     {
         var cutoff = _now() - Linger;
@@ -262,6 +272,7 @@ public sealed class LinkSessions
         }
     }
 
+    /// <summary>Ends one link cache download when disposed.</summary>
     private sealed class FillHandle : IDisposable
     {
         private readonly LinkSessions _owner;
@@ -299,6 +310,7 @@ public sealed class LinkSessions
         }
     }
 
+    /// <summary>One stream's open requests and when it was last seen.</summary>
     private sealed class Stream
     {
         public int Open { get; set; }
@@ -306,6 +318,7 @@ public sealed class LinkSessions
         public DateTime LastSeen { get; set; }
     }
 
+    /// <summary>Ends one request of a stream when disposed.</summary>
     private sealed class Handle : IDisposable
     {
         private readonly LinkSessions _owner;

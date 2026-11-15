@@ -6,6 +6,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Session;
@@ -14,9 +15,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Lets the source's dashboard control a viewer of one of its files on the server that holds the link.
-/// Stop, pause, resume, and seek, and a message, go to that server, which passes them to the viewer's
-/// client. Everything else is ignored.
+/// Lets the source's dashboard control a viewer of one of its files on the linking server. Stop, pause,
+/// resume, seek, and a message go to that server for the viewer's client, and everything else is ignored.
 /// </summary>
 public sealed class LinkSessionController : ISessionController
 {
@@ -43,12 +43,12 @@ public sealed class LinkSessionController : ISessionController
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkSessionController"/> class.
     /// </summary>
-    /// <param name="peerKey">The server entry's key.</param>
-    /// <param name="sessionKey">The peer's session key.</param>
+    /// <param name="peerKey">The key of the linking server's entry here.</param>
+    /// <param name="sessionKey">The viewer's session key on the linking server.</param>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     public LinkSessionController(string peerKey, string sessionKey, IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger logger)
     {
         _peerKey = peerKey;
@@ -72,10 +72,11 @@ public sealed class LinkSessionController : ISessionController
     /// <returns><c>true</c> when the session may be removed.</returns>
     public bool RemovableAt(DateTime now) => now - new DateTime(Interlocked.Read(ref _lastReportTicks), DateTimeKind.Utc) >= RemoveAfter;
 
-    /// <summary>Records that the server holding the link reported on this session.</summary>
+    /// <summary>Records that the linking server reported on this session.</summary>
     public void Touch() => Touch(DateTime.UtcNow);
 
-    /// <summary>Records that the server holding the link reported on this session at <paramref name="at"/>.</summary>
+    /// <summary>Records that the linking server reported on this session at <paramref name="at"/>.</summary>
+    /// <param name="at">When the report arrived.</param>
     public void Touch(DateTime at) => Interlocked.Exchange(ref _lastReportTicks, at.Ticks);
 
     /// <inheritdoc />
@@ -88,8 +89,7 @@ public sealed class LinkSessionController : ISessionController
     /// <returns>The request, or null.</returns>
     public static PeerControlRequest? RequestFor<T>(SessionMessageType name, T data)
     {
-        // Jellyfin's own stop of a paused session names no user. That is this server's housekeeping and
-        // must not stop someone watching on another server, so only a person's command is passed on.
+        // Jellyfin's own stop names no user and must not stop a viewer elsewhere.
         if (name == SessionMessageType.Playstate && data is PlaystateRequest playstate && !string.IsNullOrEmpty(playstate.ControllingUserId))
         {
             return new PeerControlRequest { Command = playstate.Command.ToString(), SeekPositionTicks = playstate.SeekPositionTicks };
@@ -131,7 +131,7 @@ public sealed class LinkSessionController : ISessionController
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning("Could not pass a remote control command to '{Server}': {Reason}", server.DisplayName, ex.Message);
+            _logger.LogWarning("Could not pass a remote control command to '{Server}': {Reason}", server.DisplayName, FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
     }
 }

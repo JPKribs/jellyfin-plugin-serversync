@@ -31,12 +31,16 @@ public sealed class LinkPolicy
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkPolicy"/> class.
     /// </summary>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="userManager">User manager.</param>
-    /// <param name="sessionManager">Session manager.</param>
-    /// <param name="sessions">The link sessions.</param>
+    /// <param name="libraryManager">Finds the item a stream asks for.</param>
+    /// <param name="userManager">Finds the user a stream runs as.</param>
+    /// <param name="sessionManager">Counts the user's own playback here.</param>
+    /// <param name="sessions">Counts the link streams this server is serving.</param>
     public LinkPolicy(ILibraryManager libraryManager, IUserManager userManager, ISessionManager sessionManager, LinkSessions sessions)
     {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(sessionManager);
+        ArgumentNullException.ThrowIfNull(sessions);
         _libraryManager = libraryManager;
         _userManager = userManager;
         _sessionManager = sessionManager;
@@ -44,16 +48,16 @@ public sealed class LinkPolicy
     }
 
     /// <summary>
-    /// Decides on one stream. A probe has no user: it reads the file for media info on behalf of the
-    /// server, so only the server's own permission and the item apply, and it is not counted.
+    /// Decides on one stream. A probe has no user, so only the calling server's own permission and the
+    /// item apply, and it is not counted.
     /// </summary>
     /// <param name="peer">The calling server's entry here.</param>
     /// <param name="itemId">This server's id of the item.</param>
     /// <param name="remoteUserId">The user's id on the calling server.</param>
     /// <param name="claimedUserId">The user here the calling server maps them to, if it does.</param>
     /// <param name="probe">Whether this is the calling server's media probe.</param>
-    /// <param name="watching">Whether someone is watching. A download into the calling server's cache is nobody watching, so the stream limits do not apply to it.</param>
-    /// <returns>The verdict.</returns>
+    /// <param name="watching">Whether someone is watching, since a download into the calling server's link cache is exempt from the stream limits.</param>
+    /// <returns>The verdict, which names the item and the user when it allows the stream.</returns>
     public LinkVerdict Check(SourceServer peer, Guid itemId, string? remoteUserId, string? claimedUserId, bool probe, bool watching = true)
     {
         ArgumentNullException.ThrowIfNull(peer);
@@ -68,7 +72,7 @@ public sealed class LinkPolicy
             return LinkVerdict.Refuse("the file is no longer on the source");
         }
 
-        // A link here is not a file, and following it would chain one server's stream through another.
+        // Following a link here would chain one server's stream through another.
         if (item.Path.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase))
         {
             return LinkVerdict.Refuse("the item is a link on the source, not a file");
@@ -108,7 +112,7 @@ public sealed class LinkPolicy
             return LinkVerdict.Refuse($"the file's bitrate is above the {limit / 1_000_000.0:0.#} Mbps the source allows your account");
         }
 
-        // A stream already running is not a new one, so seeking or a second request never trips a limit.
+        // A running stream is not a new one, so seeking never trips a limit.
         if (watching && !_sessions.IsActive(peer.Key, userId, item.Id))
         {
             if (peer.LinkMaxStreams > 0 && _sessions.CountForPeer(peer.Key) >= peer.LinkMaxStreams)
@@ -126,13 +130,13 @@ public sealed class LinkPolicy
         return new LinkVerdict(true, null, item, userId);
     }
 
-    // This server's own mapping for the calling server decides first, then the fallback user set here.
-    // Only when this server maps no users and names no fallback is the calling server trusted to name
-    // the user, since its key already holds access to this server. Otherwise no one streams.
-    /// <summary>The user here a link stream for a user on the calling server runs as, or null for none.</summary>
-    /// <param name="peer">The linking server.</param>
+    /// <summary>
+    /// The user here a link stream for a user on the calling server runs as, or null for none. This
+    /// server's own user mapping decides first, then the user it sets for unmapped users.
+    /// </summary>
+    /// <param name="peer">The linking server's entry here, which holds the user mappings.</param>
     /// <param name="remoteUserId">The user's id on that server, or null.</param>
-    /// <param name="claimedUserId">The user id the request named, or null.</param>
+    /// <param name="claimedUserId">The user id the request named, which is never trusted.</param>
     /// <returns>The local user's id, or null.</returns>
     public static Guid? UserFor(SourceServer peer, string? remoteUserId, string? claimedUserId)
     {
@@ -146,13 +150,12 @@ public sealed class LinkPolicy
             }
         }
 
-        // An unmapped user streams as the user chosen for them here, or is refused. The user the linking
-        // server claims is never taken, since it could name anyone here, an administrator included.
+        // The claimed user is never taken, since it could name an administrator here.
         return Guid.TryParse(peer.LinkFallbackUserId, out var fallback) ? fallback : null;
     }
 
     /// <summary>The user's playback on this server outside links, when the setting counts it, otherwise 0.</summary>
-    /// <param name="userId">The local user.</param>
+    /// <param name="userId">The local user whose sessions are counted.</param>
     /// <param name="countOwnSessions">Whether the setting counts the user's own playback.</param>
     /// <returns>The number of sessions.</returns>
     public int OwnPlayback(Guid userId, bool countOwnSessions)
@@ -162,6 +165,7 @@ public sealed class LinkPolicy
                 && !string.Equals(s.Client, ClientName, StringComparison.Ordinal))
             : 0;
 
+    /// <summary>Counts a user's link streams, plus their own playback here when the setting counts it.</summary>
     private int StreamsOf(Guid userId, bool countOwnSessions)
         => _sessions.CountForUser(userId) + OwnPlayback(userId, countOwnSessions);
 }

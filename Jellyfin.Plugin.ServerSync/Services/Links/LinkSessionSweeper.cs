@@ -23,10 +23,12 @@ public sealed class LinkSessionSweeper : BackgroundService
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkSessionSweeper"/> class.
     /// </summary>
-    /// <param name="sessions">The link sessions.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="sessions">The link sessions to sweep.</param>
+    /// <param name="logger">Writes log entries.</param>
     public LinkSessionSweeper(LinkPlaybackSessions sessions, ILogger<LinkSessionSweeper> logger)
     {
+        ArgumentNullException.ThrowIfNull(sessions);
+        ArgumentNullException.ThrowIfNull(logger);
         _sessions = sessions;
         _logger = logger;
     }
@@ -39,6 +41,7 @@ public sealed class LinkSessionSweeper : BackgroundService
         {
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
+                // One failed sweep must not end the service.
                 try
                 {
                     await _sessions.SweepAsync(DateTime.UtcNow).ConfigureAwait(false);

@@ -26,23 +26,26 @@ public sealed class LinkHealth
     {
     }
 
-    /// <summary>Initializes a new instance of the <see cref="LinkHealth"/> class, for tests.</summary>
-    /// <param name="now">The clock.</param>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkHealth"/> class.
+    /// </summary>
+    /// <param name="now">Reads the current time, so a test can move it.</param>
     public LinkHealth(Func<DateTime> now)
     {
+        ArgumentNullException.ThrowIfNull(now);
         _now = now;
     }
 
     /// <summary>Records that a server did not answer.</summary>
-    /// <param name="serverKey">The server entry's key.</param>
+    /// <param name="serverKey">The key of the server entry that did not answer.</param>
     public void Failed(string serverKey) => _failedAt[serverKey ?? string.Empty] = _now();
 
     /// <summary>Records that a server answered, whatever it said.</summary>
-    /// <param name="serverKey">The server entry's key.</param>
+    /// <param name="serverKey">The key of the server entry that answered.</param>
     public void Answered(string serverKey) => _failedAt.TryRemove(serverKey ?? string.Empty, out _);
 
     /// <summary>Whether a server failed to answer within the last minute.</summary>
-    /// <param name="serverKey">The server entry's key, or null.</param>
+    /// <param name="serverKey">The key of the server entry to check, or null.</param>
     /// <returns><c>true</c> when it did not answer.</returns>
     public bool IsDown(string? serverKey)
     {

@@ -6,13 +6,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Ties a link to the users the source has allowed to play it. Jellyfin's ffmpeg and its stream proxy
-/// read a link with no token, so a user is recorded when the source allows them at PlaybackInfo, and
-/// the link route reads it from here. Only that approval makes a grant: a later stream request can
-/// keep its own user's grant alive, never make one. A grant nobody uses expires quickly. Once in use it
-/// lasts while playback goes on, since a player pauses and seeks with gaps between its requests. When
-/// two allowed users play one link at once, the link route names the one seen most recently. Each grant
-/// also keeps the server its playback streams from, since a link can fall back to another server.
+/// Ties a link to the users the source has allowed to play it, since Jellyfin's ffmpeg and its stream
+/// proxy read a link with no token. Only the source's approval at PlaybackInfo makes a grant, which
+/// expires quickly when unused and lasts while playback goes on.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkGrants
@@ -38,7 +34,7 @@ public sealed class LinkGrants
     private readonly Func<DateTime> _now;
     private readonly object _lock = new();
 
-    // Per link, the live grants by user. The probe's grant is keyed by the empty id.
+    /// <summary>The live grants of each link by user, with the probe's grant under the empty id.</summary>
     private readonly Dictionary<string, Dictionary<Guid, Entry>> _grants = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -49,10 +45,13 @@ public sealed class LinkGrants
     {
     }
 
-    /// <summary>Initializes a new instance of the <see cref="LinkGrants"/> class, for tests.</summary>
-    /// <param name="now">The clock.</param>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkGrants"/> class.
+    /// </summary>
+    /// <param name="now">Reads the current time, so a test can move it.</param>
     public LinkGrants(Func<DateTime> now)
     {
+        ArgumentNullException.ThrowIfNull(now);
         _now = now;
     }
 
@@ -62,6 +61,7 @@ public sealed class LinkGrants
     /// <param name="route">The server the playback streams from, or null for the link's own.</param>
     public void Grant(string linkId, Guid userId, LinkRoute? route = null)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         lock (_lock)
         {
             var users = UsersOf(linkId);
@@ -79,6 +79,7 @@ public sealed class LinkGrants
     /// <returns>The route, or null.</returns>
     public LinkRoute? RouteFor(string linkId, Guid userId)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         lock (_lock)
         {
             return _grants.TryGetValue(linkId, out var users) && users.TryGetValue(userId, out var current) && Live(current)
@@ -96,6 +97,8 @@ public sealed class LinkGrants
     /// <param name="route">The server that stood in.</param>
     public void Reroute(string linkId, Guid userId, LinkRoute route)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
+        ArgumentNullException.ThrowIfNull(route);
         lock (_lock)
         {
             if (_grants.TryGetValue(linkId, out var users) && users.TryGetValue(userId, out var current) && Live(current))
@@ -114,6 +117,7 @@ public sealed class LinkGrants
     /// <returns><c>true</c> when the user holds a live grant.</returns>
     public bool Refresh(string linkId, Guid userId)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         lock (_lock)
         {
             if (!_grants.TryGetValue(linkId, out var users) || !users.TryGetValue(userId, out var current) || !Live(current))
@@ -130,6 +134,7 @@ public sealed class LinkGrants
     /// <param name="linkId">The link's id.</param>
     public void GrantProbe(string linkId)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         lock (_lock)
         {
             var users = UsersOf(linkId);
@@ -145,6 +150,7 @@ public sealed class LinkGrants
     /// <returns>The grant, or null.</returns>
     public LinkGrant? Use(string linkId)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         lock (_lock)
         {
             if (!_grants.TryGetValue(linkId, out var users))
@@ -165,7 +171,7 @@ public sealed class LinkGrants
 
             var (userId, entry) = users.OrderByDescending(p => p.Value.Probe ? DateTime.MinValue : p.Value.At).First();
 
-            // A probe grant keeps its own short window from when it was made, however often it is read.
+            // A probe grant keeps its window from when it was made.
             if (!entry.Probe)
             {
                 users[userId] = entry with { At = _now(), Used = true };
@@ -184,6 +190,7 @@ public sealed class LinkGrants
     /// <returns><c>true</c> while the read may go on.</returns>
     public bool SpendProbe(string linkId, long bytes)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         lock (_lock)
         {
             if (!_grants.TryGetValue(linkId, out var users) || !users.TryGetValue(Guid.Empty, out var current) || !Live(current))
@@ -196,6 +203,7 @@ public sealed class LinkGrants
         }
     }
 
+    /// <summary>Returns the grants of one link, making an empty set when it has none.</summary>
     private Dictionary<Guid, Entry> UsersOf(string linkId)
     {
         if (!_grants.TryGetValue(linkId, out var users))
@@ -212,9 +220,8 @@ public sealed class LinkGrants
 
     /// <summary>
     /// How many links are streaming now, each by one user, from one server or from all of them. A play
-    /// counts from its first request until <see cref="Playing"/> after its last, so a paused player
-    /// gives its place up. The play being chosen for is left out, since choosing again for a play
-    /// already going must not count it against itself.
+    /// counts from its first request until <see cref="Playing"/> after its last, and the play being
+    /// chosen for is left out so it never counts against itself.
     /// </summary>
     /// <param name="serverKey">The server streamed from, or null for every server.</param>
     /// <param name="exceptLinkId">The link being chosen for.</param>
@@ -245,27 +252,30 @@ public sealed class LinkGrants
         }
     }
 
+    /// <summary>Whether a grant is inside its window and, for a probe, inside its budget.</summary>
     private bool Live(Entry entry)
         => _now() - entry.At < (entry.Probe ? ProbeWait : entry.Used ? InUse : Unused)
             && (!entry.Probe || entry.Spent < ProbeBudget);
 
+    /// <summary>One grant, with when it was last seen, where it streams from, and its open requests.</summary>
     private sealed record Entry(bool Probe, DateTime At, bool Used, LinkRoute? Route, long Spent, int Open = 0);
 
     /// <summary>
-    /// Marks a play as streaming for as long as one of its requests is open. A player that reads a
-    /// whole film in one request makes no further request to be seen by, so the open request itself
-    /// is what counts it. Disposing the answer closes it, and the play then counts for
-    /// <see cref="Playing"/> more.
+    /// Marks a play as streaming while one of its requests is open, since a player that reads a whole
+    /// film in one request is seen no other way. Disposing the hold closes it, and the play then counts
+    /// for <see cref="Playing"/> more.
     /// </summary>
-    /// <param name="linkId">The link.</param>
+    /// <param name="linkId">The link's id.</param>
     /// <param name="userId">The user playing it.</param>
     /// <returns>The hold to dispose when the request ends.</returns>
     public IDisposable Hold(string linkId, Guid userId)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         Adjust(linkId, userId, 1);
         return new Held(this, linkId, userId);
     }
 
+    /// <summary>Adds to or takes from a grant's open requests, and marks it used.</summary>
     private void Adjust(string linkId, Guid userId, int by)
     {
         lock (_lock)
@@ -277,6 +287,7 @@ public sealed class LinkGrants
         }
     }
 
+    /// <summary>Closes one open request of a play when disposed.</summary>
     private sealed class Held : IDisposable
     {
         private readonly LinkGrants _owner;

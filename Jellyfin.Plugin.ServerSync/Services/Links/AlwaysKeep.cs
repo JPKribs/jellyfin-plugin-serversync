@@ -8,14 +8,14 @@ using Jellyfin.Plugin.ServerSync.Utilities;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// The shows and films picked to always keep on a Link mapping. Their files are full copies in the
-/// library, synced like any copy, rather than links. Everything else in the mapping stays a link.
+/// The shows and films picked for Always Keep on a Link library mapping. Their files are permanent
+/// copies, synced like any copy, and everything else in the mapping stays a link.
 /// </summary>
 public static class AlwaysKeep
 {
     /// <summary>
-    /// Whether a source file sits under an item picked to always keep on its Link mapping: inside a
-    /// picked show's folder, the picked film's file, or another version of a picked film.
+    /// Whether a source file sits under an item picked for Always Keep on its Link library mapping, as
+    /// a file in a picked show's folder, the picked film's file, or another version of a picked film.
     /// </summary>
     /// <param name="mapping">The library mapping the file comes through.</param>
     /// <param name="sourcePath">The file's path on the source.</param>
@@ -59,8 +59,8 @@ public static class AlwaysKeep
     }
 
     /// <summary>
-    /// How a source file is stored: as a copy when it is picked to always keep, otherwise as its
-    /// mapping says.
+    /// How a source file is stored, as a copy when it is picked for Always Keep, otherwise as its
+    /// library mapping says.
     /// </summary>
     /// <param name="mapping">The library mapping the file comes through.</param>
     /// <param name="sourcePath">The file's path on the source.</param>

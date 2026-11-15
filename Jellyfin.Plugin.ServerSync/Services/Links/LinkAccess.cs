@@ -17,12 +17,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Asks the source whether a user here may play one of this server's links, before Jellyfin starts on
-/// it, so a refusal shows when they press play rather than partway into the stream. When the link's own
-/// server is down, full, or refuses, the other servers this one pulls from that map the same folder are
-/// asked for the same file, by its path there and its size, and the highest ranked that allows it
-/// is used. A server that did not answer a moment ago is passed over, and the others are asked together
-/// once the link's own server is slow to answer, so a dead server never holds up play.
+/// Asks the source whether a user here may play one of this server's links before Jellyfin starts on
+/// it, so a refusal shows when they press play. When the link's own server is down, full, slow, or
+/// refuses, the other pull servers that map the same folder are asked, and the highest ranked that allows it is used.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton, ServiceType = typeof(ILinkAccess))]
 public sealed class LinkAccess : ILinkAccess
@@ -42,8 +39,8 @@ public sealed class LinkAccess : ILinkAccess
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="health">Which servers are down.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="health">Remembers which servers did not answer.</param>
     /// <param name="grants">The plays in progress, or null to apply no limits of this server.</param>
     public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health, LinkGrants? grants = null)
         : this(configManager, clientFactory, applicationHost, logger, health, Hedge)
@@ -58,16 +55,21 @@ public sealed class LinkAccess : ILinkAccess
     public LinkGrants? Grants { get; set; }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="LinkAccess"/> class, for tests.
+    /// Initializes a new instance of the <see cref="LinkAccess"/> class.
     /// </summary>
     /// <param name="configManager">Reads the plugin configuration.</param>
     /// <param name="clientFactory">Builds clients for other servers.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="health">Which servers are down.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="health">Remembers which servers did not answer.</param>
     /// <param name="hedge">How long the link's own server has before others are asked.</param>
     public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health, TimeSpan hedge)
     {
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(health);
         _configManager = configManager;
         _clientFactory = clientFactory;
         _applicationHost = applicationHost;
@@ -82,8 +84,8 @@ public sealed class LinkAccess : ILinkAccess
     public static TimeSpan Hedge { get; } = TimeSpan.FromSeconds(2);
 
     /// <summary>The source user this server maps a local user to on that server's entry, or null.</summary>
-    /// <param name="server">The server entry.</param>
-    /// <param name="localUserId">The local user, or null.</param>
+    /// <param name="server">The server entry whose user mappings are read.</param>
+    /// <param name="localUserId">The local user to map, or null.</param>
     /// <returns>The source user's id, or null.</returns>
     public static string? SourceUserFor(SourceServer server, Guid? localUserId)
     {
@@ -94,7 +96,7 @@ public sealed class LinkAccess : ILinkAccess
     }
 
     /// <summary>The configured entry a link streams from, when it is still configured and on.</summary>
-    /// <param name="link">The link.</param>
+    /// <param name="link">The link whose server entry is looked up.</param>
     /// <returns>The server entry, or null.</returns>
     public SourceServer? ServerFor(LinkEntry link)
     {
@@ -114,9 +116,9 @@ public sealed class LinkAccess : ILinkAccess
         Task<LinkStreamCheckResponse>? primaryAsk = null;
         LinkStreamCheckResponse? busyPrimary = null;
 
-        // This server's own limits come first: how many links it streams at once in all, and how many
-        // it takes from each server. A server at its limit here is not asked, and the next is tried.
         var streaming = Grants?.Streaming(null, link.LinkId, userId) ?? 0;
+
+        // This server's own limit on links streamed at once comes before any server is asked.
         if (config.LinkMaxStreamsTotal > 0 && streaming >= config.LinkMaxStreamsTotal)
         {
             return new LinkChoice(null, $"this server is already streaming {streaming} link(s), the most it streams at once");
@@ -132,9 +134,9 @@ public sealed class LinkAccess : ILinkAccess
         }
         else if (!Skipped(primary))
         {
+            // A server that just failed to answer is asked last.
             if (_health.IsDown(primary.Key))
             {
-                // It did not answer a moment ago. It is asked last, when nobody else can play the file.
                 primaryPassedOver = true;
                 firstRefusal = $"{primary.DisplayName} could not be reached";
             }
@@ -149,10 +151,9 @@ public sealed class LinkAccess : ILinkAccess
                         return new LinkChoice(LinkFallback.PrimaryOf(link), null);
                     }
 
+                    // An allowed but busy server yields to one with more room.
                     if (answer.Allowed)
                     {
-                        // It may play the link, and is already streaming for this server. Another
-                        // server that holds the same file with more room is used instead.
                         busyPrimary = answer;
                     }
                     else
@@ -165,7 +166,6 @@ public sealed class LinkAccess : ILinkAccess
             }
         }
 
-        // The others are asked together, and answer in rank order.
         var alsoTried = new List<string>();
         var alternates = LinkFallback.Alternates(config, link).Where(a => !Skipped(a.Server)).ToList();
         var asks = alternates.Select(a => _health.IsDown(a.Server.Key)
@@ -173,11 +173,10 @@ public sealed class LinkAccess : ILinkAccess
             : Full(a.Server)
                 ? Task.FromResult(new LinkStreamCheckResponse { Reason = $"this server is already streaming {Taking(a.Server)} link(s) from {a.Server.DisplayName}, the most it takes from it" })
                 : AskAlternateAsync(a, link, userId, cancellationToken)).ToList();
+
+        // The first idle server takes the play, else one with strictly more room.
         if (busyPrimary is not null)
         {
-            // The first server in the list that is doing nothing for this one takes the play. With
-            // none idle, the one with the most room does, and the link's own server keeps it unless
-            // another has strictly more. Equal room goes to the higher server in the list.
             var bestRoom = Room(primary!, busyPrimary);
             (SourceServer Server, LinkRoute Route)? roomier = null;
             for (var i = 0; i < alternates.Count; i++)
@@ -203,7 +202,7 @@ public sealed class LinkAccess : ILinkAccess
 
             if (roomier is { } chosen)
             {
-                _logger.LogInformation("Playing the link {Path} from '{Server}', which has more room than '{Primary}'", link.LinkPath, chosen.Server.DisplayName, primary!.DisplayName);
+                _logger.LogInformation("Playing the link {Path} from '{Server}', which has more room than '{Primary}'", FormatUtilities.SanitizeForLog(link.LinkPath), chosen.Server.DisplayName, primary!.DisplayName);
                 return new LinkChoice(chosen.Route, null);
             }
 
@@ -212,7 +211,7 @@ public sealed class LinkAccess : ILinkAccess
 
         var standIn = FirstAllowedAsync();
 
-        // The link's own server is still thinking. It wins if it allows the play before another does.
+        // A link's own server still answering wins if it allows the play first.
         if (primaryAsk is not null)
         {
             if (await Task.WhenAny(primaryAsk, standIn).ConfigureAwait(false) == primaryAsk || (await standIn.ConfigureAwait(false)) is null)
@@ -235,9 +234,9 @@ public sealed class LinkAccess : ILinkAccess
         {
             _logger.LogInformation(
                 "Playing the link {Path} from '{Server}' instead: {Reason}",
-                link.LinkPath,
+                FormatUtilities.SanitizeForLog(link.LinkPath),
                 found.Server.DisplayName,
-                firstRefusal ?? "the server it streamed from failed");
+                FormatUtilities.SanitizeForLog(firstRefusal ?? "the server it streamed from failed", 300));
             return new LinkChoice(found.Route, null);
         }
 
@@ -249,7 +248,7 @@ public sealed class LinkAccess : ILinkAccess
             firstRefusal ??= answer.Reason;
         }
 
-        // Nobody else can play it, so the server passed over is asked after all: it may be back.
+        // Nobody else can play it, so the server passed over is asked after all.
         if (primaryPassedOver)
         {
             var answer = await AskAsync(primary!, link.LinkId, null, userId, cancellationToken).ConfigureAwait(false);
@@ -266,16 +265,13 @@ public sealed class LinkAccess : ILinkAccess
 
         bool Skipped(SourceServer server) => skip?.Contains(server.Key, StringComparer.OrdinalIgnoreCase) == true;
 
-        // How many links this server is streaming from a server now, and whether that is all it takes.
         int Taking(SourceServer server) => Grants?.Streaming(server.Key, link.LinkId, userId) ?? 0;
 
         bool Full(SourceServer server) => server.LinkTakeMaxStreams > 0 && Taking(server) >= server.LinkTakeMaxStreams;
 
-        // A server doing nothing for this one, by its own count and by this server's.
         bool Idle(SourceServer server, LinkStreamCheckResponse answer) => answer.StreamsInUse <= 0 && Taking(server) == 0;
 
-        // The streams still free between the two: what the server has left for this one, and what
-        // this one has left to take from it, whichever is less. No limit counts as the most room.
+        // Returns the streams free between the two servers, where no limit is the most room.
         long Room(SourceServer server, LinkStreamCheckResponse answer)
         {
             var theirs = (answer.StreamLimit > 0 ? answer.StreamLimit : int.MaxValue) - (long)Math.Max(0, answer.StreamsInUse);
@@ -283,8 +279,7 @@ public sealed class LinkAccess : ILinkAccess
             return Math.Min(theirs, mine);
         }
 
-        // The first server in the list that allows the play and is doing nothing for this one. With
-        // none idle, the one that allows it with the most room, the higher in the list on a tie.
+        // Returns the first idle server that allows the play, else the one with the most room.
         async Task<(SourceServer Server, LinkRoute Route)?> FirstAllowedAsync()
         {
             (SourceServer Server, LinkRoute Route)? busiest = null;
@@ -314,7 +309,7 @@ public sealed class LinkAccess : ILinkAccess
         }
     }
 
-    // An alternate is only used when it names the item and holds the same file, told by its size.
+    /// <summary>Asks another server, and refuses it unless it names the item and holds a file of the same size.</summary>
     private async Task<LinkStreamCheckResponse> AskAlternateAsync(LinkAlternate alternate, LinkEntry link, Guid? userId, CancellationToken cancellationToken)
     {
         var answer = await AskAsync(alternate.Server, string.Empty, alternate.SourcePath, userId, cancellationToken).ConfigureAwait(false);
@@ -331,6 +326,7 @@ public sealed class LinkAccess : ILinkAccess
         return answer;
     }
 
+    /// <summary>Asks one server whether the play is allowed, and records whether it answered.</summary>
     private async Task<LinkStreamCheckResponse> AskAsync(SourceServer server, string itemId, string? path, Guid? userId, CancellationToken cancellationToken)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -360,7 +356,7 @@ public sealed class LinkAccess : ILinkAccess
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _health.Failed(server.Key);
-            _logger.LogWarning("Could not ask '{Server}' whether a link may play: {Reason}", server.DisplayName, ex.Message);
+            _logger.LogWarning("Could not ask '{Server}' whether a link may play: {Reason}", server.DisplayName, FormatUtilities.SanitizeForLog(ex.Message, 300));
             return new LinkStreamCheckResponse { Reason = $"{server.DisplayName} could not be reached" };
         }
     }

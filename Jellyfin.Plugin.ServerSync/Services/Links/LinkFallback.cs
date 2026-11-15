@@ -6,16 +6,15 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// A link streams from the server that won its file in sync. When that server is down, full, or
-/// refuses, the same file may be on another server this one pulls from: one that maps the folder the
-/// link sits in. Those are tried in rank order, by the path the file would have there.
+/// Finds the other servers a link can stream from when the server that won its file is down, full, or
+/// refuses. They are the pull servers that map the folder the link sits in, tried in rank order.
 /// </summary>
 public static class LinkFallback
 {
     private static readonly char[] Separators = { '/', '\\' };
 
-    /// <summary>The route a link streams from when nothing has moved it: the server that won its file.</summary>
-    /// <param name="link">The link.</param>
+    /// <summary>The route a link streams from when nothing has moved it, the server that won its file.</summary>
+    /// <param name="link">The link to route.</param>
     /// <returns>The route.</returns>
     public static LinkRoute PrimaryOf(LinkEntry link)
     {
@@ -27,8 +26,8 @@ public static class LinkFallback
     /// The other servers this one pulls from whose enabled library mappings cover the folder a link
     /// sits in, highest ranked first, each with the path the file would have there.
     /// </summary>
-    /// <param name="config">The plugin configuration.</param>
-    /// <param name="link">The link.</param>
+    /// <param name="config">The configuration that lists the pull servers and their library mappings.</param>
+    /// <param name="link">The link to find other servers for.</param>
     /// <returns>The other servers, highest ranked first.</returns>
     public static IEnumerable<LinkAlternate> Alternates(PluginConfiguration config, LinkEntry link)
     {
