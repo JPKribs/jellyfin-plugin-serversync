@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
@@ -50,11 +52,11 @@ public class ImageInfoDto
             }
             else if (Size < 1024 * 1024)
             {
-                return $"{Size / 1024.0:F1} KB";
+                return string.Create(CultureInfo.InvariantCulture, $"{Size / 1024.0:F1} KB");
             }
             else
             {
-                return $"{Size / (1024.0 * 1024.0):F1} MB";
+                return string.Create(CultureInfo.InvariantCulture, $"{Size / (1024.0 * 1024.0):F1} MB");
             }
         }
     }

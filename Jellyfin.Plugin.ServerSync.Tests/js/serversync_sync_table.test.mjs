@@ -111,7 +111,7 @@ test('setHealthLastSync shows the relative time, and Never when there is none', 
 test('setHealthCount colors a positive count as success and a zero count as a warning', function () {
     kit.setHealthCount('healthCount', 4);
     var el = view.querySelector('#healthCount');
-    assert.equal(el.textContent, 4);
+    assert.equal(el.textContent, '4');
     assert.equal(el.className, 'serversync-health-value serversync-success');
     kit.setHealthCount('healthCount', 0);
     assert.equal(el.className, 'serversync-health-value serversync-warning');
@@ -205,7 +205,7 @@ test('a module builds its element ids from the view name', async function () {
     await setup(['syncStatus', 'historySyncedCount', 'historyStatusGroupSynced', 'btnRetryHistoryErrors']);
     var module = kit.createSyncTableModule(historySpec());
     module._showStatusCounts({ Synced: 7, Queued: 0, Errored: 2, Ignored: 0 });
-    assert.equal(view.querySelector('#historySyncedCount').textContent, 7);
+    assert.equal(view.querySelector('#historySyncedCount').textContent, '7');
     assert.equal(view.querySelector('#historyStatusGroupSynced').getAttribute('title'), 'Synced: 7');
     assert.equal(view.querySelector('#btnRetryHistoryErrors').classList.contains('hidden'), false);
     module._showStatusCounts({ Synced: 7, Errored: 0 });

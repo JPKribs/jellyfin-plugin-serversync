@@ -153,7 +153,7 @@ export async function settle(ms) {
 export function clickDialogButton(dom, text) {
     var dialog = dom.document.querySelector('.jpk-dialog');
     if (!dialog) return false;
-    var button = dialog.querySelectorAll('button').find(function (b) { return b.textContent === text; });
+    var button = Array.from(dialog.querySelectorAll('button')).find(function (b) { return b.textContent === text; });
     if (!button) return false;
     button.click();
     return true;

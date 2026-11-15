@@ -258,8 +258,8 @@ test('render fills the counts and shows the unmatched warning', function () {
     };
     queue.render();
     var text = function (id) { return env.view.querySelector('#' + id).textContent; };
-    assert.equal(text('queuePendingCount'), 3);
-    assert.equal(text('queueSentCount'), 2);
+    assert.equal(text('queuePendingCount'), '3');
+    assert.equal(text('queueSentCount'), '2');
     assert.equal(text('queueFailedCount'), 1);
     assert.equal(text('queueInboundCount'), 4);
     assert.equal(text('queueGatheringCount'), 1);
@@ -274,7 +274,7 @@ test('render adds a filter button for each server and a server card for each', f
     queue._config = { Servers: [] };
     queue._data = { Peers: [{ Key: 'k1', Name: 'Alpha', Sends: ['History'] }, { Key: 'k2', Name: 'Beta', Sends: [] }], Outbound: [], Inbound: [] };
     queue.render();
-    var buttons = env.view.querySelector('#queueFilters').querySelectorAll('[data-peer]');
+    var buttons = Array.from(env.view.querySelector('#queueFilters').querySelectorAll('[data-peer]'));
     assert.deepEqual(buttons.map(function (b) { return b.textContent; }), ['Alpha', 'Beta']);
     assert.ok(buttons[0].classList.contains('serversync-filter-pill'));
     var cards = env.view.querySelector('#queuePeerRow').innerHTML;
