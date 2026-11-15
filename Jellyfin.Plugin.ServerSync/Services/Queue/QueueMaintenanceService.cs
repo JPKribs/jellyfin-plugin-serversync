@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
@@ -23,11 +24,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Background upkeep for the hint queues and the sync tables. Every six hours it removes hints that sat
-/// sent or failed for a week, pending versions whose values never applied, and the versions of items and
-/// users this server no longer has, gives rows that errored more than a day ago a fresh set of retries,
-/// forgets copies of playlists that were deleted, and removes the backups a finished file replacement
-/// left behind.
+/// Runs upkeep for the hint queues and the sync tables every six hours.
+/// It removes what has settled or gone stale, gives errored rows fresh retries, and tells the administrator what keeps failing.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class QueueMaintenanceService : IHostedService, IDisposable
@@ -36,11 +34,11 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
     private static readonly TimeSpan SettledKept = TimeSpan.FromDays(7);
     private static readonly TimeSpan PendingKept = TimeSpan.FromDays(14);
-    // A failed row is tried again on the next run rather than waiting for someone to press Retry. The
-    // hour keeps a row that failed a moment ago from being queued again in the same breath.
+
+    /// <summary>How long a row stays errored before it is queued again, so one that failed a moment ago is not retried at once.</summary>
     private static readonly TimeSpan ErroredRetryAfter = TimeSpan.FromHours(1);
 
-    // How long a row may go on failing, retried on every run, before the administrator is told.
+    /// <summary>How long a row may go on failing, retried on every run, before the administrator is told.</summary>
     private static readonly TimeSpan FailingBeforeTold = TimeSpan.FromDays(1);
     private static readonly TimeSpan ReplacementBackupKept = TimeSpan.FromDays(1);
     private const string ReplacementMarker = ".replacing.";
@@ -59,14 +57,14 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="QueueMaintenanceService"/> class.
     /// </summary>
-    /// <param name="outbound">The outbound hint store.</param>
-    /// <param name="versions">The version store.</param>
-    /// <param name="store">Bulk statements over the sync tables.</param>
-    /// <param name="configManager">Plugin configuration.</param>
-    /// <param name="libraryManager">The library, to tell which items still exist.</param>
-    /// <param name="userManager">The users, to tell which still exist.</param>
-    /// <param name="services">The service provider the content table is read from.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="outbound">Holds the sent and failed hints that expire.</param>
+    /// <param name="versions">Holds the stamps that are pruned.</param>
+    /// <param name="store">Runs bulk statements over the sync tables.</param>
+    /// <param name="configManager">Reads the Recycling Bin settings and the run failures.</param>
+    /// <param name="libraryManager">Tells which items still exist.</param>
+    /// <param name="userManager">Tells which users still exist.</param>
+    /// <param name="services">Resolves the content table and the activity writer when a step needs them.</param>
+    /// <param name="logger">Writes what each step did or could not do.</param>
     public QueueMaintenanceService(
         OutboundHintStore outbound,
         VersionStore versions,
@@ -77,6 +75,15 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         IServiceProvider services,
         ILogger<QueueMaintenanceService> logger)
     {
+        ArgumentNullException.ThrowIfNull(outbound);
+        ArgumentNullException.ThrowIfNull(versions);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _services = services;
         _outbound = outbound;
         _versions = versions;
@@ -109,9 +116,9 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
             {
                 await _loop.ConfigureAwait(false);
             }
+            // The loop ends by cancellation when the service stops.
             catch (OperationCanceledException)
             {
-                // Expected on stop.
             }
         }
     }
@@ -119,13 +126,12 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
     /// <inheritdoc />
     public void Dispose() => _stopping?.Dispose();
 
-    /// <summary>One round of upkeep. Public so tests and the dashboard can run it on demand.</summary>
+    /// <summary>Runs one round of upkeep.</summary>
     public void RunOnce()
     {
         var now = DateTime.UtcNow;
         Step("expire settled hints", () => _outbound.ExpireSettled(now - SettledKept));
         Step("prune pending versions", () => _versions.PrunePending(now - PendingKept));
-        // Before the requeue, while the rows that failed on the last run still read as failed.
         Step("tell the administrator what keeps failing", () => ReportFailing(now));
         Step("tell the administrator what is blocked", ReportBlocked);
         Step("requeue errored rows", () => _store.RequeueErrored(now - ErroredRetryAfter));
@@ -135,8 +141,9 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         Step("remove finished replacement backups", RemoveFinishedReplacementBackups);
     }
 
-    // One entry on Jellyfin's Activity page for what has failed on every run for a day. Everything
-    // else is retried quietly, so this is the only time a failing row asks for anyone's attention.
+    /// <summary>
+    /// Writes one Activity page entry for what has failed on every run for a day. It runs before the requeue, while those rows still read as failed.
+    /// </summary>
     private int ReportFailing(DateTime now)
     {
         var failing = _store.TrackFailures(now, now - FailingBeforeTold);
@@ -150,7 +157,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         var example = failing.Select(kind => kind.Reason).FirstOrDefault(reason => !string.IsNullOrWhiteSpace(reason));
         var overview = $"{kinds} have failed on every run for a day and are still being retried. Open Server Sync and filter the Sync tab by Errored to see each one"
             + (example is null ? string.Empty : $". For example: {example}");
-        _logger.LogWarning("Server Sync: {Overview}", overview);
+        _logger.LogWarning("Server Sync: {Overview}", FormatUtilities.SanitizeForLog(overview, 1000));
         if (_services.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
         {
             _ = activity.LogAndWaitAsync($"Server Sync Needs Attention: {total} Item{(total == 1 ? string.Empty : "s")} Keep Failing", "ServerSyncAttention", JPKribs.Jellyfin.Base.ActivityText.Sentence(overview), LogLevel.Warning);
@@ -159,16 +166,16 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         return total;
     }
 
-    // One entry on the Activity page for each kind of run that has ended the same wrong way for a
-    // day: a cleanup held back by a safety limit, a server that cannot be reached, a disk too full to
-    // download to. A clean run clears the failure, so it is only raised again if it comes back.
+    /// <summary>
+    /// Writes one Activity page entry for each kind of run that has ended the same wrong way for a day, such as an unreachable server.
+    /// </summary>
     private int ReportBlocked()
     {
         var standing = RunFailureLog.TakeUnreported(_configManager, FailingBeforeTold);
         foreach (var failure in standing)
         {
             var overview = $"{failure.ModuleKey} {failure.Phase.ToLowerInvariant()} has ended this way on every run for a day: {failure.Reason}";
-            _logger.LogWarning("Server Sync: {Overview}", overview);
+            _logger.LogWarning("Server Sync: {Overview}", FormatUtilities.SanitizeForLog(overview, 1000));
             if (_services.GetService<JPKribs.Jellyfin.Base.ActivityLogger>() is { } activity)
             {
                 _ = activity.LogAndWaitAsync($"Server Sync Needs Attention: {failure.ModuleKey} {failure.Phase} Is Held Up", "ServerSyncAttention", JPKribs.Jellyfin.Base.ActivityText.Sentence(overview), LogLevel.Warning);
@@ -178,6 +185,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         return standing.Count;
     }
 
+    /// <summary>Forgets the copies of playlists that no longer exist here.</summary>
     private int ForgetDeletedPlaylistCopies()
     {
         var forgotten = 0;
@@ -193,10 +201,10 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         return forgotten;
     }
 
-    // A download is copied into the library folder under "name.syncing.<id>" and renamed into place.
-    // A server stopped mid-copy leaves that half file behind, and only another download of the same
-    // file would clear it. Any that has sat for a day is removed. It is never the only copy of
-    // anything: the download it belonged to starts again from the source.
+    /// <summary>
+    /// Removes the half files a server stopped mid download left behind, once they have sat for a day.
+    /// Such a file is never the only copy, since its download starts again from the source.
+    /// </summary>
     private int RemoveAbandonedStagedFiles(ContentSyncTableManager manager, PluginConfiguration config, DateTime cutoff)
     {
         var removed = 0;
@@ -227,7 +235,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    _logger.LogDebug(ex, "Could not remove the abandoned download {File}", staged);
+                    _logger.LogDebug(ex, "Could not remove the abandoned download {File}", FormatUtilities.SanitizeForLog(staged));
                 }
             }
         }
@@ -235,6 +243,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         return removed;
     }
 
+    /// <summary>Removes or recycles the backups a finished file replacement left behind, unless Sync Content is running.</summary>
     private int RemoveFinishedReplacementBackups()
     {
         var content = SyncModuleMutex.ForModule("Content");
@@ -284,7 +293,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
                         }
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                         {
-                            _logger.LogDebug(ex, "Could not remove the replacement backup {Backup}", backup);
+                            _logger.LogDebug(ex, "Could not remove the replacement backup {Backup}", FormatUtilities.SanitizeForLog(backup));
                         }
                     }
                 }
@@ -298,6 +307,7 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
         }
     }
 
+    /// <summary>Runs upkeep after a first delay and then at every interval until stopped.</summary>
     private async Task RunAsync(CancellationToken cancellationToken)
     {
         try
@@ -309,12 +319,13 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
                 await Task.Delay(Interval, cancellationToken).ConfigureAwait(false);
             }
         }
+        // The loop ends by cancellation when the service stops.
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Stopping.
         }
     }
 
+    /// <summary>Runs one step and logs what it did, so a failing step never stops the others.</summary>
     private void Step(string name, Func<int> step)
     {
         try
@@ -325,14 +336,16 @@ public sealed class QueueMaintenanceService : IHostedService, IDisposable
                 _logger.LogInformation("Server Sync upkeep: {Step}, {Count} row(s)", name, count);
             }
         }
+        // One failing step must not stop the rest of the upkeep or its loop.
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Server Sync upkeep could not {Step}", name);
         }
     }
 
-    // Versions of items and users that no longer exist decide nothing and only grow the table. People are
-    // kept, since a person's key is a name and a missing person may simply not be scanned in yet.
+    /// <summary>
+    /// Removes the stamps of items and users that no longer exist. People are kept, since a missing person may not be scanned in yet.
+    /// </summary>
     private int PruneMissingVersions()
     {
         var removed = 0;

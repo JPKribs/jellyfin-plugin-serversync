@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Database;
 using Microsoft.Data.Sqlite;
@@ -12,7 +13,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// The hints this server still owes its peers. See <see cref="OutboundHint"/> for the row's life.
+/// Stores the hints this server still owes its peers.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class OutboundHintStore : QueueStoreBase
@@ -20,20 +21,19 @@ public sealed class OutboundHintStore : QueueStoreBase
     /// <summary>
     /// Initializes a new instance of the <see cref="OutboundHintStore"/> class.
     /// </summary>
-    /// <param name="databaseProvider">The database provider.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="databaseProvider">Opens the database the hints are stored in.</param>
+    /// <param name="logger">Writes rows dropped past the cap.</param>
     public OutboundHintStore(ISyncDatabaseProvider databaseProvider, ILogger<OutboundHintStore> logger)
         : base(databaseProvider, logger)
     {
     }
 
     /// <summary>
-    /// Records a hint for one peer. An existing row for the same peer, kind, and key is reused: it goes
-    /// back to pending with the newer version and a fresh attempt count, whatever state it was in, so
-    /// an edit made after delivery is delivered again. The hint id is this server's id and a random id.
+    /// Records a hint for one peer, putting a row for the same peer, kind, and key back to pending with the newer stamp.
+    /// The hint id is minted with the insert, kept for every later edit of the object, and never reused, since a peer may remember it.
     /// </summary>
     /// <param name="row">The row to store. Its id and hint id are filled in.</param>
-    /// <param name="originServerId">This server's id.</param>
+    /// <param name="originServerId">This server's id, which starts the hint id.</param>
     public void Enqueue(OutboundHint row, string originServerId)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -64,9 +64,6 @@ public sealed class OutboundHintStore : QueueStoreBase
                     SentAt = NULL,
                     LastError = NULL
                 RETURNING Id, HintId";
-            // The id is minted before the insert, so the row and its id land in one statement and a crash
-            // cannot leave a row with no id. It stays the same for every later edit of the object, and is
-            // never reused after the database is reset, since a peer may still remember a completed one.
             Add(cmd, "@hint", originServerId + ":" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
             Add(cmd, "@peer", row.PeerKey);
             Add(cmd, "@kind", (int)row.Kind);
@@ -88,10 +85,8 @@ public sealed class OutboundHintStore : QueueStoreBase
     }
 
     /// <summary>
-    /// Keeps at most the cap of pending rows for one peer, dropping the oldest. A paused peer would
-    /// otherwise accumulate rows without bound. The scheduled tasks carry whatever they would have. Run
-    /// once per delivery pass rather than on every insert, so a scan raising thousands of hints does not
-    /// count the table thousands of times.
+    /// Keeps at most the cap of pending rows for one peer, dropping the oldest, so a paused peer cannot gather rows without bound.
+    /// The scheduled tasks carry whatever the dropped rows would have.
     /// </summary>
     /// <param name="peerKey">The peer's entry key.</param>
     /// <returns>How many rows were dropped.</returns>
@@ -119,18 +114,17 @@ public sealed class OutboundHintStore : QueueStoreBase
         });
         if (trimmed > 0)
         {
-            Logger.LogWarning("Dropped {Count} of the oldest pending hint(s) for peer {Peer}: more than {Cap} were waiting", trimmed, peerKey, HintProtocol.MaxPendingPerPeer);
+            Logger.LogWarning("Dropped {Count} of the oldest pending hint(s) for peer {Peer}: more than {Cap} were waiting", trimmed, FormatUtilities.SanitizeForLog(peerKey), HintProtocol.MaxPendingPerPeer);
         }
 
         return trimmed;
     }
 
     /// <summary>
-    /// Removes rows that have sat sent or failed for longer than the cutoff. A sent row a peer never
-    /// completes, and a failed row nobody discards, would otherwise stay forever. The scheduled tasks
-    /// carry whatever they would have.
+    /// Removes rows that have sat sent or failed since before the cutoff, which would otherwise stay forever.
+    /// The scheduled tasks carry whatever they would have.
     /// </summary>
-    /// <param name="before">The cutoff.</param>
+    /// <param name="before">Rows sent or created before this are removed.</param>
     /// <returns>How many rows were removed.</returns>
     public int ExpireSettled(DateTime before) => Write(conn =>
     {
@@ -142,7 +136,7 @@ public sealed class OutboundHintStore : QueueStoreBase
 
     /// <summary>Returns the pending rows for one peer that are due, oldest first.</summary>
     /// <param name="peerKey">The peer's entry key.</param>
-    /// <param name="utcNow">Now.</param>
+    /// <param name="utcNow">Rows due at or before this time are returned.</param>
     /// <param name="limit">The most rows to return.</param>
     /// <returns>The rows.</returns>
     public IList<OutboundHint> GetDue(string peerKey, DateTime utcNow, int limit) => Read(conn =>
@@ -186,13 +180,12 @@ public sealed class OutboundHintStore : QueueStoreBase
         return ReadAll(cmd);
     });
 
-    // Every state change below names the version that was sent. An edit that merges into the row while
-    // the request is in flight moves the version on, and the change then leaves the row pending so the
-    // newer edit is sent too, rather than marking it sent, failed, or done on the strength of an older one.
-
-    /// <summary>Marks rows accepted by the peer, each only while it still carries the version sent.</summary>
+    /// <summary>
+    /// Marks rows accepted by the peer, each only while it still carries the stamp sent.
+    /// An edit that merged into a row while the request was in flight leaves it pending, so the newer edit is sent too.
+    /// </summary>
     /// <param name="rows">The rows as sent.</param>
-    /// <param name="utcNow">Now.</param>
+    /// <param name="utcNow">The time the rows were sent.</param>
     public void MarkSent(IEnumerable<OutboundHint> rows, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -220,9 +213,9 @@ public sealed class OutboundHintStore : QueueStoreBase
         });
     }
 
-    /// <summary>Marks a row the peer rejected for good, while it still carries the version sent.</summary>
+    /// <summary>Marks a row the peer rejected for good, while it still carries the stamp sent.</summary>
     /// <param name="row">The row as sent.</param>
-    /// <param name="reason">Why.</param>
+    /// <param name="reason">Why the peer rejected it.</param>
     public void MarkFailed(OutboundHint row, string reason)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -237,10 +230,10 @@ public sealed class OutboundHintStore : QueueStoreBase
         });
     }
 
-    /// <summary>Puts rows off until later, each only while it still carries the version sent.</summary>
+    /// <summary>Puts rows off until later, each only while it still carries the stamp sent.</summary>
     /// <param name="rows">The rows as sent.</param>
     /// <param name="nextAttempt">When to try again.</param>
-    /// <param name="error">Why.</param>
+    /// <param name="error">Why the delivery did not go through.</param>
     public void Defer(IEnumerable<OutboundHint> rows, DateTime nextAttempt, string error)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -264,7 +257,7 @@ public sealed class OutboundHintStore : QueueStoreBase
         });
     }
 
-    /// <summary>Removes a row the peer declined, while it still carries the version sent.</summary>
+    /// <summary>Removes a row the peer declined, while it still carries the stamp sent.</summary>
     /// <param name="row">The row as sent.</param>
     /// <returns><c>true</c> when it was removed.</returns>
     public bool DeleteSent(OutboundHint row)
@@ -281,8 +274,8 @@ public sealed class OutboundHintStore : QueueStoreBase
     }
 
     /// <summary>
-    /// Removes rows the peer reports done. A row is only removed when it still carries the version the
-    /// peer applied. A row that was edited again after delivery stays pending with its newer version.
+    /// Removes rows the peer reports done, each only while it still carries the stamp the peer applied.
+    /// A row that was edited again after delivery stays pending with its newer stamp.
     /// </summary>
     /// <param name="peerKey">The entry key of the peer that reports them, whose rows alone may be removed.</param>
     /// <param name="completed">The peer's report.</param>
@@ -314,7 +307,7 @@ public sealed class OutboundHintStore : QueueStoreBase
 
     /// <summary>Returns the rows for one peer that carry the given hint ids.</summary>
     /// <param name="peerKey">The peer's entry key.</param>
-    /// <param name="hintIds">The hint ids.</param>
+    /// <param name="hintIds">The hint ids to look up.</param>
     /// <returns>The rows found, by hint id.</returns>
     public Dictionary<string, OutboundHint> GetByHintIds(string peerKey, IEnumerable<string> hintIds)
     {
@@ -359,8 +352,8 @@ public sealed class OutboundHintStore : QueueStoreBase
     });
 
     /// <summary>Puts sent rows back to pending because the peer no longer holds them and never reported them done.</summary>
-    /// <param name="ids">The row ids.</param>
-    /// <param name="utcNow">Now.</param>
+    /// <param name="ids">The ids of the rows to send again.</param>
+    /// <param name="utcNow">The time the rows become due.</param>
     public void Resend(IEnumerable<long> ids, DateTime utcNow)
     {
         ArgumentNullException.ThrowIfNull(ids);
@@ -406,7 +399,7 @@ public sealed class OutboundHintStore : QueueStoreBase
     });
 
     /// <summary>Removes one row, used by the operator to discard a failed hint.</summary>
-    /// <param name="id">The row id.</param>
+    /// <param name="id">The id of the row to remove.</param>
     /// <returns><c>true</c> when a row was removed.</returns>
     public bool Delete(long id) => Write(conn =>
     {
@@ -417,10 +410,9 @@ public sealed class OutboundHintStore : QueueStoreBase
     });
 
     /// <summary>
-    /// Puts every failed row back to pending with its attempts cleared, so it is sent again now. Used
-    /// by the operator after a peer that was down for a long while is back.
+    /// Puts every failed row back to pending with its attempts cleared, for the operator once a peer is back.
     /// </summary>
-    /// <param name="utcNow">Now.</param>
+    /// <param name="utcNow">The time the rows become due.</param>
     /// <returns>How many rows were put back.</returns>
     public int RetryFailed(DateTime utcNow) => Write(conn =>
     {
@@ -455,6 +447,7 @@ public sealed class OutboundHintStore : QueueStoreBase
         return counts;
     });
 
+    /// <summary>Runs a query and maps every row it returns.</summary>
     private static List<OutboundHint> ReadAll(SqliteCommand cmd)
     {
         using var reader = cmd.ExecuteReader();
@@ -467,6 +460,7 @@ public sealed class OutboundHintStore : QueueStoreBase
         return rows;
     }
 
+    /// <summary>Maps one database row to a hint.</summary>
     private static OutboundHint Map(SqliteDataReader reader) => new()
     {
         Id = reader.GetInt64(reader.GetOrdinal("Id")),
@@ -490,8 +484,9 @@ public sealed class OutboundHintStore : QueueStoreBase
         CreatedAt = Unstamp(reader.GetString(reader.GetOrdinal("CreatedAt")))
     };
 
-    // A history hint names the parts that changed. One that replaces a hint still waiting for the
-    // same object carries that hint's parts as well, or the earlier change would never be taken.
+    /// <summary>
+    /// Adds the parts of a history hint still waiting for the same object to the hint that replaces it, so the earlier change is still taken.
+    /// </summary>
     private static string? WithWaitingParts(SqliteConnection conn, OutboundHint row)
     {
         if (row.Kind != HintKind.History)

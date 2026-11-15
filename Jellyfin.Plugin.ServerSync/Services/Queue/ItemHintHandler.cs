@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
@@ -25,11 +26,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Applies metadata and people hints through the module tasks themselves: the refresh task builds
-/// and stores the one row the way the full scan would, and the apply task writes it the way the full
-/// run would, so a hint and a scan can never disagree. Between the two, the conflict is decided on
-/// origin versions. The peer's edit wins when it is newer. This server's wins when it is newer, in
-/// which case nothing is written here and the peers, the origin included, are told to pull it.
+/// Applies metadata and people hints through the scheduled tasks' own refresh and apply, so a hint and a scan never disagree.
+/// Between the two the stamps decide, and when this server's edit is newer nothing is written and the peers are told to pull it.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class ItemHintHandler
@@ -45,13 +43,13 @@ public sealed class ItemHintHandler
     /// <summary>
     /// Initializes a new instance of the <see cref="ItemHintHandler"/> class.
     /// </summary>
-    /// <param name="services">The service provider the module tasks are built from.</param>
-    /// <param name="configManager">Plugin configuration.</param>
+    /// <param name="services">Builds the refresh and apply tasks for one row.</param>
+    /// <param name="configManager">Tells which sync types are on and how the sources rank.</param>
     /// <param name="triage">Finds the local object a hint waits for.</param>
-    /// <param name="resolver">The version resolver.</param>
+    /// <param name="resolver">Reads and records the stamps the conflict is decided on.</param>
     /// <param name="publisher">Publishes this server's winning values.</param>
-    /// <param name="libraryManager">The library, which names the item the activity log mentions.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="libraryManager">Finds the local item, for its lock and its title.</param>
+    /// <param name="logger">Writes what was applied or kept.</param>
     public ItemHintHandler(
         IServiceProvider services,
         IPluginConfigurationManager configManager,
@@ -71,12 +69,12 @@ public sealed class ItemHintHandler
     }
 
     /// <summary>Applies a metadata hint.</summary>
-    /// <param name="hint">The inbound row.</param>
-    /// <param name="origin">The configured entry for the origin.</param>
-    /// <param name="client">A client bound to the origin.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <param name="prefetched">The origin's item when the worker already read it in a page, else null.</param>
-    /// <returns>The outcome.</returns>
+    /// <param name="hint">The hint that names the item on the origin.</param>
+    /// <param name="origin">The server entry of the origin, whose library mappings apply.</param>
+    /// <param name="client">Reads the item from the origin.</param>
+    /// <param name="cancellationToken">Cancels the read and the apply.</param>
+    /// <param name="prefetched">The origin's item when the worker already read it in a page, or null.</param>
+    /// <returns>How the hint ended.</returns>
     public async Task<HintApplyResult> ApplyMetadataAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken, BaseItemDto? prefetched = null)
     {
         ArgumentNullException.ThrowIfNull(hint);
@@ -105,8 +103,9 @@ public sealed class ItemHintHandler
             return HintApplyResult.Park(waitFor, "no local item at the mapped path yet. It applies when the item arrives");
         }
 
-        // The worker reads a pass's items in pages. A row it did not cover reads its own.
         var dto = prefetched;
+
+        // A row the worker's pages did not cover reads its own item.
         if (dto is null)
         {
             List<BaseItemDto> fetched;
@@ -114,11 +113,7 @@ public sealed class ItemHintHandler
             {
                 fetched = await client.GetItemsByIdsAsync(new[] { originItemId }, RefreshMetadataSyncTableTask.BuildRequestedFields(config), cancellationToken: cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 return HintApplyResult.RetryLater($"could not read the item from '{origin.DisplayName}': {ex.Message}");
             }
@@ -166,11 +161,11 @@ public sealed class ItemHintHandler
     }
 
     /// <summary>Applies a people hint.</summary>
-    /// <param name="hint">The inbound row.</param>
-    /// <param name="origin">The configured entry for the origin.</param>
-    /// <param name="client">A client bound to the origin.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The outcome.</returns>
+    /// <param name="hint">The hint that names the person.</param>
+    /// <param name="origin">The server entry of the origin.</param>
+    /// <param name="client">Reads the person from the origin.</param>
+    /// <param name="cancellationToken">Cancels the read and the apply.</param>
+    /// <returns>How the hint ended.</returns>
     public async Task<HintApplyResult> ApplyPeopleAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(hint);
@@ -197,11 +192,7 @@ public sealed class ItemHintHandler
         {
             dto = await client.GetPersonByNameAsync(hint.Key, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             return HintApplyResult.RetryLater($"could not read the person from '{origin.DisplayName}': {ex.Message}");
         }
@@ -233,6 +224,10 @@ public sealed class ItemHintHandler
             () => _libraryManager.GetItemById(Guid.Parse(record.LocalPersonId))).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Decides between the refreshed row and this server's value by their stamps, then applies the row or keeps the local value.
+    /// A row whose retries ran out is queued again first, since its value still differs.
+    /// </summary>
     private async Task<HintApplyResult> SettleAndApplyAsync<TRecord>(
         TRecord record,
         HintKind kind,
@@ -252,8 +247,6 @@ public sealed class ItemHintHandler
             return HintApplyResult.Dropped(HintCode.Ignored, "the row is ignored on this server");
         }
 
-        // A row whose retries ran out still differs. Taking it for "the values match" would record a
-        // version for a value this server does not hold.
         record.RetryIfErrored();
 
         if (record.Status == SyncStatus.Pending)
@@ -261,9 +254,9 @@ public sealed class ItemHintHandler
             return HintApplyResult.Kept(HintCode.AwaitingApproval, "waiting for approval on this server");
         }
 
+        // A row that is not queued already matches, so the hint's stamp is this value's too.
         if (record.Status != SyncStatus.Queued)
         {
-            // The values already match, so the hint's version is the version of the value here too.
             if (hint.Recorded)
             {
                 _resolver.Record(incoming);
@@ -272,17 +265,16 @@ public sealed class ItemHintHandler
             return HintApplyResult.Unchanged;
         }
 
-        // Provider work never touches an item locked here, the same as Jellyfin's own refresh. A lock is
-        // the one sign of curation that predates versions, so it protects edits no version records.
+        // A lock protects edits no stamp records, so provider work never replaces a locked item.
         if (!hint.Recorded && localItem() is { IsLocked: true })
         {
             record.MarkKept($"kept: the item is locked here, so a provider's work on '{origin.DisplayName}' does not replace it");
             StoreKept(record, kind);
-            _logger.LogInformation("Kept {Kind} for {Name}: the item is locked here and the change from '{Origin}' is a provider's work", kind, name, origin.DisplayName);
+            _logger.LogInformation("Kept {Kind} for {Name}: the item is locked here and the change from '{Origin}' is a provider's work", kind, FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(origin.DisplayName));
             return HintApplyResult.Kept(HintCode.Locked, "the item is locked here");
         }
 
-        // A recorded edit here beats a newer provider's work there, and beats an older edit there.
+        // A stamped edit here beats provider work there, and beats an older edit there.
         var local = _resolver.Recorded(kind, localKey);
         if (local is not null && (!hint.Recorded || VersionDecider.Decide(local, incoming, valuesEqual: false) == VersionDecision.Keep))
         {
@@ -291,14 +283,13 @@ public sealed class ItemHintHandler
                 : $"kept: this server's edit beats a provider's work on '{origin.DisplayName}'");
             StoreKept(record, kind);
 
-            // Only an edit made here is announced from here, so a value this server took from a third
-            // server never bounces between peers.
+            // A value taken from a third server is that server's to announce.
             if (_resolver.IsThisServer(local))
             {
                 publishLocal(local);
             }
 
-            _logger.LogInformation("Kept this server's {Kind} for {Name}, newer than '{Origin}'", kind, name, origin.DisplayName);
+            _logger.LogInformation("Kept this server's {Kind} for {Name}, newer than '{Origin}'", kind, FormatUtilities.SanitizeForLog(name), FormatUtilities.SanitizeForLog(origin.DisplayName));
             return HintApplyResult.Kept(HintCode.Superseded, "this server's edit is newer");
         }
 
@@ -307,17 +298,17 @@ public sealed class ItemHintHandler
             return HintApplyResult.RetryLater(record.Reason ?? "the apply failed");
         }
 
-        // The apply task recorded the version it read from the peer. The hint's is at least as exact.
-        // Provider work leaves no version, so a later edit anywhere still wins over it.
+        // Provider work leaves no stamp, so a later edit anywhere still wins over it.
         if (hint.Recorded)
         {
             _resolver.Record(incoming);
         }
 
-        _logger.LogInformation("Applied a {Kind} hint from '{Origin}' for {Name}{Provider}", kind, origin.DisplayName, name, hint.Recorded ? string.Empty : " (provider work)");
+        _logger.LogInformation("Applied a {Kind} hint from '{Origin}' for {Name}{Provider}", kind, FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(name), hint.Recorded ? string.Empty : " (provider work)");
         return HintApplyResult.AppliedTo(localItem());
     }
 
+    /// <summary>Stores a row marked kept in the table of its sync type.</summary>
     private void StoreKept(SyncRecord record, HintKind kind)
     {
         switch (kind)
@@ -331,6 +322,7 @@ public sealed class ItemHintHandler
         }
     }
 
+    /// <summary>Wraps the origin and its client as a scan source with the origin's rank.</summary>
     private ScanSource Connect(SourceServer origin, SourceServerClient client)
     {
         var priority = Math.Max(0, _configManager.Configuration.GetPullServers().FindIndex(s => string.Equals(s.Key, origin.Key, StringComparison.OrdinalIgnoreCase)));

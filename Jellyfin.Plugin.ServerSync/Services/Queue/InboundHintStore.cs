@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// The hints peers have sent this server that are not yet applied. See <see cref="InboundHint"/>.
+/// Stores the hints peers have sent this server that are not yet applied.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class InboundHintStore : QueueStoreBase
@@ -20,19 +20,18 @@ public sealed class InboundHintStore : QueueStoreBase
     /// <summary>
     /// Initializes a new instance of the <see cref="InboundHintStore"/> class.
     /// </summary>
-    /// <param name="databaseProvider">The database provider.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="databaseProvider">Opens the database the hints are stored in.</param>
+    /// <param name="logger">Writes database failures.</param>
     public InboundHintStore(ISyncDatabaseProvider databaseProvider, ILogger<InboundHintStore> logger)
         : base(databaseProvider, logger)
     {
     }
 
     /// <summary>
-    /// Stores a received hint. A row for the same origin, kind, and key is refreshed with the newer
-    /// hint id and version and made due at once, so a notice that arrives while an older one waits
-    /// is never applied twice.
+    /// Stores a received hint, refreshing a row for the same origin, kind, and key with the newer hint id and stamp.
+    /// A hint that arrives while an older one waits is therefore never applied twice.
     /// </summary>
-    /// <param name="row">The row.</param>
+    /// <param name="row">The hint to store, which receives its row id.</param>
     public void Enqueue(InboundHint row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -83,8 +82,8 @@ public sealed class InboundHintStore : QueueStoreBase
         });
     }
 
-    /// <summary>Returns the due rows of one lane: content, whose applies download files, or everything else.</summary>
-    /// <param name="utcNow">Now.</param>
+    /// <summary>Returns the due rows of one lane, which is content, whose applies download files, or everything else.</summary>
+    /// <param name="utcNow">Rows due at or before this time are returned.</param>
     /// <param name="limit">The most rows to return.</param>
     /// <param name="content"><c>true</c> for content rows, <c>false</c> for the rest.</param>
     /// <returns>The rows.</returns>
@@ -115,9 +114,9 @@ public sealed class InboundHintStore : QueueStoreBase
         return ReadAll(cmd);
     });
 
-    /// <summary>Returns one row, or null when it is gone.</summary>
-    /// <param name="id">The row id.</param>
-    /// <returns>The row.</returns>
+    /// <summary>Returns one row.</summary>
+    /// <param name="id">The id of the row to read.</param>
+    /// <returns>The row, or null when it is gone.</returns>
     public InboundHint? Get(long id) => Read(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -145,10 +144,9 @@ public sealed class InboundHintStore : QueueStoreBase
     });
 
     /// <summary>
-    /// Makes every row whose apply has failed due now with its attempts cleared, so each is tried
-    /// again at once and with its full allowance. Used by the operator once what blocked them is fixed.
+    /// Makes every row whose apply has failed due with its attempts cleared, so each is tried again with its full allowance.
     /// </summary>
-    /// <param name="utcNow">Now.</param>
+    /// <param name="utcNow">The time the rows become due.</param>
     /// <returns>How many rows were made due.</returns>
     public int RetryFailing(DateTime utcNow) => Write(conn =>
     {
@@ -169,7 +167,7 @@ public sealed class InboundHintStore : QueueStoreBase
         return ReadAll(cmd);
     });
 
-    /// <summary>Counts the rows held from one origin, parked rows aside, so a full queue can answer "busy" rather than grow.</summary>
+    /// <summary>Counts the rows held from one origin, parked rows aside, so a full queue can answer busy and not grow.</summary>
     /// <param name="originServerId">The origin's server id.</param>
     /// <returns>How many rows.</returns>
     public int CountForOrigin(string originServerId) => Read(conn =>
@@ -208,9 +206,8 @@ public sealed class InboundHintStore : QueueStoreBase
     });
 
     /// <summary>
-    /// The form a server id is stored and looked up in. Server entries match ids without regard to
-    /// case, so the queue does too: one peer is one origin, however it spells its id, and its rows
-    /// count once toward its limit.
+    /// Gives the form a server id is stored and looked up in.
+    /// Server entries match ids in any case, so one peer is one origin however it spells its id.
     /// </summary>
     /// <param name="originServerId">The id as received.</param>
     /// <returns>The id, trimmed and in lower case.</returns>
@@ -228,12 +225,11 @@ public sealed class InboundHintStore : QueueStoreBase
     });
 
     /// <summary>
-    /// Removes a row once its work is done, but only while it still carries the version the apply worked
-    /// from. The origin reuses one hint id per object, so the id cannot tell a refresh apart. The version
-    /// can. A row refreshed with a newer version during the apply stays and is applied again.
+    /// Removes a row once its work is done, but only while it still carries the stamp the apply worked from.
+    /// The origin reuses one hint id for each object, so only the stamp tells a refreshed row, which stays and is applied again.
     /// </summary>
-    /// <param name="id">The row id.</param>
-    /// <param name="appliedVersion">The version the apply worked from.</param>
+    /// <param name="id">The id of the row to remove.</param>
+    /// <param name="appliedVersion">The time of the stamp the apply worked from.</param>
     /// <returns><c>true</c> when the row was removed.</returns>
     public bool Remove(long id, DateTime appliedVersion) => Write(conn =>
     {
@@ -245,7 +241,7 @@ public sealed class InboundHintStore : QueueStoreBase
     });
 
     /// <summary>Removes a row by id regardless of its hint, for the operator.</summary>
-    /// <param name="id">The row id.</param>
+    /// <param name="id">The id of the row to remove.</param>
     /// <returns><c>true</c> when a row was removed.</returns>
     public bool Delete(long id) => Write(conn =>
     {
@@ -255,7 +251,7 @@ public sealed class InboundHintStore : QueueStoreBase
         return cmd.ExecuteNonQuery() > 0;
     });
 
-    /// <summary>Schedules a row for another attempt after a failed apply.</summary>
+    /// <summary>Schedules a row for another attempt after a failed apply, while it still carries the stamp that was tried.</summary>
     /// <param name="row">The row as tried.</param>
     /// <param name="nextAttempt">When to try again.</param>
     /// <param name="error">What went wrong.</param>
@@ -264,8 +260,6 @@ public sealed class InboundHintStore : QueueStoreBase
         ArgumentNullException.ThrowIfNull(row);
         Write(conn =>
         {
-            // Only while the row still carries the version tried. A newer hint that arrived during the
-            // apply reset the row to due with no attempts, and must not inherit the older one's backoff.
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "UPDATE InboundHints SET Attempts = Attempts + 1, NextAttempt = @next, LastError = @error WHERE Id = @id AND VersionTimestamp = @version";
             Add(cmd, "@next", Stamp(nextAttempt));
@@ -277,12 +271,11 @@ public sealed class InboundHintStore : QueueStoreBase
     }
 
     /// <summary>
-    /// Puts a row off without counting an attempt, for a row that could not start because the module's
-    /// scheduled run was busy. Nothing failed, so it must not count toward giving up on the row.
+    /// Puts a row off without counting an attempt, for a row that could not start because the scheduled task was running.
     /// </summary>
     /// <param name="row">The row as tried.</param>
     /// <param name="nextAttempt">When to try again.</param>
-    /// <param name="reason">Why.</param>
+    /// <param name="reason">Why the row could not start.</param>
     public void Postpone(InboundHint row, DateTime nextAttempt, string reason)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -299,13 +292,12 @@ public sealed class InboundHintStore : QueueStoreBase
     }
 
     /// <summary>
-    /// Sets a row aside until the local object it waits for appears or the time runs out, without
-    /// counting an attempt.
+    /// Sets a row aside until the local object it waits for appears or the time runs out, without counting an attempt.
     /// </summary>
     /// <param name="row">The row as tried.</param>
     /// <param name="parkKey">The key the row waits under.</param>
     /// <param name="until">When to try the row again regardless.</param>
-    /// <param name="reason">Why.</param>
+    /// <param name="reason">What the row is waiting for.</param>
     public void Park(InboundHint row, string parkKey, DateTime until, string reason)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -324,11 +316,10 @@ public sealed class InboundHintStore : QueueStoreBase
     }
 
     /// <summary>
-    /// Makes parked rows due now when they would otherwise wait past the park window, as rows parked under an
-    /// older, longer window do. They are applied once more and parked again with the current window, or
-    /// dropped when it has passed.
+    /// Makes parked rows due when they would otherwise wait past the park window.
+    /// They are applied once more, then parked again with the current window or dropped when it has passed.
     /// </summary>
-    /// <param name="utcNow">The current time.</param>
+    /// <param name="utcNow">The time the rows become due.</param>
     /// <param name="window">The current park window.</param>
     /// <returns>How many rows were made due.</returns>
     public int ShortenParked(DateTime utcNow, TimeSpan window) => Write(conn =>
@@ -340,9 +331,9 @@ public sealed class InboundHintStore : QueueStoreBase
         return cmd.ExecuteNonQuery();
     });
 
-    /// <summary>Makes the rows parked under a key due now, since what they waited for appeared.</summary>
-    /// <param name="parkKey">The park key.</param>
-    /// <param name="utcNow">The current time.</param>
+    /// <summary>Makes the rows parked under a key due, since what they waited for appeared.</summary>
+    /// <param name="parkKey">The key the rows wait under.</param>
+    /// <param name="utcNow">The time the rows become due.</param>
     /// <returns>How many rows were made due.</returns>
     public int WakeParked(string parkKey, DateTime utcNow) => Write(conn =>
     {
@@ -362,6 +353,7 @@ public sealed class InboundHintStore : QueueStoreBase
         return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     });
 
+    /// <summary>Runs a query and maps every row it returns.</summary>
     private static List<InboundHint> ReadAll(SqliteCommand cmd)
     {
         using var reader = cmd.ExecuteReader();
@@ -374,6 +366,7 @@ public sealed class InboundHintStore : QueueStoreBase
         return rows;
     }
 
+    /// <summary>Maps one database row to a hint.</summary>
     private static InboundHint Map(SqliteDataReader reader) => new()
     {
         Id = reader.GetInt64(reader.GetOrdinal("Id")),
@@ -396,8 +389,9 @@ public sealed class InboundHintStore : QueueStoreBase
         ParkedPath = Text(reader, "ParkedPath")
     };
 
-    // A history hint names the parts that changed. One that replaces a hint still waiting for the
-    // same object carries that hint's parts as well, or the earlier change would never be taken.
+    /// <summary>
+    /// Adds the parts of a history hint still waiting for the same object to the hint that replaces it, so the earlier change is still taken.
+    /// </summary>
     private static string? WithWaitingParts(SqliteConnection conn, InboundHint row)
     {
         if (row.Kind != HintKind.History)

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
@@ -20,11 +21,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Applies one history hint: reads the user's live history for the item from the origin, builds the
-/// same row the full scan would, merges three way against the last agreed base, settles the merged
-/// state with the origin through the negotiation endpoint, and writes it here under the apply guard
-/// so the write raises no hint of its own. A merge that moved past what the origin had is a change of
-/// this server's own, so it is published to the other peers.
+/// Applies a history hint by merging the origin's live history with this server's, settling the result with the origin, and writing it here.
+/// A merge that moved past what the origin had is a change of this server's own, so it is published to the other peers.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class HistoryHintHandler
@@ -45,16 +43,16 @@ public sealed class HistoryHintHandler
     /// Initializes a new instance of the <see cref="HistoryHintHandler"/> class.
     /// </summary>
     /// <param name="tableService">Builds history rows.</param>
-    /// <param name="table">The history table.</param>
-    /// <param name="localClient">This server's library and user data.</param>
-    /// <param name="guard">The apply guard.</param>
-    /// <param name="versions">The version store.</param>
+    /// <param name="table">Holds the history rows and their agreed bases.</param>
+    /// <param name="localClient">Reads and writes this server's user data.</param>
+    /// <param name="guard">Keeps the write from raising a hint of its own.</param>
+    /// <param name="versions">Holds the stamps the merge is decided on.</param>
     /// <param name="publisher">Publishes changes of this server's own to the other peers.</param>
-    /// <param name="applicationHost">The server host, for this server's id.</param>
-    /// <param name="configManager">Plugin configuration, for the history switch.</param>
+    /// <param name="applicationHost">Gives this server's id.</param>
+    /// <param name="configManager">Tells whether History is on.</param>
     /// <param name="triage">Finds the local item a hint waits for.</param>
-    /// <param name="libraryManager">The library, which names the item the activity log mentions.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="libraryManager">Finds the local item, for its title.</param>
+    /// <param name="logger">Writes what was applied and how it was decided.</param>
     public HistoryHintHandler(
         HistorySyncTableService tableService,
         HistorySyncTableManager table,
@@ -81,12 +79,12 @@ public sealed class HistoryHintHandler
         _logger = logger;
     }
 
-    /// <summary>Applies one hint from one origin.</summary>
-    /// <param name="hint">The inbound row.</param>
-    /// <param name="origin">The configured entry for the origin.</param>
-    /// <param name="client">A client bound to the origin.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The outcome.</returns>
+    /// <summary>Applies one history hint from one origin.</summary>
+    /// <param name="hint">The hint that names the user and item on the origin.</param>
+    /// <param name="origin">The server entry of the origin, whose mappings apply.</param>
+    /// <param name="client">Reads the history from the origin and negotiates with it.</param>
+    /// <param name="cancellationToken">Cancels the read and the negotiation.</param>
+    /// <returns>How the hint ended.</returns>
     public async Task<HintApplyResult> ApplyAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(hint);
@@ -177,51 +175,46 @@ public sealed class HistoryHintHandler
             }
         }
 
-        // A base says what this server and the origin last agreed on. When this server's value has since
-        // come from a third server, the base no longer describes it, and a three way merge would read that
-        // change as this server's own: a play taken from C would then beat a newer unmark from B. The edit
-        // versions decide instead, as they do on first contact.
         var itemType = HintProtocol.SplitHistoryItemType(hint.ItemType, out var parts);
         var taken = HistoryParts.None;
         var decideByVersion = !record.HasNegotiatedBase || ChangedByThirdServer(localKey, origin);
+
+        // A base no longer describes a value taken from a third server, so the stamps decide.
         if (decideByVersion)
         {
             taken = DecideByVersion(record, hint, localKey, parts);
         }
 
+        // Both servers already hold the merged state, so it becomes the agreed base.
         if (!HistorySyncMergeService.HasChangesToSync(record))
         {
-            // Both servers already hold the merged state, so this becomes the agreed base and the hint's
-            // version is adopted as the version of the value here.
             var baseMoved = !record.HasNegotiatedBase
                 || !PeerHistoryNegotiator.StatesMatch(PeerHistoryNegotiator.NegotiatedStateOf(record), PeerHistoryNegotiator.MergedStateOf(record));
             record.RecordNegotiatedBase(now);
             Store(record, now);
             _versions.Set(HintProtocol.IncomingVersion(hint, HintKind.History, localKey));
+
+            // The origin records the same base only when it hears of it.
             if (baseMoved)
             {
-                // The origin records the same base only when it hears of it, so a base that moved here is
-                // confirmed there with an offer of the state both already hold.
                 await ConfirmBaseWithOriginAsync(record, origin, client, cancellationToken).ConfigureAwait(false);
             }
 
             return HintApplyResult.Unchanged;
         }
 
-        // A key the origin's whitelist refuses cannot negotiate. The merged state is then written here
-        // only, the way one way history always worked, and no base is recorded because the origin never
-        // agreed to anything.
         var oneWay = false;
         NegotiationStep settled;
         try
         {
             settled = await SettleWithOriginAsync(record, client, decideByVersion ? r => taken = DecideByVersion(r, hint, localKey, parts) : null, cancellationToken).ConfigureAwait(false);
         }
+        // A refused API Key cannot negotiate, so the merge is written here only and no base is recorded.
         catch (PeerRefusedException ex) when (ex.KeyRefused)
         {
             oneWay = true;
             settled = new NegotiationStep(NegotiationAction.Proceed, null);
-            _logger.LogWarning("Server Sync on '{Origin}' refused this server's key, so history from it is applied one way. Add this server or its user to the whitelist there", origin.DisplayName);
+            _logger.LogWarning("Server Sync on '{Origin}' refused this server's key, so history from it is applied one way. Add this server or its user to the whitelist there", FormatUtilities.SanitizeForLog(origin.DisplayName));
         }
 
         if (settled.Action == NegotiationAction.Fail)
@@ -229,8 +222,6 @@ public sealed class HistoryHintHandler
             return HintApplyResult.RetryLater(settled.Reason ?? "negotiation with the origin failed");
         }
 
-        // Whether the merge moved past what the origin held is decided now, before the row's picture of
-        // the origin is brought up to date below.
         var movedPastOrigin = HistorySyncMergeService.SourceDiffersFromMerged(record);
 
         using (_guard.Enter(HintProtocol.GuardKey(HintKind.History, localKey)))
@@ -266,21 +257,19 @@ public sealed class HistoryHintHandler
 
         Store(record, now);
 
-        // The parts taken from the origin carry its version here, each on its own.
         var incomingVersion = HintProtocol.IncomingVersion(hint, HintKind.History, localKey);
         foreach (var part in new[] { HistoryParts.Played, HistoryParts.Favorite })
         {
+            // Each part taken from the origin carries the origin's stamp on its own.
             if (taken.HasFlag(part))
             {
                 _versions.Set(new ObjectVersion { Kind = HintKind.History, Key = HintProtocol.HistoryPartKey(localKey, part), ServerId = incomingVersion.ServerId, Timestamp = incomingVersion.Timestamp });
             }
         }
 
+        // This server added to the merge, so the peers that did not negotiate it hear of it from here.
         if (movedPastOrigin)
         {
-            // This server contributed to the merged state, so the other peers hear about it from here.
-            // The origin already holds it through the negotiation above, unless the origin refused this
-            // server's key and nothing was negotiated, in which case the origin hears of it too.
             var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = now };
             _publisher.PublishHistory(localUserId, userMapping.LocalUserName, localItemId, record.LocalPath ?? string.Empty, version, excludePeerKey: oneWay ? null : origin.Key, itemType: HintProtocol.HistoryItemType(itemType, taken == HistoryParts.None ? parts : taken));
         }
@@ -289,12 +278,11 @@ public sealed class HistoryHintHandler
             _versions.Set(HintProtocol.IncomingVersion(hint, HintKind.History, localKey));
         }
 
-        _logger.LogInformation("Applied a history hint from '{Origin}' for {Item}: {Changes}", origin.DisplayName, record.ItemName, HistorySyncMergeService.GetChangeSummary(record));
+        _logger.LogInformation("Applied a history hint from '{Origin}' for {Item}: {Changes}", FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(record.ItemName), HistorySyncMergeService.GetChangeSummary(record));
         return HintApplyResult.AppliedTo(_libraryManager.GetItemById(localItemId));
     }
 
-    // Whether this server's current value came from a server other than itself and the origin, by the
-    // version it carries.
+    /// <summary>Whether this server's value came from a server other than itself and the origin, by the stamp it carries.</summary>
     private bool ChangedByThirdServer(string localKey, SourceServer origin)
     {
         var local = _versions.Get(HintKind.History, localKey);
@@ -303,8 +291,10 @@ public sealed class HistoryHintHandler
             && !string.Equals(local.ServerId, origin.ServerId, StringComparison.OrdinalIgnoreCase);
     }
 
-    // Best effort: the hint is already settled here, so a refused key or an unreachable origin leaves
-    // the origin's base where it was and the next exchange records it.
+    /// <summary>
+    /// Offers the origin the state both servers already hold, so it records the same base.
+    /// The hint is already settled here, so a failure leaves the origin's base for the next exchange.
+    /// </summary>
     private async Task ConfirmBaseWithOriginAsync(HistorySyncItem record, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken)
     {
         try
@@ -312,21 +302,18 @@ public sealed class HistoryHintHandler
             var answer = await OfferAsync(record, client, cancellationToken).ConfigureAwait(false);
             if (answer.Outcome is not (PeerHistoryOutcome.Applied or PeerHistoryOutcome.Unchanged))
             {
-                _logger.LogDebug("'{Origin}' did not record the base for {Item}: {Outcome} {Reason}", origin.DisplayName, record.ItemName, answer.Outcome, answer.Reason);
+                _logger.LogDebug("'{Origin}' did not record the base for {Item}: {Outcome} {Reason}", FormatUtilities.SanitizeForLog(origin.DisplayName), FormatUtilities.SanitizeForLog(record.ItemName), answer.Outcome, FormatUtilities.SanitizeForLog(answer.Reason, 300));
             }
         }
+        // A standard user's API Key cannot negotiate, so the origin keeps no base.
         catch (PeerRefusedException)
         {
-            // A standard user's key cannot negotiate, so there is no base on the origin to keep.
         }
     }
 
     /// <summary>
-    /// The merge cannot be trusted to tell the newer change: the two servers have never agreed on this
-    /// object, or this server's value has since come from a third server. When this server knows when
-    /// its own value was last edited, the newer edit wins outright on origin versions. Without a local version the merge stands, which keeps a play that predates versioning
-    /// rather than risk losing it, and the base recorded after this apply makes every later merge three
-    /// way.
+    /// Lets the newer stamp win when the merge cannot tell the newer change, which is on first contact or after a value came from a third server.
+    /// Without a local stamp the merge stands, which keeps a play no stamp records.
     /// </summary>
     private HistoryParts DecideByVersion(HistorySyncItem record, InboundHint hint, string localKey, HistoryParts parts)
     {
@@ -340,9 +327,7 @@ public sealed class HistoryHintHandler
         var source = PeerHistoryNegotiator.SourceStateOf(record);
         var local = PeerHistoryNegotiator.LocalStateOf(record);
 
-        // The origin says which parts it changed. Only those are weighed, each against the version
-        // this server holds for that part, and the rest stay as they are here. The origin may never
-        // have heard of a change this server took from a third, so its other parts say nothing.
+        // Only the parts the origin says it changed are weighed, each against its own stamp here.
         if (parts != HistoryParts.None)
         {
             var taken = HistoryParts.None;
@@ -375,7 +360,7 @@ public sealed class HistoryHintHandler
             }
 
             PeerHistoryNegotiator.ApplyMergedState(record, merged);
-            _logger.LogDebug("Deciding {Item} by version, part by part: taking {Taken} of {Parts} from the origin", record.ItemName, taken, parts);
+            _logger.LogDebug("Deciding {Item} by version, part by part: taking {Taken} of {Parts} from the origin", FormatUtilities.SanitizeForLog(record.ItemName), taken, parts);
             return taken;
         }
 
@@ -383,18 +368,19 @@ public sealed class HistoryHintHandler
         {
             case VersionDecision.Apply:
                 PeerHistoryNegotiator.ApplyMergedState(record, source);
-                _logger.LogDebug("Deciding {Item} by version: the origin's edit is newer, taking it", record.ItemName);
+                _logger.LogDebug("Deciding {Item} by version: the origin's edit is newer, taking it", FormatUtilities.SanitizeForLog(record.ItemName));
                 break;
 
             case VersionDecision.Keep:
                 PeerHistoryNegotiator.ApplyMergedState(record, local);
-                _logger.LogDebug("Deciding {Item} by version: this server's edit is newer, keeping it", record.ItemName);
+                _logger.LogDebug("Deciding {Item} by version: this server's edit is newer, keeping it", FormatUtilities.SanitizeForLog(record.ItemName));
                 break;
         }
 
         return HistoryParts.None;
     }
 
+    /// <summary>Offers the merged state to the origin, and once more when its live state had moved.</summary>
     private async Task<NegotiationStep> SettleWithOriginAsync(HistorySyncItem record, SourceServerClient client, Action<HistorySyncItem>? remerge, CancellationToken cancellationToken)
     {
         var answer = await OfferAsync(record, client, cancellationToken).ConfigureAwait(false);
@@ -408,6 +394,7 @@ public sealed class HistoryHintHandler
         return step;
     }
 
+    /// <summary>Sends one offer to the origin and returns its answer, or a failed result when it could not be reached.</summary>
     private async Task<PeerHistoryResult> OfferAsync(HistorySyncItem record, SourceServerClient client, CancellationToken cancellationToken)
     {
         var request = new PeerHistoryRequest
@@ -434,20 +421,14 @@ public sealed class HistoryHintHandler
                 ? response.Items[0]
                 : new PeerHistoryResult { Outcome = PeerHistoryOutcome.Failed, Reason = "origin returned no result" };
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (PeerRefusedException ex) when (ex.KeyRefused)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        // A refused API Key and a cancelled apply are the caller's to handle.
+        catch (Exception ex) when (ex is not PeerRefusedException { KeyRefused: true } && (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
         {
             return new PeerHistoryResult { Outcome = PeerHistoryOutcome.Failed, Reason = ex.Message };
         }
     }
 
+    /// <summary>Marks a row applied and stores it.</summary>
     private void Store(HistorySyncItem record, DateTime now)
     {
         record.MarkApplied(now);
