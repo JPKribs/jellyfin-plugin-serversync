@@ -34,6 +34,8 @@ changelog:
   - Descriptions and messages across the pages are shorter and end with a period, and the hint above the server list says how rank works
   - The reasons a link stream is refused name the count plainly, as in 1 stream or 2 link streams
   - The scheduled steps that Sync Content and Sync Information run are named for what they do in the log and on the Activity page, such as Scan Content and Copy Content
+  - The pages are drawn with the new Base components. Buttons, numbered steps, count cards, and status messages look a little different, a status message carries an icon, and a file size reads 2 KB where it read 2.00 KB
+  - A thumbnail in the Content and History tables is always upright, so an episode still is cropped to fit
   - Addresses in 100.64.0.0/10, the range Tailscale uses, count as a private network. A server entry at such an address needs Allow Private Network Address on, which it is by default
   fixed:
   - A viewer who stopped a link stayed on the source's dashboard as still playing, and pressing Stop there answered that the session was not found. The session now goes idle when playback stops and leaves the dashboard 20 minutes later
@@ -57,4 +59,6 @@ changelog:
   - A history fetch no longer asks the source for media sources, which it never read
   - Values another server or a request supplies pass through SanitizeForLog in the link, provider, and whitelist log lines
   - PluginConfiguration.ValidateConfiguration and IsValid, which nothing called, are removed
-  - Uses JPKribs.Jellyfin.Base 2026.11.14. Its speed bucket, throttled and capped streams, retry handler, path containment, hashing, size constants, and address rules replace the local copies
+  - Uses JPKribs.Jellyfin.Base 2026.11.16. Its speed bucket, throttled and capped streams, retry handler, path containment, hashing, size constants, and address rules replace the local copies
+  - The pages use Base's base- classes and tokens, and each is built with createConfigPage through createServerSyncPage in serversync_shared.js, which also holds the tab list
+  - Table thumbnails come from a column image loader that reads the image proxy, which replaces the three local thumbnail builders
