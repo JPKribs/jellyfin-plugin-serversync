@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Xml;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Sdk.Generated.Models;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
@@ -98,9 +99,7 @@ public static class LinkNfo
             return false;
         }
 
-        var temp = path + ".serversync-tmp";
-        File.WriteAllText(temp, Build(item), new UTF8Encoding(false));
-        File.Move(temp, path, overwrite: true);
+        AtomicFile.WriteAllBytes(path, new UTF8Encoding(false).GetBytes(Build(item)));
         return true;
     }
 

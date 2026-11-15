@@ -737,9 +737,7 @@ public sealed class LinkCache
         {
             Directory.CreateDirectory(_loadedRoot!);
             var index = Path.Combine(_loadedRoot!, IndexFile);
-            var temp = index + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(_entries!.Values.ToList()));
-            File.Move(temp, index, overwrite: true);
+            AtomicFile.WriteAllBytes(index, JsonSerializer.SerializeToUtf8Bytes(_entries!.Values.ToList()));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

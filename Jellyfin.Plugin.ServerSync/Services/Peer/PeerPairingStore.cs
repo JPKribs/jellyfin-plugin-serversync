@@ -97,7 +97,7 @@ public sealed class PeerPairingStore : QueueStoreBase
             return false;
         }
 
-        return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(presented), Encoding.UTF8.GetBytes(expected));
+        return SecretCompare.FixedTimeEquals(presented, expected, StringComparison.Ordinal);
     }
 
     /// <summary>The secret a peer must present when it names itself as the sender, or null when it was never issued one.</summary>

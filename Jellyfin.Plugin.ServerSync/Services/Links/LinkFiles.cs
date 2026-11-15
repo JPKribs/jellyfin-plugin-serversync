@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller;
 using Microsoft.Extensions.DependencyInjection;
@@ -57,7 +58,7 @@ public sealed class LinkFiles
             return false;
         }
 
-        return CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(Secret(linkId)), Encoding.ASCII.GetBytes(presented));
+        return SecretCompare.FixedTimeEquals(Secret(linkId), presented, StringComparison.Ordinal);
     }
 
     /// <summary>Whether the file at <paramref name="path"/> already holds the current URL for <paramref name="linkId"/>.</summary>
@@ -100,25 +101,7 @@ public sealed class LinkFiles
             Directory.CreateDirectory(folder);
         }
 
-        var temp = path + ".serversync-tmp";
-        try
-        {
-            File.WriteAllText(temp, UrlFor(linkId) + "\n", new UTF8Encoding(false));
-            File.Move(temp, path, overwrite: true);
-        }
-        catch
-        {
-            // A write that fails leaves nothing behind for a later run to trip over.
-            try
-            {
-                File.Delete(temp);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-            }
-
-            throw;
-        }
+        AtomicFile.WriteAllBytes(path, new UTF8Encoding(false).GetBytes(UrlFor(linkId) + "\n"));
     }
 
     /// <summary>The first URL line in a .strm, the same line Jellyfin reads.</summary>
@@ -182,14 +165,7 @@ public sealed class LinkFiles
                 else
                 {
                     var fresh = RandomNumberGenerator.GetBytes(32);
-                    var temp = _keyPath + ".tmp";
-                    File.WriteAllBytes(temp, fresh);
-                    if (!OperatingSystem.IsWindows())
-                    {
-                        File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                    }
-
-                    File.Move(temp, _keyPath, overwrite: true);
+                    AtomicFile.WriteAllBytes(_keyPath, fresh, ownerOnly: true);
                     _key = fresh;
                 }
             }
