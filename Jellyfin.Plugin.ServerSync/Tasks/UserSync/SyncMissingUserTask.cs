@@ -488,13 +488,13 @@ public class SyncMissingUserTask
         {
             using (var fileStream = File.Create(tempPath))
             {
-                await StallWatchdogStream.CopyAsync(new CappedReadStream(imageStream, CappedReadStream.MaxSyncedImageBytes), fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
+                await StallWatchdogStream.CopyAsync(new CappedReadStream(imageStream, StreamCaps.MaxSyncedImageBytes), fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
             }
 
             string downloadedHash;
             using (var verifyStream = File.OpenRead(tempPath))
             {
-                downloadedHash = HashUtilities.ComputeSha256Hash(verifyStream);
+                downloadedHash = (await HashUtilities.ComputeSha256HashAsync(verifyStream, cancellationToken).ConfigureAwait(false)).Hash;
             }
 
             var downloadedSize = new FileInfo(tempPath).Length;

@@ -110,4 +110,24 @@ public class SourceServerTests
         Assert.True(config.Servers[0].Pushes);
         Assert.Equal(2, config.Servers[0].GetEnabledUserMappings().Count);
     }
+
+    /// <summary>
+    /// A server entry's link stream speed is in megabits, and the scheduled speed takes over inside the
+    /// bandwidth schedule's hours.
+    /// True: the source sends at the rate the administrator set for the hour it is.
+    /// False: the wrong rate, or none, would apply.
+    /// </summary>
+    [Fact]
+    public void GetLinkStreamSpeedBytes_FollowsTheSchedule()
+    {
+        var server = new SourceServer { LinkStreamSpeedMbps = 80, LinkScheduledStreamSpeedMbps = 8 };
+        var config = new PluginConfiguration { EnableBandwidthScheduling = true, ScheduledStartHour = 18, ScheduledEndHour = 23 };
+
+        Assert.Equal(10_000_000, server.GetLinkStreamSpeedBytes(config.IsInBandwidthSchedule(12)));
+        Assert.Equal(1_000_000, server.GetLinkStreamSpeedBytes(config.IsInBandwidthSchedule(20)));
+
+        config.EnableBandwidthScheduling = false;
+        Assert.Equal(10_000_000, server.GetLinkStreamSpeedBytes(config.IsInBandwidthSchedule(20)));
+        Assert.Equal(0, new SourceServer().GetLinkStreamSpeedBytes(false));
+    }
 }

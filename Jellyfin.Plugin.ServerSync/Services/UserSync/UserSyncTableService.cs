@@ -223,7 +223,7 @@ public class UserSyncTableService
                 {
                     localImageSize = new FileInfo(localUser.ProfileImage.Path).Length;
                     using var fileStream = File.OpenRead(localUser.ProfileImage.Path);
-                    localImageHash = HashUtilities.ComputeSha256Hash(fileStream);
+                    localImageHash = (await HashUtilities.ComputeSha256HashAsync(fileStream, cancellationToken).ConfigureAwait(false)).Hash;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

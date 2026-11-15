@@ -573,7 +573,7 @@ public class DownloadService
         {
             if (_sharedSpeed is null)
             {
-                _sharedSpeed = new SpeedBucket(bytesPerSecond);
+                _sharedSpeed = new SpeedBucket(bytesPerSecond, StreamCaps.BurstSeconds);
             }
             else
             {

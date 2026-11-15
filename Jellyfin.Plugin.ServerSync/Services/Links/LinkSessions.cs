@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -204,7 +205,7 @@ public sealed class LinkSessions
                 return bucket;
             }
 
-            return _speeds[key] = new SpeedBucket(bytesPerSecond);
+            return _speeds[key] = new SpeedBucket(bytesPerSecond, StreamCaps.BurstSeconds);
         }
     }
 

@@ -117,7 +117,7 @@ public partial class PeerController
         }
 
         var file = new FileStream(verdict.Item.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        return new FileStreamResult(new Utilities.ThrottledReadStream(file, sessions.SpeedFor(peer.Key, verdict.UserId, fill, speed)), mime)
+        return new FileStreamResult(new JPKribs.Jellyfin.Base.ThrottledReadStream(file, sessions.SpeedFor(peer.Key, verdict.UserId, fill, speed)), mime)
         {
             EnableRangeProcessing = true,
             LastModified = System.IO.File.GetLastWriteTimeUtc(verdict.Item.Path)
