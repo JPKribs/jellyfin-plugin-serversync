@@ -20,18 +20,16 @@ using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Library;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
 
 /// <summary>
-/// Refresh phase for Content sync. Walks every enabled library mapping,
-/// fetches its items, and turns each into a <see cref="SyncItem"/> with the
-/// appropriate Pending/Queued/Synced status per the configured approval
-/// modes. Items with no local match get a queued/pending row. Items already
-/// matched and in size-sync get marked Synced. Missing items get pruned via
-/// <see cref="SyncStateService.ProcessMissingItem"/>.
+/// Scans Content: walks every enabled library mapping, fetches its items, and turns each into a <see cref="SyncItem"/> whose status follows the approval settings.
+/// Items the sources no longer hold are settled by Removed files.
 /// </summary>
 public class UpdateSyncTablesTask
     : RefreshSyncTaskBase<SyncItem, ContentRefreshWork, string>
@@ -39,27 +37,14 @@ public class UpdateSyncTablesTask
     private readonly ILibraryManager _libraryManager;
 
     /// <summary>
-    /// Items the source reported per mapping this run, keyed by
-    /// SourceLibraryId. 0 means the source answered with nothing for a
-    /// mapping that may still hold rows, <see cref="PruneStaleAsync"/>
-    /// refuses to prune those rows, because a stale/recreated library ID or
-    /// a transient empty answer is indistinguishable from real removal and
-    /// returns 200-empty with no error. -1 marks a whitelist mapping whose
-    /// FilteredItems list is explicitly empty (intentional. Prune allowed).
-    /// Safe as instance state: runs are serialized by the module mutex.
+    /// How many items each source reported for each mapping this run.
+    /// A 0 stops the prune of that mapping's rows, since an empty answer cannot be told from a real removal, and -1 marks a whitelist that is empty on purpose.
     /// </summary>
     private readonly Dictionary<string, int> _seenPerMapping = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// SourceItemIds ("N") excluded this run because a BLACKLISTED collection
-    /// or playlist contains them, keyed by the blacklisting mapping's
-    /// SourceLibraryId. Path-prefix blacklist matching can't see container
-    /// membership, so blacklisted entries are expanded to leaf IDs up front.
-    /// Scoped per mapping: containers can hold items from any library, and a
-    /// global set would let mapping A's blacklist suppress items mapping B
-    /// legitimately syncs. Also consulted at prune time so rows dropped by a
-    /// container edit go through deletion approval. Same lifecycle rules as
-    /// <see cref="_seenPerMapping"/>.
+    /// The source item ids left out this run because a blacklisted collection or playlist holds them, by the blacklisting mapping.
+    /// It is kept for each mapping because a container can hold items from any library, and it is read at prune time so those rows go through approval.
     /// </summary>
     private readonly Dictionary<string, HashSet<string>> _blacklistExcludedByMapping = new(StringComparer.OrdinalIgnoreCase);
 
@@ -105,23 +90,20 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// Records how many items a mapping's fetch produced. Multiple mappings
-    /// of one server can share a SourceLibraryId (rows carry only the server and
-    /// the library ID, so their pools are indistinguishable at prune time), merge
-    /// instead of overwrite: a suspicious 0 is sticky, an intentionally-empty whitelist
-    /// (-1) never overrides a real answer, and positive counts accumulate.
+    /// Records how many items a mapping's fetch produced, merging with any earlier count for the same library id.
+    /// A 0 sticks, a -1 never replaces a real answer, and positive counts add up.
     /// </summary>
     /// <param name="sourceLibraryId">The library's id on the source.</param>
-    /// <param name="count">How many items changed.</param>
+    /// <param name="count">How many items the fetch produced, or -1 for a whitelist that is empty on purpose.</param>
     protected void RecordMappingSeen(string sourceLibraryId, int count) => RecordMappingSeen(null, sourceLibraryId, count);
 
     /// <summary>
     /// Records the count for one server's mapping. Another server's library with the same id is
-    /// counted on its own, so a partner that holds nothing never blocks the prune of this server's rows.
+    /// counted on its own, so a server that holds nothing never blocks the prune of this server's rows.
     /// </summary>
-    /// <param name="serverKey">The server entry key, or null for the first scan server.</param>
+    /// <param name="serverKey">The server entry key, or null for the first source.</param>
     /// <param name="sourceLibraryId">The library's id on the source.</param>
-    /// <param name="count">How many items changed.</param>
+    /// <param name="count">How many items the fetch produced, or -1 for a whitelist that is empty on purpose.</param>
     protected void RecordMappingSeen(string? serverKey, string sourceLibraryId, int count)
     {
         sourceLibraryId = MapKey(serverKey, sourceLibraryId);
@@ -156,7 +138,7 @@ public class UpdateSyncTablesTask
     /// <param name="logger">Writes log entries.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
     /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="clientFactory">Builds the client for each source.</param>
     /// <param name="libraryManager">Reads and changes Jellyfin's library.</param>
     /// <param name="watermarks">Holds when each source was last scanned, or null when scans are never incremental.</param>
     /// <param name="linkFiles">Reads and writes link files, or null when linking is not available.</param>
@@ -183,9 +165,8 @@ public class UpdateSyncTablesTask
     private readonly LinkRehomer? _rehomer;
 
     /// <summary>
-    /// Where a file this server already had is never replaced by the other server's: a Link library,
-    /// unless the film is picked to always keep, and any library of a server this one syncs with as
-    /// an equal.
+    /// Says whether a file this server already had is never replaced by the other server's.
+    /// That holds in a Link library, unless the film is picked to always keep, and in any library of a server this one syncs with as an equal.
     /// </summary>
     private static bool OwnFilesStay(ContentRefreshWork source, bool picked)
         => (source.Mapping.StorageMode == StorageMode.Link && !picked) || source.Source.Server.Mode == ServerMode.Sync;
@@ -208,13 +189,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// A scan that lists only what changed hears nothing of what was removed. A server that keeps a
-    /// record of what left its library is asked for it, and each removal it names is checked with it
-    /// once more and then settled as a full scan would settle it: a link moves to another server that
-    /// holds the file or goes, and a copy follows Removed files. A copy is left for the full scan when
-    /// another server here covers its folder, since only a full scan knows whether that server still
-    /// offers the file. The same limit holds as for a full scan: a server that names more than half
-    /// its rows as removed is not believed, and the full scan decides.
+    /// Settles the removals a source names on a run that lists only what changed, each checked with the source once more and then settled as a full scan would.
+    /// A copy another source covers waits for the full scan, and so does a source that names more than half its rows as removed.
     /// </summary>
     /// <inheritdoc />
     protected override async Task<int> ApplyReportedRemovalsAsync(IReadOnlyDictionary<string, SyncItem> existing, HashSet<string> seenKeys, CancellationToken cancellationToken)
@@ -236,7 +212,7 @@ public class UpdateSyncTablesTask
             Models.Peer.PeerChangesResponse? changes;
             try
             {
-                // A little further back than the scan asked from, so two clocks that disagree lose nothing.
+                // Reaches further back, so two clocks that disagree lose nothing.
                 changes = await source.Client.GetPeerChangesAsync(since.AddMinutes(-10), cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or IOException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
@@ -245,17 +221,14 @@ public class UpdateSyncTablesTask
                 continue;
             }
 
-            // An answer that reaches back less far than was asked may be missing removals. The ones it
-            // does name are still removals, each checked again below, and the rest wait for the full scan.
+            // A short answer may miss removals, which wait for the full scan.
             if (changes is null || changes.RemovedItemIds.Count == 0)
             {
                 continue;
             }
 
             var named = new HashSet<string>(changes.RemovedItemIds.Select(id => id.Replace("-", string.Empty, StringComparison.Ordinal)), StringComparer.OrdinalIgnoreCase);
-            // Each named row is read again from the table. A row another server also offered this run was
-            // built in memory as that server's without being stored, since a run that lists only what
-            // changed cannot tell the first server gave the file up, and the stored row is the one to settle.
+            // Read again from the table, since a contested row was built without being stored.
             var stored = existing.Keys.Where(named.Contains)
                 .Select(key => typedManager.GetByKey(key))
                 .Where(row => row is not null)
@@ -284,7 +257,7 @@ public class UpdateSyncTablesTask
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    // Asked once more, by id. An item put back at the same place has the same id again.
+                    // An item put back at the same place has the same id again.
                     if (!Guid.TryParse(row.SourceItemId, out var id) || await source.Client.FindItemDetailsAsync(id, cancellationToken).ConfigureAwait(false) is not null)
                     {
                         continue;
@@ -306,7 +279,7 @@ public class UpdateSyncTablesTask
                 }
                 catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or IOException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
                 {
-                    Logger.LogDebug(ex, "{Task}: could not confirm that {Path} left '{Server}', so it waits for the full scan", Name, row.SourcePath, source.Name);
+                    Logger.LogDebug(ex, "{Task}: could not confirm that {Path} left '{Server}', so it waits for the full scan", Name, FormatUtilities.SanitizeForLog(row.SourcePath), source.Name);
                 }
             }
         }
@@ -319,6 +292,7 @@ public class UpdateSyncTablesTask
         return settled;
     }
 
+    /// <summary>Says whether another source's enabled mapping covers the folder a row's file sits in.</summary>
     private static bool CoveredByAnotherServer(PluginConfiguration config, SyncItem row)
         => !string.IsNullOrEmpty(row.LocalPath)
             && config.GetPullServers().Any(server => !string.Equals(server.Key, row.ServerKey, StringComparison.OrdinalIgnoreCase)
@@ -333,15 +307,10 @@ public class UpdateSyncTablesTask
     private readonly HashSet<string> _notTheirs = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Who decides about a file a server offers when that server was itself given the file. A file
-    /// that first came from this server is this server's to decide, so an offer of it is never taken:
-    /// taking it would bring back a file removed here. A file that first came from another server this
-    /// one syncs the same folder from is that server's to decide, so its copies on other servers are
-    /// not taken as files of their own, and stop being kept once it removes the file. Any other offer
-    /// counts, including one whose origin this server does not sync from, which is how a file reaches
-    /// a server through one in between.
+    /// Says who decides about a file a server offers when that server was itself given the file.
+    /// A file that first came from this server, or from another server this one syncs the same folder from, is that server's to decide, and any other offer counts.
     /// </summary>
-    /// <param name="config">The configuration.</param>
+    /// <param name="config">The plugin settings, for the configured sources.</param>
     /// <param name="localServerId">This server's id.</param>
     /// <param name="offeringKey">The key of the server entry making the offer.</param>
     /// <param name="originServerId">The id of the server the file first came from, or empty.</param>
@@ -397,9 +366,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// A row whose offer was left out this run and that records no origin: a file that was here when it
-    /// was matched, or a row from before origins were recorded. Nothing says this server was given the
-    /// file, so the row and the file are left exactly as they are.
+    /// Says whether a row's offer was left out this run and the row records no origin.
+    /// Nothing says this server was given the file, so the row and the file are left as they are.
     /// </summary>
     private bool KeptAsItIs(SyncItem row) => _notTheirs.Contains(row.SourceItemId) && string.IsNullOrEmpty(row.OriginServerId);
 
@@ -415,18 +383,16 @@ public class UpdateSyncTablesTask
             string? origin = null;
             if (!string.IsNullOrEmpty(path) && item.SourceItem.Id.HasValue)
             {
-                // Read while the server was listed, so this only looks the path up.
                 origin = await item.Source.Client.OriginOfAsync(path, cancellationToken).ConfigureAwait(false);
             }
 
-            // Only a file that would be copied here. In a Link library a file is there for as long as
-            // any server holds a real copy, so every holder's offer counts and a link is written to it.
+            // In a Link library every holder's offer counts, so only copies are checked.
             if (origin is not null
                 && AlwaysKeep.StorageFor(item.Mapping, path) != StorageMode.Link
                 && DecidedElsewhere(config, _localServerId, item.Source.Key, origin, PathUtilities.TranslatePath(path!, item.Mapping.SourceRootPath, item.Mapping.LocalRootPath), ListedCleanly) is { } decider)
             {
                 _notTheirs.Add(item.SourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture));
-                Logger.LogDebug("Left out {Path} offered by '{Server}': the file first came from {Decider}, which decides about it", path, item.Source.Name, decider);
+                Logger.LogDebug("Left out {Path} offered by '{Server}': the file first came from {Decider}, which decides about it", FormatUtilities.SanitizeForLog(path), item.Source.Name, decider);
                 continue;
             }
 
@@ -450,9 +416,7 @@ public class UpdateSyncTablesTask
 
     /// <summary>
     /// What each server last answered about links, kept across runs, and the copy this run started with.
-    /// A server's scope carries the answer the run started with, so when a server starts offering links
-    /// the run that learns it records the old answer, and the next run sees a new scope and lists the
-    /// server in full. Files passed over while it offered none are then linked.
+    /// A server's scope carries the starting answer, so the run after a server starts offering links lists it in full.
     /// </summary>
     private readonly ConcurrentDictionary<string, bool> _linkingKnown = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, bool> _linkingAtStart = new(StringComparer.OrdinalIgnoreCase);
@@ -469,12 +433,13 @@ public class UpdateSyncTablesTask
         return _linkingAtStart.TryGetValue(source.Key, out var offered) && offered ? "links" : "no-links";
     }
 
-    /// <summary>Whether this run asked a server for links and was told no, or got no answer.</summary>
+    /// <summary>Says whether this run asked a server for links and was told no, or got no answer.</summary>
     /// <param name="sourceKey">The server's entry key.</param>
     /// <returns><c>true</c> when the server did not offer links.</returns>
     internal bool LinkingRefusedBy(string sourceKey)
         => _linkingKnown.TryGetValue(sourceKey, out var offered) && !offered;
 
+    /// <summary>Asks a server once for each run whether it offers links.</summary>
     private Task<bool> LinkingOfferedAsync(ScanSource source, CancellationToken cancellationToken)
         => _linkingOffered.GetOrAdd(source.Key, async _ =>
         {
@@ -483,6 +448,7 @@ public class UpdateSyncTablesTask
             return offered;
         });
 
+    /// <summary>Asks a server whether it offers links, and takes no answer as no.</summary>
     private async Task<bool> AskLinkingAsync(ScanSource source, CancellationToken cancellationToken)
     {
         try
@@ -495,13 +461,9 @@ public class UpdateSyncTablesTask
 
             Logger.LogWarning("{Task}: '{Server}' does not offer links, so files new to a Link mapping wait until Server Sync there allows linking for this server", Name, source.Name);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning("{Task}: could not ask '{Server}' whether it offers links, so files new to a Link mapping wait: {Reason}", Name, source.Name, ex.Message);
+            Logger.LogWarning("{Task}: could not ask '{Server}' whether it offers links, so files new to a Link mapping wait: {Reason}", Name, source.Name, FormatUtilities.SanitizeForLog(ex.Message, 300));
         }
 
         return false;
@@ -553,8 +515,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// Per run state is reset once per run, not per server, since the list phase runs once for
-    /// every connected server and the counts have to accumulate across them.
+    /// Resets the state kept for a run.
+    /// It is reset once for each run and not for each server, since the counts add up across every connected server.
     /// </summary>
     /// <inheritdoc />
     protected override void OnRunStarting()
@@ -568,15 +530,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// Routing depends on <see cref="LibraryMapping.FilterMode"/>:
-    ///   <list type="bullet">
-    ///   <item><b>Whitelist</b>, resolve each ID in
-    ///   <see cref="LibraryMapping.FilteredItems"/> on its own. Leaves are
-    ///   taken as-is and folder-type entries expand to their leaf
-    ///   descendants. No bulk library scan. The whitelist is the authority.</item>
-    ///   <item><b>Blacklist / AllowAll</b>, bulk-fetch the library, drop
-    ///   blacklisted items via <see cref="PathUtilities.IsItemFiltered"/>.</item>
-    ///   </list>
+    /// Lists one server's items for every enabled mapping.
+    /// A whitelist resolves each entry on its own and expands folders to their leaves, and any other filter fetches the whole library and drops what the blacklist names.
     /// </summary>
     /// <inheritdoc />
     protected override async Task<IList<ContentRefreshWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
@@ -588,18 +543,11 @@ public class UpdateSyncTablesTask
         var client = source.Client;
         var enabledMappings = source.Server.GetEnabledLibraryMappings();
 
-        // Which of this server's files it was given by another is read here, as part of listing it. A
-        // server that cannot say fails its listing, so none of its offers are weighed this run.
+        // A server that cannot say which files it was given fails its listing here.
         await client.OriginOfAsync("/", cancellationToken).ConfigureAwait(false);
 
-        // Playlist expansion is user-scoped on the source. The token-generation
-        // flow stores the authenticating user's id for exactly this.
         Guid? playlistUserId = Guid.TryParse(source.Server.AuthenticatedUserId, out var authUserId) ? authUserId : null;
 
-        // Pre-fetch per-library counts so per-item progress reporting has a
-        // denominator. Bulk-fetched mappings ask the server (Limit=0 count
-        // query). Whitelist mappings leave it unset, see below. Total
-        // round-trip is at most one per enabled library.
         var libraryCounts = new Dictionary<string, int>(enabledMappings.Count);
         var totalExpected = 0;
         foreach (var mapping in enabledMappings)
@@ -612,13 +560,7 @@ public class UpdateSyncTablesTask
 
             if (mapping.FilterMode == LibraryFilterMode.Whitelist)
             {
-                // Whitelist count isn't known up-front: a single whitelisted
-                // Series expands to all of its episodes. TotalRecordCount on
-                // the AncestorIds endpoint could be queried, but that's an
-                // extra round-trip per library. Cheaper to leave the
-                // denominator unset and let progress be coarse for whitelist
-                // mappings, the bulk-fetch libraries (if any) dominate the
-                // bar. The Math.Min(100...) clamp keeps it visually sane.
+                // A whitelist's count is not known up front, so its progress is coarse.
                 libraryCounts[mapping.SourceLibraryId] = 0;
                 continue;
             }
@@ -637,9 +579,6 @@ public class UpdateSyncTablesTask
 
         progress.Report(totalExpected > 0 ? 1 : 50);
 
-        // The filter users are configured once for every server, but each id
-        // belongs to one server, so only the ids this server knows are asked
-        // about. Resolved once per server rather than once per library.
         var watchedFilterUsers = await ResolveWatchedFilterUsersAsync(
             source,
             config.SkipWatchedByAllUsers,
@@ -667,14 +606,6 @@ public class UpdateSyncTablesTask
 
             if (mapping.FilterMode == LibraryFilterMode.Whitelist)
             {
-                // Whitelist: fetch only what the user picked. Each whitelisted
-                // ID is resolved on its own, leaves are returned as-is,
-                // folder-type whitelists (Series / Season / BoxSet / Album /
-                // Artist) expand to their leaf descendants. Per-ID query
-                // avoids the prior approach's reliance on
-                // ParentId+Recursive=true, which dropped items whose direct
-                // ParentId did not equal the whitelisted ID (e.g. all
-                // episodes under a whitelisted Series).
                 var rawItems = mapping.FilteredItems ?? new List<FilteredItem>();
                 var ids = new List<Guid>(rawItems.Count);
                 var droppedIds = 0;
@@ -719,16 +650,9 @@ public class UpdateSyncTablesTask
                     {
                         leaves = await client.GetWhitelistedItemLeavesAsync(whitelistedId, playlistUserId, cancellationToken).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                     {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        // One whitelist entry failed, skip pruning this run so
-                        // items whose source state couldn't be verified aren't
-                        // scheduled for deletion. Keep processing the remaining
-                        // entries so partial progress is still recorded.
+                        // One failed entry skips the prune, and the remaining entries are still read.
                         MarkSourceUnavailable($"source server unavailable resolving a whitelist entry in '{mapping.SourceLibraryName}'");
                         Logger.LogWarning(ex,
                             "Whitelist lookup failed for ID {Id} in {Library}. Continuing with remaining entries",
@@ -743,21 +667,14 @@ public class UpdateSyncTablesTask
                             continue;
                         }
 
-                        // A leaf with no Path can't be synced and must not count
-                        // as "seen": if the API key lost admin rights Jellyfin
-                        // omits Path on everything, and counting those would let
-                        // the prune treat every row as legitimately removed.
+                        // Pathless leaves must not count as seen, or a weak API key prunes everything.
                         if (string.IsNullOrEmpty(item.Path))
                         {
                             pathless++;
                             continue;
                         }
 
-                        // A collection can contain items from other libraries.
-                        // TranslatePath would silently flatten those into this
-                        // mapping's root with just their filename, skip them
-                        // instead. Syncing them needs a mapping for THEIR
-                        // library with the same collection whitelisted.
+                        // A collection can hold items from other libraries, which belong to another mapping.
                         if (sourceRoot.Length > 0
                             && !item.Path.Replace('\\', '/').StartsWith(sourceRoot.Replace('\\', '/') + "/", StringComparison.OrdinalIgnoreCase))
                         {
@@ -765,7 +682,7 @@ public class UpdateSyncTablesTask
                             continue;
                         }
 
-                        // A link on the peer is not a file to copy. Its history and metadata still sync.
+                        // A link on the peer is not a file to copy.
                         if (client.IsPeerLink(item.Id) || IsStrm(item))
                         {
                             continue;
@@ -807,16 +724,7 @@ public class UpdateSyncTablesTask
                 continue;
             }
 
-            // Blacklist / AllowAll: bulk-fetch and post-filter via the
-            // FetchAllPagesAsync utility, which honors the same FilterMode
-            // semantics that BuildRecordAsync uses.
-            //
-            // Blacklisted COLLECTIONS need ID-based exclusion: the path
-            // filter can't see membership (a collection's path prefixes no
-            // media file). Expand them to leaf IDs first. If an expansion
-            // fails, skip this mapping's discovery entirely, fetching with
-            // no exclusions would sync everything the user excluded, then
-            // schedule it all for deletion once expansion recovers.
+            // Blacklisted containers are expanded to ids, since a path filter cannot see membership.
             var excludedThisMapping = 0;
             if (mapping.FilterMode == LibraryFilterMode.Blacklist && mapping.FilteredItems != null)
             {
@@ -845,11 +753,7 @@ public class UpdateSyncTablesTask
                             }
                         }
                     }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                     {
                         MarkSourceUnavailable($"failed to expand blacklisted {fi.Type} '{fi.Name}' in '{mapping.SourceLibraryName}'");
                         Logger.LogWarning(ex,
@@ -860,6 +764,7 @@ public class UpdateSyncTablesTask
                     }
                 }
 
+                // Fetching without the exclusions would sync everything the operator left out.
                 if (failedExpansion)
                 {
                     continue;
@@ -934,7 +839,7 @@ public class UpdateSyncTablesTask
             return Task.FromResult<SyncItem?>(null);
         }
 
-        // A peer's own link is not a file to copy, whichever way it arrived, by scan or by hint.
+        // A peer's own link is not a file to copy, however it arrived.
         if (source.Source.Client.IsPeerLink(source.SourceItem.Id) || IsStrm(source.SourceItem))
         {
             return Task.FromResult<SyncItem?>(null);
@@ -945,35 +850,30 @@ public class UpdateSyncTablesTask
         var sourceCreateDate = source.SourceItem.DateCreated?.DateTime ?? DateTime.UtcNow;
         var localPath = PathUtilities.TranslatePath(sourcePath, source.Mapping.SourceRootPath, source.Mapping.LocalRootPath);
 
-        // An item picked to always keep is copied, even in a Link mapping.
         var storage = AlwaysKeep.StorageFor(source.Mapping, sourcePath);
         var picked = source.Mapping.StorageMode == StorageMode.Link && storage == StorageMode.Copy;
 
         existing.TryGetValue(sourceItemId, out var existingItem);
 
-        // Rows are keyed by the source's item id, and two servers can report the same id. When the
-        // row belongs to another server and names a different local file, this server's item is not
-        // that file, so it is left alone. Taken as the same row, the other server's file would be
-        // moved to this server's path and handed to it.
+        // Two servers can report the same id, so another server's row is left alone.
         if (existingItem is not null && BelongsToAnotherServer(existingItem, source.Source.Key, localPath))
         {
-            Logger.LogDebug("Skipped {Path}: its id is already tracked for another server at {LocalPath}", sourcePath, existingItem.LocalPath);
+            Logger.LogDebug("Skipped {Path}: its id is already tracked for another server at {LocalPath}", FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(existingItem.LocalPath));
             return Task.FromResult<SyncItem?>(null);
         }
 
-        // Watched-by-all takes precedence: mark Ignored regardless of approval mode.
+        // Watched by all wins over the approval settings.
         if (source.WatchedByAll)
         {
             var watched = BuildWatchedFiltered(source.Mapping, source.SourceItem, sourceItemId, sourceSize, sourceCreateDate, localPath, existingItem);
 
-            // A link stays at its .strm, so hiding it never points the row at a copy that is not there.
+            // A link stays at its .strm, so the row never names a missing copy.
             if (existingItem is not null && watched is not null && existingItem.StorageMode.IsLink() && LinkPaths.LinkPathFor(localPath) is { } existingLink)
             {
                 watched.LocalPath = existingLink;
             }
 
-            // A file new to a Link mapping is recorded as a link, so it is linked rather than copied
-            // if it is ever wanted again.
+            // A file new to a Link mapping is recorded as a link.
             if (existingItem is null && watched is not null && _linkFiles is not null
                 && storage == StorageMode.Link && LinkPaths.CanLink(source.SourceItem) && LinkPaths.LinkPathFor(localPath) is { } watchedLink)
             {
@@ -986,10 +886,7 @@ public class UpdateSyncTablesTask
 
         var config = ConfigManager.Configuration;
 
-        // A crash between the two phases of a download replacement leaves the local file, and the
-        // files that go with it, set aside under names nothing plays. They are put back before the
-        // file is taken for gone, whatever the row's status: a replacement runs on a queued row, so
-        // that is the status an interrupted one leaves.
+        // A crashed replacement leaves the file set aside, so it is put back.
         if (existingItem != null
             && existingItem.StorageMode == StorageMode.Copy
             && !string.IsNullOrEmpty(existingItem.LocalPath)
@@ -998,7 +895,7 @@ public class UpdateSyncTablesTask
             ReplacementRecovery.Restore(existingItem.LocalPath, Logger);
         }
 
-        // A link whose .strm is gone is not a removed file: it is written again further down.
+        // A link whose .strm is gone is not a removed file.
         if (existingItem != null
             && existingItem.Status == SyncStatus.Synced
             && !existingItem.StorageMode.IsLink()
@@ -1012,10 +909,7 @@ public class UpdateSyncTablesTask
             }
         }
 
-        // A copy row stays a copy whatever the mapping says now, so switching a mapping never removes a
-        // file already here. A link becomes a copy when its mapping copies, or when it is picked to
-        // always keep, and new files follow the same. Only video is linked, since Jellyfin plays
-        // nothing else from a .strm. Anything else in a Link mapping is copied.
+        // A copy stays a copy whatever the mapping says, and only video is linked.
         if (_linkFiles is not null
             && (existingItem?.StorageMode ?? (LinkPaths.CanLink(source.SourceItem) ? storage : StorageMode.Copy)).IsLink()
             && LinkPaths.LinkPathFor(localPath) is { } linkPath)
@@ -1032,14 +926,14 @@ public class UpdateSyncTablesTask
                 return Task.FromResult(Stamp(link, source));
             }
 
-            // A real copy already at the name always wins, and is tracked as a copy.
+            // A real copy already at the name wins, and is tracked as a copy.
             if (!File.Exists(localPath))
             {
                 return NewLinkAsync(source, sourceItemId, sourcePath, sourceSize, sourceCreateDate, linkPath, config.DownloadNewContentMode, cancellationToken);
             }
         }
 
-        // A kept copy on its way back to a link waits for the download run, unless its pick came back.
+        // A kept copy turning back into a link waits for the download run.
         if (existingItem is { StorageMode: StorageMode.Unkeeping })
         {
             if (picked)
@@ -1053,13 +947,7 @@ public class UpdateSyncTablesTask
             return Task.FromResult(Stamp(existingItem, source));
         }
 
-        // A film this server already had is its own wherever the two servers are equals: in a Link
-        // library, where each brings its own films, and with a Sync server, where content evens out
-        // by filling what each lacks. The other server's file at the same name is never downloaded
-        // over it, whether that file differs or changes later: the row stays settled, says so when
-        // the two differ, and the file stays as it is. Queueing the row by hand takes the other
-        // server's file, and so does picking the film to always keep in a Link library. A Pull server
-        // is a source to mirror, so there its file replaces this one by Changed files, as ever.
+        // Between equals this server's own file stays, and the row says when they differ.
         if (existingItem is { Kept: KeptReason.Own, StorageMode: StorageMode.Copy, Status: SyncStatus.Synced or SyncStatus.Pending }
             && OwnFilesStay(source, picked) && File.Exists(localPath))
         {
@@ -1101,12 +989,9 @@ public class UpdateSyncTablesTask
             config.DownloadNewContentMode,
             config.ReplaceExistingContentMode,
             0);
-        // A file that was here before any row for it is this server's own. Matching it to a source's
-        // file tracks it, and gives the source no say over whether it stays.
+        // A file here before any row is this server's own and stays.
         if (fresh is not null && OwnFilesStay(source, picked) && File.Exists(localPath))
         {
-            // A film this server already has, where the two are equals: it is tracked as its own and
-            // left as it is, whatever the other server's file at that name looks like.
             fresh.Status = SyncStatus.Synced;
             fresh.PendingType = null;
             fresh.Kept = KeptReason.Own;
@@ -1125,10 +1010,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// A copy in a Link mapping that a pick covers is recorded as kept by that pick. Once no pick covers
-    /// it, it goes back to being a link: the download run writes the link and moves the copy into the
-    /// link cache. A copy kept by hand, or one from before this was recorded, stays until it is turned
-    /// back by hand.
+    /// Records a copy in a Link mapping that a pick covers as kept by that pick, and queues it to become a link again once no pick covers it.
+    /// A copy kept by hand stays until it is turned back by hand.
     /// </summary>
     private void Unkeep(SyncItem row, ContentRefreshWork source, bool picked, string localPath)
     {
@@ -1163,6 +1046,7 @@ public class UpdateSyncTablesTask
         }
     }
 
+    /// <summary>Builds the row for a new link, or nothing when the server does not offer links.</summary>
     private async Task<SyncItem?> NewLinkAsync(ContentRefreshWork source, string sourceItemId, string sourcePath, long sourceSize, DateTime sourceCreateDate, string linkPath, ApprovalMode downloadMode, CancellationToken cancellationToken)
     {
         if (!await LinkingOfferedAsync(source.Source, cancellationToken).ConfigureAwait(false))
@@ -1174,10 +1058,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// A Link mapping links every version of a film, not only the first, so a user the source refuses
-    /// one version, such as a file above their bitrate limit, can play another. A version outside the
-    /// mapping's root is passed over, as any file outside it is. A Copy mapping copies the first version
-    /// only.
+    /// Adds every other version of a film in a Link mapping, so a user the source refuses one version can play another.
+    /// A version outside the mapping's root is passed over, and a Copy mapping copies the first version only.
     /// </summary>
     /// <param name="work">The work list the other versions are added to.</param>
     /// <param name="source">The server the item came from.</param>
@@ -1194,8 +1076,7 @@ public class UpdateSyncTablesTask
         var root = (mapping.SourceRootPath ?? string.Empty).Replace('\\', '/').TrimEnd('/') + "/";
         foreach (var version in LinkPaths.OtherVersions(item))
         {
-            // A whitelist admitted the film itself, so its versions come with it. A blacklist names
-            // paths to leave out, and is applied to each version's own path.
+            // A whitelist admits the film with its versions, and a blacklist checks each path.
             if (version.Path!.Replace('\\', '/').StartsWith(root, StringComparison.OrdinalIgnoreCase)
                 && (mapping.FilterMode != LibraryFilterMode.Blacklist
                     || !PathUtilities.IsItemFiltered(version.Path, mapping.SourceRootPath ?? string.Empty, mapping.FilterMode, mapping.FilteredItems)))
@@ -1209,13 +1090,13 @@ public class UpdateSyncTablesTask
     /// A .strm on a peer is never a file to copy or link, whether it is one of the peer's links or one its
     /// users made: either way it points at someone else's file, so passing it on would be a second hop.
     /// </summary>
-    /// <param name="item">The source item.</param>
+    /// <param name="item">The item as the source reports it.</param>
     /// <returns><c>true</c> when the item is a .strm file.</returns>
     internal static bool IsStrm(BaseItemDto item)
         => item.Path?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true;
 
     /// <summary>
-    /// Every row remembers which server built it, so the apply phase downloads from the right peer.
+    /// Says whether a stored row was built by another enabled server for a different local file.
     /// </summary>
     private bool BelongsToAnotherServer(SyncItem row, string serverKey, string localPath)
     {
@@ -1231,6 +1112,7 @@ public class UpdateSyncTablesTask
             && !string.Equals(row.LocalPath, LinkPaths.LinkPathFor(localPath), StringComparison.Ordinal);
     }
 
+    /// <summary>Records the server that built a row, so the sync task downloads from it.</summary>
     private static SyncItem? Stamp(SyncItem? item, ContentRefreshWork source)
     {
         if (item != null)
@@ -1250,7 +1132,7 @@ public class UpdateSyncTablesTask
 
     /// <summary>
     /// Two servers collide when they would land the same local file. The higher ranked server's
-    /// offer wins, and a row from the other server for that file is retired rather than treated as
+    /// offer wins, and a row from the other server for that file is retired and not treated as
     /// a removal, so a rank change never schedules a local file for deletion.
     /// </summary>
     /// <inheritdoc />
@@ -1266,7 +1148,7 @@ public class UpdateSyncTablesTask
     {
         ArgumentNullException.ThrowIfNull(record);
 
-        // A link is keyed by the file it stands in for, the same key a source offering that file has.
+        // A link is keyed by the file it stands in for.
         if (record.StorageMode.IsLink())
         {
             return LinkPaths.CopiedPathOf(record);
@@ -1285,9 +1167,7 @@ public class UpdateSyncTablesTask
     {
         ArgumentNullException.ThrowIfNull(record);
 
-        // By the row's own server. Two servers set up alike share library ids, so a server that is
-        // disabled or gone would otherwise have its rows counted under another's mapping, read as
-        // all removed, and stop the cleanup for every server.
+        // Two servers can share library ids, so scope follows the row's own server.
         if (string.IsNullOrEmpty(record.ServerKey))
         {
             return IsEnabledSourceLibrary(record.SourceLibraryId);
@@ -1306,18 +1186,15 @@ public class UpdateSyncTablesTask
     private HashSet<string>? _scopeForRun;
 
     /// <summary>
-    /// Rows the prune would no-op on (see SyncStateService.ProcessMissingItem):
-    /// already Ignored, already scheduled for deletion, or already awaiting
-    /// deletion approval. Excluding them from the prune safety limit's stale count
-    /// keeps gradual legitimate removals from accumulating until the limit
-    /// refuses every prune.
+    /// <summary>
+    /// Says whether the prune would act on a row, which leaves out rows that are Ignored, being deleted, or waiting for deletion approval.
+    /// Leaving them out keeps real removals from adding up until the prune safety limit refuses every prune.
     /// </summary>
     /// <inheritdoc />
     protected override bool IsPruneCandidate(SyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        // With Removed files on Keep only a link is ever pruned, so a copy that stays for good never
-        // counts toward the prune safety limit.
+        // With Removed files on Keep only a link is ever pruned.
         return !KeptAsItIs(record)
             && record.Status != SyncStatus.Ignored
             && record.Status != SyncStatus.Deleting
@@ -1326,10 +1203,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// A link whose file no server offers any more, and whose .strm is this plugin's own or already
-    /// gone. It holds nothing a download would bring back, so it is removed whatever Removed files
-    /// says. A link the library filter now leaves out is still on the source, and a .strm someone else
-    /// wrote is theirs, so both follow Removed files as a copy does.
+    /// Says whether a link's file is offered by no server any more and its .strm is this plugin's own or already gone, so it is removed whatever Removed files says.
+    /// A link the library filter leaves out, or a .strm someone else wrote, follows Removed files as a copy does.
     /// </summary>
     private bool IsGoneLink(SyncItem row, Dictionary<string, LibraryMapping> mappingById)
         => row.StorageMode.IsLink()
@@ -1342,6 +1217,7 @@ public class UpdateSyncTablesTask
         ".mp3", ".flac", ".m4a", ".m4b", ".aac", ".ogg", ".opus", ".wav", ".wma", ".ape", ".epub", ".pdf"
     };
 
+    /// <summary>Says whether a row is stale because the library filter changed and not because the source removed the item.</summary>
     private bool ScopeChanged(SyncItem row, Dictionary<string, LibraryMapping> mappingById)
         => IsBlacklistExcluded(row.ServerKey, row.SourceLibraryId, row.SourceItemId)
             || (MappingOf(row, mappingById) is { } mapping
@@ -1352,6 +1228,7 @@ public class UpdateSyncTablesTask
     private static bool IsHiddenTitle(SyncItem row)
         => row.Status == SyncStatus.Ignored && row.Reason == SyncStateService.HiddenReason;
 
+    /// <summary>Builds a lookup from a row to its title's folder.</summary>
     private Func<SyncItem, string?> TitleFolders()
     {
         var mappings = MappingsByKey(ConfigManager.Configuration.Servers, enabledOnly: false);
@@ -1360,6 +1237,7 @@ public class UpdateSyncTablesTask
             : null;
     }
 
+    /// <summary>Removes the .ignore file of each hidden title the predicate picks and marks its rows Synced.</summary>
     private int ShowTitles(ContentSyncTableManager manager, IEnumerable<SyncItem> hidden, Func<SyncItem, string?> folderOf, Func<string, bool> show, string why)
     {
         var changed = 0;
@@ -1378,7 +1256,7 @@ public class UpdateSyncTablesTask
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.LogWarning("Could not remove the .ignore file in {Folder}: {Error}", title.Key, ex.Message);
+                    Logger.LogWarning("Could not remove the .ignore file in {Folder}: {Error}", FormatUtilities.SanitizeForLog(title.Key), FormatUtilities.SanitizeForLog(ex.Message, 300));
                     continue;
                 }
             }
@@ -1389,7 +1267,7 @@ public class UpdateSyncTablesTask
                 changed++;
             }
 
-            Logger.LogInformation("Showed {Folder} again, {Why}", title.Key.Length > 0 ? title.Key : "a title", why);
+            Logger.LogInformation("Showed {Folder} again, {Why}", title.Key.Length > 0 ? FormatUtilities.SanitizeForLog(title.Key) : "a title", why);
         }
 
         return changed;
@@ -1402,8 +1280,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// Changes the rows in the list as well as in the table, so a later step reading the same list
-    /// sees them stood down.
+    /// Cancels the deletions that are waiting when Removed files is no longer Delete.
+    /// The rows change in the list as well as the table, so a later step reading the list sees them.
     /// </summary>
     private int StandDownDeletions(ContentSyncTableManager manager, IList<SyncItem> current, HashSet<string> goneLinks)
     {
@@ -1418,7 +1296,7 @@ public class UpdateSyncTablesTask
             row.StatusDate = DateTime.UtcNow;
         }
 
-        var changed = manager.UpsertMany(waiting, (row, ex) => Logger.LogWarning(ex, "Could not cancel the waiting deletion of {Path}", row.LocalPath ?? row.SourcePath));
+        var changed = manager.UpsertMany(waiting, (row, ex) => Logger.LogWarning(ex, "Could not cancel the waiting deletion of {Path}", FormatUtilities.SanitizeForLog(row.LocalPath ?? row.SourcePath)));
 
         if (changed > 0)
         {
@@ -1428,6 +1306,7 @@ public class UpdateSyncTablesTask
         return changed;
     }
 
+    /// <summary>Hides each title folder whose every file is gone from the source with a .ignore file, and shows the titles that came back.</summary>
     private int HideGoneTitles(ContentSyncTableManager manager, IList<SyncItem> current, List<SyncItem> stale, HashSet<string> returned, Dictionary<string, LibraryMapping> mappingById)
     {
         var folderOf = TitleFolders();
@@ -1458,11 +1337,11 @@ public class UpdateSyncTablesTask
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Logger.LogWarning("Could not hide {Folder} with a .ignore file: {Error}", title.Key, ex.Message);
+                Logger.LogWarning("Could not hide {Folder} with a .ignore file: {Error}", FormatUtilities.SanitizeForLog(title.Key), FormatUtilities.SanitizeForLog(ex.Message, 300));
                 continue;
             }
 
-            Logger.LogInformation("Hid {Folder} with a .ignore file, since everything in it is gone from the source", title.Key);
+            Logger.LogInformation("Hid {Folder} with a .ignore file, since everything in it is gone from the source", FormatUtilities.SanitizeForLog(title.Key));
             foreach (var row in title.Where(row => row.Status != SyncStatus.Ignored))
             {
                 if (SyncStateService.MarkHidden(manager, row, Logger).Changed)
@@ -1475,6 +1354,7 @@ public class UpdateSyncTablesTask
         return changed;
     }
 
+    /// <summary>Says whether a folder holds media no row tracks, which is assumed when the folder cannot be read.</summary>
     private bool HasUntrackedMedia(string folder, HashSet<string> tracked)
     {
         try
@@ -1484,7 +1364,7 @@ public class UpdateSyncTablesTask
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.LogDebug(ex, "Could not read {Folder}, so it is not hidden", folder);
+            Logger.LogDebug(ex, "Could not read {Folder}, so it is not hidden", FormatUtilities.SanitizeForLog(folder));
             return true;
         }
     }
@@ -1495,15 +1375,11 @@ public class UpdateSyncTablesTask
         || ConfigManager.Configuration.GetEnabledLibraryMappings().Any(m => m.StorageMode == StorageMode.Link);
 
     /// <summary>
-    /// No-op, <see cref="BuildRecordAsync"/> sets the status itself based
-    /// on the configured approval modes (DownloadNewContentMode,
-    /// ReplaceExistingContentMode), so the default Queued/Synced decision
-    /// would override Content's intent.
+    /// Does nothing, since <see cref="BuildRecordAsync"/> sets the status itself from the approval settings.
     /// </summary>
     /// <inheritdoc />
     protected override void DecideStatus(SyncItem record)
     {
-        // Intentionally empty.
     }
 
     /// <inheritdoc />
@@ -1521,25 +1397,8 @@ public class UpdateSyncTablesTask
         var hide = action == MissingContentAction.Ignore;
         var typedManager = (ContentSyncTableManager)Manager;
 
-        // Skip rows already seen, and rows whose library mapping is currently
-        // disabled (or removed from config), without the scope guard,
-        // disabling a mapping silently schedules every synced file under it
-        // for deletion. Rows under a mapping the source reported ZERO items
-        // for are also refused: a deleted/recreated source library ID or a
-        // transient empty answer returns 200-empty with no error, and pruning
-        // on it would schedule the mapping's entire local content for
-        // deletion. (-1 = explicitly emptied whitelist, prune allowed.)
-        // Items stale because the USER narrowed a blacklist (the item still
-        // exists on the source. The current config just excludes it) go
-        // through approval even in auto-delete mode, a filter edit is a
-        // scope change like disabling a mapping, not a source-side removal.
-        // Whitelist narrowing can't be distinguished from source removal
-        // without a per-item source query, so it keeps list-is-authority
-        // semantics.
         var mappingById = MappingsByKey(ConfigManager.Configuration.GetPullServers(), enabledOnly: true);
 
-        // Links no server offers any more are split off first. They are removed whatever Removed files
-        // says, and everything else follows it.
         var stale = new List<SyncItem>();
         var fileless = new List<SyncItem>();
         var goneLinks = new List<SyncItem>();
@@ -1554,9 +1413,7 @@ public class UpdateSyncTablesTask
             var goneLink = IsGoneLink(kvp.Value, mappingById);
             if (!goneLink && !deletes && !hide)
             {
-                // Keep keeps files. A row that never had one, or whose file is already gone, keeps
-                // nothing, and would only fail to download on every run from a source that no longer
-                // has the item. The row goes. Nothing on disk is touched.
+                // A row with no file keeps nothing and would fail to download every run.
                 var kept = kvp.Value;
                 if (kept.StorageMode == StorageMode.Copy && kept.Status != SyncStatus.Ignored && SeenFor(kept) != 0
                     && (string.IsNullOrEmpty(kept.LocalPath) || !File.Exists(kept.LocalPath)))
@@ -1567,6 +1424,7 @@ public class UpdateSyncTablesTask
                 continue;
             }
 
+            // An empty answer cannot be told from a real removal, so the mapping is skipped.
             if (SeenFor(kvp.Value) == 0)
             {
                 blockedMappings.Add(MapKey(kvp.Value.ServerKey, kvp.Value.SourceLibraryId));
@@ -1584,8 +1442,7 @@ public class UpdateSyncTablesTask
             MarkPruneBlocked($"Prune blocked for {JPKribs.Jellyfin.Base.ActivityText.Count(blockedMappings.Count, "library mapping")}. The source reported 0 items while local rows exist, so check the mapping's source library ID.");
         }
 
-        // The table as the build left it, read once for every step below. The snapshot passed in was
-        // taken before the build wrote this run's rows.
+        // The snapshot passed in predates this run's writes, so the table is read again.
         var goneLinkKeys = new HashSet<string>(goneLinks.Select(row => row.SourceItemId), StringComparer.OrdinalIgnoreCase);
         var current = typedManager.GetAllStrict();
         var settled = deletes ? 0 : StandDownDeletions(typedManager, current, goneLinkKeys);
@@ -1629,6 +1486,7 @@ public class UpdateSyncTablesTask
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
+                // A filter edit is a scope change, so its removals wait for approval.
                 var effectiveMode = deleteMode == ApprovalMode.Enabled && ScopeChanged(stale[i], mappingById)
                     ? ApprovalMode.RequireApproval
                     : deleteMode;
@@ -1639,9 +1497,9 @@ public class UpdateSyncTablesTask
                     pruned++;
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is SqliteException or InvalidOperationException or IOException or UnauthorizedAccessException)
             {
-                Logger.LogWarning(ex, "Failed to process missing item {SourceItemId}", stale[i].SourceItemId);
+                Logger.LogWarning(ex, "Failed to process missing item {SourceItemId}", FormatUtilities.SanitizeForLog(stale[i].SourceItemId));
             }
 
             if ((i + 1) % reportEvery == 0)
@@ -1670,9 +1528,9 @@ public class UpdateSyncTablesTask
                     removed++;
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is SqliteException or InvalidOperationException or IOException or UnauthorizedAccessException)
             {
-                Logger.LogWarning(ex, "Failed to process the gone link {SourceItemId}", link.SourceItemId);
+                Logger.LogWarning(ex, "Failed to process the gone link {SourceItemId}", FormatUtilities.SanitizeForLog(link.SourceItemId));
             }
         }
 
@@ -1692,11 +1550,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// Picks the configured watched filter users that exist on one scan
-    /// server. Returns null when the filter is disabled, no users are
-    /// selected, an id is unparseable, the server's users cannot be read, or
-    /// none of the selected users exist on this server. Null means the filter
-    /// does not apply to this server's items.
+    /// Picks the configured watched filter users that exist on one source.
+    /// It returns null when the filter does not apply to that server, as when it is off, an id is invalid, or none of the users exist there.
     /// </summary>
     private async Task<List<Guid>?> ResolveWatchedFilterUsersAsync(
         ScanSource source,
@@ -1714,10 +1569,7 @@ public class UpdateSyncTablesTask
         {
             if (!Guid.TryParse(userIdStr, out var userId))
             {
-                // An unparseable filter user means the configuration is broken
-                // for that slot. Disable the filter entirely rather than silently
-                // dropping the user (which would treat them as a wildcard and
-                // cause items to be wrongly classified as "watched by all").
+                // Dropping the user would widen the filter, so the whole filter is turned off.
                 Logger.LogWarning(
                     "Watched-by-all filter disabled: invalid user ID {UserId} in WatchedFilterUserIds. Fix the configuration to re-enable the filter.",
                     userIdStr);
@@ -1733,15 +1585,9 @@ public class UpdateSyncTablesTask
             var users = await source.Client.GetUsersAsync(source.Server.AuthenticatedUserId, cancellationToken).ConfigureAwait(false);
             serverUserIds = new HashSet<Guid>(users.Where(u => u.Id.HasValue && source.Server.MaySyncUser(u.Id.Value.ToString("N", CultureInfo.InvariantCulture))).Select(u => u.Id!.Value));
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Without the server's users there is no telling which selected
-            // users live here, so the filter is not applied to this server
-            // rather than failing the listing.
+            // Without the server's users the filter cannot apply, and the listing still runs.
             Logger.LogWarning(ex, "Watched-by-all filter skipped for '{Server}': its users could not be read", source.Name);
             return null;
         }
@@ -1757,9 +1603,10 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// Builds the set of source items that every given user has played in the
-    /// given library. Returns null when there are no users, which means the
-    /// filter does not apply.
+    /// <summary>
+    /// Builds the set of source items that every given user has played in the given library.
+    /// It returns null when there are no users, which means the filter does not apply.
+    /// </summary>
     /// </summary>
     private static async Task<HashSet<Guid>?> BuildWatchedByAllSetAsync(
         SourceServerClient client,
@@ -1797,9 +1644,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// Builds an Ignored record for an item that every selected user has
-    /// played. A record already in Synced/Ignored is left alone. Otherwise
-    /// it is updated (or a new one is created) as Ignored.
+    /// Builds an Ignored row for an item every selected user has played.
+    /// A row already Synced or Ignored is left alone.
     /// </summary>
     private static SyncItem? BuildWatchedFiltered(
         LibraryMapping mapping,
@@ -1833,11 +1679,8 @@ public class UpdateSyncTablesTask
     }
 
     /// <summary>
-    /// True when a whitelist mapping holds a collection or playlist entry.
-    /// A stale row under such a mapping can mean a container membership edit
-    /// or a source permission change rather than a real source removal, so
-    /// auto-delete is demoted to approval for those rows. Direct-item
-    /// whitelists have no such ambiguity and keep list-is-authority deletes.
+    /// Says whether a whitelist mapping holds a collection or playlist entry.
+    /// A stale row under one can mean a membership edit and not a real removal, so its deletion waits for approval.
     /// </summary>
     private static bool HasContainerEntry(LibraryMapping mapping)
     {
@@ -1860,7 +1703,7 @@ public class UpdateSyncTablesTask
 
     /// <summary>
     /// Resolves <see cref="SyncItem.LocalItemId"/> for synced items that
-    /// don't have one yet, by looking the path up in the local library.
+    /// do not have one yet, by looking the path up in the local library.
     /// </summary>
     private void ResolveLocalItemIds()
     {
@@ -1885,9 +1728,10 @@ public class UpdateSyncTablesTask
                     resolved++;
                 }
             }
+            // One path the library cannot resolve must not stop the others.
             catch (Exception ex)
             {
-                Logger.LogDebug(ex, "Failed to resolve LocalItemId for {FileName}", Path.GetFileName(item.LocalPath));
+                Logger.LogDebug(ex, "Failed to resolve LocalItemId for {FileName}", FormatUtilities.SanitizeForLog(Path.GetFileName(item.LocalPath)));
             }
         }
 
