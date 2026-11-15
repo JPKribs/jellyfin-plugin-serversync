@@ -185,6 +185,22 @@ public sealed class ConfigurationControllerImageProxyTests : IDisposable
     }
 
     /// <summary>
+    /// A server entry the client factory refuses answers 404.
+    /// True: an entry that cannot be called shows as no image.
+    /// False: the refusal would escape as an unhandled error on every thumbnail.
+    /// </summary>
+    [Fact]
+    public async Task GetSourceImage_FactoryRefusesTheEntry_Answers404()
+    {
+        _harness.AddPeer();
+        _harness.Clients.Refusal = "the address is not allowed";
+
+        var result = await _harness.Configuration().GetSourceImage(ItemId);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    /// <summary>
     /// The image route requires elevation and answers GET only.
     /// True: only an administrator can fetch a source's images through this server's key.
     /// False: any caller could use this server's key to read another server's images.

@@ -76,7 +76,7 @@ public partial class ConfigurationController
             Response.Headers.XContentTypeOptions = "nosniff";
             return File(bytes, contentType);
         }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or UriFormatException)
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or UriFormatException or ArgumentException)
         {
             _logger.LogDebug(ex, "Image proxy fetch failed for {ItemId}", itemId);
             return NotFound();

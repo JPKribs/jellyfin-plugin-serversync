@@ -192,6 +192,7 @@ public sealed class ScanConflictSettler
         Func<TSource, ScanSource> sourceOf,
         Func<TSource, string?> peerKeyOf,
         CancellationToken cancellationToken)
+        where TSource : class
     {
         ArgumentNullException.ThrowIfNull(contested);
         ArgumentNullException.ThrowIfNull(versioned);
