@@ -6,9 +6,8 @@ using Microsoft.Data.Sqlite;
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// The sync database's schema: every table as this release reads and writes it, and the version that
-/// names it. There are no upgrade steps. A database written by a release before
-/// <see cref="OldestUpgradableRelease"/> is refused, and that release is the one to pass through first.
+/// Holds the sync database's schema, every table as this release reads and writes it, and the version that names it.
+/// It has no upgrade steps, so a database written before <see cref="OldestUpgradableRelease"/> is refused until that release has opened it.
 /// </summary>
 public static class SyncSchema
 {
@@ -26,10 +25,11 @@ public static class SyncSchema
     /// <summary>
     /// Reads the schema version of the database under a data folder without changing the file.
     /// </summary>
-    /// <param name="dataPath">Jellyfin's data folder.</param>
+    /// <param name="dataPath">Jellyfin's data folder, which holds the database's own folder.</param>
     /// <returns>The version, or null when there is no database or it cannot be read.</returns>
     public static int? StoredVersion(string dataPath)
     {
+        ArgumentNullException.ThrowIfNull(dataPath);
         var path = System.IO.Path.Combine(dataPath, "serversync", "sync.db");
         if (!System.IO.File.Exists(path))
         {
@@ -56,11 +56,8 @@ public static class SyncSchema
     public static bool IsTooOld(int? storedVersion) => storedVersion is > 0 and < CurrentSchemaVersion;
 
     /// <summary>
-    /// The oldest schema version whose code can still work with a database at
-    /// <see cref="CurrentSchemaVersion"/>. It is written into the database, so an older build that finds a
-    /// newer database can tell whether it may use it as is. Raise it only when a schema change alters or
-    /// removes something older code relies on. One that only adds tables, nullable or defaulted
-    /// columns, or indexes leaves it alone.
+    /// The oldest schema version whose code can still use a database at <see cref="CurrentSchemaVersion"/>, written into the database so an older build can tell.
+    /// Raise it only when a change alters or removes something older code relies on, never for added tables, nullable or defaulted columns, or indexes.
     /// </summary>
     public const int MinReaderVersion = 28;
 
@@ -72,14 +69,14 @@ public static class SyncSchema
     public const int LinkReaderVersion = 32;
 
     /// <summary>
-    /// The oldest schema whose code knows a kept copy going back to a link. A database holding one names
+    /// The oldest schema whose code knows a permanent copy turning back into a link. A database holding one names
     /// this as its oldest reader, so an older build never takes that row for a copy still to download.
     /// </summary>
     public const int UnkeepReaderVersion = 33;
 
-    /// <summary>The oldest reader a database with these contents allows: <see cref="LinkReaderVersion"/> once it holds a link.</summary>
-    /// <param name="connection">Database connection.</param>
-    /// <returns>The version.</returns>
+    /// <summary>Finds the oldest reader a database with these contents allows, which is <see cref="LinkReaderVersion"/> once it holds a link.</summary>
+    /// <param name="connection">The open database whose rows are checked.</param>
+    /// <returns>The oldest schema version that may use the database.</returns>
     public static int MinReaderFor(SqliteConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -99,17 +96,24 @@ public static class SyncSchema
     /// <summary>
     /// Creates every table of the schema in an empty database.
     /// </summary>
-    /// <param name="connection">Database connection.</param>
+    /// <param name="connection">The open database to create the tables in.</param>
     public static void Create(SqliteConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        CreateContentTable(connection);
+        CreateHistoryTable(connection);
+        CreateUserTable(connection);
+        CreatePeopleTable(connection);
+        CreateMetadataTable(connection);
+        CreateSharedTables(connection);
+    }
 
-        // Tracks files to be downloaded/replaced/deleted on the local server.
-        // Change detection uses Size only. StorageMode says whether a row is a
-        // full copy or a .strm link, Kept why a copy in a Link mapping is kept,
-        // and OriginServerId the server a copy first came from.
-        // PendingType describes the operation (download/replacement/deletion)
-        // which is orthogonal to Status (Pending/Queued/Synced/Errored/Ignored).
+    /// <summary>
+    /// Creates the Content sync table, one row for each file to download, replace, or delete, where a change shows as a new size.
+    /// PendingType names the operation apart from Status, StorageMode says copy or link, and OriginServerId names a copy's origin.
+    /// </summary>
+    private static void CreateContentTable(SqliteConnection connection)
+    {
         using var syncItemsCmd = connection.CreateCommand();
         syncItemsCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS SyncItems (
@@ -141,12 +145,14 @@ public static class SyncSchema
             CREATE INDEX IF NOT EXISTS idx_local_path ON SyncItems(LocalPath);
         ";
         syncItemsCmd.ExecuteNonQuery();
+    }
 
-        // One row per (user, library, item). Source/Local/Merged are five
-        // primitive fields (IsPlayed/PlayCount/PositionTicks/LastPlayedDate/
-        // IsFavorite). SourceStateHash/SyncedStateHash bundle the five
-        // source-side fields into a single fingerprint so Refresh can
-        // skip rows whose source state hasn't moved since the last sync.
+    /// <summary>
+    /// Creates the History sync table, one row for each user and item, holding the five history fields as the source, this server, and the merge have them.
+    /// The state hashes fingerprint the source's five fields, so a scan skips a row whose source state has not moved.
+    /// </summary>
+    private static void CreateHistoryTable(SqliteConnection connection)
+    {
         using var historyCmd = connection.CreateCommand();
         historyCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS HistorySyncItems (
@@ -197,11 +203,14 @@ public static class SyncSchema
             CREATE INDEX IF NOT EXISTS idx_history_server_local ON HistorySyncItems(ServerKey, LocalItemId);
         ";
         historyCmd.ExecuteNonQuery();
+    }
 
-        // One row per (user mapping, property category). Categories are Policy,
-        // Configuration, ProfileImage. SourceValueHash/SyncedValueHash provide
-        // the fast-path skip. SourceImageHash/LocalImageHash/SyncedImageHash
-        // remain for ProfileImage-specific comparison.
+    /// <summary>
+    /// Creates the Users sync table, one row for each user mapping and each of Policy, Configuration, and ProfileImage.
+    /// The value hashes let a scan skip an unchanged row, and the image hashes compare the profile image.
+    /// </summary>
+    private static void CreateUserTable(SqliteConnection connection)
+    {
         using var userCmd = connection.CreateCommand();
         userCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS UserSyncItems (
@@ -235,10 +244,14 @@ public static class SyncSchema
             CREATE INDEX IF NOT EXISTS idx_user_sync_category ON UserSyncItems(PropertyCategory);
         ";
         userCmd.ExecuteNonQuery();
+    }
 
-        // One row per person, matched by name across servers. Two SyncableValue
-        // fields: Metadata (JSON blob) and Images (JSON manifest). Hashes
-        // enable the SourceHash == SyncedHash fast-path.
+    /// <summary>
+    /// Creates the People sync table, one row for each person, matched by name across servers.
+    /// Metadata and Images are each held as JSON with hashes, so a scan skips a value that matches what was synced.
+    /// </summary>
+    private static void CreatePeopleTable(SqliteConnection connection)
+    {
         using var peopleCmd = connection.CreateCommand();
         peopleCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS PeopleSyncItems (
@@ -266,10 +279,14 @@ public static class SyncSchema
             CREATE INDEX IF NOT EXISTS idx_people_sync_status ON PeopleSyncItems(Status);
         ";
         peopleCmd.ExecuteNonQuery();
+    }
 
-        // One row per item, four SyncableValue fields (Metadata, Images,
-        // People, Studios). Hashes per category enable per-field
-        // short-circuiting.
+    /// <summary>
+    /// Creates the Metadata sync table, one row for each item, holding Metadata, Images, People, and Studios.
+    /// Each category has its own hashes, so a scan skips the categories that match what was synced.
+    /// </summary>
+    private static void CreateMetadataTable(SqliteConnection connection)
+    {
         using var metadataCmd = connection.CreateCommand();
         metadataCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS MetadataSyncItems (
@@ -312,10 +329,14 @@ public static class SyncSchema
             CREATE INDEX IF NOT EXISTS idx_metadata_sync_library ON MetadataSyncItems(SourceLibraryId);
         ";
         metadataCmd.ExecuteNonQuery();
+    }
 
-        // What this server has told its peers and what they have told it, the version each tracked
-        // object carries, pairing secrets, scan watermarks, the playlists copied from peers, when each
-        // failing row first failed, and the record of the files that left the library.
+    /// <summary>
+    /// Creates the tables beside the sync tables, which hold hints sent and received, stamps, pairing secrets, scan watermarks,
+    /// playlists copied from peers, when each failing row first failed, and the files that left the library.
+    /// </summary>
+    private static void CreateSharedTables(SqliteConnection connection)
+    {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS OutboundHints (

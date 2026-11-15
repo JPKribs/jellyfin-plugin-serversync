@@ -8,10 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// The media files that left this server's library, each with when. Jellyfin answers what was added
-/// or changed since a given time, and nothing remembers what was removed, so a server reading this
-/// one could only learn of a removal by listing everything. This is that one missing record. It holds
-/// only what is gone, and only for <see cref="Kept"/>, so it never grows into a copy of the library.
+/// Records the media files that left this server's library and when, for <see cref="Kept"/>.
+/// Jellyfin keeps no record of removals, so without this a server reading this one would have to list everything.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class RemovedItemsStore : QueueStoreBase
@@ -22,8 +20,8 @@ public sealed class RemovedItemsStore : QueueStoreBase
     /// <summary>
     /// Initializes a new instance of the <see cref="RemovedItemsStore"/> class.
     /// </summary>
-    /// <param name="databaseProvider">Database provider.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="databaseProvider">Opens the sync database on first use.</param>
+    /// <param name="logger">Writes log entries.</param>
     public RemovedItemsStore(ISyncDatabaseProvider databaseProvider, ILogger<RemovedItemsStore> logger)
         : base(databaseProvider, logger)
     {
@@ -32,6 +30,7 @@ public sealed class RemovedItemsStore : QueueStoreBase
     /// <summary>Records that an item left the library.</summary>
     /// <param name="itemId">The item's id here, without dashes.</param>
     /// <param name="when">When it left.</param>
+    /// <exception cref="ArgumentException">The id is empty.</exception>
     public void Note(string itemId, DateTime when)
     {
         ArgumentException.ThrowIfNullOrEmpty(itemId);
@@ -46,8 +45,8 @@ public sealed class RemovedItemsStore : QueueStoreBase
     }
 
     /// <summary>
-    /// The ids removed since a time, and the time the record reaches back to. A caller asking from
-    /// before that time has missed removals this cannot name.
+    /// Reads the ids removed since a time, and the time the record reaches back to.
+    /// A caller asking from before that time has missed removals this cannot name.
     /// </summary>
     /// <param name="since">Removals at or after this are returned.</param>
     /// <param name="now">The current time.</param>
@@ -79,9 +78,8 @@ public sealed class RemovedItemsStore : QueueStoreBase
     });
 
     /// <summary>
-    /// The copies this server removed since a time that it had been given by another server, each
-    /// with the server it first came from. Jellyfin goes on listing a removed file until it next
-    /// scans the folder, so a peer reading the library in between is still told whose file it was.
+    /// Reads the copies removed since a time that another server gave this one, each with its origin.
+    /// Jellyfin lists a removed file until its next library scan, so a peer still learns whose file it was.
     /// </summary>
     /// <param name="since">Removals at or after this are returned.</param>
     /// <returns>Path and origin pairs.</returns>

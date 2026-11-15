@@ -1,12 +1,12 @@
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// Provides access to the shared <see cref="SyncDatabase"/> singleton.
+/// Gives every store and sync table the one shared <see cref="SyncDatabase"/>.
 /// </summary>
 public interface ISyncDatabaseProvider
 {
     /// <summary>
-    /// Gets the <see cref="SyncDatabase"/> instance.
+    /// Gets the sync database, opening it on first use.
     /// </summary>
     SyncDatabase Database { get; }
 }

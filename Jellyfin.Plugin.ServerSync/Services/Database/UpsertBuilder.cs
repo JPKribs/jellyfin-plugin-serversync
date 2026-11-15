@@ -1,4 +1,4 @@
-#pragma warning disable CA2100 // Table and column names are internal constants; values are parameters.
+#pragma warning disable CA2100 // SQL is internal and parameterized.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,10 +8,8 @@ using Microsoft.Data.Sqlite;
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// Builds the insert-or-update every sync table writes its rows with, from one list of columns and
-/// how each is updated. The rules that every table shares live in <see cref="SyncColumns"/>, written
-/// once, so no table can differ from the others, such as by letting a refresh overwrite an Ignored
-/// row's retry count.
+/// Builds the insert or update every sync table writes its rows with, from one list of columns and how each is updated.
+/// The rules every table shares live in <see cref="SyncColumns"/>, so no table can let a scan overwrite an Ignored row.
 /// </summary>
 public sealed class UpsertBuilder
 {
@@ -28,22 +26,22 @@ public sealed class UpsertBuilder
 
     private enum Rule
     {
-        // Part of the conflict target, so only ever inserted.
+        /// <summary>Part of the conflict target, so only ever inserted.</summary>
         Key,
 
-        // Always takes the new value.
+        /// <summary>Always takes the new value.</summary>
         Always,
 
-        // Keeps the stored value on an Ignored row, so the user's choice and its reason survive scans.
+        /// <summary>Keeps the stored value on an Ignored row, so the user's choice and its reason survive scans.</summary>
         UnlessIgnored,
 
-        // Keeps the stored value when the new one is null, as a synced hash is only known after an apply.
+        /// <summary>Keeps the stored value when the new one is null, as a synced hash is only known after an apply.</summary>
         UnlessNull,
 
-        // Both of the above.
+        /// <summary>Keeps the stored value on an Ignored row or when the new one is null.</summary>
         UnlessIgnoredOrNull,
 
-        // Takes the new value only when a condition holds.
+        /// <summary>Takes the new value only when a condition holds.</summary>
         When
     }
 
@@ -51,32 +49,32 @@ public sealed class UpsertBuilder
     public string Sql => BuildSql();
 
     /// <summary>Adds a column of the conflict target.</summary>
-    /// <param name="column">The column.</param>
-    /// <param name="value">Its value.</param>
+    /// <param name="column">The column's name, an internal constant.</param>
+    /// <param name="value">The value to insert.</param>
     /// <returns>This builder.</returns>
     public UpsertBuilder Key(string column, object? value) => Add(column, value, Rule.Key);
 
     /// <summary>Adds a column that always takes the new value.</summary>
-    /// <param name="column">The column.</param>
-    /// <param name="value">Its value.</param>
+    /// <param name="column">The column's name, an internal constant.</param>
+    /// <param name="value">The value to write.</param>
     /// <returns>This builder.</returns>
     public UpsertBuilder Set(string column, object? value) => Add(column, value, Rule.Always);
 
     /// <summary>Adds a column that keeps its stored value on an Ignored row.</summary>
-    /// <param name="column">The column.</param>
-    /// <param name="value">Its value.</param>
+    /// <param name="column">The column's name, an internal constant.</param>
+    /// <param name="value">The value to write when the row is not Ignored.</param>
     /// <returns>This builder.</returns>
     public UpsertBuilder SetUnlessIgnored(string column, object? value) => Add(column, value, Rule.UnlessIgnored);
 
     /// <summary>Adds a column that keeps its stored value when the new one is null.</summary>
-    /// <param name="column">The column.</param>
-    /// <param name="value">Its value.</param>
+    /// <param name="column">The column's name, an internal constant.</param>
+    /// <param name="value">The value to write, or null to keep the stored one.</param>
     /// <returns>This builder.</returns>
     public UpsertBuilder SetUnlessNull(string column, object? value) => Add(column, value, Rule.UnlessNull);
 
     /// <summary>Adds a column that keeps its stored value on an Ignored row or when the new one is null.</summary>
-    /// <param name="column">The column.</param>
-    /// <param name="value">Its value.</param>
+    /// <param name="column">The column's name, an internal constant.</param>
+    /// <param name="value">The value to write, or null to keep the stored one.</param>
     /// <returns>This builder.</returns>
     public UpsertBuilder SetUnlessIgnoredOrNull(string column, object? value) => Add(column, value, Rule.UnlessIgnoredOrNull);
 
@@ -84,22 +82,22 @@ public sealed class UpsertBuilder
     /// Adds a column that takes the new value only when a condition holds. The condition is SQL over
     /// the stored row's columns and the new values, which are named <c>@p_</c> and the column.
     /// </summary>
-    /// <param name="column">The column.</param>
-    /// <param name="value">Its value.</param>
+    /// <param name="column">The column's name, an internal constant.</param>
+    /// <param name="value">The value to write when the condition holds.</param>
     /// <param name="condition">The condition, an internal constant.</param>
     /// <returns>This builder.</returns>
     public UpsertBuilder SetWhen(string column, object? value, string condition)
     {
+        ArgumentException.ThrowIfNullOrEmpty(column);
         ArgumentException.ThrowIfNullOrEmpty(condition);
         _columns.Add(new Column(column, value, Rule.When, condition));
         return this;
     }
 
     /// <summary>
-    /// Adds the columns every sync row carries: its status and the bookkeeping around it, which an
-    /// Ignored row keeps, and the server it came from.
+    /// Adds the columns every sync row carries, which are its status fields, kept on an Ignored row, and its server.
     /// </summary>
-    /// <param name="record">The row.</param>
+    /// <param name="record">The row whose status fields and server key are written.</param>
     /// <returns>This builder.</returns>
     public UpsertBuilder SyncColumns(SyncRecord record)
     {
@@ -113,17 +111,17 @@ public sealed class UpsertBuilder
     }
 
     /// <summary>Formats a time the way every table stores it.</summary>
-    /// <param name="value">The time.</param>
+    /// <param name="value">The time to store.</param>
     /// <returns>The stored text.</returns>
     public static string Time(DateTime value) => Utilities.UtcTime.Format(value);
 
     /// <summary>Formats a time the way every table stores it, or null.</summary>
-    /// <param name="value">The time.</param>
+    /// <param name="value">The time to store, or null.</param>
     /// <returns>The stored text, or null.</returns>
     public static string? Time(DateTime? value) => value.HasValue ? Utilities.UtcTime.Format(value.Value) : null;
 
     /// <summary>Stores a flag as SQLite stores booleans, or null.</summary>
-    /// <param name="value">The flag.</param>
+    /// <param name="value">The flag to store, or null.</param>
     /// <returns>1, 0, or null.</returns>
     public static int? Flag(bool? value) => value.HasValue ? (value.Value ? 1 : 0) : null;
 

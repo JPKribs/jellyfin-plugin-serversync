@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// Provides lazy-initialized access to the shared <see cref="SyncDatabase"/> singleton.
+/// Opens the shared <see cref="SyncDatabase"/> on first use and closes it on disposal.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton, ServiceType = typeof(ISyncDatabaseProvider))]
 public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
@@ -27,6 +27,8 @@ public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
     /// <param name="services">Resolves services the database may need, or null.</param>
     public SyncDatabaseProvider(ILoggerFactory loggerFactory, IApplicationPaths applicationPaths, IServiceProvider? services = null)
     {
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(applicationPaths);
         _loggerFactory = loggerFactory;
         _dataPath = applicationPaths.DataPath;
         _services = services;
@@ -44,8 +46,7 @@ public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
                 return _database;
             }
 
-            // A database from a release this one cannot read stays that way until Jellyfin restarts on
-            // another release, so it is not opened again on every use.
+            // A database this release cannot read stays unreadable until restart, so it is not reopened.
             if (_tooOld is { } known)
             {
                 throw known;

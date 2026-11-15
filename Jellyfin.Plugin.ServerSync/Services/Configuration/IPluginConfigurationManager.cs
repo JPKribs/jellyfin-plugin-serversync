@@ -3,7 +3,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Services.Configuration;
 
 /// <summary>
-/// Provides access to plugin configuration and related operations.
+/// Reads and saves the plugin configuration and resolves the secrets it holds.
 /// </summary>
 public interface IPluginConfigurationManager
 {
@@ -18,8 +18,7 @@ public interface IPluginConfigurationManager
     string DecryptApiKey(string protectedKey);
 
     /// <summary>
-    /// Resolves the API key a dashboard request carries. The page never sees a stored key, only the kept
-    /// sentinel, so the sentinel means the key stored on the named server entry.
+    /// Resolves the API key a dashboard request carries, where the kept sentinel means the key stored on the named server entry.
     /// </summary>
     /// <param name="requestApiKey">The key as posted, or the sentinel.</param>
     /// <param name="serverKey">The server entry the request is about.</param>
@@ -29,14 +28,14 @@ public interface IPluginConfigurationManager
     string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl);
 
     /// <summary>
-    /// Saves the current configuration to disk.
+    /// Saves the current configuration to disk, protecting every API key first.
     /// </summary>
     void SaveConfiguration();
 
     /// <summary>
     /// Gets the configured temp download path, falling back to the cache directory.
     /// </summary>
-    /// <returns>Path to the temp download directory.</returns>
+    /// <returns>The folder downloads are written to before they move into a library.</returns>
     string GetTempDownloadPath();
 
     /// <summary>Gets this server's name.</summary>

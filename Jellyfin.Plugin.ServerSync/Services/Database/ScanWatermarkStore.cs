@@ -15,8 +15,8 @@ public sealed class ScanWatermarkStore : QueueStoreBase
     /// <summary>
     /// Initializes a new instance of the <see cref="ScanWatermarkStore"/> class.
     /// </summary>
-    /// <param name="databaseProvider">Database provider.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="databaseProvider">Opens the sync database on first use.</param>
+    /// <param name="logger">Writes log entries.</param>
     public ScanWatermarkStore(ISyncDatabaseProvider databaseProvider, ILogger<ScanWatermarkStore> logger)
         : base(databaseProvider, logger)
     {
@@ -28,17 +28,22 @@ public sealed class ScanWatermarkStore : QueueStoreBase
     /// <param name="taskKey">The scan task's key.</param>
     /// <param name="serverKey">The server entry's key.</param>
     /// <returns>The watermark, or null when there is none.</returns>
-    public ScanWatermark? Get(string taskKey, string serverKey) => Read(conn =>
+    public ScanWatermark? Get(string taskKey, string serverKey)
     {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT ScopeHash, ListedFrom, FullAt FROM ScanWatermarks WHERE TaskKey = @task AND ServerKey = @server";
-        Add(cmd, "@task", taskKey);
-        Add(cmd, "@server", serverKey);
-        using var reader = cmd.ExecuteReader();
-        return reader.Read()
-            ? new ScanWatermark(reader.GetString(0), Unstamp(reader.GetString(1)), Unstamp(reader.GetString(2)))
-            : null;
-    });
+        ArgumentNullException.ThrowIfNull(taskKey);
+        ArgumentNullException.ThrowIfNull(serverKey);
+        return Read(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT ScopeHash, ListedFrom, FullAt FROM ScanWatermarks WHERE TaskKey = @task AND ServerKey = @server";
+            Add(cmd, "@task", taskKey);
+            Add(cmd, "@server", serverKey);
+            using var reader = cmd.ExecuteReader();
+            return reader.Read()
+                ? new ScanWatermark(reader.GetString(0), Unstamp(reader.GetString(1)), Unstamp(reader.GetString(2)))
+                : null;
+        });
+    }
 
     /// <summary>
     /// Saves the watermark for a scan task and server, replacing any earlier one.
@@ -48,6 +53,8 @@ public sealed class ScanWatermarkStore : QueueStoreBase
     /// <param name="watermark">The watermark to keep.</param>
     public void Set(string taskKey, string serverKey, ScanWatermark watermark)
     {
+        ArgumentNullException.ThrowIfNull(taskKey);
+        ArgumentNullException.ThrowIfNull(serverKey);
         ArgumentNullException.ThrowIfNull(watermark);
         Write(conn =>
         {

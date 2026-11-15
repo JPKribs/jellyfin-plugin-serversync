@@ -1,18 +1,13 @@
 namespace Jellyfin.Plugin.ServerSync.Services.Configuration;
 
 /// <summary>
-/// Single lock serializing every plugin-configuration mutation-and-save.
-/// XmlSerializer enumerates <c>LastRunFailures</c> while writing the config
-/// file. A concurrent module recording a failure would throw
-/// "collection was modified" mid-write and could truncate the XML. All save
-/// paths, task completion stamps, RunFailureLog, the config manager, and
-/// the settings-page save (<c>Plugin.UpdateConfiguration</c>), take this
-/// lock.
+/// Holds the one lock every change and save of the plugin configuration takes.
+/// A save racing a change to <c>LastRunFailures</c> would throw while writing and could truncate the file.
 /// </summary>
 public static class ConfigurationSaveLock
 {
     /// <summary>
-    /// Gets the lock object.
+    /// Gets the object to lock on.
     /// </summary>
     public static object Sync { get; } = new();
 }

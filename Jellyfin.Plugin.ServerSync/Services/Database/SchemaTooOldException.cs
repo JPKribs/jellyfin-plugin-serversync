@@ -3,8 +3,7 @@ using System;
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// The sync database was written by a release this one cannot read. It is left exactly as it is, so
-/// installing <see cref="SyncSchema.OldestUpgradableRelease"/> and starting it once brings it up to date.
+/// Thrown when the sync database was written by a release this one cannot read, and the database is left as it is.
 /// </summary>
 public sealed class SchemaTooOldException : InvalidOperationException
 {

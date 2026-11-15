@@ -12,27 +12,28 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// Universal operations on a sync table, the parts that depend only on the
-/// standard columns (<c>Id</c>, <c>Status</c>, <c>StatusDate</c>,
-/// <c>LastSyncTime</c>, <c>Reason</c>). Schema-specific methods (key lookup,
-/// upsert SQL, search) remain abstract for subclasses. Composite-key tables
-/// override <see cref="UpdateStatusByKey"/> directly but should still use
-/// <see cref="BuildStatusTransitionClauses"/> + <see cref="AddStatusTransitionParameters"/>
-/// for consistent transition logic.
+/// Implements the operations every sync table shares, which depend only on the standard status columns.
+/// A subclass supplies the key lookup, the upsert, and the search for its own table.
 /// </summary>
-/// <typeparam name="TRecord">Record type.</typeparam>
-/// <typeparam name="TKey">Natural-key type.</typeparam>
+/// <typeparam name="TRecord">The row type the sync table holds.</typeparam>
+/// <typeparam name="TKey">The natural key that names one row.</typeparam>
 public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TRecord, TKey>
     where TRecord : SyncRecord
     where TKey : notnull
 {
+    private const int SqliteBusy = 5;
+    private const int SqliteLocked = 6;
+    private const int SqliteReadOnly = 8;
+    private const int SqliteCorrupt = 11;
+    private const int SqliteCantOpen = 14;
+
     private readonly ISyncDatabaseProvider _provider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SyncTableManagerBase{TRecord, TKey}"/> class.
     /// </summary>
-    /// <param name="databaseProvider">Provider of the database whose connection and write-lock back this manager.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="databaseProvider">Opens the database whose connection and write lock back this sync table.</param>
+    /// <param name="logger">Writes log entries.</param>
     protected SyncTableManagerBase(ISyncDatabaseProvider databaseProvider, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(databaseProvider);
@@ -41,12 +42,13 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         Logger = logger;
     }
 
-    // Opened on first use, never while a manager is being built, so a database that cannot be opened
-    // fails the call that needs it and not the start of everything that holds a manager.
+    /// <summary>
+    /// Gets the database, opened on first use so one that cannot open fails the call that needs it and not startup.
+    /// </summary>
     private SyncDatabase Database => _provider.Database;
 
     /// <summary>
-    /// Gets the live SQLite connection (re-resolved per access, handles closes/reopens).
+    /// Gets the write connection, resolved on each use so a reopened connection is picked up.
     /// </summary>
     private SqliteConnection Connection => Database.Connection;
 
@@ -67,18 +69,14 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     protected abstract string TableName { get; }
 
     /// <summary>
-    /// Gets the natural-key column name for single-column-keyed tables. Used
-    /// by the default <see cref="UpdateStatusByKey"/> implementation.
-    /// Composite-key tables can return any sentinel since they must override
-    /// <see cref="UpdateStatusByKey"/> anyway.
+    /// Gets the natural-key column of a table keyed by one column, read by the default <see cref="UpdateStatusByKey"/>.
+    /// A table with a composite key overrides that method, so it may return any value here.
     /// </summary>
     protected abstract string KeyColumn { get; }
 
     /// <summary>
-    /// Gets the SQL fragment that defines the status priority for ORDER BY in
-    /// pagination. Default ordering: Errored, Queued, Pending, Ignored,
-    /// Synced. Override to customize per module (e.g. Content surfaces
-    /// Pending first because the approval UX prioritizes new items).
+    /// Gets the SQL that ranks statuses for a page's sort, as Errored, Queued, Pending, Ignored, then Synced.
+    /// A sync type may override it, as Content does to put Pending first for approvals.
     /// </summary>
     protected virtual string StatusPriorityOrderBy => @"
         CASE Status
@@ -91,8 +89,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         END";
 
     /// <summary>
-    /// Builds the query for one page of full rows. It sorts the ids alone, then reads only that page's
-    /// rows, so a deep page never sorts every wide row. It takes <c>@take</c> and <c>@skip</c>.
+    /// Builds the query for one page of full rows, which takes <c>@take</c> and <c>@skip</c>.
+    /// It sorts the ids alone and then reads only that page's rows, so a deep page never sorts every wide row.
     /// </summary>
     /// <param name="table">The table to page through.</param>
     /// <param name="whereClause">The filter, with its <c>WHERE</c>, or empty for every row.</param>
@@ -104,9 +102,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         ORDER BY {orderBy}";
 
     /// <summary>
-    /// Maps the current row of <paramref name="reader"/> into a record. Must
-    /// populate the standard <see cref="SyncRecord"/> fields plus the subclass
-    /// payload.
+    /// Maps the current row of <paramref name="reader"/> into a record, filling the standard
+    /// <see cref="SyncRecord"/> fields and the table's own.
     /// </summary>
     /// <param name="reader">The reader, positioned on the row.</param>
     /// <returns>The record.</returns>
@@ -167,7 +164,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// nothing. For a caller that would delete on an empty answer.
     /// </summary>
     /// <typeparam name="T">What the read returns.</typeparam>
-    /// <param name="read">The read.</param>
+    /// <param name="read">The read to run on a read connection.</param>
     /// <returns>What it read.</returns>
     protected T ReadStrict<T>(Func<SqliteConnection, T> read) => Database.RunRead(read);
 
@@ -255,12 +252,10 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Writes many records in one transaction, so a scan of a large library commits once per batch
-    /// instead of once per row. Each table's own <see cref="Upsert"/> runs unchanged inside it: the
-    /// transaction is opened with a plain BEGIN, which the commands join without carrying it. A batch
-    /// that fails is rolled back and written one record at a time, so one bad record costs only itself.
+    /// Writes many records in one transaction, so a scan of a large library commits once per batch and not once per row.
+    /// A batch that fails is rolled back and written one record at a time, so one bad record costs only itself.
     /// </summary>
-    /// <param name="records">The records.</param>
+    /// <param name="records">The records to write.</param>
     /// <param name="onFailure">Called with each record that could not be written.</param>
     /// <returns>How many were written.</returns>
     public int UpsertMany(IReadOnlyList<TRecord> records, Action<TRecord, Exception> onFailure)
@@ -295,7 +290,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
                 }
                 catch (SqliteException rollbackEx)
                 {
-                    // SQLite already rolled back on some errors, which leaves nothing to roll back.
+                    // SQLite rolls back by itself on some errors, which leaves nothing to roll back.
                     Logger.LogDebug(rollbackEx, "Rollback after a failed batch on {Table}", TableName);
                 }
             }
@@ -338,7 +333,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         }
         catch (SqliteException)
         {
-            // Nothing to roll back.
+            // SQLite already rolled back, which leaves nothing to roll back.
         }
     }
 
@@ -359,11 +354,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         return deleted;
     }
 
-    /// <summary>
-    /// Truncates the table, deletes every row regardless of status.
-    /// Powers each sync type's Reset action.
-    /// </summary>
-    /// <returns>How many rows were deleted.</returns>
+    /// <inheritdoc />
     public int ResetTable()
     {
         var deleted = 0;
@@ -388,12 +379,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     });
 
     /// <summary>
-    /// Updates the status of many rows in one transaction and returns the per-call
-    /// breakdown: how many rows were actually updated, and which input IDs
-    /// were NOT present in the table (typically: row was deleted between
-    /// the user clicking Queue and the request reaching the server). Used
-    /// by the bulk endpoints to surface "5 of 10 items updated. 5 not
-    /// found" in the UI instead of silently dropping the missing ones.
+    /// Updates the status of many rows in one transaction, and reports how many were updated and which ids were not found.
+    /// A row can be deleted between the request and the write, and the caller reports those ids to the user.
     /// </summary>
     /// <param name="ids">The primary-key ids to update.</param>
     /// <param name="status">The new status.</param>
@@ -442,10 +429,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Queues every row that is in one status, in a single statement with no row cap. Used by the
-    /// "Retry errors" actions, which must reach every errored row rather than only those on the page
-    /// the operator has loaded. The Queued transition resets RetryCount, so each row gets its full
-    /// allowance again.
+    /// Queues every row in one status with a single statement and no row cap, so a retry reaches rows beyond the loaded page.
+    /// The Queued transition resets RetryCount, so each row gets its full allowance again.
     /// </summary>
     /// <param name="fromStatus">The status whose rows are queued.</param>
     /// <returns>How many rows were queued.</returns>
@@ -466,9 +451,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Gets extra SET clauses a module applies when an operator queues its rows, on top of the status
-    /// transition. A module whose sync skips categories it believes are already applied clears that
-    /// belief here, so a queued row is really applied again.
+    /// Gets extra SET clauses a sync type applies when an operator queues its rows, on top of the status transition.
+    /// A sync type that skips categories it believes are already applied clears that belief here, so a queued row is applied again.
     /// </summary>
     protected virtual IReadOnlyList<string> OperatorQueueClauses => Array.Empty<string>();
 
@@ -484,16 +468,12 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     });
 
     /// <summary>
-    /// Builds the universal SET clauses for a status transition. Always
-    /// includes Status, StatusDate, Reason. Adds LastSyncTime when
-    /// transitioning to <see cref="SyncStatus.Synced"/>. When
-    /// <paramref name="trackRetryCount"/> is <c>true</c>, also resets RetryCount on
-    /// Synced and increments it on Errored. Every module's table has a
-    /// RetryCount column.
+    /// Builds the SET clauses every status transition shares, which are Status, StatusDate, and Reason, plus LastSyncTime on
+    /// <see cref="SyncStatus.Synced"/>. When <paramref name="trackRetryCount"/> is <c>true</c>, RetryCount resets on Synced and Queued and rises on Errored.
     /// </summary>
-    /// <param name="status">Target status.</param>
-    /// <param name="trackRetryCount">Whether to manage RetryCount column.</param>
-    /// <returns>SET clause fragments to be joined with commas.</returns>
+    /// <param name="status">The status the row moves to.</param>
+    /// <param name="trackRetryCount">Whether the clauses also manage the RetryCount column.</param>
+    /// <returns>The SET clause fragments, to be joined with commas.</returns>
     protected static List<string> BuildStatusTransitionClauses(SyncStatus status, bool trackRetryCount = true)
     {
         var clauses = new List<string>
@@ -513,11 +493,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         }
         else if (status == SyncStatus.Queued && trackRetryCount)
         {
-            // Reaching Queued through this path means an operator asked for it
-            // (a Queue or Retry action), so hand back the full allowance. The
-            // refresh re-queues through Upsert instead, which preserves the
-            // count, that is what lets the ceiling actually stop a row that
-            // can never converge.
+            // An operator queued the row, so it gets its full retry allowance.
             clauses.Add("RetryCount = 0");
         }
         else if (status == SyncStatus.Errored && trackRetryCount)
@@ -529,10 +505,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Binds the universal status-transition parameters (<c>@status</c>,
-    /// <c>@statusDate</c>, <c>@reason</c>) onto <paramref name="cmd"/>.
-    /// Synced auto-clears the reason regardless of the caller's input, the
-    /// row's prior error text shouldn't survive a successful sync.
+    /// Binds <c>@status</c>, <c>@statusDate</c>, and <c>@reason</c> onto <paramref name="cmd"/>.
+    /// Synced clears the reason, so an earlier error does not outlive a successful sync.
     /// </summary>
     /// <param name="cmd">The command to bind onto.</param>
     /// <param name="status">The new status.</param>
@@ -647,20 +621,17 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Formats a <see cref="DateTime"/> as UTC round trip text, the format for every timestamp column in
-    /// this database. See <see cref="Utilities.UtcTime"/>.
+    /// Formats a <see cref="DateTime"/> as UTC round trip text, the format of every timestamp column in this database.
     /// </summary>
     /// <param name="value">The time to format.</param>
     /// <returns>The text.</returns>
     protected static string FormatTimestamp(DateTime value) => Utilities.UtcTime.Format(value);
 
     /// <summary>
-    /// Parses an ISO-8601 round-trip text timestamp written by
-    /// <see cref="FormatTimestamp"/>. Returns <see cref="DateTime.MinValue"/>
-    /// on parse failure.
+    /// Parses a timestamp written by <see cref="FormatTimestamp"/>.
     /// </summary>
     /// <param name="value">The text to parse.</param>
-    /// <returns>The time.</returns>
+    /// <returns>The time, or <see cref="DateTime.MinValue"/> when the text does not parse.</returns>
     protected static DateTime ParseTimestamp(string value)
         => Utilities.UtcTime.TryParse(value, out var dt) ? dt : DateTime.MinValue;
 
@@ -683,12 +654,12 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Executes a read on a read connection, beside any write in progress,
-    /// returning <paramref name="fallback"/> on transient errors.
+    /// Executes a read on a read connection, beside any write in progress, and returns
+    /// <paramref name="fallback"/> when the database is busy, locked, read-only, corrupt, or cannot open.
     /// </summary>
     /// <typeparam name="T">The type the read returns.</typeparam>
     /// <param name="readOperation">The read to run.</param>
-    /// <param name="fallback">What to return when the read fails transiently.</param>
+    /// <param name="fallback">What to return when the database cannot be read.</param>
     /// <param name="callerName">The calling member, for the log.</param>
     /// <returns>The read's result, or the fallback.</returns>
     protected T ExecuteRead<T>(
@@ -702,15 +673,15 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
             return Database.RunRead(readOperation);
         }
         catch (SqliteException ex) when (
-            ex.SqliteErrorCode == 5 ||  // SQLITE_BUSY
-            ex.SqliteErrorCode == 6 ||  // SQLITE_LOCKED
-            ex.SqliteErrorCode == 8 ||  // SQLITE_READONLY
-            ex.SqliteErrorCode == 14)   // SQLITE_CANTOPEN
+            ex.SqliteErrorCode == SqliteBusy ||
+            ex.SqliteErrorCode == SqliteLocked ||
+            ex.SqliteErrorCode == SqliteReadOnly ||
+            ex.SqliteErrorCode == SqliteCantOpen)
         {
             Logger.LogWarning(ex, "Read '{Op}' on {Table} failed with SQLite error {Code}. Returning fallback", callerName, TableName, ex.SqliteErrorCode);
             return fallback;
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 11) // SQLITE_CORRUPT
+        catch (SqliteException ex) when (ex.SqliteErrorCode == SqliteCorrupt)
         {
             Logger.LogError(ex, "Database CORRUPT during read '{Op}' on {Table}", callerName, TableName);
             return fallback;
@@ -723,8 +694,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     }
 
     /// <summary>
-    /// Executes a write against the connection under the write-lock. Errors
-    /// propagate. Callers decide retry policy.
+    /// Executes a write on the write connection under the write lock. Errors propagate, and the caller decides whether to retry.
     /// </summary>
     /// <param name="writeOperation">The write to run.</param>
     /// <param name="callerName">The calling member, for the log.</param>

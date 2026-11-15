@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// SQLite database for tracking sync items between servers.
+/// Opens and owns the SQLite database that holds every sync table.
 /// </summary>
 public class SyncDatabase : IDisposable
 {
@@ -31,17 +31,20 @@ public class SyncDatabase : IDisposable
     private SqliteConnection? _connection;
     private volatile bool _disposed;
 
-    // Bumped whenever the database file is replaced, so read connections to the old file are dropped
-    // instead of being handed out again.
+    /// <summary>
+    /// Rises each time the database file is replaced, so read connections to the old file are closed and not reused.
+    /// </summary>
     private int _generation;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SyncDatabase"/> class and opens the database.
+    /// Initializes a new instance of the <see cref="SyncDatabase"/> class.
     /// </summary>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     /// <param name="dataPath">Jellyfin's data folder, which holds the database's own folder.</param>
     public SyncDatabase(ILogger<SyncDatabase> logger, string dataPath)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(dataPath);
         _logger = logger;
         var dbDir = Path.Combine(dataPath, "serversync");
         Directory.CreateDirectory(dbDir);
@@ -56,8 +59,7 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// Open SQLite connection. Used by per-table <c>SyncTableManager</c> instances.
-    /// Throws if disposed. Reopens transparently if closed.
+    /// Gets the write connection every sync table shares, reopening it when it is closed.
     /// </summary>
     internal SqliteConnection Connection
     {
@@ -70,19 +72,17 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// Shared write lock, used by per-table managers to serialize mutations
-    /// against the same connection.
+    /// Gets the lock every sync table takes to serialize writes on the write connection.
     /// </summary>
     internal object WriteLock => _writeLock;
 
     /// <summary>
-    /// Runs a read on a read connection of its own, so it does not wait for the write lock. A read
-    /// made while this thread holds the write lock runs on the write connection instead, since only
-    /// that connection sees the rows of a transaction still open there.
+    /// Runs a read on a read connection of its own, so it does not wait for the write lock. A read made while
+    /// this thread holds the write lock runs on the write connection, the only one that sees an open transaction's rows.
     /// </summary>
-    /// <typeparam name="T">The result type.</typeparam>
-    /// <param name="read">The read.</param>
-    /// <returns>Its result.</returns>
+    /// <typeparam name="T">What the read returns.</typeparam>
+    /// <param name="read">The read to run against the connection it is given.</param>
+    /// <returns>What the read returned.</returns>
     internal T RunRead<T>(Func<SqliteConnection, T> read)
     {
         ArgumentNullException.ThrowIfNull(read);
@@ -143,8 +143,9 @@ public class SyncDatabase : IDisposable
         }
     }
 
-    // A connection that failed, belongs to a replaced file, or outlived the database is closed rather
-    // than kept for the next read.
+    /// <summary>
+    /// Keeps a read connection for the next read, or closes one that failed, belongs to a replaced file, or outlived the database.
+    /// </summary>
     private void ReturnReader(SqliteConnection? reader, int generation, bool healthy)
     {
         if (reader is null)
@@ -161,8 +162,9 @@ public class SyncDatabase : IDisposable
         reader.Dispose();
     }
 
-    // Waits for every read in flight to finish and holds new ones back while the file is replaced,
-    // since an open handle keeps Windows from moving or deleting it.
+    /// <summary>
+    /// Waits for every read in flight and holds new ones back while the file is replaced, since an open handle keeps Windows from moving or deleting it.
+    /// </summary>
     private void WithReadersDrained(Action replace)
     {
         var taken = 0;
@@ -188,7 +190,9 @@ public class SyncDatabase : IDisposable
         }
     }
 
-    // Closes every idle read connection and retires the ones in use, for when the file is replaced.
+    /// <summary>
+    /// Closes every idle read connection and retires the ones in use, for when the file is replaced.
+    /// </summary>
     private void DropReaders()
     {
         System.Threading.Interlocked.Increment(ref _generation);
@@ -232,16 +236,11 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// Builds the SQLite connection string with hardened settings.
+    /// Builds the connection string, with pooling off so no stale connection fails as read-only after a restart or crash.
+    /// The builder quotes the path, so a data folder holding a semicolon or a quote cannot break the string apart.
     /// </summary>
     private string BuildConnectionString()
     {
-        // Use a connection string with settings for better reliability:
-        // - Mode=ReadWriteCreate: Create the file if it doesn't exist
-        // - Pooling=False: Disable connection pooling to avoid stale cached connections
-        //   causing SQLITE_READONLY errors after server restarts or crashes
-        // The builder quotes the path, since a data folder holding a semicolon or a quote would
-        // otherwise break the string apart.
         return new SqliteConnectionStringBuilder
         {
             DataSource = _dbPath,
@@ -309,7 +308,7 @@ public class SyncDatabase : IDisposable
                 _logger.LogDebug(ex, "Failed to delete {FilePath}, retrying ({Attempt}/{Max})", filePath, i + 1, maxRetries);
                 System.Threading.Thread.Sleep(50 * (i + 1));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 _logger.LogWarning(ex, "Failed to delete file {FilePath}", filePath);
                 throw;
@@ -332,7 +331,7 @@ public class SyncDatabase : IDisposable
                 File.Delete(walPath);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogDebug(ex, "Failed to delete WAL file at {Path}", walPath);
         }
@@ -344,7 +343,7 @@ public class SyncDatabase : IDisposable
                 File.Delete(shmPath);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogDebug(ex, "Failed to delete SHM file at {Path}", shmPath);
         }
@@ -359,8 +358,7 @@ public class SyncDatabase : IDisposable
             switch (action)
             {
                 case SchemaAction.UsedNewer:
-                    // A newer build wrote this database and says this one can still use it, since everything
-                    // it added since is extra. It is used as is, so the newer build finds it as it left it.
+                    // A newer build allows this reader, so the database is used unchanged.
                     _logger.LogInformation(
                         "Sync database is schema v{Found}, newer than this plugin's v{Expected}, and readable by v{MinReader} and later. Using it as is",
                         DatabaseSchema.GetVersion(_connection),
@@ -369,9 +367,7 @@ public class SyncDatabase : IDisposable
                     return;
 
                 case SchemaAction.TooNew:
-                    // A newer build wrote this database and this one cannot read it. Carrying on would produce
-                    // a stream of confusing per query errors, so it is kept as a backup the newer build can
-                    // still read, and this build starts fresh.
+                    // Reading it would fail on every query, so it becomes a backup.
                     _logger.LogError(
                         "Sync database is schema v{Found}, newer than this plugin's v{Expected}, and this version cannot read it. It is kept as a .newer-* backup the newer version can still read, and a fresh database is started",
                         DatabaseSchema.GetVersion(_connection),
@@ -385,10 +381,7 @@ public class SyncDatabase : IDisposable
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 11 || ex.SqliteErrorCode == 26)
         {
-            // SQLITE_CORRUPT / SQLITE_NOTADB: the file itself is unusable, so recreation is the only way
-            // forward. Anything else, a locked file at boot, a permissions hiccup, a full disk, is transient.
-            // Recreating would reset every tracking table and the user's Ignored and approval state over a
-            // condition that fixes itself, so those propagate and the plugin retries on the next start.
+            // Only a corrupt file is recreated. A transient failure propagates so tracking survives.
             _logger.LogError(ex, "Sync database is corrupt (SQLite error {Code}), attempting recovery", ex.SqliteErrorCode);
             try
             {
@@ -396,6 +389,7 @@ public class SyncDatabase : IDisposable
             }
             catch (Exception recreateEx)
             {
+                // Any failure here must close the connection and surface as one error.
                 _logger.LogError(recreateEx, "Failed to recreate database");
                 CloseConnection();
                 throw new InvalidOperationException("Unable to initialize or recover sync database", recreateEx);
@@ -403,8 +397,7 @@ public class SyncDatabase : IDisposable
         }
         catch (SchemaTooOldException ex)
         {
-            // An older release wrote this database and this one has no steps to bring it forward. It is
-            // left as it is, and said once at this level, since every later use fails the same way.
+            // Logged once, since every later use fails the same way.
             if (System.Threading.Interlocked.Exchange(ref _tooOldReported, 1) == 0)
             {
                 _logger.LogError("{Message}", ex.Message);
@@ -415,28 +408,26 @@ public class SyncDatabase : IDisposable
         }
         catch
         {
-            // Any other failure propagates so the plugin retries on the next start. Release the
-            // connection first, or the open handle outlives the failed start.
+            // The connection is closed first, or its handle outlives the failed start.
             CloseConnection();
             throw;
         }
     }
 
+    /// <summary>
+    /// Opens the schema with an oldest reader that follows what the file holds, so a release that cannot read links never opens a database with links as usable.
+    /// </summary>
     private SchemaAction OpenSchema(SqliteConnection connection)
         => DatabaseSchema.Open(
             connection,
             SyncSchema.CurrentSchemaVersion,
-            // The floor follows what the file holds. A database with links keeps the higher floor
-            // across restarts, so a release that cannot read links never opens it as usable.
             SyncSchema.MinReaderFor(connection),
             c => SyncSchema.Create((SqliteConnection)c),
             (_, fromVersion) => throw new SchemaTooOldException(fromVersion));
 
     /// <summary>
-    /// Closes the current database, moves it aside as a timestamped backup with its journal, and creates a
-    /// fresh one. The old file is kept, not deleted: the tracking database carries user intent, Ignored
-    /// overrides and pending approvals, that a recovery must not silently destroy. The three newest backups
-    /// for each reason are kept.
+    /// Closes the database, moves it aside as a timestamped backup with its journal, and creates a fresh one.
+    /// The old file is kept because it carries Ignored rows and pending approvals, and the three newest backups for each reason stay.
     /// </summary>
     /// <param name="reason">The word in the backup's name, <c>corrupt</c> or <c>newer</c>.</param>
     private void RecreateDatabase(string reason)
@@ -468,6 +459,7 @@ public class SyncDatabase : IDisposable
         }
         catch (Exception ex)
         {
+            // A connection that cannot close must not stop the reopen.
             _logger.LogWarning(ex, "Error disposing old database connection");
         }
 
@@ -477,7 +469,7 @@ public class SyncDatabase : IDisposable
         {
             _connection = OpenConnection();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Failed to open database connection to {DbPath}", _dbPath);
             throw new InvalidOperationException($"Unable to open database connection: {ex.Message}", ex);
@@ -514,7 +506,7 @@ public class SyncDatabase : IDisposable
     }
 
     /// <summary>
-    /// Closes the connections once.
+    /// Closes the connections once, marking the database disposed first so no caller races the close.
     /// </summary>
     /// <param name="disposing"><c>true</c> when called from <see cref="Dispose()"/>.</param>
     protected virtual void Dispose(bool disposing)
@@ -523,7 +515,7 @@ public class SyncDatabase : IDisposable
         {
             lock (_writeLock)
             {
-                _disposed = true; // Set first inside lock to prevent races
+                _disposed = true;
 
                 try
                 {
@@ -531,6 +523,7 @@ public class SyncDatabase : IDisposable
                 }
                 catch (Exception ex)
                 {
+                    // Disposal must never throw.
                     _logger.LogWarning(ex, "Error during database disposal");
                 }
             }

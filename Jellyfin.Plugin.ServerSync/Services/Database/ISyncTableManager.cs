@@ -6,13 +6,10 @@ using JPKribs.Jellyfin.Base;
 namespace Jellyfin.Plugin.ServerSync.Services.Database;
 
 /// <summary>
-/// Per-table CRUD surface for sync records. One implementation per record
-/// type. <see cref="SyncTableManagerBase{TRecord, TKey}"/> provides the
-/// universal operations and concrete subclasses fill in schema-specific
-/// methods (key lookup, upsert SQL, search columns).
+/// Reads and writes the rows of one sync table.
 /// </summary>
-/// <typeparam name="TRecord">Record type extending <see cref="SyncRecord"/>.</typeparam>
-/// <typeparam name="TKey">Natural-key type for the table.</typeparam>
+/// <typeparam name="TRecord">The row type the sync table holds.</typeparam>
+/// <typeparam name="TKey">The natural key that names one row.</typeparam>
 public interface ISyncTableManager<TRecord, TKey>
     where TRecord : SyncRecord
     where TKey : notnull
@@ -20,14 +17,14 @@ public interface ISyncTableManager<TRecord, TKey>
     /// <summary>
     /// Returns the record with the given primary-key Id, or null if none.
     /// </summary>
-    /// <param name="id">The primary-key id.</param>
+    /// <param name="id">The primary-key id of the row to read.</param>
     /// <returns>The record, or null.</returns>
     TRecord? GetById(long id);
 
     /// <summary>
     /// Returns the record matching the given natural key, or null if none.
     /// </summary>
-    /// <param name="key">The natural key.</param>
+    /// <param name="key">The natural key of the row to read.</param>
     /// <returns>The record, or null.</returns>
     TRecord? GetByKey(TKey key);
 
@@ -40,22 +37,17 @@ public interface ISyncTableManager<TRecord, TKey>
     IList<TRecord> GetByStatus(SyncStatus status, int? limit = null);
 
     /// <summary>
-    /// Returns all records in the table, propagating database errors instead
-    /// of degrading to an empty list. Refresh tasks use this for the
-    /// existing-row snapshot: an empty snapshot makes every source item look
-    /// new, and the subsequent upserts would overwrite user-set statuses
-    /// (Ignored, pending approvals) with freshly computed ones.
+    /// Returns all records in the table, and throws on a database error where the other reads return an empty list.
+    /// A scan reads its existing rows with this, since an empty answer would make every item look new and overwrite Ignored and Pending rows.
     /// </summary>
     /// <returns>Every record.</returns>
     IList<TRecord> GetAllStrict();
 
     /// <summary>
-    /// Returns all records with the given status, letting database errors
-    /// propagate instead of degrading to an empty list. Use where an
-    /// empty-on-error answer would be read as "nothing to do" and stamp a
-    /// clean run.
+    /// Returns all records with the given status, and throws on a database error where the other reads return an empty list.
+    /// Use it where an empty answer would be read as nothing to do and record a clean run.
     /// </summary>
-    /// <param name="status">Status to filter by.</param>
+    /// <param name="status">The status to filter by.</param>
     /// <returns>All records with that status.</returns>
     IList<TRecord> GetByStatusStrict(SyncStatus status);
 
@@ -82,7 +74,7 @@ public interface ISyncTableManager<TRecord, TKey>
     /// Inserts or updates many records, in one transaction where the table can. A record that fails is
     /// handed to <paramref name="onFailure"/> and the rest are still written.
     /// </summary>
-    /// <param name="records">The records.</param>
+    /// <param name="records">The records to write.</param>
     /// <param name="onFailure">Called with each record that could not be written.</param>
     /// <returns>How many were written.</returns>
     int UpsertMany(IReadOnlyList<TRecord> records, Action<TRecord, Exception> onFailure)
@@ -109,13 +101,13 @@ public interface ISyncTableManager<TRecord, TKey>
     /// <summary>
     /// Deletes a row by primary-key Id.
     /// </summary>
-    /// <param name="id">The primary-key id.</param>
+    /// <param name="id">The primary-key id of the row to delete.</param>
     void DeleteById(long id);
 
     /// <summary>
     /// Deletes many rows by primary-key Id, in one transaction where the table can.
     /// </summary>
-    /// <param name="ids">The ids.</param>
+    /// <param name="ids">The primary-key ids of the rows to delete.</param>
     /// <returns>How many rows were deleted.</returns>
     int DeleteByIds(IReadOnlyCollection<long> ids)
     {
@@ -131,28 +123,27 @@ public interface ISyncTableManager<TRecord, TKey>
     /// <summary>
     /// Deletes a row by natural key.
     /// </summary>
-    /// <param name="key">The natural key.</param>
+    /// <param name="key">The natural key of the row to delete.</param>
     void DeleteByKey(TKey key);
 
     /// <summary>
-    /// Truncates the table, deletes every row regardless of status. Used
-    /// by each sync type's Reset action.
+    /// Deletes every row in the table whatever its status, for a sync type's Reset.
     /// </summary>
     /// <returns>How many rows were deleted.</returns>
     int ResetTable();
 
     /// <summary>
-    /// Updates only the status (and reason) of a row, leaving payload alone.
+    /// Updates only the status and reason of a row.
     /// </summary>
-    /// <param name="id">The primary-key id.</param>
+    /// <param name="id">The primary-key id of the row to update.</param>
     /// <param name="status">The new status.</param>
     /// <param name="reason">The reason, for a status that carries one.</param>
     void UpdateStatus(long id, SyncStatus status, string? reason = null);
 
     /// <summary>
-    /// Updates only the status (and reason) of a row by natural key.
+    /// Updates only the status and reason of a row by natural key.
     /// </summary>
-    /// <param name="key">The natural key.</param>
+    /// <param name="key">The natural key of the row to update.</param>
     /// <param name="status">The new status.</param>
     /// <param name="reason">The reason, for a status that carries one.</param>
     void UpdateStatusByKey(TKey key, SyncStatus status, string? reason = null);

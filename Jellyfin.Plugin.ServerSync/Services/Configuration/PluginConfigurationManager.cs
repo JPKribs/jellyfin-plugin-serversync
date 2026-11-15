@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync.Services.Configuration;
 
 /// <summary>
-/// Provides access to plugin configuration by delegating to the Plugin singleton.
+/// Reads and saves the configuration held by the <see cref="Plugin"/> instance.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton, ServiceType = typeof(IPluginConfigurationManager))]
 public class PluginConfigurationManager : IPluginConfigurationManager
@@ -29,6 +29,9 @@ public class PluginConfigurationManager : IPluginConfigurationManager
         IServerConfigurationManager serverConfigurationManager,
         SecretProtector secrets)
     {
+        ArgumentNullException.ThrowIfNull(applicationPaths);
+        ArgumentNullException.ThrowIfNull(serverConfigurationManager);
+        ArgumentNullException.ThrowIfNull(secrets);
         _applicationPaths = applicationPaths;
         _serverConfigurationManager = serverConfigurationManager;
         _secrets = secrets;
@@ -44,8 +47,7 @@ public class PluginConfigurationManager : IPluginConfigurationManager
     /// <inheritdoc />
     public string ResolveRequestApiKey(string? requestApiKey, string? serverKey, string? requestUrl)
     {
-        // The stored key in its protected form reaches the page with the configuration, so it is held
-        // to the same rule as the sentinel. Taken as typed, it would be decrypted and sent to any address.
+        // A protected key posted back is held to the sentinel's rule, or any address could receive it.
         if (!string.Equals(requestApiKey, SecretProtector.KeptSentinel, StringComparison.Ordinal)
             && !SecretProtector.IsProtected(requestApiKey))
         {
@@ -58,8 +60,7 @@ public class PluginConfigurationManager : IPluginConfigurationManager
             return string.Empty;
         }
 
-        // The stored key is a secret the page never sees. Sent to whatever address a request names, an
-        // edited URL would hand it to any server, so it only goes to the address saved on the entry.
+        // The stored key only goes to the saved address, or an edited URL could take it.
         if (requestUrl is not null && !Utilities.ConfigurationUtilities.SameServerUrl(entry.Url, requestUrl))
         {
             throw new ArgumentException("The stored key is only sent to the address saved for this server. Enter the key again to use a new address.");
@@ -73,16 +74,10 @@ public class PluginConfigurationManager : IPluginConfigurationManager
     {
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("Plugin is not initialized");
 
-        // Single plugin-wide lock: XmlSerializer enumerates LastRunFailures
-        // while writing the file, so an unsynchronized save racing another
-        // module's RunFailureLog mutation throws mid-write and can truncate
-        // the config XML.
         lock (ConfigurationSaveLock.Sync)
         {
             plugin.Configuration.SanitizeValues();
 
-            // Encrypt every server's API key at rest. Protect() no-ops on already-encrypted or empty,
-            // so this is idempotent across saves.
             foreach (var server in plugin.Configuration.Servers)
             {
                 server.ApiKey = _secrets.Protect(server.ApiKey);
