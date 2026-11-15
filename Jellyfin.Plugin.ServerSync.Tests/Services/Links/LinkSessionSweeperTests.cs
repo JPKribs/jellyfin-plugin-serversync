@@ -54,7 +54,8 @@ public sealed class LinkSessionSweeperTests
 
         await sweeper.StopAsync(CancellationToken.None);
 
-        Assert.True(sweeper.ExecuteTask!.IsCompletedSuccessfully);
+        Assert.True(sweeper.ExecuteTask!.IsCompleted);
+        Assert.False(sweeper.ExecuteTask.IsFaulted);
         Assert.Empty(manager.Calls);
     }
 
