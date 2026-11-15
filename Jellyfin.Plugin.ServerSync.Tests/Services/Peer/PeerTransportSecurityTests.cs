@@ -191,7 +191,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync(new Uri("http://203.0.113.10:8096/System/Info")));
 
-        Assert.Contains(ConfigurationUtilities.PlainHttpRefusal, Flatten(ex), StringComparison.Ordinal);
+        Assert.Contains(JPKribs.Jellyfin.Base.SsrfGuard.PlainHttpRefusal, Flatten(ex), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -212,7 +212,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     [InlineData("http://203.0.113.10:8096", false)]
     public void Validator_RefusesPlainHttpToPublicServers(string url, bool allowPrivateNetwork)
     {
-        Assert.Equal(ConfigurationUtilities.PlainHttpRefusal, ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork));
+        Assert.Contains(JPKribs.Jellyfin.Base.SsrfGuard.PlainHttpRefusal, ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork) ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -249,7 +249,7 @@ public sealed class PeerTransportSecurityTests : IDisposable
     [InlineData("2001:db8::1", false)]
     public void AllowsPlainHttp_CoversLoopbackPrivateAndTailnetRanges(string address, bool expected)
     {
-        Assert.Equal(expected, ConfigurationUtilities.AllowsPlainHttp(IPAddress.Parse(address)));
+        Assert.Equal(expected, JPKribs.Jellyfin.Base.SsrfGuard.IsPrivateOrLoopback(IPAddress.Parse(address)));
     }
 
     [Fact]

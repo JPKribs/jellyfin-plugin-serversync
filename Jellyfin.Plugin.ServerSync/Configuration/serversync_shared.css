@@ -248,6 +248,9 @@
 
 .serversync-role-head {
     color: var(--base-gray-fg);
+}
+
+.serversync-role-head > span {
     font-size: 0.85em;
 }
 

@@ -84,15 +84,15 @@ public sealed class ConfigurationUtilitiesTests
     /// False: a file or FTP address, or a path that climbs, would be stored and called.
     /// </summary>
     [Theory]
-    [InlineData(null, "URL cannot be empty")]
-    [InlineData("", "URL cannot be empty")]
-    [InlineData("   ", "URL cannot be empty")]
+    [InlineData(null, "The URL is empty")]
+    [InlineData("", "The URL is empty")]
+    [InlineData("   ", "The URL is empty")]
     [InlineData("https://source.example/../admin", "URL contains invalid path sequences")]
     [InlineData("https://source.example/./admin", "URL contains invalid path sequences")]
-    [InlineData("not a url", "Invalid URL format")]
-    [InlineData("source.example:8096", "Only HTTP and HTTPS URLs are allowed")]
-    [InlineData("ftp://source.example", "Only HTTP and HTTPS URLs are allowed")]
-    [InlineData("file:///etc/passwd", "Only HTTP and HTTPS URLs are allowed")]
+    [InlineData("not a url", "The URL is not a valid absolute URL")]
+    [InlineData("source.example:8096", "Only http and https URLs are allowed")]
+    [InlineData("ftp://source.example", "Only http and https URLs are allowed")]
+    [InlineData("file:///etc/passwd", "Only http and https URLs are allowed")]
     public void ValidateServerUrlForSsrf_MalformedUrl_IsRefusedWithTheReason(string? url, string expected)
     {
         var error = ConfigurationUtilities.ValidateServerUrlForSsrf(url!);
@@ -144,7 +144,7 @@ public sealed class ConfigurationUtilitiesTests
     {
         var error = ConfigurationUtilities.ValidateServerUrlForSsrf(url, allowPrivateNetwork: true);
 
-        Assert.Equal(expected, error);
+        Assert.Contains(expected, error ?? string.Empty, System.StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -215,7 +215,7 @@ public sealed class ConfigurationUtilitiesTests
     [InlineData("::", false)]
     public void AllowsPlainHttp_RangeEdges_FollowTheRule(string address, bool expected)
     {
-        var allowed = ConfigurationUtilities.AllowsPlainHttp(IPAddress.Parse(address));
+        var allowed = JPKribs.Jellyfin.Base.SsrfGuard.IsPrivateOrLoopback(IPAddress.Parse(address));
 
         Assert.Equal(expected, allowed);
     }
@@ -228,7 +228,7 @@ public sealed class ConfigurationUtilitiesTests
     [Fact]
     public void AllowsPlainHttp_NullAddress_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => ConfigurationUtilities.AllowsPlainHttp(null!));
+        Assert.Throws<ArgumentNullException>(() => JPKribs.Jellyfin.Base.SsrfGuard.IsPrivateOrLoopback(null!));
     }
 
     /// <summary>
@@ -301,7 +301,7 @@ public sealed class ConfigurationUtilitiesTests
     [InlineData("169.254.169.254", false)]
     public void AllowsPlainHttp_OnlyToPrivateAddresses(string address, bool expected)
     {
-        var allowed = ConfigurationUtilities.AllowsPlainHttp(System.Net.IPAddress.Parse(address));
+        var allowed = JPKribs.Jellyfin.Base.SsrfGuard.IsPrivateOrLoopback(System.Net.IPAddress.Parse(address));
 
         Assert.Equal(expected, allowed);
     }

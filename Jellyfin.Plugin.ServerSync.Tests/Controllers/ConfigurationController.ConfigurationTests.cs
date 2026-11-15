@@ -219,7 +219,7 @@ public sealed class ConfigurationControllerConfigurationTests : IDisposable
     /// False: a blank form would post empty credentials to the other server.
     /// </summary>
     [Theory]
-    [InlineData("", "alice", "pw", "URL cannot be empty")]
+    [InlineData("", "alice", "pw", "The URL is empty")]
     [InlineData(Url, " ", "pw", "Enter the username.")]
     [InlineData(Url, "alice", "", "Enter the password.")]
     public async Task Authenticate_MissingField_FailsWithoutCalling(string url, string username, string password, string message)

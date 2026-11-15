@@ -15,6 +15,12 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 /// </summary>
 public static class ConfigurationUtilities
 {
+    private const string PathRefusal = "URL contains invalid path sequences";
+
+    private static readonly SsrfGuard PublicGuard = new(allowPrivateNetwork: false, requireHttpsForPublic: true);
+
+    private static readonly SsrfGuard PrivateGuard = new(allowPrivateNetwork: true, requireHttpsForPublic: true);
+
     /// <summary>
     /// Whether at least one server entry is one this server pulls from.
     /// </summary>
@@ -27,174 +33,51 @@ public static class ConfigurationUtilities
     }
 
     /// <summary>
-    /// Checks a Server URL against the SSRF rules. Loopback and private addresses pass only when <paramref name="allowPrivateNetwork"/> is <c>true</c>.
-    /// </summary>
-    /// <param name="url">The address to check.</param>
-    /// <param name="allowPrivateNetwork">Whether a loopback or private address is acceptable.</param>
-    /// <returns>Null when the URL is acceptable, else why not.</returns>
-    public static string? ValidateServerUrlForSsrf(string url, bool allowPrivateNetwork = true)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return "URL cannot be empty";
-        }
-
-        if (url.Contains("..", StringComparison.Ordinal) || url.Contains("./", StringComparison.Ordinal))
-        {
-            return "URL contains invalid path sequences";
-        }
-
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-        {
-            return "Invalid URL format";
-        }
-
-        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-        {
-            return "Only HTTP and HTTPS URLs are allowed";
-        }
-
-        // Uri.Host keeps the brackets of an IPv6 literal, which IPAddress.TryParse rejects.
-        var host = uri.Host.Trim('[', ']');
-        if (IPAddress.TryParse(host, out var ipAddress))
-        {
-            var rejection = SsrfGuard.Classify(ipAddress, allowPrivateNetwork);
-            if (rejection != null)
-            {
-                return char.ToUpperInvariant(rejection[0]) + rejection[1..];
-            }
-        }
-
-        if (uri.Scheme == Uri.UriSchemeHttp
-            && (!allowPrivateNetwork || (ipAddress is not null && !AllowsPlainHttp(ipAddress))))
-        {
-            return PlainHttpRefusal;
-        }
-
-        return null;
-    }
-
-    /// <summary>The reason a plain HTTP address to a public host is refused.</summary>
-    public const string PlainHttpRefusal = "Plain HTTP sends the API key unencrypted, so it only reaches loopback and private network addresses. Use an https:// URL for this server";
-
-    /// <summary>Whether plain HTTP may be used for an address, which only a loopback or private one allows.</summary>
-    /// <param name="address">The address the name resolves to.</param>
-    /// <returns><c>true</c> when the address is loopback or private.</returns>
-    public static bool AllowsPlainHttp(IPAddress address)
-    {
-        ArgumentNullException.ThrowIfNull(address);
-        return SsrfGuard.Classify(address, allowPrivateNetwork: true) is null
-            && SsrfGuard.Classify(address, allowPrivateNetwork: false) is not null;
-    }
-
-    /// <summary>
-    /// Checks a Server URL like <see cref="ValidateServerUrlForSsrf"/>, and also resolves a host name so a name is refused the way its address would be.
+    /// Checks a Server URL before this server calls it. Only http and https are allowed, an address no server lives at is refused,
+    /// and plain http reaches only loopback and private addresses, since it would send the API Key unencrypted.
     /// </summary>
     /// <param name="url">The Server URL to check.</param>
-    /// <param name="allowPrivateNetwork">Whether private and loopback addresses are allowed.</param>
-    /// <param name="cancellationToken">Cancels the name lookup.</param>
-    /// <returns>Null when acceptable, else why not.</returns>
-    public static async Task<string?> ValidateServerUrlForSsrfAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken = default)
-    {
-        var error = ValidateServerUrlForSsrf(url, allowPrivateNetwork);
-        if (error is not null || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || IPAddress.TryParse(uri.Host.Trim('[', ']'), out _))
-        {
-            return error;
-        }
-
-        var plainHttp = uri.Scheme == Uri.UriSchemeHttp;
-        if (allowPrivateNetwork && !plainHttp)
-        {
-            return null;
-        }
-
-        IPAddress[] addresses;
-        try
-        {
-            addresses = await Dns.GetHostAddressesAsync(uri.Host, cancellationToken).ConfigureAwait(false);
-        }
-        catch (SocketException)
-        {
-            return allowPrivateNetwork ? null : $"The name '{uri.Host}' does not resolve";
-        }
-
-        foreach (var address in addresses)
-        {
-            var rejection = SsrfGuard.Classify(address, allowPrivateNetwork);
-            if (rejection is not null)
-            {
-                return $"The name '{uri.Host}' resolves to {address}: {rejection}";
-            }
-
-            if (plainHttp && !AllowsPlainHttp(address))
-            {
-                return $"The name '{uri.Host}' resolves to {address}, a public address. {PlainHttpRefusal}";
-            }
-        }
-
-        return addresses.Length == 0 && !allowPrivateNetwork ? $"The name '{uri.Host}' does not resolve" : null;
-    }
+    /// <param name="allowPrivateNetwork">Whether a loopback, LAN, or carrier NAT address is allowed.</param>
+    /// <returns>Why the URL is refused, as a sentence, or <c>null</c> when it may be called.</returns>
+    public static string? ValidateServerUrlForSsrf(string url, bool allowPrivateNetwork = true)
+        => ClimbsOut(url) ? PathRefusal : Sentence(Guard(allowPrivateNetwork).ValidateUrl(url));
 
     /// <summary>
-    /// Connects for server entries that disallow private networks, after checking every address the name resolves to.
+    /// Checks a Server URL as <see cref="ValidateServerUrlForSsrf"/> does, and also every address its name resolves to.
     /// </summary>
-    /// <param name="context">The connection the handler wants.</param>
+    /// <param name="url">The Server URL to check.</param>
+    /// <param name="allowPrivateNetwork">Whether a loopback, LAN, or carrier NAT address is allowed.</param>
+    /// <param name="cancellationToken">Cancels the name lookup.</param>
+    /// <returns>Why the URL is refused, as a sentence, or <c>null</c> when it may be called.</returns>
+    public static async Task<string?> ValidateServerUrlForSsrfAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken = default)
+        => ClimbsOut(url) ? PathRefusal : Sentence(await Guard(allowPrivateNetwork).ValidateUrlAsync(url, allowUnresolved: allowPrivateNetwork, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// Connects for the client that reaches public addresses only, checking each address at the moment of connecting.
+    /// </summary>
+    /// <param name="context">The connection the HTTP handler is opening.</param>
     /// <param name="cancellationToken">Cancels the connection.</param>
     /// <returns>The connected stream.</returns>
     public static ValueTask<Stream> ConnectPublicOnlyAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
-        => ConnectCheckedAsync(context, allowPrivateNetwork: false, cancellationToken);
+        => PublicGuard.ConnectAsync(context, cancellationToken);
 
     /// <summary>
-    /// Connects for server entries that allow private networks, after every other address check of <see cref="ConnectPublicOnlyAsync"/>.
+    /// Connects for the client that may reach private addresses, checking each address at the moment of connecting.
     /// </summary>
-    /// <param name="context">The connection the handler wants.</param>
+    /// <param name="context">The connection the HTTP handler is opening.</param>
     /// <param name="cancellationToken">Cancels the connection.</param>
     /// <returns>The connected stream.</returns>
     public static ValueTask<Stream> ConnectPrivateAllowedAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
-        => ConnectCheckedAsync(context, allowPrivateNetwork: true, cancellationToken);
+        => PrivateGuard.ConnectAsync(context, cancellationToken);
 
-    /// <summary>Resolves the host, refuses the whole name when any address is disallowed, then connects.</summary>
-    private static async ValueTask<Stream> ConnectCheckedAsync(SocketsHttpConnectionContext context, bool allowPrivateNetwork, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        var plainHttp = context.InitialRequestMessage.RequestUri?.Scheme == Uri.UriSchemeHttp;
-        var endPoint = context.DnsEndPoint;
-        IPAddress[] addresses = IPAddress.TryParse(endPoint.Host.Trim('[', ']'), out var literal)
-            ? new[] { literal }
-            : await Dns.GetHostAddressesAsync(endPoint.Host, cancellationToken).ConfigureAwait(false);
+    // A path with a parent or current folder step is refused before it is read as a URL, which would fold the step away.
+    private static bool ClimbsOut(string? url)
+        => !string.IsNullOrEmpty(url) && (url.Contains("..", StringComparison.Ordinal) || url.Contains("./", StringComparison.Ordinal));
 
-        foreach (var address in addresses)
-        {
-            var rejection = SsrfGuard.Classify(address, allowPrivateNetwork);
-            // Mixed answers are how a rebinding attack looks, so one refusal fails the name.
-            if (rejection is not null)
-            {
-                throw new HttpRequestException($"'{endPoint.Host}' resolves to {address}: {rejection}");
-            }
+    private static SsrfGuard Guard(bool allowPrivateNetwork) => allowPrivateNetwork ? PrivateGuard : PublicGuard;
 
-            if (plainHttp && !AllowsPlainHttp(address))
-            {
-                throw new HttpRequestException($"'{endPoint.Host}' resolves to {address}, a public address. {PlainHttpRefusal}");
-            }
-        }
-
-        if (addresses.Length == 0)
-        {
-            throw new HttpRequestException($"'{endPoint.Host}' does not resolve");
-        }
-
-        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        try
-        {
-            await socket.ConnectAsync(addresses, endPoint.Port, cancellationToken).ConfigureAwait(false);
-            return new NetworkStream(socket, ownsSocket: true);
-        }
-        catch
-        {
-            socket.Dispose();
-            throw;
-        }
-    }
+    private static string? Sentence(string? refusal)
+        => string.IsNullOrEmpty(refusal) ? null : char.ToUpperInvariant(refusal[0]) + refusal[1..];
 
     /// <summary>Whether two server addresses name the same server, ignoring case and a trailing slash.</summary>
     /// <param name="a">The first Server URL.</param>
