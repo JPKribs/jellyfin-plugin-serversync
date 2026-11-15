@@ -7,14 +7,12 @@ using System.Text.Json;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Read helpers that distinguish "field absent" from "field present and null"
-/// so apply-path callers can skip vs write a clearing value.
+/// Reads JSON fields while telling an absent field from one that is present and null, so a caller can skip the first and clear the second.
 /// </summary>
 public static class JsonFieldHelpers
 {
     /// <summary>
-    /// Reads a string field. Skips when the key is absent. Otherwise passes the value
-    /// (which may be null) to <paramref name="assign"/>.
+    /// Reads a string field and passes it to <paramref name="assign"/>, skipping a field that is absent.
     /// </summary>
     /// <param name="metadata">The item's metadata fields by name.</param>
     /// <param name="key">The field name to read.</param>
@@ -30,7 +28,7 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads a nullable float field. Same skip-when-absent semantics as <see cref="AssignString"/>.
+    /// Reads a float field and passes it to <paramref name="assign"/>, skipping a field that is absent.
     /// </summary>
     /// <param name="metadata">The item's metadata fields by name.</param>
     /// <param name="key">The field name to read.</param>
@@ -47,7 +45,7 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads a nullable int field. Same skip-when-absent semantics as <see cref="AssignString"/>.
+    /// Reads an integer field and passes it to <paramref name="assign"/>, skipping a field that is absent.
     /// </summary>
     /// <param name="metadata">The item's metadata fields by name.</param>
     /// <param name="key">The field name to read.</param>
@@ -64,11 +62,10 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Parses an ISO 8601 date string with <see cref="DateTimeStyles.RoundtripKind"/>.
-    /// Returns null on missing, non-string, or unparseable input.
+    /// Parses an ISO 8601 date, keeping the kind it was written with.
     /// </summary>
-    /// <param name="v">The JSON value.</param>
-    /// <returns>The date, or null.</returns>
+    /// <param name="v">The JSON value holding the date text.</param>
+    /// <returns>The date, or null when the value is missing, not text, or not a date.</returns>
     public static DateTime? ParseNullableDate(JsonElement v)
     {
         if (v.ValueKind != JsonValueKind.String) return null;
@@ -78,11 +75,10 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads a string array. Returns an empty array for missing or non-array input,
-    /// and drops non-string entries.
+    /// Reads a string array, dropping entries that are not strings.
     /// </summary>
-    /// <param name="v">The JSON value.</param>
-    /// <returns>The strings.</returns>
+    /// <param name="v">The JSON value holding the array.</param>
+    /// <returns>The strings, or an empty array when the value is not an array.</returns>
     public static string[] ReadStringArray(JsonElement v)
     {
         if (v.ValueKind != JsonValueKind.Array)
@@ -104,11 +100,11 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Reads an enum array. Returns an empty array for missing or non-array input,
-    /// and drops unparseable entries.
+    /// Reads an enum array, dropping entries that do not parse.
     /// </summary>
-    /// <param name="v">The JSON value.</param>
-    /// <returns>The values that parsed.</returns>
+    /// <typeparam name="T">The enum to parse each entry as.</typeparam>
+    /// <param name="v">The JSON value holding the array.</param>
+    /// <returns>The values that parsed, or an empty array when the value is not an array.</returns>
     public static T[] ReadEnumArray<T>(JsonElement v) where T : struct, Enum
     {
         if (v.ValueKind != JsonValueKind.Array)
@@ -130,20 +126,18 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// Whether a provider id is one of this plugin's own marks on an item: the Identify pin, and the
-    /// tags on mirrored playlists and collections. Each names something on this server only, so it is
-    /// never compared with, copied from, or removed to match another server.
+    /// Whether a provider id is one of this plugin's own marks, such as the Identify pin or a mirrored playlist's tag.
+    /// Each names something on this server only, so it is never compared, copied, or removed to match another server.
     /// </summary>
     /// <param name="key">The provider id's name.</param>
-    /// <returns>True for this plugin's own keys.</returns>
+    /// <returns><c>true</c> for this plugin's own keys.</returns>
     public static bool IsOwnProviderKey(string? key)
         => key is not null && key.StartsWith("ServerSync", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Reads a Jellyfin-style ProviderIds object as a case-insensitive string dictionary.
-    /// Empty-string values are dropped.
+    /// Reads a ProviderIds object as a dictionary that ignores case, dropping empty values.
     /// </summary>
-    /// <param name="v">The JSON value.</param>
+    /// <param name="v">The JSON value holding the object.</param>
     /// <returns>The provider ids by provider name.</returns>
     public static Dictionary<string, string> ReadProviderIds(JsonElement v)
     {
@@ -166,11 +160,8 @@ public static class JsonFieldHelpers
     }
 
     /// <summary>
-    /// The provider ids of an item as they are compared between servers: without empty values or this
-    /// plugin's own keys, sorted, and with keys that differ only by case taken as one id. Jellyfin
-    /// stores provider ids by exact name, so an item can hold "TvdbCollection" and "tvdbcollection"
-    /// side by side, which is one id written twice and not a difference from a server that holds it
-    /// once. Of such keys the first in ordinal order is kept, on both servers alike.
+    /// Reduces an item's provider ids to what is compared between servers, without empty values or this plugin's own keys.
+    /// Keys that differ only by case count as one id, and the first in ordinal order is kept.
     /// </summary>
     /// <param name="ids">The ids as the item holds them.</param>
     /// <returns>The ids to compare, or null when there are none to read.</returns>
@@ -183,13 +174,11 @@ public static class JsonFieldHelpers
             .ToDictionary(id => id.Key, id => id.Value);
 
     /// <summary>
-    /// Makes an item's provider ids match the source's: the same keys, spelled the same, with the same
-    /// values. A local key that differs from a source key only by case is removed, so the id is left
-    /// once under the source's spelling. This plugin's own keys are left alone.
+    /// Makes an item's provider ids match the source's keys, spelling, and values, leaving this plugin's own keys alone.
     /// </summary>
     /// <param name="local">The item's provider ids, changed in place.</param>
     /// <param name="source">The source's provider ids.</param>
-    /// <returns>True when anything changed.</returns>
+    /// <returns><c>true</c> when anything changed.</returns>
     public static bool ReconcileProviderIds(IDictionary<string, string> local, IReadOnlyDictionary<string, string> source)
     {
         ArgumentNullException.ThrowIfNull(local);

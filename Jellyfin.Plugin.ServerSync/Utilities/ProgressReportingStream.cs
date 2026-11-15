@@ -6,16 +6,8 @@ using System.Threading.Tasks;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Write-through stream wrapper that reports the fraction of
-/// <c>expectedBytes</c> written so far. Wrapped around the temp-file stream
-/// during a download so a single multi-hour file moves the task's progress
-/// bar instead of freezing it at the item boundary.
-/// <para>
-/// Reports are throttled to whole-percent steps, a 50 GB copy writes
-/// hundreds of thousands of buffers, and forwarding every one of them to
-/// Jellyfin's task-progress plumbing is pure overhead. Does not own the
-/// inner stream. The caller's <c>using</c> disposes it.
-/// </para>
+/// A write-through wrapper that reports the fraction of the expected bytes written, in whole percent steps, so one long download moves the task's progress.
+/// It does not own the inner stream.
 /// </summary>
 public sealed class ProgressReportingStream : Stream
 {
@@ -28,10 +20,10 @@ public sealed class ProgressReportingStream : Stream
     /// <summary>
     /// Initializes a new instance of the <see cref="ProgressReportingStream"/> class.
     /// </summary>
-    /// <param name="inner">Destination stream. Not disposed by this wrapper.</param>
-    /// <param name="expectedBytes">Total bytes expected. Must be positive.</param>
-    /// <param name="progress">Receives the written fraction (0 to 1) at whole-percent steps.</param>
-    /// <param name="alreadyWritten">Bytes already in place before this stream, for a resumed download.</param>
+    /// <param name="inner">The stream written to. Not disposed by this wrapper.</param>
+    /// <param name="expectedBytes">The total bytes expected. Must be positive.</param>
+    /// <param name="progress">Receives the written fraction, from 0 to 1, at whole percent steps.</param>
+    /// <param name="alreadyWritten">The bytes already in place before this stream, for a resumed download.</param>
     public ProgressReportingStream(Stream inner, long expectedBytes, IProgress<double> progress, long alreadyWritten = 0)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -106,11 +98,12 @@ public sealed class ProgressReportingStream : Stream
         Advance(buffer.Length);
     }
 
+    /// <summary>Counts written bytes and reports each new whole percent.</summary>
     private void Advance(int count)
     {
         _written += count;
 
-        // Sizes drift (stale SourceSize, transfer encoding). Never report past 1.
+        // The expected size can be stale, so the fraction never passes 1.
         var fraction = Math.Min(1.0, (double)_written / _expectedBytes);
         var percent = (int)(fraction * 100);
         if (percent > _lastReportedPercent)

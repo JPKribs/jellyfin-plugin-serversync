@@ -6,20 +6,17 @@ using System.Linq;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Turns the files a content run wrote or removed into the folders Jellyfin is told to look at again,
-/// so a run that touched a few titles refreshes those titles instead of every library.
+/// Turns the files a content run wrote or removed into the folders Jellyfin is told to look at again.
 /// </summary>
 public static class ChangedFolders
 {
     /// <summary>
-    /// The most folders reported one by one. Past this a single full library scan is cheaper than as
-    /// many separate refreshes, as on a first run that copies a whole library.
+    /// The most folders reported one by one. Past this a single full library scan is cheaper.
     /// </summary>
     public const int MaxTargeted = 250;
 
     /// <summary>
-    /// The distinct folders holding the changed files. A folder inside another one in the list is
-    /// dropped, since refreshing the outer folder covers it.
+    /// Lists the distinct folders holding the changed files, dropping any folder inside another in the list.
     /// </summary>
     /// <param name="changedFiles">The files written or removed.</param>
     /// <returns>The folders, outermost only.</returns>
@@ -48,14 +45,12 @@ public static class ChangedFolders
     }
 
     /// <summary>
-    /// Whether Jellyfin knows a folder at or above each changed folder, so telling it about the folder
-    /// reaches a library. Jellyfin refreshes a reported folder through the nearest one it knows, and it
-    /// does not record a library's folder while that folder is empty. A first run into an empty library
-    /// would be reported and silently dropped, so it needs a full scan instead.
+    /// Whether Jellyfin knows a folder at or above each changed folder, so reporting the folder reaches a library.
+    /// Jellyfin does not record an empty library's folder, so a first run into one needs a full scan instead.
     /// </summary>
     /// <param name="folders">The changed folders.</param>
     /// <param name="known">Whether Jellyfin holds a library folder at a path.</param>
-    /// <returns>True when every folder has a known folder at or above it.</returns>
+    /// <returns><c>true</c> when every folder has a known folder at or above it.</returns>
     public static bool AllReachable(IEnumerable<string> folders, Func<string, bool> known)
     {
         ArgumentNullException.ThrowIfNull(folders);
@@ -85,6 +80,7 @@ public static class ChangedFolders
         return true;
     }
 
+    /// <summary>Whether a folder lies inside another on a separator boundary.</summary>
     private static bool IsInside(string folder, string outer)
         => folder.Length > outer.Length
             && folder.StartsWith(outer, StringComparison.Ordinal)

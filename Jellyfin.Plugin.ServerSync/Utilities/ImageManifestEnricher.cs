@@ -6,42 +6,28 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Services.Clients;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Adds Size / Width / Height to a tag-only source image manifest via one HTTP call.
+/// Adds size, width, and height to a source image manifest that holds tags only.
 /// </summary>
 public static class ImageManifestEnricher
 {
     /// <summary>
-    /// Enriches a freshly built tag-only manifest, preferring carried-forward
-    /// sizes over live HTTP. Flow:
-    /// <list type="number">
-    /// <item>Carry sizes forward from <paramref name="priorSourceManifestJson"/>
-    /// for entries whose Tag is unchanged (same image → same size).</item>
-    /// <item>If every entry now has a size and <paramref name="deepVerification"/>
-    /// is off, return without any HTTP, the steady-state path. This is what
-    /// keeps refresh from issuing one GET + one HEAD per image per item per
-    /// run on libraries where nothing changed.</item>
-    /// <item>Otherwise fall through to <see cref="EnrichAsync"/> (per-item GET
-    /// + per-image HEAD), then carry forward once more so a partial enrichment
-    /// failure doesn't read as a phantom change.</item>
-    /// </list>
-    /// A changed Tag always misses the carry-forward and triggers live
-    /// enrichment, so real image changes are still detected. The case only
-    /// <paramref name="deepVerification"/> catches: an image file replaced on
-    /// the source's disk without a metadata rescan (same Tag, different bytes).
+    /// Fills a tag-only manifest with sizes, reusing the prior sizes of unchanged tags and calling the source only for the rest.
+    /// Only <paramref name="deepVerification"/> catches an image replaced on the source's disk under the same tag.
     /// </summary>
-    /// <param name="freshManifestJson">The image manifest the source reports now, as JSON.</param>
+    /// <param name="freshManifestJson">The image manifest this scan read from the source, as JSON.</param>
     /// <param name="priorSourceManifestJson">The manifest the row held before this scan, as JSON.</param>
     /// <param name="sourceItemId">The item's id on the source.</param>
     /// <param name="client">The client for the source server.</param>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="logContext">Names the item in log entries.</param>
     /// <param name="deepVerification">Whether to measure every image again even when its tag is unchanged.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="cancellationToken">Cancels the calls to the source.</param>
     /// <returns>The manifest with sizes filled in.</returns>
     public static async Task<string?> EnrichWithCarryForwardAsync(
         string? freshManifestJson,
@@ -64,9 +50,7 @@ public static class ImageManifestEnricher
     }
 
     /// <summary>
-    /// True when every image entry in the manifest has a measured size.
-    /// Unparseable or empty manifests return false so callers fall through to
-    /// live enrichment rather than skipping on bad data.
+    /// Whether every image in the manifest has a measured size. A manifest that is empty or cannot be read counts as unsized.
     /// </summary>
     private static bool HasAllSizes(string? manifestJson)
     {
@@ -105,14 +89,14 @@ public static class ImageManifestEnricher
     }
 
     /// <summary>
-    /// Returns the enriched manifest JSON, or the input unchanged on any failure.
+    /// Fills a manifest with the sizes the source reports, and returns the input unchanged on any failure.
     /// </summary>
     /// <param name="sourceManifestJson">The image manifest the source reports, as JSON.</param>
     /// <param name="sourceItemId">The item's id on the source.</param>
     /// <param name="client">The client for the source server.</param>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="logContext">Names the item in log entries.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="cancellationToken">Cancels the calls to the source.</param>
     /// <returns>The enriched manifest, or the input unchanged when enrichment failed.</returns>
     public static async Task<string?> EnrichAsync(
         string? sourceManifestJson,
@@ -134,7 +118,7 @@ public static class ImageManifestEnricher
         }
         catch (JsonException ex)
         {
-            logger.LogDebug(ex, "Could not deserialize source image manifest for {Context}", logContext);
+            logger.LogDebug(ex, "Could not deserialize source image manifest for {Context}", FormatUtilities.SanitizeForLog(logContext));
             return sourceManifestJson;
         }
 
@@ -145,13 +129,9 @@ public static class ImageManifestEnricher
         {
             sourceInfo = await client.GetItemImageInfoAsync(sourceItemId, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Source image-info enrichment failed for {Context}", logContext);
+            logger.LogDebug(ex, "Source image-info enrichment failed for {Context}", FormatUtilities.SanitizeForLog(logContext));
             return sourceManifestJson;
         }
 
@@ -178,15 +158,10 @@ public static class ImageManifestEnricher
                     anyChanged = true;
                 }
 
-                // /Items/{id}/Images reads Size from Jellyfin's in-memory
-                // item state, which goes stale when the image file is
-                // replaced on disk without a metadata rescan. HEAD the
-                // actual image URL instead. Jellyfin's image controller serves
-                // the file directly, so Content-Length is the current
-                // file length and the comparator sees the replacement
-                // even when Jellyfin hasn't re-indexed.
                 int? imageIndex = kvp.Key == "Backdrop" || kvp.Value.Count > 1 ? entry.ImageIndex : null;
                 var headSize = await client.GetItemImageContentLengthAsync(sourceItemId, kvp.Key, imageIndex, cancellationToken).ConfigureAwait(false);
+
+                // The reported size goes stale when a file is replaced, so the length wins.
                 if (headSize.HasValue && headSize.Value != entry.Size)
                 {
                     entry.Size = headSize.Value;
@@ -199,16 +174,8 @@ public static class ImageManifestEnricher
     }
 
     /// <summary>
-    /// Fills missing Size / Width / Height on a freshly built (tag-only) source
-    /// manifest from the previously stored manifest, for images whose Tag is
-    /// unchanged. Refresh rebuilds the source side tag-only every run and only
-    /// enriches it with a live HTTP call. When that call fails or is skipped,
-    /// the row would otherwise drop back to Size=0 and read as a change against
-    /// the sized local side until the next successful enrichment. An unchanged
-    /// Tag means the same image, so the previously measured size still holds, so
-    /// carrying it forward keeps the comparison honest with no extra HTTP. A
-    /// changed Tag is a real new image and is left tag-only so the change is
-    /// still detected.
+    /// Fills missing sizes on a tag-only manifest from the stored one, for images whose tag is unchanged.
+    /// A failed or skipped call to the source then never reads as a change, and a changed tag stays unsized so it is still detected.
     /// </summary>
     /// <param name="newManifestJson">The manifest to fill in sizes for, as JSON.</param>
     /// <param name="oldManifestJson">The manifest whose measured sizes are reused, as JSON.</param>

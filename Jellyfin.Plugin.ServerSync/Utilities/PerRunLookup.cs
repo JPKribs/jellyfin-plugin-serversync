@@ -4,9 +4,7 @@ using System.Collections.Concurrent;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Remembers what a lookup answered for one key until it is cleared, so a run that asks the same
-/// question for every item asks it once. A run clears it when it starts, so an answer never outlives
-/// the run that asked.
+/// Remembers what a lookup answered for each key until a run clears it, so a run that asks the same question for every item asks it once.
 /// </summary>
 /// <typeparam name="TKey">What the lookup is asked about.</typeparam>
 /// <typeparam name="TValue">What the lookup answers, including null for no answer.</typeparam>

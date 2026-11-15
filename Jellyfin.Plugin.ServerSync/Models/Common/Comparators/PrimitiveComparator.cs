@@ -5,13 +5,9 @@ using System.Globalization;
 namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 
 /// <summary>
-/// Comparator for primitive value types, bool, int, long, DateTime, Guid, etc.
-/// Equality uses <see cref="EqualityComparer{T}.Default"/>. Hashing returns the
-/// invariant <c>ToString()</c> form for non-null values, which is sufficient
-/// to detect "did the value change since last sync" for the
-/// <see cref="SyncableValue{T}"/> fast-path.
+/// Compares simple values with their default equality, and fingerprints one as its invariant text.
 /// </summary>
-/// <typeparam name="T">Primitive or struct type.</typeparam>
+/// <typeparam name="T">The simple type compared, such as a number, a date, or a Guid.</typeparam>
 public sealed class PrimitiveComparator<T> : ISyncComparator<T>
 {
     /// <inheritdoc />

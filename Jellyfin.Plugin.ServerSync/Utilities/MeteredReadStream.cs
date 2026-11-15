@@ -87,6 +87,7 @@ public sealed class MeteredReadStream : Stream
         base.Dispose(disposing);
     }
 
+    /// <summary>Charges the bytes read to the meter and fails when it refuses.</summary>
     private int Charge(int read)
     {
         if (read > 0 && !_take(read))

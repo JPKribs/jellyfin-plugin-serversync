@@ -13,7 +13,7 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 /// </summary>
 public static class MetadataFieldWriter
 {
-    /// <summary>Writes the blob's fields onto the item. A field the blob lacks is left alone.</summary>
+    /// <summary>Writes the blob's fields onto the item. A field the blob lacks is left alone, and one it holds as null or empty is cleared.</summary>
     /// <param name="localItem">The item to change.</param>
     /// <param name="metadataJson">The metadata blob, as JSON.</param>
     /// <param name="syncGenres">Whether to write genres.</param>
@@ -37,33 +37,25 @@ public static class MetadataFieldWriter
         var hasChanges = false;
         var localVideo = localItem as Video;
 
-        // Strings, assign through nulls and empty strings so source clearing
-        // a field actually clears local.
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "Name", v => { if (!string.IsNullOrEmpty(v) && localItem.Name != v) { localItem.Name = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "OriginalTitle", v => { if (localItem.OriginalTitle != v) { localItem.OriginalTitle = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "Overview", v => { if (localItem.Overview != v) { localItem.Overview = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "OfficialRating", v => { if (localItem.OfficialRating != v) { localItem.OfficialRating = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "Tagline", v => { if (localItem.Tagline != v) { localItem.Tagline = v; return true; } return false; });
-        // SortName intentionally not synced: Jellyfin derives SortName
-        // from Name independently on each server, so writing it from
-        // source produces a value that local will overwrite on next
-        // metadata refresh anyway. ForcedSortName (user override) IS synced.
+
+        // SortName is left out because each server derives it from Name.
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "ForcedSortName", v => { if (localItem.ForcedSortName != v) { localItem.ForcedSortName = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "CustomRating", v => { if (localItem.CustomRating != v) { localItem.CustomRating = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "PreferredMetadataCountryCode", v => { if (localItem.PreferredMetadataCountryCode != v) { localItem.PreferredMetadataCountryCode = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignString(metadata, "PreferredMetadataLanguage", v => { if (localItem.PreferredMetadataLanguage != v) { localItem.PreferredMetadataLanguage = v; return true; } return false; });
 
-        // Floats, number or null. Treat absent as no-op, present-and-null as
-        // clear-local.
         hasChanges |= JsonFieldHelpers.AssignFloat(metadata, "CommunityRating", v => { if (localItem.CommunityRating != v) { localItem.CommunityRating = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignFloat(metadata, "CriticRating", v => { if (localItem.CriticRating != v) { localItem.CriticRating = v; return true; } return false; });
 
-        // Ints, same semantic.
         hasChanges |= JsonFieldHelpers.AssignInt(metadata, "ProductionYear", v => { if (localItem.ProductionYear != v) { localItem.ProductionYear = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignInt(metadata, "IndexNumber", v => { if (localItem.IndexNumber != v) { localItem.IndexNumber = v; return true; } return false; });
         hasChanges |= JsonFieldHelpers.AssignInt(metadata, "ParentIndexNumber", v => { if (localItem.ParentIndexNumber != v) { localItem.ParentIndexNumber = v; return true; } return false; });
 
-        // Dates, date-only compare.
         if (metadata.TryGetValue("PremiereDate", out var premiereValue))
         {
             var d = JsonFieldHelpers.ParseNullableDate(premiereValue);
@@ -84,7 +76,6 @@ public static class MetadataFieldWriter
             }
         }
 
-        // Arrays, empty/null source clears local.
         if (syncGenres && metadata.TryGetValue("Genres", out var genresValue))
         {
             var newGenres = JsonFieldHelpers.ReadStringArray(genresValue);
@@ -105,8 +96,6 @@ public static class MetadataFieldWriter
             }
         }
 
-        // ProviderIds: reconcile so local matches source exactly. Includes
-        // removing local-only keys.
         if (metadata.TryGetValue("ProviderIds", out var providerIdsValue))
         {
             var sourceIds = JsonFieldHelpers.ReadProviderIds(providerIdsValue);
@@ -114,7 +103,6 @@ public static class MetadataFieldWriter
             hasChanges |= JsonFieldHelpers.ReconcileProviderIds(localItem.ProviderIds, sourceIds);
         }
 
-        // Video-specific fields. Settable only when local is a Video.
         if (localVideo != null)
         {
             hasChanges |= JsonFieldHelpers.AssignString(metadata, "AspectRatio", v => { if (localVideo.AspectRatio != v) { localVideo.AspectRatio = v; return true; } return false; });
@@ -139,7 +127,6 @@ public static class MetadataFieldWriter
             }
         }
 
-        // LockedFields, empty source clears local.
         if (syncLocks && metadata.TryGetValue("LockedFields", out var lockedValue))
         {
             var newLocked = JsonFieldHelpers.ReadEnumArray<MetadataField>(lockedValue);
@@ -150,8 +137,7 @@ public static class MetadataFieldWriter
             }
         }
 
-        // LockData, bool? coalesced to false when null, matching source-side
-        // serialization (which writes `LockData ?? false`).
+        // A null LockData reads as unlocked, matching what the source writes.
         if (syncLocks && metadata.TryGetValue("LockData", out var lockDataValue))
         {
             bool target = lockDataValue.ValueKind == JsonValueKind.True;
@@ -210,9 +196,11 @@ public static class MetadataFieldWriter
     public static string[] ReadStudios(string? studiosJson)
         => string.IsNullOrEmpty(studiosJson) ? Array.Empty<string>() : (JsonSerializer.Deserialize<List<string>>(studiosJson) ?? new List<string>()).ToArray();
 
+    /// <summary>Compares two string arrays in order, treating null as empty.</summary>
     private static bool ArraysEqualOrdinal(string[]? a, string[]? b)
         => (a ?? Array.Empty<string>()).SequenceEqual(b ?? Array.Empty<string>(), StringComparer.Ordinal);
 
+    /// <summary>Compares two arrays in order, treating null as empty.</summary>
     private static bool ArraysEqual<T>(T[]? a, T[]? b) where T : struct
         => (a ?? Array.Empty<T>()).SequenceEqual(b ?? Array.Empty<T>());
 }

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Sdk.Generated.Models;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
@@ -14,9 +15,7 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 public static class PaginatedFetchUtility
 {
     /// <summary>
-    /// Items fetched per page. Callers request only light fields (Path /
-    /// DateCreated / MediaSources), so a larger page cuts round-trip count
-    /// against the source server without meaningfully growing the response.
+    /// Items fetched per page. Callers ask for light fields only, so a large page saves round trips to the source.
     /// </summary>
     public const int DefaultBatchSize = 500;
 
@@ -30,20 +29,20 @@ public static class PaginatedFetchUtility
     /// </summary>
     /// <param name="startIndex">The index of the first item to fetch.</param>
     /// <param name="batchSize">How many items each page holds.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="cancellationToken">Cancels the fetch.</param>
+    /// <returns>The page, or null when the source gave no answer.</returns>
     public delegate Task<BaseItemDtoQueryResult?> FetchPageAsync(int startIndex, int batchSize, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Processes a single item. Returns true to count it toward the processed total.
+    /// Processes a single item.
     /// </summary>
-    /// <param name="item">The source item.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="item">The item the source listed.</param>
+    /// <param name="cancellationToken">Cancels the processing.</param>
+    /// <returns><c>true</c> to count the item toward the processed total.</returns>
     public delegate Task<bool> ProcessItemAsync(BaseItemDto item, CancellationToken cancellationToken);
 
     /// <summary>
-    /// How many times one library is enumerated when the catalog shifts underneath the scan. A second
-    /// pass skips everything the first one handled, so it costs little, and a clean second pass proves
-    /// nothing was skipped. A library that keeps changing still reports incomplete discovery.
+    /// How many times one library is listed when it changes under the scan. A clean second pass proves nothing was skipped.
     /// </summary>
     public const int MaxEnumerationPasses = 2;
 
@@ -58,7 +57,7 @@ public static class PaginatedFetchUtility
     /// <param name="filterMode">The Library Filter mode.</param>
     /// <param name="filteredItems">The paths the Library Filter lists, or null.</param>
     /// <param name="logger">Writes log entries.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="cancellationToken">Cancels the loop.</param>
     /// <param name="onItemProcessed">Called after each item, or null.</param>
     /// <returns>How many items were handled and whether the loop reached the end.</returns>
     public static async Task<PaginatedFetchOutcome> FetchAllPagesAsync(
@@ -72,6 +71,10 @@ public static class PaginatedFetchUtility
         CancellationToken cancellationToken,
         Action? onItemProcessed = null)
     {
+        ArgumentNullException.ThrowIfNull(fetchPage);
+        ArgumentNullException.ThrowIfNull(processItem);
+        ArgumentNullException.ThrowIfNull(logger);
+
         var state = new FetchState();
         var completedFully = false;
         for (var pass = 1; pass <= MaxEnumerationPasses; pass++)
@@ -109,6 +112,7 @@ public static class PaginatedFetchUtility
         return new PaginatedFetchOutcome(state.ProcessedItems, completedFully);
     }
 
+    /// <summary>How one pass over a library ended.</summary>
     private enum PassResult
     {
         Complete,
@@ -134,6 +138,9 @@ public static class PaginatedFetchUtility
         public int ProcessedItems { get; set; }
     }
 
+    /// <summary>
+    /// Lists a library once, and reports a shift when the count or a repeated ID shows the pages moved mid pass.
+    /// </summary>
     private static async Task<PassResult> RunPassAsync(
         FetchPageAsync fetchPage,
         ProcessItemAsync processItem,
@@ -170,10 +177,9 @@ public static class PaginatedFetchUtility
             {
                 throw;
             }
+            // A timeout arrives as a cancellation the caller never asked for, so it retries.
             catch (Exception ex)
             {
-                // An HTTP timeout arrives as a TaskCanceledException without the caller's token
-                // being cancelled, so it lands here and is retried like any other failed page.
                 consecutiveErrors++;
                 logger.LogWarning(ex,
                     "Failed to fetch items from library {LibraryName} at index {Index} (attempt {Attempt}/{Max})",
@@ -199,7 +205,7 @@ public static class PaginatedFetchUtility
                 continue;
             }
 
-            // null result is treated as a transient error (distinct from empty Items).
+            // A null page is a failed fetch, while an empty one ends the list.
             if (result == null)
             {
                 consecutiveErrors++;
@@ -250,31 +256,22 @@ public static class PaginatedFetchUtility
                 }
 
                 var id = item.Id.Value;
+                // A repeated ID means pages shifted and another item was skipped unseen.
                 if (!fetchedIds.Add(id))
                 {
-                    // A repeated ID means page boundaries shifted mid-scan
-                    // (tie reorder or source mutation). A duplicate on one
-                    // side implies a silent skip on the other, and the
-                    // count-based check below can't see a swap, because the
-                    // duplicate keeps the totals matching.
                     duplicateIds++;
                     continue;
                 }
 
-                // Handled by an earlier pass: seen once is enough, and processing it again would
-                // count it twice.
+                // An earlier pass handled it, and a second time would count it twice.
                 if (state.Handled.Contains(id))
                 {
                     continue;
                 }
 
+                // Jellyfin omits Path when the API Key lacks admin rights, so these are counted.
                 if (string.IsNullOrEmpty(item.Path))
                 {
-                    // Distinct from a plain skip: a Path-less item is invisible
-                    // to the caller's seen set, and Jellyfin omits Path on
-                    // every item when the API key lacks admin rights. The
-                    // per-mapping zero-seen guard catches the all-pathless
-                    // case, and this counter surfaces partial ones.
                     state.PathlessSkipped.Add(id);
                     state.Handled.Add(id);
                     continue;
@@ -302,21 +299,15 @@ public static class PaginatedFetchUtility
                 {
                     throw;
                 }
+                // A failed item is counted so the caller's prune never reads it as removed.
                 catch (Exception ex)
                 {
-                    // Counted: an item that failed to process is absent from
-                    // the caller's seen set exactly like an item that was
-                    // never fetched, so it must poison CompletedFully or the
-                    // caller's prune would treat it as removed from source.
-                    // Left unhandled, so a second pass tries it again.
                     state.Failed.Add(id);
-                    logger.LogWarning(ex, "Failed to process item {ItemId} ({Path})", item.Id, item.Path);
+                    logger.LogWarning(ex, "Failed to process item {ItemId} ({Path})", item.Id, FormatUtilities.SanitizeForLog(item.Path));
                 }
             }
 
-            // Cancellation can break the item loop mid-page. The remaining
-            // items on this page were never processed, so this run must not
-            // report complete discovery.
+            // A cancel mid page leaves items unprocessed, so the pass must not report complete.
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
@@ -336,13 +327,7 @@ public static class PaginatedFetchUtility
             return PassResult.Stopped;
         }
 
-        // Offset pagination races with catalog mutations: an item deleted on
-        // the source mid-enumeration shifts everything after it down one slot,
-        // silently skipping an unrelated item at the next page boundary, and
-        // a skipped item is indistinguishable from a removed one to the
-        // caller's prune. The first page's TotalRecordCount says how many
-        // items existed at pass start. Fetching a different number means the
-        // catalog changed during the pass, so it is not a consistent snapshot.
+        // A count unlike the first page's total means the library changed mid pass.
         if (expectedTotal.HasValue && rawFetched != expectedTotal.Value)
         {
             logger.LogWarning(

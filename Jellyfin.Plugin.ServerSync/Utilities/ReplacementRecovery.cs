@@ -1,26 +1,25 @@
 using System;
 using System.IO;
 using System.Linq;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Puts back what an interrupted replacement moved aside. A download that replaces a file first moves
-/// the file and the files that go with it to <c>name.replacing.&lt;id&gt;</c>, then moves the new file
-/// in. A server stopped between the two leaves the local file under a name nothing plays. Every move
-/// here goes into a name that is free, so nothing is overwritten and nothing is deleted.
+/// Puts back the files a replacing download set aside as <c>name.replacing.&lt;id&gt;</c> when the server stopped before the new file moved in.
+/// Every move goes into a free name, so nothing is overwritten or deleted.
 /// </summary>
 public static class ReplacementRecovery
 {
+    /// <summary>The text between a set-aside file's own name and its id.</summary>
     private const string Marker = ".replacing.";
 
     /// <summary>
-    /// Restores the file at <paramref name="localPath"/> when it is missing and a set-aside copy of it
-    /// is there, and every set-aside file that goes with it whose own name is free.
+    /// Restores the file at <paramref name="localPath"/> from its set-aside copy when it is missing, with every set-aside companion whose name is free.
     /// </summary>
     /// <param name="localPath">Where the file belongs.</param>
-    /// <param name="logger">Writes log entries.</param>
+    /// <param name="logger">Writes a log entry for each file restored or refused.</param>
     /// <returns>How many files were put back.</returns>
     public static int Restore(string? localPath, ILogger logger)
     {
@@ -36,7 +35,7 @@ public static class ReplacementRecovery
             var name = Path.GetFileName(localPath);
             var stem = Path.GetFileNameWithoutExtension(localPath);
 
-            // Newest first, so the file is the one that was here last.
+            // Newest first, so the restored file is the one that was here last.
             foreach (var aside in Directory.EnumerateFiles(folder)
                 .Where(path => OriginalNameOf(path) is not null)
                 .OrderByDescending(File.GetLastWriteTimeUtc)
@@ -58,24 +57,24 @@ public static class ReplacementRecovery
                 {
                     File.Move(aside, target);
                     restored++;
-                    logger.LogWarning("Restored {Path}, which an interrupted replacement had set aside", target);
+                    logger.LogWarning("Restored {Path}, which an interrupted replacement had set aside", FormatUtilities.SanitizeForLog(target));
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    logger.LogWarning(ex, "Could not restore {Path} from {Aside}", target, aside);
+                    logger.LogWarning(ex, "Could not restore {Path} from {Aside}", FormatUtilities.SanitizeForLog(target), FormatUtilities.SanitizeForLog(aside));
                 }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Could not look for set-aside files beside {Path}", localPath);
+            logger.LogWarning(ex, "Could not look for set-aside files beside {Path}", FormatUtilities.SanitizeForLog(localPath));
         }
 
         return restored;
     }
 
     /// <summary>
-    /// The name a set-aside file had: what comes before ".replacing." when 32 hex digits follow it.
+    /// Reads the name a set-aside file had, which is what precedes the marker when 32 hex digits follow it.
     /// </summary>
     private static string? OriginalNameOf(string path)
     {

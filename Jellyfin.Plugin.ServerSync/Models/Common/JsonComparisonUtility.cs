@@ -7,18 +7,16 @@ using System.Text.Json;
 namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
-/// Utility class for semantic JSON comparison.
-/// Used across sync modules for comparing configuration values.
+/// Compares JSON by meaning, ignoring property order and formatting.
 /// </summary>
 public static class JsonComparisonUtility
 {
     /// <summary>
-    /// Compares two JSON strings for semantic equality.
-    /// Handles differences in property ordering and formatting.
+    /// Compares two JSON strings by meaning, ignoring property order and formatting.
     /// </summary>
-    /// <param name="json1">First JSON string.</param>
-    /// <param name="json2">Second JSON string.</param>
-    /// <returns>True if semantically equal, false otherwise.</returns>
+    /// <param name="json1">The source's JSON.</param>
+    /// <param name="json2">The JSON compared with it.</param>
+    /// <returns><c>true</c> when the two mean the same.</returns>
     public static bool JsonEquals(string? json1, string? json2)
     {
         if (string.IsNullOrEmpty(json1) && string.IsNullOrEmpty(json2))
@@ -31,13 +29,7 @@ public static class JsonComparisonUtility
             return false;
         }
 
-        // Byte-identical blobs are trivially equal, skip the parse + walk.
-        // This is the hot path on refresh: source/local blobs come from
-        // hand-mirrored builders with identical key order, so in-sync rows
-        // usually serialize identically, and this check runs for every
-        // record whose hash short-circuit missed. Parsing two documents and
-        // walking them with per-object dictionary allocations across 100k+
-        // rows was saturating every core during the build phase.
+        // Rows in step usually serialize identically, which skips the costly parse.
         if (string.Equals(json1, json2, StringComparison.Ordinal))
         {
             return true;
@@ -57,12 +49,11 @@ public static class JsonComparisonUtility
     }
 
     /// <summary>
-    /// Counts the number of differing properties between two JSON objects.
-    /// Properties where both values are "empty" (null, empty string, empty array) are not counted.
+    /// Counts the top level properties that differ between two JSON objects. A property empty on both sides is not counted.
     /// </summary>
-    /// <param name="json1">First JSON string.</param>
-    /// <param name="json2">Second JSON string.</param>
-    /// <returns>Number of differing properties.</returns>
+    /// <param name="json1">The source's JSON.</param>
+    /// <param name="json2">The JSON compared with it.</param>
+    /// <returns>How many properties differ.</returns>
     public static int CountDifferences(string? json1, string? json2)
     {
         if (string.IsNullOrEmpty(json1) || string.IsNullOrEmpty(json2))
@@ -105,7 +96,7 @@ public static class JsonComparisonUtility
                 }
                 else if (has1)
                 {
-                    // One-sided property counts only when its value is non-empty.
+                    // A property only one side holds differs only when it is not empty.
                     if (!IsEmptyValue(val1))
                     {
                         diffCount++;
@@ -126,19 +117,16 @@ public static class JsonComparisonUtility
     }
 
     /// <summary>
-    /// Returns the names of top-level properties that differ between two
-    /// JSON objects, with the same null/empty/missing equivalence as
-    /// <see cref="JsonElementEquals"/>.
+    /// Names the top level properties that differ between two JSON objects, treating null, empty, and missing as equal.
     /// </summary>
-    /// <param name="json1">The first JSON document.</param>
-    /// <param name="json2">The second JSON document.</param>
-    /// <returns>The names of the fields that differ.</returns>
+    /// <param name="json1">The source's JSON.</param>
+    /// <param name="json2">The JSON compared with it.</param>
+    /// <returns>The names of the fields that differ, sorted.</returns>
     public static IReadOnlyList<string> GetDifferingFields(string? json1, string? json2)
     {
         if (string.IsNullOrEmpty(json1) || string.IsNullOrEmpty(json2))
         {
-            // Mismatched presence, not a property-level diff, but report it
-            // distinctly so callers can still surface a useful message.
+            // A blob only one side holds has no fields to name.
             return !string.IsNullOrEmpty(json1) || !string.IsNullOrEmpty(json2)
                 ? new[] { "(blob)" }
                 : Array.Empty<string>();
@@ -199,12 +187,10 @@ public static class JsonComparisonUtility
     }
 
     /// <summary>
-    /// Returns a compact "field=source-vs-local" diagnostic for the first
-    /// few divergent properties, with values JSON-serialised and truncated
-    /// to fit in a log line.
+    /// Describes the first few differing properties with both values, cut to fit a log line.
     /// </summary>
-    /// <param name="json1">The first JSON document.</param>
-    /// <param name="json2">The second JSON document.</param>
+    /// <param name="json1">The source's JSON.</param>
+    /// <param name="json2">The local JSON.</param>
     /// <param name="maxFields">The most fields to describe.</param>
     /// <param name="maxValueLength">The longest value to show before it is cut.</param>
     /// <returns>The differing fields with their values, in words.</returns>
@@ -255,14 +241,12 @@ public static class JsonComparisonUtility
         }
     }
 
+    /// <summary>Cuts a text to a length, marking the cut with an ellipsis.</summary>
     private static string Truncate(string s, int max)
         => s.Length <= max ? s : string.Concat(s.AsSpan(0, max), "…");
 
     /// <summary>
-    /// Cheap shape check for ISO-8601 date strings (<c>yyyy-MM-dd…</c>).
-    /// Every date this plugin serializes starts that way. Filters which
-    /// string pairs are worth a <see cref="DateTimeOffset.TryParse(string, out DateTimeOffset)"/>
-    /// attempt in <see cref="JsonElementEquals"/>.
+    /// Whether a string starts like an ISO 8601 date, which decides if a date parse is worth trying.
     /// </summary>
     private static bool LooksLikeIsoDate(string? s) =>
         s is { Length: >= 10 and <= 40 }
@@ -273,7 +257,7 @@ public static class JsonComparisonUtility
         && s[4] == '-';
 
     /// <summary>
-    /// Checks if a JsonElement represents an "empty" value (null, empty string, empty array, empty object).
+    /// Whether an element is null, undefined, or an empty string, array, or object.
     /// </summary>
     private static bool IsEmptyValue(JsonElement e) => e.ValueKind switch
     {
@@ -286,13 +270,11 @@ public static class JsonComparisonUtility
     };
 
     /// <summary>
-    /// Compares two nullable DateTime values as date-only (calendar date),
-    /// ignoring time-of-day and Kind/timezone differences. Use for date-only
-    /// semantic fields like birthdays, premiere dates, and end dates.
+    /// Compares two times as calendar dates, ignoring the time of day and the zone.
     /// </summary>
-    /// <param name="a">First value.</param>
-    /// <param name="b">Second value.</param>
-    /// <returns>True if equal as calendar dates, false otherwise.</returns>
+    /// <param name="a">The source's date.</param>
+    /// <param name="b">The date compared with it.</param>
+    /// <returns><c>true</c> when both fall on the same UTC calendar date.</returns>
     public static bool DateOnlyEquals(DateTime? a, DateTime? b)
     {
         if (!a.HasValue && !b.HasValue)
@@ -305,20 +287,15 @@ public static class JsonComparisonUtility
             return false;
         }
 
-        // Unspecified is read as UTC, not local, matching how Jellyfin stores date-only fields.
+        // A time with no zone reads as UTC, as Jellyfin stores date fields.
         return Utilities.UtcTime.AsUtc(a.Value).Date == Utilities.UtcTime.AsUtc(b.Value).Date;
     }
 
     /// <summary>
-    /// Normalizes a date-only semantic field (premiere/end/birth/death dates)
-    /// to its UTC calendar date as <c>yyyy-MM-dd</c>. Blob builders store
-    /// this instead of the raw timestamp so the JSON comparison agrees with
-    /// the apply step's <see cref="DateOnlyEquals"/>. Servers routinely hold
-    /// the same date with different times of day (TZ-shifted midnights,
-    /// provider quirks like 07:01), and comparing timestamps left rows
-    /// permanently diverged that the apply step correctly refused to touch.
+    /// Formats a date field as its UTC calendar date, <c>yyyy-MM-dd</c>.
+    /// Servers hold the same date at different times of day, so blobs store the date alone to agree with <see cref="DateOnlyEquals"/>.
     /// </summary>
-    /// <param name="value">The date.</param>
+    /// <param name="value">The time whose date is kept.</param>
     /// <returns>The date as text, or null when there is none.</returns>
     public static string? ToDateOnlyString(DateTime? value) =>
         value.HasValue
@@ -326,9 +303,9 @@ public static class JsonComparisonUtility
             : null;
 
     /// <summary>
-    /// <see cref="ToDateOnlyString(DateTime?)"/> for the SDK's offset-typed dates.
+    /// Formats a date field the SDK holds with an offset as its UTC calendar date, <c>yyyy-MM-dd</c>.
     /// </summary>
-    /// <param name="value">The date.</param>
+    /// <param name="value">The time whose date is kept.</param>
     /// <returns>The date as text, or null when there is none.</returns>
     public static string? ToDateOnlyString(DateTimeOffset? value) =>
         value.HasValue
@@ -336,12 +313,11 @@ public static class JsonComparisonUtility
             : null;
 
     /// <summary>
-    /// Recursively compares two JsonElements for equality.
-    /// Treats null, undefined, empty string, empty array, and empty object as equivalent.
+    /// Compares two elements in depth, treating null, undefined, and an empty string, array, or object as equal.
     /// </summary>
-    /// <param name="e1">First element.</param>
-    /// <param name="e2">Second element.</param>
-    /// <returns>True if equal, false otherwise.</returns>
+    /// <param name="e1">The source's element.</param>
+    /// <param name="e2">The element compared with it.</param>
+    /// <returns><c>true</c> when the two mean the same.</returns>
     public static bool JsonElementEquals(JsonElement e1, JsonElement e2)
     {
         if (IsEmptyValue(e1) && IsEmptyValue(e2))
@@ -382,7 +358,7 @@ public static class JsonComparisonUtility
                     }
                     else if (has1)
                     {
-                        // One-sided property is a diff only when non-empty.
+                        // A property only one side holds differs only when it is not empty.
                         if (!IsEmptyValue(val1))
                         {
                             return false;
@@ -429,12 +405,7 @@ public static class JsonComparisonUtility
                     return true;
                 }
 
-                // Compare as dates via DateTimeOffset to avoid the DateTime
-                // Unspecified-kind TZ shift. AssumeUniversal makes offset-less
-                // strings UTC. Gated on an ISO-date shape check first, since blobs
-                // are full of long non-date strings (overviews, taglines) and
-                // attempting a culture-aware parse on every unequal pair was
-                // measurable CPU across 100k-row refreshes.
+                // Only strings shaped like dates are parsed, since parsing every unequal pair is costly.
                 if (LooksLikeIsoDate(s1) && LooksLikeIsoDate(s2) &&
                     DateTimeOffset.TryParse(s1, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto1) &&
                     DateTimeOffset.TryParse(s2, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto2))
@@ -444,8 +415,7 @@ public static class JsonComparisonUtility
                         return true;
                     }
 
-                    // Date-only relaxation: both midnight in their own offset
-                    // with the same calendar date (PremiereDate / birthdays).
+                    // Two midnights in their own zones on one calendar date are one date.
                     if (dto1.TimeOfDay == TimeSpan.Zero
                         && dto2.TimeOfDay == TimeSpan.Zero
                         && dto1.Date == dto2.Date)
@@ -453,9 +423,7 @@ public static class JsonComparisonUtility
                         return true;
                     }
 
-                    // Whole-hour relaxation: TZ-shifted "midnight in local TZ"
-                    // values land on whole-hour boundaries with the same UTC
-                    // calendar date within a 24-hour window. Treat as equal.
+                    // A midnight shifted by a zone lands on a whole hour of the same date.
                     if (dto1.Minute == 0 && dto1.Second == 0
                         && dto2.Minute == 0 && dto2.Second == 0
                         && dto1.UtcDateTime.Date == dto2.UtcDateTime.Date
@@ -468,8 +436,7 @@ public static class JsonComparisonUtility
                 return false;
 
             case JsonValueKind.Number:
-                // Compare numbers semantically rather than by raw text
-                // (e.g., 1.0 and 1 should be considered equal)
+                // Numbers compare by value, so 1.0 equals 1.
                 if (e1.TryGetInt64(out var l1) && e2.TryGetInt64(out var l2))
                 {
                     return l1 == l2;

@@ -13,8 +13,7 @@ public sealed class PaginationRequest
     public int Page { get; init; } = 1;
 
     /// <summary>
-    /// Gets the page size. Capped per-implementation. Managers may clamp
-    /// excessive values to a reasonable upper bound.
+    /// Gets the page size, which a manager may clamp to its own upper bound.
     /// </summary>
     public int PageSize { get; init; } = 50;
 
@@ -24,14 +23,12 @@ public sealed class PaginationRequest
     public SyncStatus? StatusFilter { get; init; }
 
     /// <summary>
-    /// Gets an optional free-text search term. Each manager defines which
-    /// columns are searched (typically a primary name/path field).
+    /// Gets an optional search term. Each manager defines which columns it searches.
     /// </summary>
     public string? SearchTerm { get; init; }
 
     /// <summary>
-    /// Gets the column to sort by. Managers define their own valid set and
-    /// fall back to an internal default for unknown values.
+    /// Gets the column to sort by. A manager falls back to its default for a column it does not know.
     /// </summary>
     public string? SortColumn { get; init; }
 

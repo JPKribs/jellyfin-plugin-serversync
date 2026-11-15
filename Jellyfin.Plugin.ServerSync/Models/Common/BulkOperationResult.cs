@@ -3,20 +3,16 @@ using System.Collections.Generic;
 namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
-/// Standard response shape for bulk-status endpoints. Surfaces per-item
-/// outcomes so the UI can flag partial failures instead of treating any
-/// non-zero count as success. <see cref="Updated"/> rows in <see cref="Requested"/>
-/// total. <see cref="Failed"/> lists IDs that didn't update (typically:
-/// row was deleted between the user's click and the request landing).
+/// The response of a bulk status route, listing each row that did not update so the page can flag a partial failure.
 /// </summary>
 public sealed class BulkOperationResult
 {
-    /// <summary>Number of rows actually updated.</summary>
+    /// <summary>Gets or sets how many rows were updated.</summary>
     public int Updated { get; set; }
 
-    /// <summary>Number of IDs the caller requested.</summary>
+    /// <summary>Gets or sets how many IDs the caller asked for.</summary>
     public int Requested { get; set; }
 
-    /// <summary>Per-item failures with diagnostic reason. Empty on full success.</summary>
+    /// <summary>Gets or sets the rows that did not update, each with its reason.</summary>
     public IReadOnlyList<BulkOperationFailure> Failed { get; set; } = new List<BulkOperationFailure>();
 }

@@ -6,18 +6,13 @@ using System.Threading.Tasks;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// A read-through wrapper that fails once more than a set number of bytes has been read. Wrapped
-/// around a body from another server whose size is known, so a server that sends more than it said
-/// cannot fill this server's disk.
-/// <para>
-/// Does not own the inner stream. The caller's <c>using</c> disposes it.
-/// </para>
+/// A read-through wrapper that fails once more than a set number of bytes is read, so a server that sends more than it said cannot fill the disk.
+/// It does not own the inner stream.
 /// </summary>
 public sealed class CappedReadStream : Stream
 {
     /// <summary>
-    /// The most one image copied from another server may weigh. Posters and backdrops run to a few
-    /// megabytes, so this only stops a body that is not an image at all.
+    /// The most bytes one image copied from another server may hold, which only stops a body that is not an image.
     /// </summary>
     public const long MaxSyncedImageBytes = 64L * 1024 * 1024;
 
@@ -79,6 +74,7 @@ public sealed class CappedReadStream : Stream
     /// <inheritdoc />
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
+    /// <summary>Counts the bytes read and fails once they pass the cap.</summary>
     private int Count(int read)
     {
         _read += read;

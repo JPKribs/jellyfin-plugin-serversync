@@ -7,11 +7,8 @@ using System.Threading.Tasks;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// A read-through wrapper that holds reads to the rate of a <see cref="SpeedBucket"/>, which other
-/// streams may share. It stays seekable, so a response that serves byte ranges from it still can.
-/// <para>
-/// Owns the inner stream and disposes it.
-/// </para>
+/// A read-through wrapper that holds reads to the rate of a <see cref="SpeedBucket"/>, which other streams may share.
+/// It stays seekable, and it owns and disposes the inner stream.
 /// </summary>
 public sealed class ThrottledReadStream : Stream
 {

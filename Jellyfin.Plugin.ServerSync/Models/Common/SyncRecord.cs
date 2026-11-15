@@ -3,10 +3,7 @@ using System;
 namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
-/// Base class for every record persisted in a sync table. Carries the universal
-/// status-tracking fields. Each module defines its own subclass with the
-/// payload-specific fields (typically a set of <see cref="SyncableValue{T}"/>
-/// fields) and overrides <see cref="HasChanges"/>.
+/// The base of every row in a sync table, carrying the status fields all sync types share.
 /// </summary>
 public abstract class SyncRecord
 {
@@ -21,40 +18,34 @@ public abstract class SyncRecord
     public SyncStatus Status { get; set; }
 
     /// <summary>
-    /// Gets or sets the UTC timestamp of the last status change.
+    /// Gets or sets the UTC time of the last status change.
     /// </summary>
     public DateTime StatusDate { get; set; }
 
     /// <summary>
-    /// Gets or sets the UTC timestamp of the last successful sync, if any.
+    /// Gets or sets the UTC time of the last successful sync, if any.
     /// </summary>
     public DateTime? LastSyncTime { get; set; }
 
     /// <summary>
-    /// Gets or sets a human-readable explanation associated with the current
-    /// status. Populated for <see cref="SyncStatus.Errored"/> (error message)
-    /// and <see cref="SyncStatus.Ignored"/> (why-ignored). Null otherwise.
+    /// Gets or sets the error of an <see cref="SyncStatus.Errored"/> row or why an <see cref="SyncStatus.Ignored"/> row is ignored, and null otherwise.
     /// </summary>
     public string? Reason { get; set; }
 
     /// <summary>
-    /// Gets or sets how many times an apply has failed for this row since the
-    /// last success. Refresh refuses to re-queue a row that has reached
-    /// <c>MaxRetryCount</c>, so a row that can never converge stops being
-    /// re-applied on every run instead of churning forever. Reset to zero on a
-    /// successful apply and by an explicit operator requeue.
+    /// Gets or sets how many times an apply has failed for this row since the last success.
+    /// A scan does not queue a row that reached <c>MaxRetryCount</c>, so a row that can never settle stops being applied on every run.
     /// </summary>
     public int RetryCount { get; set; }
 
     /// <summary>
-    /// Gets or sets the key of the configured server entry this row was built from. A row
-    /// with none belongs to the first scan server.
+    /// Gets or sets the key of the server entry this row was built from. A row with none belongs to the first source.
     /// </summary>
     public string? ServerKey { get; set; }
 
     /// <summary>
-    /// Marks the row as settled without writing anything, because this server's value is kept. The
-    /// stored hash is left alone, so the next scan compares again.
+    /// Marks the row as settled without writing anything, because this server's value is kept.
+    /// The stored hash is left alone, so the next scan compares again.
     /// </summary>
     /// <param name="reason">Why the value was kept, shown on the dashboard.</param>
     public void MarkKept(string reason)
@@ -64,7 +55,7 @@ public abstract class SyncRecord
         Reason = reason;
     }
 
-    /// <summary>Marks the row as applied: settled now, with no reason or retries left over.</summary>
+    /// <summary>Marks the row as applied, with no reason or retries left over.</summary>
     /// <param name="utcNow">The time of the apply.</param>
     public void MarkApplied(DateTime utcNow)
     {
@@ -77,8 +68,7 @@ public abstract class SyncRecord
     }
 
     /// <summary>
-    /// Queues a row whose retries ran out once more. A fresh change is a fresh reason to try it, and an
-    /// errored row would otherwise read as already settled.
+    /// Queues an errored row again, since a fresh change is a fresh reason to try it.
     /// </summary>
     public void RetryIfErrored()
     {
@@ -90,18 +80,12 @@ public abstract class SyncRecord
     }
 
     /// <summary>
-    /// Gets a value indicating whether this record has differences that should
-    /// be synced. Implementations typically OR together the
-    /// <see cref="SyncableValue{T}.HasChanges"/> of their constituent fields.
+    /// Gets a value indicating whether this row has differences to sync.
     /// </summary>
     public abstract bool HasChanges { get; }
 
     /// <summary>
-    /// Marks this record as successfully synced. Implementations call
-    /// <see cref="SyncableValue{T}.MarkSynced"/> on each constituent field to
-    /// record the applied baseline in <see cref="SyncableValue{T}.Synced"/> /
-    /// <see cref="SyncableValue{T}.SyncedHash"/>. Change detection does not
-    /// consult those, see <see cref="SyncableValue{T}.HasChanges"/>.
+    /// Records what was applied on each of the row's values. Change detection does not read what this records.
     /// </summary>
     public abstract void MarkSynced();
 }

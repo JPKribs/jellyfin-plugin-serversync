@@ -6,13 +6,8 @@ using System.Threading.Tasks;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Read-through stream wrapper that calls back every time a read returns bytes. Wrapped around a
-/// download's response stream so a watchdog can push its deadline out while data keeps arriving,
-/// and cancel the copy once the source stops sending. HttpClient's timeout ends when the headers
-/// arrive, so without this a source that stops mid-body leaves the copy waiting forever.
-/// <para>
-/// Does not own the inner stream. The caller's <c>using</c> disposes it.
-/// </para>
+/// A read-through wrapper that calls back whenever a read returns bytes, so a watchdog can cancel a download whose source stops sending.
+/// It does not own the inner stream.
 /// </summary>
 public sealed class StallWatchdogStream : Stream
 {
@@ -27,7 +22,7 @@ public sealed class StallWatchdogStream : Stream
     /// <summary>
     /// Initializes a new instance of the <see cref="StallWatchdogStream"/> class.
     /// </summary>
-    /// <param name="inner">Source stream. Not disposed by this wrapper.</param>
+    /// <param name="inner">The stream read from. Not disposed by this wrapper.</param>
     /// <param name="onProgress">Called after every read that returned at least one byte.</param>
     public StallWatchdogStream(Stream inner, Action onProgress)
     {
@@ -85,29 +80,25 @@ public sealed class StallWatchdogStream : Stream
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
     /// <summary>
-    /// Copies a response body with <see cref="Stream.CopyToAsync(Stream, CancellationToken)"/> under a
-    /// stall watchdog. See <see cref="CopyAsync(Stream, Stream, TimeSpan, Func{Stream, Stream, CancellationToken, Task}, CancellationToken)"/>.
+    /// Copies a response body under a stall watchdog.
     /// </summary>
     /// <param name="source">The body being read.</param>
     /// <param name="destination">Where it is written.</param>
     /// <param name="idleTimeout">How long the source may send nothing.</param>
-    /// <param name="cancellationToken">The caller's token. Cancelling it cancels, it never reports a stall.</param>
+    /// <param name="cancellationToken">Cancels the copy without reporting a stall.</param>
     /// <returns>A task that completes when the copy does.</returns>
     public static Task CopyAsync(Stream source, Stream destination, TimeSpan idleTimeout, CancellationToken cancellationToken)
         => CopyAsync(source, destination, idleTimeout, static (from, to, token) => from.CopyToAsync(to, token), cancellationToken);
 
     /// <summary>
-    /// Runs a copy under a stall watchdog. Responses read with ResponseHeadersRead are past HttpClient's
-    /// timeout once the headers arrive, so a source that stops sending mid-body would hold the copy
-    /// forever. Every read that returns bytes pushes the deadline out again. When it passes, the copy is
-    /// cancelled and fails with an IOException naming the stall, which the retry policy treats as
-    /// transient.
+    /// Runs a copy under a stall watchdog, since HttpClient's timeout ends once the headers arrive.
+    /// A copy that receives nothing for the idle time fails with an IOException, which the retry policy treats as passing.
     /// </summary>
     /// <param name="source">The body being read.</param>
     /// <param name="destination">Where it is written.</param>
     /// <param name="idleTimeout">How long the source may send nothing.</param>
     /// <param name="copy">The copy to run, given the watched source and the watchdog's token.</param>
-    /// <param name="cancellationToken">The caller's token. Cancelling it cancels, it never reports a stall.</param>
+    /// <param name="cancellationToken">Cancels the copy without reporting a stall.</param>
     /// <returns>A task that completes when the copy does.</returns>
     public static async Task CopyAsync(Stream source, Stream destination, TimeSpan idleTimeout, Func<Stream, Stream, CancellationToken, Task> copy, CancellationToken cancellationToken)
     {
@@ -128,6 +119,7 @@ public sealed class StallWatchdogStream : Stream
         }
     }
 
+    /// <summary>Calls back when a read returned bytes.</summary>
     private int Advance(int read)
     {
         if (read > 0)

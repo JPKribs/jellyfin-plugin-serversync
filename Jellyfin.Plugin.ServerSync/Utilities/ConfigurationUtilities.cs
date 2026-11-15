@@ -10,22 +10,23 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Configuration-side validation helpers.
+/// Checks Server URLs and connections against the SSRF rules.
 /// </summary>
 public static class ConfigurationUtilities
 {
     /// <summary>
-    /// True when at least one configured server entry is one this server pulls from.
+    /// Whether at least one server entry is one this server pulls from.
     /// </summary>
-    /// <param name="config">The plugin settings.</param>
-    /// <returns><c>true</c> when a scan server is set up with a Server URL and API Key.</returns>
+    /// <param name="config">The plugin settings holding the server entries.</param>
+    /// <returns><c>true</c> when a source is set up with a Server URL and API Key.</returns>
     public static bool HasValidAuthConfiguration(PluginConfiguration config)
-        => config.GetPullServers().Count > 0;
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.GetPullServers().Count > 0;
+    }
 
     /// <summary>
-    /// Returns null when the URL is acceptable, otherwise an error string explaining
-    /// why the URL was rejected for SSRF reasons. Loopback and RFC1918/ULA addresses
-    /// are allowed when <paramref name="allowPrivateNetwork"/> is true.
+    /// Checks a Server URL against the SSRF rules. Loopback and private addresses pass only when <paramref name="allowPrivateNetwork"/> is <c>true</c>.
     /// </summary>
     /// <param name="url">The address to check.</param>
     /// <param name="allowPrivateNetwork">Whether a loopback or private address is acceptable.</param>
@@ -52,9 +53,7 @@ public static class ConfigurationUtilities
             return "Only HTTP and HTTPS URLs are allowed";
         }
 
-        // IP-literal hosts are validated here. DNS names go through the HTTP stack.
-        // Uri.Host keeps the brackets on an IPv6 literal ("[::1]"), which
-        // IPAddress.TryParse rejects, so they are trimmed first.
+        // Uri.Host keeps the brackets of an IPv6 literal, which IPAddress.TryParse rejects.
         var host = uri.Host.Trim('[', ']');
         if (IPAddress.TryParse(host, out var ipAddress))
         {
@@ -90,8 +89,9 @@ public static class ConfigurationUtilities
 
         if (address.AddressFamily == AddressFamily.InterNetwork)
         {
-            // 100.64.0.0/10, carrier-grade NAT shared space, private in practice.
             var bytes = address.GetAddressBytes();
+
+            // 100.64.0.0/10 is carrier NAT space, private in practice.
             if (bytes[0] == 100 && (bytes[1] & 0xC0) == 64)
             {
                 return true;
@@ -103,13 +103,11 @@ public static class ConfigurationUtilities
     }
 
     /// <summary>
-    /// Like <see cref="ValidateServerUrlForSsrf"/>, and when private networks are disallowed also resolves
-    /// a host name and classifies every address it points at, so "localhost" or a LAN name is refused
-    /// the same way its address would be. Used when an entry is saved or tested, not on every call.
+    /// Checks a Server URL like <see cref="ValidateServerUrlForSsrf"/>, and also resolves a host name so a name is refused the way its address would be.
     /// </summary>
     /// <param name="url">The Server URL to check.</param>
     /// <param name="allowPrivateNetwork">Whether private and loopback addresses are allowed.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="cancellationToken">Cancels the name lookup.</param>
     /// <returns>Null when acceptable, else why not.</returns>
     public static async Task<string?> ValidateServerUrlForSsrfAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken = default)
     {
@@ -153,19 +151,16 @@ public static class ConfigurationUtilities
     }
 
     /// <summary>
-    /// Connects for the client whose entries disallow private networks: every address the name resolves
-    /// to is classified first, and the connection goes to the first allowed one. A name that resolves
-    /// to a loopback or private address fails here the way the address itself fails the URL check.
+    /// Connects for server entries that disallow private networks, after checking every address the name resolves to.
     /// </summary>
     /// <param name="context">The connection the handler wants.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="cancellationToken">Cancels the connection.</param>
     /// <returns>The connected stream.</returns>
     public static ValueTask<Stream> ConnectPublicOnlyAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         => ConnectCheckedAsync(context, allowPrivateNetwork: false, cancellationToken);
 
     /// <summary>
-    /// Connects for the client whose entries allow private networks, after the same address checks as
-    /// <see cref="ConnectPublicOnlyAsync"/> apart from the private network ban.
+    /// Connects for server entries that allow private networks, after every other address check of <see cref="ConnectPublicOnlyAsync"/>.
     /// </summary>
     /// <param name="context">The connection the handler wants.</param>
     /// <param name="cancellationToken">Cancels the connection.</param>
@@ -173,6 +168,7 @@ public static class ConfigurationUtilities
     public static ValueTask<Stream> ConnectPrivateAllowedAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         => ConnectCheckedAsync(context, allowPrivateNetwork: true, cancellationToken);
 
+    /// <summary>Resolves the host, refuses the whole name when any address is disallowed, then connects.</summary>
     private static async ValueTask<Stream> ConnectCheckedAsync(SocketsHttpConnectionContext context, bool allowPrivateNetwork, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -185,10 +181,9 @@ public static class ConfigurationUtilities
         foreach (var address in addresses)
         {
             var rejection = ClassifyIpAddress(address, allowPrivateNetwork);
+            // Mixed answers are how a rebinding attack looks, so one refusal fails the name.
             if (rejection is not null)
             {
-                // One private answer refuses the whole name. Mixed answers are how a rebinding attack
-                // looks, so no address of such a name is used.
                 throw new HttpRequestException($"'{endPoint.Host}' resolves to {address}: {rejection}");
             }
 
@@ -217,9 +212,9 @@ public static class ConfigurationUtilities
     }
 
     /// <summary>Whether two server addresses name the same server, ignoring case and a trailing slash.</summary>
-    /// <param name="a">One address.</param>
-    /// <param name="b">The other.</param>
-    /// <returns>True when they are the same.</returns>
+    /// <param name="a">The first Server URL.</param>
+    /// <param name="b">The address compared with it.</param>
+    /// <returns><c>true</c> when they are the same.</returns>
     public static bool SameServerUrl(string? a, string? b)
     {
         if (Uri.TryCreate((a ?? string.Empty).Trim(), UriKind.Absolute, out var ua) && Uri.TryCreate((b ?? string.Empty).Trim(), UriKind.Absolute, out var ub))
@@ -233,17 +228,16 @@ public static class ConfigurationUtilities
         return string.Equals((a ?? string.Empty).Trim().TrimEnd('/'), (b ?? string.Empty).Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Returns why an address is refused, or null when it is allowed.</summary>
     private static string? ClassifyIpAddress(IPAddress ipAddress, bool allowPrivateNetwork)
     {
-        // An IPv4 address written as IPv6 (::ffff:127.0.0.1) is judged as the IPv4 address it is.
+        // An IPv4 address written as IPv6 is judged as the IPv4 address it is.
         if (ipAddress.IsIPv4MappedToIPv6)
         {
             ipAddress = ipAddress.MapToIPv4();
         }
 
-        // Always-blocked: no legitimate use as a remote source server target.
-        // The IPv6 unspecified address (::, which is also IPv6None) reaches the local host on most
-        // systems, the same as 0.0.0.0, and a multicast group is never a single server.
+        // The unspecified address reaches the local host on most systems.
         if (ipAddress.Equals(IPAddress.IPv6Any) || ipAddress.Equals(IPAddress.IPv6None))
         {
             return "The unspecified address (::) is not allowed";
@@ -268,19 +262,18 @@ public static class ConfigurationUtilities
         {
             var bytes = ipAddress.GetAddressBytes();
 
-            // 0.0.0.0/8, unspecified/this network.
             if (bytes[0] == 0)
             {
                 return "0.0.0.0/8 addresses are not allowed";
             }
 
-            // 169.254.0.0/16, IPv4 link-local (covers AWS/GCP metadata 169.254.169.254).
+            // 169.254.0.0/16 holds the cloud metadata address.
             if (bytes[0] == 169 && bytes[1] == 254)
             {
                 return "Link-local addresses are not allowed";
             }
 
-            // 224.0.0.0/4 is IPv4 multicast, a group address rather than one server.
+            // 224.0.0.0/4 is multicast, a group and never one server.
             if ((bytes[0] & 0xF0) == 0xE0)
             {
                 return "Multicast addresses are not allowed";
@@ -301,19 +294,16 @@ public static class ConfigurationUtilities
         {
             var bytes = ipAddress.GetAddressBytes();
 
-            // 10.0.0.0/8, RFC1918 private network.
             if (bytes[0] == 10)
             {
                 return "Private-network addresses (10.0.0.0/8) are not allowed when private-network access is disabled";
             }
 
-            // 172.16.0.0/12, RFC1918 private network.
             if (bytes[0] == 172 && (bytes[1] & 0xF0) == 16)
             {
                 return "Private-network addresses (172.16.0.0/12) are not allowed when private-network access is disabled";
             }
 
-            // 192.168.0.0/16, RFC1918 private network.
             if (bytes[0] == 192 && bytes[1] == 168)
             {
                 return "Private-network addresses (192.168.0.0/16) are not allowed when private-network access is disabled";
@@ -323,7 +313,7 @@ public static class ConfigurationUtilities
         {
             var bytes = ipAddress.GetAddressBytes();
 
-            // fc00::/7, IPv6 unique local address (ULA).
+            // fc00::/7 is the unique local range.
             if ((bytes[0] & 0xFE) == 0xFC)
             {
                 return "IPv6 unique-local addresses are not allowed when private-network access is disabled";

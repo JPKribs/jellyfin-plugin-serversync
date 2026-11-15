@@ -13,16 +13,16 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// File-system operations: atomic moves, companion-file discovery, recycled-name
-/// generation, and directory write-permission probes.
+/// Moves files, finds companion files, names recycled files, and probes folders for write permission.
 /// </summary>
 public static class FileOperationUtilities
 {
     /// <summary>
-    /// Subtitle / metadata / image extensions discovered as companion files for a media file.
+    /// The subtitle, metadata, and image extensions that mark a companion of a media file.
     /// </summary>
     public static readonly string[] CompanionExtensions = { ".srt", ".sub", ".ass", ".ssa", ".vtt", ".nfo", ".jpg", ".png" };
 
+    /// <summary>The extensions of images Jellyfin saves beside a media file.</summary>
     private static readonly string[] ItemImageExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tbn" };
 
     /// <summary>
@@ -33,9 +33,7 @@ public static class FileOperationUtilities
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// What Jellyfin generates for one media file and names after it: its local images
-    /// ("name-thumb.jpg") and its trickplay folder ("name.trickplay"). Matching is on the exact name, so
-    /// another version in the same folder ("name - 4K.mkv") is never matched.
+    /// Finds the images and trickplay folder Jellyfin named after one media file. The match is on the exact name, so another version in the folder is never matched.
     /// </summary>
     /// <param name="mainFilePath">Path to the media file.</param>
     /// <returns>The image files, and the trickplay folder when there is one.</returns>
@@ -51,8 +49,7 @@ public static class FileOperationUtilities
         var stem = Path.GetFileNameWithoutExtension(mainFilePath);
         try
         {
-            // Another media file under the same name, such as Film.mp4 beside the Film.mkv it replaced,
-            // or a link beside its copy, shares these by name. They are its now, so none is matched.
+            // Another media file of the same name owns these, so none is matched.
             if (HasSameNamedMedia(directory, stem, mainFilePath))
             {
                 return (images, null);
@@ -72,7 +69,7 @@ public static class FileOperationUtilities
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Unreadable folder: nothing is matched, so nothing extra is removed.
+            // An unreadable folder matches nothing, so nothing extra is removed.
         }
 
         var trickplay = Path.Combine(directory, stem + ".trickplay");
@@ -80,15 +77,15 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// Moves a file with overwrite semantics, retrying on transient IO failures. Retry waits use
-    /// <see cref="Task.Delay(int, CancellationToken)"/> so they don't block thread-pool threads.
+    /// Moves a file over any file already there, retrying when an IO failure may pass.
     /// </summary>
     /// <param name="sourcePath">The file to move.</param>
     /// <param name="destinationPath">Where the file goes.</param>
     /// <param name="logger">Writes log entries, or null.</param>
     /// <param name="maxRetries">How many attempts to make.</param>
     /// <param name="retryDelayMs">The wait before the first retry, in milliseconds. Each retry waits longer.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="cancellationToken">Cancels the wait between attempts.</param>
+    /// <returns>A task that ends when the file has moved.</returns>
     public static async Task MoveFileWithOverwriteAsync(
         string sourcePath,
         string destinationPath,
@@ -120,15 +117,12 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// The longest name a recycled file may have, in UTF-8 bytes. Most filesystems cap a name at 255
-    /// bytes, and room is left for the "_" and eight hex digits added when the name is taken.
+    /// The longest name a recycled file may have, in UTF-8 bytes. It leaves room under the 255 byte cap for the suffix added when the name is taken.
     /// </summary>
     public const int MaxRecycledNameBytes = 255 - 9;
 
     /// <summary>
-    /// Builds a recycled file name in the form <c>path.to.file_2026-01-29_17-30-45.ext</c>. A deep path
-    /// would make a name longer than the filesystem allows, so the folder part is then cut to its end,
-    /// behind a short hash of the whole folder path that keeps two cut names apart.
+    /// Builds a recycled file name in the form <c>path.to.file_2026-01-29_17-30-45.ext</c>. A name too long for the filesystem keeps the end of its folder part behind a short hash of the whole folder path.
     /// </summary>
     /// <param name="originalPath">The file's path before it was recycled.</param>
     /// <returns>The recycled file name.</returns>
@@ -136,9 +130,9 @@ public static class FileOperationUtilities
         => GenerateRecycledFileName(originalPath, DateTime.UtcNow);
 
     /// <summary>Builds a recycled file name for a given time. See <see cref="GenerateRecycledFileName(string)"/>.</summary>
-    /// <param name="originalPath">The file's path.</param>
+    /// <param name="originalPath">The file's path before it was recycled.</param>
     /// <param name="utcNow">The time of recycling.</param>
-    /// <returns>The name.</returns>
+    /// <returns>The recycled file name.</returns>
     public static string GenerateRecycledFileName(string originalPath, DateTime utcNow)
     {
         var fileName = Path.GetFileName(originalPath);
@@ -150,9 +144,6 @@ public static class FileOperationUtilities
             .Replace(':', '.')
             .Trim('.');
 
-        // InvariantCulture: TryReadRecycledTime parses with it, and a
-        // host on a non-Gregorian calendar (th-TH, ar-SA) would otherwise write
-        // a year the parser can't read, and the file would never expire.
         var timestamp = utcNow.ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture);
         var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
         var extension = Path.GetExtension(fileName);
@@ -174,9 +165,7 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// Shortens the folder part from its start, keeping its first keepPrefixChars (the hash), then the
-    /// file's own name if it alone is too long. The timestamp and extension always survive, since the
-    /// retention cleanup reads the one and Jellyfin users recognise files by the other.
+    /// Shortens the folder part from its start, keeping the hash, then the file's own name. The time and extension always survive, since the retention cleanup reads the time.
     /// </summary>
     private static string FitName(string folderPart, string stem, string timestamp, string extension, int keepPrefixChars = 0)
     {
@@ -192,7 +181,7 @@ public static class FileOperationUtilities
                 return prefix + KeepEnd(rest, forRest) + "." + stem + suffix;
             }
 
-            // The file's own name leaves no room for any folder: keep the hash alone.
+            // The file name alone fills the budget, so only the hash precedes it.
             var stemRoom = budget - Utf8Length(prefix) - 1;
             return prefix + "." + KeepStart(stem, stemRoom) + suffix;
         }
@@ -200,6 +189,7 @@ public static class FileOperationUtilities
         return KeepStart(stem, budget) + suffix;
     }
 
+    /// <summary>Counts the UTF-8 bytes of a text.</summary>
     private static int Utf8Length(string value) => Encoding.UTF8.GetByteCount(value);
 
     /// <summary>
@@ -231,20 +221,18 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// A recycled file as the bin names it: "&lt;name&gt;_yyyy-MM-dd_HH-mm-ss&lt;ext&gt;", with "_" and eight hex
-    /// digits before the extension when that name was taken.
+    /// Matches a recycled file as the Recycling Bin names it, with an optional suffix of eight hex digits.
     /// </summary>
     private static readonly Regex RecycledFileName = new(
         "^.+_(?<at>[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2})(_[0-9a-f]{8})?(\\.[^.]*)?$",
         RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// Reads the UTC time a file was recycled at from its name. Only names the recycling bin builds
-    /// qualify, so a file someone else put in the folder is never read as one of the plugin's.
+    /// Reads the UTC time a file was recycled at from its name. Only names the Recycling Bin builds qualify, so a stranger's file is never read as one.
     /// </summary>
     /// <param name="filePath">The file's path or name.</param>
     /// <param name="recycledAt">The time it was recycled at.</param>
-    /// <returns>True when the name is one the recycling bin builds.</returns>
+    /// <returns><c>true</c> when the name is one the Recycling Bin builds.</returns>
     public static bool TryReadRecycledTime(string filePath, out DateTime recycledAt)
     {
         recycledAt = default;
@@ -258,16 +246,15 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// Extracts the UTC timestamp from a recycled file name, or null if the pattern doesn't match.
+    /// Reads the UTC time from a recycled file name.
     /// </summary>
     /// <param name="filePath">The recycled file's path.</param>
-    /// <returns>The time the file was recycled, or null.</returns>
+    /// <returns>The time the file was recycled, or null when the name is not a recycled one.</returns>
     public static DateTime? ExtractTimestampFromFileName(string filePath)
         => TryReadRecycledTime(filePath, out var at) ? at : null;
 
     /// <summary>
-    /// Returns companion files (subtitles, NFOs, images) that share the main file's stem.
-    /// Match is exact on <c>{base}.</c> so siblings like <c>Foo 2.mkv</c> don't bleed into <c>Foo.mkv</c>'s companions.
+    /// Finds the companion files that share the media file's name. A file named after a longer title in the folder belongs to that title.
     /// </summary>
     /// <param name="mainFilePath">The media file's path.</param>
     /// <returns>The companion file paths.</returns>
@@ -286,10 +273,6 @@ public static class FileOperationUtilities
 
         try
         {
-            // One listing of the folder. Files that share the prefix but are not companions are other
-            // titles: beside "Avatar.mkv", "Avatar.The.Way.of.Water.mkv" is one, and its subtitles and
-            // artwork start with this title's prefix too. A candidate named after such a title is its
-            // companion, not this one's.
             var sharing = Directory.EnumerateFiles(directory, fileNameWithoutExt + ".*")
                 .Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(path, mainFilePath, StringComparison.OrdinalIgnoreCase))
@@ -317,8 +300,7 @@ public static class FileOperationUtilities
     }
 
     /// <summary>
-    /// Whether the folder holds another file with the same name and a different extension that is not a
-    /// companion, such as a second container of the same title.
+    /// Whether the folder holds another media file with the same name, such as a second container of the title.
     /// </summary>
     private static bool HasSameNamedMedia(string directory, string stem, string mainFilePath)
         => Directory.EnumerateFiles(directory, stem + ".*")
@@ -327,12 +309,12 @@ public static class FileOperationUtilities
                 && !IsCompanionExtension(path)
                 && !Path.GetFileName(path).Contains(".replacing.", StringComparison.Ordinal));
 
+    /// <summary>Whether the path ends in a companion extension.</summary>
     private static bool IsCompanionExtension(string path)
         => Array.Exists(CompanionExtensions, ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Probes a directory for write permission by creating and deleting a sentinel file.
-    /// Creates the directory if it doesn't exist.
+    /// Probes a folder for write permission by creating and deleting a file, creating the folder when it is missing.
     /// </summary>
     /// <param name="directoryPath">The folder to probe.</param>
     /// <returns><c>true</c> when files can be written there.</returns>
@@ -369,7 +351,7 @@ public static class FileOperationUtilities
                     }
                     catch (IOException)
                     {
-                        // DeleteOnClose handles cleanup. Explicit delete is best-effort.
+                        // DeleteOnClose already removes the file.
                     }
                 }
             }

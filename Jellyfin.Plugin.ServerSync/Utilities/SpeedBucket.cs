@@ -4,11 +4,8 @@ using System.Diagnostics;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// A rate in bytes per second that several streams can share. Each read takes its bytes from the
-/// bucket, and a read that takes more than the bucket holds waits until the rate has made up the
-/// difference. A short burst is let through after the bucket has sat idle, so a player fills its first
-/// buffer at once, and it is one burst for everything that shares the bucket, however many requests
-/// a player splits its reading into.
+/// A rate in bytes per second that several streams share, where a read that takes more than the bucket holds waits for the rate to catch up.
+/// One short burst is let through after the bucket has sat idle, so a player fills its first buffer at once.
 /// </summary>
 public sealed class SpeedBucket
 {
@@ -22,15 +19,15 @@ public sealed class SpeedBucket
     private TimeSpan _at;
 
     /// <summary>Initializes a new instance of the <see cref="SpeedBucket"/> class.</summary>
-    /// <param name="bytesPerSecond">The rate.</param>
+    /// <param name="bytesPerSecond">The rate the bucket refills at.</param>
     public SpeedBucket(long bytesPerSecond)
         : this(bytesPerSecond, static () => Stopwatch.GetElapsedTime(0))
     {
     }
 
-    /// <summary>Initializes a new instance of the <see cref="SpeedBucket"/> class, for tests.</summary>
-    /// <param name="bytesPerSecond">The rate.</param>
-    /// <param name="now">The clock.</param>
+    /// <summary>Initializes a new instance of the <see cref="SpeedBucket"/> class.</summary>
+    /// <param name="bytesPerSecond">The rate the bucket refills at.</param>
+    /// <param name="now">The clock the bucket measures time with, which a test replaces with its own.</param>
     public SpeedBucket(long bytesPerSecond, Func<TimeSpan> now)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bytesPerSecond);

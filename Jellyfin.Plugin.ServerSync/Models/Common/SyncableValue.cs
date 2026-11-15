@@ -3,81 +3,57 @@ using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
-/// One comparable field on a <see cref="SyncRecord"/>: source / local /
-/// synced snapshots, plus content fingerprints recording what was last
-/// applied. Change detection compares source against local through the
-/// comparator, see <see cref="HasChanges"/>.
+/// One comparable field on a <see cref="SyncRecord"/>, holding its source, local, and synced values with fingerprints of what was last applied.
 /// </summary>
-/// <typeparam name="T">Value type, typically <see cref="string"/> for JSON blobs.</typeparam>
+/// <typeparam name="T">The type of the value, which is <see cref="string"/> for a JSON blob.</typeparam>
 public sealed class SyncableValue<T>
 {
     /// <summary>
-    /// Gets or sets the value as observed on the source server during the most
-    /// recent Refresh.
+    /// Gets or sets the value the last scan read from the source.
     /// </summary>
     public T? Source { get; set; }
 
     /// <summary>
-    /// Gets or sets the value as observed on the local Jellyfin instance
-    /// during the most recent Refresh.
+    /// Gets or sets the value the last scan read from this server.
     /// </summary>
     public T? Local { get; set; }
 
     /// <summary>
-    /// Gets or sets the value that was last successfully applied to local.
-    /// Recorded for display and per-module bookkeeping. Not consulted by
-    /// <see cref="HasChanges"/>.
+    /// Gets or sets the value last applied to this server. <see cref="HasChanges"/> does not read it.
     /// </summary>
     public T? Synced { get; set; }
 
     /// <summary>
-    /// Gets or sets the content fingerprint of <see cref="Source"/>, recomputed
-    /// each Refresh.
+    /// Gets or sets the fingerprint of <see cref="Source"/>, computed again by each scan.
     /// </summary>
     public string? SourceHash { get; set; }
 
     /// <summary>
-    /// Gets or sets the content fingerprint of <see cref="Source"/> at the
-    /// time of the most recent successful Sync. Equality with
-    /// <see cref="SourceHash"/> means the source has not moved since that
-    /// apply, which is NOT the same as local still matching it, so this is
-    /// not used to skip comparison. See <see cref="HasChanges"/>.
+    /// Gets or sets the fingerprint of <see cref="Source"/> at the last successful apply.
+    /// Matching <see cref="SourceHash"/> only means the source has not moved, so it never skips a comparison.
     /// </summary>
     public string? SyncedHash { get; set; }
 
     /// <summary>
-    /// Gets the comparator used to test <see cref="ISyncComparator{T}.Equals"/> and produce
-    /// <see cref="ISyncComparator{T}.ComputeHash"/>. Must be supplied at construction.
+    /// Gets the comparator that tests equality and computes fingerprints.
     /// </summary>
     public required ISyncComparator<T> Comparator { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether <see cref="Source"/> differs meaningfully
-    /// from <see cref="Local"/>, per the comparator.
-    /// <para>
-    /// It never short-circuits on <see cref="SourceHash"/> equalling
-    /// <see cref="SyncedHash"/>. That only says the source has not moved since
-    /// the last apply, and local can drift on its own: a later local edit (an
-    /// overview rewritten, a tag dropped, an image replaced on this server)
-    /// would stay invisible until the source item changed. The refresh holds
-    /// both values in memory before reading this property, so the comparison
-    /// costs little.
-    /// </para>
+    /// Gets a value indicating whether <see cref="Source"/> differs from <see cref="Local"/>, per the comparator.
+    /// It always compares the values, since matching hashes would hide an edit made on this server.
     /// </summary>
     public bool HasChanges => !Comparator.Equals(Source, Local);
 
     /// <summary>
-    /// Recomputes <see cref="SourceHash"/> from the current <see cref="Source"/>.
-    /// Call after assigning a new <see cref="Source"/> during Refresh.
+    /// Computes <see cref="SourceHash"/> again from the current <see cref="Source"/>.
     /// </summary>
     public void RecomputeSourceHash() => SourceHash = Comparator.ComputeHash(Source);
 
     /// <summary>
-    /// Assigns a new source value and recomputes <see cref="SourceHash"/>
-    /// in one step, equivalent to setting <see cref="Source"/> and then
-    /// calling <see cref="RecomputeSourceHash"/>.
+    /// Assigns a new source value and computes <see cref="SourceHash"/> from it.
     /// </summary>
-    /// <param name="value">The new value.</param>
+    /// <param name="value">The value the scan read from the source.</param>
     public void UpdateSource(T? value)
     {
         Source = value;
@@ -85,10 +61,7 @@ public sealed class SyncableValue<T>
     }
 
     /// <summary>
-    /// Marks the current <see cref="Source"/> as successfully applied: copies
-    /// <see cref="Source"/> into <see cref="Synced"/> and <see cref="SourceHash"/>
-    /// into <see cref="SyncedHash"/>. Call from the Sync phase after a
-    /// successful apply.
+    /// Records the current <see cref="Source"/> and its fingerprint as applied.
     /// </summary>
     public void MarkSynced()
     {

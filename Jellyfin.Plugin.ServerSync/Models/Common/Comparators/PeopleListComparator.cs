@@ -7,20 +7,12 @@ using System.Text.Json;
 namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 
 /// <summary>
-/// Comparator for serialized credit lists of the form
-/// <c>List&lt;Dictionary&lt;string, string&gt;&gt;</c> with Name / Role / Type
-/// keys. Equality mirrors how Jellyfin's people repository keys a credit:
-/// trimmed, case-insensitive name and role, plus the person type, in list
-/// order.
+/// Compares credit lists the way Jellyfin keys a credit, by trimmed name and role without case, plus the person type, in list order.
+/// Jellyfin keeps an existing credit's spelling when it matches without case, so an exact compare would queue the row forever.
 /// </summary>
-/// <remarks>
-/// A plain JSON compare can never settle here. Jellyfin's UpdatePeople matches an incoming credit to an
-/// existing row case-insensitively and keeps the existing row's name and role text, so a source
-/// "Jean-Claude van Damme" written over a local "Jean-Claude Van Damme" leaves local unchanged and an
-/// exact compare would re-queue the row forever.
-/// </remarks>
 public sealed class PeopleListComparator : ISyncComparator<string>
 {
+    /// <summary>The person type a credit without one is given.</summary>
     private const string UnknownType = "Unknown";
 
     /// <inheritdoc />
@@ -28,11 +20,10 @@ public sealed class PeopleListComparator : ISyncComparator<string>
         => DescribeDifference(source, local) == null;
 
     /// <summary>
-    /// Returns the first detected mismatch between two credit lists, or null
-    /// when they match.
+    /// Describes the first difference between two credit lists.
     /// </summary>
-    /// <param name="source">The source's value.</param>
-    /// <param name="local">This server's value.</param>
+    /// <param name="source">The source's credit list, as JSON.</param>
+    /// <param name="local">This server's credit list, as JSON.</param>
     /// <returns>The first difference in words, or null when they match.</returns>
     public string? DescribeDifference(string? source, string? local)
     {
@@ -69,14 +60,12 @@ public sealed class PeopleListComparator : ISyncComparator<string>
             return null;
         }
 
-        // SHA256 here is a content fingerprint, not a security primitive.
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", keys)));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     /// <summary>
-    /// Reduces a blob to its ordered, de-duplicated credit keys. Null on a
-    /// parse failure, empty for a null or empty blob.
+    /// Reduces a blob to its credit keys, in order and without repeats. A blob that does not parse gives null.
     /// </summary>
     private static List<string>? Normalize(string? blob)
     {

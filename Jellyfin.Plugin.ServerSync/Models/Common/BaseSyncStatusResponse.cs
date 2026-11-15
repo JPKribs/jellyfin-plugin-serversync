@@ -3,7 +3,7 @@ using System;
 namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
-/// Base class for sync status responses with common status counts.
+/// The status counts every sync type's status response carries.
 /// </summary>
 public class BaseSyncStatusResponse
 {
@@ -38,22 +38,17 @@ public class BaseSyncStatusResponse
     public virtual int Total => Pending + Queued + Synced + Errored + Ignored;
 
     /// <summary>
-    /// Phase of the most-recent run failure ("Refresh" or "Sync"). Null
-    /// when the last run completed cleanly.
+    /// Gets or sets the phase the last run failed in, "Refresh" or "Sync", or null when it ended cleanly.
     /// </summary>
     public string? LastFailurePhase { get; set; }
 
     /// <summary>
-    /// Human-readable reason for the most-recent run failure. Null when the
-    /// last run completed cleanly. The dashboard surfaces this so silent
-    /// aborts (connection failure, disk space, circuit breaker) become
-    /// visible without log-diving.
+    /// Gets or sets why the last run failed, shown on the dashboard, or null when it ended cleanly.
     /// </summary>
     public string? LastFailureReason { get; set; }
 
     /// <summary>
-    /// UTC timestamp of the most-recent run failure. Null when the last run
-    /// completed cleanly.
+    /// Gets or sets the UTC time the last run failed, or null when it ended cleanly.
     /// </summary>
     public DateTime? LastFailureTime { get; set; }
 }

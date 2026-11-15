@@ -1,31 +1,24 @@
 namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 
 /// <summary>
-/// Strategy interface for comparing two values of type <typeparamref name="T"/>
-/// and computing a stable content fingerprint of one. Used by
-/// <see cref="SyncableValue{T}"/> to keep comparison and hashing logic out of
-/// per-module code.
+/// Compares two values of type <typeparamref name="T"/> and computes a stable fingerprint of one, for <see cref="SyncableValue{T}"/>.
 /// </summary>
-/// <typeparam name="T">Value type being compared.</typeparam>
+/// <typeparam name="T">The type of the values compared.</typeparam>
 public interface ISyncComparator<T>
 {
     /// <summary>
-    /// Returns true if <paramref name="source"/> and <paramref name="local"/>
-    /// are semantically equivalent. Implementations decide what "equivalent"
-    /// means (raw equality, JSON equality with timezone tolerance, etc.).
+    /// Whether two values mean the same. Each implementation decides what that takes.
     /// </summary>
-    /// <param name="source">Value as fetched from the source server.</param>
-    /// <param name="local">Value as observed on the local server.</param>
-    /// <returns>True if equivalent.</returns>
+    /// <param name="source">The value read from the source.</param>
+    /// <param name="local">The value read from this server.</param>
+    /// <returns><c>true</c> when the two mean the same.</returns>
     bool Equals(T? source, T? local);
 
     /// <summary>
-    /// Returns a stable content fingerprint of <paramref name="value"/>.
-    /// Returns null when the value is empty or hashing is not meaningful for
-    /// this comparator. Used as a fast-path equality test against a previously
-    /// stored hash. Never used as a cross-server comparator.
+    /// Computes a stable fingerprint of a value, to test against a hash stored earlier on this server.
+    /// It is never compared with another server's hash.
     /// </summary>
-    /// <param name="value">Value to fingerprint.</param>
-    /// <returns>Lowercase hex hash, or null for empty/non-hashable inputs.</returns>
+    /// <param name="value">The value to fingerprint.</param>
+    /// <returns>A lowercase hex hash, or null when the value is empty or cannot be hashed.</returns>
     string? ComputeHash(T? value);
 }

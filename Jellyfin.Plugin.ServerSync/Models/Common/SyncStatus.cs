@@ -1,44 +1,38 @@
 namespace Jellyfin.Plugin.ServerSync.Models.Common;
 
 /// <summary>
-/// Sync status values shared across all sync modules. Stored as INTEGER in SQLite.
+/// The status of a row in any sync table, stored as an integer in SQLite.
 /// </summary>
 public enum SyncStatus
 {
     /// <summary>
-    /// Refresh has stored a snapshot but Compare has not yet decided the status.
-    /// Transient state when Compare runs immediately after Refresh. Visible if
-    /// the two phases are scheduled separately.
+    /// The scan stored the row and has not yet decided its status, or the row waits for approval.
     /// </summary>
     Pending = 0,
 
     /// <summary>
-    /// Compare detected a meaningful difference. Awaits Sync to apply it.
+    /// The row differs from the source and waits for the next run to apply it.
     /// </summary>
     Queued = 1,
 
     /// <summary>
-    /// Sync applied the source value successfully and the synced fingerprint
-    /// is recorded.
+    /// The source's value was applied and its fingerprint recorded.
     /// </summary>
     Synced = 2,
 
     /// <summary>
-    /// Sync failed. <c>Reason</c> on the record holds the error message.
+    /// The apply failed. <c>Reason</c> on the row holds the error.
     /// </summary>
     Errored = 3,
 
     /// <summary>
-    /// User flagged this row to skip. <c>Reason</c> on the record holds the
-    /// human-readable explanation.
+    /// A user set the row to be skipped. <c>Reason</c> on the row says why.
     /// </summary>
     Ignored = 4,
 
     /// <summary>
-    /// Content-sync only: row is queued for local file deletion. Treated
-    /// like <see cref="Queued"/> in flows that don't distinguish operation
-    /// type. The per-row <c>PendingType</c> column carries the discriminator
-    /// when needed.
+    /// The row's local file is queued for deletion, which only Content uses.
+    /// Flows that do not tell operations apart treat it like <see cref="Queued"/>.
     /// </summary>
     Deleting = 5
 }

@@ -6,18 +6,18 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
 /// <summary>
-/// Path translation and library-filter matching.
+/// Translates source paths to local ones and matches paths against a Library Filter.
 /// </summary>
 public static class PathUtilities
 {
+    /// <summary>The separators of both Windows and Unix paths.</summary>
     private static readonly char[] PathSeparators = { '/', '\\' };
 
     /// <summary>
-    /// Maps a source-server path to the corresponding local path, stripping any
-    /// path-traversal segments and falling back to <paramref name="localRoot"/> + filename
-    /// when the source path doesn't lie under <paramref name="sourceRoot"/>.
+    /// Maps a path on the source to the matching path under the local root folder, dropping any traversal segments.
+    /// A path outside <paramref name="sourceRoot"/> maps to <paramref name="localRoot"/> plus the file name.
     /// </summary>
-    /// <param name="sourcePath">The file to move.</param>
+    /// <param name="sourcePath">The file's path on the source.</param>
     /// <param name="sourceRoot">The library's root folder on the source.</param>
     /// <param name="localRoot">The library's root folder on this server.</param>
     /// <returns>The path under the local root.</returns>
@@ -27,6 +27,9 @@ public static class PathUtilities
         {
             return localRoot;
         }
+
+        ArgumentNullException.ThrowIfNull(sourceRoot);
+        ArgumentNullException.ThrowIfNull(localRoot);
 
         sourceRoot = sourceRoot.TrimEnd(PathSeparators);
         localRoot = localRoot.TrimEnd(PathSeparators);
@@ -41,7 +44,7 @@ public static class PathUtilities
                 var result = localRoot;
                 foreach (var part in pathParts)
                 {
-                    // Defends against directory traversal from untrusted source paths.
+                    // A source path is untrusted, so traversal segments are dropped.
                     if (part == ".." || part == ".")
                     {
                         continue;
@@ -50,10 +53,10 @@ public static class PathUtilities
                     result = Path.Combine(result, part);
                 }
 
-                // Belt-and-suspenders: even after stripping .. segments, confirm the
-                // result is still under localRoot before returning it.
                 var normalizedResult = Path.GetFullPath(result);
                 var normalizedRoot = Path.GetFullPath(localRoot + Path.DirectorySeparatorChar);
+
+                // A result that still escapes the root folder falls back to the file name.
                 if (!normalizedResult.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(normalizedResult, Path.GetFullPath(localRoot), StringComparison.OrdinalIgnoreCase))
                 {
@@ -70,8 +73,7 @@ public static class PathUtilities
     }
 
     /// <summary>
-    /// The local root plus the last part of a source path, cut on either kind of separator. A last
-    /// part that names no file, such as "..", leaves the root itself, which no caller writes to.
+    /// Joins the local root folder and the last part of a source path. A last part that names no file leaves the root itself.
     /// </summary>
     private static string CombineWithLastPart(string localRoot, string sourcePath)
     {
@@ -81,13 +83,8 @@ public static class PathUtilities
     }
 
     /// <summary>
-    /// True when <paramref name="path"/> lies under <paramref name="root"/> on a
-    /// path-segment boundary. A bare <c>StartsWith</c> matched sibling roots that
-    /// merely share a name prefix, with a root of <c>/media/Movies</c>, a path of
-    /// <c>/media/Movies 4K/film.mkv</c> matched and translated to
-    /// <c>&lt;LocalRoot&gt;/ 4K/film.mkv</c>, silently writing the file to the wrong
-    /// folder. An empty root matches everything, preserving the "no source root
-    /// configured" behavior.
+    /// Whether <paramref name="path"/> lies under <paramref name="root"/> on a segment boundary, so <c>/media/Movies 4K</c> is not under <c>/media/Movies</c>.
+    /// An empty root matches everything.
     /// </summary>
     private static bool StartsWithRootSegment(string path, string root)
     {
@@ -107,13 +104,13 @@ public static class PathUtilities
     }
 
     /// <summary>
-    /// Returns true if the item should be SKIPPED for the given filter mode + list.
-    /// Whitelist skips non-matches, Blacklist skips matches, AllowAll skips nothing.
+    /// Whether the Library Filter leaves an item out. A Whitelist skips what it does not list, and a Blacklist skips what it lists.
     /// </summary>
-    /// <param name="sourcePath">The file to move.</param>
+    /// <param name="sourcePath">The item's path on the source.</param>
     /// <param name="sourceRootPath">The library's root folder on the source.</param>
     /// <param name="filterMode">The Library Filter mode.</param>
     /// <param name="filteredItems">The paths the Library Filter lists, or null.</param>
+    /// <returns><c>true</c> when the item is skipped.</returns>
     public static bool IsItemFiltered(
         string sourcePath,
         string sourceRootPath,
@@ -125,11 +122,13 @@ public static class PathUtilities
             return false;
         }
 
+        // An item with no path matches no list, so only a Whitelist skips it.
         if (string.IsNullOrEmpty(sourcePath))
         {
-            // Pathless item: Whitelist can't match (skip), Blacklist can't match (allow).
             return filterMode == LibraryFilterMode.Whitelist;
         }
+
+        ArgumentNullException.ThrowIfNull(sourceRootPath);
 
         var normalizedSourcePath = sourcePath.Replace('\\', '/').TrimEnd('/');
         var normalizedRoot = sourceRootPath.TrimEnd(PathSeparators).Replace('\\', '/');
@@ -148,7 +147,7 @@ public static class PathUtilities
                 ? normalizedFilterPath
                 : normalizedRoot + "/" + normalizedFilterPath.TrimStart('/');
 
-            // StartsWith + segment-boundary check: "Foo" must not match "Foobar".
+            // The match must end on a segment, so "Foo" never matches "Foobar".
             if (normalizedSourcePath.StartsWith(fullFilterPrefix, StringComparison.OrdinalIgnoreCase)
                 && (normalizedSourcePath.Length == fullFilterPrefix.Length
                     || normalizedSourcePath[fullFilterPrefix.Length] == '/'))
