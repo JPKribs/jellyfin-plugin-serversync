@@ -195,15 +195,16 @@ Use Base tokens. They follow the dashboard's theme, light themes included. Never
 
 | Token | Use |
 | :--- | :--- |
-| `--jpk-accent` | Links, focus rings, primary buttons, progress |
-| `--jpk-accent-hover` | Hover on accent elements |
-| `--jpk-fg` | Washes on elements that fade their own text |
-| `--jpk-surface` | Panel and dialog backgrounds |
-| `--jpk-border` | Every border and divider |
-| `--jpk-field-gap` | Space between field rows |
-| `--jpk-mono` | Code, ids, paths, and raw errors |
-| `--jpk-success`, `--jpk-warning`, `--jpk-error`, `--jpk-info`, `--jpk-purple` | Solid status colors |
-| `--jpk-<color>-bg`, `--jpk-<color>-fg` | Tinted badge and card backgrounds and text, for green, red, orange, purple, blue, and gray |
+| `--base-accent` | Links, focus rings, primary buttons, progress |
+| `--base-accent-hover` | Hover on accent elements |
+| `--base-fg` | Washes on elements that fade their own text |
+| `--base-surface` | Panel and dialog backgrounds |
+| `--base-border` | Every border and divider |
+| `--base-gap-wide` | Space between components, such as one field row and the next |
+| `--base-gap-narrow` | Space inside a component, such as between a label and its field |
+| `--base-mono` | Code, ids, paths, and raw errors |
+| `--base-success`, `--base-warning`, `--base-error` | Solid status colors |
+| `--base-<color>-bg`, `--base-<color>-fg` | Tinted badge and card backgrounds and text, for green, red, orange, purple, blue, and gray |
 
 ### Meaning
 
@@ -260,13 +261,13 @@ Every config page uses Jellyfin's page shell.
 
 | Need | Component |
 | :--- | :--- |
-| A page with several independent groups of settings | `jpk-collapsible-section`, one per group |
-| A group that is always open | `jpk-section` with `jpk-section-title` |
-| A heading inside a section | `jpk-subsection-title` |
-| An ordered setup, such as a server editor | `jpk-collapsible-section` with `jpk-step-title` and `jpk-step-number` |
-| Settings that only matter when a checkbox is on | `jpk-indent` under the checkbox, shown with `shared.bindReveal` |
+| A page with several independent groups of settings | `base-collapsible-section`, one per group |
+| A group that is always open | `base-section` with `base-section-title` |
+| A heading inside a section | `base-subsection-title` |
+| An ordered setup, such as a server editor | `base-collapsible-section numbered`, which Base numbers in order |
+| Settings that only matter when a checkbox is on | `base-indent` under the checkbox, shown with `shared.bindReveal` |
 
-* A collapsible header is a `button.jpk-collapsible-header` holding `jpk-collapsible-title` and `jpk-collapsible-icon`. Base replaces the icon with `expand_more`.
+* A collapsible header is a `button.base-collapsible-header` holding `base-collapsible-title` and `base-collapsible-icon`. Base replaces the icon with `expand_more`.
 * Start collapsibles closed, except the first one on a page someone opens to act on.
 
 ### Saving
@@ -275,11 +276,11 @@ Pick one model per page and keep it.
 
 | Model | Use it when | Save button |
 | :--- | :--- | :--- |
-| One Save per page | Settings depend on each other | `raised jpk-button-submit block` at the bottom |
-| One Save per section | Sections are independent and long | `raised jpk-button-submit jpk-button-small` in `jpk-collapsible-actions` |
+| One Save per page | Settings depend on each other | `raised base-button primary fill` at the bottom |
+| One Save per section | Sections are independent and long | `raised base-button primary small` in `base-collapsible-actions flush` |
 | Editor dialog | Each record is edited on its own | **Done** in `openEditorDialog` |
 
-* Track unsaved changes with `createChangeTracker` and the `jpk-unsaved` indicator, which reads "Unsaved".
+* Track unsaved changes with `createChangeTracker` and the `base-unsaved` indicator, which reads "Unsaved".
 * Guard leaving the page with `page.guardUnsaved`.
 * Report the result with `shared.setStatus` next to the button.
 * Use `shared.saveConfigWith` for get, change, save, and report.
@@ -295,35 +296,35 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 | Text, number, or URL | `inputContainer` with `<label for>`, `<input is="emby-input">`, and a `fieldDescription` |
 | Choice from a short list | `selectContainer` with `label.selectLabel` and `<select is="emby-select">` |
 | On or off | `checkboxContainer checkboxContainer-withDescription` with `emby-checkbox` and `fieldDescription checkboxFieldDescription` |
-| A mode that needs a sentence per option | `createChoiceGroup` with `jpk-choice` cards |
-| Several on or off options in a row | `jpk-toggle-group` with `jpk-toggle` pills |
-| Many checkboxes | `jpk-check-grid` |
+| A mode that needs a sentence per option | `createChoiceGroup` with `base-choice` cards |
+| Several on or off options in a row | `base-toggle-group` with `base-toggle` pills |
+| Many checkboxes | `base-check-grid` |
 | Many items from a long or searchable list | `createCheckboxList` |
 | Typeahead with removable chips | `createChipSelect`, with `single: true` for one choice |
 | One user | `createUserSelector` |
 | Several users | `createUserMultiSelector` |
-| Several fields side by side | `jpk-field-row` with `jpk-field` |
+| Several fields side by side | `base-field-row` with `base-field` |
 | A secret | `bindSecretField`, `readSecretField`, and `clearSecretField` |
 | A template with `{name}` tokens | `placeholderHint` and `bindPlaceholders` |
-| Code or JSON, read only | `jpk-code-block` |
+| Code or JSON, read only | `base-code-block` |
 
-* Use `emby-select`, never `jpk-selector-dropdown`, for a field. `jpk-selector-dropdown` is only for the record picker.
+* Use `emby-select`, never `base-selector-dropdown`, for a field. `base-selector-dropdown` is only for the record picker.
 * Every input has a `<label for>`.
 
 ### Buttons
 
 | Need | Class |
 | :--- | :--- |
-| Primary action | `raised jpk-button-submit` |
-| Destructive action | `raised jpk-button-destructive` |
-| Secondary action | `raised jpk-secondary` |
-| Compact action in a section | add `jpk-button-small` |
-| Icon and label in a toolbar | `jpk-icon-btn` |
-| Icon only in a row | `jpk-row-btn`, with `.dirty` for unsaved and `.success` after saving |
+| Primary action | `raised base-button primary` |
+| Destructive action | `raised base-button destructive` |
+| Secondary action | `raised base-button secondary` |
+| Compact action in a section | add `small` |
+| Icon and label in a toolbar | `raised base-button` holding a `material-icons` span and a label |
+| Icon only in a row | `base-row-btn`, with `.dirty` for unsaved and `.success` after saving |
 
 * Every button is `<button is="emby-button" type="button">`.
 * Icons are `<span class="material-icons" aria-hidden="true">name</span>`.
-* Close a dialog with `jpk-dialog-close` and `&times;`. Never "✕" or another glyph.
+* Close a dialog with `base-dialog-close` and `&times;`. Never "✕" or another glyph.
 
 | Action | Icon |
 | :--- | :--- |
@@ -343,13 +344,13 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 
 | Need | Use |
 | :--- | :--- |
-| One record at a time from a list | `jpk-selector` with New, Rename, and Remove |
+| One record at a time from a list | `base-selector` with New, Rename, and Remove |
 | Records in priority order | `createSortableCardList` |
-| A plain list of records | `jpk-card-list` with `jpk-card-item-*` |
+| A plain list of records | `base-card-list` with `base-card-item-*` |
 | Edit one record in a dialog | `openEditorDialog` |
 | A large searchable list | `createPaginatedTable` |
-| Edit table rows in place | `jpk-bulk-edit-bar` and `jpk-edit-row` |
-| Uploaded files | `jpk-asset-list` |
+| Edit table rows in place | `base-bulk-edit-bar` and `base-edit-row` |
+| Uploaded files | `base-asset-list` |
 
 * A record picker's actions read **New**, **Rename**, **Remove**, then **Import** and **Export**, in that order.
 * Use `createPaginatedTable` for any list that can grow past one screen. Rows open with `actions.onRowClick`.
@@ -360,12 +361,12 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 | :--- | :--- |
 | The state of one item | `shared.statusBadge(text, state)` |
 | A label on an item | `shared.badge(color, label)` |
-| Counts at the top of a page | `shared.renderCards` with `jpk-cards jpk-cards-rows` |
-| Label and value pairs | `jpk-record-card` |
-| A notice in the page | `jpk-info`, `jpk-success`, `jpk-warn`, `jpk-error`, `jpk-neutral` |
-| Raw failure text | `jpk-error-message` |
+| Counts at the top of a page | `shared.renderCards` with `base-cards`, and `compact` for many counts on a phone |
+| Label and value pairs | `base-record-card` |
+| A notice in the page | `base-info`, `base-success`, `base-warn`, `base-error`, `base-neutral` |
+| Raw failure text | `base-error-message` |
 | The result of an action | `shared.setStatus` |
-| A row of reset actions | `jpk-reset-group` with `jpk-reset-row` |
+| A row of reset actions | `base-reset-group` with `base-reset-row` |
 
 * Never use `Dashboard.alert` for a result. It blocks the page. Use `setStatus`.
 * A notice holds one sentence. Use a callout for something the reader must know before acting, not for a result.
@@ -373,7 +374,7 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 ### Progress
 
 * A task started from a button shows progress in that button with `shared.pollTaskProgress`.
-* Progress inside a row uses `jpk-progress` and `jpk-progress-bar`.
+* Progress inside a row uses `base-progress` and `base-progress-bar`.
 * Never block the page with `Dashboard.showLoadingMsg`.
 
 ### Dialogs
@@ -394,7 +395,7 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 
 * Use Base's breakpoints, 768 px for tablet and 600 px for phone. Use 700 px only where Base does, for dialogs.
 * Test every page at 375 px wide. Nothing scrolls sideways except a table.
-* Spacing comes from `--jpk-field-gap`. Never add margins between fields.
+* Spacing comes from `--base-gap-wide` and `--base-gap-narrow`. Never add margins between fields.
 * Never set a width in pixels on a field. Let it fill its container.
 
 ## Accessibility
@@ -406,9 +407,9 @@ Every component below is in Base. Use it as Base ships it. When it does not fit,
 
 ## CSS in This Plugin
 
-* Plugin classes use the `serversync-` prefix in kebab case. `jpk-` is reserved for Base.
+* Plugin classes use the `serversync-` prefix in kebab case. `base-` is reserved for Base.
 * Keep plugin CSS for layout that only this plugin has. A component another plugin could use goes to Base.
-* Never override a `jpk-` class. Change Base instead.
+* Never override a `base-` class. Change Base instead.
 * Never define a color token. Use Base's.
 
 ## Consolidation
@@ -424,14 +425,13 @@ These ServerSync pieces duplicate Base or another plugin. Replace each with the 
 | `window.confirm` in `serversync_settings.js` | `confirmDialog` |
 | Inline `<span class="text-error">` errors in `serversync_servers.js` | `shared.setStatus` |
 | `.serversync-queue-chip` and `.serversync-storage-mode-badge` | `shared.badge` |
-| Hand written `<span class="jpk-badge">` strings | `shared.badge` |
-| `.text-success`, `.text-error`, `.text-warn` | `jpk-ok`, `jpk-bad`, or a callout |
-| `.serversync-health-card` panel | `jpk-cards` or `jpk-record-card` |
-| `.serversync-filter-item*` and `.serversync-queue-row*` thumbnail rows | `jpk-table-row` with `jpk-table-row-thumb` |
-| `#mainStatusRow .jpk-card.hidden` | `jpk-cards-rows` |
-| `.jpk-collapsible-actions` border override | Base default, or a Base change |
-| `jpk-modal-field-value`, which Base does not define | `jpk-record-card` |
-| "✕" close glyph in the queue | `&times;` in `jpk-row-btn` |
+| Hand written `<span class="base-badge">` strings | `shared.badge` |
+| `.text-success`, `.text-error`, `.text-warn` | `base-ok`, `base-bad`, or a callout |
+| `.serversync-health-card` panel | `base-cards` or `base-record-card` |
+| `.serversync-filter-item*` and `.serversync-queue-row*` thumbnail rows | `base-table-row` with a column `image` loader |
+| `#mainStatusRow .base-card.hidden` | `base-cards`, which gives a hidden card no place |
+| `serversync-modal-field-value` | `base-record-card` |
+| "✕" close glyph in the queue | `&times;` in `base-row-btn` |
 | Sentence long button titles in `serversync_sync.html` | One to three word titles |
 
 ### Promote to Base
@@ -440,11 +440,11 @@ These are built two or more times across the plugins and belong in Base.
 
 | Component | Built today in |
 | :--- | :--- |
-| `jpk-panel`, a bordered sub card | ServerSync `.serversync-panel` and `.serversync-mapping`, plus Live Channels, Remote Access, User Management |
-| `jpk-static-table`, a simple scrolling table | ServerSync `.serversync-compare-table`, `.serversync-form-table`, `.serversync-role-table`, plus Remote Access, Artwork Generator |
+| `base-panel`, a bordered sub card | ServerSync `.serversync-panel` and `.serversync-mapping`, plus Live Channels, Remote Access, User Management |
+| `base-static-table`, a simple scrolling table | ServerSync `.serversync-compare-table`, `.serversync-form-table`, `.serversync-role-table`, plus Remote Access, Artwork Generator |
 | A single choice pill group | ServerSync `.serversync-filter-pills`, plus YouTube Audio, Remote Access |
 | `.btn-progress` styling for `pollTaskProgress` | ServerSync `.serversync-action-button` |
-| `jpk-section-intro` | ServerSync `fieldDescription mb-md`, plus Scripts, Artwork Generator, Remote Access |
+| A section intro line | ServerSync `fieldDescription mb-md`, plus Scripts, Artwork Generator, Remote Access |
 | A JS plural helper | ServerSync and YouTube Audio "(s)", plus hand written plurals in four plugins |
 | A light ordered list with up and down buttons | User Management, YouTube Audio, Requests |
 | An inline editor footer | ServerSync `.serversync-editor-footer` |

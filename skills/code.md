@@ -8,7 +8,7 @@ How to write, comment, and test code in this plugin. It covers C#, JavaScript, H
 
 ### Use What Base Has
 
-* Use the Base type or component when one fits. Never write a local version, a wrapper that renames it, or a CSS override of a `jpk-` class.
+* Use the Base type or component when one fits. Never write a local version, a wrapper that renames it, or a CSS override of a `base-` class.
 * When Base almost fits, change Base. Never patch around it locally.
 * Delete a local copy as soon as Base offers the same thing. Do it in the commit that moves to that Base version.
 * Never shadow a Base name. A local `FormatUtilities` beside Base's `FormatUtilities` is ambiguous.
@@ -157,8 +157,8 @@ export function createSyncTableModule(view, shared) {
 ```
 
 * Three lines above each component, the name, what it looks like, and one example.
-* Prefix every class with `serversync-` in kebab case. `jpk-` is reserved for Base.
-* Use Base tokens such as `--jpk-border` and `--jpk-fg` for colors. Never write a hex value for something Base already colors.
+* Prefix every class with `serversync-` in kebab case. `base-` is reserved for Base.
+* Use Base tokens such as `--base-border` and `--base-fg` for colors. Never write a hex value for something Base already colors.
 
 ### Python, Shell, and YAML
 

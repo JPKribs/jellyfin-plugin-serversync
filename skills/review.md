@@ -28,7 +28,7 @@ The check to run on your own changes before you call them done. People and AI as
 ## Base
 
 * [ ] Nothing duplicates a Base component, helper, or style.
-* [ ] No `jpk-` class is overridden.
+* [ ] No `base-` class is overridden.
 * [ ] Anything another plugin could use went to Base, per [code.md](code.md#move-code-into-base).
 
 ## Words
