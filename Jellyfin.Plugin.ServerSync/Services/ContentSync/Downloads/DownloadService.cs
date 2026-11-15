@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 
 /// <summary>
-/// Service for downloading files from the source server.
+/// Downloads files from a source and puts them in place on this server.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public class DownloadService
@@ -24,7 +24,7 @@ public class DownloadService
     private readonly ILogger<DownloadService> _logger;
 
     /// <summary>
-    /// Default retry count for network operations.
+    /// How many times a download is retried when the settings give no count.
     /// </summary>
     private const int DefaultNetworkRetries = 3;
 
@@ -34,12 +34,13 @@ public class DownloadService
     public static readonly TimeSpan DefaultStallTimeout = StallWatchdogStream.DefaultIdleTimeout;
 
     /// <summary>
-    /// The buffer the base copy reads in. With a speed limit it sleeps after each buffer, so the
-    /// stall window has to outlast one buffer's worth of sleep at the configured rate.
+    /// The size of the buffer a copy reads in, which the stall window has to outlast at the speed limit.
     /// </summary>
     private const int CopyBufferBytes = 81920;
 
-    // The most downloads that can share the speed at once: the top of Downloads At Once.
+    /// <summary>
+    /// The most downloads that can share the speed at once, which is the top of Downloads At Once.
+    /// </summary>
     private const int MaxSharers = 10;
 
     private static readonly TimeSpan RateCheckEvery = TimeSpan.FromSeconds(30);
@@ -47,23 +48,23 @@ public class DownloadService
     private static SpeedBucket? _sharedSpeed;
 
     /// <summary>
-    /// The most a subtitle from the source may weigh. Image based subtitles run to tens of megabytes,
-    /// and nothing a source calls a subtitle is larger than this.
+    /// The most bytes a subtitle from the source may hold, well above the tens of megabytes an image based subtitle runs to.
     /// </summary>
     public const long MaxCompanionBytes = 256L * 1024 * 1024;
 
     /// <summary>
-    /// How far past its announced size a body with no stated length may run, as a fraction of that
-    /// size plus a fixed floor, to allow for source metadata that has gone stale.
+    /// The fixed part of how far past its recorded size a body with no stated length may run, to allow for stale source metadata.
     /// </summary>
     private const long UnstatedLengthSlackBytes = 64L * 1024 * 1024;
 
-    // Marks a download staged beside its target while it waits to be renamed into place.
+    /// <summary>
+    /// Marks a download staged beside its target while it waits to be renamed into place.
+    /// </summary>
     private const string StagedMarker = ".syncing.";
 
     /// <summary>
-    /// The external subtitle formats Jellyfin reads beside a video. A companion from the source is
-    /// only written under one of these, so a source cannot name a video, an .nfo or a .ignore file.
+    /// The external subtitle formats Jellyfin reads beside a video.
+    /// A companion from the source is only written under one of these, so a source cannot name a video, an .nfo, or a .ignore file.
     /// </summary>
     private static readonly HashSet<string> SubtitleExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -73,30 +74,32 @@ public class DownloadService
     /// <summary>
     /// Initializes a new instance of the <see cref="DownloadService"/> class.
     /// </summary>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Records resumed downloads, skipped companions, and failed file moves.</param>
     public DownloadService(ILogger<DownloadService> logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _logger = logger;
     }
 
     /// <summary>
-    /// Gets or sets how long a download may receive nothing before it is abandoned as stalled and
-    /// handed to the retry policy.
+    /// Gets or sets how long a download may receive nothing before it is abandoned as stalled and retried.
     /// </summary>
     public TimeSpan StallTimeout { get; set; } = DefaultStallTimeout;
 
     /// <summary>
-    /// Downloads a single item and its companion files with retry support.
+    /// Downloads one item and its companion files, resuming a partial file across retries.
+    /// A file already in place is set aside first and restored when the new file cannot be put in place, so the previous version is never lost.
     /// </summary>
-    /// <param name="client">Source server client.</param>
-    /// <param name="item">Sync item to download.</param>
-    /// <param name="tempPath">Temporary download path.</param>
-    /// <param name="speedLimitBytesPerSecond">Download speed limit in bytes per second.</param>
-    /// <param name="includeCompanionFiles">Whether to download companion files.</param>
-    /// <param name="config">Plugin configuration.</param>
-    /// <param name="progress">Optional per-item progress (fraction 0 to 1 of the main file's bytes).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Download result.</returns>
+    /// <param name="client">The source the file is downloaded from.</param>
+    /// <param name="item">The row that names the source item, its recorded size, and the local path.</param>
+    /// <param name="tempPath">The folder the download is written to before it moves into place.</param>
+    /// <param name="speedLimitBytesPerSecond">The speed limit used when the settings give none, where 0 is no limit.</param>
+    /// <param name="includeCompanionFiles">Whether to download the item's external subtitles too.</param>
+    /// <param name="config">Supplies the retry count, speed, free space, and Recycling Bin settings.</param>
+    /// <param name="progress">Receives the fraction of the main file downloaded, from 0 to 1, or null.</param>
+    /// <param name="cancellationToken">Cancels the download and removes its temp file.</param>
+    /// <returns>Whether the download succeeded, with the reason when it did not and the companions written when it did.</returns>
     public async Task<DownloadResult> DownloadItemAsync(
         SourceServerClient client,
         SyncItem item,
@@ -109,6 +112,7 @@ public class DownloadService
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(tempPath);
         ArgumentNullException.ThrowIfNull(config);
 
         if (string.IsNullOrEmpty(item.LocalPath))
@@ -124,9 +128,6 @@ public class DownloadService
 
         try
         {
-            // Download with retry support. A partial file from a failed attempt is kept and resumed,
-            // so a drop at 90% of a large file costs the last 10%, not the whole file again. The
-            // validator ties the resume to the same file on the source.
             CleanupTempFile(tempFilePath);
             string? validator = null;
             await RetryPolicy.ExecuteWithRetryAsync(
@@ -137,25 +138,20 @@ public class DownloadService
                     validator = download.Validator;
                     using (download.Stream)
                     {
+                        // An offset of zero means the source sent the whole file again.
                         if (download.Offset == 0)
                         {
-                            // Not resumed: nothing kept, or the source sent the whole file again.
                             CleanupTempFile(tempFilePath);
                         }
                         else
                         {
-                            _logger.LogInformation("Resuming {FileName} from {Offset} bytes", fileName, download.Offset);
+                            _logger.LogInformation("Resuming {FileName} from {Offset} bytes", FormatUtilities.SanitizeForLog(fileName), download.Offset);
                         }
 
                         var mode = download.Offset > 0 ? FileMode.Append : FileMode.Create;
                         var most = MostBytesToAccept(download.TotalLength, download.Offset, item, tempFilePath, config);
                         using (var fileStream = OpenForDownload(tempFilePath, mode))
                         {
-                            // The total length is authoritative. The recorded
-                            // SourceSize is the fallback (can be stale but is
-                            // the right order of magnitude). No basis → no
-                            // in-file reporting. The item still completes its
-                            // share when it finishes.
                             var expectedBytes = download.TotalLength ?? (item.SourceSize > 0 ? item.SourceSize : (long?)null);
                             Stream destination = progress != null && expectedBytes > 0
                                 ? new ProgressReportingStream(fileStream, expectedBytes.Value, progress, download.Offset)
@@ -168,21 +164,17 @@ public class DownloadService
                     if (download.TotalLength.HasValue && downloadedInfo.Length != download.TotalLength.Value)
                     {
                         var errorMsg = $"Truncated download: expected {download.TotalLength.Value} bytes, got {downloadedInfo.Length} bytes";
+                        // Bytes past the stated length cannot belong to the file, so none are kept.
                         if (downloadedInfo.Length > download.TotalLength.Value)
                         {
-                            // Longer than the file can be: the kept bytes do not belong to it.
                             validator = null;
                             CleanupTempFile(tempFilePath);
                         }
 
-                        // An IOException is retried, and the retry resumes from the bytes kept.
                         throw new IOException(errorMsg);
                     }
 
-                    // With no length from the source there is nothing to hold the download to but the
-                    // size the scan recorded. A download that does not match it never replaces a file
-                    // that is already here: the local file is kept and the row errors, and the next
-                    // scan records the size the source has now.
+                    // With no stated length, a size mismatch must never replace a file already here.
                     if (!download.TotalLength.HasValue && item.SourceSize > 0 && downloadedInfo.Length != item.SourceSize
                         && !string.IsNullOrEmpty(item.LocalPath) && File.Exists(item.LocalPath))
                     {
@@ -195,14 +187,14 @@ public class DownloadService
                     {
                         _logger.LogDebug(
                             "Downloaded {FileName}: actual {Actual} bytes differs from recorded SourceSize {Expected} bytes (likely stale source metadata)",
-                            fileName,
+                            FormatUtilities.SanitizeForLog(fileName),
                             downloadedInfo.Length,
                             item.SourceSize);
                     }
                 },
                 networkRetries,
                 _logger,
-                $"Download {fileName}",
+                $"Download {FormatUtilities.SanitizeForLog(fileName)}",
                 cancellationToken).ConfigureAwait(false);
 
             var targetDir = Path.GetDirectoryName(item.LocalPath);
@@ -211,23 +203,6 @@ public class DownloadService
                 Directory.CreateDirectory(targetDir);
             }
 
-            // Two-phase replacement so a rename failure does not leave the user
-            // with the previous version stuck in the recycling bin and no working
-            // file at the target path:
-            //   1. Move existing file (and its companions) to *.replacing.<guid>
-            //      sidecars on the same volume, atomic, so rolling back is fast.
-            //   2. Atomically rename the just-downloaded temp file into place.
-            //   3. Only after step 2 succeeds, archive the old main file to the
-            //      recycling bin (or delete it).
-            //   4. After the companion download, put back every companion the
-            //      download did not replace. The source only serves external
-            //      subtitles, so nfo files, artwork and subtitles it no longer
-            //      lists stay with the new file instead of being thrown away.
-            // If step 2 throws, the catch block restores the sidecars so the
-            // user's previous version stays intact at item.LocalPath.
-            // The temp folder is usually on another volume, where a move is a copy. That copy is made
-            // under a staged name beside the target, so the library never sees a partial file under
-            // the real name and a crash mid copy leaves the previous file untouched.
             RemoveStaleStaged(item.LocalPath);
             var stagedPath = item.LocalPath + StagedMarker + Guid.NewGuid().ToString("N");
             try
@@ -261,9 +236,9 @@ public class DownloadService
                             TouchBackup(companionBackup);
                             backupCompanions.Add((companionPath, companionBackup));
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                         {
-                            _logger.LogWarning(ex, "Failed to move existing companion aside: {CompanionPath}", companionPath);
+                            _logger.LogWarning(ex, "Failed to move existing companion aside: {CompanionPath}", FormatUtilities.SanitizeForLog(companionPath));
                         }
                     }
                 }
@@ -274,19 +249,18 @@ public class DownloadService
             {
                 CleanupTempFile(stagedPath);
 
-                // Roll back so the user keeps their previous version.
                 try
                 {
                     if (backupMain != null && File.Exists(backupMain) && !File.Exists(item.LocalPath))
                     {
-                        // No need to clear backupMain: this block always
-                        // rethrows, so the archive step below is unreachable.
                         File.Move(backupMain, item.LocalPath);
                     }
                 }
+
+                // A failed restore must not replace the error being rethrown.
                 catch (Exception restoreEx)
                 {
-                    _logger.LogError(restoreEx, "Failed to restore previous file from sidecar to {Path}", item.LocalPath);
+                    _logger.LogError(restoreEx, "Failed to restore previous file from sidecar to {Path}", FormatUtilities.SanitizeForLog(item.LocalPath));
                 }
 
                 foreach (var (orig, bk) in backupCompanions)
@@ -298,16 +272,17 @@ public class DownloadService
                             File.Move(bk, orig);
                         }
                     }
+
+                    // A failed restore must not replace the error being rethrown.
                     catch (Exception restoreEx)
                     {
-                        _logger.LogError(restoreEx, "Failed to restore companion from sidecar to {Path}", orig);
+                        _logger.LogError(restoreEx, "Failed to restore companion from sidecar to {Path}", FormatUtilities.SanitizeForLog(orig));
                     }
                 }
 
                 throw;
             }
 
-            // The rename succeeded, so the old main file is no longer needed.
             ArchiveOrDeleteSidecar(backupMain, item.LocalPath, config);
 
             string? companionFilesList = null;
@@ -333,13 +308,9 @@ public class DownloadService
             }
             finally
             {
-                // Runs on cancellation and on a failed companion lookup too, since both leave the old
-                // companions aside with nothing written in their place.
                 SettleCompanionSidecars(backupCompanions, config);
             }
 
-            // Jellyfin finds the file in a later scan. This keeps that from being announced to peers as a
-            // new local file.
             Queue.WrittenFiles.Mark(item.LocalPath);
             return new DownloadResult(true, null, companionFilesList);
         }
@@ -348,7 +319,9 @@ public class DownloadService
             CleanupTempFile(tempFilePath);
             throw;
         }
-        catch (Exception ex)
+
+        // One item's failure becomes its result, so it never stops the other downloads.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             CleanupTempFile(tempFilePath);
             return new DownloadResult(false, ex.Message);
@@ -356,17 +329,18 @@ public class DownloadService
     }
 
     /// <summary>
-    /// Downloads external companion files (subtitles, etc.) for an item with retry support.
+    /// Downloads an item's external subtitles beside its video, each with retries.
+    /// A name from the source is only written when it is a subtitle of this video that stays inside the target folder.
     /// </summary>
-    /// <param name="client">Source server client.</param>
-    /// <param name="itemId">Item ID.</param>
-    /// <param name="targetDir">Target directory for companion files.</param>
-    /// <param name="mainStem">The video's file name without its extension. Every companion's name starts with it.</param>
-    /// <param name="tempPath">Temporary download path.</param>
-    /// <param name="speedLimitBytesPerSecond">Download speed limit in bytes per second.</param>
-    /// <param name="config">Plugin configuration.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of successfully downloaded companion file names.</returns>
+    /// <param name="client">The source the companion files are downloaded from.</param>
+    /// <param name="itemId">The source item whose companion files are listed.</param>
+    /// <param name="targetDir">The folder the companion files are written to.</param>
+    /// <param name="mainStem">The video's file name without its extension, which every companion's name must start with.</param>
+    /// <param name="tempPath">The folder each download is written to before it moves into place.</param>
+    /// <param name="speedLimitBytesPerSecond">The speed limit used when the settings give none, where 0 is no limit.</param>
+    /// <param name="config">Supplies the retry count and speed settings.</param>
+    /// <param name="cancellationToken">Cancels the downloads and removes the temp file in progress.</param>
+    /// <returns>The names of the companion files written.</returns>
     public async Task<List<string>> DownloadCompanionFilesAsync(
         SourceServerClient client,
         Guid itemId,
@@ -396,16 +370,13 @@ public class DownloadService
 
             foreach (var companion in companions)
             {
-                // The name comes from the other server. It is cut to its last part on either kind of
-                // separator, since a Windows source sends backslashes a Linux server does not split on,
-                // and it must be a subtitle of this video and nothing else.
                 var companionFileName = CompanionNameFor(companion.FileName, mainStem);
                 if (companionFileName is null)
                 {
                     _logger.LogWarning(
                         "Skipping companion file {FileName}: it is not a subtitle named after {Stem}",
                         FormatUtilities.SanitizeForLog(companion.FileName ?? string.Empty, 300),
-                        mainStem);
+                        FormatUtilities.SanitizeForLog(mainStem));
                     continue;
                 }
 
@@ -418,7 +389,7 @@ public class DownloadService
                 var resolvedTargetDir = Path.GetFullPath(targetDir);
                 if (!string.Equals(Path.GetDirectoryName(resolvedTargetPath), resolvedTargetDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.Ordinal))
                 {
-                    _logger.LogWarning("Companion file path traversal blocked: {FileName} resolved to {Resolved}", companion.FileName, resolvedTargetPath);
+                    _logger.LogWarning("Companion file path traversal blocked: {FileName} resolved to {Resolved}", FormatUtilities.SanitizeForLog(companion.FileName, 300), FormatUtilities.SanitizeForLog(resolvedTargetPath));
                     continue;
                 }
 
@@ -434,7 +405,6 @@ public class DownloadService
                                 throw new InvalidOperationException($"No response for companion file {companion.FileName}");
                             }
 
-                            // Clean up any partial file from previous attempt
                             CleanupTempFile(tempFilePath);
 
                             using (var fileStream = OpenForDownload(tempFilePath, FileMode.Create))
@@ -444,34 +414,31 @@ public class DownloadService
                         },
                         networkRetries,
                         _logger,
-                        $"Download companion {companion.FileName}",
+                        $"Download companion {FormatUtilities.SanitizeForLog(companion.FileName, 300)}",
                         cancellationToken).ConfigureAwait(false);
 
                     await FileOperationUtilities.MoveFileWithOverwriteAsync(tempFilePath, targetPath, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
                     downloadedFiles.Add(companionFileName);
-                    _logger.LogDebug("Downloaded companion file {FileName}", companionFileName);
+                    _logger.LogDebug("Downloaded companion file {FileName}", FormatUtilities.SanitizeForLog(companionFileName));
                 }
                 catch (OperationCanceledException)
                 {
                     CleanupTempFile(tempFilePath);
                     throw;
                 }
-                catch (Exception ex)
+
+                // One companion's failure must not stop the others.
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     CleanupTempFile(tempFilePath);
-                    _logger.LogWarning(ex, "Failed to download companion file {FileName} after retries", companion.FileName);
+                    _logger.LogWarning(ex, "Failed to download companion file {FileName} after retries", FormatUtilities.SanitizeForLog(companion.FileName, 300));
                 }
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+
+        // A cancelled run stops here, and any other failure keeps the existing companions.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // A cancelled run must stop here rather than report the item as downloaded.
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // The lookup failing is not the same as the item having no companions. Say so plainly,
-            // and the caller puts back the companions it moved aside since nothing replaced them.
             _logger.LogWarning(ex, "Could not list companion files for item {ItemId}, keeping the existing companions", itemId);
         }
 
@@ -479,12 +446,12 @@ public class DownloadService
     }
 
     /// <summary>
-    /// Validates an item before downloading.
+    /// Checks an item's path, free space, and write permission before it downloads.
     /// </summary>
-    /// <param name="item">Sync item to validate.</param>
-    /// <param name="config">Plugin configuration.</param>
-    /// <param name="manager">Sync table manager for collision checking.</param>
-    /// <returns>Validation result with error message if invalid.</returns>
+    /// <param name="item">The row whose local path and source size are checked.</param>
+    /// <param name="config">Supplies the root folders and the minimum free space.</param>
+    /// <param name="manager">The Content sync table searched for another item on the same path.</param>
+    /// <returns>Whether the item may download, with the reason when it may not.</returns>
     public static (bool IsValid, string? ErrorMessage) ValidateForDownload(
         SyncItem item,
         PluginConfiguration config,
@@ -514,12 +481,12 @@ public class DownloadService
     }
 
     /// <summary>
-    /// Checks if a download should be skipped because the local file already exists and is valid.
+    /// Checks whether a download can be skipped because the local file exists with a matching size.
     /// </summary>
-    /// <param name="item">Sync item to check.</param>
-    /// <param name="sizeMatchToleranceBytes">Tolerance in bytes for size comparison (0 = strict).</param>
-    /// <param name="skipReason">Output parameter with reason for skipping.</param>
-    /// <returns><c>true</c> if download should be skipped.</returns>
+    /// <param name="item">The row whose local path and source size are compared.</param>
+    /// <param name="sizeMatchToleranceBytes">How many bytes the sizes may differ by, where 0 requires them to be equal.</param>
+    /// <param name="skipReason">Why the download is skipped, or null when it is not.</param>
+    /// <returns><c>true</c> when the download should be skipped.</returns>
     public static bool ShouldSkipDownload(SyncItem item, long sizeMatchToleranceBytes, out string? skipReason)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -528,13 +495,11 @@ public class DownloadService
     }
 
     /// <summary>
-    /// Copies a download under a stall watchdog, so a source that stops sending mid-body cannot hold
-    /// the copy, and the Content lock with it, forever. The stall fails with an IOException, which the
-    /// retry policy treats as transient, and a download that keeps stalling fails like any other.
+    /// Copies a download under a stall watchdog, so a source that stops sending cannot hold the copy forever.
+    /// A stall fails with an <see cref="IOException"/>, which the retry policy retries.
     /// </summary>
     private async Task CopyWithStallWatchdogAsync(Stream source, Stream destination, long speedLimitBytesPerSecond, PluginConfiguration config, CancellationToken cancellationToken)
     {
-        // The speed in force now: the configured one for this hour, or the caller's when none is configured.
         long Rate()
         {
             var live = config.GetEffectiveDownloadSpeedBytes();
@@ -545,8 +510,7 @@ public class DownloadService
         var rate = Rate();
         if (rate > 0)
         {
-            // Every download waits its turn on one shared speed, so the pause between two reads of one
-            // download can be as long as a buffer from each of the others takes.
+            // Downloads share one speed, so a read can wait a buffer from each of the others.
             var throttleSleep = TimeSpan.FromSeconds(2.0 * CopyBufferBytes * MaxSharers / rate);
             if (throttleSleep > window)
             {
@@ -562,9 +526,10 @@ public class DownloadService
             cancellationToken).ConfigureAwait(false);
     }
 
-    // Copies under the one speed all content downloads share, so the limit is the total across
-    // Downloads At Once and not a limit for each file. The speed is read again as the copy runs, so a
-    // long download follows the scheduled hours as they begin and end.
+    /// <summary>
+    /// Copies under the one speed all Content downloads share, so the limit is the total across Downloads At Once.
+    /// The speed is read again as the copy runs, so a long download follows the scheduled hours.
+    /// </summary>
     private static async Task CopyAtSharedSpeedAsync(Stream source, Stream destination, Func<long> rate, CancellationToken cancellationToken)
     {
         var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(CopyBufferBytes);
@@ -594,6 +559,9 @@ public class DownloadService
         }
     }
 
+    /// <summary>
+    /// Gets the bucket all downloads draw their speed from, set to the given rate, or null when there is no limit.
+    /// </summary>
     private static SpeedBucket? SharedSpeed(long bytesPerSecond)
     {
         if (bytesPerSecond <= 0)
@@ -617,13 +585,12 @@ public class DownloadService
     }
 
     /// <summary>
-    /// The name a companion from the source is written under, or null when it must not be written.
-    /// It is the last part of the name the source gave, it carries a subtitle extension, and it
-    /// starts with the video's own name, which is also what makes Jellyfin attach it to the video.
+    /// Gets the name a companion from the source is written under, or null when it must not be written.
+    /// The name is the last part of what the source gave, on either kind of separator, and must carry a subtitle extension and start with the video's own name.
     /// </summary>
-    /// <param name="remoteName">The name or path the source gave.</param>
-    /// <param name="mainStem">The video's file name without its extension.</param>
-    /// <returns>The safe file name, or null.</returns>
+    /// <param name="remoteName">The name or path the source gave, which is not trusted.</param>
+    /// <param name="mainStem">The video's file name without its extension, which the companion's name must start with.</param>
+    /// <returns>The safe file name, or null when the companion must not be written.</returns>
     public static string? CompanionNameFor(string? remoteName, string mainStem)
     {
         if (string.IsNullOrWhiteSpace(remoteName) || string.IsNullOrEmpty(mainStem))
@@ -644,11 +611,13 @@ public class DownloadService
             return null;
         }
 
-        // What follows the video's name is a tag such as ".en" or ".forced", never more of a title.
+        // A tag such as ".en" must follow the video's name, never more of a title.
         return name[mainStem.Length] is '.' or '-' or '_' or ' ' ? name : null;
     }
 
-    // Async sequential writes without a second buffer: the copy already hands over large blocks.
+    /// <summary>
+    /// Opens a file for async sequential writes with no second buffer, since the copy already hands over large blocks.
+    /// </summary>
     private static FileStream OpenForDownload(string path, FileMode mode) => new(path, new FileStreamOptions
     {
         Mode = mode,
@@ -658,10 +627,10 @@ public class DownloadService
         Options = FileOptions.Asynchronous | FileOptions.SequentialScan
     });
 
-    // The most bytes one attempt may write. The source's stated length is the limit when it gives one.
-    // Without one the recorded size plus some slack is, and with neither the free space is. A body
-    // longer than the free space in the temp folder, or than the library has room for, is refused
-    // before a byte is written, so a source cannot fill a disk by sending more than it announced.
+    /// <summary>
+    /// Gets the most bytes one attempt may write, from the source's stated length, else the recorded size plus slack, else the free space.
+    /// A body the temp folder or the library has no room for is refused before a byte is written, so a source cannot fill a disk.
+    /// </summary>
     private static long MostBytesToAccept(long? totalLength, long offset, SyncItem item, string tempFilePath, PluginConfiguration config)
     {
         long most;
@@ -700,8 +669,9 @@ public class DownloadService
         return most;
     }
 
-    // Staged copies a crashed run left beside this target. No run is writing them: one download per
-    // item runs at a time.
+    /// <summary>
+    /// Deletes the staged copies a crashed run left beside a target, which no run is writing since one download per item runs at a time.
+    /// </summary>
     private void RemoveStaleStaged(string localPath)
     {
         try
@@ -723,11 +693,13 @@ public class DownloadService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogDebug(ex, "Could not look for staged downloads beside {Path}", localPath);
+            _logger.LogDebug(ex, "Could not look for staged downloads beside {Path}", FormatUtilities.SanitizeForLog(localPath));
         }
     }
 
-    // The bytes a failed attempt left behind, or 0 when there is nothing to resume from.
+    /// <summary>
+    /// Gets the bytes a failed attempt left behind, or 0 when there is nothing to resume from.
+    /// </summary>
     private static long ExistingLength(string path)
     {
         try
@@ -742,7 +714,7 @@ public class DownloadService
     }
 
     /// <summary>
-    /// Cleans up a temporary file, ignoring any errors.
+    /// Deletes a temp file, leaving it behind when it cannot be deleted.
     /// </summary>
     private static void CleanupTempFile(string tempFilePath)
     {
@@ -752,22 +724,17 @@ public class DownloadService
             {
                 File.Delete(tempFilePath);
             }
-            catch (IOException)
+
+            // Cleanup must never fail the download, so a locked file is left behind.
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Ignore cleanup errors - temp file will be cleaned up by OS
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // File is read-only or ACL denies. Leave for OS cleanup.
             }
         }
     }
 
     /// <summary>
-    /// Settles the companions moved aside while replacing a file. A companion the download wrote again
-    /// is in place at its original path, so its old copy is archived or deleted. Every other companion
-    /// goes back to its original path, because the source only serves external subtitles and the rest
-    /// (nfo files, artwork, subtitles it does not list) would otherwise be lost with the old file.
+    /// Settles the companions set aside while replacing a file, removing the old copy of each one the download wrote again.
+    /// Every other companion goes back to its original path, since the source only serves external subtitles and the rest would be lost.
     /// </summary>
     private void SettleCompanionSidecars(List<(string Original, string Backup)> backupCompanions, PluginConfiguration config)
     {
@@ -786,15 +753,18 @@ public class DownloadService
                     File.Move(bk, orig);
                 }
             }
+
+            // This runs in a finally block, so it must never throw.
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to put companion back from sidecar {Sidecar} to {Path}", bk, orig);
+                _logger.LogWarning(ex, "Failed to put companion back from sidecar {Sidecar} to {Path}", FormatUtilities.SanitizeForLog(bk), FormatUtilities.SanitizeForLog(orig));
             }
         }
     }
 
-    // Stamps a file just moved aside with the current time, so its age counts from the replacement
-    // rather than from when the old file was last written.
+    /// <summary>
+    /// Sets the write time of a file just set aside to the current time, so its age counts from the replacement.
+    /// </summary>
     private void TouchBackup(string backupPath)
     {
         try
@@ -803,15 +773,13 @@ public class DownloadService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogDebug(ex, "Could not stamp the replacement backup {Path}", backupPath);
+            _logger.LogDebug(ex, "Could not stamp the replacement backup {Path}", FormatUtilities.SanitizeForLog(backupPath));
         }
     }
 
     /// <summary>
-    /// Archives a sidecar (the file kept aside while replacing) to the
-    /// recycling bin under the original file's name, or deletes it outright if
-    /// the recycling bin is disabled. Quiet on missing sidecars (the rollback
-    /// may have already put it back).
+    /// Moves a file set aside during a replacement to the Recycling Bin under the original file's name, or deletes it when the Recycling Bin is off.
+    /// A missing file is skipped, since the rollback may have put it back.
     /// </summary>
     private void ArchiveOrDeleteSidecar(string? sidecarPath, string originalDisplayPath, PluginConfiguration config)
     {
@@ -830,9 +798,9 @@ public class DownloadService
         {
             File.Delete(sidecarPath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(ex, "Failed to delete sidecar {Path}", sidecarPath);
+            _logger.LogWarning(ex, "Failed to delete sidecar {Path}", FormatUtilities.SanitizeForLog(sidecarPath));
         }
     }
 }

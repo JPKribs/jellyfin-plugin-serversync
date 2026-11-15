@@ -12,6 +12,7 @@ using Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 using Jellyfin.Plugin.ServerSync.Services.Links;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
@@ -19,30 +20,36 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 
 /// <summary>
-/// Centralized service for file deletion operations including companion files.
+/// Deletes synced files and the companion files that belong to them.
 /// </summary>
 public static class FileDeletionService
 {
     private static readonly string[] TitleImageExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tbn" };
 
-    // Artwork Jellyfin and other tools save for a title folder as a whole.
+    /// <summary>
+    /// Matches artwork Jellyfin and other tools save for a title folder as a whole.
+    /// </summary>
     private static readonly Regex TitleImageName = new(
         "^(poster|folder|fanart|backdrop|banner|logo|clearart|thumb|landscape|disc)[0-9]*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    // Text companions of the deleted item that may be left behind ("name.en.srt", "name.txt").
+    /// <summary>
+    /// Extensions of text companions a deleted item may leave behind, such as "name.en.srt".
+    /// </summary>
     private static readonly string[] ItemTextExtensions = { ".srt", ".sub", ".idx", ".ass", ".ssa", ".vtt", ".smi", ".txt", ".nfo" };
 
     /// <summary>
     /// Deletes a file and its companion files permanently.
     /// </summary>
-    /// <param name="filePath">Path to the main file to delete.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="removeEmptyFolders">Whether to remove parent folders if they become empty.</param>
-    /// <param name="libraryRootPath">The library root bounding the empty-folder cleanup, or null to skip it.</param>
-    /// <returns><c>true</c> if main file was deleted successfully.</returns>
+    /// <param name="filePath">The main file to delete.</param>
+    /// <param name="logger">Records each file deleted and each failure.</param>
+    /// <param name="removeEmptyFolders">Whether to remove parent folders the deletion leaves empty.</param>
+    /// <param name="libraryRootPath">The root folder bounding the empty folder cleanup, or null to skip it.</param>
+    /// <returns><c>true</c> when the main file was deleted.</returns>
     public static bool DeleteWithCompanions(string filePath, ILogger logger, bool removeEmptyFolders = false, string? libraryRootPath = null)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         if (string.IsNullOrEmpty(filePath))
         {
             return false;
@@ -57,20 +64,19 @@ public static class FileDeletionService
             {
                 File.Delete(filePath);
                 mainDeleted = true;
-                logger.LogDebug("Deleted file: {FileName}", Path.GetFileName(filePath));
+                logger.LogDebug("Deleted file: {FileName}", FormatUtilities.SanitizeForLog(Path.GetFileName(filePath)));
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            logger.LogError(ex, "Failed to delete file: {FilePath}", filePath);
+            logger.LogError(ex, "Failed to delete file: {FilePath}", FormatUtilities.SanitizeForLog(filePath));
             return false;
         }
 
         DeleteCompanionFiles(filePath, logger);
         DeleteItemArtifacts(filePath, logger);
 
-        // Remove empty parent folders if enabled, bounded by library root. A folder this item leaves
-        // holding nothing but title artwork and nfo files counts as empty, so those go first.
+        // A folder left with only title artwork and nfo files counts as empty.
         if (removeEmptyFolders && mainDeleted && !string.IsNullOrEmpty(parentDirectory))
         {
             DeleteTitleArtifacts(parentDirectory, Path.GetFileNameWithoutExtension(filePath), logger, libraryRootPath);
@@ -81,14 +87,13 @@ public static class FileDeletionService
     }
 
     /// <summary>
-    /// Deletes a link's .strm with everything beside it under the same name, and then every folder
-    /// that leaves holding nothing but title artwork and nfo files, up to the library root. A link is
-    /// never recycled and its folders always go, whatever the settings for copies say, since nothing
-    /// in it is worth keeping once no server has the file. A show's folder goes with its last season.
+    /// Deletes a link with everything beside it under the same name, then every folder that leaves
+    /// holding only title artwork and nfo files, up to the root folder. A link never goes to the
+    /// Recycling Bin and its folders always go, whatever the settings for copies say.
     /// </summary>
-    /// <param name="linkPath">The .strm.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="libraryRootPath">The library root, which bounds the folders removed.</param>
+    /// <param name="linkPath">The link's .strm file.</param>
+    /// <param name="logger">Records each file and folder deleted.</param>
+    /// <param name="libraryRootPath">The root folder, which bounds the folders removed.</param>
     /// <returns><c>true</c> when the .strm was deleted.</returns>
     public static bool DeleteLinkWithFolders(string linkPath, ILogger logger, string? libraryRootPath)
     {
@@ -97,8 +102,7 @@ public static class FileDeletionService
             return false;
         }
 
-        // The link's own folder was cleared above. Each folder above it is cleared the same way, but
-        // only once the folder below it has gone, so a folder that still holds anything stops the walk.
+        // A folder is cleared only once the folder below it has gone.
         var stem = Path.GetFileNameWithoutExtension(linkPath);
         var folder = Path.GetDirectoryName(linkPath);
         while (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
@@ -117,21 +121,19 @@ public static class FileDeletionService
     }
 
     /// <summary>
-    /// Attempts to remove empty parent folders after file deletion.
-    /// Only removes folders that are completely empty.
-    /// Stops at the library root to prevent deleting folders outside the library boundary.
+    /// Removes a folder and each parent above it while they are completely empty, stopping at the root folder.
     /// </summary>
-    /// <param name="directoryPath">Starting directory to check.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="libraryRootPath">Optional library root path to prevent walking above the library boundary.</param>
+    /// <param name="directoryPath">The folder the walk starts at.</param>
+    /// <param name="logger">Records each folder removed and each failure.</param>
+    /// <param name="libraryRootPath">The root folder the walk never reaches or leaves, or null to skip the cleanup.</param>
     public static void TryRemoveEmptyFolders(string directoryPath, ILogger logger, string? libraryRootPath = null)
     {
-        // Without a known root the walk-up has no boundary and could climb
-        // through the library root into mount-point parents, skip cleanup
-        // rather than walk unbounded.
+        ArgumentNullException.ThrowIfNull(logger);
+
+        // Without a root the walk could climb into mount point parents.
         if (string.IsNullOrEmpty(libraryRootPath))
         {
-            logger.LogDebug("Skipping empty-folder cleanup for {Directory}: no library root resolved to bound the walk", directoryPath);
+            logger.LogDebug("Skipping empty-folder cleanup for {Directory}: no library root resolved to bound the walk", FormatUtilities.SanitizeForLog(directoryPath));
             return;
         }
 
@@ -143,7 +145,6 @@ public static class FileDeletionService
 
             while (!string.IsNullOrEmpty(currentDir) && Directory.Exists(currentDir))
             {
-                // Stop at the library root or anywhere outside it.
                 var normalizedCurrent = Path.GetFullPath(currentDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 if (string.Equals(normalizedCurrent, normalizedRoot, StringComparison.OrdinalIgnoreCase)
                     || !normalizedCurrent.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
@@ -159,53 +160,56 @@ public static class FileDeletionService
                 try
                 {
                     Directory.Delete(currentDir, recursive: false);
-                    logger.LogDebug("Removed empty folder: {FolderPath}", currentDir);
+                    logger.LogDebug("Removed empty folder: {FolderPath}", FormatUtilities.SanitizeForLog(currentDir));
                     currentDir = Path.GetDirectoryName(currentDir);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    logger.LogDebug(ex, "Could not remove folder (may be in use): {FolderPath}", currentDir);
+                    logger.LogDebug(ex, "Could not remove folder (may be in use): {FolderPath}", FormatUtilities.SanitizeForLog(currentDir));
                     break;
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            logger.LogDebug(ex, "Error checking empty folders for {DirectoryPath}", directoryPath);
+            logger.LogDebug(ex, "Error checking empty folders for {DirectoryPath}", FormatUtilities.SanitizeForLog(directoryPath));
         }
     }
 
     /// <summary>
-    /// Deletes companion files (subtitles, metadata, images) that match the main file name.
+    /// Deletes the companion files, such as subtitles, metadata, and images, named after the main file.
     /// </summary>
-    /// <param name="mainFilePath">Path to the main file (companions are found by pattern matching).</param>
-    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="mainFilePath">The main file whose name the companions share.</param>
+    /// <param name="logger">Records each companion deleted and each failure.</param>
     public static void DeleteCompanionFiles(string mainFilePath, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         var companions = FileOperationUtilities.GetCompanionFiles(mainFilePath);
         foreach (var companionFile in companions)
         {
             try
             {
                 File.Delete(companionFile);
-                logger.LogDebug("Deleted companion file: {CompanionFile}", Path.GetFileName(companionFile));
+                logger.LogDebug("Deleted companion file: {CompanionFile}", FormatUtilities.SanitizeForLog(Path.GetFileName(companionFile)));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                logger.LogWarning(ex, "Failed to delete companion file: {CompanionFile}", Path.GetFileName(companionFile));
+                logger.LogWarning(ex, "Failed to delete companion file: {CompanionFile}", FormatUtilities.SanitizeForLog(Path.GetFileName(companionFile)));
             }
         }
     }
 
     /// <summary>
-    /// Deletes what Jellyfin generates for one media file and names after it: its local images
-    /// ("name-thumb.jpg") and its trickplay folder ("name.trickplay"). Another version in the same
-    /// folder ("name - 4K.mkv") keeps its own.
+    /// Deletes the local images and trickplay folder Jellyfin generates for one media file and names after it.
+    /// Another version in the same folder keeps its own.
     /// </summary>
-    /// <param name="mainFilePath">Path to the main file.</param>
-    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="mainFilePath">The media file the images and trickplay folder are named after.</param>
+    /// <param name="logger">Records each deletion and each failure.</param>
     public static void DeleteItemArtifacts(string mainFilePath, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         var (images, trickplay) = FileOperationUtilities.GetItemArtifacts(mainFilePath);
         foreach (var image in images)
         {
@@ -220,28 +224,26 @@ public static class FileDeletionService
         try
         {
             Directory.Delete(trickplay, recursive: true);
-            logger.LogDebug("Deleted trickplay folder: {Folder}", Path.GetFileName(trickplay));
+            logger.LogDebug("Deleted trickplay folder: {Folder}", FormatUtilities.SanitizeForLog(Path.GetFileName(trickplay)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Failed to delete trickplay folder: {Folder}", trickplay);
+            logger.LogWarning(ex, "Failed to delete trickplay folder: {Folder}", FormatUtilities.SanitizeForLog(trickplay));
         }
     }
 
     /// <summary>
-    /// Deletes the title artwork and nfo files a folder is left with, once the item deleted from it
-    /// was the last thing there. Anything else in the folder, a file that is not plainly title
-    /// artwork, an nfo, or a text companion of the deleted item, or any subfolder other than the
-    /// item's own trickplay, means the folder still holds something, and then nothing is deleted. That
-    /// way an unlisted media type, a disc structure, a photo, or a user's own file always keeps the
-    /// folder and its artwork. Only a folder strictly inside a known library root is considered.
+    /// Deletes the title artwork and nfo files left in a folder strictly inside the root folder, once the deleted item was the last thing there.
+    /// Any other file or subfolder means the folder still holds something, and then nothing is deleted.
     /// </summary>
     /// <param name="folder">The folder the deleted file was in.</param>
-    /// <param name="deletedStem">The deleted file's name without its extension.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="libraryRootPath">The library root bounding the cleanup, or null to skip it.</param>
+    /// <param name="deletedStem">The deleted file's name without its extension, which marks its own leftovers.</param>
+    /// <param name="logger">Records each file deleted and each failure.</param>
+    /// <param name="libraryRootPath">The root folder bounding the cleanup, or null to skip it.</param>
     public static void DeleteTitleArtifacts(string folder, string deletedStem, ILogger logger, string? libraryRootPath)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         if (string.IsNullOrEmpty(libraryRootPath) || string.IsNullOrEmpty(deletedStem) || !Directory.Exists(folder))
         {
             return;
@@ -275,10 +277,13 @@ public static class FileDeletionService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogDebug(ex, "Could not clean the title files in {Folder}", folder);
+            logger.LogDebug(ex, "Could not clean the title files in {Folder}", FormatUtilities.SanitizeForLog(folder));
         }
     }
 
+    /// <summary>
+    /// Whether a file is title artwork, an nfo, or a text companion of the deleted item.
+    /// </summary>
     private static bool IsTitleFile(string file, string deletedStem)
     {
         var name = Path.GetFileName(file);
@@ -303,21 +308,21 @@ public static class FileDeletionService
         try
         {
             File.Delete(file);
-            logger.LogDebug("Deleted file: {FileName}", Path.GetFileName(file));
+            logger.LogDebug("Deleted file: {FileName}", FormatUtilities.SanitizeForLog(Path.GetFileName(file)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Failed to delete file: {FileName}", Path.GetFileName(file));
+            logger.LogWarning(ex, "Failed to delete file: {FileName}", FormatUtilities.SanitizeForLog(Path.GetFileName(file)));
         }
     }
 
     /// <summary>
-    /// Deletes a file using the recycling bin (moves file instead of permanent delete).
+    /// Moves a file and its companions to the Recycling Bin instead of deleting them.
     /// </summary>
-    /// <param name="filePath">Path to the file to recycle.</param>
-    /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <returns>Deletion result.</returns>
+    /// <param name="filePath">The file to move.</param>
+    /// <param name="recyclingBinPath">The Recycling Bin folder the file moves into.</param>
+    /// <param name="logger">Records the move and any failure.</param>
+    /// <returns>Whether the move succeeded, with the reason when it did not.</returns>
     public static DeletionResult DeleteWithRecyclingBin(string filePath, string recyclingBinPath, ILogger logger)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -337,14 +342,13 @@ public static class FileDeletionService
     }
 
     /// <summary>
-    /// Deletes a local item via the Jellyfin library manager API.
-    /// This properly handles library database cleanup and companion files.
+    /// Deletes an item through Jellyfin's library manager, which also clears it from the library database.
     /// </summary>
-    /// <param name="localItem">The Jellyfin library item to delete.</param>
-    /// <param name="libraryManager">Jellyfin library manager.</param>
-    /// <param name="deleteFileLocation">Whether to delete the actual file from disk.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <returns>Deletion result.</returns>
+    /// <param name="localItem">The Jellyfin item to delete.</param>
+    /// <param name="libraryManager">Deletes the item from Jellyfin's library.</param>
+    /// <param name="deleteFileLocation">Whether Jellyfin also deletes the item's file from disk.</param>
+    /// <param name="logger">Records a failed deletion.</param>
+    /// <returns>Whether the deletion succeeded, with the reason when it did not.</returns>
     public static DeletionResult DeleteViaJellyfinApi(
         BaseItem localItem,
         ILibraryManager libraryManager,
@@ -353,6 +357,7 @@ public static class FileDeletionService
     {
         ArgumentNullException.ThrowIfNull(localItem);
         ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(logger);
 
         try
         {
@@ -364,23 +369,25 @@ public static class FileDeletionService
 
             return new DeletionResult(true);
         }
+
+        // Jellyfin can throw anything here, and the caller needs a result, not an exception.
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to delete item via Jellyfin API: {ItemName}", localItem.Name);
+            logger.LogError(ex, "Failed to delete item via Jellyfin API: {ItemName}", FormatUtilities.SanitizeForLog(localItem.Name));
             return new DeletionResult(false, ex.Message);
         }
     }
 
     /// <summary>
-    /// Deletes a local file using the appropriate strategy based on configuration.
-    /// Handles: Jellyfin API deletion, recycling bin, and permanent deletion.
+    /// Deletes a local file to the Recycling Bin or permanently, as the settings say, then removes its item from Jellyfin without touching the disk.
+    /// Jellyfin's own file deletion is never used, since it removes a movie's whole folder with every other file in it.
     /// </summary>
-    /// <param name="filePath">Path to the file.</param>
-    /// <param name="localItem">Optional Jellyfin library item (null if not in library).</param>
-    /// <param name="libraryManager">Jellyfin library manager.</param>
-    /// <param name="config">Plugin configuration.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <returns>Deletion result.</returns>
+    /// <param name="filePath">The file to delete, or null to use the item's own path.</param>
+    /// <param name="localItem">The Jellyfin item for the file, or null when the file is not in the library.</param>
+    /// <param name="libraryManager">Removes the item from Jellyfin's library.</param>
+    /// <param name="config">Supplies the Recycling Bin, empty folder, and root folder settings.</param>
+    /// <param name="logger">Records each deletion and each failure.</param>
+    /// <returns>Whether the deletion succeeded, with the reason when it did not.</returns>
     public static DeletionResult DeleteLocalFile(
         string? filePath,
         BaseItem? localItem,
@@ -390,20 +397,15 @@ public static class FileDeletionService
     {
         ArgumentNullException.ThrowIfNull(libraryManager);
         ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(logger);
 
         var useRecyclingBin = config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath);
 
-        // If item exists in Jellyfin library
         if (localItem != null)
         {
-            // The file is deleted here and the item is then removed from Jellyfin without touching the
-            // disk. Jellyfin's own file deletion removes the whole containing folder, recursively, for a
-            // video that is not in a mixed folder (a movie in its own folder), which takes every other
-            // file in that folder with it. The automatic deletion path deletes the same way.
             var path = !string.IsNullOrEmpty(filePath) ? filePath : localItem.Path;
 
-            // A single file item whose file is already gone leaves only a stale entry in Jellyfin. It is
-            // removed without touching the disk, and reported as deleted elsewhere.
+            // A file already gone leaves only a stale Jellyfin entry to remove.
             if (!string.IsNullOrEmpty(path) && !File.Exists(path) && !Directory.Exists(path) && IsSingleFileItem(localItem))
             {
                 var removed = DeleteViaJellyfinApi(localItem, libraryManager, deleteFileLocation: false, logger);
@@ -418,7 +420,6 @@ public static class FileDeletionService
 
             if (useRecyclingBin)
             {
-                // Move to recycling bin first, then remove from Jellyfin without deleting file
                 var recycleResult = DeleteWithRecyclingBin(path!, config.RecyclingBinPath!, logger);
                 if (!recycleResult.Success)
                 {
@@ -430,11 +431,9 @@ public static class FileDeletionService
                 return new DeletionResult(false, "Failed to delete file");
             }
 
-            // Remove from Jellyfin database only (file already gone)
             return DeleteViaJellyfinApi(localItem, libraryManager, deleteFileLocation: false, logger);
         }
 
-        // File not in Jellyfin library but exists on disk
         if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
         {
             if (useRecyclingBin)
@@ -447,32 +446,27 @@ public static class FileDeletionService
                 : new DeletionResult(false, "Failed to delete file");
         }
 
-        // File doesn't exist
         return new DeletionResult(true);
     }
 
     /// <summary>
-    /// Whether an item is one plain file: not a disc structure (DVD, Blu-ray, HD DVD folder) and not
-    /// split into stacked parts. Anything that is not a video is one file.
+    /// Whether an item is one plain file, meaning not a disc structure and not split into stacked parts.
+    /// Anything that is not a video is one file.
     /// </summary>
-    /// <param name="localItem">The Jellyfin item.</param>
+    /// <param name="localItem">The Jellyfin item to classify.</param>
     /// <returns><c>true</c> when the item is a single file.</returns>
     public static bool IsSingleFileItem(BaseItem localItem)
         => localItem is not Video video
             || (!video.IsStacked && video.VideoType is MediaBrowser.Model.Entities.VideoType.VideoFile or MediaBrowser.Model.Entities.VideoType.Iso);
 
     /// <summary>
-    /// Why a library item cannot be deleted as a single file, or null when it can. Server Sync deletes
-    /// one file and what belongs to it. A disc structure (a folder) or a stacked multi part item has
-    /// more files than that, and a file that is not on disk has nothing to delete, so each is refused
-    /// with nothing touched and the row and the Jellyfin item stay as they were. The path that would be
-    /// deleted, which may be the item's own path when the row tracks none, must also lie inside a
-    /// library root without a symlinked folder on the way.
+    /// Says why a library item cannot be deleted as a single file, or null when it can.
+    /// A disc structure, a stacked item, a file not on disk, and a path outside every root folder or through a symlinked folder are each refused with nothing touched.
     /// </summary>
-    /// <param name="path">The path that would be deleted.</param>
-    /// <param name="localItem">The Jellyfin item.</param>
-    /// <param name="config">Plugin configuration.</param>
-    /// <returns>The reason, or null.</returns>
+    /// <param name="path">The path that would be deleted, which may be the item's own path.</param>
+    /// <param name="localItem">The Jellyfin item, checked for disc structures and stacked parts.</param>
+    /// <param name="config">Supplies the root folders the path must lie inside.</param>
+    /// <returns>The reason for the refusal, or null when the deletion may go ahead.</returns>
     public static string? RefuseLibraryItemDeletion(string? path, BaseItem localItem, PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(localItem);
@@ -517,14 +511,13 @@ public static class FileDeletionService
     }
 
     /// <summary>
-    /// Processes all items marked for deletion in the sync database.
-    /// Uses batch operations for database consistency.
+    /// Deletes the file and the row of every item the Content sync table marks as Deleting.
     /// </summary>
-    /// <param name="manager">Sync table manager.</param>
-    /// <param name="config">Plugin configuration.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Tuple of (deleted count, failed count).</returns>
+    /// <param name="manager">The Content sync table the Deleting rows are read from and removed from.</param>
+    /// <param name="config">Supplies the Removed files, Recycling Bin, and root folder settings.</param>
+    /// <param name="logger">Records each deletion, refusal, and failure.</param>
+    /// <param name="cancellationToken">Stops the pass before the next item.</param>
+    /// <returns>How many items were deleted and how many failed.</returns>
     public static (int Deleted, int Failed) ProcessPendingDeletions(
         ContentSyncTableManager manager,
         PluginConfiguration config,
@@ -533,15 +526,15 @@ public static class FileDeletionService
         => ProcessPendingDeletions(manager, config, logger, null, cancellationToken);
 
     /// <summary>
-    /// Processes pending deletions, collecting the path of every file removed so the caller can refresh
-    /// just the folders that changed.
+    /// Deletes the file and then the row of every item marked as Deleting, one item at a time, so a failed row delete never leaves other rows pointing at deleted files.
+    /// A link is deleted whatever Removed files says, and a copy only while Removed files deletes.
     /// </summary>
-    /// <param name="manager">Sync table manager.</param>
-    /// <param name="config">Plugin configuration.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="removedPaths">Receives each removed file's path, or null.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Tuple of (deleted count, failed count).</returns>
+    /// <param name="manager">The Content sync table the Deleting rows are read from and removed from.</param>
+    /// <param name="config">Supplies the Removed files, Recycling Bin, and root folder settings.</param>
+    /// <param name="logger">Records each deletion, refusal, and failure.</param>
+    /// <param name="removedPaths">Receives each deleted file's path so the caller can refresh only the folders that changed, or null.</param>
+    /// <param name="cancellationToken">Stops the pass before the next item.</param>
+    /// <returns>How many items were deleted and how many failed.</returns>
     public static (int Deleted, int Failed) ProcessPendingDeletions(
         ContentSyncTableManager manager,
         PluginConfiguration config,
@@ -552,8 +545,7 @@ public static class FileDeletionService
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(logger);
-        // A link is removed whatever Removed files says, since it holds nothing a download would bring
-        // back. A copy is only removed while Removed files deletes.
+
         var deletesCopies = config.DeletesMissing;
         var itemsToDelete = manager.GetByStatus(SyncStatus.Deleting).Where(item => deletesCopies || item.StorageMode.IsLink()).ToList();
 
@@ -573,11 +565,6 @@ public static class FileDeletionService
         var failed = 0;
         var failedItems = new List<(string SourceItemId, string Error)>();
 
-        // Per-item atomicity: file delete, then the row delete right away. Deleting every file
-        // first and the rows in one batch at the end would leave rows pointing at deleted files
-        // whenever that batch failed (SQLite locked, disk full), and a later refresh would report
-        // a false error. Per item, a transient DB failure leaves only that row in place, which the
-        // next refresh re-marks Deleting so the pair is retried on the next sync.
         foreach (var item in itemsToDelete)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -591,21 +578,19 @@ public static class FileDeletionService
 
             if (!string.IsNullOrEmpty(localPath) && File.Exists(localPath))
             {
-                // Same boundary check the manual deletion endpoint enforces:
-                // the unattended path must never delete a file outside every
-                // configured library root, no matter what the row says.
+                // An unattended run must never delete outside every root folder, whatever the row says.
                 var containingRoot = FileValidationService.GetContainingLibraryRoot(localPath, config);
                 if (containingRoot == null)
                 {
                     failedItems.Add((item.SourceItemId, "Deletion refused: path is outside all configured library roots"));
-                    logger.LogError("Refused to delete {FileName}: {Path} is outside all configured library roots", fileName, localPath);
+                    logger.LogError("Refused to delete {FileName}: {Path} is outside all configured library roots", FormatUtilities.SanitizeForLog(fileName), FormatUtilities.SanitizeForLog(localPath));
                     continue;
                 }
 
                 if (FileValidationService.HasSymlinkedDirectoryComponent(localPath, containingRoot))
                 {
                     failedItems.Add((item.SourceItemId, "Deletion refused: path traverses a symlinked directory"));
-                    logger.LogError("Refused to delete {FileName}: {Path} traverses a symlinked directory, so the physical file may live outside the library", fileName, localPath);
+                    logger.LogError("Refused to delete {FileName}: {Path} traverses a symlinked directory, so the physical file may live outside the library", FormatUtilities.SanitizeForLog(fileName), FormatUtilities.SanitizeForLog(localPath));
                     continue;
                 }
 
@@ -616,9 +601,8 @@ public static class FileDeletionService
                 }
                 else if (item.StorageMode.IsLink())
                 {
-                    // The row is a link, but the file there now is not one this plugin wrote: someone
-                    // put their own in its place. It is theirs, so the row goes and the file stays.
-                    logger.LogInformation("Left {Path} in place: the link there was replaced by a file Server Sync did not write", localPath);
+                    // A file a user put in the link's place is theirs, so it stays.
+                    logger.LogInformation("Left {Path} in place: the link there was replaced by a file Server Sync did not write", FormatUtilities.SanitizeForLog(localPath));
                     result = new DeletionResult(true);
                 }
                 else if (config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath))
@@ -635,17 +619,17 @@ public static class FileDeletionService
                 {
                     fileGone = true;
                     removedPaths?.Add(localPath);
-                    logger.LogInformation("DELETED: {FileName}", fileName);
+                    logger.LogInformation("DELETED: {FileName}", FormatUtilities.SanitizeForLog(fileName));
                 }
                 else
                 {
                     failedItems.Add((item.SourceItemId, $"Deletion failed: {result.ErrorMessage}"));
-                    logger.LogError("Failed to delete {FileName}: {Error}", fileName, result.ErrorMessage);
+                    logger.LogError("Failed to delete {FileName}: {Error}", FormatUtilities.SanitizeForLog(fileName), FormatUtilities.SanitizeForLog(result.ErrorMessage, 300));
                 }
             }
             else
             {
-                // File doesn't exist on disk, DB row should still be cleaned up.
+                // A row whose file is already gone still has to go.
                 fileGone = true;
             }
 
@@ -661,18 +645,11 @@ public static class FileDeletionService
                     manager.Delete(item.SourceItemId);
                     deleted++;
                 }
-                catch (OperationCanceledException)
+
+                // The file is gone, so the next scan retries the row.
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    // File is gone but DB delete failed. Log loudly so the
-                    // user can see it. The next sync run will pick up the
-                    // stale row and re-attempt cleanup. It is not added to
-                    // failedItems because the file IS deleted, re-marking
-                    // it would be wrong.
-                    logger.LogError(ex, "DB cleanup failed for {FileName} ({SourceItemId}), file already deleted. Will retry on next sync", fileName, item.SourceItemId);
+                    logger.LogError(ex, "DB cleanup failed for {FileName} ({SourceItemId}), file already deleted. Will retry on next sync", FormatUtilities.SanitizeForLog(fileName), FormatUtilities.SanitizeForLog(item.SourceItemId));
                 }
             }
         }
@@ -681,16 +658,15 @@ public static class FileDeletionService
         {
             try
             {
-                // A deletion that failed waits for approval with its reason, so each row says why: a
-                // refusal (outside every library root, a symlinked folder) asks for a different fix
-                // than a file that could not be removed. It is not marked Errored, since errored rows
-                // are retried as downloads, and this file is one the source no longer has.
+                // Errored rows retry as downloads, so a failed deletion waits as Pending.
                 foreach (var (sourceItemId, error) in failedItems)
                 {
                     manager.UpdateStatus(sourceItemId, SyncStatus.Pending, PendingType.Deletion, errorMessage: error);
                     failed++;
                 }
             }
+
+            // A failed status write must not hide the deletions already made.
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to update error status for {Count} items", failedItems.Count);

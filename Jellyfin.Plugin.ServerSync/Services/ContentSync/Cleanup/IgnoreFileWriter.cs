@@ -12,11 +12,11 @@ public static class IgnoreFileWriter
     public const string FileName = ".ignore";
 
     /// <summary>
-    /// Finds the first folder under a library root that holds a path, which is the folder of that title.
+    /// Finds the first folder under a root folder that holds a path, which is the folder of that title.
     /// </summary>
-    /// <param name="localPath">The path of a file under the root.</param>
-    /// <param name="localRoot">The library's local root folder.</param>
-    /// <returns>The title's folder, or null when the path is not inside a folder under the root.</returns>
+    /// <param name="localPath">The path of a file under the root folder.</param>
+    /// <param name="localRoot">The library's root folder on this server.</param>
+    /// <returns>The title's folder, or null when the path is not inside a folder under the root folder.</returns>
     public static string? TitleFolder(string localPath, string localRoot)
     {
         if (string.IsNullOrEmpty(localPath) || string.IsNullOrEmpty(localRoot))
@@ -53,6 +53,8 @@ public static class IgnoreFileWriter
     /// <returns><c>true</c> when a file was removed.</returns>
     public static bool UnhideFolder(string folder)
     {
+        ArgumentNullException.ThrowIfNull(folder);
+
         var ignorePath = Path.Combine(folder, FileName);
         if (!File.Exists(ignorePath) || new FileInfo(ignorePath).Length > 0)
         {

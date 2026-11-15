@@ -14,27 +14,30 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 
 /// <summary>
-/// Service for checking disk space availability.
+/// Checks free disk space and holds space for downloads in progress.
 /// </summary>
 public static class DiskSpaceService
 {
     private const long BytesPerGigabyte = 1024L * 1024L * 1024L;
 
-    // Paths already reported as unmeasurable, so a share that can never be measured logs one warning
-    // instead of one per item on every run.
+    /// <summary>
+    /// Paths already reported as unmeasurable, so each logs one warning instead of one per item.
+    /// </summary>
     private static readonly ConcurrentDictionary<string, byte> _unmeasurableReported = new(StringComparer.Ordinal);
 
-    // Bytes held by downloads in flight, per volume. Each download checks its own file against the free
-    // space, so without this several large files started together could each pass and together fill
-    // the disk. Free space shrinks as a download writes while its hold stays whole, so the count errs
-    // on the side of caution until the download ends.
+    /// <summary>
+    /// Bytes held per volume by downloads in progress, so large files started together cannot each pass the check and fill the disk.
+    /// </summary>
     private static readonly Dictionary<string, long> _held = new(StringComparer.Ordinal);
     private static readonly object _heldLock = new();
+
+    /// <summary>
+    /// Completes when a hold is released, which wakes the downloads waiting for space.
+    /// </summary>
     private static TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
-    /// Gets or sets the logger used to report a path whose free space cannot be read. The plugin sets
-    /// it at startup. This service is static and called from places with no logger of their own.
+    /// Gets or sets the logger that reports a path whose free space cannot be read, which the plugin sets at startup.
     /// </summary>
     public static ILogger Logger { get; set; } = NullLogger.Instance;
 
@@ -44,12 +47,11 @@ public static class DiskSpaceService
     private static long GigabytesToBytes(int gigabytes) => gigabytes * BytesPerGigabyte;
 
     /// <summary>
-    /// Gets disk space information for all enabled library paths. A path whose free space cannot be
-    /// read is listed with zero sizes and counted as sufficient, since an unknown reading must not
-    /// stop downloads.
+    /// Gets the disk space of every enabled library mapping's root folder.
+    /// A root folder whose free space cannot be read is listed with zero sizes and counted as sufficient, since an unknown reading must not stop downloads.
     /// </summary>
-    /// <param name="config">Plugin configuration containing library mappings.</param>
-    /// <returns>List of disk space info for each library path.</returns>
+    /// <param name="config">Supplies the library mappings and the minimum free space.</param>
+    /// <returns>One entry for each root folder.</returns>
     public static List<DiskSpaceInfo> GetDiskSpaceInfo(PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -87,12 +89,11 @@ public static class DiskSpaceService
     }
 
     /// <summary>
-    /// Checks if there is sufficient disk space across all library paths. A path whose free space
-    /// cannot be read does not fail the check.
+    /// Checks that every enabled root folder has the minimum free space, passing any whose free space cannot be read.
     /// </summary>
-    /// <param name="config">Plugin configuration containing library mappings.</param>
-    /// <param name="insufficientPath">Output parameter containing the path with insufficient space.</param>
-    /// <returns><c>true</c> if all paths have sufficient space.</returns>
+    /// <param name="config">Supplies the library mappings and the minimum free space.</param>
+    /// <param name="insufficientPath">The first root folder short of space, or null when all pass.</param>
+    /// <returns><c>true</c> when every root folder has enough space.</returns>
     public static bool HasSufficientSpace(PluginConfiguration config, out string? insufficientPath)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -113,13 +114,13 @@ public static class DiskSpaceService
     }
 
     /// <summary>
-    /// Checks if there is sufficient disk space for a specific file. A target whose free space cannot
-    /// be read passes, so an unmeasurable share does not stop every download.
+    /// Checks that a file fits on its volume with the reserve left over.
+    /// A target whose free space cannot be read passes, so an unmeasurable share does not stop every download.
     /// </summary>
-    /// <param name="filePath">Target file path.</param>
-    /// <param name="fileSize">Size of the file in bytes.</param>
-    /// <param name="minimumReserveGb">Minimum free space to reserve in GB.</param>
-    /// <returns><c>true</c> if there is sufficient space for the file plus reserve.</returns>
+    /// <param name="filePath">Where the file will be written.</param>
+    /// <param name="fileSize">The file's size in bytes.</param>
+    /// <param name="minimumReserveGb">The free space in GB that must remain after the file.</param>
+    /// <returns><c>true</c> when the file and the reserve fit.</returns>
     public static bool HasSufficientSpaceForFile(string? filePath, long fileSize, int minimumReserveGb)
     {
         if (string.IsNullOrEmpty(filePath) || fileSize <= 0)
@@ -136,15 +137,13 @@ public static class DiskSpaceService
     }
 
     /// <summary>
-    /// Holds space for a file about to download, on top of what other downloads already hold on the
-    /// same volume. A file that fits only once those finish waits for them. A file that would not fit
-    /// even then gets no hold. A target whose free space cannot be read passes, as in
-    /// <see cref="HasSufficientSpaceForFile"/>.
+    /// Holds space for a file about to download, on top of what other downloads hold on the same volume.
+    /// A file that fits only once those finish waits for them, and a target whose free space cannot be read passes.
     /// </summary>
-    /// <param name="filePath">Target file path.</param>
-    /// <param name="fileSize">Size of the file in bytes.</param>
-    /// <param name="minimumReserveGb">Minimum free space to reserve in GB.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="filePath">Where the file will be written.</param>
+    /// <param name="fileSize">The file's size in bytes.</param>
+    /// <param name="minimumReserveGb">The free space in GB that must remain after the file.</param>
+    /// <param name="cancellationToken">Cancels the wait for other downloads to finish.</param>
     /// <returns>The hold, which the caller disposes when the download ends, or null when the file does not fit.</returns>
     public static async Task<IDisposable?> ReserveForFileAsync(string? filePath, long fileSize, int minimumReserveGb, CancellationToken cancellationToken)
     {
@@ -180,14 +179,13 @@ public static class DiskSpaceService
                 released = _released.Task;
             }
 
-            // It fits once other downloads on this volume finish. Look again when one does.
             await released.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
     /// <summary>Reads the free space on the volume that holds a path.</summary>
     /// <param name="path">A file or folder on the volume.</param>
-    /// <param name="freeBytes">The free bytes.</param>
+    /// <param name="freeBytes">The bytes free on that volume, or zero when unknown.</param>
     /// <returns><c>true</c> when the space was read, <c>false</c> when it is unknown.</returns>
     public static bool TryGetFreeBytes(string path, out long freeBytes) => TryGetSpace(path, out freeBytes, out _);
 
@@ -203,6 +201,9 @@ public static class DiskSpaceService
         }
     }
 
+    /// <summary>
+    /// Returns held bytes to a volume and wakes the downloads waiting for space.
+    /// </summary>
     private static void Release(string volume, long bytes)
     {
         TaskCompletionSource released;
@@ -225,6 +226,9 @@ public static class DiskSpaceService
         released.TrySetResult();
     }
 
+    /// <summary>
+    /// Space held on one volume until the download ends.
+    /// </summary>
     private sealed class Hold : IDisposable
     {
         private readonly string _volume;
@@ -246,6 +250,9 @@ public static class DiskSpaceService
         }
     }
 
+    /// <summary>
+    /// The hold given when there is nothing to hold or the volume cannot be measured.
+    /// </summary>
     private sealed class NoHold : IDisposable
     {
         public static readonly NoHold Instance = new();
@@ -256,21 +263,19 @@ public static class DiskSpaceService
     }
 
     /// <summary>
-    /// Reads the free and total space of the filesystem that holds a path. On Linux and macOS the
-    /// path root is always "/", so measuring the root would read the container's own disk in Docker
-    /// instead of the mounted library. The nearest existing directory of the path is measured
-    /// instead, and the system resolves the mount that holds it. Windows measures the drive root,
-    /// and a UNC path it cannot measure counts as unknown.
+    /// Reads the free and total space of the filesystem that holds a path.
     /// </summary>
-    /// <param name="path">A library root or a target file path.</param>
+    /// <param name="path">A root folder or a target file path.</param>
     /// <param name="freeBytes">The free space available to this process.</param>
     /// <param name="totalBytes">The filesystem size.</param>
     /// <returns><c>true</c> when the space was read, <c>false</c> when it is unknown.</returns>
     private static bool TryGetSpace(string path, out long freeBytes, out long totalBytes)
         => TryGetSpace(path, out freeBytes, out totalBytes, out _);
 
-    // The volume's format is read too, since with the total size it tells volumes apart: on Linux
-    // and macOS DriveInfo names the path it was given, not the mount that holds it.
+    /// <summary>
+    /// Reads the free space, total size, and format of the filesystem that holds a path.
+    /// The format and total size together tell volumes apart, since on Linux and macOS DriveInfo names the path it was given.
+    /// </summary>
     private static bool TryGetSpace(string path, out long freeBytes, out long totalBytes, out string format)
     {
         freeBytes = 0;
@@ -294,13 +299,15 @@ public static class DiskSpaceService
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
         {
-            // Report by the folder or root that was measured, so every file on one unreadable share
-            // shares a single warning.
             ReportUnmeasurable(string.IsNullOrEmpty(target) ? path : target, ex);
             return false;
         }
     }
 
+    /// <summary>
+    /// Finds what to measure for a path, the drive root on Windows and the nearest existing folder elsewhere.
+    /// On Linux and macOS the path root is always "/", which in Docker is the container's disk and not the mounted library.
+    /// </summary>
     private static string? ResolveMeasurablePath(string path)
     {
         if (OperatingSystem.IsWindows())
@@ -308,8 +315,6 @@ public static class DiskSpaceService
             return Path.GetPathRoot(path);
         }
 
-        // The path may name a file or a folder that does not exist yet, so walk up to the first
-        // folder that does. That folder sits on the same mount the new file will land on.
         var directory = Path.GetFullPath(path);
         while (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
         {
@@ -319,21 +324,24 @@ public static class DiskSpaceService
         return directory;
     }
 
+    /// <summary>
+    /// Logs one warning for each folder or root whose free space cannot be read.
+    /// </summary>
     private static void ReportUnmeasurable(string path, Exception? ex)
     {
         if (_unmeasurableReported.TryAdd(path, 0))
         {
-            Logger.LogWarning(ex, "Could not read the free space for {Path}, so downloads there are not held back by the free space check", path);
+            Logger.LogWarning(ex, "Could not read the free space for {Path}, so downloads there are not held back by the free space check", FormatUtilities.SanitizeForLog(path));
         }
     }
 
     /// <summary>
-    /// Formats a disk space check failure message.
+    /// Builds the message for a path that failed the free space check.
     /// </summary>
-    /// <param name="path">Path that failed the check.</param>
-    /// <param name="availableBytes">Available bytes on the drive.</param>
-    /// <param name="minimumReserveGb">Required minimum GB.</param>
-    /// <returns>Formatted error message.</returns>
+    /// <param name="path">The path that is short of space.</param>
+    /// <param name="availableBytes">The bytes free on its volume.</param>
+    /// <param name="minimumReserveGb">The free space in GB the settings require.</param>
+    /// <returns>The message shown for the failed check.</returns>
     public static string FormatInsufficientSpaceMessage(string path, long availableBytes, int minimumReserveGb)
     {
         return $"Insufficient disk space on {path}: {FormatUtilities.FormatBytes(availableBytes)} free, {minimumReserveGb} GB required";

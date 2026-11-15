@@ -6,45 +6,47 @@ using System.Linq;
 namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 
 /// <summary>
-/// Thread-safe tracker for active downloads.
-/// Shared between download task and cleanup task to prevent temp file deletion during downloads.
+/// Tracks the downloads in progress so the cleanup task never deletes a temp file a download is writing.
 /// </summary>
 public static class ActiveDownloadTracker
 {
     /// <summary>
-    /// Tracks items currently being downloaded with their temp file paths.
-    /// Key: SourceItemId, Value: (StartTime, TempFilePath)
+    /// The downloads in progress, keyed by source item id.
     /// </summary>
     private static readonly ConcurrentDictionary<string, DownloadInfo> ActiveDownloads = new();
 
     /// <summary>
-    /// Maximum age before a download is considered stale (likely crashed/abandoned).
+    /// The age in hours past which a download counts as abandoned.
     /// </summary>
     private const int StaleDownloadHours = 2;
 
     /// <summary>
-    /// Attempts to register a download. Returns <c>false</c> if already downloading.
+    /// Registers a download unless the item is already downloading.
     /// </summary>
     /// <param name="sourceItemId">The source item being downloaded.</param>
     /// <param name="tempFilePath">The temp file the download writes to.</param>
-    /// <returns><c>true</c> when the download was registered.</returns>
+    /// <returns><c>true</c> when the download was registered, <c>false</c> when the item is already downloading.</returns>
     public static bool TryStartDownload(string sourceItemId, string tempFilePath)
     {
+        ArgumentNullException.ThrowIfNull(sourceItemId);
+
         var info = new DownloadInfo(DateTime.UtcNow, tempFilePath);
         return ActiveDownloads.TryAdd(sourceItemId, info);
     }
 
     /// <summary>
-    /// Marks a download as complete and removes it from tracking.
+    /// Stops tracking a download that ended.
     /// </summary>
     /// <param name="sourceItemId">The source item whose download ended.</param>
     public static void CompleteDownload(string sourceItemId)
     {
+        ArgumentNullException.ThrowIfNull(sourceItemId);
+
         ActiveDownloads.TryRemove(sourceItemId, out _);
     }
 
     /// <summary>
-    /// Checks if a temp file path is currently in use by an active download.
+    /// Checks whether a download in progress is writing to a temp file.
     /// </summary>
     /// <param name="tempFilePath">The temp file to check.</param>
     /// <returns><c>true</c> when a download is writing to it.</returns>
@@ -55,9 +57,9 @@ public static class ActiveDownloadTracker
     }
 
     /// <summary>
-    /// Gets all currently active temp file paths.
+    /// Gets the temp file of every download in progress.
     /// </summary>
-    /// <returns>The temp file paths.</returns>
+    /// <returns>The temp file paths that must not be deleted.</returns>
     public static IReadOnlyCollection<string> GetActiveTempFiles()
     {
         return ActiveDownloads.Values
@@ -67,8 +69,7 @@ public static class ActiveDownloadTracker
     }
 
     /// <summary>
-    /// Removes stale download entries (downloads that have been running too long).
-    /// Returns the count of removed entries.
+    /// Stops tracking downloads that have run long enough to count as abandoned.
     /// </summary>
     /// <returns>How many entries were removed.</returns>
     public static int CleanupStaleEntries()
@@ -88,11 +89,12 @@ public static class ActiveDownloadTracker
     }
 
     /// <summary>
-    /// Information about an active download.
+    /// When one download started and the temp file it writes to.
     /// </summary>
     private sealed class DownloadInfo
     {
         public DateTime StartTime { get; }
+
         public string TempFilePath { get; }
 
         public DownloadInfo(DateTime startTime, string tempFilePath)

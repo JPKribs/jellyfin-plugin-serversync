@@ -9,19 +9,21 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
 
 /// <summary>
-/// Handles moving files to the recycling bin and cleaning up old files.
+/// Moves files to the Recycling Bin and deletes the ones past their retention period.
 /// </summary>
 public static class RecyclingBinService
 {
     /// <summary>
-    /// Moves a file to the recycling bin with a timestamped name.
+    /// Moves a file to the Recycling Bin under a name that carries the time it was moved.
     /// </summary>
-    /// <param name="filePath">Path to the file to move.</param>
-    /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <returns><c>true</c> if successful, <c>false</c> otherwise.</returns>
+    /// <param name="filePath">The file to move.</param>
+    /// <param name="recyclingBinPath">The Recycling Bin folder the file moves into.</param>
+    /// <param name="logger">Records the move and any failure.</param>
+    /// <returns><c>true</c> when the file was moved.</returns>
     public static bool MoveToRecyclingBin(string filePath, string recyclingBinPath, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(recyclingBinPath))
         {
             return false;
@@ -29,7 +31,7 @@ public static class RecyclingBinService
 
         if (!File.Exists(filePath))
         {
-            logger.LogWarning("Cannot move to recycling bin - file does not exist: {FilePath}", filePath);
+            logger.LogWarning("Cannot move to recycling bin - file does not exist: {FilePath}", FormatUtilities.SanitizeForLog(filePath));
             return false;
         }
 
@@ -38,14 +40,12 @@ public static class RecyclingBinService
             if (!Directory.Exists(recyclingBinPath))
             {
                 Directory.CreateDirectory(recyclingBinPath);
-                logger.LogDebug("Created recycling bin directory: {Path}", recyclingBinPath);
+                logger.LogDebug("Created recycling bin directory: {Path}", FormatUtilities.SanitizeForLog(recyclingBinPath));
             }
 
-            // Generate recycled file name: path.with.periods_2026-01-29_17-30-45.ext
             var recycledFileName = FileOperationUtilities.GenerateRecycledFileName(filePath);
             var destinationPath = Path.Combine(recyclingBinPath, recycledFileName);
 
-            // Handle case where destination already exists (unlikely but possible)
             if (File.Exists(destinationPath))
             {
                 var uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
@@ -56,27 +56,28 @@ public static class RecyclingBinService
             }
 
             File.Move(filePath, destinationPath);
-            logger.LogDebug("Moved to recycling bin: {FileName} -> {RecycledName}", Path.GetFileName(filePath), recycledFileName);
+            logger.LogDebug("Moved to recycling bin: {FileName} -> {RecycledName}", FormatUtilities.SanitizeForLog(Path.GetFileName(filePath)), FormatUtilities.SanitizeForLog(recycledFileName));
 
             return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            logger.LogError(ex, "Failed to move file to recycling bin: {FilePath}", filePath);
+            logger.LogError(ex, "Failed to move file to recycling bin: {FilePath}", FormatUtilities.SanitizeForLog(filePath));
             return false;
         }
     }
 
     /// <summary>
-    /// Moves a folder (an item's trickplay) to the recycling bin under a timestamped name, which the
-    /// retention cleanup reads to remove it once it expires.
+    /// Moves an item's trickplay folder to the Recycling Bin under a name that carries the time, which the retention cleanup reads.
     /// </summary>
     /// <param name="folderPath">The folder to move.</param>
-    /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <returns><c>true</c> when it was moved.</returns>
+    /// <param name="recyclingBinPath">The Recycling Bin folder the folder moves into.</param>
+    /// <param name="logger">Records the move and any failure.</param>
+    /// <returns><c>true</c> when the folder was moved.</returns>
     public static bool MoveFolderToRecyclingBin(string folderPath, string recyclingBinPath, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         if (string.IsNullOrEmpty(folderPath) || string.IsNullOrEmpty(recyclingBinPath) || !Directory.Exists(folderPath))
         {
             return false;
@@ -92,30 +93,28 @@ public static class RecyclingBinService
             }
 
             Directory.Move(folderPath, destination);
-            logger.LogDebug("Moved folder to recycling bin: {Folder}", Path.GetFileName(folderPath));
+            logger.LogDebug("Moved folder to recycling bin: {Folder}", FormatUtilities.SanitizeForLog(Path.GetFileName(folderPath)));
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Failed to move folder to recycling bin: {Folder}", folderPath);
+            logger.LogWarning(ex, "Failed to move folder to recycling bin: {Folder}", FormatUtilities.SanitizeForLog(folderPath));
             return false;
         }
     }
 
     /// <summary>
-    /// Moves a sidecar/backup file to the recycling bin, naming it as if it
-    /// were the original file. Used by the download pipeline after a successful
-    /// atomic rename: the previous version was first moved to a sidecar (so it
-    /// could be restored on rename failure), and is archived under its
-    /// original path's recycled filename.
+    /// Moves the backup a download set aside for the file it replaced to the Recycling Bin, named as if it were the original file.
     /// </summary>
-    /// <param name="backupPath">Current location of the sidecar to archive.</param>
-    /// <param name="originalDisplayPath">Original path of the file (used to derive the recycled filename).</param>
-    /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <returns><c>true</c> if successful, <c>false</c> otherwise.</returns>
+    /// <param name="backupPath">Where the backup of the replaced file sits.</param>
+    /// <param name="originalDisplayPath">The replaced file's original path, which the recycled name is built from.</param>
+    /// <param name="recyclingBinPath">The Recycling Bin folder the backup moves into.</param>
+    /// <param name="logger">Records the move and any failure.</param>
+    /// <returns><c>true</c> when the backup was moved.</returns>
     public static bool ArchiveBackupToRecyclingBin(string backupPath, string originalDisplayPath, string recyclingBinPath, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         if (string.IsNullOrEmpty(backupPath) || string.IsNullOrEmpty(originalDisplayPath) || string.IsNullOrEmpty(recyclingBinPath))
         {
             return false;
@@ -123,7 +122,7 @@ public static class RecyclingBinService
 
         if (!File.Exists(backupPath))
         {
-            logger.LogWarning("Cannot archive backup - file does not exist: {BackupPath}", backupPath);
+            logger.LogWarning("Cannot archive backup - file does not exist: {BackupPath}", FormatUtilities.SanitizeForLog(backupPath));
             return false;
         }
 
@@ -149,41 +148,41 @@ public static class RecyclingBinService
             File.Move(backupPath, destinationPath);
             logger.LogDebug(
                 "Archived previous version to recycling bin: {OriginalName} -> {RecycledName}",
-                Path.GetFileName(originalDisplayPath),
-                recycledFileName);
+                FormatUtilities.SanitizeForLog(Path.GetFileName(originalDisplayPath)),
+                FormatUtilities.SanitizeForLog(recycledFileName));
 
             return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            logger.LogError(ex, "Failed to archive backup to recycling bin: {BackupPath}", backupPath);
+            logger.LogError(ex, "Failed to archive backup to recycling bin: {BackupPath}", FormatUtilities.SanitizeForLog(backupPath));
             return false;
         }
     }
 
     /// <summary>
-    /// Moves a file and its companion files (subtitles, etc.) to the recycling bin.
+    /// Moves a file to the Recycling Bin, then its companion files, local images, and trickplay folder.
+    /// Companions come from the strict matcher, so files that only share a name prefix stay.
     /// </summary>
-    /// <param name="filePath">Path to the main file to move.</param>
-    /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <returns><c>true</c> if the main file was moved successfully.</returns>
+    /// <param name="filePath">The main file to move.</param>
+    /// <param name="recyclingBinPath">The Recycling Bin folder everything moves into.</param>
+    /// <param name="logger">Records each move and any failure.</param>
+    /// <returns><c>true</c> when the main file was moved.</returns>
     public static bool MoveWithCompanionsToRecyclingBin(string filePath, string recyclingBinPath, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(recyclingBinPath))
         {
             return false;
         }
 
-        // Move the main file first. When it stays put, its companions stay with it, since recycling
-        // them alone would strip the nfo, artwork and subtitles from a file that is still in use.
+        // Moving companions alone would strip a file that is still in use.
         if (!MoveToRecyclingBin(filePath, recyclingBinPath, logger))
         {
             return false;
         }
 
-        // Companions come from the strict matcher in FileOperationUtilities.GetCompanionFiles, so
-        // siblings whose names only share a prefix are not recycled with it.
         try
         {
             foreach (var companionFile in FileOperationUtilities.GetCompanionFiles(filePath))
@@ -191,7 +190,6 @@ public static class RecyclingBinService
                 MoveToRecyclingBin(companionFile, recyclingBinPath, logger);
             }
 
-            // Its own thumbnails and trickplay go with it, the same as when it is deleted outright.
             var (images, trickplay) = FileOperationUtilities.GetItemArtifacts(filePath);
             foreach (var image in images)
             {
@@ -203,22 +201,23 @@ public static class RecyclingBinService
                 MoveFolderToRecyclingBin(trickplay, recyclingBinPath, logger);
             }
         }
+
+        // The main file has moved, so a companion failure must not report failure.
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Error processing companion files for {FilePath}", filePath);
+            logger.LogDebug(ex, "Error processing companion files for {FilePath}", FormatUtilities.SanitizeForLog(filePath));
         }
 
         return true;
     }
 
     /// <summary>
-    /// Returns <c>true</c> when a folder the plugin cleans up on its own (the recycling bin, or the temp
-    /// folder) overlaps a configured library root: the folder inside a library, or a library inside
-    /// the folder. Running that cleanup against a media folder could permanently delete library files.
+    /// Checks whether a folder the plugin cleans up on its own, the Recycling Bin or the temp folder, lies inside a root folder or holds one.
+    /// Cleaning up such a folder could delete library files for good.
     /// </summary>
     /// <param name="recyclingBinPath">The folder to check.</param>
-    /// <param name="config">The plugin configuration that holds the library roots.</param>
-    /// <returns><c>true</c> when the folder and a library root overlap.</returns>
+    /// <param name="config">Supplies the root folder of every library mapping.</param>
+    /// <returns><c>true</c> when the folder and a root folder overlap.</returns>
     public static bool OverlapsLibraryRoot(string recyclingBinPath, PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -250,15 +249,17 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Deletes the files and recycled trickplay folders the plugin put in the recycling bin once they are
-    /// older than the retention period. Anything else in the folder is left alone.
+    /// Deletes the files and trickplay folders the plugin put in the Recycling Bin once the time in their name is past the retention period.
+    /// Anything named another way belongs to someone else and is never touched.
     /// </summary>
-    /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
-    /// <param name="retentionDays">Number of days to retain files before deletion.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <returns>Number of files and recycled trickplay folders deleted.</returns>
+    /// <param name="recyclingBinPath">The Recycling Bin folder to clean.</param>
+    /// <param name="retentionDays">How many days a recycled file is kept before it is deleted.</param>
+    /// <param name="logger">Records each deletion and each failure.</param>
+    /// <returns>How many files and trickplay folders were deleted.</returns>
     public static int CleanupExpiredFiles(string recyclingBinPath, int retentionDays, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         if (string.IsNullOrEmpty(recyclingBinPath) || !Directory.Exists(recyclingBinPath))
         {
             return 0;
@@ -278,8 +279,7 @@ public static class RecyclingBinService
             {
                 try
                 {
-                    // Only files the bin named expire, by the time in their name. A file named any
-                    // other way was put here by someone else and is never touched, however old.
+                    // A file the plugin did not name is someone else's and never expires.
                     if (!FileOperationUtilities.TryReadRecycledTime(file, out var fileTime))
                     {
                         continue;
@@ -292,21 +292,19 @@ public static class RecyclingBinService
                         fileInfo.Delete();
                         deletedCount++;
                         totalBytes += fileSize;
-                        logger.LogDebug("Permanently deleted from recycling bin: {FileName}", fileInfo.Name);
+                        logger.LogDebug("Permanently deleted from recycling bin: {FileName}", FormatUtilities.SanitizeForLog(fileInfo.Name));
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    logger.LogWarning(ex, "Failed to delete recycled file: {FilePath}", file);
+                    logger.LogWarning(ex, "Failed to delete recycled file: {FilePath}", FormatUtilities.SanitizeForLog(file));
                     errorCount++;
                 }
             }
 
-            // The only folders the plugin puts here are recycled trickplay folders, and only those expire,
-            // by the timestamp in their name. Any other folder, even one named with a timestamp, belongs
-            // to someone else and is never touched.
             foreach (var folder in Directory.GetDirectories(recyclingBinPath))
             {
+                // Only recycled trickplay folders expire, and any other folder is someone else's.
                 if (!TryReadRecycledTrickplayTime(Path.GetFileName(folder), out var folderTime) || folderTime >= cutoffTime)
                 {
                     continue;
@@ -318,11 +316,11 @@ public static class RecyclingBinService
                     Directory.Delete(folder, recursive: true);
                     deletedFolders++;
                     totalBytes += folderSize;
-                    logger.LogDebug("Permanently deleted folder from recycling bin: {Folder}", Path.GetFileName(folder));
+                    logger.LogDebug("Permanently deleted folder from recycling bin: {Folder}", FormatUtilities.SanitizeForLog(Path.GetFileName(folder)));
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    logger.LogWarning(ex, "Failed to delete recycled folder: {FolderPath}", folder);
+                    logger.LogWarning(ex, "Failed to delete recycled folder: {FolderPath}", FormatUtilities.SanitizeForLog(folder));
                     errorCount++;
                 }
             }
@@ -341,28 +339,27 @@ public static class RecyclingBinService
                 logger.LogWarning("Failed to delete {Count} items from recycling bin", errorCount);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            logger.LogError(ex, "Failed to clean up recycling bin: {Path}", recyclingBinPath);
+            logger.LogError(ex, "Failed to clean up recycling bin: {Path}", FormatUtilities.SanitizeForLog(recyclingBinPath));
         }
 
         return deletedCount + deletedFolders;
     }
 
-    // A recycled trickplay folder as MoveFolderToRecyclingBin names it: the recycled name of
-    // "<name>.trickplay", "<path>.<name>_yyyy-MM-dd_HH-mm-ss.trickplay", with "_" and eight hex digits
-    // appended when that name was taken.
+    /// <summary>
+    /// Matches a trickplay folder as <see cref="MoveFolderToRecyclingBin"/> names it, with eight hex digits appended when that name was taken.
+    /// </summary>
     private static readonly System.Text.RegularExpressions.Regex RecycledTrickplayName = new(
         "^.+_(?<at>[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2})\\.trickplay(_[0-9a-f]{8})?$",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// Reads the time a recycled trickplay folder was recycled at from its name. Only names the plugin
-    /// builds for those folders qualify.
+    /// Reads the time a trickplay folder moved to the Recycling Bin from its name, for names the plugin built only.
     /// </summary>
-    /// <param name="folderName">The folder's name.</param>
-    /// <param name="recycledAt">The UTC time it was recycled at.</param>
-    /// <returns><c>true</c> when the name is one of the plugin's recycled trickplay folders.</returns>
+    /// <param name="folderName">The folder's name, without its path.</param>
+    /// <param name="recycledAt">The UTC time the folder moved to the Recycling Bin.</param>
+    /// <returns><c>true</c> when the plugin built the name for a recycled trickplay folder.</returns>
     public static bool TryReadRecycledTrickplayTime(string folderName, out DateTime recycledAt)
     {
         recycledAt = default;
