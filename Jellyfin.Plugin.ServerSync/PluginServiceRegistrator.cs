@@ -55,7 +55,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 AllowAutoRedirect = false,
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPrivateAllowedAsync
             })
-            .AddHttpMessageHandler(() => new TransientRetryHandler())
+            .AddHttpMessageHandler(() => new JPKribs.Jellyfin.Base.JpkRetryHandler())
             .AddHttpMessageHandler(() => new RedirectRefusingHandler())
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
 
@@ -70,7 +70,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 AllowAutoRedirect = false,
                 ConnectCallback = Utilities.ConfigurationUtilities.ConnectPublicOnlyAsync
             })
-            .AddHttpMessageHandler(() => new TransientRetryHandler())
+            .AddHttpMessageHandler(() => new JPKribs.Jellyfin.Base.JpkRetryHandler())
             .AddHttpMessageHandler(() => new RedirectRefusingHandler())
             .SetHandlerLifetime(TimeSpan.FromMinutes(5));
     }
