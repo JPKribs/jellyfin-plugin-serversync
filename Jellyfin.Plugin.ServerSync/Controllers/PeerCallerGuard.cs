@@ -10,8 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// The filter behind <see cref="PeerCallerGuardAttribute"/>. Asks <see cref="PeerCallerPolicy"/> about the
-/// caller and answers 403 when it refuses.
+/// The filter behind <see cref="PeerCallerGuardAttribute"/>, which asks <see cref="PeerCallerPolicy"/> about the caller and answers 403 when it refuses.
 /// </summary>
 public sealed class PeerCallerGuard : IAsyncActionFilter
 {
@@ -19,7 +18,7 @@ public sealed class PeerCallerGuard : IAsyncActionFilter
     public const string ScopedUserKey = "ServerSync.ScopedUser";
 
     /// <summary>Gets the user the caller's key is scoped to, when the guard set one.</summary>
-    /// <param name="context">The current request.</param>
+    /// <param name="context">The request the guard ran on.</param>
     /// <returns>The user's id, or null when the key is not scoped.</returns>
     public static Guid? ScopedUser(HttpContext context)
         => context?.Items.TryGetValue(ScopedUserKey, out var value) == true && value is Guid id ? id : null;
@@ -32,6 +31,9 @@ public sealed class PeerCallerGuard : IAsyncActionFilter
     /// <param name="logger">Writes log entries.</param>
     public PeerCallerGuard(PeerCallerPolicy policy, ILogger<PeerCallerGuard> logger)
     {
+        ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _policy = policy;
         _logger = logger;
     }

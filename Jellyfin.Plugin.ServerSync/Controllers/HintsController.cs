@@ -22,9 +22,8 @@ using JPKribs.Jellyfin.Base;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// The operator's view of the hint queues on this server: what is owed to each peer, what peers have
-/// sent that is not yet applied, and which peers are paused and why. Also lets the operator discard a
-/// row that will never go through and run a delivery or apply pass without waiting.
+/// The operator's view of the Change Queue, with what is owed to each peer, what peers sent that is not yet applied, and which peers are paused.
+/// It also lets the operator discard a row and run a delivery or apply pass at once.
 /// </summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
@@ -33,7 +32,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 public class HintsController : ControllerBase
 {
     /// <summary>
-    /// The queue view polls every few seconds, so each lane is capped and the counts come from the table.
+    /// The most rows each lane of the overview returns, since the page polls every few seconds.
     /// </summary>
     private const int OverviewRows = 500;
 
@@ -52,17 +51,17 @@ public class HintsController : ControllerBase
     /// <summary>
     /// Initializes a new instance of the <see cref="HintsController"/> class.
     /// </summary>
-    /// <param name="outbound">The outbound store.</param>
-    /// <param name="inbound">The inbound store.</param>
-    /// <param name="outboundWorker">The delivery worker.</param>
-    /// <param name="inboundWorker">The apply worker.</param>
-    /// <param name="observer">The local change observer.</param>
+    /// <param name="outbound">Holds the hints owed to peers.</param>
+    /// <param name="inbound">Holds the hints peers sent that are not yet applied.</param>
+    /// <param name="outboundWorker">Delivers hints and knows which peers are paused.</param>
+    /// <param name="inboundWorker">Applies received hints.</param>
+    /// <param name="observer">Holds the local changes still gathering.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
-    /// <param name="applicationHost">The server host, for this server's id.</param>
-    /// <param name="versions">The version store, for the detail modals.</param>
-    /// <param name="libraryManager">Library manager, to name the changes still gathering.</param>
-    /// <param name="userManager">User manager, to name the changes still gathering.</param>
+    /// <param name="clientFactory">Builds the client for another server.</param>
+    /// <param name="applicationHost">Gives this server's ID and name.</param>
+    /// <param name="versions">Reads the stamp an object carries.</param>
+    /// <param name="libraryManager">Names the items of changes still gathering.</param>
+    /// <param name="userManager">Names the users of changes still gathering.</param>
     public HintsController(
         OutboundHintStore outbound,
         InboundHintStore inbound,
@@ -76,6 +75,18 @@ public class HintsController : ControllerBase
         ILibraryManager libraryManager,
         IUserManager userManager)
     {
+        ArgumentNullException.ThrowIfNull(outbound);
+        ArgumentNullException.ThrowIfNull(inbound);
+        ArgumentNullException.ThrowIfNull(outboundWorker);
+        ArgumentNullException.ThrowIfNull(inboundWorker);
+        ArgumentNullException.ThrowIfNull(observer);
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+        ArgumentNullException.ThrowIfNull(versions);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(userManager);
+
         _libraryManager = libraryManager;
         _userManager = userManager;
         _versions = versions;
@@ -90,15 +101,12 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>
-    /// Checks a server entry against the mode it is about to be saved with. Pull works against any
-    /// server and only warns when changes will not also arrive as they happen, which needs Server Sync
-    /// there listing this server as Push or Sync. Push needs the server to run Server Sync and list this
-    /// server as Pull or Sync, since it must pull what this server announces. Sync needs the server to
-    /// list this server as Sync too. A link that would only fail in the queue is caught at setup.
+    /// Checks a server entry against the Direction it is about to be saved with, so a pairing that would only fail in the queue is caught at setup.
+    /// Pull works against any server, Push needs the other server to list this one as Pull or Sync, and Sync needs it to list this one as Sync.
     /// </summary>
-    /// <param name="request">The entry's URL and key, as the connection test takes them.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>What was learned.</returns>
+    /// <param name="request">The entry's Server URL, API Key, and Direction.</param>
+    /// <param name="cancellationToken">Cancels the calls to the other server.</param>
+    /// <returns>What was learned about the other server, with a verdict for the Direction.</returns>
     [HttpPost("CheckPeer")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<PeerCheckResult>> CheckPeer([FromBody] TestConnectionRequest request, CancellationToken cancellationToken)
@@ -143,17 +151,13 @@ public class HintsController : ControllerBase
             {
                 capabilities = await client.GetPeerCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
             catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             {
                 var (_, why) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
                 result.Message = $"Connected, but its Server Sync refused this call: {why}. Add this server or its user to the Whitelist there.";
                 return Ok(result);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 result.Message = $"Connected, but its Server Sync could not be reached: {ex.Message}";
                 return Ok(result);
@@ -178,7 +182,6 @@ public class HintsController : ControllerBase
                 return Ok(result);
             }
 
-            // Conflicts are decided on the two clocks, so a peer whose clock is off is worth a sentence.
             var skew = capabilities.ServerTime.HasValue ? (DateTime.UtcNow - Utilities.UtcTime.AsUtc(capabilities.ServerTime.Value)).Duration() : TimeSpan.Zero;
             result.ClockSkewSeconds = (int)Math.Round(skew.TotalSeconds);
             var skewNote = skew > HintProtocol.ClockSkewWarning
@@ -194,11 +197,7 @@ public class HintsController : ControllerBase
             {
                 link = await client.GetPeerLinkAsync(_applicationHost.SystemId, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 result.Message = $"Connected, but Server Sync there did not say whether it lists this server: {ex.Message}";
                 return Ok(result);
@@ -226,8 +225,7 @@ public class HintsController : ControllerBase
                 result.Message += PeerAccessNote(link);
             }
 
-            // A listed server pairs on every check. One that could not reach this server back cannot
-            // prove itself on later requests, so nothing it sends as this server would be accepted.
+            // A server that could not pair cannot prove itself, so its hints are refused.
             if (link is { Listed: true } && !result.Paired)
             {
                 AppendWarning(result, $" It could not pair with this server: {link.PairingError ?? "no reason was given"}. Until it can, hints between the two are refused.");
@@ -239,7 +237,7 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>
-    /// The verdict for the chosen direction, given how the peer lists this server.
+    /// Builds the verdict for the chosen Direction, given how the peer lists this server.
     /// </summary>
     private static (string Severity, string Message, string Headline) Verdict(ServerMode mode, PeerLinkResponse? link, string? version, PeerCheckResult result)
     {
@@ -259,8 +257,7 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>
-    /// The same answer as lines with badges: how the other server lists this one, which way changes
-    /// travel, what it applies, the access it holds here, and anything that would stop the two talking.
+    /// Builds the verdict as lines with badges, covering how the other server lists this one, which way changes travel, what it applies, and its access here.
     /// </summary>
     private static List<PeerCheckDetail> Details(ServerMode mode, PeerLinkResponse? link, PeerCapabilities capabilities, PeerCheckResult result, TimeSpan skew)
     {
@@ -387,8 +384,10 @@ public class HintsController : ControllerBase
         return rows;
     }
 
+    /// <summary>Capitalizes the first letter of a text.</summary>
     private static string Sentence(string words) => words.Length == 0 ? words : char.ToUpperInvariant(words[0]) + words[1..];
 
+    /// <summary>Describes the access the peer's key holds on this server.</summary>
     private static string PeerAccessNote(PeerLinkResponse link)
     {
         if (string.Equals(link.AccessLevel, SourceServer.StandardUserAccess, StringComparison.OrdinalIgnoreCase))
@@ -425,8 +424,7 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>
-    /// The answer for a link that works on a schedule only: a warning for Pull, which still pulls, and an
-    /// error for Push and Sync, which need more than a schedule.
+    /// Builds the answer for a server without Server Sync, a warning for Pull and an error for Push and Sync.
     /// </summary>
     private static ActionResult<PeerCheckResult> Limited(PeerCheckResult result, ServerMode mode, string pullMessage, string otherMessage)
     {
@@ -436,8 +434,7 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>
-    /// Jellyfin's own title for a local item, and a second line: the episode under its series, the year
-    /// under a film, the user under a watch history change. Falls back to the file or the name.
+    /// Reads Jellyfin's title for a local item with a second line, such as the episode under its series or the year under a film.
     /// </summary>
     private static (string Title, string? Subtitle) DisplayOf(MediaBrowser.Controller.Entities.BaseItem? item, HintKind kind, string? userName)
     {
@@ -462,11 +459,13 @@ public class HintsController : ControllerBase
             return (item.Name, null);
         }
 
-        // A title that already ends with its year, as test libraries and some folder names do, is not repeated.
         var year = item.ProductionYear?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        // A title that already ends with its year does not repeat it.
         return (item.Name, year is not null && item.Name.EndsWith($"({year})", StringComparison.Ordinal) ? null : year);
     }
 
+    /// <summary>Names a kind of hint in the reader's words.</summary>
     private static string DescribeKind(string kind) => kind switch
     {
         "History" => "watch history",
@@ -477,7 +476,7 @@ public class HintsController : ControllerBase
     };
 
     /// <summary>
-    /// "a", "a and b", "a, b, and c".
+    /// Joins words as a list in prose, with commas and a final "and".
     /// </summary>
     private static string JoinWords(List<string> words) => words.Count switch
     {
@@ -487,11 +486,12 @@ public class HintsController : ControllerBase
         _ => string.Join(", ", words.Take(words.Count - 1)) + ", and " + words[^1]
     };
 
+    /// <summary>Formats a clock difference in minutes, or seconds when under a minute.</summary>
     private static string FormatSkew(TimeSpan skew)
         => skew.TotalMinutes >= 1 ? ActivityText.Count((int)Math.Round(skew.TotalMinutes), "minute") : ActivityText.Count((int)Math.Round(skew.TotalSeconds), "second");
 
     /// <summary>Returns both queues and the state of every peer.</summary>
-    /// <returns>The queues.</returns>
+    /// <returns>Both queues, the changes still gathering, and each peer's state.</returns>
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<HintsOverview> Get()
@@ -511,7 +511,6 @@ public class HintsController : ControllerBase
             overview.OutboundCounts[state.ToString()] = count;
         }
 
-        // What is still gathering, named, so the operator sees a change the moment it is noticed.
         foreach (var change in _observer.Gathering().Take(OverviewRows))
         {
             var item = change.ItemId == Guid.Empty ? null : _libraryManager.GetItemById(change.ItemId);
@@ -581,14 +580,13 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>
-    /// The version an object carries on this server, for the detail modals: which server last edited it
-    /// and when, or nothing when no edit has been recorded since versions began.
+    /// Reads the Stamp an object carries on this server, which names the server that last edited it and when.
     /// </summary>
-    /// <param name="kind">The kind of object.</param>
-    /// <param name="localItemId">The local item id, for metadata, content, and history.</param>
-    /// <param name="localUserId">The local user id, for history and users.</param>
+    /// <param name="kind">The sync type the object belongs to.</param>
+    /// <param name="localItemId">The item's ID on this server, for Metadata, Content, History, and Playlists.</param>
+    /// <param name="localUserId">The user's ID on this server, for History and Users.</param>
     /// <param name="name">The person's name, for people.</param>
-    /// <returns>The version, or no content.</returns>
+    /// <returns>The stamp, 204 when no edit was recorded, or 400 when the IDs for the kind are missing.</returns>
     [HttpGet("Version")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -624,9 +622,9 @@ public class HintsController : ControllerBase
         return Ok(new ObjectVersionDto { ServerId = version.ServerId, ServerName = serverName, Timestamp = version.Timestamp, IsThisServer = isThisServer });
     }
 
-    /// <summary>Raises every gathered local change now, re-reads what each peer accepts, delivers, and applies, instead of waiting for the workers.</summary>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>No content.</returns>
+    /// <summary>Sends every gathered local change, reads again what each peer accepts, delivers, and applies, without waiting for the workers.</summary>
+    /// <param name="cancellationToken">Cancels the delivery and the apply.</param>
+    /// <returns>204 once both passes ran.</returns>
     [HttpPost("Run")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<ActionResult> Run(CancellationToken cancellationToken)
@@ -638,7 +636,7 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>Clears the warning about local changes that matched no mapping.</summary>
-    /// <returns>No content.</returns>
+    /// <returns>204 once the warning is cleared.</returns>
     [HttpDelete("Unmatched")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public ActionResult DismissUnmatched()
@@ -648,11 +646,9 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>
-    /// Tries every failed row again now, with its attempts cleared: outbound rows that were given up
-    /// on are delivered, and inbound rows whose apply kept failing are applied. For a server that was
-    /// down, or a fault that is fixed, long enough ago that its changes stopped being tried.
+    /// Tries every failed row again at once with its attempts cleared, delivering outbound rows and applying inbound ones.
     /// </summary>
-    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="cancellationToken">Cancels the delivery and the apply.</param>
     /// <returns>How many rows were put back, in all and each way.</returns>
     [HttpPost("Failed/Retry")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -676,8 +672,7 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>
-    /// Discards every failed row: outbound rows that were given up on, and inbound rows whose apply
-    /// has failed. The scheduled tasks still carry the changes.
+    /// Discards every failed row, outbound and inbound. The scheduled tasks still carry the changes.
     /// </summary>
     /// <returns>How many rows were removed, in all and each way.</returns>
     [HttpDelete("Failed")]
@@ -690,16 +685,16 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>Discards one outbound row.</summary>
-    /// <param name="id">The row id.</param>
-    /// <returns>No content, or not found.</returns>
+    /// <param name="id">The ID of the outbound row.</param>
+    /// <returns>204, or 404 when there is no such row.</returns>
     [HttpDelete("Outbound/{id}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult RemoveOutbound([FromRoute] long id) => _outbound.Delete(id) ? NoContent() : NotFound();
 
     /// <summary>Discards one inbound row.</summary>
-    /// <param name="id">The row id.</param>
-    /// <returns>No content, or not found.</returns>
+    /// <param name="id">The ID of the inbound row.</param>
+    /// <returns>204, or 404 when there is no such row.</returns>
     [HttpDelete("Inbound/{id}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

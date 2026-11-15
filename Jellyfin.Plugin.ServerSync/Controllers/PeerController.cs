@@ -11,6 +11,7 @@ using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Plugin.ServerSync.Services.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.Peer;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -20,9 +21,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// Endpoints another Server Sync installation calls to negotiate state with this server. Every route
-/// needs a signed in caller that the whitelist allows, and a standard user is held to its own data.
-/// Ids in a request are always this server's ids, never paths or foreign ids.
+/// The routes another server's Server Sync calls. Every route needs a signed in caller the Whitelist allows, and a standard user is held to its own data.
 /// </summary>
 [ApiController]
 [Authorize]
@@ -46,29 +45,28 @@ public partial class PeerController : ControllerBase
     private readonly ILogger<PeerController> _logger;
 
     /// <summary>
-    /// The largest body a peer route reads. The fullest request allowed, a batch of hints with every
-    /// field at its longest, fits with room to spare.
+    /// The largest body a peer route reads, which fits the fullest batch of hints with room to spare.
     /// </summary>
     public const long MaxRequestBytes = 4 * 1024 * 1024;
 
     /// <summary>
-    /// A pairing call is one small request, so a peer that cannot answer it promptly is treated as unreachable.
+    /// How long a pairing call may take before the peer counts as unreachable.
     /// </summary>
     private static readonly TimeSpan PairTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerController"/> class.
     /// </summary>
-    /// <param name="history">The history negotiation service.</param>
+    /// <param name="history">Applies the History a peer proposes.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="applicationHost">The server host, for this server's id.</param>
-    /// <param name="inbound">The inbound hint store.</param>
-    /// <param name="outbound">The outbound hint store. Not used by these routes.</param>
-    /// <param name="versions">The version store.</param>
-    /// <param name="inboundWorker">The worker that applies inbound hints.</param>
-    /// <param name="outboundWorker">The delivery worker, which removes the hints a peer reports done.</param>
-    /// <param name="pairings">The pairing secrets.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="applicationHost">Gives this server's ID and name.</param>
+    /// <param name="inbound">Holds the hints peers sent that are not yet applied.</param>
+    /// <param name="outbound">Holds the hints owed to peers, which these routes do not read.</param>
+    /// <param name="versions">Reads the stamp an object carries.</param>
+    /// <param name="inboundWorker">Applies received hints, and is woken when one is queued.</param>
+    /// <param name="outboundWorker">Removes the hints a peer reports done.</param>
+    /// <param name="pairings">Holds the secret issued to each paired server.</param>
+    /// <param name="clientFactory">Builds the client for another server.</param>
     /// <param name="triage">Decides what to do with each inbound hint.</param>
     /// <param name="lookup">Finds this server's item for a peer's description of one.</param>
     /// <param name="logger">Writes log entries.</param>
@@ -102,10 +100,9 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>
-    /// Describes what this installation can negotiate, so a caller can tell a missing plugin from a
-    /// missing feature before it queues any work.
+    /// Describes what this server can negotiate, so a caller can tell a missing plugin from a missing feature before it queues work.
     /// </summary>
-    /// <returns>The capabilities.</returns>
+    /// <returns>This server's protocol versions, accepted kinds, and features.</returns>
     [HttpGet("Capabilities")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PeerCapabilities> GetCapabilities()
@@ -123,12 +120,11 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>
-    /// Tells a server whether, and how, this server lists it. Hints from it are only accepted when it is
-    /// listed as Pull or Sync, so a server about to turn on Send mode asks this first.
+    /// Tells a server whether and how this server lists it, and pairs with it when it is listed.
     /// </summary>
-    /// <param name="serverId">The asking server's Jellyfin id.</param>
-    /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>The listing.</returns>
+    /// <param name="serverId">The Jellyfin ID of the server that asks.</param>
+    /// <param name="cancellationToken">Cancels the pairing call.</param>
+    /// <returns>How this server lists the caller, and whether the two are paired.</returns>
     [HttpGet("Link")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -152,9 +148,7 @@ public partial class PeerController : ControllerBase
         response.AccessUser = string.IsNullOrEmpty(entry.AuthenticatedUser) ? null : entry.AuthenticatedUser;
         response.CanDownload = entry.CanDownload;
 
-        // The caller says it is this entry. Any whitelisted caller could say so, which is why the secret
-        // goes to the entry's own address over this server's own key for it, not back to the caller. Only
-        // the real server at that address receives it, and it is what every later request must carry.
+        // Any caller could claim this entry, so the secret goes to its own address.
         if (response.Enabled)
         {
             (response.Paired, response.PairingError) = await PairAsync(entry, cancellationToken).ConfigureAwait(false);
@@ -168,8 +162,7 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>
-    /// Hands an entry its secret by calling the entry's own address. The secret already issued is sent
-    /// again when there is one, so a peer that lost its copy is whole again the moment it checks the link.
+    /// Hands an entry its secret by calling the entry's own address, sending the issued secret again when there is one.
     /// Pairings with one entry run one at a time, so two checks at once send the same secret.
     /// </summary>
     private async Task<(bool Paired, string? Error)> PairAsync(Models.Configuration.SourceServer entry, CancellationToken cancellationToken)
@@ -186,6 +179,7 @@ public partial class PeerController : ControllerBase
         }
     }
 
+    /// <summary>Sends the secret to the entry's address and stores it once the entry accepts it.</summary>
     private async Task<(bool Paired, string? Error)> PairOnceAsync(Models.Configuration.SourceServer entry, CancellationToken cancellationToken)
     {
         string secret;
@@ -206,17 +200,13 @@ public partial class PeerController : ControllerBase
                     409 => "it does not list this server: " + body,
                     _ => $"it answered {status}: {body}"
                 };
-                _logger.LogWarning("Could not pair with '{Peer}': {Why}", entry.DisplayName, why);
+                _logger.LogWarning("Could not pair with '{Peer}': {Why}", FormatUtilities.SanitizeForLog(entry.DisplayName), FormatUtilities.SanitizeForLog(why, 300));
                 return (false, why);
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not pair with '{Peer}'", entry.DisplayName);
+            _logger.LogWarning(ex, "Could not pair with '{Peer}'", FormatUtilities.SanitizeForLog(entry.DisplayName));
             return (false, "this server could not reach it at " + entry.Url + ": " + ex.Message);
         }
 
@@ -224,20 +214,20 @@ public partial class PeerController : ControllerBase
         {
             _pairings.SetInbound(entry.Key, secret);
         }
+        // A secret that cannot be stored means not paired, whatever the cause.
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Paired with '{Peer}' but could not store its secret", entry.DisplayName);
+            _logger.LogError(ex, "Paired with '{Peer}' but could not store its secret", FormatUtilities.SanitizeForLog(entry.DisplayName));
             return (false, "the secret could not be stored on this server: " + ex.Message);
         }
 
-        _logger.LogInformation("Paired with '{Peer}': it now presents a secret this server issued", entry.DisplayName);
+        _logger.LogInformation("Paired with '{Peer}': it now presents a secret this server issued", FormatUtilities.SanitizeForLog(entry.DisplayName));
         return (true, null);
     }
 
     /// <summary>
-    /// The entry a request's sender claims to be, proven by the secret this server issued to that entry,
-    /// or the answer to send back. An entry without a secret has never paired, so the sender pairs on
-    /// hearing so and comes back.
+    /// Finds the entry a request's sender claims to be, proven by the secret this server issued to it, or the refusal to send back.
+    /// An entry without a secret has never paired, so the sender pairs on hearing so and comes back.
     /// </summary>
     private (Models.Configuration.SourceServer? Entry, ActionResult? Refusal) Sender(string? senderServerId)
     {
@@ -252,7 +242,7 @@ public partial class PeerController : ControllerBase
             return (null, Conflict($"server {senderServerId} is not configured on this server"));
         }
 
-        // A disabled entry is skipped by this server, so nothing is taken from it either.
+        // This server skips a disabled entry, so it takes nothing from it either.
         if (!entry.IsEnabled)
         {
             return (null, Conflict($"server {senderServerId} is disabled on this server"));
@@ -268,12 +258,10 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>
-    /// Receives change hints from a peer. Each hint is answered with a code: Queued and NoLocalItem are
-    /// stored, the latter parked until the local item arrives, and every other code means this server
-    /// will not use it, so the sender stops trying. The sender must be configured here as a Pull or
-    /// Sync server, since that is where the change is pulled from.
+    /// Receives hints from a peer that this server lists as Pull or Sync, and answers each with a code.
+    /// Queued and NoLocalItem are stored, and any other code tells the sender to stop trying.
     /// </summary>
-    /// <param name="request">The hints.</param>
+    /// <param name="request">The sender's ID and its batch of hints.</param>
     /// <returns>One result per hint.</returns>
     [HttpPost("Queue")]
     [RequireCompatibleProtocol]
@@ -303,16 +291,13 @@ public partial class PeerController : ControllerBase
             return Conflict($"server {request.SenderServerId} is not configured on this server as a Pull or Sync server, so its changes cannot be pulled");
         }
 
-        // A hint with no id cannot be answered, since the sender matches answers by id, so it fails the
-        // request. Every other problem with one hint is declined for that hint alone, so one bad row
-        // never takes the rest of the batch down with it.
+        // The sender matches answers by ID, so a hint without one fails the request.
         if (request.Items.Any(h => h is null || string.IsNullOrWhiteSpace(h.HintId) || h.HintId.Length > HintTriage.MaxIdLength))
         {
             return BadRequest($"Every hint needs a HintId of at most {HintTriage.MaxIdLength} characters.");
         }
 
-        // One origin cannot fill the queue without bound. A full queue answers "busy" so the sender waits
-        // and sends again, rather than this server dropping the rows that are next to apply.
+        // A full queue answers busy, so the sender waits and no row is dropped.
         if (_inbound.CountForOrigin(request.SenderServerId) >= HintProtocol.MaxPendingPerPeer)
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable, $"this server already holds {HintProtocol.MaxPendingPerPeer} hints from {origin.DisplayName}. Send again later");
@@ -364,7 +349,7 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>A peer reports hints this server sent it as done. The matching outbound rows are removed.</summary>
-    /// <param name="request">The finished hints.</param>
+    /// <param name="request">The sender's ID and the hints it finished.</param>
     /// <returns>How many rows were removed.</returns>
     [HttpPost("Complete")]
     [RequireCompatibleProtocol]
@@ -388,15 +373,13 @@ public partial class PeerController : ControllerBase
             return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} completions per request, none of them null.");
         }
 
-        // Only the rows queued for the peer that reports them, and never past this server's clock, so a
-        // peer can finish its own work and nothing else.
         var removed = _outboundWorker.Complete(peer, request.Items);
         return Ok(new { Removed = removed });
     }
 
     /// <summary>Lists the hints a paired peer sent that this server still holds, and those it finished.</summary>
-    /// <param name="serverId">The asking server's id.</param>
-    /// <returns>The inbound rows.</returns>
+    /// <param name="serverId">The Jellyfin ID of the server that asks.</param>
+    /// <returns>The rows still held and the hints finished recently.</returns>
     [HttpGet("Status")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -422,7 +405,7 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>Says what this server reads from the sender, so the sender announces only what is wanted.</summary>
-    /// <param name="serverId">The sender's server id.</param>
+    /// <param name="serverId">The Jellyfin ID of the server that asks.</param>
     /// <returns>What this server wants announced.</returns>
     [HttpGet("Interest")]
     [RequireCompatibleProtocol]
@@ -442,9 +425,9 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>Lists the playlists the caller may read.</summary>
-    /// <param name="reader">The reader of local playlists.</param>
+    /// <param name="reader">Reads this server's playlists.</param>
     /// <param name="id">One playlist to read, or null for every one.</param>
-    /// <param name="serverId">The sender's server id.</param>
+    /// <param name="serverId">The Jellyfin ID of the server that asks.</param>
     /// <returns>The playlists with their items, owners, and shares.</returns>
     [HttpGet("Playlists")]
     [RequireCompatibleProtocol]
@@ -461,9 +444,9 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>Finds the local item that matches a path, a name, or provider ids.</summary>
-    /// <param name="request">What to match on.</param>
-    /// <param name="userManager">Reads Jellyfin's users.</param>
-    /// <param name="libraryManager">Reads Jellyfin's library.</param>
+    /// <param name="request">The path, name, or provider IDs to match on.</param>
+    /// <param name="userManager">Finds the user a standard caller is held to.</param>
+    /// <param name="libraryManager">Finds the matched item, to check that user may see it.</param>
     /// <returns>The matching item, when there is one.</returns>
     [HttpPost("Lookup")]
     [RequireCompatibleProtocol]
@@ -496,9 +479,9 @@ public partial class PeerController : ControllerBase
         return Ok(found);
     }
 
-    /// <summary>Returns the versions this server holds for a batch of its own keys. Keys with no version are left out.</summary>
-    /// <param name="request">The kind and keys.</param>
-    /// <returns>The versions.</returns>
+    /// <summary>Returns the stamps this server holds for a batch of its own keys, leaving out keys with none.</summary>
+    /// <param name="request">The kind and the keys to read.</param>
+    /// <returns>The stamp of each key that has one.</returns>
     [HttpPost("Versions")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -531,11 +514,10 @@ public partial class PeerController : ControllerBase
     }
 
     /// <summary>
-    /// Applies a batch of merged watch history states. Each entry is written only when this server's
-    /// live state still matches what the caller expected, so a play that happened here after the caller
-    /// read this server is reported back as stale instead of being overwritten.
+    /// Applies a batch of merged History states.
+    /// Each is written only when this server's live state matches what the caller expected, so a play made here meanwhile is reported as stale.
     /// </summary>
-    /// <param name="request">The proposed writes.</param>
+    /// <param name="request">The sender's ID and the writes it proposes.</param>
     /// <returns>One result per entry, in request order.</returns>
     [HttpPost("History")]
     [RequireCompatibleProtocol]
@@ -553,9 +535,7 @@ public partial class PeerController : ControllerBase
             return BadRequest($"At most {PeerHistoryNegotiator.MaxEntriesPerRequest} entries per request, none of them null.");
         }
 
-        // A sender this server lists is recorded against its own rows, so it has to prove it is that
-        // entry. A sender this server does not list negotiates as any whitelisted caller may, and nothing is
-        // recorded against anyone's row.
+        // A listed sender is recorded against its own rows, so it must prove itself.
         if (!string.IsNullOrWhiteSpace(request.SenderServerId)
             && _configManager.Configuration.FindServerById(request.SenderServerId) is not null)
         {

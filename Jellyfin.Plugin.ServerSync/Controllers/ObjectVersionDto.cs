@@ -2,7 +2,7 @@ using System;
 
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
-/// <summary>The version an object carries, as the detail modals show it.</summary>
+/// <summary>The Stamp an object carries, as the detail dialogs show it.</summary>
 public class ObjectVersionDto
 {
     /// <summary>Gets or sets the id of the server where the edit was made.</summary>

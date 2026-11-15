@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
@@ -108,7 +109,7 @@ public static class FileOperationUtilities
                     "File move attempt {Attempt}/{MaxRetries} failed for {Destination}, retrying",
                     attempt,
                     maxRetries,
-                    Path.GetFileName(destinationPath));
+                    FormatUtilities.SanitizeForLog(Path.GetFileName(destinationPath)));
                 await Task.Delay(retryDelayMs * attempt, cancellationToken).ConfigureAwait(false);
             }
         }

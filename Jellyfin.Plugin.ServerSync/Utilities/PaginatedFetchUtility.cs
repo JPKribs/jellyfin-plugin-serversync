@@ -90,7 +90,7 @@ public static class PaginatedFetchUtility
             {
                 logger.LogInformation(
                     "Library {LibraryName} changed during enumeration, listing it again so items that moved between pages are not missed",
-                    libraryName);
+                    FormatUtilities.SanitizeForLog(libraryName));
             }
         }
 
@@ -98,14 +98,14 @@ public static class PaginatedFetchUtility
         {
             logger.LogWarning(
                 "{Count} item(s) in library {LibraryName} came back without a file path and were skipped, if this is unexpected, check that the API key has admin rights on the source",
-                state.PathlessSkipped.Count, libraryName);
+                state.PathlessSkipped.Count, FormatUtilities.SanitizeForLog(libraryName));
         }
 
         if (state.Failed.Count > 0)
         {
             logger.LogWarning(
                 "{Count} item(s) in library {LibraryName} failed to process. Reporting incomplete discovery so they are not treated as removed",
-                state.Failed.Count, libraryName);
+                state.Failed.Count, FormatUtilities.SanitizeForLog(libraryName));
             completedFully = false;
         }
 
@@ -173,23 +173,19 @@ public static class PaginatedFetchUtility
             {
                 result = await fetchPage(startIndex, DefaultBatchSize, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
             // A timeout arrives as a cancellation the caller never asked for, so it retries.
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 consecutiveErrors++;
                 logger.LogWarning(ex,
                     "Failed to fetch items from library {LibraryName} at index {Index} (attempt {Attempt}/{Max})",
-                    libraryName, startIndex, consecutiveErrors, MaxConsecutiveErrors);
+                    FormatUtilities.SanitizeForLog(libraryName), startIndex, consecutiveErrors, MaxConsecutiveErrors);
 
                 if (consecutiveErrors >= MaxConsecutiveErrors)
                 {
                     logger.LogError(
                         "Too many consecutive errors fetching from {LibraryName}, stopping sync for this library",
-                        libraryName);
+                        FormatUtilities.SanitizeForLog(libraryName));
                     break;
                 }
 
@@ -211,13 +207,13 @@ public static class PaginatedFetchUtility
                 consecutiveErrors++;
                 logger.LogWarning(
                     "Fetch returned null for library {LibraryName} at index {Index} (attempt {Attempt}/{Max})",
-                    libraryName, startIndex, consecutiveErrors, MaxConsecutiveErrors);
+                    FormatUtilities.SanitizeForLog(libraryName), startIndex, consecutiveErrors, MaxConsecutiveErrors);
 
                 if (consecutiveErrors >= MaxConsecutiveErrors)
                 {
                     logger.LogError(
                         "Too many consecutive null results fetching from {LibraryName}, stopping sync for this library",
-                        libraryName);
+                        FormatUtilities.SanitizeForLog(libraryName));
                     break;
                 }
 
@@ -295,12 +291,8 @@ public static class PaginatedFetchUtility
                     state.Failed.Remove(id);
                     onItemProcessed?.Invoke();
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
                 // A failed item is counted so the caller's prune never reads it as removed.
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
                     state.Failed.Add(id);
                     logger.LogWarning(ex, "Failed to process item {ItemId} ({Path})", item.Id, FormatUtilities.SanitizeForLog(item.Path));
@@ -332,7 +324,7 @@ public static class PaginatedFetchUtility
         {
             logger.LogWarning(
                 "Library {LibraryName} changed during enumeration (expected {Expected} items, fetched {Fetched}), reporting incomplete discovery so shifted items are not treated as removed",
-                libraryName, expectedTotal.Value, rawFetched);
+                FormatUtilities.SanitizeForLog(libraryName), expectedTotal.Value, rawFetched);
             return PassResult.Shifted;
         }
 
@@ -340,7 +332,7 @@ public static class PaginatedFetchUtility
         {
             logger.LogWarning(
                 "{Count} duplicate item ID(s) across pages in library {LibraryName}, page boundaries shifted during enumeration. Reporting incomplete discovery so skipped items are not treated as removed",
-                duplicateIds, libraryName);
+                duplicateIds, FormatUtilities.SanitizeForLog(libraryName));
             return PassResult.Shifted;
         }
 

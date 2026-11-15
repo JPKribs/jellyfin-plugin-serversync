@@ -16,26 +16,24 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// The routes behind links: streaming this server's files to a server that holds links to them, and
-/// listing this server's own links so a peer matches them by the file they stand in for.
+/// The routes behind links, which stream this server's files to a linking server and list this server's own links.
 /// </summary>
 public partial class PeerController
 {
     /// <summary>
-    /// Streams one of this server's files to a server that holds a link to it, with range support. The
-    /// caller must be paired and allowed to link here, and the user it streams for must pass this
-    /// server's checks and limits.
+    /// Streams one of this server's files to a linking server, with range support.
+    /// The caller must be paired and allowed to link here, and the user it streams for must pass this server's checks and limits.
     /// </summary>
-    /// <param name="itemId">This server's id of the item.</param>
-    /// <param name="serverId">The calling server's Jellyfin id.</param>
-    /// <param name="userId">The user's id on the calling server, or empty for its media probe.</param>
-    /// <param name="sourceUserId">The user here the calling server maps them to, if it does.</param>
-    /// <param name="probe">Whether this is the calling server's media probe.</param>
-    /// <param name="fill">Whether the calling server is downloading the file into its link cache, which is held to the speed limits and is not counted as a stream.</param>
-    /// <param name="policy">The link checks.</param>
-    /// <param name="sessions">The open link streams.</param>
-    /// <param name="userManager">The users here.</param>
-    /// <returns>The file.</returns>
+    /// <param name="itemId">The item's ID on this server.</param>
+    /// <param name="serverId">The Jellyfin ID of the linking server.</param>
+    /// <param name="userId">The user's ID on the linking server, or empty for its media probe.</param>
+    /// <param name="sourceUserId">The user here the linking server maps them to, when it does.</param>
+    /// <param name="probe">Whether this is the linking server's media probe.</param>
+    /// <param name="fill">Whether the linking server is filling its link cache, which is held to the speed limits and not counted as a stream.</param>
+    /// <param name="policy">Decides whether the server and user may stream the file.</param>
+    /// <param name="sessions">Counts the open link streams against the limits.</param>
+    /// <param name="userManager">Finds the user a standard caller is held to.</param>
+    /// <returns>The file, or 403 or 429 with the reason.</returns>
     [HttpGet("Stream/{itemId}")]
     [HttpHead("Stream/{itemId}")]
     [RequireCompatibleProtocol]
@@ -64,14 +62,14 @@ public partial class PeerController
         var verdict = HeldToScopedUser(policy.Check(peer, itemId, userId, sourceUserId, probe, watching: !fill), userManager);
         if (!verdict.Allowed || verdict.Item is null)
         {
-            _logger.LogWarning("Refused a link stream to '{Server}': {Reason}", peer.DisplayName, JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(verdict.Reason, 300));
+            _logger.LogWarning("Refused a link stream to '{Server}': {Reason}", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(peer.DisplayName), JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(verdict.Reason, 300));
             return StatusCode(StatusCodes.Status403Forbidden, verdict.Reason);
         }
 
         // A cache download is nobody watching, so it takes no stream from the limits.
         if (verdict.UserId is { } user && !fill)
         {
-            // The limits again, now under one lock with opening the stream, so requests at the same moment cannot pass together.
+            // The limits are checked again under the lock that opens the stream.
             var handle = sessions.TryOpen(peer.Key, user, verdict.Item.Id, peer.LinkMaxStreams, peer.GetLinkMaxStreamsFor(user), policy.OwnPlayback(user, peer.LinkCountOwnSessions));
             if (handle is null)
             {
@@ -81,8 +79,7 @@ public partial class PeerController
             HttpContext.Response.RegisterForDispose(handle);
         }
 
-        // A cache download is not counted as a stream, so the flag is held to a few at once for each
-        // server. A server cannot then use it to stream as many files as it likes uncounted.
+        // Cache downloads are uncounted, so only a few run at once for each server.
         if (fill)
         {
             var filling = sessions.TryOpenFill(peer.Key);
@@ -96,8 +93,7 @@ public partial class PeerController
 
         var mime = MediaBrowser.Model.Net.MimeTypes.GetMimeType(verdict.Item.Path);
 
-        // A probe is for no user, so nothing above counted or limited it. It is held to an allowance
-        // for each file instead, enough to read a file's media info and not enough to copy the file.
+        // A probe gets an allowance that reads media info but cannot copy the file.
         if (verdict.UserId is null && !fill)
         {
             var probed = verdict.Item.Id;
@@ -114,9 +110,6 @@ public partial class PeerController
             };
         }
 
-        // A stream for a user, and a download into the calling server's cache, are held to this server's
-        // speed for that server and for that user, when one is set. The calling server's media probe
-        // is small and is never slowed.
         var speed = peer.GetLinkStreamSpeedBytes(_configManager.Configuration.IsInBandwidthSchedule(), verdict.UserId);
         if (speed <= 0)
         {
@@ -132,18 +125,15 @@ public partial class PeerController
     }
 
     /// <summary>
-    /// Answers whether a user on the calling server may stream one of this server's files through a
-    /// link, with the same checks as the stream, so a refusal shows before playback starts. The file is
-    /// named by its id, or by its path here when the calling server's link is to another server and it
-    /// is looking for the same file to fall back to. An allowed answer carries the item's id and the
-    /// file's size, so the calling server can tell it is the same file.
+    /// Answers whether a user on the linking server may stream one of this server's files, with the same checks as the stream.
+    /// The file is named by its ID, or by its path when the caller looks for the same file to fall back to.
     /// </summary>
-    /// <param name="request">The item and user.</param>
-    /// <param name="policy">The link checks.</param>
-    /// <param name="userManager">The users here.</param>
-    /// <param name="libraryManager">The library, to find a file by its path.</param>
+    /// <param name="request">The file, by ID or path, and the user to check for.</param>
+    /// <param name="policy">Decides whether the server and user may stream the file.</param>
+    /// <param name="userManager">Finds the user a standard caller is held to.</param>
+    /// <param name="libraryManager">Finds a file by its path.</param>
     /// <param name="sessions">Tracks the link streams that are open, or null when none are kept.</param>
-    /// <returns>The answer.</returns>
+    /// <returns>Whether the stream is allowed, with the item's ID and size when it is.</returns>
     [HttpPost("Stream/Check")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -193,11 +183,9 @@ public partial class PeerController
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The stream reads it again and answers for itself, so a size it cannot read now is left out.
+            // The stream reads the file itself, so an unreadable size is left out.
         }
 
-        // How busy this server is for the caller goes with the answer, so a caller with several
-        // servers that hold the file picks the one with the most room without asking twice.
         return Ok(new LinkStreamCheckResponse
         {
             Allowed = true,
@@ -209,12 +197,11 @@ public partial class PeerController
     }
 
     /// <summary>
-    /// Receives playback of a link from the server that holds it, and shows it here as a session for the
-    /// user it streams as.
+    /// Receives playback of a link from the linking server, and shows it here as a session for the user it streams as.
     /// </summary>
     /// <param name="report">What the linking server reports about the playback.</param>
     /// <param name="sessions">Applies the report.</param>
-    /// <returns>No content, or why the report was refused.</returns>
+    /// <returns>204, or 403 with why the report was refused.</returns>
     [HttpPost("Playback")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -243,7 +230,7 @@ public partial class PeerController
         var why = await sessions.ApplyAsync(peer, report, HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
         if (why is not null)
         {
-            _logger.LogDebug("Ignored a playback report from '{Server}': {Reason}", peer.DisplayName, why);
+            _logger.LogDebug("Ignored a playback report from '{Server}': {Reason}", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(peer.DisplayName), JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(why, 300));
             return StatusCode(StatusCodes.Status403Forbidden, why);
         }
 
@@ -251,15 +238,14 @@ public partial class PeerController
     }
 
     /// <summary>
-    /// Passes a remote control command from the source's dashboard to a viewer of one of its files here.
-    /// The source may only control a session that is playing one of its own links here.
+    /// Passes a remote control command from the source's dashboard to a session here that is playing one of its links.
     /// </summary>
-    /// <param name="request">The command.</param>
-    /// <param name="sessionManager">The sessions here.</param>
-    /// <param name="libraryManager">The library.</param>
-    /// <param name="links">This server's links.</param>
-    /// <param name="grants">Which server each viewer streams from.</param>
-    /// <returns>No content, or why the command was refused.</returns>
+    /// <param name="request">The session and the command or message to send it.</param>
+    /// <param name="sessionManager">Finds the session and sends it the command.</param>
+    /// <param name="libraryManager">Finds the path of what the session is playing.</param>
+    /// <param name="links">Finds the link at that path.</param>
+    /// <param name="grants">Knows which server each viewer streams from.</param>
+    /// <returns>204, or why the command was refused.</returns>
     [HttpPost("Control")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -288,7 +274,7 @@ public partial class PeerController
 
         var session = sessionManager.Sessions.FirstOrDefault(s => string.Equals(s.Id, request.SessionKey, StringComparison.Ordinal));
         var playing = session?.NowPlayingItem?.Id is { } nowId ? libraryManager.GetItemById(nowId)?.Path : null;
-        // Only the server the viewer streams from, which after a fallback is not the link's own.
+        // Only the server the viewer streams from may control the session.
         if (session is null || playing is null || links.Find(playing) is not { } link
             || !string.Equals((grants.RouteFor(link.LinkId, session.UserId) ?? LinkFallback.PrimaryOf(link)).ServerKey, peer.Key, StringComparison.OrdinalIgnoreCase))
         {
@@ -310,12 +296,12 @@ public partial class PeerController
             await sessionManager.SendMessageCommand(null!, session.Id, new MediaBrowser.Model.Session.MessageCommand { Header = string.IsNullOrWhiteSpace(request.Header) ? peer.DisplayName : $"{peer.DisplayName}: {request.Header}", Text = request.Text, TimeoutMs = request.TimeoutMs }, aborted).ConfigureAwait(false);
         }
 
-        _logger.LogInformation("Passed a remote control command from '{Server}' to a viewer of {Path}", peer.DisplayName, playing);
+        _logger.LogInformation("Passed a remote control command from '{Server}' to a viewer of {Path}", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(peer.DisplayName), JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(playing));
         return NoContent();
     }
 
     /// <summary>
-    /// A standard user's key is held to that user: it streams as them, and its probe reads only what they can see.
+    /// Holds a standard user's key to that user, so it streams as them and its probe reads only what they can see.
     /// </summary>
     private LinkVerdict HeldToScopedUser(LinkVerdict verdict, IUserManager userManager)
     {
@@ -335,14 +321,12 @@ public partial class PeerController
     }
 
     /// <summary>
-    /// Answers for files the calling server holds links to: whether each is still here to stream, its
-    /// size, and, when asked, its media info, chapters, and which trickplay images this server holds.
-    /// The calling server checks its links against this on every content sync, and fills in a link's
-    /// media info from it rather than probing the file across the network.
+    /// Answers for files the linking server holds links to, with whether each is still here, its size, and its media info when asked.
+    /// The linking server checks its links against this on every Content run.
     /// </summary>
-    /// <param name="request">The items.</param>
-    /// <param name="libraryManager">The library.</param>
-    /// <param name="userManager">The users here.</param>
+    /// <param name="request">The item IDs to describe, and whether to include media info.</param>
+    /// <param name="libraryManager">Finds each item.</param>
+    /// <param name="userManager">Finds the user a standard caller is held to.</param>
     /// <param name="mediaSources">Reads an item's streams and attachments.</param>
     /// <param name="chapters">Reads an item's chapters.</param>
     /// <param name="trickplay">Reads an item's trickplay sets.</param>
@@ -379,7 +363,6 @@ public partial class PeerController
             return StatusCode(StatusCodes.Status403Forbidden, $"linking is not allowed for {peer.DisplayName} here");
         }
 
-        // A standard user's key only learns about what that user can see.
         var scopedId = PeerCallerGuard.ScopedUser(HttpContext);
         var scoped = scopedId is { } id ? userManager.GetUserById(id) : null;
         var response = new PeerLinkDescribeResponse();
@@ -456,20 +439,18 @@ public partial class PeerController
     }
 
     /// <summary>
-    /// Sends one image this server made for a file the calling server links to: a chapter's image, or a
-    /// trickplay tile. Jellyfin makes neither for a link, so the server holding the link takes them
-    /// from here.
+    /// Sends a chapter image or trickplay tile this server made for a file the caller links to, since Jellyfin makes neither for a link.
     /// </summary>
-    /// <param name="itemId">This server's id of the item.</param>
-    /// <param name="kind">Chapter or Trickplay.</param>
-    /// <param name="index">The chapter's index, or the tile's.</param>
-    /// <param name="serverId">The calling server's Jellyfin id.</param>
-    /// <param name="width">For a trickplay tile, the width of the set it belongs to.</param>
-    /// <param name="libraryManager">The library.</param>
-    /// <param name="userManager">The users here.</param>
+    /// <param name="itemId">The item's ID on this server.</param>
+    /// <param name="kind">The kind of image, Chapter or Trickplay.</param>
+    /// <param name="index">The index of the chapter or the tile.</param>
+    /// <param name="serverId">The Jellyfin ID of the linking server.</param>
+    /// <param name="width">The width of the trickplay set the tile belongs to.</param>
+    /// <param name="libraryManager">Finds the item and its library options.</param>
+    /// <param name="userManager">Finds the user a standard caller is held to.</param>
     /// <param name="chapters">Reads an item's chapters.</param>
     /// <param name="trickplay">Finds a trickplay tile.</param>
-    /// <returns>The image.</returns>
+    /// <returns>The image, or 404 when there is none.</returns>
     [HttpGet("Links/{itemId}/Images/{kind}/{index}")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -506,8 +487,7 @@ public partial class PeerController
             return NotFound();
         }
 
-        // A link's chapter images and trickplay tiles were taken from the server it links to, so they are
-        // not this server's to hand on, as Describe refuses a link.
+        // A link's images came from another server, so they are not handed on.
         if (item.Path?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true)
         {
             return NotFound();
@@ -527,13 +507,12 @@ public partial class PeerController
     }
 
     /// <summary>
-    /// Lists this server's links, each with the path its full copy would have, so a peer reading this
-    /// server's items matches a link by the file it stands in for rather than by its .strm.
+    /// Lists this server's links, each with the path its copy would have, so a peer matches a link by the file it stands in for.
     /// </summary>
-    /// <param name="table">The content sync table.</param>
-    /// <param name="userManager">The users here.</param>
-    /// <param name="libraryManager">The library.</param>
-    /// <returns>The links.</returns>
+    /// <param name="table">Reads the Content sync table.</param>
+    /// <param name="userManager">Finds the user a standard caller is held to.</param>
+    /// <param name="libraryManager">Finds the item behind each row, to check a standard user may see it.</param>
+    /// <returns>The links, or 503 when the table cannot be read.</returns>
     [HttpGet("Links")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -543,7 +522,6 @@ public partial class PeerController
         ArgumentNullException.ThrowIfNull(userManager);
         ArgumentNullException.ThrowIfNull(libraryManager);
 
-        // A standard user learns of the links it can see as items here, and of no other path.
         var scoped = PeerCallerGuard.ScopedUser(HttpContext);
         var owner = scoped is { } id ? userManager.GetUserById(id) : null;
         if (owner is null && scoped is not null)
@@ -551,8 +529,7 @@ public partial class PeerController
             return Ok(new PeerLinksResponse());
         }
 
-        // A table that cannot be read is no answer. An empty list would tell the peer this server holds
-        // no links, and it would take every .strm here for a file.
+        // An empty list would tell the peer every .strm here is a file.
         if (table.TryGetLinks() is not { } rows)
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "this server could not read its links");
@@ -568,13 +545,11 @@ public partial class PeerController
     }
 
     /// <summary>
-    /// The media files that left this server's library since a time. A server that reads this one
-    /// asks on each scan that lists only what changed, since Jellyfin answers what was added or
-    /// changed and nothing else remembers what was removed. Only ids are given: an id names nothing to
-    /// a caller that did not already hold the item.
+    /// Lists the IDs of media files that left this server's library since a time, since Jellyfin only answers what was added or changed.
+    /// An ID names nothing to a caller that did not already hold the item.
     /// </summary>
     /// <param name="since">The time to answer from, in UTC.</param>
-    /// <param name="removed">The record of removals.</param>
+    /// <param name="removed">Holds the record of removed items.</param>
     /// <returns>The ids removed since, and how far back the record reaches.</returns>
     [HttpGet("Changes")]
     [RequireCompatibleProtocol]
@@ -594,14 +569,12 @@ public partial class PeerController
     }
 
     /// <summary>
-    /// Lists the copies this server downloaded from other servers, each with the server it first came
-    /// from, so a peer reading this server's items can tell a file that is this server's own from one
-    /// it was given. A file that is this server's own is not listed.
+    /// Lists the copies this server downloaded from other servers, each with its origin, so a peer can tell them from this server's own files.
     /// </summary>
-    /// <param name="table">The content sync table.</param>
-    /// <param name="userManager">The users here.</param>
-    /// <param name="libraryManager">The library.</param>
-    /// <returns>The copies.</returns>
+    /// <param name="table">Reads the Content sync table.</param>
+    /// <param name="userManager">Finds the user a standard caller is held to.</param>
+    /// <param name="libraryManager">Finds the item behind each row, to check a standard user may see it.</param>
+    /// <returns>The copies, or 503 when the table cannot be read.</returns>
     [HttpGet("Copies")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -611,7 +584,6 @@ public partial class PeerController
         ArgumentNullException.ThrowIfNull(userManager);
         ArgumentNullException.ThrowIfNull(libraryManager);
 
-        // A standard user learns of the copies it can see as items here, and of no other path.
         var scoped = PeerCallerGuard.ScopedUser(HttpContext);
         var owner = scoped is { } id ? userManager.GetUserById(id) : null;
         if (owner is null && scoped is not null)
@@ -619,8 +591,7 @@ public partial class PeerController
             return Ok(new PeerCopiesResponse());
         }
 
-        // A table that cannot be read is no answer. An empty list would tell the peer every file here
-        // is this server's own.
+        // An empty list would tell the peer every file here is this server's own.
         if (table.TryGetCopiesWithOrigin() is not { } rows)
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "this server could not read its copies");
@@ -631,8 +602,7 @@ public partial class PeerController
             .Select(row => new PeerCopy { Path = row.LocalPath!, OriginServerId = row.OriginServerId! })
             .ToList();
 
-        // A copy removed within the last day may still be listed by Jellyfin, so its origin is still told.
-        // Only to a caller that sees everything: a path with no item left cannot be checked for a user.
+        // A removed copy has no item to check, so only full callers hear it.
         if (owner is null && HttpContext.RequestServices.GetService(typeof(RemovedItemsStore)) is RemovedItemsStore removedItems)
         {
             var listed = new System.Collections.Generic.HashSet<string>(copies.Select(copy => copy.Path), StringComparer.OrdinalIgnoreCase);

@@ -1,3 +1,4 @@
+using System;
 using System.Net.Mime;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
@@ -27,18 +28,22 @@ public class PeerPairController : ControllerBase
 
     /// <summary>Initializes a new instance of the <see cref="PeerPairController"/> class.</summary>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="pairings">The store of pairing secrets.</param>
+    /// <param name="pairings">Holds the secret each paired server issued.</param>
     /// <param name="logger">Writes log entries.</param>
     public PeerPairController(IPluginConfigurationManager configManager, PeerPairingStore pairings, ILogger<PeerPairController> logger)
     {
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(pairings);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _configManager = configManager;
         _pairings = pairings;
         _logger = logger;
     }
 
     /// <summary>Takes the secret a server offers and records it for that server.</summary>
-    /// <param name="request">The sender's id and the secret.</param>
-    /// <returns>The result of the pairing.</returns>
+    /// <param name="request">The sender's ID and the secret it issues.</param>
+    /// <returns>That the two are paired, or 400 or 409 with the reason.</returns>
     [HttpPost("Pair")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -57,17 +62,15 @@ public class PeerPairController : ControllerBase
             return Conflict($"server {request.ServerId} is not configured on this server, so it cannot pair");
         }
 
-        // A secret is only taken while this server is asking that entry for one. Any whitelisted caller
-        // can name an entry, and taken at any time its secret would replace the real one and cut this
-        // server off from that entry until the two paired again.
+        // A secret taken unasked would replace the real one and cut the entry off.
         if (!_pairings.Expecting(entry.Key))
         {
-            _logger.LogWarning("Refused a pairing secret for '{Peer}' that this server did not ask for", entry.DisplayName);
+            _logger.LogWarning("Refused a pairing secret for '{Peer}' that this server did not ask for", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(entry.DisplayName));
             return Conflict("this server is not asking that server to pair right now. Check the link from this server to pair");
         }
 
         _pairings.SetOutbound(entry.Key, request.Secret);
-        _logger.LogInformation("Paired with '{Peer}': it issued the secret this server presents to it", entry.DisplayName);
+        _logger.LogInformation("Paired with '{Peer}': it issued the secret this server presents to it", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(entry.DisplayName));
         return Ok(new { Paired = true });
     }
 }

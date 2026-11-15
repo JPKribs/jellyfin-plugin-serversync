@@ -66,7 +66,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
         try
         {
-            // A key saved while Data Protection was down is plaintext until it is protected here.
+            // A key saved while Data Protection was down is plaintext until protected here.
             var encrypted = false;
             foreach (var server in Configuration.Servers ?? new System.Collections.Generic.List<Models.Configuration.SourceServer>())
             {

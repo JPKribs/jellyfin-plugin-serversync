@@ -13,12 +13,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// The URL inside every link this server wrote. Jellyfin's own ffmpeg and its static stream proxy call
-/// it while playing a link, and they send no Jellyfin token, so it cannot require one. Instead it
-/// answers this server alone, and only with the secret that only this server can derive for the link.
-/// It streams the file from the source with this server's own credentials, which never leave it, for the
-/// user who asked to play the link, whom the source checks again. Jellyfin reads a link without saying
-/// who for, so when two users play one link at once this route reads for the one seen most recently.
+/// Serves the URL inside every link this server wrote, streaming the file from its source for the user who asked to play it.
+/// Jellyfin's own callers send no token, so the route answers this server alone and only with the secret this server derives for the link.
 /// </summary>
 [ApiController]
 [AllowAnonymous]
@@ -26,10 +22,8 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 public class LinkController : ControllerBase
 {
     /// <summary>
-    /// A request that passed through a proxy carries one of these. Jellyfin's own callers never do, and a
-    /// reverse proxy on this machine would otherwise look like this server itself. When Jellyfin trusts a
-    /// proxy, it takes the address from X-Forwarded-For and removes that header, but leaves the
-    /// X-Original ones behind, so a request whose address came from a header is still refused.
+    /// The headers that mark a request as passed through a proxy, which Jellyfin's own callers never send.
+    /// Jellyfin leaves the X-Original headers behind when it trusts a proxy, so those are refused too.
     /// </summary>
     private static readonly string[] ProxyHeaders = { "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-IP", "Forwarded", "Via", "X-Original-For", "X-Original-Host", "X-Original-Proto" };
 
@@ -55,10 +49,9 @@ public class LinkController : ControllerBase
     }
 
     /// <summary>
-    /// Whether a request comes from this server itself: from and to a loopback address, with nothing to
-    /// say it passed through a proxy on the way.
+    /// Whether a request comes from this server itself, from and to a loopback address with no sign of a proxy.
     /// </summary>
-    /// <param name="context">The current request.</param>
+    /// <param name="context">The request whose addresses and headers are checked.</param>
     /// <returns><c>true</c> when the request comes from this server itself.</returns>
     public static bool FromThisServer(HttpContext context)
     {
@@ -86,9 +79,9 @@ public class LinkController : ControllerBase
     }
 
     /// <summary>Streams the file a link stands in for, from the source that holds it.</summary>
-    /// <param name="linkId">The link's id.</param>
-    /// <param name="key">The link's secret.</param>
-    /// <returns>Nothing. The answer is written directly.</returns>
+    /// <param name="linkId">The link's ID, which is the item's ID on the source.</param>
+    /// <param name="key">The secret the link carries.</param>
+    /// <returns>An empty result once the stream is written, or the status that refuses it.</returns>
     [HttpGet("{linkId}")]
     [HttpHead("{linkId}")]
     public async Task<IActionResult> Get([FromRoute] string linkId, [FromQuery(Name = "k")] string? key)
@@ -111,10 +104,10 @@ public class LinkController : ControllerBase
             return NotFound();
         }
 
-        // Only a user who asked to play the link, or this server's own media probe, may read it.
+        // Only a user who asked to play the link, or the probe, may read.
         if (_grants.Use(linkId) is not { } grant)
         {
-            _logger.LogWarning("Refused a read of the link {Path}: nobody here asked to play it", row.LocalPath);
+            _logger.LogWarning("Refused a read of the link {Path}: nobody here asked to play it", JPKribs.Jellyfin.Base.FormatUtilities.SanitizeForLog(row.LocalPath));
             return StatusCode(StatusCodes.Status403Forbidden);
         }
 

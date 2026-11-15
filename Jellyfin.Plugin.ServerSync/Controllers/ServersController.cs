@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Net.Mime;
 using Jellyfin.Plugin.ServerSync.Services.ContentSync.Cleanup;
@@ -16,9 +17,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// Operator actions on a server entry beyond saving the configuration. Removing an entry leaves rows in
-/// every sync table that carry its key with nothing to pull from, so the Servers tab asks for them to
-/// go when the entry is removed. Files already downloaded are never touched.
+/// The operator's actions on a server entry beyond saving the settings.
+/// Removing an entry removes the rows that carry its key, and never touches files already downloaded.
 /// </summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
@@ -39,14 +39,14 @@ public class ServersController : ControllerBase
     /// <summary>
     /// Initializes a new instance of the <see cref="ServersController"/> class.
     /// </summary>
-    /// <param name="content">The content table.</param>
-    /// <param name="history">The history table.</param>
-    /// <param name="metadata">The metadata table.</param>
-    /// <param name="people">The people table.</param>
-    /// <param name="users">The user table.</param>
-    /// <param name="outbound">The outbound hint store.</param>
-    /// <param name="inbound">The inbound hint store.</param>
-    /// <param name="pairings">The pairing secrets.</param>
+    /// <param name="content">Removes the entry's Content rows and finds its links.</param>
+    /// <param name="history">Removes the entry's History rows.</param>
+    /// <param name="metadata">Removes the entry's Metadata rows.</param>
+    /// <param name="people">Removes the entry's People rows.</param>
+    /// <param name="users">Removes the entry's Users rows.</param>
+    /// <param name="outbound">Removes the hints owed to the entry.</param>
+    /// <param name="inbound">Removes the hints the entry sent.</param>
+    /// <param name="pairings">Forgets the secrets shared with the entry.</param>
     /// <param name="logger">Writes log entries.</param>
     public ServersController(
         ContentSyncTableManager content,
@@ -59,6 +59,16 @@ public class ServersController : ControllerBase
         Services.Peer.PeerPairingStore pairings,
         ILogger<ServersController> logger)
     {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(people);
+        ArgumentNullException.ThrowIfNull(users);
+        ArgumentNullException.ThrowIfNull(outbound);
+        ArgumentNullException.ThrowIfNull(inbound);
+        ArgumentNullException.ThrowIfNull(pairings);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _pairings = pairings;
         _inbound = inbound;
         _content = content;
@@ -70,11 +80,11 @@ public class ServersController : ControllerBase
         _logger = logger;
     }
 
-    /// <summary>Removes every sync row and queued hint that came from one server entry.</summary>
-    /// <param name="key">The entry key.</param>
-    /// <param name="serverId">The removed server's id, so hints it sent and that wait here go too.</param>
-    /// <param name="libraryManager">Reads and changes Jellyfin's library, or null to skip the library.</param>
-    /// <returns>How many rows were removed per table.</returns>
+    /// <summary>Removes every sync row, queued hint, and link that came from one server entry. Its copies are real files and stay.</summary>
+    /// <param name="key">The key of the removed server entry.</param>
+    /// <param name="serverId">The removed server's Jellyfin ID, so the hints it sent go too.</param>
+    /// <param name="libraryManager">Lists the library folders links are removed under, or null to leave links alone.</param>
+    /// <returns>How many rows were removed from each table.</returns>
     [HttpDelete("{key}/Rows")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -85,8 +95,6 @@ public class ServersController : ControllerBase
             return BadRequest("A server key is required.");
         }
 
-        // The removed server's links point at a server this one no longer talks to, so they go with
-        // their rows. Only a .strm this plugin wrote is removed. Its copies are real files and stay.
         var links = 0;
         var roots = libraryManager?.GetVirtualFolders().SelectMany(folder => folder.Locations ?? System.Array.Empty<string>()).ToList() ?? new System.Collections.Generic.List<string>();
         foreach (var row in (_content.TryGetLinks() ?? new System.Collections.Generic.List<Models.ContentSync.SyncItem>())

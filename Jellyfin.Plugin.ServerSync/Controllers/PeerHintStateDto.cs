@@ -22,8 +22,8 @@ public class PeerHintStateDto
     public string? Reason { get; set; }
 
     /// <summary>
-    /// Gets or sets the kinds this server sends to the peer, which are the modules selected there, or
-    /// null when the peer has not said yet, in which case everything is sent.
+    /// Gets or sets the kinds this server sends to the peer, which are the sync types turned on there.
+    /// It is null until the peer has said, and everything is sent meanwhile.
     /// </summary>
     public List<string>? Sends { get; set; }
 }

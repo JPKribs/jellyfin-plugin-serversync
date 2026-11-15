@@ -42,7 +42,7 @@ public class SyncHint
     public DateTime VersionTimestamp { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether a person made the change. A peer that leaves it out is read as <c>true</c>.
+    /// Gets or sets a value indicating whether a person made the change, which is <c>true</c> when a peer leaves it out.
     /// A provider's change is marked <c>false</c>, so it only fills in where the receiver recorded no edit of its own.
     /// </summary>
     public bool Recorded { get; set; } = true;

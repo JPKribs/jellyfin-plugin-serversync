@@ -423,7 +423,7 @@ public static class JsonComparisonUtility
                         return true;
                     }
 
-                    // A midnight shifted by a zone lands on a whole hour of the same date.
+                    // A midnight shifted by a zone lands on a whole hour that date.
                     if (dto1.Minute == 0 && dto1.Second == 0
                         && dto2.Minute == 0 && dto2.Second == 0
                         && dto1.UtcDateTime.Date == dto2.UtcDateTime.Date

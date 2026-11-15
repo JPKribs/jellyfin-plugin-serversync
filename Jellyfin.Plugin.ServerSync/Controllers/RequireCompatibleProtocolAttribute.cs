@@ -11,8 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// Refuses a peer whose wire protocol does not overlap this build's. A caller from before protocol
-/// versions sends none, and is let through only on exactly this plugin version.
+/// Refuses a peer whose protocol does not overlap this server's.
+/// A caller that sends no protocol version is let through only on exactly this plugin version.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method)]
 public sealed class RequireCompatibleProtocolAttribute : ActionFilterAttribute
@@ -32,6 +32,7 @@ public sealed class RequireCompatibleProtocolAttribute : ActionFilterAttribute
         }
     }
 
+    /// <summary>Reads a header as a whole number, or null when it is missing or not one.</summary>
     private static int? ReadInt(IHeaderDictionary headers, string name)
         => int.TryParse(headers[name].FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
 }
