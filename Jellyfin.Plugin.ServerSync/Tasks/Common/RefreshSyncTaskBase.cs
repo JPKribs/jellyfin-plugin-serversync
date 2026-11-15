@@ -960,7 +960,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 Settings = ScopeSettings,
                 Extra = extra
             });
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(shape)))[..16];
+        return HashUtilities.Sha256Hex(shape, 16).ToUpperInvariant();
     }
 
     /// <summary>

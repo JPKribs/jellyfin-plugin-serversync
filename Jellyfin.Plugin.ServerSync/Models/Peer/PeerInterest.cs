@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
@@ -60,7 +61,7 @@ public class PeerInterest
                 .OrderBy(id => id, StringComparer.Ordinal)
                 .ToList()
         };
-        interest.Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { interest.Kinds, interest.Libraries, interest.Users }))))[..16];
+        interest.Revision = HashUtilities.Sha256Hex(JsonSerializer.Serialize(new { interest.Kinds, interest.Libraries, interest.Users }), 16).ToUpperInvariant();
         return interest;
     }
 

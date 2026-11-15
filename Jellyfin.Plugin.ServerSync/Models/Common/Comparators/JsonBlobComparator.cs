@@ -1,6 +1,7 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 
@@ -22,7 +23,6 @@ public sealed class JsonBlobComparator : ISyncComparator<string>
             return null;
         }
 
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        return HashUtilities.Sha256Hex(value);
     }
 }

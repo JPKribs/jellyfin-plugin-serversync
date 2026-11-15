@@ -161,7 +161,7 @@ public static class FileOperationUtilities
             return full;
         }
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(directory)))[..8].ToLowerInvariant();
+        var hash = HashUtilities.Sha256Hex(directory, 8);
         return FitName(hash + "~" + encodedPath, nameWithoutExt, timestamp, extension, keepPrefixChars: hash.Length + 1);
     }
 

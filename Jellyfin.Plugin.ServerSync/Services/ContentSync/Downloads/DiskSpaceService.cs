@@ -18,7 +18,6 @@ namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Downloads;
 /// </summary>
 public static class DiskSpaceService
 {
-    private const long BytesPerGigabyte = 1024L * 1024L * 1024L;
 
     /// <summary>
     /// Paths already reported as unmeasurable, so each logs one warning instead of one per item.
@@ -44,7 +43,7 @@ public static class DiskSpaceService
     /// <summary>
     /// Converts gigabytes to bytes.
     /// </summary>
-    private static long GigabytesToBytes(int gigabytes) => gigabytes * BytesPerGigabyte;
+    private static long GigabytesToBytes(int gigabytes) => gigabytes * ByteSize.Gigabyte;
 
     /// <summary>
     /// Gets the disk space of every enabled library mapping's root folder.

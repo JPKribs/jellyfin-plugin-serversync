@@ -107,19 +107,7 @@ public partial class SourceServerClient
                 return (null, null);
             }
 
-            using var sha256 = System.Security.Cryptography.SHA256.Create();
-            var buffer = new byte[8192];
-            long totalBytes = 0;
-            int bytesRead;
-            while ((bytesRead = await imageStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                sha256.TransformBlock(buffer, 0, bytesRead, null, 0);
-                totalBytes += bytesRead;
-            }
-
-            sha256.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-            var hash = Convert.ToHexString(sha256.Hash!).ToLowerInvariant()[..32];
-
+            var (hash, totalBytes) = await HashUtilities.ComputeSha256HashAsync(imageStream, cancellationToken).ConfigureAwait(false);
             return (hash, totalBytes);
         }
         // The image opener already logs and wraps its InvalidOperationException.

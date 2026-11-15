@@ -105,12 +105,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <returns>The limit in bytes.</returns>
     public long GetLinkCacheLimitBytes(long usedBytes, long freeBytes)
     {
-        const long Gb = 1024L * 1024L * 1024L;
-        var room = Math.Max(0, usedBytes) + Math.Max(0, freeBytes - (Math.Max(0, MinimumFreeDiskSpaceGb) * Gb));
+        var room = Math.Max(0, usedBytes) + Math.Max(0, freeBytes - (Math.Max(0, MinimumFreeDiskSpaceGb) * ByteSize.Gigabyte));
         return EffectiveLinkCacheSizing switch
         {
             Models.ContentSync.Configuration.LinkCacheSizing.Off => 0,
-            Models.ContentSync.Configuration.LinkCacheSizing.Fixed => LinkCacheSizeGb * Gb,
+            Models.ContentSync.Configuration.LinkCacheSizing.Fixed => LinkCacheSizeGb * ByteSize.Gigabyte,
             Models.ContentSync.Configuration.LinkCacheSizing.Percent => (long)(room * (Math.Clamp(LinkCachePercent, 1, 100) / 100.0)),
             _ => room
         };

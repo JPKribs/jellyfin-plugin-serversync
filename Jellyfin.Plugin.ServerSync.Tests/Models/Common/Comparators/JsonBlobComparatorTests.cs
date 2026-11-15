@@ -110,4 +110,17 @@ public class JsonBlobComparatorTests
         var result = Cmp.Equals(null, "{\"a\":1}");
         Assert.False(result);
     }
+
+    /// <summary>
+    /// The hash of a value is the full SHA256 of its text in lowercase hex.
+    /// True: hashes stored by earlier releases still match, so nothing looks changed.
+    /// False: every tracked row would read as changed and be synced again.
+    /// </summary>
+    [Fact]
+    public void ComputeHash_KnownValue_IsLowercaseSha256()
+    {
+        var hash = Cmp.ComputeHash("abc");
+
+        Assert.Equal("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", hash);
+    }
 }

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 
@@ -108,8 +109,7 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
                 map.OrderBy(k => k.Key, StringComparer.Ordinal)
                     .Select(k => $"{k.Key}:{string.Join(",", k.Value.Select(v => $"{v.Tag ?? string.Empty}_{v.Size}_{v.Width}x{v.Height}").OrderBy(v => v, StringComparer.Ordinal))}"));
 
-            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(fingerprint));
-            return Convert.ToHexString(bytes).ToLowerInvariant();
+            return HashUtilities.Sha256Hex(fingerprint);
         }
         catch (JsonException)
         {

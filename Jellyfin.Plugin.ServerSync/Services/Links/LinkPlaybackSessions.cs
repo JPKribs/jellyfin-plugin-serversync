@@ -69,8 +69,7 @@ public sealed class LinkPlaybackSessions
     public static string DeviceIdFor(SourceServer peer, string sessionKey)
     {
         ArgumentNullException.ThrowIfNull(peer);
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(peer.Key + "|" + sessionKey)))[..24];
-        return "serversync-link-" + hash.ToLowerInvariant();
+        return "serversync-link-" + HashUtilities.Sha256Hex(peer.Key + "|" + sessionKey, 24);
     }
 
     /// <summary>Applies one playback report to its session here.</summary>

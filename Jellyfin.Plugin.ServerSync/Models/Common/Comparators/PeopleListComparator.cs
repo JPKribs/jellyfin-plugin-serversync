@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 
@@ -60,8 +61,7 @@ public sealed class PeopleListComparator : ISyncComparator<string>
             return null;
         }
 
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", keys)));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        return HashUtilities.Sha256Hex(string.Join("\n", keys));
     }
 
     /// <summary>

@@ -353,4 +353,17 @@ public sealed class LinkPlaybackSessionsTests
         AllowLinking = true,
         UserMappings = { new UserMapping { SourceUserId = RemoteUser.ToString("N"), LocalUserId = _user.Id.ToString("N") } }
     };
+
+    /// <summary>
+    /// A viewer's device id is the prefix and the first 24 lowercase hex characters of the SHA256 of the server key and session key.
+    /// True: a viewer keeps the device the source already lists for them.
+    /// False: every viewer would show as a new device after an update.
+    /// </summary>
+    [Fact]
+    public void DeviceIdFor_KnownViewer_KeepsItsFormat()
+    {
+        var id = LinkPlaybackSessions.DeviceIdFor(new global::Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer { Key = "abc" }, "def");
+
+        Assert.Equal("serversync-link-" + System.Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("abc|def")))[..24].ToLowerInvariant(), id);
+    }
 }
