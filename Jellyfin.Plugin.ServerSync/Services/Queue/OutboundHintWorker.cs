@@ -603,7 +603,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
             state.Interest = null;
             _logger.LogDebug("'{Peer}' refused to say what it wants ({Status}). Sending everything until it answers, so the refusal surfaces as a pause", FormatUtilities.SanitizeForLog(peer.DisplayName), (int?)ex.StatusCode);
         }
-catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogDebug(ex, "Could not read what '{Peer}' wants. Keeping the last answer", FormatUtilities.SanitizeForLog(peer.DisplayName));
         }
