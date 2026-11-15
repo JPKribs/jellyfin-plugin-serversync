@@ -2,18 +2,19 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.14.0"
+version: "12.4.14.1"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
 description: >
   Server Sync keeps a pool of Jellyfin servers in step. Each server scans the others it is told to in
-  priority order and pulls missing or updated content, metadata, people, user settings, playlists, and
+  rank order and pulls missing or updated content, metadata, people, user settings, playlists, and
   watch history. Servers that both run the plugin also tell each other about changes as they happen, so an
   edit or a play made on one shows up on the others within about a minute, and the scheduled scan remains
   the safety net. Watch history merges three way against what the servers last agreed on, and other
-  values resolve on where and when they were last edited, so the newest edit always wins. A library can
-  also hold its videos as links that stream from the source instead of full copies, and a link cache can keep local copies of the links that are played.
+  values resolve on where and when they were last edited, so the newest edit wins unless Precedence is
+  set to Ranked. A library can also hold its videos as links that stream from the source instead of
+  full copies, and a link cache can keep local copies of the links that are played.
 category: "Administration"
 owner: "JPKribs"
 artifacts:
@@ -28,32 +29,24 @@ artifacts:
 - "Microsoft.IO.RecyclableMemoryStream.dll"
 - "Std.UriTemplate.dll"
 changelog:
-  added:
-  - Precedence, for metadata, people, playlists, and user settings. Newest lets a lower ranked server be heard over the ones above it when it changed something last. Ranked keeps to the order on the Servers tab
-  - User settings travel both ways with a Sync server. A change made here stays until that server takes it, and a change made there is applied here
-  - User Conflicts, for the permissions of a user changed on both sides since the two last agreed. Other Server, Permissive for everything either server allows, or Restrictive for only what both allow. A disabled user stays disabled under either
-  - Removed Playlists, to delete or keep a copy when the server it came from deletes its playlist. A deletion is remembered, so a deleted playlist is not made again from another server's copy unless that copy was edited afterwards
-  - Check Link shows its answer as a verdict and a list, one line with a badge for each thing it learned. How the other server lists this one, which way changes travel, what it applies from this server, what it reads here, pairing, and the two clocks when they differ
-  - Playlist Sync under Settings > Troubleshooting forgets which playlists are copies of another server's. The next playlist sync works it out again from the copies themselves
   changed:
-  - This release carries no upgrade steps for releases before 12.4.13.0. A server on anything older must run 12.4.13.0 for a day before updating
-  - A server that skips 12.4.13.0 holds Server Sync and leaves Jellyfin running as usual. Its database and settings are left exactly as they were, the settings are copied aside, every save is refused, nothing of Server Sync runs, and every Server Sync page, the log, and the Activity page say which release to install first
-  - Saving a server as Push or Sync, or with a library kept as links, is refused when its Server Sync is too far from this version for the two to talk
-  - The Sharing option of playlist sync shows only while playlist sync is on, as the options of every other sync type do
-  - The table resets under Settings > Troubleshooting are in alphabetical order
+  - The third step of a server entry is named Linking, the metadata option for who appears in an item is named People, and a synced copy on the Sync tab reads Synced
+  - Descriptions and messages across the pages are shorter and end with a period, and the hint above the server list says how rank works
+  - The reasons a link stream is refused name the count plainly, as in 1 stream or 2 link streams
+  - The scheduled steps that Sync Content and Sync Information run are named for what they do in the log and on the Activity page, such as Scan Content and Copy Content
   fixed:
-  - A scan only ever heard the highest ranked server that held an item. A change made on a lower ranked server whose announcement was lost never arrived, for metadata, people, user settings, and watch history
-  - Between two servers that each sync with a third and not with each other, a play made on one undid a favorite made on the other. A watch history change now says whether it is the play or the favorite, and only that part is taken
-  - A playlist deleted on a Sync server while its announcement was lost stayed on the others for good, and could be copied back to the server that deleted it
-  - History, playlists, and user settings could be switched on with no user mapping, where they had nothing to sync. Each now says a user mapping is needed first, as playlists did
-  - A sync database that could not be opened when Jellyfin started stopped Jellyfin from starting. It is opened on first use, so only Server Sync is affected
-  - The words beside a button, such as a failed check, sat below the button's centre line
+  - A viewer who stopped a link stayed on the source's dashboard as still playing, and pressing Stop there answered that the session was not found. The session now goes idle when playback stops and leaves the dashboard 20 minutes later
+  - Saving a server entry with an empty Server URL was accepted and dropped its stored API Key. The save is refused and the key is kept
+  - A user that had never synced showed a last sync of 739934 days ago. It reads Never
+  - A deep page of a large Sync tab table took about a second to load. It sorts the page before reading its rows
+  - A watch history refresh looked up the same user for every item. A refresh that took 40.5 seconds takes 17.2 on the same data
+  - The refusal to save a server whose Server Sync cannot talk to this one showed as a pop up. It shows beside the Save button
+  - A settings file with an empty server entry stopped the settings from loading
+  - The History detail on a phone ran off the side of the screen
   developer:
-  - A watch history hint's ItemType carries the parts that changed after the item's type, as in Movie+Played or Movie+Favorite. A server on an older release reads it as the item's type and decides as before
-  - integration/run.py gains a chain of three servers whose ends do not know each other, and a ring of three equals in which the server ranked last makes changes that are never announced. Each covers metadata, watch history, playlists, and user settings
-  - The database is created from one schema, still version 36, with no migration steps. A test pins every table, column, and index to that version
-  - The single source settings from before servers were a list, the per module deep image verification settings, the Stream direction, the playlist-copies.json import, and the one time conversions for the whitelist, the linking rules, and existing copies are removed
-  - POST /Sync/Tasks/{taskKey}/Run replaces the ten TriggerRefresh and TriggerSync routes, and POST /Sync/Reset/{table} the six reset routes and adds Playlists
-  - GET /Sync/Stats, GET /Sync/Capabilities, POST /Sync/UpdateItemStatus, POST /Sync/HistoryItems/UpdateStatus, and POST /Sync/MetadataItems/UpdateStatus are removed. One row is ignored or queued through the same routes as many
-  - GET /Sync/Health says whether Server Sync can run and why not. POST /Sync/Hints/CheckPeer also answers with Headline, Details, and Incompatible
-  - integration/matrix.py fails a round whose change queues do not drain, or in which anything is raised in the fifteen seconds after they do, and leaves a ring of three equals idle for three minutes to prove nothing travels
+  - The guides in starthere.md and skills cover naming, style, code, testing, profiling, documentation, review, and release, and docs/Architecture.md maps the parts
+  - Tests mirror the source folders, shared fakes live in Fakes, and the tests that measure real time or disk space run in one serial collection
+  - The image proxy asks the source through SourceServerClientFactory, as every other call does
+  - A history fetch no longer asks the source for media sources, which it never read
+  - Values another server or a request supplies pass through SanitizeForLog in the link, provider, and whitelist log lines
+  - PluginConfiguration.ValidateConfiguration and IsValid, which nothing called, are removed
