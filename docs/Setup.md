@@ -30,7 +30,7 @@ Steps are numbered in the order they show, so a Pull server's Libraries is step 
 | :--- | :--- |
 | ![Library Mapping](screenshots/settings/Library%20Mapping.png) | ![User Mapping](screenshots/settings/User%20Mapping.png) |
 
-![Stream](screenshots/settings/Stream.png)
+![Linking](screenshots/settings/Linking.png)
 
 **Test Connection** shows who the key belongs to, whether it may download, whether Server Sync there lets it in, and what each sync type can do with it.
 
