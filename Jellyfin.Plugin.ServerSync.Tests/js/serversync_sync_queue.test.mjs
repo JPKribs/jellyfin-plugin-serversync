@@ -260,9 +260,9 @@ test('render fills the counts and shows the unmatched warning', function () {
     var text = function (id) { return env.view.querySelector('#' + id).textContent; };
     assert.equal(text('queuePendingCount'), '3');
     assert.equal(text('queueSentCount'), '2');
-    assert.equal(text('queueFailedCount'), 1);
-    assert.equal(text('queueInboundCount'), 4);
-    assert.equal(text('queueGatheringCount'), 1);
+    assert.equal(text('queueFailedCount'), '1');
+    assert.equal(text('queueInboundCount'), '4');
+    assert.equal(text('queueGatheringCount'), '1');
     assert.equal(env.view.querySelector('#queueFailedActions').classList.contains('hidden'), false);
     assert.equal(env.view.querySelector('#queueUnmatched').classList.contains('hidden'), false);
     assert.match(env.view.querySelector('#queueUnmatchedText').textContent, /^2 local changes matched no library or user mapping/);
