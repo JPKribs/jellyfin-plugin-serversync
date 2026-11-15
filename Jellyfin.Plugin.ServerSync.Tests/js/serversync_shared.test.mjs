@@ -4,7 +4,7 @@
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { installPage, loadScript } from './support.mjs';
+import { installPage, loadScript, statusText } from './support.mjs';
 
 var timers = [];
 globalThis.setTimeout = function (fn) { timers.push(fn); return timers.length; };
@@ -178,8 +178,8 @@ test('saveSection saves the changed config and reports the success message', asy
     assert.equal(seen.Changed, true);
     assert.equal(saved.Changed, true);
     var el = view.querySelector('#status');
-    assert.equal(el.textContent, 'Saved.');
-    assert.ok(el.classList.contains('jpk-status-ok'));
+    assert.equal(statusText(el), 'Saved.');
+    assert.ok(el.classList.contains('base-status-ok'));
 });
 
 test('saveSection resolves null and reports the failure message when the save does not land', async function () {
@@ -188,8 +188,8 @@ test('saveSection resolves null and reports the failure message when the save do
     var saved = await shared.saveSection(function () {}, 'status', 'Saved.', 'Could not save.');
     assert.equal(saved, null);
     var el = view.querySelector('#status');
-    assert.equal(el.textContent, 'Could not save.');
-    assert.ok(el.classList.contains('jpk-status-bad'));
+    assert.equal(statusText(el), 'Could not save.');
+    assert.ok(el.classList.contains('base-status-bad'));
 });
 
 test('saveSection reports a failure when the mutator throws, and never saves', async function () {
@@ -199,17 +199,17 @@ test('saveSection reports a failure when the mutator throws, and never saves', a
     var saved = await shared.saveSection(function () { throw new Error('removed'); }, 'status', 'Saved.', 'Could not save.');
     assert.equal(saved, null);
     assert.equal(posted, 0);
-    assert.equal(view.querySelector('#status').textContent, 'Could not save.');
+    assert.equal(statusText(view.querySelector('#status')), 'Could not save.');
 });
 
 test('syncStatus shows a result on the Sync tab status line, in the error color for a failure', function () {
     shared.syncStatus('Item deleted.', false);
     var el = view.querySelector('#syncStatus');
-    assert.equal(el.textContent, 'Item deleted.');
-    assert.ok(el.classList.contains('jpk-status-ok'));
+    assert.equal(statusText(el), 'Item deleted.');
+    assert.ok(el.classList.contains('base-status-ok'));
     shared.syncStatus('Could not delete the item.', true);
-    assert.ok(el.classList.contains('jpk-status-bad'));
-    assert.equal(el.classList.contains('jpk-status-ok'), false);
+    assert.ok(el.classList.contains('base-status-bad'));
+    assert.equal(el.classList.contains('base-status-ok'), false);
 });
 
 test('pageHelpers returns helpers bound to the bag, so a page can call them by bare name', function () {
@@ -223,25 +223,29 @@ test('pageHelpers returns helpers bound to the bag, so a page can call them by b
     assert.equal(requestFor({ Url: 'u', Key: 'k' }).ServerKey, 'k');
 });
 
-test('renderItemThumb gives the placeholder alone when there is no item', function () {
-    var html = shared.renderItemThumb('', 'k');
-    assert.match(html, /jpk-table-row-thumb-placeholder/);
-    assert.doesNotMatch(html, /<img/);
-    assert.doesNotMatch(html, /hidden/);
+test('proxyImage gives no loader when there is no id', function () {
+    assert.equal(shared.proxyImage('', false, 'k'), null);
+    assert.equal(shared.proxyImage(null, true, 'k'), null);
 });
 
-test('renderItemThumb pairs the image with a hidden placeholder and writes no inline style', function () {
-    var html = shared.renderItemThumb('item-1', 'k');
-    assert.match(html, /<img id="ss-thumb-\d+" class="jpk-table-row-thumb jpk-table-row-thumb-portrait"/);
-    assert.match(html, /class="hidden jpk-table-row-thumb-placeholder"/);
-    assert.doesNotMatch(html, /style=/);
+test('proxyImage asks the image proxy for the item on its server, and for a user when told', async function () {
+    var asked = [];
+    globalThis.ApiClient.getUrl = function (path, params) { asked.push({ path: path, params: params }); return 'proxy-url'; };
+    globalThis.ApiClient.fetch = function () { return Promise.resolve({ ok: true, blob: function () { return Promise.resolve('picture'); } }); };
+
+    var item = await shared.proxyImage('item-1', false, 'k')();
+    await shared.proxyImage('user-1', true, '')();
+
+    assert.equal(item, 'picture');
+    assert.deepEqual(asked[0], { path: 'Sync/ImageProxy', params: { itemId: 'item-1', user: 'false', maxHeight: 80, serverKey: 'k' } });
+    assert.deepEqual(asked[1], { path: 'Sync/ImageProxy', params: { itemId: 'user-1', user: 'true', maxHeight: 80 } });
 });
 
-test('renderUserThumb and renderPersonThumb use their own shapes', function () {
-    assert.match(shared.renderUserThumb('u1', 'k'), /class="jpk-table-row-thumb-user"/);
-    assert.match(shared.renderUserThumb('u1', 'k'), /class="hidden jpk-table-row-thumb-user-placeholder"/);
-    assert.match(shared.renderPersonThumb('p1', 'k'), /jpk-table-row-thumb-portrait/);
-    assert.doesNotMatch(shared.renderPersonThumb('p1', 'k'), /onload/);
+test('proxyImage fails its loader when the proxy answers with an error, so the placeholder stays', async function () {
+    globalThis.ApiClient.getUrl = function () { return 'proxy-url'; };
+    globalThis.ApiClient.fetch = function () { return Promise.resolve({ ok: false }); };
+
+    await assert.rejects(shared.proxyImage('item-1', false, 'k')());
 });
 
 test('scheduleProxyImage hides the image and shows its placeholder when the image cannot load', async function () {

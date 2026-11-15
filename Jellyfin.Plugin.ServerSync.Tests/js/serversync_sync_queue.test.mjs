@@ -4,7 +4,7 @@
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSyncContext, loadScript, flush } from './support.mjs';
+import { createSyncContext, loadScript, flush, statusText } from './support.mjs';
 
 globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
@@ -170,7 +170,7 @@ test('a row has a discard button with a name and a times sign, and none of the o
     queue._data = { Outbound: [{ Id: 12, State: 0, Kind: 'Metadata', PeerKey: 'k1', PeerName: 'Alpha', Title: 'T', Attempts: 0 }] };
     queue.renderList();
     var html = env.view.querySelector('#queueList').innerHTML;
-    assert.match(html, /class="jpk-row-btn serversync-queue-discard" data-lane="Outbound" data-discard="12" title="Discard" aria-label="Discard"><span aria-hidden="true">&times;<\/span>/);
+    assert.match(html, /class="base-row-btn serversync-queue-discard" data-lane="Outbound" data-discard="12" title="Discard" aria-label="Discard"><span aria-hidden="true">&times;<\/span>/);
     assert.doesNotMatch(html, /✕/);
 });
 
@@ -299,7 +299,7 @@ test('discarding a change deletes it from its lane and reports it', async functi
     await flush();
     var del = env.page.requests.find(function (r) { return r.type === 'DELETE'; });
     assert.equal(del.url, 'Sync/Hints/Outbound/5');
-    assert.equal(env.view.querySelector('#syncStatus').textContent, 'Hint discarded.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), 'Hint discarded.');
 });
 
 test('a discard that fails reports it and lets the button be used again', async function () {
@@ -307,7 +307,7 @@ test('a discard that fails reports it and lets the button be used again', async 
     env.responses.push(new Error('refused'));
     queue._onDiscard({ target: button });
     await flush();
-    assert.equal(env.view.querySelector('#syncStatus').textContent, 'Could not discard the hint.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), 'Could not discard the hint.');
     assert.equal(button.disabled, false);
 });
 
@@ -341,7 +341,7 @@ test('failedAction posts to its route and says how many changes it handled', asy
     assert.equal(buttons[0].disabled, true);
     await flush();
     assert.equal(env.page.requests.find(function (r) { return r.url === 'Sync/Hints/Failed/Retry'; }).type, 'POST');
-    assert.equal(env.view.querySelector('#syncStatus').textContent, '2 failed changes tried again.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), '2 failed changes tried again.');
     assert.equal(buttons[0].disabled, false);
 });
 
@@ -350,7 +350,7 @@ test('failedAction says what could not be done and points to the server log', as
     env.responses.push(new Error('refused'));
     queue.failedAction('Hints/Failed', 'DELETE', 'Removed', 'one', 'many');
     await flush();
-    assert.equal(env.view.querySelector('#syncStatus').textContent, 'Could not finish that. See the server log.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), 'Could not finish that. See the server log.');
 });
 
 test('runNow delivers what was due and reports it', async function () {
@@ -359,7 +359,7 @@ test('runNow delivers what was due and reports it', async function () {
     queue.runNow();
     assert.equal(button.disabled, true);
     await flush();
-    assert.equal(env.view.querySelector('#syncStatus').textContent, 'Delivered and applied what was due.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), 'Delivered and applied what was due.');
     assert.equal(button.disabled, false);
 });
 

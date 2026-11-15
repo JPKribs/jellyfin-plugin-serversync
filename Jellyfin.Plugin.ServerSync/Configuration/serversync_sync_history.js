@@ -52,12 +52,12 @@ export function createHistorySyncTableModule(ctx, kit) {
                     key: 'name',
                     label: 'Item',
                     type: 'custom',
-                    className: 'jpk-table-cell-with-thumb',
+                    className: 'base-table-cell-with-thumb',
+                    image: function(item) { return ServerSyncShared.proxyImage(item.SourceItemId, false, item.ServerKey); },
                     render: function(item) {
                         var userMapping = self.findUserMapping(item);
                         var users = (userMapping ? userMapping.SourceUserName : 'Unknown') + ' → ' + (userMapping ? userMapping.LocalUserName : 'Unknown');
-                        return renderRowInfo(ServerSyncShared.renderItemThumb(item.SourceItemId, item.ServerKey),
-                            item.ItemName || 'Unknown', users, item, item.Status);
+                        return renderRowInfo(item.ItemName || 'Unknown', users, item, item.Status);
                     }
                 },
                 {
@@ -67,7 +67,7 @@ export function createHistorySyncTableModule(ctx, kit) {
                     className: 'serversync-details-cell',
                     render: function(item) {
                         if (!item.HasChanges) {
-                            return '<span class="jpk-badge gray">No Changes</span>';
+                            return '<span class="base-badge gray">No Changes</span>';
                         }
 
                         var details = [];
@@ -114,7 +114,7 @@ export function createHistorySyncTableModule(ctx, kit) {
 
                 var statusBadge = view.querySelector('#historyModalStatusBadge');
                 statusBadge.textContent = item.Status;
-                statusBadge.className = 'jpk-table-status-badge ' + item.Status;
+                statusBadge.className = 'base-table-status-badge ' + item.Status;
 
                 var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';

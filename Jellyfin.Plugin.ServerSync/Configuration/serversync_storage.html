@@ -16,9 +16,9 @@
                     </div>
                     <div class="fieldDescription serversync-mb-md">Sets how each mapped library keeps its files, and which items it syncs. Libraries are mapped on the Servers tab.</div>
 
-                    <div id="storageStatus" class="jpk-status-text" role="status"></div>
-                    <div id="storageDisabled" class="jpk-neutral serversync-mb-md hidden">Content, history, and metadata sync are off, so nothing here applies. Turn one on under Settings.</div>
-                    <div id="storageFiltersOnly" class="jpk-neutral serversync-mb-md hidden">Content sync is off, so only each library's filter and history setting apply here.</div>
+                    <div id="storageStatus" class="base-status-text" role="status"></div>
+                    <div id="storageDisabled" class="base-neutral serversync-mb-md hidden">Content, history, and metadata sync are off, so nothing here applies. Turn one on under Settings.</div>
+                    <div id="storageFiltersOnly" class="base-neutral serversync-mb-md hidden">Content sync is off, so only each library's filter and history setting apply here.</div>
 
                     <div id="storageContent" class="hidden">
 
@@ -28,38 +28,38 @@
                             <label for="selStorageServer">Server</label>
                             <select is="emby-select" id="selStorageServer" class="emby-select-withcolor emby-select"></select>
                         </div>
-                        <div id="storageNoServers" class="jpk-empty-section hidden">No server has library mappings yet. Map libraries on the Servers tab.</div>
+                        <div id="storageNoServers" class="base-empty-section hidden">No server has library mappings yet. Map libraries on the Servers tab.</div>
 
                         <!-- Libraries -->
 
-                        <div id="storageLibrariesSection" class="jpk-collapsible-section hidden">
-                            <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="storageLibrariesContent">
-                                <span class="jpk-collapsible-title">Libraries</span>
-                                <span class="jpk-collapsible-icon">&#9660;</span>
+                        <div id="storageLibrariesSection" class="base-collapsible-section hidden">
+                            <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="storageLibrariesContent">
+                                <span class="base-collapsible-title">Libraries</span>
+                                <span class="base-collapsible-icon">&#9660;</span>
                             </button>
-                            <div id="storageLibrariesContent" class="jpk-collapsible-content collapsed">
+                            <div id="storageLibrariesContent" class="base-collapsible-content collapsed">
                                 <div class="fieldDescription serversync-mb-md">Shows one card for each enabled library mapping of this server.</div>
                                 <div id="storageLibrariesContainer"></div>
-                                <div id="storageNoLibraries" class="jpk-empty-section hidden">This server has no enabled library mappings. Map libraries on the Servers tab.</div>
-                                <div class="jpk-collapsible-actions">
-                                    <button is="emby-button" type="button" id="btnSaveStorage" class="raised jpk-button-submit jpk-button-small">
+                                <div id="storageNoLibraries" class="base-empty-section hidden">This server has no enabled library mappings. Map libraries on the Servers tab.</div>
+                                <div class="base-collapsible-actions flush">
+                                    <button is="emby-button" type="button" id="btnSaveStorage" class="raised base-button primary small">
                                         <span>Save</span>
                                     </button>
-                                    <span id="saveStorageStatus" class="jpk-status-text" role="status"></span>
+                                    <span id="saveStorageStatus" class="base-status-text" role="status"></span>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Permanent Copies -->
 
-                        <div id="keptCopiesSection" class="jpk-collapsible-section hidden">
-                            <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="keptCopiesContent">
-                                <span class="jpk-collapsible-title">Permanent Copies</span>
-                                <span class="jpk-collapsible-icon">&#9660;</span>
+                        <div id="keptCopiesSection" class="base-collapsible-section hidden">
+                            <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="keptCopiesContent">
+                                <span class="base-collapsible-title">Permanent Copies</span>
+                                <span class="base-collapsible-icon">&#9660;</span>
                             </button>
-                            <div id="keptCopiesContent" class="jpk-collapsible-content collapsed">
+                            <div id="keptCopiesContent" class="base-collapsible-content collapsed">
                                 <div class="fieldDescription serversync-mb-md">Lists the full copies in this server's Link libraries. Turning one back into a link moves the copy into the link cache.</div>
-                                <div id="keptCopiesStatus" class="jpk-status-text serversync-mb-md" role="status"></div>
+                                <div id="keptCopiesStatus" class="base-status-text serversync-mb-md" role="status"></div>
                                 <div id="keptCopiesTableContainer"></div>
                             </div>
                         </div>

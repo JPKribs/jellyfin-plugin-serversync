@@ -55,11 +55,11 @@ export function createMetadataSyncTableModule(ctx, kit) {
                     key: 'item',
                     label: 'Item',
                     type: 'custom',
-                    className: 'jpk-table-cell-with-thumb',
+                    className: 'base-table-cell-with-thumb',
+                    image: function(item) { return ServerSyncShared.proxyImage(item.SourceItemId, false, item.ServerKey); },
                     render: function(item) {
                         var libraries = (item.SourceLibraryName || 'Unknown') + ' → ' + (item.LocalLibraryName || 'Unknown');
-                        return renderRowInfo(ServerSyncShared.renderItemThumb(item.SourceItemId, item.ServerKey),
-                            item.ItemName || 'Unknown', libraries, item, item.Status);
+                        return renderRowInfo(item.ItemName || 'Unknown', libraries, item, item.Status);
                     }
                 },
                 {
@@ -114,7 +114,7 @@ export function createMetadataSyncTableModule(ctx, kit) {
 
                     var statusBadge = view.querySelector('#metadataSyncModalStatusBadge');
                     statusBadge.textContent = item.Status;
-                    statusBadge.className = 'jpk-table-status-badge ' + item.Status;
+                    statusBadge.className = 'base-table-status-badge ' + item.Status;
 
                     var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                     var localServerName = ServerSyncShared.localServerName || 'Local';

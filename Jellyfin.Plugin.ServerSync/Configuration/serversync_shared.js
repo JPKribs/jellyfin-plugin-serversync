@@ -173,77 +173,26 @@ export function createServerSyncShared(view) {
         setTimeout(tryLoad, 0);
     };
 
-    // renderProxyThumb
-    // Builds an image and its hidden placeholder, and starts loading the image through the proxy.
+    // proxyImage
+    // Gives a table column the loader for a thumbnail that is read through this server's image proxy.
     //
     // Inputs
     // id [string]: The item, person, or user to show.
     // isUser [boolean]: Whether id is a user.
-    // imgClass [string]: The class of the image.
-    // extraAttrs [string]: Attributes added to the image tag.
-    // placeholderHtml [string]: The placeholder to show when there is no image. It must start with a class attribute.
     // serverKey [string]: The configured server that holds it.
     //
     // Output
-    // [string]: The HTML, or the placeholder alone when there is no id.
-    function renderProxyThumb(id, isUser, imgClass, extraAttrs, placeholderHtml, serverKey) {
-        if (!id) return placeholderHtml;
-        var imgId = 'ss-thumb-' + (++thumbSeq);
-        shared.scheduleProxyImage(imgId, id, isUser, 80, serverKey);
-        return '<img id="' + imgId + '" class="' + imgClass + '"' + extraAttrs + ' />' +
-            placeholderHtml.replace('class="', 'class="hidden ');
-    }
-
-    // renderItemThumb
-    // Builds an item thumbnail. It starts as a portrait (40 by 60) and swaps to the landscape class
-    // (106 by 60) once the image loads wider than it is tall.
-    //
-    // Inputs
-    // itemId [string]: The source item.
-    // serverKey [string]: The configured server that holds it.
-    //
-    // Output
-    // [string]: The HTML.
-    shared.renderItemThumb = function (itemId, serverKey) {
-        return renderProxyThumb(itemId, false,
-            'jpk-table-row-thumb jpk-table-row-thumb-portrait',
-            ' onload="if(this.naturalWidth>this.naturalHeight){this.classList.remove(\'jpk-table-row-thumb-portrait\');this.classList.add(\'jpk-table-row-thumb-landscape\')}"',
-            '<div class="jpk-table-row-thumb-placeholder"><span class="material-icons">movie</span></div>',
-            serverKey);
-    };
-
-    // renderUserThumb
-    // Builds a round thumbnail of a source user.
-    //
-    // Inputs
-    // userId [string]: The source user.
-    // serverKey [string]: The configured server that holds it.
-    //
-    // Output
-    // [string]: The HTML.
-    shared.renderUserThumb = function (userId, serverKey) {
-        return renderProxyThumb(userId, true,
-            'jpk-table-row-thumb-user',
-            '',
-            '<div class="jpk-table-row-thumb-user-placeholder"><span class="material-icons">person</span></div>',
-            serverKey);
-    };
-
-    // renderPersonThumb
-    // Builds a portrait thumbnail of a person. It never swaps to landscape, since person images are headshots.
-    //
-    // Inputs
-    // personId [string]: The source person.
-    // serverKey [string]: The configured server that holds it.
-    //
-    // Output
-    // [string]: The HTML.
-    shared.renderPersonThumb = function (personId, serverKey) {
-        return renderProxyThumb(personId, false,
-            'jpk-table-row-thumb jpk-table-row-thumb-portrait',
-            '',
-            '<div class="jpk-table-row-thumb-placeholder"><span class="material-icons">person</span></div>',
-            serverKey);
+    // [function]: A loader that resolves to the image, or null when there is no id.
+    shared.proxyImage = function (id, isUser, serverKey) {
+        if (!id) return null;
+        return function () {
+            var params = { itemId: id, user: isUser ? 'true' : 'false', maxHeight: 80 };
+            if (serverKey) params.serverKey = serverKey;
+            return ApiClient.fetch({ url: ApiClient.getUrl('Sync/ImageProxy', params), type: 'GET' }).then(function (response) {
+                if (!response || !response.ok) throw new Error('image fetch failed');
+                return response.blob();
+            });
+        };
     };
 
     // scanServers
@@ -465,7 +414,7 @@ export function createServerSyncShared(view) {
             }
             if (!banner) {
                 banner = document.createElement('div');
-                banner.className = 'serversync-health-banner jpk-error';
+                banner.className = 'serversync-health-banner base-error';
                 banner.setAttribute('role', 'alert');
                 host.insertBefore(banner, host.firstChild);
             }

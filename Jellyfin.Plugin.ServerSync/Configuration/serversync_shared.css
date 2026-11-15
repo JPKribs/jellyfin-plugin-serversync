@@ -1,15 +1,9 @@
 /* serversync_shared.css */
 /* The layout the Sync, Servers, Storage, and Settings pages add to Base. Every class carries the serversync- prefix. */
 
-/* jpk-collapsible-actions */
-/* Section action row with no divider line, its buttons and status text on one center line. */
-/* Example: <div class="jpk-collapsible-actions"><button>Save</button><span class="jpk-status-text"></span></div> */
-.jpk-collapsible-actions { border-top: none; padding-top: 0; align-items: center; }
-.jpk-collapsible-actions .jpk-status-text { margin-top: 0; }
-
 /* serversync-modal-relative */
 /* Makes a dialog the anchor for its absolutely placed close button. */
-/* Example: <div class="jpk-dialog-content serversync-modal-relative"></div> */
+/* Example: <div class="base-dialog-content serversync-modal-relative"></div> */
 .serversync-modal-relative { position: relative; }
 
 /* serversync-health-dashboard */
@@ -39,14 +33,14 @@
     font-size: 1.1em;
     font-weight: 500;
 }
-.serversync-health-value.serversync-warning { color: var(--jpk-orange-fg); }
-.serversync-health-value.serversync-success { color: var(--jpk-green-fg); }
+.serversync-health-value.serversync-warning { color: var(--base-orange-fg); }
+.serversync-health-value.serversync-success { color: var(--base-green-fg); }
 
 /* serversync-section-separator */
 /* Thin rule between a view's action buttons and its table. */
 /* Example: <div class="serversync-section-separator"></div> */
 .serversync-section-separator {
-    border-bottom: 1px solid var(--jpk-border);
+    border-bottom: 1px solid var(--base-border);
     margin-bottom: 16px;
 }
 
@@ -97,7 +91,7 @@
 }
 .serversync-compare-table th.serversync-compare-table-merged {
     width: 22%;
-    color: var(--jpk-accent);
+    color: var(--base-accent);
 }
 .serversync-compare-table td.serversync-compare-table-property {
     text-align: left;
@@ -111,7 +105,7 @@
 }
 .serversync-compare-table td.serversync-compare-table-merged {
     background: rgba(0, 164, 220, 0.08);
-    color: var(--jpk-accent);
+    color: var(--base-accent);
     font-weight: 600;
 }
 .serversync-compare-table tr:last-child td {
@@ -121,7 +115,7 @@
 /* serversync-details-cell */
 /* Table column that wraps its change badges onto several rows, and is hidden on a phone. */
 /* Example: columns: [{ key: 'details', className: 'serversync-details-cell' }] */
-.jpk-table-cell.serversync-details-cell {
+.base-table-cell.serversync-details-cell {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -143,26 +137,26 @@
 /* serversync-item-info */
 /* Name, path, and error preview stacked beside a row's thumbnail, each cut to one line. */
 /* Example: <div class="serversync-item-info"><div class="serversync-item-name">Film.mkv</div><div class="serversync-item-path">Movies</div></div> */
-.jpk-table-cell .serversync-item-info {
+.base-table-cell .serversync-item-info {
     flex: 1;
     min-width: 0;
 }
-.jpk-table-cell .serversync-item-name {
+.base-table-cell .serversync-item-name {
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.jpk-table-cell .serversync-item-path {
+.base-table-cell .serversync-item-path {
     font-size: 0.85em;
     opacity: 0.7;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.jpk-table-cell .serversync-item-error {
+.base-table-cell .serversync-item-error {
     font-size: 0.75em;
-    color: var(--jpk-red-fg);
+    color: var(--base-red-fg);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -170,16 +164,16 @@
 }
 
 @media (max-width: 600px) {
-    .jpk-table-cell.serversync-details-cell {
+    .base-table-cell.serversync-details-cell {
         display: none;
     }
-    .jpk-table-cell .serversync-item-name {
+    .base-table-cell .serversync-item-name {
         font-size: 0.9em;
     }
-    .jpk-table-cell .serversync-item-path {
+    .base-table-cell .serversync-item-path {
         font-size: 0.8em;
     }
-    .jpk-table-cell .serversync-item-error {
+    .base-table-cell .serversync-item-error {
         font-size: 0.7em;
         max-width: 140px;
     }
@@ -203,14 +197,14 @@
 /* Example: <div class="serversync-filter-pills"><button class="serversync-filter-pill serversync-on">All</button></div> */
 .serversync-filter-pills { display: flex; gap: 8px; margin: 0 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
 .serversync-filter-pills::-webkit-scrollbar { display: none; }
-.serversync-filter-pill { flex: 0 0 auto; font: inherit; font-size: .85em; background: var(--jpk-surface); border: 1px solid var(--jpk-border); color: inherit; padding: 6px 12px; border-radius: 14px; cursor: pointer; }
-.serversync-filter-pill.serversync-on { background: var(--jpk-accent); border-color: var(--jpk-accent); color: var(--jpk-on-accent); }
+.serversync-filter-pill { flex: 0 0 auto; font: inherit; font-size: .85em; background: var(--base-surface); border: 1px solid var(--base-border); color: inherit; padding: 6px 12px; border-radius: 14px; cursor: pointer; }
+.serversync-filter-pill.serversync-on { background: var(--base-accent); border-color: var(--base-accent); color: var(--base-on-accent); }
 
 /* serversync-access-grid */
 /* Bordered list of rows, each a title and description beside a badge. */
-/* Example: <div class="serversync-access-grid"><div class="serversync-access-row"><div class="serversync-access-text"><div class="serversync-access-title">Content Listing</div><div class="serversync-access-description">Every library.</div></div><span class="jpk-badge green">Available</span></div></div> */
+/* Example: <div class="serversync-access-grid"><div class="serversync-access-row"><div class="serversync-access-text"><div class="serversync-access-title">Content Listing</div><div class="serversync-access-description">Every library.</div></div><span class="base-badge green">Available</span></div></div> */
 .serversync-access-grid {
-    border: 1px solid var(--jpk-border);
+    border: 1px solid var(--base-border);
     border-radius: 6px;
 }
 
@@ -223,7 +217,7 @@
 }
 
 .serversync-access-row + .serversync-access-row {
-    border-top: 1px solid var(--jpk-border);
+    border-top: 1px solid var(--base-border);
 }
 
 .serversync-access-text {
@@ -231,16 +225,16 @@
 }
 
 .serversync-access-title {
-    color: var(--jpk-fg);
+    color: var(--base-fg);
 }
 
 .serversync-access-description {
-    color: var(--jpk-gray-fg);
+    color: var(--base-gray-fg);
     font-size: 0.9em;
     margin-top: 0.2em;
 }
 
-.serversync-access-row .jpk-badge {
+.serversync-access-row .base-badge {
     flex-shrink: 0;
 }
 
@@ -248,7 +242,7 @@
 /* Bordered grid that shows what a user and an administrator key may do, one badge pair per row. */
 /* Example: <div class="serversync-role-table"><div class="serversync-role-row serversync-role-head"><span>Permission</span><span>User</span><span>Admin</span></div></div> */
 .serversync-role-table {
-    border: 1px solid var(--jpk-border);
+    border: 1px solid var(--base-border);
     border-radius: 6px;
     margin: 0.5em 0 1em;
 }
@@ -262,11 +256,11 @@
 }
 
 .serversync-role-row + .serversync-role-row {
-    border-top: 1px solid var(--jpk-border);
+    border-top: 1px solid var(--base-border);
 }
 
 .serversync-role-head {
-    color: var(--jpk-gray-fg);
+    color: var(--base-gray-fg);
     font-size: 0.85em;
 }
 
@@ -276,13 +270,13 @@
 }
 
 .serversync-role-label {
-    color: var(--jpk-fg);
+    color: var(--base-fg);
 }
 
 .serversync-role-note {
-    border-top: 1px solid var(--jpk-border);
+    border-top: 1px solid var(--base-border);
     padding: 0.6em 1em;
-    color: var(--jpk-gray-fg);
+    color: var(--base-gray-fg);
     font-size: 0.85em;
 }
 
@@ -290,7 +284,7 @@
 /* Bordered table of settings, each row a label and hint beside one or two fields. */
 /* Example: <div class="serversync-form-table"><div class="serversync-form-row"><span class="serversync-form-label">Downloads</span><span class="serversync-form-cell"><input is="emby-input" /></span></div></div> */
 .serversync-form-table {
-    border: 1px solid var(--jpk-border);
+    border: 1px solid var(--base-border);
     border-radius: 6px;
 }
 
@@ -310,17 +304,17 @@
 .serversync-form-row + .serversync-form-row,
 .serversync-form-row + div > .serversync-form-row:first-child,
 div:not(.serversync-form-row) + .serversync-form-row {
-    border-top: 1px solid var(--jpk-border);
+    border-top: 1px solid var(--base-border);
 }
 
 .serversync-form-label {
-    color: var(--jpk-fg);
+    color: var(--base-fg);
     display: flex;
     flex-direction: column;
 }
 
 .serversync-form-hint {
-    color: var(--jpk-gray-fg);
+    color: var(--base-gray-fg);
     font-size: 0.85em;
     margin-top: 0.15em;
 }
@@ -333,7 +327,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 }
 
 .serversync-form-none {
-    color: var(--jpk-gray-fg);
+    color: var(--base-gray-fg);
     font-size: 0.85em;
 }
 
@@ -352,14 +346,14 @@ div:not(.serversync-form-row) + .serversync-form-row {
 }
 
 .serversync-unit {
-    color: var(--jpk-gray-fg);
+    color: var(--base-gray-fg);
     font-size: 0.85em;
     white-space: nowrap;
     min-width: 2em;
 }
 
 .serversync-form-head {
-    color: var(--jpk-gray-fg);
+    color: var(--base-gray-fg);
     font-size: 0.85em;
 }
 
@@ -386,7 +380,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 
 #callerGrants .serversync-grant-row,
 .serversync-grant-table .serversync-role-note {
-    border-top: 1px solid var(--jpk-border);
+    border-top: 1px solid var(--base-border);
 }
 
 .serversync-grant-field {
@@ -394,7 +388,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
     box-sizing: border-box;
     height: 2.4em;
     padding: 0 0.75em;
-    border: 1px solid var(--jpk-border);
+    border: 1px solid var(--base-border);
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.05);
     color: inherit;
@@ -444,29 +438,29 @@ div:not(.serversync-form-row) + .serversync-form-row {
 /* Example: <div id="poolMap" class="serversync-pool-map" role="img"><svg><rect class="serversync-pool-pill" /><circle class="serversync-pool-dot serversync-pool-ok" /><path class="serversync-pool-line serversync-pool-pull" /></svg></div> */
 .serversync-pool-map { margin: 0.5em 0 1.25em; }
 .serversync-pool-map svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
-.serversync-pool-map .serversync-pool-name { font-size: 12px; fill: var(--jpk-fg); }
-.serversync-pool-map .serversync-pool-self { font-size: 12px; font-weight: 600; fill: var(--jpk-fg); text-anchor: middle; }
-.serversync-pool-map .serversync-pool-pill { fill: var(--jpk-surface); stroke: var(--jpk-border); stroke-width: 1; }
-.serversync-pool-map .serversync-pool-card { fill: var(--jpk-surface); stroke: var(--jpk-accent); stroke-width: 1.6; }
+.serversync-pool-map .serversync-pool-name { font-size: 12px; fill: var(--base-fg); }
+.serversync-pool-map .serversync-pool-self { font-size: 12px; font-weight: 600; fill: var(--base-fg); text-anchor: middle; }
+.serversync-pool-map .serversync-pool-pill { fill: var(--base-surface); stroke: var(--base-border); stroke-width: 1; }
+.serversync-pool-map .serversync-pool-card { fill: var(--base-surface); stroke: var(--base-accent); stroke-width: 1.6; }
 .serversync-pool-map .serversync-pool-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
-.serversync-pool-map .serversync-pool-pull { stroke: var(--jpk-green-fg); }
-.serversync-pool-map .serversync-pool-push { stroke: var(--jpk-blue-fg); }
-.serversync-pool-map .serversync-pool-sync { stroke: var(--jpk-purple-fg); }
-.serversync-pool-map .serversync-pool-ok { fill: var(--jpk-success); }
-.serversync-pool-map .serversync-pool-no-plugin { fill: var(--jpk-warning); }
-.serversync-pool-map .serversync-pool-down { fill: var(--jpk-error); }
-.serversync-pool-map .serversync-pool-disabled { fill: var(--jpk-gray-fg); }
-.serversync-pool-map .serversync-pool-pending { fill: var(--jpk-gray-fg); opacity: 0.5; }
+.serversync-pool-map .serversync-pool-pull { stroke: var(--base-green-fg); }
+.serversync-pool-map .serversync-pool-push { stroke: var(--base-blue-fg); }
+.serversync-pool-map .serversync-pool-sync { stroke: var(--base-purple-fg); }
+.serversync-pool-map .serversync-pool-ok { fill: var(--base-success); }
+.serversync-pool-map .serversync-pool-no-plugin { fill: var(--base-warning); }
+.serversync-pool-map .serversync-pool-down { fill: var(--base-error); }
+.serversync-pool-map .serversync-pool-disabled { fill: var(--base-gray-fg); }
+.serversync-pool-map .serversync-pool-pending { fill: var(--base-gray-fg); opacity: 0.5; }
 
 /* serversync-panel */
 /* Bordered sub card, with spacing helpers and muted text so no page sets them inline. */
 /* Example: <div class="serversync-panel serversync-mt-sm"><span class="serversync-muted">None</span></div> */
 .pluginConfigurationPage .serversync-mt-sm { margin-top: 8px; }
 .pluginConfigurationPage .serversync-mt-md { margin-top: 12px; }
-.pluginConfigurationPage .serversync-panel { padding: 14px; border: 1px solid var(--jpk-border); border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
-.pluginConfigurationPage .serversync-muted, .jpk-dialog .serversync-muted { opacity: 0.5; }
-.pluginConfigurationPage .serversync-empty-cell, .jpk-dialog .serversync-empty-cell { text-align: center; opacity: 0.5; }
-.pluginConfigurationPage .serversync-note-cell, .jpk-dialog .serversync-note-cell { opacity: 0.6; font-size: 0.85em; }
+.pluginConfigurationPage .serversync-panel { padding: 14px; border: 1px solid var(--base-border); border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
+.pluginConfigurationPage .serversync-muted, .base-dialog .serversync-muted { opacity: 0.5; }
+.pluginConfigurationPage .serversync-empty-cell, .base-dialog .serversync-empty-cell { text-align: center; opacity: 0.5; }
+.pluginConfigurationPage .serversync-note-cell, .base-dialog .serversync-note-cell { opacity: 0.6; font-size: 0.85em; }
 
 /* serversync-mb-md */
 /* Adds the space under a block that sits above other content. */
@@ -475,7 +469,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 
 /* serversync-sync-status */
 /* Result line under the Sync tab description, spaced from the field below only while it holds a message. */
-/* Example: <div class="jpk-status-text serversync-sync-status" role="status"></div> */
+/* Example: <div class="base-status-text serversync-sync-status" role="status"></div> */
 .serversync-sync-status:not(:empty) { margin-bottom: 12px; }
 
 /* serversync-gap-sm */
@@ -485,7 +479,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 
 /* serversync-modal-dialog */
 /* Wide detail dialog and the rows inside it: status line, info grid, paths, and the change summary. */
-/* Example: <div class="jpk-dialog-content serversync-modal-dialog"><div class="serversync-modal-top-row"></div><div class="serversync-modal-info-grid"></div></div> */
+/* Example: <div class="base-dialog-content serversync-modal-dialog"><div class="serversync-modal-top-row"></div><div class="serversync-modal-info-grid"></div></div> */
 .serversync-modal-dialog { max-width: 900px; width: 95vw; }
 .serversync-modal-top-row {
     display: flex; align-items: center; gap: 16px; margin-bottom: 16px;
@@ -503,7 +497,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
     letter-spacing: 0.5px; opacity: 0.6; margin-bottom: 4px;
 }
 .serversync-modal-info-value {
-    font-family: var(--jpk-mono);
+    font-family: var(--base-mono);
     font-size: 1em; font-weight: 500;
 }
 .serversync-modal-changes-summary {
@@ -515,7 +509,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 }
 .serversync-modal-table-container table { margin: 0; }
 .serversync-modal-table-container thead {
-    position: sticky; top: 0; background: var(--jpk-surface); z-index: 1;
+    position: sticky; top: 0; background: var(--base-surface); z-index: 1;
 }
 .serversync-modal-section-header td {
     background: rgba(255, 255, 255, 0.08); font-weight: bold;
@@ -523,8 +517,8 @@ div:not(.serversync-form-row) + .serversync-form-row {
     text-transform: uppercase; font-size: 0.85em; letter-spacing: 0.5px;
 }
 .serversync-modal-disabled-row td { padding: 8px 12px; }
-.serversync-modal-changed-row { background: var(--jpk-orange-bg); }
-.serversync-modal-changed-row td:first-child { border-left: 3px solid var(--jpk-orange-fg); }
+.serversync-modal-changed-row { background: var(--base-orange-bg); }
+.serversync-modal-changed-row td:first-child { border-left: 3px solid var(--base-orange-fg); }
 .serversync-modal-paths-section { margin-bottom: 16px; }
 .serversync-modal-path-row {
     display: flex; align-items: flex-start; gap: 16px;
@@ -536,17 +530,17 @@ div:not(.serversync-form-row) + .serversync-form-row {
     letter-spacing: 0.5px; opacity: 0.6; margin-bottom: 4px;
 }
 .serversync-modal-path-value {
-    font-family: var(--jpk-mono);
+    font-family: var(--base-mono);
     font-size: 0.85em; word-break: break-all;
 }
 .serversync-modal-path-note {
-    font-size: 0.8em; color: var(--jpk-purple-fg);
+    font-size: 0.8em; color: var(--base-purple-fg);
     margin-top: 6px; font-style: italic;
 }
 .serversync-modal-path-meta { margin-top: 8px; font-size: 0.85em; }
 .serversync-modal-path-meta-label { opacity: 0.6; margin-right: 4px; }
 .serversync-modal-path-meta-value {
-    font-family: var(--jpk-mono);
+    font-family: var(--base-mono);
 }
 
 /* serversync-companion-item */
@@ -560,7 +554,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 .serversync-companion-icon { color: rgba(255, 255, 255, 0.5); }
 .serversync-companion-name {
     color: rgba(255, 255, 255, 0.85);
-    font-family: var(--jpk-mono);
+    font-family: var(--base-mono);
     font-size: 0.9em;
 }
 
@@ -579,7 +573,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 }
 .serversync-history-user-name { font-weight: 500; margin-bottom: 2px; }
 .serversync-history-user-guid {
-    font-family: var(--jpk-mono);
+    font-family: var(--base-mono);
     font-size: 0.8em; opacity: 0.5; word-break: break-all;
 }
 
@@ -596,17 +590,17 @@ div:not(.serversync-form-row) + .serversync-form-row {
     text-transform: uppercase; letter-spacing: 0.5px;
 }
 .serversync-user-sync-name {
-    font-family: var(--jpk-mono);
+    font-family: var(--base-mono);
     font-size: 1em; font-weight: 500;
 }
 .serversync-user-sync-id {
-    font-family: var(--jpk-mono);
+    font-family: var(--base-mono);
     font-size: 0.8em; opacity: 0.5;
 }
 
 /* serversync-queue-cards */
 /* Summary cards that double as filters, dimmed while their state is hidden. */
-/* Example: <div class="jpk-cards serversync-queue-cards"><div class="jpk-card gray serversync-queue-card serversync-on"></div></div> */
+/* Example: <div class="base-cards serversync-queue-cards"><div class="base-card gray serversync-queue-card serversync-on"></div></div> */
 .serversync-queue-cards .serversync-queue-card { cursor: pointer; opacity: .45; transition: opacity .15s; }
 .serversync-queue-cards .serversync-queue-card.serversync-on { opacity: 1; }
 
@@ -614,14 +608,14 @@ div:not(.serversync-form-row) + .serversync-form-row {
 /* Health card for one server, showing its delivery state and what it is sent. */
 /* Example: <div class="serversync-health-card serversync-queue-peer-card"><div class="serversync-queue-peer-reason">Sends files</div></div> */
 .serversync-queue-peer-card .serversync-health-value { font-size: 0.95em; }
-.serversync-queue-peer-card .serversync-health-value.serversync-paused { color: var(--jpk-error); }
+.serversync-queue-peer-card .serversync-health-value.serversync-paused { color: var(--base-error); }
 .serversync-queue-peer-card .serversync-queue-peer-reason { font-size: 0.8em; opacity: 0.75; margin-top: 4px; }
 
 /* serversync-queue-list */
 /* Bordered list of change rows, each a thumbnail, a description, and a state chip. */
 /* Example: <div class="serversync-queue-list"><div class="serversync-queue-row"><div class="serversync-queue-thumb-wrap"></div><div class="serversync-queue-info"></div><div class="serversync-queue-right"></div></div></div> */
-.serversync-queue-list { border: 1px solid var(--jpk-border); border-radius: 8px; overflow: hidden; margin-bottom: 1.5em; }
-.serversync-queue-row { display: grid; grid-template-columns: 56px 1fr auto; gap: 14px; align-items: center; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.06); background: var(--jpk-surface); }
+.serversync-queue-list { border: 1px solid var(--base-border); border-radius: 8px; overflow: hidden; margin-bottom: 1.5em; }
+.serversync-queue-row { display: grid; grid-template-columns: 56px 1fr auto; gap: 14px; align-items: center; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.06); background: var(--base-surface); }
 .serversync-queue-row:last-child { border-bottom: 0; }
 .serversync-queue-row:hover { background: rgba(255,255,255,.04); }
 .serversync-queue-row:has(.serversync-wide) { grid-template-columns: 80px 1fr auto; }
@@ -644,15 +638,15 @@ div:not(.serversync-form-row) + .serversync-form-row {
 .serversync-queue-badges { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .serversync-queue-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 190px; max-width: 360px; }
 .serversync-queue-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 14px; font-size: .82em; border: 1px solid; white-space: nowrap; }
-.serversync-queue-chip.serversync-gathering { border-color: var(--jpk-gray-fg); color: var(--jpk-gray-fg); }
-.serversync-queue-chip.serversync-pending { border-color: var(--jpk-orange-fg); color: var(--jpk-orange-fg); }
-.serversync-queue-chip.serversync-sent { border-color: var(--jpk-blue-fg); color: var(--jpk-blue-fg); }
-.serversync-queue-chip.serversync-received { border-color: var(--jpk-purple-fg); color: var(--jpk-purple-fg); }
-.serversync-queue-chip.serversync-failed { border-color: var(--jpk-red-fg); color: var(--jpk-red-fg); }
-.serversync-queue-ring { width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(var(--jpk-gray-fg) var(--p, 0%), var(--jpk-border) 0); flex: 0 0 14px; }
+.serversync-queue-chip.serversync-gathering { border-color: var(--base-gray-fg); color: var(--base-gray-fg); }
+.serversync-queue-chip.serversync-pending { border-color: var(--base-orange-fg); color: var(--base-orange-fg); }
+.serversync-queue-chip.serversync-sent { border-color: var(--base-blue-fg); color: var(--base-blue-fg); }
+.serversync-queue-chip.serversync-received { border-color: var(--base-purple-fg); color: var(--base-purple-fg); }
+.serversync-queue-chip.serversync-failed { border-color: var(--base-red-fg); color: var(--base-red-fg); }
+.serversync-queue-ring { width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(var(--base-gray-fg) var(--p, 0%), var(--base-border) 0); flex: 0 0 14px; }
 .serversync-queue-meta { font-size: .8em; color: rgba(255,255,255,.5); }
-.serversync-queue-meta.serversync-error { color: var(--jpk-error); }
-.serversync-queue-discard:hover { color: var(--jpk-error); }
+.serversync-queue-meta.serversync-error { color: var(--base-error); }
+.serversync-queue-discard:hover { color: var(--base-error); }
 @media (max-width: 720px) {
     .serversync-queue-row { grid-template-columns: 44px 1fr; grid-template-areas: "thumb info" "state state"; gap: 10px 12px; padding: 12px; }
     .serversync-queue-row .serversync-queue-thumb-wrap { grid-area: thumb; }
@@ -666,22 +660,19 @@ div:not(.serversync-form-row) + .serversync-form-row {
     .serversync-queue-title .serversync-queue-episode { display: block; font-size: .9em; }
     .serversync-queue-title .serversync-queue-episode .serversync-queue-separator { display: none; }
     .serversync-queue-sub { flex-wrap: wrap; line-height: 18px; } .serversync-queue-sub > * { white-space: normal; }
-    /* Three to a row, and the two left over grow to fill the second row. */
-    .pluginConfigurationPage .jpk-cards.serversync-queue-cards { gap: 8px; }
-    .pluginConfigurationPage .jpk-cards.serversync-queue-cards .jpk-card { flex: 1 1 25%; box-sizing: border-box; min-width: 0; padding: 10px 6px; }
     .serversync-queue-thumb.serversync-wide, .serversync-queue-thumb-holder.serversync-wide { width: 72px; height: 40px; }
 }
 
 /* #authChoices */
 /* Two column choice cards for the sign in method, one column on a tablet. */
-/* Example: <div class="jpk-choice-group" id="authChoices"></div> */
+/* Example: <div class="base-choice-group" id="authChoices"></div> */
 #authChoices { grid-template-columns: repeat(2, 1fr); }
 @media (max-width: 768px) { #authChoices { grid-template-columns: 1fr; } }
 #btnCheckPeer, #btnTestConnection { white-space: nowrap; flex: 0 0 auto; }
 
 /* serversync-editor-footer */
 /* Footer of a server editor, Save Server and Remove Server with the result line between them. */
-/* Example: <div class="serversync-editor-footer"><button>Save Server</button><span class="serversync-save-status jpk-status-text"></span><button>Remove Server</button></div> */
+/* Example: <div class="serversync-editor-footer"><button>Save Server</button><span class="serversync-save-status base-status-text"></span><button>Remove Server</button></div> */
 .serversync-editor-footer { display: flex; gap: 8px; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 .serversync-save-status { flex: 1; align-self: center; }
 
@@ -691,7 +682,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 .serversync-mapping {
     margin-bottom: 2em;
     padding-bottom: 1em;
-    border-bottom: 1px solid var(--jpk-border);
+    border-bottom: 1px solid var(--base-border);
 }
 .serversync-mapping:last-child {
     border-bottom: none;
@@ -720,7 +711,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 .serversync-library-card {
     margin-bottom: 1.5em;
     padding: 1.25em 1.25em 0.75em;
-    border: 1px solid var(--jpk-border);
+    border: 1px solid var(--base-border);
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.03);
 }
@@ -730,7 +721,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
     gap: 0.85em;
     margin: -0.25em 0 1.25em;
     padding-bottom: 1em;
-    border-bottom: 1px solid var(--jpk-border);
+    border-bottom: 1px solid var(--base-border);
 }
 .serversync-library-card-icon {
     flex: none;
@@ -741,8 +732,8 @@ div:not(.serversync-form-row) + .serversync-form-row {
     align-items: center;
     justify-content: center;
     font-size: 22px;
-    color: var(--jpk-accent);
-    background: var(--jpk-accent-wash);
+    color: var(--base-accent);
+    background: var(--base-accent-wash);
 }
 .serversync-library-card-route {
     flex: 1;
@@ -793,7 +784,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 
 /* serversync-filter-section */
 /* Spaced block for a library's filter or its Always Keep picks. */
-/* Example: <div class="serversync-filter-section"><h3 class="jpk-subsection-title">Library Filter</h3></div> */
+/* Example: <div class="serversync-filter-section"><h3 class="base-subsection-title">Library Filter</h3></div> */
 .serversync-filter-section {
     margin-top: 1em;
     padding-top: 0.75em;
@@ -815,14 +806,14 @@ div:not(.serversync-form-row) + .serversync-form-row {
     background: rgba(255, 255, 255, 0.05);
 }
 .serversync-filter-item.serversync-selected {
-    background: var(--jpk-accent-wash);
+    background: var(--base-accent-wash);
 }
 /* In the base paginated table the row already provides padding/border/hover,
    so flatten the inner item (no nested box) and tint the whole row when selected. */
-.jpk-table-cell .serversync-filter-item { padding: 0; border-bottom: none; }
-.jpk-table-cell .serversync-filter-item:hover,
-.jpk-table-cell .serversync-filter-item.serversync-selected { background: transparent; }
-.jpk-table-row:has(.serversync-filter-item.serversync-selected) { background: var(--jpk-accent-wash); }
+.base-table-cell .serversync-filter-item { padding: 0; border-bottom: none; }
+.base-table-cell .serversync-filter-item:hover,
+.base-table-cell .serversync-filter-item.serversync-selected { background: transparent; }
+.base-table-row:has(.serversync-filter-item.serversync-selected) { background: var(--base-accent-wash); }
 .serversync-filter-item-thumb {
     flex: 0 0 40px;
     width: 40px;
@@ -900,7 +891,7 @@ div:not(.serversync-form-row) + .serversync-form-row {
 
 /* serversync-health-banner */
 /* Red notice at the top of a page when Server Sync cannot run on the database it found. */
-/* Example: <div class="serversync-health-banner jpk-error" role="alert">Install 12.4.13.0 first.</div> */
+/* Example: <div class="serversync-health-banner base-error" role="alert">Install 12.4.13.0 first.</div> */
 .serversync-health-banner {
     margin: 1em 0 !important;
     font-size: 1em;

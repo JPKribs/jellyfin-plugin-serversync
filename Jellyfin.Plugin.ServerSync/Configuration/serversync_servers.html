@@ -19,18 +19,18 @@
 
                     <!-- Servers -->
 
-                    <div class="jpk-section">
-                        <div id="serversConfigContent" class="jpk-section-content">
+                    <div class="base-section">
+                        <div id="serversConfigContent" class="base-section-content">
 
                             <!-- Server list, in rank order -->
-                            <div id="serverList" class="jpk-card-list"></div>
-                            <div id="serverEmpty" class="jpk-empty-section hidden">No servers yet. Add one below.</div>
-                            <div class="jpk-card-list-actions">
-                                <button is="emby-button" type="button" id="btnAddServer" class="raised jpk-icon-btn jpk-button-submit">
+                            <div id="serverList" class="base-card-list"></div>
+                            <div id="serverEmpty" class="base-empty-section hidden">No servers yet. Add one below.</div>
+                            <div class="base-card-list-actions">
+                                <button is="emby-button" type="button" id="btnAddServer" class="raised base-button primary">
                                     <span class="material-icons" aria-hidden="true">add</span>
                                     <span>Add Server</span>
                                 </button>
-                                <span id="serverListStatus" class="jpk-status-text" role="status"></span>
+                                <span id="serverListStatus" class="base-status-text" role="status"></span>
                             </div>
 
                             <!-- The editor lives inside whichever card is open. It parks here while the list re-renders. -->
@@ -38,12 +38,12 @@
                             <div id="serverEditor">
 
                                 <!-- Step 1: Connection -->
-                                <div class="jpk-collapsible-section">
-                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepConnection">
-                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">1</span> Connection</span>
-                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                <div class="base-collapsible-section numbered">
+                                    <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="serverStepConnection">
+                                        <span class="base-collapsible-title">Connection</span>
+                                        <span class="base-collapsible-icon">&#9660;</span>
                                     </button>
-                                    <div id="serverStepConnection" class="jpk-collapsible-content collapsed">
+                                    <div id="serverStepConnection" class="base-collapsible-content collapsed">
 
                                         <div class="inputContainer">
                                             <label for="txtServerName">Name</label>
@@ -83,38 +83,38 @@
                                 </div>
 
                                 <!-- Step 2: Authentication -->
-                                <div class="jpk-collapsible-section">
-                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepAuthentication">
-                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">2</span> Authentication</span>
-                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                <div class="base-collapsible-section numbered">
+                                    <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="serverStepAuthentication">
+                                        <span class="base-collapsible-title">Authentication</span>
+                                        <span class="base-collapsible-icon">&#9660;</span>
                                     </button>
-                                    <div id="serverStepAuthentication" class="jpk-collapsible-content collapsed">
+                                    <div id="serverStepAuthentication" class="base-collapsible-content collapsed">
 
-                                        <div id="serverInfoContainer" class="jpk-record-card hidden serversync-mb-md">
-                                            <div class="jpk-record-row">
-                                                <span class="jpk-record-label">Server</span>
-                                                <span id="txtSourceServerName" class="jpk-mono"></span>
+                                        <div id="serverInfoContainer" class="base-record-card hidden serversync-mb-md">
+                                            <div class="base-record-row">
+                                                <span class="base-record-label">Server</span>
+                                                <span id="txtSourceServerName" class="base-mono"></span>
                                             </div>
-                                            <div class="jpk-record-row">
-                                                <span class="jpk-record-label">ID</span>
-                                                <span id="txtSourceServerId" class="jpk-mono"></span>
+                                            <div class="base-record-row">
+                                                <span class="base-record-label">ID</span>
+                                                <span id="txtSourceServerId" class="base-mono"></span>
                                             </div>
-                                            <div id="authenticatedUserRow" class="jpk-record-row hidden">
-                                                <span class="jpk-record-label">User</span>
-                                                <span id="txtAuthenticatedUser" class="jpk-mono"></span>
+                                            <div id="authenticatedUserRow" class="base-record-row hidden">
+                                                <span class="base-record-label">User</span>
+                                                <span id="txtAuthenticatedUser" class="base-mono"></span>
                                             </div>
                                         </div>
 
-                                        <div class="jpk-choice-group" id="authChoices" role="radiogroup" aria-label="Authentication">
-                                            <label class="jpk-choice" data-auth="key">
+                                        <div class="base-choice-group" id="authChoices" role="radiogroup" aria-label="Authentication">
+                                            <label class="base-choice" data-auth="key">
                                                 <input type="radio" name="serverAuth" value="key" />
-                                                <span class="jpk-choice-name">API Key</span>
-                                                <span class="jpk-choice-text">From that server's Dashboard under API Keys.</span>
+                                                <span class="base-choice-name">API Key</span>
+                                                <span class="base-choice-text">From that server's Dashboard under API Keys.</span>
                                             </label>
-                                            <label class="jpk-choice" data-auth="user">
+                                            <label class="base-choice" data-auth="user">
                                                 <input type="radio" name="serverAuth" value="user" />
-                                                <span class="jpk-choice-name">Sign In</span>
-                                                <span class="jpk-choice-text">Sign in once. Only the token is kept.</span>
+                                                <span class="base-choice-name">Sign In</span>
+                                                <span class="base-choice-text">Sign in once. Only the token is kept.</span>
                                             </label>
                                         </div>
 
@@ -126,68 +126,68 @@
                                             </div>
                                         </div>
 
-                                        <div id="authUserPanel" class="jpk-bulk-edit-bar serversync-panel hidden">
-                                            <div id="authSignedIn" class="jpk-info hidden">Signed in as <strong id="authSignedInUser"></strong>. Sign in again to replace the token.</div>
-                                            <div class="jpk-edit-line">
-                                                <div class="jpk-field">
+                                        <div id="authUserPanel" class="base-bulk-edit-bar serversync-panel hidden">
+                                            <div id="authSignedIn" class="base-info hidden">Signed in as <strong id="authSignedInUser"></strong>. Sign in again to replace the token.</div>
+                                            <div class="base-edit-line">
+                                                <div class="base-field">
                                                     <label for="txtAuthUsername">Username</label>
                                                     <input is="emby-input" type="text" id="txtAuthUsername" />
                                                 </div>
-                                                <div class="jpk-field">
+                                                <div class="base-field">
                                                     <label for="txtAuthPassword">Password</label>
                                                     <input is="emby-input" type="password" id="txtAuthPassword" />
                                                 </div>
                                             </div>
                                             <div class="flex align-items-center serversync-gap-sm">
-                                                <button is="emby-button" type="button" id="btnGenerateToken" class="raised jpk-button-submit jpk-button-small">
+                                                <button is="emby-button" type="button" id="btnGenerateToken" class="raised base-button primary small">
                                                     <span>Generate Token</span>
                                                 </button>
-                                                <span id="tokenGeneratorStatus" class="jpk-status-text"></span>
+                                                <span id="tokenGeneratorStatus" class="base-status-text"></span>
                                             </div>
                                         </div>
 
-                                        <div id="savedSecretNote" class="jpk-warn serversync-mb-md hidden" role="status"></div>
+                                        <div id="savedSecretNote" class="base-warn serversync-mb-md hidden" role="status"></div>
 
-                                        <div class="jpk-collapsible-actions">
-                                            <button is="emby-button" type="button" id="btnTestConnection" class="raised jpk-button-small">
+                                        <div class="base-collapsible-actions flush">
+                                            <button is="emby-button" type="button" id="btnTestConnection" class="raised base-button small">
                                                 <span>Test Connection</span>
                                             </button>
-                                            <span id="connectionStatus" class="jpk-status-text"></span>
+                                            <span id="connectionStatus" class="base-status-text"></span>
                                         </div>
 
-                                        <div id="accessUnknown" class="jpk-neutral serversync-mt-md hidden">Test the connection to see what this key can do.</div>
+                                        <div id="accessUnknown" class="base-neutral serversync-mt-md hidden">Test the connection to see what this key can do.</div>
                                         <div id="accessSummary" class="serversync-mt-md hidden">
                                             <div id="accessHeadline" class="serversync-mb-md"></div>
                                             <div id="accessRows" class="serversync-access-grid serversync-mb-md"></div>
                                             <div class="fieldDescription">Select Check Link to see what that server's own key reads here.</div>
                                         </div>
 
-                                        <h3 class="jpk-subsection-title">Direction</h3>
-                                        <div class="jpk-choice-group" id="modeChoices" role="radiogroup" aria-label="Direction">
-                                            <label class="jpk-choice" data-mode="Pull">
+                                        <h3 class="base-subsection-title">Direction</h3>
+                                        <div class="base-choice-group" id="modeChoices" role="radiogroup" aria-label="Direction">
+                                            <label class="base-choice" data-mode="Pull">
                                                 <input type="radio" name="serverMode" value="Pull" />
-                                                <span class="jpk-choice-name">Pull</span>
-                                                <span class="jpk-choice-text">Read from this server on a schedule.</span>
+                                                <span class="base-choice-name">Pull</span>
+                                                <span class="base-choice-text">Read from this server on a schedule.</span>
                                             </label>
-                                            <label class="jpk-choice" data-mode="Push">
+                                            <label class="base-choice" data-mode="Push">
                                                 <input type="radio" name="serverMode" value="Push" />
-                                                <span class="jpk-choice-name">Push</span>
-                                                <span class="jpk-choice-text">Send changes made here as they happen. Needs Server Sync there.</span>
+                                                <span class="base-choice-name">Push</span>
+                                                <span class="base-choice-text">Send changes made here as they happen. Needs Server Sync there.</span>
                                             </label>
-                                            <label class="jpk-choice" data-mode="Sync">
+                                            <label class="base-choice" data-mode="Sync">
                                                 <input type="radio" name="serverMode" value="Sync" />
-                                                <span class="jpk-choice-name">Sync</span>
-                                                <span class="jpk-choice-text">Pull and Push together. Needs Server Sync there set to Sync.</span>
+                                                <span class="base-choice-name">Sync</span>
+                                                <span class="base-choice-text">Pull and Push together. Needs Server Sync there set to Sync.</span>
                                             </label>
                                         </div>
-                                        <div id="modeLimited" class="jpk-warn serversync-mt-sm hidden">A standard user must be on that server's whitelist.</div>
+                                        <div id="modeLimited" class="base-warn serversync-mt-sm hidden">A standard user must be on that server's whitelist.</div>
 
                                         <div id="peerCheckArea" class="hidden">
-                                            <div class="jpk-collapsible-actions serversync-mt-sm">
-                                                <button is="emby-button" type="button" id="btnCheckPeer" class="raised jpk-button-small">
+                                            <div class="base-collapsible-actions flush serversync-mt-sm">
+                                                <button is="emby-button" type="button" id="btnCheckPeer" class="raised base-button small">
                                                     <span>Check Link</span>
                                                 </button>
-                                                <span id="peerCheckStatus" class="jpk-status-text"></span>
+                                                <span id="peerCheckStatus" class="base-status-text"></span>
                                             </div>
                                             <div id="peerCheckResult" class="serversync-mt-md hidden">
                                                 <div id="peerCheckHeadline" class="serversync-mb-md"></div>
@@ -198,12 +198,12 @@
                                 </div>
 
                                 <!-- Step 3: Stream. Only for Push and Sync servers, since a Pull server may never link here. -->
-                                <div class="jpk-collapsible-section hidden" id="serverStepStreamSection">
-                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepStream">
-                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">3</span> Linking</span>
-                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                <div class="base-collapsible-section numbered hidden" id="serverStepStreamSection">
+                                    <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="serverStepStream">
+                                        <span class="base-collapsible-title">Linking</span>
+                                        <span class="base-collapsible-icon">&#9660;</span>
                                     </button>
-                                    <div id="serverStepStream" class="jpk-collapsible-content collapsed">
+                                    <div id="serverStepStream" class="base-collapsible-content collapsed">
                                         <div class="checkboxContainer checkboxContainer-withDescription" id="allowLinkingContainer">
                                             <label class="emby-checkbox-label">
                                                 <input type="checkbox" is="emby-checkbox" id="chkAllowLinking" />
@@ -211,7 +211,7 @@
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" id="allowLinkingDescription">Let that server stream files from here for libraries it maps as Link.</div>
                                         </div>
-                                        <div id="linkingNeedsPlugin" class="jpk-warn hidden serversync-mb-md"></div>
+                                        <div id="linkingNeedsPlugin" class="base-warn hidden serversync-mb-md"></div>
 
                                         <div id="linkLimits" class="hidden">
                                             <div class="inputContainer">
@@ -243,18 +243,18 @@
                                 </div>
 
                                 <!-- Step 4: Libraries. -->
-                                <div class="jpk-collapsible-section" id="serverStepLibrariesSection">
-                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepLibraries">
-                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">4</span> Libraries</span>
-                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                <div class="base-collapsible-section numbered" id="serverStepLibrariesSection">
+                                    <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="serverStepLibraries">
+                                        <span class="base-collapsible-title">Libraries</span>
+                                        <span class="base-collapsible-icon">&#9660;</span>
                                     </button>
-                                    <div id="serverStepLibraries" class="jpk-collapsible-content collapsed">
-                                        <div id="librariesLocked" class="jpk-neutral serversync-mb-md">Test the connection in step 2 to load libraries.</div>
+                                    <div id="serverStepLibraries" class="base-collapsible-content collapsed">
+                                        <div id="librariesLocked" class="base-neutral serversync-mb-md">Test the connection in step 2 to load libraries.</div>
                                         <div id="librariesSection" class="hidden">
                                             <div class="fieldDescription serversync-mb-md">Map that server's libraries to local ones. Storage, Always Keep, and filters are on the Storage tab.</div>
                                             <div id="libraryMappingsContainer"></div>
-                                            <div class="jpk-collapsible-actions">
-                                                <button is="emby-button" type="button" id="btnAddMapping" class="raised jpk-secondary jpk-button-small">
+                                            <div class="base-collapsible-actions flush">
+                                                <button is="emby-button" type="button" id="btnAddMapping" class="raised base-button secondary small">
                                                     <span>Add Library Mapping</span>
                                                 </button>
                                             </div>
@@ -263,19 +263,19 @@
                                 </div>
 
                                 <!-- Step 5: Users -->
-                                <div class="jpk-collapsible-section">
-                                    <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepUsers">
-                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">5</span> Users</span>
-                                        <span class="jpk-collapsible-icon">&#9660;</span>
+                                <div class="base-collapsible-section numbered">
+                                    <button type="button" class="base-collapsible-header collapsed" aria-expanded="false" data-target="serverStepUsers">
+                                        <span class="base-collapsible-title">Users</span>
+                                        <span class="base-collapsible-icon">&#9660;</span>
                                     </button>
-                                    <div id="serverStepUsers" class="jpk-collapsible-content collapsed">
-                                        <div id="usersLocked" class="jpk-neutral serversync-mb-md">Test the connection in step 2 to load users.</div>
+                                    <div id="serverStepUsers" class="base-collapsible-content collapsed">
+                                        <div id="usersLocked" class="base-neutral serversync-mb-md">Test the connection in step 2 to load users.</div>
                                         <div id="usersSection" class="hidden">
                                             <div class="fieldDescription serversync-mb-md">Map that server's users to local ones. With Allow Linking on, each mapping can also cap the local user's link streams and speed.</div>
-                                            <div id="usersLimited" class="jpk-warn hidden serversync-mb-md"></div>
+                                            <div id="usersLimited" class="base-warn hidden serversync-mb-md"></div>
                                             <div id="userMappingsContainer"></div>
-                                            <div class="jpk-collapsible-actions">
-                                                <button is="emby-button" type="button" id="btnAddUserMapping" class="raised jpk-secondary jpk-button-small">
+                                            <div class="base-collapsible-actions flush">
+                                                <button is="emby-button" type="button" id="btnAddUserMapping" class="raised base-button secondary small">
                                                     <span>Add User Mapping</span>
                                                 </button>
                                             </div>
@@ -285,11 +285,11 @@
 
                                 <!-- Editor footer -->
                                 <div class="serversync-editor-footer">
-                                    <button is="emby-button" type="button" id="btnSaveServer" class="raised jpk-button-submit jpk-button-small">
+                                    <button is="emby-button" type="button" id="btnSaveServer" class="raised base-button primary small">
                                         <span>Save Server</span>
                                     </button>
-                                    <span id="saveServerStatus" class="serversync-save-status jpk-status-text" role="status"></span>
-                                    <button is="emby-button" type="button" id="btnDeleteServer" class="raised jpk-button-destructive jpk-button-small">
+                                    <span id="saveServerStatus" class="serversync-save-status base-status-text" role="status"></span>
+                                    <button is="emby-button" type="button" id="btnDeleteServer" class="raised base-button destructive small">
                                         <span>Remove Server</span>
                                     </button>
                                 </div>

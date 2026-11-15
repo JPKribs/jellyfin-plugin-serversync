@@ -55,10 +55,10 @@ export function createPeopleSyncTableModule(ctx, kit) {
                     key: 'person',
                     label: 'Person',
                     type: 'custom',
-                    className: 'jpk-table-cell-with-thumb',
+                    className: 'base-table-cell-with-thumb',
+                    image: function(item) { return ServerSyncShared.proxyImage(item.SourcePersonId, false, item.ServerKey); },
                     render: function(item) {
-                        return renderRowInfo(ServerSyncShared.renderPersonThumb(item.SourcePersonId, item.ServerKey),
-                            item.PersonName || 'Unknown', null, item, item.Status, '');
+                        return renderRowInfo(item.PersonName || 'Unknown', null, item, item.Status, '');
                     }
                 },
                 {
@@ -110,7 +110,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
 
                     var statusBadge = view.querySelector('#peopleSyncModalStatusBadge');
                     statusBadge.textContent = detail.Status || 'Unknown';
-                    statusBadge.className = 'jpk-table-status-badge ' + (detail.Status || 'unknown');
+                    statusBadge.className = 'base-table-status-badge ' + (detail.Status || 'unknown');
 
                     if (detail.LastSyncTime) {
                         view.querySelector('#peopleSyncModalLastSync').textContent =

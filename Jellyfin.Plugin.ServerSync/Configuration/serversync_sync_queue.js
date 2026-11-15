@@ -20,7 +20,7 @@ export function createQueueModule(ctx) {
     var confirmDialog = ctx.confirmDialog;
 
     var DISCARD_BUTTON = function(lane, id) {
-        return '<button type="button" class="jpk-row-btn serversync-queue-discard" data-lane="' + lane + '" data-discard="' + ServerSyncShared.escapeHtml(String(id)) +
+        return '<button type="button" class="base-row-btn serversync-queue-discard" data-lane="' + lane + '" data-discard="' + ServerSyncShared.escapeHtml(String(id)) +
             '" title="Discard" aria-label="Discard"><span aria-hidden="true">&times;</span></button>';
     };
 
@@ -341,8 +341,8 @@ export function createQueueModule(ctx) {
             }
             var where = r.dir === 'in' ? 'from ' + esc(r.peerName || 'a server') : (r.peerName ? 'to ' + esc(r.peerName) : '');
             var sub = who + '<span>' + esc(r.what) + (where ? ' · ' + where : '') + '</span>';
-            var badges = '<span class="jpk-badge ' + QueueModule._kindColor(r.kind) + '">' + esc(QueueModule._kindLabelTitle(r.kind)) + '</span>' +
-                (r.recorded === false ? '<span class="jpk-badge gray">Provider</span>' : '');
+            var badges = '<span class="base-badge ' + QueueModule._kindColor(r.kind) + '">' + esc(QueueModule._kindLabelTitle(r.kind)) + '</span>' +
+                (r.recorded === false ? '<span class="base-badge gray">Provider</span>' : '');
 
             var chip, meta = '', err = false, act = '';
             if (r.state === 'Gathering') {

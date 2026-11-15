@@ -416,13 +416,16 @@ export default function (view) {
     // which takes the cursor out of whatever field the operator is typing in.
     function updateHealthDots() {
         renderPoolMap();
-        view.querySelectorAll('#serverList .jpk-card-item').forEach(function (card) {
+        view.querySelectorAll('#serverList .base-card-item').forEach(function (card) {
             var server = servers[parseInt(card.getAttribute('data-index'), 10)];
-            var dot = card.querySelector('.jpk-card-item-dot');
+            var dot = card.querySelector('.base-card-item-title .base-dot');
             if (!server || !dot) return;
             var spec = cardSpec(server);
-            dot.className = 'jpk-card-item-dot ' + spec.dot;
+            var color = { ok: 'green', bad: 'red', checking: 'orange', unknown: 'gray' }[spec.dot];
+            if (!color) return;
+            dot.className = 'base-dot ' + color;
             dot.title = spec.dotTitle || '';
+            dot.setAttribute('aria-label', spec.dotTitle || '');
         });
     }
 
@@ -539,7 +542,7 @@ export default function (view) {
         if (known) {
             var headline = getEl('accessHeadline');
             if (headline) {
-                headline.className = 'serversync-mb-md ' + (level === 'Administrator' ? 'jpk-success' : 'jpk-warn');
+                headline.className = 'serversync-mb-md ' + (level === 'Administrator' ? 'base-success' : 'base-warn');
                 headline.textContent = level === 'Administrator'
                     ? 'Administrator access' + (server.AuthenticatedUser ? ' as ' + server.AuthenticatedUser : '') + '. Every module works.'
                     : 'Standard user access as ' + (server.AuthenticatedUser || 'an unknown user') + '. Some features are off.';
@@ -561,7 +564,7 @@ export default function (view) {
                             '<div class="serversync-access-title">' + escapeHtml(row[0]) + '</div>' +
                             '<div class="serversync-access-description">' + escapeHtml(row[2]) + '</div>' +
                         '</div>' +
-                        '<span class="jpk-badge ' + ACCESS_BADGES[row[1]] + '">' + ACCESS_LABELS[row[1]] + '</span>' +
+                        '<span class="base-badge ' + ACCESS_BADGES[row[1]] + '">' + ACCESS_LABELS[row[1]] + '</span>' +
                         '</div>';
                 }).join('');
             }
@@ -685,7 +688,7 @@ export default function (view) {
         ServerSyncShared.setStatus('peerCheckStatus', '', false);
         var headline = getEl('peerCheckHeadline');
         if (headline) {
-            headline.className = 'serversync-mb-md ' + (severity === 'ok' ? 'jpk-success' : severity === 'warn' ? 'jpk-warn' : 'jpk-error');
+            headline.className = 'serversync-mb-md ' + (severity === 'ok' ? 'base-success' : severity === 'warn' ? 'base-warn' : 'base-error');
             headline.textContent = result.Headline || result.Message;
         }
         var grid = getEl('peerCheckRows');
@@ -696,7 +699,7 @@ export default function (view) {
                         '<div class="serversync-access-title">' + escapeHtml(row.Title) + '</div>' +
                         '<div class="serversync-access-description">' + escapeHtml(row.Text) + '</div>' +
                     '</div>' +
-                    '<span class="jpk-badge ' + (ACCESS_BADGES[row.State] || 'gray') + '">' + escapeHtml(row.Badge) + '</span>' +
+                    '<span class="base-badge ' + (ACCESS_BADGES[row.State] || 'gray') + '">' + escapeHtml(row.Badge) + '</span>' +
                     '</div>';
             }).join('');
         }
@@ -917,7 +920,7 @@ export default function (view) {
     }
 
     function setStepOpen(target, open) {
-        var header = view.querySelector('.jpk-collapsible-header[data-target="' + target + '"]');
+        var header = view.querySelector('.base-collapsible-header[data-target="' + target + '"]');
         var content = getEl(target);
         if (!header || !content) return;
         header.classList.toggle('collapsed', !open);
@@ -1334,7 +1337,7 @@ export default function (view) {
         div.innerHTML =
             '<div class="serversync-mapping-header">' +
                 '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-mapping-enabled" ' + (mapping.IsEnabled ? 'checked' : '') + ' /><span class="checkboxLabel">Enabled</span></label>' +
-                '<button is="emby-button" type="button" class="serversync-remove-mapping raised jpk-button-destructive jpk-button-small"><span>Remove</span></button>' +
+                '<button is="emby-button" type="button" class="serversync-remove-mapping raised base-button destructive small"><span>Remove</span></button>' +
             '</div>' +
             '<div class="serversync-mapping-grid">' +
                 '<div class="serversync-mapping-column">' +
@@ -1515,15 +1518,10 @@ export default function (view) {
     }
 
     // Linking is for Push and Sync servers. A Pull server only gives this one things to read, so it
-    // may never link here, and the step is hidden. The steps are numbered on from the ones shown.
+    // may never link here, and the step is hidden. Base numbers the steps that show.
     function reflectStream() {
         var mode = getMode();
         setVisible('serverStepStreamSection', mode !== 'Pull');
-        var number = 0;
-        view.querySelectorAll('#serverEditor .jpk-collapsible-section').forEach(function(section) {
-            var label = section.querySelector('.jpk-step-number');
-            if (label && !section.classList.contains('hidden')) label.textContent = String(++number);
-        });
         reflectLinking();
     }
 
@@ -1587,7 +1585,7 @@ export default function (view) {
         var warning = row.querySelector('.serversync-user-mapping-limit');
         if (!warning) {
             warning = document.createElement('div');
-            warning.className = 'serversync-user-mapping-limit jpk-warn hidden';
+            warning.className = 'serversync-user-mapping-limit base-warn hidden';
             warning.textContent = 'Skipped. A standard user key only syncs its own user.';
             row.appendChild(warning);
         }
@@ -1611,7 +1609,7 @@ export default function (view) {
         div.innerHTML =
             '<div class="serversync-mapping-header">' +
                 '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-user-mapping-enabled" ' + (mapping.IsEnabled !== false ? 'checked' : '') + ' /><span class="checkboxLabel">Enabled</span></label>' +
-                '<button is="emby-button" type="button" class="serversync-remove-user-mapping raised jpk-button-destructive jpk-button-small"><span>Remove</span></button>' +
+                '<button is="emby-button" type="button" class="serversync-remove-user-mapping raised base-button destructive small"><span>Remove</span></button>' +
             '</div>' +
             '<div class="serversync-mapping-grid">' +
                 '<div class="serversync-mapping-column"><div class="selectContainer"><label>Source User</label><select is="emby-select" class="serversync-source-user-select"></select></div></div>' +

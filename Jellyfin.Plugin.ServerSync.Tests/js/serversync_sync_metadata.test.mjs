@@ -107,12 +107,12 @@ test('buildChangesSummary gives one badge for each category that is on, orange w
     module.buildChangesSummary({ HasMetadataChanges: true, HasImagesChanges: false, HasPeopleChanges: false, HasStudiosChanges: true,
         SourceMetadataValue: JSON.stringify({ Genres: ['A'], Tags: ['t'] }), LocalMetadataValue: JSON.stringify({ Genres: ['B'], Tags: ['t'] }) });
     var html = env.view.querySelector('#metadataSyncModalChangesSummary').innerHTML;
-    assert.match(html, /<span class="jpk-badge orange">Metadata: Changes<\/span>/);
-    assert.match(html, /<span class="jpk-badge orange">Genres: Changes<\/span>/);
-    assert.match(html, /<span class="jpk-badge green">Tags: Synced<\/span>/);
-    assert.match(html, /<span class="jpk-badge green">Images: Synced<\/span>/);
-    assert.match(html, /<span class="jpk-badge green">People: Synced<\/span>/);
-    assert.match(html, /<span class="jpk-badge orange">Studios: Changes<\/span>/);
+    assert.match(html, /<span class="base-badge orange">Metadata: Changes<\/span>/);
+    assert.match(html, /<span class="base-badge orange">Genres: Changes<\/span>/);
+    assert.match(html, /<span class="base-badge green">Tags: Synced<\/span>/);
+    assert.match(html, /<span class="base-badge green">Images: Synced<\/span>/);
+    assert.match(html, /<span class="base-badge green">People: Synced<\/span>/);
+    assert.match(html, /<span class="base-badge orange">Studios: Changes<\/span>/);
 });
 
 test('buildChangesSummary leaves out the categories that are turned off', function () {

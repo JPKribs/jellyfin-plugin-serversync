@@ -40,9 +40,9 @@ export function createContentSyncTableModule(ctx, kit) {
         bulkButtons: [
             { id: 'Ignore', title: 'Ignore', icon: 'block', method: 'bulkIgnore' },
             { id: 'MarkSynced', title: 'Mark Synced', icon: 'check_circle', method: 'bulkMarkSynced' },
-            { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'jpk-button-submit', method: 'bulkQueue' },
+            { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'base-button primary', method: 'bulkQueue' },
             { id: 'MakeCopy', title: 'Keep a Copy', icon: 'push_pin', method: 'bulkMakeCopy' },
-            { id: 'Delete', title: 'Delete Local File', icon: 'delete', className: 'jpk-button-destructive', method: 'bulkDelete' }
+            { id: 'Delete', title: 'Delete Local File', icon: 'delete', className: 'base-button destructive', method: 'bulkDelete' }
         ],
         idKey: 'SourceItemId',
         tasks: {
@@ -99,12 +99,12 @@ export function createContentSyncTableModule(ctx, kit) {
                     key: 'name',
                     label: 'Item',
                     type: 'custom',
-                    className: 'jpk-table-cell-with-thumb',
+                    className: 'base-table-cell-with-thumb',
+                    image: function(item) { return ServerSyncShared.proxyImage(item.SourceItemId, false, item.ServerKey); },
                     render: function(item) {
                         var sourcePath = item.SourcePath || '';
                         var libraries = (item.SourceLibraryName || 'Unknown') + ' → ' + (item.LocalLibraryName || 'Unknown');
-                        return renderRowInfo(ServerSyncShared.renderItemThumb(item.SourceItemId, item.ServerKey),
-                            ServerSyncShared.getFileName(sourcePath), libraries, item, item.Status, sourcePath);
+                        return renderRowInfo(ServerSyncShared.getFileName(sourcePath), libraries, item, item.Status, sourcePath);
                     }
                 },
                 {
@@ -114,10 +114,10 @@ export function createContentSyncTableModule(ctx, kit) {
                     className: 'serversync-details-cell',
                     render: function(item) {
                         if (item.Status === 'Synced') {
-                            return '<span class="jpk-badge gray">No Changes</span>';
+                            return '<span class="base-badge gray">No Changes</span>';
                         }
                         var size = item.SourceSizeFormatted || '';
-                        return size ? '<span class="jpk-badge purple">' + ServerSyncShared.escapeHtml(size) + '</span>' : '';
+                        return size ? '<span class="base-badge purple">' + ServerSyncShared.escapeHtml(size) + '</span>' : '';
                     }
                 },
                 { key: 'Status', label: 'Status', type: 'status' }
@@ -308,7 +308,7 @@ export function createContentSyncTableModule(ctx, kit) {
                 var displayStatus = self.getDisplayStatus(item);
                 var statusClass = self.getStatusClass(item);
                 statusBadge.textContent = displayStatus;
-                statusBadge.className = 'jpk-table-status-badge ' + statusClass;
+                statusBadge.className = 'base-table-status-badge ' + statusClass;
 
                 var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';

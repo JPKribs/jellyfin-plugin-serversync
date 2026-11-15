@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { installPage, loadScript, settle } from './support.mjs';
+import { installPage, loadScript, settle, statusText } from './support.mjs';
 
 globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
@@ -44,8 +44,8 @@ test('the Servers tab leaves out Storage while it is hidden and still marks itse
 test('a config that cannot be loaded shows an error on the server list status and never opens an alert', async function () {
     var opened = await openPage({ fail: true });
     var status = opened.view.querySelector('#serverListStatus');
-    assert.equal(status.textContent, 'Could not load the servers. Reload the page.');
-    assert.ok(status.classList.contains('jpk-status-bad'));
+    assert.equal(statusText(status), 'Could not load the servers. Reload the page.');
+    assert.ok(status.classList.contains('base-status-bad'));
 });
 
 test('the pool map draws each server by name, escaped, and sizes the picture with an attribute, not a style', async function () {

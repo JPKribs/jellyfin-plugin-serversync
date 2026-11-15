@@ -4,7 +4,7 @@
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { installPage, loadScript } from './support.mjs';
+import { installPage, loadScript, statusText } from './support.mjs';
 
 globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
@@ -65,36 +65,36 @@ test('formatImageDisplay shows a dash for no images and a count when the size is
 });
 
 test('formatImageDisplay shows the size, with the count when there are several images', function () {
-    assert.equal(kit.formatImageDisplay(2048, 1), '2.00 KB');
-    assert.equal(kit.formatImageDisplay(2048, 3), '2.00 KB (3)');
+    assert.equal(kit.formatImageDisplay(2048, 1), '2 KB');
+    assert.equal(kit.formatImageDisplay(2048, 3), '2 KB (3)');
 });
 
 test('renderChangeBadges gives one gray badge when nothing changed', function () {
-    assert.equal(kit.renderChangeBadges([]), '<span class="jpk-badge gray">No Changes</span>');
+    assert.equal(kit.renderChangeBadges([]), '<span class="base-badge gray">No Changes</span>');
 });
 
 test('renderChangeBadges gives an orange badge for each changed category', function () {
     assert.equal(kit.renderChangeBadges(['Metadata', 'Images']),
-        '<span class="jpk-badge orange">Metadata</span> <span class="jpk-badge orange">Images</span>');
+        '<span class="base-badge orange">Metadata</span> <span class="base-badge orange">Images</span>');
 });
 
 test('renderRowInfo escapes the name and the line, and sets the name as the tooltip', function () {
-    var html = kit.renderRowInfo('<img>', 'A <b>film</b>', 'Movies & more', {}, 'Synced');
-    assert.ok(html.startsWith('<img>'));
+    var html = kit.renderRowInfo('A <b>film</b>', 'Movies & more', {}, 'Synced');
+    assert.ok(html.startsWith('<div class="serversync-item-info">'));
     assert.match(html, /class="serversync-item-name" title="A &lt;b&gt;film&lt;\/b&gt;">A &lt;b&gt;film&lt;\/b&gt;<\/div>/);
     assert.match(html, /class="serversync-item-path">Movies &amp; more<\/div>/);
     assert.doesNotMatch(html, /serversync-item-error/);
 });
 
 test('renderRowInfo shows the error preview only for an errored row', function () {
-    var errored = kit.renderRowInfo('', 'Film', 'Movies', { ErrorMessage: 'Disk <full>' }, 'Errored');
+    var errored = kit.renderRowInfo('Film', 'Movies', { ErrorMessage: 'Disk <full>' }, 'Errored');
     assert.match(errored, /class="serversync-item-error" title="Disk &lt;full&gt;">Disk &lt;full&gt;<\/div>/);
-    var synced = kit.renderRowInfo('', 'Film', 'Movies', { ErrorMessage: 'Disk full' }, 'Synced');
+    var synced = kit.renderRowInfo('Film', 'Movies', { ErrorMessage: 'Disk full' }, 'Synced');
     assert.doesNotMatch(synced, /serversync-item-error/);
 });
 
 test('renderRowInfo leaves out the second line when it is null and the tooltip when the title is empty', function () {
-    var html = kit.renderRowInfo('', 'Person', null, {}, 'Synced', '');
+    var html = kit.renderRowInfo('Person', null, {}, 'Synced', '');
     assert.doesNotMatch(html, /serversync-item-path/);
     assert.match(html, /<div class="serversync-item-name">Person<\/div>/);
 });
@@ -221,7 +221,7 @@ test('a bulk action posts the selected ids and reports how many were changed', a
     var post = page.requests.find(function (r) { return r.type === 'POST'; });
     assert.equal(post.url, 'Sync/HistoryItems/Ignore');
     assert.deepEqual(JSON.parse(post.data), { Ids: ['a', 'b'] });
-    assert.equal(view.querySelector('#syncStatus').textContent, '2 items ignored.');
+    assert.equal(statusText(view.querySelector('#syncStatus')), '2 items ignored.');
     assert.ok(module.table.log.includes('clear'));
 });
 
@@ -242,8 +242,8 @@ test('a bulk action that fails reports it as an error', async function () {
     module.bulkQueue();
     await flush();
     var el = view.querySelector('#syncStatus');
-    assert.equal(el.textContent, 'Could not queue the items.');
-    assert.ok(el.classList.contains('jpk-status-bad'));
+    assert.equal(statusText(el), 'Could not queue the items.');
+    assert.ok(el.classList.contains('base-status-bad'));
 });
 
 test('retryErrors asks the server to requeue every errored row and says how many it queued', async function () {
@@ -255,7 +255,7 @@ test('retryErrors asks the server to requeue every errored row and says how many
     var post = page.requests.find(function (r) { return r.type === 'POST'; });
     assert.equal(post.url, 'Sync/HistoryItems/Queue');
     assert.deepEqual(JSON.parse(post.data), { Ids: [], Status: 'Errored' });
-    assert.equal(view.querySelector('#syncStatus').textContent, '2 errored history items queued for retry.');
+    assert.equal(statusText(view.querySelector('#syncStatus')), '2 errored history items queued for retry.');
 });
 
 test('retryErrors says so when no row was errored, and when the request fails', async function () {
@@ -264,10 +264,10 @@ test('retryErrors says so when no row was errored, and when the request fails', 
     module.table = fakeTable([]);
     responses.push({ Updated: 0 });
     await module.retryErrors();
-    assert.equal(view.querySelector('#syncStatus').textContent, 'No errored history items to retry.');
+    assert.equal(statusText(view.querySelector('#syncStatus')), 'No errored history items to retry.');
     responses.push(new Error('refused'));
     await module.retryErrors();
-    assert.equal(view.querySelector('#syncStatus').textContent, 'Could not retry the errored history items.');
+    assert.equal(statusText(view.querySelector('#syncStatus')), 'Could not retry the errored history items.');
 });
 
 test('retryErrors counts a single row with the singular noun', async function () {
@@ -276,7 +276,7 @@ test('retryErrors counts a single row with the singular noun', async function ()
     module.table = fakeTable([]);
     responses.push({ Updated: 1 });
     await module.retryErrors();
-    assert.equal(view.querySelector('#syncStatus').textContent, '1 errored history item queued for retry.');
+    assert.equal(statusText(view.querySelector('#syncStatus')), '1 errored history item queued for retry.');
 });
 
 test('setModalStatus posts the status change, closes the modal, and reports it', async function () {
@@ -290,7 +290,7 @@ test('setModalStatus posts the status change, closes the modal, and reports it',
     var post = page.requests.find(function (r) { return r.type === 'POST'; });
     assert.equal(post.url, 'Sync/HistoryItems/Queue');
     assert.deepEqual(JSON.parse(post.data), { Ids: [9] });
-    assert.equal(view.querySelector('#syncStatus').textContent, 'Item status updated to Queued.');
+    assert.equal(statusText(view.querySelector('#syncStatus')), 'Item status updated to Queued.');
     assert.equal(module.currentModalItem, null);
 });
 
@@ -302,7 +302,7 @@ test('setModalStatus reports an error when the change is refused', async functio
     responses.push(new Error('refused'));
     module.modalIgnore();
     await flush();
-    assert.equal(view.querySelector('#syncStatus').textContent, 'Could not update the item status.');
+    assert.equal(statusText(view.querySelector('#syncStatus')), 'Could not update the item status.');
 });
 
 test('a task that cannot start reports it and puts the button back', async function () {
@@ -317,7 +317,7 @@ test('a task that cannot start reports it and puts the button back', async funct
     await flush();
     assert.equal(button.disabled, false);
     assert.equal(button.querySelector('span').textContent, 'Refresh');
-    assert.equal(view.querySelector('#syncStatus').textContent, 'Could not start the history refresh task.');
+    assert.equal(statusText(view.querySelector('#syncStatus')), 'Could not start the history refresh task.');
 });
 
 test('a spec method replaces the shared method of the same name', async function () {

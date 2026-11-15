@@ -573,7 +573,7 @@ export default function (view) {
         row.innerHTML =
             '<select class="serversync-grant-user serversync-grant-field" aria-label="User">' + options + '</select>' +
             '<input type="text" class="serversync-grant-locations serversync-grant-field" aria-label="Locations" placeholder="Default" />' +
-            '<button is="emby-button" type="button" class="raised jpk-button-destructive jpk-button-small serversync-grant-remove"><span>Remove</span></button>';
+            '<button is="emby-button" type="button" class="raised base-button destructive small serversync-grant-remove"><span>Remove</span></button>';
         container.appendChild(row);
         var select = row.querySelector('.serversync-grant-user');
         var id = (grant.UserId || '').replace(/-/g, '').toLowerCase();

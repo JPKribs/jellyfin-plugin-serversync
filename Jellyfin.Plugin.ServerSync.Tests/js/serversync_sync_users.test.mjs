@@ -32,15 +32,15 @@ test('_formatValue writes a dash for nothing, Yes and No for a flag, and a list 
 test('buildChangesSummary gives a badge for each category that is on, orange when it changed', function () {
     module.buildChangesSummary({ ConfigurationItem: { HasChanges: true }, PolicyItem: { HasChanges: false }, ProfileImageItem: null });
     var html = env.view.querySelector('#userSyncModalChangesSummary').innerHTML;
-    assert.match(html, /<span class="jpk-badge orange">Configuration: Changes<\/span>/);
-    assert.match(html, /<span class="jpk-badge green">Policy: Synced<\/span>/);
-    assert.match(html, /<span class="jpk-badge green">Image: Synced<\/span>/);
+    assert.match(html, /<span class="base-badge orange">Configuration: Changes<\/span>/);
+    assert.match(html, /<span class="base-badge green">Policy: Synced<\/span>/);
+    assert.match(html, /<span class="base-badge green">Image: Synced<\/span>/);
 });
 
 test('buildChangesSummary leaves out the categories that are turned off', function () {
     module.currentConfig = { UserSyncPolicy: false, UserSyncConfiguration: false };
     module.buildChangesSummary({ ProfileImageItem: { HasChanges: true } });
-    assert.equal(env.view.querySelector('#userSyncModalChangesSummary').innerHTML, '<span class="jpk-badge orange">Image: Changes</span>');
+    assert.equal(env.view.querySelector('#userSyncModalChangesSummary').innerHTML, '<span class="base-badge orange">Image: Changes</span>');
 });
 
 test('_addPropertyRows adds a row for each setting and marks the ones that differ', function () {

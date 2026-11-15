@@ -1,6 +1,7 @@
 // loader.mjs
 // A node module loader hook that lets the Server Sync config pages load outside Jellyfin. The pages import their
 // shared module and Base's bundle by a specifier that only Jellyfin resolves, so this maps each one to its file.
+// Base's bundle is its built dist/jpkribs_shared.js.
 
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
@@ -12,14 +13,14 @@ var baseEntry = '';
 // Receives the folders the hook maps to, from register in support.mjs.
 //
 // Inputs
-// data [object]: configDir is the plugin's Configuration folder. baseEntry is the URL of Base's JS entry.
+// data [object]: configDir is the plugin's Configuration folder. baseEntry is the URL of Base's built bundle.
 export async function initialize(data) {
     configDir = data.configDir;
     baseEntry = data.baseEntry;
 }
 
 // resolve
-// Maps './configurationpage?name=<file>' to the plugin's own file, or to Base's JS entry for the shared bundle.
+// Maps './configurationpage?name=<file>' to the plugin's own file, or to Base's built bundle for the shared one.
 //
 // Inputs
 // specifier [string]: What the importing module asked for.
@@ -46,7 +47,7 @@ export async function resolve(specifier, context, nextResolve) {
 // Output
 // [Promise]: The loaded module source.
 export async function load(url, context, nextLoad) {
-    if (url.endsWith('.js') && (url.startsWith(pathToFileURL(configDir).href) || url.startsWith(baseEntry.replace(/index\.js$/, '')))) {
+    if (url.endsWith('.js') && (url.startsWith(pathToFileURL(configDir).href) || url === baseEntry)) {
         return nextLoad(url, { ...context, format: 'module' });
     }
     return nextLoad(url, context);

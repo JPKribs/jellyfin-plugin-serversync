@@ -78,12 +78,13 @@ export function createUserSyncTableModule(ctx, kit) {
                     key: 'user',
                     label: 'User',
                     type: 'custom',
-                    className: 'jpk-table-cell-with-thumb',
+                    className: 'base-table-cell-with-thumb',
+                    image: function(item) { return ServerSyncShared.proxyImage(item.SourceUserId, true, item.ServerKey); },
+                    imageShape: 'round',
                     render: function(item) {
                         var users = (item.SourceUserName || 'Unknown') + ' → ' + (item.LocalUserName || 'Unknown');
                         var servers = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey) + ' → ' + (ServerSyncShared.localServerName || 'Unknown');
-                        return renderRowInfo(ServerSyncShared.renderUserThumb(item.SourceUserId, item.ServerKey),
-                            users, servers, item, item.OverallStatus, '');
+                        return renderRowInfo(users, servers, item, item.OverallStatus, '');
                     }
                 },
                 {
@@ -146,7 +147,7 @@ export function createUserSyncTableModule(ctx, kit) {
 
                     var statusBadge = view.querySelector('#userSyncModalStatusBadge');
                     statusBadge.textContent = detail.OverallStatus || 'Unknown';
-                    statusBadge.className = 'jpk-table-status-badge ' + (detail.OverallStatus || 'unknown');
+                    statusBadge.className = 'base-table-status-badge ' + (detail.OverallStatus || 'unknown');
 
                     var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail.ServerKey);
                     var localServerName = ServerSyncShared.localServerName || 'Local';

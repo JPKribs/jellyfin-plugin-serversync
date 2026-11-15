@@ -29,7 +29,7 @@ export function createSyncTableKit(ctx) {
 
     var DEFAULT_BULK_BUTTONS = [
         { id: 'Ignore', title: 'Ignore', icon: 'block', method: 'bulkIgnore' },
-        { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'jpk-button-submit', method: 'bulkQueue' }
+        { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'base-button primary', method: 'bulkQueue' }
     ];
 
     // An element id under a view's prefix. The Content view has no prefix, so its ids start lowercase.
@@ -63,16 +63,15 @@ export function createSyncTableKit(ctx) {
         el.className = count > 0 ? 'serversync-health-value serversync-success' : 'serversync-health-value serversync-warning';
     }
 
-    // The thumbnail, name, second line, and error preview every Item column shows.
-    function renderRowInfo(thumb, name, line, item, status, nameTitle) {
+    // The name, second line, and error preview every Item column shows. Base draws the thumbnail from the column's image.
+    function renderRowInfo(name, line, item, status, nameTitle) {
         var errorPreview = '';
         if (status === 'Errored' && item.ErrorMessage) {
             errorPreview = '<div class="serversync-item-error" title="' + ServerSyncShared.escapeHtml(item.ErrorMessage) + '">' +
                 ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
         }
         var title = nameTitle === undefined ? name : nameTitle;
-        return thumb +
-            '<div class="serversync-item-info">' +
+        return '<div class="serversync-item-info">' +
             '<div class="serversync-item-name"' + (title ? ' title="' + ServerSyncShared.escapeHtml(title) + '"' : '') + '>' + ServerSyncShared.escapeHtml(name) + '</div>' +
             (line === null ? '' : '<div class="serversync-item-path">' + ServerSyncShared.escapeHtml(line) + '</div>') +
             errorPreview +
@@ -82,9 +81,9 @@ export function createSyncTableKit(ctx) {
     // The orange badges for the categories that differ, or a gray one when none do.
     function renderChangeBadges(changes) {
         if (changes.length === 0) {
-            return '<span class="jpk-badge gray">No Changes</span>';
+            return '<span class="base-badge gray">No Changes</span>';
         }
-        return changes.map(function(c) { return '<span class="jpk-badge orange">' + c + '</span>'; }).join(' ');
+        return changes.map(function(c) { return '<span class="base-badge orange">' + c + '</span>'; }).join(' ');
     }
 
     function createSyncTableModule(spec) {
@@ -157,7 +156,7 @@ export function createSyncTableKit(ctx) {
 
                 bind(ids.modal('Ignore'), function() { self.modalIgnore(); });
                 bind(ids.modal('Queue'), function() { self.modalQueue(); });
-                // The close button carries jpk-dialog-close, so the dialog closes on it, on Escape, and on
+                // The close button carries base-dialog-close, so the dialog closes on it, on Escape, and on
                 // a backdrop click alike, and every close runs the same refresh.
                 self._dialog = bindDialog(spec.modalId, { root: view, onClose: function() { self._onModalClosed(); } });
                 (spec.extraModalButtons || []).forEach(function(b) {

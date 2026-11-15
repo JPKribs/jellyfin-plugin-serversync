@@ -4,7 +4,7 @@
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSyncContext, loadScript, flush } from './support.mjs';
+import { createSyncContext, loadScript, flush, statusText } from './support.mjs';
 
 globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
@@ -124,7 +124,7 @@ test('bulkQueue leaves out rows that are pending deletion', async function () {
     await flush();
     var post = env.page.requests.find(function (r) { return r.url === 'Sync/QueueItems'; });
     assert.deepEqual(JSON.parse(post.data), { SourceItemIds: ['b'] });
-    assert.equal(env.view.querySelector('#syncStatus').textContent, '1 item queued.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), '1 item queued.');
 });
 
 test('bulkQueue says so when every selected row is pending deletion', async function () {
@@ -133,7 +133,7 @@ test('bulkQueue says so when every selected row is pending deletion', async func
     module.bulkQueue();
     await flush();
     assert.equal(env.page.requests.filter(function (r) { return r.type === 'POST'; }).length, 0);
-    assert.equal(env.view.querySelector('#syncStatus').textContent, 'No items to queue. Items pending deletion cannot be queued.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), 'No items to queue. Items pending deletion cannot be queued.');
 });
 
 test('bulkDelete asks a destructive question first and deletes only when it is confirmed', async function () {
@@ -153,7 +153,7 @@ test('bulkDelete asks a destructive question first and deletes only when it is c
     await flush();
     var post = env.page.requests.find(function (r) { return r.url === 'Sync/DeleteLocalItems'; });
     assert.deepEqual(JSON.parse(post.data), { SourceItemIds: ['a', 'b'] });
-    assert.equal(env.view.querySelector('#syncStatus').textContent, 'Deleted 2 items.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), 'Deleted 2 items.');
 });
 
 test('bulkDelete with nothing selected asks nothing', async function () {
@@ -175,7 +175,7 @@ test('modalDelete names the file in the question and deletes only when it is con
     module.modalDelete();
     await flush();
     assert.equal(env.page.requests.filter(function (r) { return r.url === 'Sync/DeleteLocalItems'; }).length, 1);
-    assert.equal(env.view.querySelector('#syncStatus').textContent, 'Item deleted.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), 'Item deleted.');
 });
 
 test('keepMessage says how many links were moved from the cache and how many will be copied', function () {
@@ -189,7 +189,7 @@ test('bulkMarkSynced says how many items were marked and how many files were mis
     env.responses.push({ Synced: 2, NotFound: 1 });
     module.bulkMarkSynced();
     await flush();
-    assert.equal(env.view.querySelector('#syncStatus').textContent, '2 items marked as synced, 1 local file not found.');
+    assert.equal(statusText(env.view.querySelector('#syncStatus')), '2 items marked as synced, 1 local file not found.');
 });
 
 test('the controller initializes the table once and loads its rows', async function () {

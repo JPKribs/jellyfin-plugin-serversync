@@ -11,11 +11,17 @@ var realSetTimeout = globalThis.setTimeout;
 var here = dirname(fileURLToPath(import.meta.url));
 var configDir = join(here, '..', '..', 'Jellyfin.Plugin.ServerSync', 'Configuration');
 var baseRoot = join(here, '..', '..', '..', 'Shared', 'jellyfin-plugin-base');
-var baseEntry = pathToFileURL(join(baseRoot, 'src', 'js', 'index.js')).href;
+var baseBundle = join(baseRoot, 'dist', 'jpkribs_shared.js');
+var baseEntry = pathToFileURL(baseBundle).href;
 var fakeDomPath = join(baseRoot, 'JPKribs.Jellyfin.Base.Tests', 'js', 'fake-dom.mjs');
 
 if (!existsSync(fakeDomPath)) {
     throw new Error('Base is not checked out next to this repository. Expected ' + baseRoot + '.');
+}
+
+// The pages load the bundle Base ships, so a test runs the same code a plugin receives.
+if (!existsSync(baseBundle)) {
+    throw new Error('Base has no bundle. Run scripts/bundle.sh in ' + baseRoot + '.');
 }
 
 register(pathToFileURL(join(here, 'loader.mjs')).href, { parentURL: import.meta.url, data: { configDir: configDir, baseEntry: baseEntry } });
@@ -151,7 +157,7 @@ export async function settle(ms) {
 // Output
 // [boolean]: Whether a button with that label was found.
 export function clickDialogButton(dom, text) {
-    var dialog = dom.document.querySelector('.jpk-dialog');
+    var dialog = dom.document.querySelector('.base-dialog');
     if (!dialog) return false;
     var button = Array.from(dialog.querySelectorAll('button')).find(function (b) { return b.textContent === text; });
     if (!button) return false;
@@ -168,9 +174,22 @@ export function clickDialogButton(dom, text) {
 // Output
 // [object]: The title, and the text of each paragraph, or null when no dialog is open.
 export function dialogText(dom) {
-    var dialog = dom.document.querySelector('.jpk-dialog');
+    var dialog = dom.document.querySelector('.base-dialog');
     if (!dialog) return null;
-    var title = dialog.querySelector('.jpk-modal-title');
-    var body = dialog.querySelector('.jpk-modal-body');
+    var title = dialog.querySelector('.base-modal-title');
+    var body = dialog.querySelector('.base-modal-body');
     return { title: title ? title.textContent : '', body: body ? (body.innerHTML || body.children.map(function (c) { return c.textContent; }).join(' ')) : '' };
+}
+
+// statusText
+// Reads the message a status element shows, without the icon Base draws beside it.
+//
+// Inputs
+// el [object]: The status element.
+//
+// Output
+// [string]: The message, or an empty string when it shows none.
+export function statusText(el) {
+    var message = el && el.querySelector ? el.querySelector('.base-status-message') : null;
+    return message ? message.textContent : '';
 }

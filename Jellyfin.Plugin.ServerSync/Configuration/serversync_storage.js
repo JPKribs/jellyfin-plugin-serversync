@@ -199,7 +199,7 @@ export default function (view) {
                         '<span class="serversync-library-card-name">' + escapeHtml(localName) + '</span>' +
                     '</div>' +
                 '</div>' +
-                '<span class="jpk-badge gray serversync-storage-mode-badge"></span>' +
+                '<span class="base-badge gray serversync-storage-mode-badge"></span>' +
             '</div>' +
             '<div class="selectContainer serversync-storage-mode-block">' +
                 '<label>Storage</label>' +
@@ -210,19 +210,19 @@ export default function (view) {
                 '<div class="fieldDescription">Copy downloads each file and follows that server, so a file it removes is handled by Removed files here. Link writes a .strm that streams from any server that holds the file and allows linking, and goes only when none holds it.</div>' +
             '</div>' +
             '<div class="serversync-link-cache-section hidden">' +
-                '<h3 class="jpk-subsection-title">Link Cache</h3>' +
+                '<h3 class="base-subsection-title">Link Cache</h3>' +
                 '<div class="checkboxContainer checkboxContainer-withDescription">' +
                     '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-cache-links" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">Cache This Library\'s Links</span></label>' +
                     '<div class="fieldDescription checkboxFieldDescription">Cache played links and upcoming episodes. The cache is set up under Settings &gt; Content.</div>' +
                 '</div>' +
             '</div>' +
             '<div class="serversync-permanent-section hidden">' +
-                '<h3 class="jpk-subsection-title">Always Keep</h3>' +
+                '<h3 class="base-subsection-title">Always Keep</h3>' +
                 '<div class="fieldDescription serversync-mb-md">Picked shows and films, every version included, are full copies here instead of links. Removing a pick turns them back into links on the next sync.</div>' +
                 '<div class="serversync-filter-table-container" id="' + permanentTableId + '"></div>' +
             '</div>' +
             '<div class="serversync-filter-section">' +
-                '<h3 class="jpk-subsection-title">Library Filter</h3>' +
+                '<h3 class="base-subsection-title">Library Filter</h3>' +
                 '<div class="selectContainer">' +
                     '<label>Filter Mode</label>' +
                     '<select is="emby-select" class="serversync-filter-mode-select">' +
@@ -243,7 +243,7 @@ export default function (view) {
             '</div>' +
             (negotiable
                 ? '<div class="serversync-history-section">' +
-                    '<h3 class="jpk-subsection-title">History</h3>' +
+                    '<h3 class="base-subsection-title">History</h3>' +
                     '<div class="checkboxContainer checkboxContainer-withDescription">' +
                         '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-negotiate-history" ' + (mapping.NegotiateHistory ? 'checked' : '') + ' /><span class="checkboxLabel">Negotiate History</span></label>' +
                         '<div class="fieldDescription checkboxFieldDescription">Write merged watch history back to that server too.</div>' +
@@ -310,7 +310,7 @@ export default function (view) {
                 selected[item.Id] = pickedItem(item);
             }
             var sel = !!selected[item.Id];
-            pickerContainer.querySelectorAll('.jpk-table-row').forEach(function (rowEl) {
+            pickerContainer.querySelectorAll('.base-table-row').forEach(function (rowEl) {
                 if (rowEl.getAttribute('data-id') !== String(item.Id)) return;
                 var wrap = rowEl.querySelector('.serversync-filter-item');
                 if (wrap) wrap.classList.toggle('serversync-selected', sel);
@@ -468,13 +468,12 @@ export default function (view) {
                     key: 'name',
                     label: 'Item',
                     type: 'custom',
-                    className: 'jpk-table-cell-with-thumb',
+                    className: 'base-table-cell-with-thumb',
+                    image: function (item) { return ServerSyncShared.proxyImage(item.SourceItemId, false, item.ServerKey || selectedKey); },
                     render: function (item) {
                         keptRows[String(item.Id)] = item;
                         var path = item.LocalPath || item.SourcePath || '';
-                        var thumb = ServerSyncShared.renderItemThumb(item.SourceItemId, item.ServerKey || selectedKey);
-                        return thumb +
-                            '<div class="serversync-item-info">' +
+                        return '<div class="serversync-item-info">' +
                                 '<div class="serversync-item-name" title="' + escapeHtml(path) + '">' + escapeHtml(ServerSyncShared.getFileName(path)) + '</div>' +
                                 '<div class="serversync-item-path">' + escapeHtml(path) + '</div>' +
                             '</div>';
@@ -488,8 +487,8 @@ export default function (view) {
                     render: function (item) {
                         var badge = KEPT_BADGES[item.Kept] || KEPT_BADGES.Unknown;
                         var size = item.SourceSizeFormatted || '';
-                        return '<span class="jpk-badge ' + badge.cls + '" title="' + escapeHtml(badge.title) + '">' + escapeHtml(badge.label) + '</span>' +
-                            (size ? ' <span class="jpk-badge purple">' + escapeHtml(size) + '</span>' : '');
+                        return '<span class="base-badge ' + badge.cls + '" title="' + escapeHtml(badge.title) + '">' + escapeHtml(badge.label) + '</span>' +
+                            (size ? ' <span class="base-badge purple">' + escapeHtml(size) + '</span>' : '');
                     }
                 },
                 { key: 'Status', label: 'Status', type: 'status' }
@@ -497,7 +496,7 @@ export default function (view) {
         });
         var bulk = keptTable.getBulkActionsContainer();
         if (bulk) {
-            bulk.innerHTML = '<button is="emby-button" type="button" id="btnUnkeepCopies" class="raised jpk-button-submit jpk-button-small serversync-kept-bulk-button" disabled>' +
+            bulk.innerHTML = '<button is="emby-button" type="button" id="btnUnkeepCopies" class="raised base-button primary small serversync-kept-bulk-button" disabled>' +
                 '<span class="material-icons" aria-hidden="true">link</span><span>Turn Back Into Links</span></button>';
             bulk.querySelector('#btnUnkeepCopies').addEventListener('click', unkeepSelected);
         }

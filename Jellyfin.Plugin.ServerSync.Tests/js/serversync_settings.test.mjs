@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { installPage, loadScript, settle, clickDialogButton, dialogText } from './support.mjs';
+import { installPage, loadScript, settle, clickDialogButton, dialogText, statusText } from './support.mjs';
 
 globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
@@ -53,8 +53,8 @@ test('the Settings tab moves up one place when the Storage tab is hidden', async
 test('a config that cannot be loaded shows an error on the page status and never opens an alert', async function () {
     var opened = await openPage({ fail: true });
     var status = opened.view.querySelector('#settingsStatus');
-    assert.equal(status.textContent, 'Could not load the settings. Reload the page.');
-    assert.ok(status.classList.contains('jpk-status-bad'));
+    assert.equal(statusText(status), 'Could not load the settings. Reload the page.');
+    assert.ok(status.classList.contains('base-status-bad'));
 });
 
 test('resetting the whole database asks first and sends nothing when the question is cancelled', async function () {
@@ -68,7 +68,7 @@ test('resetting the whole database asks first and sends nothing when the questio
     assert.equal(clickDialogButton(opened.page.dom, 'Cancel'), true);
     await settle(20);
     assert.equal(posts(opened).length, 0);
-    assert.equal(opened.view.querySelector('#resetStatus').textContent, '');
+    assert.equal(statusText(opened.view.querySelector('#resetStatus')), '');
 });
 
 test('resetting the whole database posts the reset and reports it on the reset status', async function () {
@@ -79,8 +79,8 @@ test('resetting the whole database posts the reset and reports it on the reset s
     await settle(20);
     assert.equal(posts(opened)[0].url, 'Sync/Reset/All');
     var status = opened.view.querySelector('#resetStatus');
-    assert.equal(status.textContent, 'Database reset.');
-    assert.ok(status.classList.contains('jpk-status-ok'));
+    assert.equal(statusText(status), 'Database reset.');
+    assert.ok(status.classList.contains('base-status-ok'));
 });
 
 test('resetting one table names it in the question and in the result', async function () {
@@ -92,7 +92,7 @@ test('resetting one table names it in the question and in the result', async fun
     clickDialogButton(opened.page.dom, 'Reset');
     await settle(20);
     assert.equal(posts(opened)[0].url, 'Sync/Reset/Content');
-    assert.equal(opened.view.querySelector('#resetStatus').textContent, 'Content sync table reset.');
+    assert.equal(statusText(opened.view.querySelector('#resetStatus')), 'Content sync table reset.');
 });
 
 test('a reset that fails shows an error on the reset status', async function () {
@@ -103,8 +103,8 @@ test('a reset that fails shows an error on the reset status', async function () 
     clickDialogButton(opened.page.dom, 'Reset');
     await settle(20);
     var status = opened.view.querySelector('#resetStatus');
-    assert.equal(status.textContent, 'Could not reset the database.');
-    assert.ok(status.classList.contains('jpk-status-bad'));
+    assert.equal(statusText(status), 'Could not reset the database.');
+    assert.ok(status.classList.contains('base-status-bad'));
 });
 
 test('deleting the cached files asks a destructive question and posts only when it is confirmed', async function () {
@@ -151,8 +151,8 @@ test('saving the bandwidth posts the changed fields and reports it beside the Sa
     assert.equal(saved.DownloadSpeedUnit, 'Mbps');
     assert.equal(saved.Untouched, 'kept');
     var status = opened.view.querySelector('#saveBandwidthStatus');
-    assert.equal(status.textContent, 'Bandwidth saved.');
-    assert.ok(status.classList.contains('jpk-status-ok'));
+    assert.equal(statusText(status), 'Bandwidth saved.');
+    assert.ok(status.classList.contains('base-status-ok'));
 });
 
 test('a bandwidth save that fails says so and does not claim success', async function () {
@@ -161,6 +161,6 @@ test('a bandwidth save that fails says so and does not claim success', async fun
     opened.view.querySelector('#btnSaveBandwidth').click();
     await settle(20);
     var status = opened.view.querySelector('#saveBandwidthStatus');
-    assert.equal(status.textContent, 'Could not save the bandwidth.');
-    assert.ok(status.classList.contains('jpk-status-bad'));
+    assert.equal(statusText(status), 'Could not save the bandwidth.');
+    assert.ok(status.classList.contains('base-status-bad'));
 });
