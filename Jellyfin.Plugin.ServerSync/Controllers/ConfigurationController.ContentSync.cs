@@ -30,6 +30,7 @@ public partial class ConfigurationController
     /// <param name="pendingType">Narrows the list to one pending type, when given.</param>
     /// <param name="cached">Whether to list only links whose file is in the link cache.</param>
     /// <param name="storage">The Storage to list, Copy or Link, or null for both.</param>
+    /// <param name="serverKey">The key of the server entry whose rows are listed, or null for every server.</param>
     /// <param name="skip">How many rows to pass over before the page starts.</param>
     /// <param name="take">The most rows the page holds, clamped to 200.</param>
     /// <returns>A page of rows with the total count.</returns>
@@ -42,6 +43,7 @@ public partial class ConfigurationController
         [FromQuery] string? pendingType = null,
         [FromQuery] bool cached = false,
         [FromQuery] string? storage = null,
+        [FromQuery] string? serverKey = null,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 50)
     {
@@ -68,7 +70,10 @@ public partial class ConfigurationController
         bool? links = string.Equals(storage, "Link", StringComparison.OrdinalIgnoreCase) ? true
             : string.Equals(storage, "Copy", StringComparison.OrdinalIgnoreCase) ? false
             : null;
-        var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take, cachedIds, links);
+        
+        // A key that names no server entry matches no row, so an unknown server lists nothing.
+        var serverFilter = string.IsNullOrEmpty(serverKey) ? null : config.FindServer(serverKey)?.Key ?? serverKey;
+        var (items, totalCount) = manager.SearchPaginated(search, statusFilter, pendingTypeFilter, skip, take, cachedIds, links, serverFilter);
 
         var libraryMappings = config.GetAllLibraryMappings();
         var libraryNameLookup = libraryMappings

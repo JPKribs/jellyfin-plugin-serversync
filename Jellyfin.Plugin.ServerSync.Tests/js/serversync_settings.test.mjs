@@ -10,8 +10,8 @@ globalThis.setTimeout = function () { return 1; };
 globalThis.clearTimeout = function () {};
 globalThis.setInterval = function () { return 1; };
 
-var IDS = ['settingsStatus', 'resetStatus', 'saveBandwidthStatus', 'streamSpeedRows', 'linkTakeRows', 'linkCacheStatus', 'bandwidthTable', 'watchedFilterUsersList', 'saveContentSettingsStatus'];
-var BUTTONS = ['btnResetEntireDatabase', 'btnResetContentTable', 'btnClearLinkCache', 'btnSaveBandwidth', 'btnSaveContentSettings'];
+var IDS = ['settingsStatus', 'resetStatus', 'saveBandwidthStatus', 'streamSpeedRows', 'linkTakeRows', 'linkCacheStatus', 'bandwidthTable', 'watchedFilterUsersList', 'saveContentSettingsStatus', 'callerGrants', 'saveCallerAccessStatus'];
+var BUTTONS = ['btnResetEntireDatabase', 'btnResetContentTable', 'btnClearLinkCache', 'btnSaveBandwidth', 'btnSaveContentSettings', 'btnSaveCallerAccess'];
 
 // openPage
 // Loads the Settings controller over a view that holds the elements it uses, and shows the page.
@@ -195,4 +195,32 @@ test('saving Content keeps the picked users, keeps a saved user whose server did
     await settle(20);
     assert.deepEqual(saved.WatchedFilterUserIds, ['u2', 'gone']);
     assert.equal(saved.SkipWatchedByAllUsers, true);
+});
+
+// grantUsersAnswer
+// Answers the list of this server's users with one user.
+function grantUsersAnswer(options) {
+    if (String(options.url) !== 'Users') return Promise.resolve({});
+    return Promise.resolve([{ Id: 'AAAA-1111', Name: 'viewer' }]);
+}
+
+test('the whitelist is a Repeater that saves each row with a user, its name, and its locations split at commas', async function () {
+    var grants = [
+        { UserId: 'apikey', UserName: 'API Keys', Locations: ['10.0.0.0/8', 'source-a'] },
+        { UserId: 'AAAA-1111', UserName: 'viewer', Locations: [] },
+        { UserId: 'gone', UserName: 'Left', Locations: [] }
+    ];
+    var opened = await openPage({ config: { Servers: [], PeerCallerGrants: grants }, answer: grantUsersAnswer });
+    await settle(20);
+    assert.ok(opened.view.querySelector('#callerGrants').children.length > 0);
+    var saved = null;
+    globalThis.ApiClient.updatePluginConfiguration = function (id, config) { saved = config; return Promise.resolve(); };
+    opened.view.querySelector('#btnSaveCallerAccess').click();
+    await settle(20);
+    assert.deepEqual(saved.PeerCallerGrants, [
+        { UserId: 'apikey', UserName: 'API Keys', Locations: ['10.0.0.0/8', 'source-a'] },
+        { UserId: 'aaaa1111', UserName: 'viewer', Locations: [] },
+        { UserId: 'gone', UserName: 'Left', Locations: [] }
+    ]);
+    assert.equal(statusText(opened.view.querySelector('#saveCallerAccessStatus')), 'Whitelist saved.');
 });

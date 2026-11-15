@@ -11,7 +11,7 @@ globalThis.clearTimeout = function () {};
 globalThis.setInterval = function () { return 1; };
 
 var IDS = ['storageStatus', 'storageDisabled', 'storageFiltersOnly', 'storageContent', 'storageLibrariesContainer', 'storageServerContainer',
-    'storageNoServers', 'storageLibrariesSection', 'keptCopiesSection', 'selStorageServer', 'storageFilesSection', 'storageFilesChart'];
+    'storageNoServers', 'storageLibrariesSection', 'keptCopiesSection', 'selStorageServer', 'storageFilesSection', 'storageFilesChart', 'storageUsageSection', 'storageUsageMeter'];
 
 // openPage
 // Loads the Storage controller over a view that holds the elements it uses, and shows the page.
@@ -71,11 +71,14 @@ test('a Push server maps no libraries, so the picker leaves it out', async funct
     assert.equal(opened.view.querySelector('#storageNoServers').classList.contains('hidden'), false);
 });
 
+var MAPPED = { Key: 'a b', Name: 'A', Url: 'u', ApiKey: 'k', LibraryMappings: [{ IsEnabled: false }] };
+
 // countsAnswer
 // Answers the Items counts the chart asks for: copies, links, and cached links.
-function countsAnswer(copies, links, cached) {
+function countsAnswer(copies, links, cached, cache) {
     return function (options) {
         var url = String(options.url);
+        if (url === 'Sync/LinkCache') return Promise.resolve(cache || { Enabled: false });
         if (url.indexOf('Items?') < 0) return Promise.resolve({});
         var total = url.indexOf('cached=true') >= 0 ? cached : url.indexOf('storage=Link') >= 0 ? links : copies;
         return Promise.resolve({ Items: [], TotalCount: total });
@@ -83,10 +86,10 @@ function countsAnswer(copies, links, cached) {
 }
 
 test('the files chart counts synced copies, links, and cached links, and totals them in its center', async function () {
-    var opened = await openPage({ config: { EnableContentSync: true, Servers: [] }, answer: countsAnswer(7, 5, 2) });
+    var opened = await openPage({ config: { EnableContentSync: true, Servers: [MAPPED] }, answer: countsAnswer(7, 5, 2) });
     var asked = opened.page.requests.map(function (r) { return String(r.url); }).filter(function (u) { return u.indexOf('Items?') >= 0; });
     assert.equal(asked.length, 3);
-    asked.forEach(function (u) { assert.match(u, /status=Synced/); });
+    asked.forEach(function (u) { assert.match(u, /status=Synced/); assert.match(u, /serverKey=a%20b/); });
     assert.equal(opened.view.querySelector('#storageFilesSection').classList.contains('hidden'), false);
     var text = opened.view.querySelector('#storageFilesChart').textContent;
     assert.match(text, /Copies/);
@@ -97,6 +100,16 @@ test('the files chart counts synced copies, links, and cached links, and totals 
 test('the files chart stays hidden while content sync is off, and when a count fails', async function () {
     var off = await openPage({ config: { EnableContentSync: false, EnableHistorySync: true, Servers: [] }, answer: countsAnswer(1, 1, 0) });
     assert.equal(off.view.querySelector('#storageFilesSection').classList.contains('hidden'), true);
-    var failed = await openPage({ config: { EnableContentSync: true, Servers: [] }, answer: function () { return Promise.reject(new Error('refused')); } });
+    var failed = await openPage({ config: { EnableContentSync: true, Servers: [MAPPED] }, answer: function () { return Promise.reject(new Error('refused')); } });
     assert.equal(failed.view.querySelector('#storageFilesSection').classList.contains('hidden'), true);
+});
+
+test('the Usage section shows the link cache as used of its limit only while the cache is on', async function () {
+    var on = await openPage({ config: { EnableContentSync: true, Servers: [MAPPED] }, answer: countsAnswer(1, 1, 0, { Enabled: true, UsedBytes: 1073741824, LimitBytes: 4294967296 }) });
+    assert.equal(on.view.querySelector('#storageUsageSection').classList.contains('hidden'), false);
+    var text = on.view.querySelector('#storageUsageMeter').textContent;
+    assert.match(text, /Link Cache/);
+    assert.match(text, /1 GB of 4 GB used/);
+    var off = await openPage({ config: { EnableContentSync: true, Servers: [MAPPED] }, answer: countsAnswer(1, 1, 0, { Enabled: false, UsedBytes: 0, LimitBytes: 0 }) });
+    assert.equal(off.view.querySelector('#storageUsageSection').classList.contains('hidden'), true);
 });

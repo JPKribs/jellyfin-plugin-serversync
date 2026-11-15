@@ -23,7 +23,7 @@ Under **Settings > Content**:
 
 Elsewhere:
 
-* **Storage** and **Library Filter**, on each library mapping in the **Storage** tab. Storage holds the source's files as full **Copy** files, the default, or as **Link** files that stream from the source. See [Links](Links.md). The filter is covered below. The tab opens with **Files**, a chart of how many synced files are copies, links, and cached links.
+* **Storage** and **Library Filter**, on each library mapping in the **Storage** tab. Storage holds the source's files as full **Copy** files, the default, or as **Link** files that stream from the source. See [Links](Links.md). The filter is covered below. **Files** charts how many of the picked server's synced files are copies, links, and cached links. **Usage** shows how much of the link cache is used, while the cache is on.
 * **Downloads** under **Settings > Bandwidth** caps the total rate of every download to this server, in Mbps, where 0 means no limit. With **Scheduled Speed** on, the **Scheduled** rate applies during the set hours, in the server's time. A download already running follows the hours as they begin and end. Downloads into the link cache are held to it too.
 * **Failed Item Retries** under **Settings > Processing** sets how many times a failed download or item is tried within one run. One that still fails is tried again on the next run, and is raised on the Activity page once it has failed for a day. See [When something goes wrong](#when-something-goes-wrong). A retry picks up where the failed attempt stopped when the source supports it, and starts over if the file changed on the source in between.
 

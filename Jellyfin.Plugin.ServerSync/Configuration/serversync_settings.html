@@ -123,16 +123,8 @@
                         <div id="callerAccessContent" class="base-collapsible-content collapsed">
                             <div class="fieldDescription serversync-mb-md">Limits who may call this server's sync routes. An administrator or API Key calling from an enabled server's address always may.</div>
 
-                            <div class="serversync-form-table serversync-grant-table serversync-mb-md">
-                                <div class="serversync-grant-row serversync-form-head"><span>User</span><span>Locations</span><span></span></div>
-                                <div id="callerGrants"></div>
-                                <div class="serversync-role-note">Accepts hosts, URLs, IPs, or ranges, separated by commas. Empty allows every location.</div>
-                            </div>
-                            <div class="serversync-grant-add">
-                                <button is="emby-button" type="button" id="btnAddCallerGrant" class="raised base-button secondary small">
-                                    <span>Add User</span>
-                                </button>
-                            </div>
+                            <div id="callerGrants"></div>
+                            <div class="fieldDescription serversync-mb-md">Accepts hosts, URLs, IPs, or ranges, separated by commas. Empty allows every location.</div>
 
                             <div class="base-collapsible-actions flush">
                                 <button is="emby-button" type="button" id="btnSaveCallerAccess" class="raised base-button primary small">

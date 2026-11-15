@@ -359,6 +359,26 @@ public sealed class ContentSyncTableManagerTests : IDisposable
     /// True: the Links and Copies views each show a row under the storage it is leaving.
     /// False: a row changing storage would vanish from both views or show in both.
     /// </summary>
+    [Fact]
+    public void SearchPaginated_ServerKey_ListsOnlyThatServersRows()
+    {
+        Add("a1", "/local/a1.mkv", serverKey: "a");
+        Add("a2", "/local/a2.strm", storage: StorageMode.Link, serverKey: "a");
+        Add("b1", "/local/b1.mkv", serverKey: "b");
+
+        var (items, total) = _table.SearchPaginated(null, serverKey: "a");
+        var (links, linkTotal) = _table.SearchPaginated(null, links: true, serverKey: "a");
+
+        Assert.Equal(new[] { "a1", "a2" }, Ids(items));
+        Assert.Equal(2, total);
+        Assert.Equal(new[] { "a2" }, Ids(links));
+        Assert.Equal(1, linkTotal);
+        Assert.Equal(0, _table.SearchPaginated(null, serverKey: "none").TotalCount);
+    }
+
+    /// <summary>
+    /// The Storage filter splits rows into links and copies, with a row changing storage under the one it leaves.
+    /// </summary>
     [Theory]
     [InlineData(true, new[] { "link", "promoting" })]
     [InlineData(false, new[] { "copy", "unkeeping" })]

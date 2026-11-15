@@ -357,63 +357,6 @@ div:not(.serversync-form-row) + .serversync-form-row {
     }
 }
 
-/* serversync-grant-row */
-/* Whitelist row of a user picker, a locations field, and a Remove button. */
-/* Example: <div class="serversync-grant-row"><select class="serversync-grant-user serversync-grant-field"></select><input class="serversync-grant-locations serversync-grant-field" /><button class="serversync-grant-remove">Remove</button></div> */
-.serversync-grant-row {
-    display: grid;
-    grid-template-columns: minmax(8em, 1fr) minmax(10em, 1.6fr) 6.5em;
-    gap: 0.75em;
-    align-items: center;
-    padding: 0.6em 1em;
-}
-
-#callerGrants .serversync-grant-row,
-.serversync-grant-table .serversync-role-note {
-    border-top: 1px solid var(--base-border);
-}
-
-.serversync-grant-field {
-    width: 100%;
-    box-sizing: border-box;
-    height: 2.4em;
-    padding: 0 0.75em;
-    border: 1px solid var(--base-border);
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.05);
-    color: inherit;
-    font: inherit;
-}
-
-.serversync-grant-row .serversync-grant-remove {
-    margin: 0;
-    width: 100%;
-    height: 2.4em;
-}
-
-.serversync-grant-add {
-    margin-bottom: 1em;
-}
-
-.serversync-grant-add .emby-button {
-    margin-left: 0;
-}
-
-@media (max-width: 640px) {
-    .serversync-grant-row {
-        grid-template-columns: 1fr 6.5em;
-    }
-
-    .serversync-grant-row .serversync-grant-locations {
-        grid-column: 1 / -1;
-        grid-row: 2;
-    }
-
-    .serversync-grant-table .serversync-form-head {
-        display: none;
-    }
-}
-
 /* serversync-bandwidth */
 /* Bandwidth table with a row per direction, a normal and a scheduled speed. The scheduled column hides while scheduling is off. */
 /* Example: <div class="serversync-form-table serversync-form-table3 serversync-bandwidth serversync-no-schedule"></div> */

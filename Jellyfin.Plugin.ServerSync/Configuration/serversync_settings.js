@@ -503,53 +503,78 @@ export default function (view) {
         });
     }
 
-    function addGrantRow(grant) {
-        grant = grant || { UserId: '', Locations: [] };
-        var container = getEl('callerGrants');
-        if (!container) return;
-        var row = document.createElement('div');
-        row.className = 'serversync-grant-row';
-        var options = '<option value="">Select a user</option><option value="apikey">API Keys</option>' + grantUsers.map(function (u) {
-            return '<option value="' + escapeHtml(u.Id) + '">' + escapeHtml(u.Name) + '</option>';
-        }).join('');
-        row.innerHTML =
-            '<select class="serversync-grant-user serversync-grant-field" aria-label="User">' + options + '</select>' +
-            '<input type="text" class="serversync-grant-locations serversync-grant-field" aria-label="Locations" placeholder="Default" />' +
-            '<button is="emby-button" type="button" class="raised base-button destructive small serversync-grant-remove"><span>Remove</span></button>';
-        container.appendChild(row);
-        var select = row.querySelector('.serversync-grant-user');
-        var id = (grant.UserId || '').replace(/-/g, '').toLowerCase();
-        if (id && !Array.prototype.some.call(select.options, function (o) { return o.value === id; })) {
-            var missing = document.createElement('option');
-            missing.value = id;
-            missing.textContent = grant.UserName || id;
-            select.appendChild(missing);
-        }
-        select.value = id;
-        row.querySelector('.serversync-grant-locations').value = (grant.Locations || []).join(', ');
-        row.querySelector('.serversync-grant-remove').addEventListener('click', function () { row.remove(); });
-    }
+    // The Repeater that holds the whitelist rows, or null before the users have loaded.
+    var grantRepeater = null;
 
-    function collectGrants() {
-        var grants = [];
-        view.querySelectorAll('#callerGrants .serversync-grant-row').forEach(function (row) {
-            var select = row.querySelector('.serversync-grant-user');
-            if (!select.value) return;
-            grants.push({
-                UserId: select.value,
-                UserName: select.options[select.selectedIndex] ? select.options[select.selectedIndex].textContent : '',
-                Locations: row.querySelector('.serversync-grant-locations').value.split(',').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; })
-            });
+    // grantChoices
+    // Lists the choices of a row's User field: API Keys, every user here, and any saved user no longer here.
+    //
+    // Inputs
+    // grants [object[]]: The saved rows.
+    //
+    // Output
+    // [object[]]: The choices as { value, label }.
+    function grantChoices(grants) {
+        var choices = [{ value: '', label: 'Select a user' }, { value: 'apikey', label: 'API Keys' }];
+        var known = { apikey: true };
+        grantUsers.forEach(function (u) {
+            known[u.Id] = true;
+            choices.push({ value: u.Id, label: u.Name });
         });
-        return grants;
+        grants.forEach(function (g) {
+            if (!g.UserId || known[g.UserId]) return;
+            known[g.UserId] = true;
+            choices.push({ value: g.UserId, label: g.UserName || g.UserId });
+        });
+        return choices;
     }
 
+    // collectGrants
+    // Reads the whitelist rows that name a user, with each row's locations split at its commas.
+    //
+    // Output
+    // [object[]]: The rows as { UserId, UserName, Locations }.
+    function collectGrants() {
+        if (!grantRepeater) return [];
+        var names = {};
+        grantRepeater.choices.forEach(function (c) { names[c.value] = c.label; });
+        return grantRepeater.handle.getValue().filter(function (row) { return !!row.UserId; }).map(function (row) {
+            return {
+                UserId: row.UserId,
+                UserName: names[row.UserId] || '',
+                Locations: String(row.Locations || '').split(',').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; })
+            };
+        });
+    }
+
+    // loadCallerAccessSettings
+    // Loads the users and draws the whitelist as a Repeater of a user and their locations.
+    //
+    // Inputs
+    // config [object]: The plugin configuration.
     function loadCallerAccessSettings(config) {
         grantsLoaded = false;
         fetchGrantUsers().then(function () {
             var container = getEl('callerGrants');
-            if (container) container.innerHTML = '';
-            (config.PeerCallerGrants || []).forEach(addGrantRow);
+            if (!container) return;
+            if (grantRepeater) grantRepeater.handle.destroy();
+            container.innerHTML = '';
+            var grants = (config.PeerCallerGrants || []).map(function (g) {
+                return { UserId: (g.UserId || '').replace(/-/g, '').toLowerCase(), UserName: g.UserName, Locations: (g.Locations || []).join(', ') };
+            });
+            var choices = grantChoices(grants);
+            var handle = serverSyncModule.createRepeater({
+                fields: [
+                    { key: 'UserId', label: 'User', type: 'select', options: choices, width: '1fr' },
+                    { key: 'Locations', label: 'Locations', type: 'text', placeholder: 'Default', width: '2fr' }
+                ],
+                value: grants.map(function (g) { return { UserId: g.UserId, Locations: g.Locations }; }),
+                addText: 'Add User',
+                rowName: 'User',
+                emptyText: 'No user is listed.'
+            });
+            grantRepeater = { handle: handle, choices: choices };
+            container.appendChild(handle.element);
             grantsLoaded = true;
         });
     }
@@ -653,7 +678,6 @@ export default function (view) {
 
         bindClick('btnSaveProcessing', saveProcessingSettings);
         bindClick('btnSaveCallerAccess', saveCallerAccessSettings);
-        bindClick('btnAddCallerGrant', function () { if (grantsLoaded) addGrantRow(); });
 
         bindClick('btnSaveContentSettings', saveContentSettings);
         bindClick('btnSaveBandwidth', saveBandwidthSettings);

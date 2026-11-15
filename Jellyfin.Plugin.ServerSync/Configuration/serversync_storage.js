@@ -572,7 +572,7 @@ export default function (view) {
     var filesChart = null;
 
     // countSynced
-    // Counts the synced Content rows that match a query.
+    // Counts the picked server's synced Content rows that match a query.
     //
     // Inputs
     // query [string]: The Items filters, such as storage=Link.
@@ -580,19 +580,22 @@ export default function (view) {
     // Output
     // [Promise]: Resolves to the count.
     function countSynced(query) {
-        return apiRequest('Items?status=Synced&skip=0&take=1&' + query, 'GET').then(function (page) {
+        return apiRequest('Items?status=Synced&skip=0&take=1&serverKey=' + encodeURIComponent(selectedKey) + '&' + query, 'GET').then(function (page) {
             return (page && page.TotalCount) || 0;
         });
     }
 
     // loadFilesChart
-    // Draws how many synced files are copies, links, and cached links. A failed count hides the chart.
+    // Draws how many of the picked server's synced files are copies, links, and cached links. A failed count
+    // hides the chart, and an answer for a server that is no longer picked is dropped.
     function loadFilesChart() {
-        if (!contentOn) {
+        var key = selectedKey;
+        if (!contentOn || !key) {
             setVisible('storageFilesSection', false);
             return;
         }
         Promise.all([countSynced('storage=Copy'), countSynced('storage=Link'), countSynced('storage=Link&cached=true')]).then(function (counts) {
+            if (key !== selectedKey) return;
             var cached = Math.min(counts[2], counts[1]);
             var slices = [
                 { label: 'Copies', value: counts[0] },
@@ -615,7 +618,34 @@ export default function (view) {
             holder.appendChild(filesChart.element);
             setVisible('storageFilesSection', true);
         }).catch(function () {
-            setVisible('storageFilesSection', false);
+            if (key === selectedKey) setVisible('storageFilesSection', false);
+        });
+    }
+
+    // The Usage Meter of the link cache, or null before the first draw.
+    var usageMeter = null;
+
+    // loadUsage
+    // Draws how much of the link cache's room is used. The section shows only while the cache is on.
+    function loadUsage() {
+        if (!contentOn) {
+            setVisible('storageUsageSection', false);
+            return;
+        }
+        apiRequest('LinkCache', 'GET').then(function (cache) {
+            var holder = getEl('storageUsageMeter');
+            var inUse = !!cache && !!cache.Enabled && cache.LimitBytes > 0;
+            setVisible('storageUsageSection', inUse && !!holder);
+            if (!inUse || !holder) return;
+            var value = { used: cache.UsedBytes || 0, total: cache.LimitBytes };
+            if (usageMeter) {
+                usageMeter.setValue(value);
+                return;
+            }
+            usageMeter = serverSyncModule.createUsageMeter({ label: 'Link Cache', bytes: true, used: value.used, total: value.total });
+            holder.appendChild(usageMeter.element);
+        }).catch(function () {
+            setVisible('storageUsageSection', false);
         });
     }
 
@@ -635,8 +665,9 @@ export default function (view) {
                 clearCards();
                 return;
             }
-            loadFilesChart();
+            loadUsage();
             renderServerPicker();
+            loadFilesChart();
             renderLibraries();
             reloadKeptCopies();
         }).catch(function () {
@@ -654,6 +685,7 @@ export default function (view) {
         if (select) {
             select.addEventListener('change', function () {
                 selectedKey = select.value;
+                loadFilesChart();
                 renderLibraries();
                 reloadKeptCopies();
             });

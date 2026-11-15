@@ -454,7 +454,7 @@ Turns links into full copies, the **Keep a full local copy** action on the **Syn
 { "Promoted": 2, "FromCache": 1, "Skipped": 0 }
 ```
 
-Content rows from `GET /Sync/Items` carry `StorageMode`, which is `Copy`, `Link`, `Promoting` for a link on its way to a copy, or `Unkeeping` for a copy on its way back to a link. They also carry `Cached`, true for a link whose file is in the link cache. On `GET /Sync/Items`, `cached=true` lists only those, and `storage=Copy` or `storage=Link` lists only copies or links.
+Content rows from `GET /Sync/Items` carry `StorageMode`, which is `Copy`, `Link`, `Promoting` for a link on its way to a copy, or `Unkeeping` for a copy on its way back to a link. They also carry `Cached`, true for a link whose file is in the link cache. On `GET /Sync/Items`, `cached=true` lists only those, and `storage=Copy` or `storage=Link` lists only copies or links. `serverKey={key}` lists only one server entry's rows.
 
 ### GET /Sync/KeptCopies?serverKey={key}&search={text}&skip={n}&take={n}
 

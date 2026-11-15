@@ -296,6 +296,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// <param name="take">Rows to return.</param>
     /// <param name="sourceItemIds">Only these source items, or null.</param>
     /// <param name="links"><c>true</c> for links only, <c>false</c> for copies only, or null for both.</param>
+    /// <param name="serverKey">Only rows of this server entry, or null for every server.</param>
     /// <returns>The page and the total.</returns>
     public (IList<SyncItem> Items, int TotalCount) SearchPaginated(
         string? searchTerm,
@@ -304,7 +305,8 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         int skip = 0,
         int take = 50,
         IReadOnlyList<string>? sourceItemIds = null,
-        bool? links = null) => ExecuteRead<(IList<SyncItem> Items, int TotalCount)>(
+        bool? links = null,
+        string? serverKey = null) => ExecuteRead<(IList<SyncItem> Items, int TotalCount)>(
         conn =>
         {
             var conditions = new List<string>();
@@ -329,6 +331,11 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
                 conditions.Add(wantLinks ? "StorageMode IN (1, 2)" : "StorageMode IN (0, 3)");
             }
 
+            if (serverKey is not null)
+            {
+                conditions.Add("ServerKey = @server");
+            }
+
             if (sourceItemIds is not null)
             {
                 conditions.Add(sourceItemIds.Count == 0 ? "0" : $"SourceItemId IN ({string.Join(", ", sourceItemIds.Select((_, i) => "@id" + i.ToString(CultureInfo.InvariantCulture)))})");
@@ -340,13 +347,13 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             using (var countCmd = conn.CreateCommand())
             {
                 countCmd.CommandText = $"SELECT COUNT(*) FROM SyncItems {whereClause}";
-                BindSearchFilters(countCmd, searchTerm, status, pendingType, sourceItemIds);
+                BindSearchFilters(countCmd, searchTerm, status, pendingType, sourceItemIds, serverKey);
                 totalCount = Convert.ToInt32(countCmd.ExecuteScalar(), CultureInfo.InvariantCulture);
             }
 
             using var dataCmd = conn.CreateCommand();
             dataCmd.CommandText = PageQuery("SyncItems", whereClause, $"{StatusPriorityOrderBy}, LocalPath ASC, Id ASC");
-            BindSearchFilters(dataCmd, searchTerm, status, pendingType, sourceItemIds);
+            BindSearchFilters(dataCmd, searchTerm, status, pendingType, sourceItemIds, serverKey);
             dataCmd.Parameters.AddWithValue("@take", take);
             dataCmd.Parameters.AddWithValue("@skip", skip);
             return (ReadAll(dataCmd), totalCount);
@@ -603,8 +610,13 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         return count;
     }
 
-    private static void BindSearchFilters(SqliteCommand cmd, string? searchTerm, SyncStatus? status, PendingType? pendingType, IReadOnlyList<string>? sourceItemIds)
+    private static void BindSearchFilters(SqliteCommand cmd, string? searchTerm, SyncStatus? status, PendingType? pendingType, IReadOnlyList<string>? sourceItemIds, string? serverKey)
     {
+        if (serverKey is not null)
+        {
+            cmd.Parameters.AddWithValue("@server", serverKey);
+        }
+
         for (var i = 0; i < (sourceItemIds?.Count ?? 0); i++)
         {
             cmd.Parameters.AddWithValue("@id" + i.ToString(CultureInfo.InvariantCulture), sourceItemIds![i]);
