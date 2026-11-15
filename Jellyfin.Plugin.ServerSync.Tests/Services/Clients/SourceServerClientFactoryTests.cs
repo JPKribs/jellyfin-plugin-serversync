@@ -156,6 +156,23 @@ public sealed class SourceServerClientFactoryTests : IDisposable
     }
 
     /// <summary>
+    /// A saved entry asked for with its key in another letter case still finds its secret.
+    /// True: the pairing is read under the key it was stored with.
+    /// False: the client would carry a pairing with no secret and send no pairing header.
+    /// </summary>
+    [Fact]
+    public void Create_SavedEntryKeyInAnotherCase_FindsItsSecret()
+    {
+        _config.Configuration.Servers.Add(new SourceServer { Key = "saved", Url = ClientStubServer.Url, ApiKey = "k" });
+        var secret = PeerPairingStore.NewSecret();
+        _pairings.SetOutbound("saved", secret);
+
+        using var client = _factory.Create(new SourceServer { Key = "SAVED", Url = ClientStubServer.Url, ApiKey = "k" });
+
+        Assert.Equal(secret, client.Pairing?.CurrentSecret());
+    }
+
+    /// <summary>
     /// An entry that is not saved, or is called at another address than the saved one, gets no pairing.
     /// True: the pairing secret only ever goes to the address saved on the server entry.
     /// False: testing an edited URL from the settings page would hand the secret to whatever host was typed.

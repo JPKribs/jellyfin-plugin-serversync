@@ -63,7 +63,7 @@ public class SourceServerClientFactory : ISourceServerClientFactory
         // A pairing secret only goes to the address saved on the server entry.
         if (_configManager.Configuration.FindServer(server.Key) is { } saved && ConfigurationUtilities.SameServerUrl(saved.Url, server.Url))
         {
-            client.Pairing = new PeerPairing(_pairings, server.Key, _applicationHost.SystemId);
+            client.Pairing = new PeerPairing(_pairings, saved.Key, _applicationHost.SystemId);
         }
 
         return client;
