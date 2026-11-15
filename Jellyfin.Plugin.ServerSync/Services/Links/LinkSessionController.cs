@@ -23,6 +23,12 @@ public sealed class LinkSessionController : ISessionController
     /// <summary>How long after the last report the session still counts as active.</summary>
     public static readonly TimeSpan ActiveFor = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// How long after the last report the session is removed. It is longer than the 16 minutes the
+    /// dashboard lists a device for, so the dashboard sees the session idle before it is gone.
+    /// </summary>
+    public static readonly TimeSpan RemoveAfter = TimeSpan.FromMinutes(20);
+
     private long _lastReportTicks = DateTime.UtcNow.Ticks;
 
     private readonly string _peerKey;
@@ -32,6 +38,15 @@ public sealed class LinkSessionController : ISessionController
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkSessionController"/> class.
+    /// </summary>
+    /// <param name="peerKey">The server entry's key.</param>
+    /// <param name="sessionKey">The peer's session key.</param>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="logger">Logger instance.</param>
     public LinkSessionController(string peerKey, string sessionKey, IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger logger)
     {
         _peerKey = peerKey;
@@ -46,7 +61,14 @@ public sealed class LinkSessionController : ISessionController
     public bool IsSessionActive => ActiveAt(DateTime.UtcNow);
 
     /// <summary>Whether the session still counts as active at <paramref name="now"/>.</summary>
+    /// <param name="now">The time to check.</param>
+    /// <returns><c>true</c> when the session is active.</returns>
     public bool ActiveAt(DateTime now) => now - new DateTime(Interlocked.Read(ref _lastReportTicks), DateTimeKind.Utc) < ActiveFor;
+
+    /// <summary>Whether the session has gone unreported long enough to be removed at <paramref name="now"/>.</summary>
+    /// <param name="now">The time to check.</param>
+    /// <returns><c>true</c> when the session may be removed.</returns>
+    public bool RemovableAt(DateTime now) => now - new DateTime(Interlocked.Read(ref _lastReportTicks), DateTimeKind.Utc) >= RemoveAfter;
 
     /// <summary>Records that the server holding the link reported on this session.</summary>
     public void Touch() => Touch(DateTime.UtcNow);
@@ -58,6 +80,10 @@ public sealed class LinkSessionController : ISessionController
     public bool SupportsMediaControl => _configManager.Configuration.FindServer(_peerKey) is { IsEnabled: true, IsConfigured: true };
 
     /// <summary>The request to send for a session message, or null when it is not one this passes on.</summary>
+    /// <typeparam name="T">The message's data type.</typeparam>
+    /// <param name="name">The message type.</param>
+    /// <param name="data">The message's data.</param>
+    /// <returns>The request, or null.</returns>
     public static PeerControlRequest? RequestFor<T>(SessionMessageType name, T data)
     {
         // Jellyfin's own stop of a paused session names no user. That is this server's housekeeping and

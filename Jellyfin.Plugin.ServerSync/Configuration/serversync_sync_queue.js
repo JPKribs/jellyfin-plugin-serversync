@@ -1,19 +1,29 @@
-// ============================================
-// SERVER SYNC PLUGIN - SYNC PAGE: CHANGE QUEUE VIEW
-// ============================================
+// serversync_sync_queue.js
 // The Change Queue view. Built by serversync_sync.js from the page context once the shared
 // module is in.
-// ============================================
 
+// createQueueModule
+// Builds the Change Queue view: the hint counts, the servers' delivery states, and the list of changes. It
+// reloads itself every few seconds while it is the view on screen, and the page stops it on viewhide.
+//
+// Inputs
+// ctx [object]: The page context from serversync_sync.js.
+//
+// Output
+// [object]: A handle with init, load, startAutoRefresh, stopAutoRefresh, render, renderList, and the
+// helpers that format a row.
 export function createQueueModule(ctx) {
     'use strict';
 
     var view = ctx.view;
     var ServerSyncShared = ctx.shared;
+    var confirmDialog = ctx.confirmDialog;
 
-    // ============================================
-    // CHANGE QUEUE MODULE
-    // ============================================
+    var DISCARD_BUTTON = function(lane, id) {
+        return '<button type="button" class="jpk-row-btn serversync-queue-discard" data-lane="' + lane + '" data-discard="' + ServerSyncShared.escapeHtml(String(id)) +
+            '" title="Discard" aria-label="Discard"><span aria-hidden="true">&times;</span></button>';
+    };
+
     // Both hint queues and every peer's delivery state, read from
     // Sync/Hints. Rows are few and short lived, so a plain table that
     // reloads itself every few seconds fits better than the paginated table.
@@ -43,23 +53,29 @@ export function createQueueModule(ctx) {
                 this._bound = true;
                 view.querySelector('#btnQueueRefresh').addEventListener('click', function() { self.load(true); });
                 view.querySelector('#btnQueueRun').addEventListener('click', function() { self.runNow(); });
-                view.querySelector('#btnQueueRetryFailed').addEventListener('click', function() { self.failedAction('Hints/Failed/Retry', 'POST', 'Retried', 'failed change(s) tried again'); });
+                view.querySelector('#btnQueueRetryFailed').addEventListener('click', function() { self.failedAction('Hints/Failed/Retry', 'POST', 'Retried', 'failed change tried again', 'failed changes tried again'); });
                 view.querySelector('#btnQueueDismissFailed').addEventListener('click', function() {
-                    if (window.confirm('Discard every failed change, sent and received? The scheduled tasks still carry them.')) {
-                        self.failedAction('Hints/Failed', 'DELETE', 'Removed', 'failed change(s) dismissed');
-                    }
+                    confirmDialog('Discard every failed change, sent and received? The scheduled tasks still carry them.', {
+                        title: 'Dismiss Failed Changes',
+                        confirmText: 'Dismiss',
+                        destructive: true
+                    }).then(function(confirmed) {
+                        if (confirmed) self.failedAction('Hints/Failed', 'DELETE', 'Removed', 'failed change dismissed', 'failed changes dismissed');
+                    });
                 });
                 view.querySelector('#btnQueueUnmatchedDismiss').addEventListener('click', function() { self.dismissUnmatched(); });
                 view.querySelector('#queueList').addEventListener('click', function(e) { self._onDiscard(e); });
-                view.querySelectorAll('.qCards .qCard').forEach(function(card) {
+                // An image error does not bubble, so the list catches it on the way down.
+                view.querySelector('#queueList').addEventListener('error', function(e) { self._onImageError(e); }, true);
+                view.querySelectorAll('.serversync-queue-cards .serversync-queue-card').forEach(function(card) {
                     card.addEventListener('click', function() {
                         self._states[card.dataset.state] = !self._states[card.dataset.state];
-                        card.classList.toggle('on', self._states[card.dataset.state]);
+                        card.classList.toggle('serversync-on', self._states[card.dataset.state]);
                         self.renderList();
                     });
                 });
                 view.querySelector('#queueFilters').addEventListener('click', function(e) {
-                    var btn = e.target.closest('.qFilter');
+                    var btn = e.target.closest('.serversync-filter-pill');
                     if (!btn) return;
                     if (btn.dataset.dir) { self._dir = btn.dataset.dir; self._peer = null; }
                     else { self._peer = self._peer === btn.dataset.peer ? null : btn.dataset.peer; self._dir = 'all'; }
@@ -122,10 +138,22 @@ export function createQueueModule(ctx) {
                 self._proxyCache[cacheKey] = '';
                 var img = document.getElementById(imgId);
                 if (img) {
-                    img.style.display = 'none';
-                    if (img.nextElementSibling) img.nextElementSibling.style.display = 'flex';
+                    img.classList.add('hidden');
+                    if (img.nextElementSibling) img.nextElementSibling.classList.remove('hidden');
                 }
             });
+        },
+
+        // Hides an image that failed to load and shows its placeholder, or only hides an avatar.
+        _onImageError: function(e) {
+            var img = e.target;
+            if (!img || img.tagName !== 'IMG') return;
+            if (img.classList.contains('serversync-queue-avatar')) {
+                img.classList.add('serversync-broken');
+                return;
+            }
+            img.classList.add('hidden');
+            if (img.nextElementSibling) img.nextElementSibling.classList.remove('hidden');
         },
 
         runNow: function() {
@@ -135,25 +163,25 @@ export function createQueueModule(ctx) {
             ServerSyncShared.apiRequest('Hints/Run', 'POST').then(function() {
                 return self.load(true);
             }).then(function() {
-                ServerSyncShared.showAlert('Delivered and applied what was due');
+                ServerSyncShared.syncStatus('Delivered and applied what was due.', false);
             }).catch(function() {
-                ServerSyncShared.showAlert('The run failed. See the server log');
+                ServerSyncShared.syncStatus('Could not run the queue. See the server log.', true);
             }).then(function() {
                 btn.disabled = false;
             });
         },
 
         // Every failed row at once: sent again, or discarded.
-        failedAction: function(route, method, countKey, done) {
+        failedAction: function(route, method, countKey, doneOne, doneMany) {
             var self = this;
             var buttons = [view.querySelector('#btnQueueRetryFailed'), view.querySelector('#btnQueueDismissFailed')];
             buttons.forEach(function(b) { b.disabled = true; });
             ServerSyncShared.apiRequest(route, method).then(function(result) {
                 return self.load(true).then(function() {
-                    ServerSyncShared.showAlert(((result && result[countKey]) || 0) + ' ' + done);
+                    ServerSyncShared.syncStatus(ServerSyncShared.plural((result && result[countKey]) || 0, doneOne, doneMany) + '.', false);
                 });
             }).catch(function() {
-                ServerSyncShared.showAlert('That did not work. See the server log');
+                ServerSyncShared.syncStatus('Could not finish that. See the server log.', true);
             }).then(function() {
                 buttons.forEach(function(b) { b.disabled = false; });
             });
@@ -166,7 +194,7 @@ export function createQueueModule(ctx) {
             ServerSyncShared.apiRequest('Hints/Unmatched', 'DELETE').then(function() {
                 return self.load(true);
             }).catch(function() {
-                ServerSyncShared.showAlert('Could not dismiss the warning');
+                ServerSyncShared.syncStatus('Could not dismiss the warning.', true);
             }).then(function() {
                 btn.disabled = false;
             });
@@ -194,14 +222,14 @@ export function createQueueModule(ctx) {
                 var paused = p.PausedUntil && new Date(p.PausedUntil) > new Date();
                 var state = paused ? 'Paused until ' + QueueModule._time(p.PausedUntil)
                     : p.LastAttempt ? 'Delivered ' + QueueModule._ago(p.LastAttempt) : 'Nothing sent yet';
-                var sends = p.Sends === null || p.Sends === undefined ? 'Sends everything until the peer says what it applies'
+                var sends = p.Sends === null || p.Sends === undefined ? 'Sends everything until the server says what it applies'
                     : p.Sends.length === 0 ? 'Sends nothing: every module is off there'
                     : 'Sends ' + p.Sends.map(QueueModule._kindLabel).join(', ');
-                return '<div class="healthCard queuePeerCard">' +
-                    '<span class="healthLabel">' + ServerSyncShared.escapeHtml(p.Name || p.Key) + '</span>' +
-                    '<span class="healthValue' + (paused ? ' paused' : '') + '">' + ServerSyncShared.escapeHtml(state) + '</span>' +
-                    '<div class="queuePeerReason">' + ServerSyncShared.escapeHtml(sends) + '</div>' +
-                    (p.Reason ? '<div class="queuePeerReason">' + ServerSyncShared.escapeHtml(p.Reason) + '</div>' : '') +
+                return '<div class="serversync-health-card serversync-queue-peer-card">' +
+                    '<span class="serversync-health-label">' + ServerSyncShared.escapeHtml(p.Name || p.Key) + '</span>' +
+                    '<span class="serversync-health-value' + (paused ? ' serversync-paused' : '') + '">' + ServerSyncShared.escapeHtml(state) + '</span>' +
+                    '<div class="serversync-queue-peer-reason">' + ServerSyncShared.escapeHtml(sends) + '</div>' +
+                    (p.Reason ? '<div class="serversync-queue-peer-reason">' + ServerSyncShared.escapeHtml(p.Reason) + '</div>' : '') +
                     '</div>';
             }).join('');
             view.querySelector('#queuePeers').classList.toggle('hidden', peers.length === 0);
@@ -220,7 +248,7 @@ export function createQueueModule(ctx) {
             filters.querySelectorAll('[data-peer]').forEach(function(b) { b.remove(); });
             peers.forEach(function(p) {
                 var b = document.createElement('button');
-                b.type = 'button'; b.className = 'qFilter'; b.dataset.peer = p.Key; b.textContent = p.Name || p.Key;
+                b.type = 'button'; b.className = 'serversync-filter-pill'; b.dataset.peer = p.Key; b.textContent = p.Name || p.Key;
                 filters.appendChild(b);
             });
             this._reflectFilters();
@@ -229,8 +257,8 @@ export function createQueueModule(ctx) {
 
         _reflectFilters: function() {
             var self = this;
-            view.querySelectorAll('#queueFilters .qFilter').forEach(function(b) {
-                b.classList.toggle('on', b.dataset.dir ? (self._peer === null && b.dataset.dir === self._dir) : b.dataset.peer === self._peer);
+            view.querySelectorAll('#queueFilters .serversync-filter-pill').forEach(function(b) {
+                b.classList.toggle('serversync-on', b.dataset.dir ? (self._peer === null && b.dataset.dir === self._dir) : b.dataset.peer === self._peer);
             });
         },
 
@@ -269,7 +297,7 @@ export function createQueueModule(ctx) {
             var shown = rows.slice(0, self._maxRows);
             list.innerHTML = shown.map(function(r) { return QueueModule._row(r); }).join('') +
                 (rows.length > shown.length
-                    ? '<div class="qMore">Showing the latest ' + shown.length + ' of ' + rows.length + '. Filter by state or server to see others.</div>'
+                    ? '<div class="serversync-queue-more">Showing the latest ' + shown.length + ' of ' + rows.length + '. Filter by state or server to see others.</div>'
                     : '');
             view.querySelector('#queueEmpty').classList.toggle('hidden', rows.length > 0);
             list.classList.toggle('hidden', rows.length === 0);
@@ -281,25 +309,26 @@ export function createQueueModule(ctx) {
             var isUser = r.kind === 'Users' || r.kind === 4;
             var isPlaylist = r.kind === 'Playlists' || r.kind === 5;
             // Jellyfin's own shapes: a person is round, an episode or a home video is wide, the rest are posters.
-            var shape = isPerson || isUser ? ' round' : QueueModule._isWide(r.itemType) ? ' wide' : '';
+            var shape = isPerson || isUser ? ' serversync-round' : QueueModule._isWide(r.itemType) ? ' serversync-wide' : '';
             var icon = isPlaylist ? 'queue_music' : isUser || isPerson ? 'person' : QueueModule._isWide(r.itemType) ? 'tv' : 'movie';
-            var holder = '<div class="qThumbHolder' + shape + '"><span class="material-icons">' + icon + '</span></div>';
+            var holder = '<div class="serversync-queue-thumb-holder' + shape + '"><span class="material-icons">' + icon + '</span></div>';
+            var hiddenHolder = holder.replace('class="', 'class="hidden ');
             var thumb;
             if (r.itemId && !isUser) {
                 var url = ApiClient.getImageUrl(r.itemId, { type: 'Primary', maxHeight: 128 });
-                thumb = '<img class="qThumb' + shape + '" loading="lazy" src="' + esc(url) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" />' +
-                    holder.replace('<div ', '<div style="display:none" ');
+                thumb = '<img class="serversync-queue-thumb' + shape + '" loading="lazy" src="' + esc(url) + '" alt="" />' +
+                    hiddenHolder;
             } else if (r.originItemId && r.peerKey && !isUser) {
                 var cacheKey = r.peerKey + '|' + r.originItemId;
                 var cached = QueueModule._proxyCache[cacheKey];
                 if (cached) {
-                    thumb = '<img class="qThumb' + shape + '" src="' + esc(cached) + '" alt="" />' + holder.replace('<div ', '<div style="display:none" ');
+                    thumb = '<img class="serversync-queue-thumb' + shape + '" src="' + esc(cached) + '" alt="" />' + hiddenHolder;
                 } else if (cached === '') {
                     thumb = holder;
                 } else {
                     var id = 'ss-q-thumb-' + Math.random().toString(36).slice(2);
                     setTimeout(function() { QueueModule._loadProxy(id, cacheKey, r.originItemId, r.peerKey); }, 0);
-                    thumb = '<img id="' + id + '" class="qThumb' + shape + '" alt="" />' + holder.replace('<div ', '<div style="display:none" ');
+                    thumb = '<img id="' + id + '" class="serversync-queue-thumb' + shape + '" alt="" />' + hiddenHolder;
                 }
             } else {
                 thumb = holder;
@@ -307,41 +336,41 @@ export function createQueueModule(ctx) {
 
             var who = '';
             if (r.userName && (r.kind === 'History' || r.kind === 0)) {
-                var avatar = r.userId ? '<img class="qAvatar" src="' + esc(ApiClient.getUserImageUrl(r.userId, { type: 'Primary', height: 32 })) + '" alt="" onerror="this.style.visibility=\'hidden\'" />' : '<i class="qAvatar"></i>';
-                who = '<span class="qWho">' + avatar + esc(r.userName) + '</span>';
+                var avatar = r.userId ? '<img class="serversync-queue-avatar" src="' + esc(ApiClient.getUserImageUrl(r.userId, { type: 'Primary', height: 32 })) + '" alt="" />' : '<i class="serversync-queue-avatar"></i>';
+                who = '<span class="serversync-queue-who">' + avatar + esc(r.userName) + '</span>';
             }
-            var where = r.dir === 'in' ? 'from ' + esc(r.peerName || 'a peer') : (r.peerName ? 'to ' + esc(r.peerName) : '');
+            var where = r.dir === 'in' ? 'from ' + esc(r.peerName || 'a server') : (r.peerName ? 'to ' + esc(r.peerName) : '');
             var sub = who + '<span>' + esc(r.what) + (where ? ' · ' + where : '') + '</span>';
             var badges = '<span class="jpk-badge ' + QueueModule._kindColor(r.kind) + '">' + esc(QueueModule._kindLabelTitle(r.kind)) + '</span>' +
-                (r.recorded === false ? '<span class="jpk-badge gray">provider</span>' : '');
+                (r.recorded === false ? '<span class="jpk-badge gray">Provider</span>' : '');
 
             var chip, meta = '', err = false, act = '';
             if (r.state === 'Gathering') {
-                chip = '<span class="qChip gathering" data-due="' + esc(r.dueAt || '') + '" data-edited="' + esc(r.at || '') + '"><i class="qRing"></i><span class="qChipText">Gathering · ' + QueueModule._countdown(r.dueAt) + '</span></span>';
+                chip = '<span class="serversync-queue-chip serversync-gathering" data-due="' + esc(r.dueAt || '') + '" data-edited="' + esc(r.at || '') + '"><i class="serversync-queue-ring"></i><span class="serversync-queue-chip-text">Gathering · ' + QueueModule._countdown(r.dueAt) + '</span></span>';
                 meta = 'edited ' + QueueModule._ago(r.at);
             } else if (r.state === 'Pending') {
-                chip = '<span class="qChip pending">Pending' + (r.attempts > 0 ? ' · retry ' + QueueModule._time(r.nextAttempt) : ' · ' + esc(r.peerName)) + '</span>';
+                chip = '<span class="serversync-queue-chip serversync-pending">Pending' + (r.attempts > 0 ? ' · retry ' + QueueModule._time(r.nextAttempt) : ' · ' + esc(r.peerName)) + '</span>';
                 if (r.attempts > 0) { meta = (r.lastError || 'retrying') + ', attempt ' + r.attempts; err = true; } else { meta = 'waiting for delivery'; }
-                act = '<button type="button" class="qAct" data-lane="Outbound" data-discard="' + r.id + '" title="Discard this hint. The scheduled task still covers the change.">✕</button>';
+                act = DISCARD_BUTTON('Outbound', r.id);
             } else if (r.state === 'Sent') {
-                chip = '<span class="qChip sent">Sent · waiting for ' + esc(r.peerName) + '</span>';
+                chip = '<span class="serversync-queue-chip serversync-sent">Sent · waiting for ' + esc(r.peerName) + '</span>';
                 meta = 'accepted ' + QueueModule._ago(r.sentAt);
-                act = '<button type="button" class="qAct" data-lane="Outbound" data-discard="' + r.id + '" title="Discard this hint. The scheduled task still covers the change.">✕</button>';
+                act = DISCARD_BUTTON('Outbound', r.id);
             } else if (r.state === 'Failed') {
-                chip = '<span class="qChip failed">Failed · ' + esc(r.peerName) + '</span>';
+                chip = '<span class="serversync-queue-chip serversync-failed">Failed · ' + esc(r.peerName) + '</span>';
                 meta = r.lastError || 'rejected'; err = true;
-                act = '<button type="button" class="qAct" data-lane="Outbound" data-discard="' + r.id + '" title="Discard this hint.">✕</button>';
+                act = DISCARD_BUTTON('Outbound', r.id);
             } else {
-                chip = '<span class="qChip received">Received · ' + (r.parked ? 'waiting for the item' : r.attempts > 0 ? 'retrying' : 'applying next pass') + '</span>';
+                chip = '<span class="serversync-queue-chip serversync-received">Received · ' + (r.parked ? 'waiting for the item' : r.attempts > 0 ? 'retrying' : 'applying next pass') + '</span>';
                 if (r.parked) { meta = r.lastError || 'waiting for the item to arrive here'; } else if (r.attempts > 0) { meta = (r.lastError || 'retrying') + ', attempt ' + r.attempts; err = true; } else { meta = QueueModule._ago(r.receivedAt); }
-                act = '<button type="button" class="qAct" data-lane="Inbound" data-discard="' + r.id + '" title="Discard this hint. The scheduled task still covers the change.">✕</button>';
+                act = DISCARD_BUTTON('Inbound', r.id);
             }
 
-            var title = esc(r.title || '') + (r.subtitle ? ' <span class="qEp"><i class="qSep">· </i>' + esc(r.subtitle) + '</span>' : '');
-            return '<div class="qRow">' +
-                '<div class="qThumbWrap">' + thumb + '</div>' +
-                '<div class="qInfo"><div class="qTitle">' + title + '</div><div class="qSub">' + sub + '</div><div class="qBadges">' + badges + '</div></div>' +
-                '<div class="qRight">' + chip + '<span class="qMeta' + (err ? ' err' : '') + '">' + esc(meta) + '</span>' + act + '</div>' +
+            var title = esc(r.title || '') + (r.subtitle ? ' <span class="serversync-queue-episode"><i class="serversync-queue-separator">· </i>' + esc(r.subtitle) + '</span>' : '');
+            return '<div class="serversync-queue-row">' +
+                '<div class="serversync-queue-thumb-wrap">' + thumb + '</div>' +
+                '<div class="serversync-queue-info"><div class="serversync-queue-title">' + title + '</div><div class="serversync-queue-sub">' + sub + '</div><div class="serversync-queue-badges">' + badges + '</div></div>' +
+                '<div class="serversync-queue-right">' + chip + '<span class="serversync-queue-meta' + (err ? ' serversync-error' : '') + '">' + esc(meta) + '</span>' + act + '</div>' +
                 '</div>';
         },
 
@@ -352,13 +381,13 @@ export function createQueueModule(ctx) {
 
         // The gathering countdown moves every second without a round trip.
         _tickChips: function() {
-            view.querySelectorAll('#queueList .qChip.gathering').forEach(function(chip) {
+            view.querySelectorAll('#queueList .serversync-queue-chip.serversync-gathering').forEach(function(chip) {
                 var due = chip.getAttribute('data-due');
                 var edited = chip.getAttribute('data-edited');
                 if (!due) return;
-                var text = chip.querySelector('.qChipText');
+                var text = chip.querySelector('.serversync-queue-chip-text');
                 if (text) text.textContent = 'Gathering · ' + QueueModule._countdown(due);
-                var ring = chip.querySelector('.qRing');
+                var ring = chip.querySelector('.serversync-queue-ring');
                 if (ring && edited) {
                     var total = new Date(due) - new Date(edited);
                     var done = Date.now() - new Date(edited);
@@ -434,10 +463,10 @@ export function createQueueModule(ctx) {
             var self = this;
             btn.disabled = true;
             ServerSyncShared.apiRequest('Hints/' + btn.getAttribute('data-lane') + '/' + btn.getAttribute('data-discard'), 'DELETE').then(function() {
-                ServerSyncShared.showAlert('Hint discarded');
+                ServerSyncShared.syncStatus('Hint discarded.', false);
                 return self.load(true);
             }).catch(function() {
-                ServerSyncShared.showAlert('Could not discard the hint');
+                ServerSyncShared.syncStatus('Could not discard the hint.', true);
                 btn.disabled = false;
             });
         }

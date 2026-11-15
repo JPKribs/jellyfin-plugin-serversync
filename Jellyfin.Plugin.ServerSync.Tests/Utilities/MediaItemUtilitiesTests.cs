@@ -6,6 +6,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 
+/// <summary>
+/// The media item helpers turn the SDK's wrapped values into plain values.
+/// </summary>
 public class MediaItemUtilitiesTests
 {
     /// <summary>

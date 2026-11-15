@@ -24,6 +24,9 @@ public partial class ConfigurationController
     /// Gets a specific metadata sync item by its ID.
     /// </summary>
     /// <param name="id">The database ID of the metadata sync item.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="metadataService">Builds and compares metadata sync rows.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The metadata sync item DTO.</returns>
     [HttpGet("MetadataItems/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -84,6 +87,7 @@ public partial class ConfigurationController
     /// Gets paginated metadata sync items from the database with optional search and filter.
     /// One record per item containing all categories (Metadata, Images, People).
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="search">Optional search term (matches item names or paths).</param>
     /// <param name="status">Optional status filter.</param>
     /// <param name="sourceLibraryId">Optional source library ID filter.</param>
@@ -129,6 +133,7 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets metadata sync status counts.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <returns>Metadata sync status response with counts.</returns>
     [HttpGet("MetadataStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -156,6 +161,7 @@ public partial class ConfigurationController
     /// Moves metadata sync items to Queued status. With no ids and a Status, queues every row in that
     /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Bulk metadata sync items request.</param>
     /// <returns>Action result with updated count.</returns>
     [HttpPost("MetadataItems/Queue")]
@@ -173,7 +179,7 @@ public partial class ConfigurationController
 
         if (request?.Ids == null || request.Ids.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         try
@@ -184,13 +190,14 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue metadata sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
+            return StatusCode(500, new { Error = "Could not queue the items. See the server log." });
         }
     }
 
     /// <summary>
     /// Marks metadata sync items as ignored.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Bulk metadata sync items request.</param>
     /// <returns>Action result with updated count.</returns>
     [HttpPost("MetadataItems/Ignore")]
@@ -203,7 +210,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids == null || request.Ids.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         try
@@ -214,7 +221,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore metadata sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
+            return StatusCode(500, new { Error = "Could not ignore the items. See the server log." });
         }
     }
 }

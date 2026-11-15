@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
@@ -19,9 +20,10 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// Shows playback of a link on this server, the source, as a session of its own. Each viewer on the
 /// server holding the link is a device here under the client name Server Sync, so the dashboard lists
 /// it, the activity log and playback plugins see it, and Jellyfin's own stop handling updates played
-/// state and resume position for the user it streams as. The server holding the link ends a session
-/// by reporting its stop. When that report is lost, <see cref="SweepAsync"/> ends the session once it
-/// has gone ten minutes without a report, since Jellyfin itself never removes it.
+/// state and resume position for the user it streams as. A stop report ends the playback and leaves
+/// the session idle, since the dashboard keeps showing a session that vanishes while it plays.
+/// <see cref="SweepAsync"/> stops playback that went ten minutes without a report, and removes a
+/// session twenty minutes after its last report, since Jellyfin itself never removes it.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkPlaybackSessions
@@ -34,6 +36,16 @@ public sealed class LinkPlaybackSessions
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LinkSessionController> _controllerLogger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkPlaybackSessions"/> class.
+    /// </summary>
+    /// <param name="sessionManager">Session manager.</param>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="userManager">User manager.</param>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="controllerLogger">Logger for each session controller.</param>
     public LinkPlaybackSessions(
         ISessionManager sessionManager,
         ILibraryManager libraryManager,
@@ -53,6 +65,9 @@ public sealed class LinkPlaybackSessions
     }
 
     /// <summary>The device id a viewer on the calling server shows under here.</summary>
+    /// <param name="peer">The linking server.</param>
+    /// <param name="sessionKey">The viewer's session key on that server.</param>
+    /// <returns>The device id.</returns>
     public static string DeviceIdFor(SourceServer peer, string sessionKey)
     {
         ArgumentNullException.ThrowIfNull(peer);
@@ -155,8 +170,7 @@ public sealed class LinkPlaybackSessions
                 }).ConfigureAwait(false);
                 break;
             case LinkPlaybackEvent.Stop:
-                // The session ends even when Jellyfin's stop handling throws, and the stop is answered as
-                // applied either way. Sent again, it would open a new session and stop it a second time.
+                // A stop that throws is still answered as applied, since sending it again would not help.
                 try
                 {
                     await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
@@ -170,10 +184,9 @@ public sealed class LinkPlaybackSessions
                 }
                 catch (Exception ex)
                 {
-                    _controllerLogger.LogWarning(ex, "Jellyfin could not stop the link session {Session}, so it is ended without its stop", session.Id);
+                    _controllerLogger.LogWarning(ex, "Jellyfin could not stop the link session {Session}, so the sweep stops it", session.Id);
                 }
 
-                await _sessionManager.ReportSessionEnded(session.Id).ConfigureAwait(false);
                 break;
             default:
                 return "unknown playback event";
@@ -183,14 +196,14 @@ public sealed class LinkPlaybackSessions
     }
 
     /// <summary>
-    /// Ends every link session that has had no report for <see cref="LinkSessionController.ActiveFor"/>.
-    /// The server holding the link ends a session by reporting its stop, and when that report is lost
-    /// nothing in Jellyfin removes the session: it only checks a session's controllers when a websocket
-    /// closes, and a link session has none. So the sweep does it, stopping any playback first so played
-    /// state and resume position are kept.
+    /// Tidies the link sessions whose server stopped reporting on them. Playback with no report for
+    /// <see cref="LinkSessionController.ActiveFor"/> is stopped, so played state and resume position
+    /// are kept and the dashboard shows the session idle. A session with no report for
+    /// <see cref="LinkSessionController.RemoveAfter"/> is removed, since nothing in Jellyfin removes a
+    /// session that has no websocket.
     /// </summary>
     /// <param name="now">The time to judge staleness by.</param>
-    /// <returns>How many sessions were ended.</returns>
+    /// <returns>How many sessions were removed.</returns>
     public async Task<int> SweepAsync(DateTime now)
     {
         var ended = 0;
@@ -214,6 +227,7 @@ public sealed class LinkPlaybackSessions
                         MediaSourceId = session.PlayState?.MediaSourceId,
                         PositionTicks = session.PlayState?.PositionTicks is >= 0 and var at ? at : null
                     }).ConfigureAwait(false);
+                    _controllerLogger.LogInformation("Stopped playback on the link session {Device} for {User}: the server holding the link has not reported on it for {Minutes} minutes", FormatUtilities.SanitizeForLog(session.DeviceName), FormatUtilities.SanitizeForLog(session.UserName), LinkSessionController.ActiveFor.TotalMinutes);
                 }
             }
             catch (Exception ex)
@@ -221,15 +235,19 @@ public sealed class LinkPlaybackSessions
                 _controllerLogger.LogDebug(ex, "Could not stop playback on the stale link session {Session}", session.Id);
             }
 
+            if (!controllers.All(c => c is LinkSessionController link && link.RemovableAt(now)))
+            {
+                continue;
+            }
+
             try
             {
                 await _sessionManager.ReportSessionEnded(session.Id).ConfigureAwait(false);
                 ended++;
-                _controllerLogger.LogInformation("Ended the link session {Device} for {User}: the server holding the link has not reported on it for {Minutes} minutes", session.DeviceName, session.UserName, LinkSessionController.ActiveFor.TotalMinutes);
             }
             catch (Exception ex)
             {
-                _controllerLogger.LogWarning(ex, "Could not end the stale link session {Session}", session.Id);
+                _controllerLogger.LogWarning(ex, "Could not remove the stale link session {Session}", session.Id);
             }
         }
 
@@ -238,9 +256,11 @@ public sealed class LinkPlaybackSessions
 
     /// <summary>
     /// The name a viewer's session shows under here: their client and their user on the server holding
-    /// the link, as in <c>Jellyfin Web (Joe)</c>. A linking server that sends no user name, as releases
-    /// before 12.2.11.4 do, is named instead.
+    /// the link, as in <c>Jellyfin Web (Joe)</c>. A linking server that sends no user name is named instead.
     /// </summary>
+    /// <param name="peer">The linking server.</param>
+    /// <param name="report">The playback report.</param>
+    /// <returns>The name.</returns>
     public static string DeviceName(SourceServer peer, PeerPlaybackReport report)
     {
         ArgumentNullException.ThrowIfNull(peer);

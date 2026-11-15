@@ -4,6 +4,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 
+/// <summary>
+/// Stored times are written and read as UTC text.
+/// </summary>
 public class UtcTimeTests
 {
     /// <summary>

@@ -49,6 +49,17 @@ public sealed class LinkStreamer
     private readonly TimeSpan _stallTimeout;
     private readonly LinkCache? _cache;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkStreamer"/> class.
+    /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="access">Picks the server a link streams from.</param>
+    /// <param name="grants">The plays in progress.</param>
+    /// <param name="health">Which servers are down.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="cache">The link cache.</param>
     public LinkStreamer(
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
@@ -62,7 +73,18 @@ public sealed class LinkStreamer
     {
     }
 
-    /// <summary>Initializes a new instance of the <see cref="LinkStreamer"/> class, for tests.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkStreamer"/> class, for tests.
+    /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="access">Picks the server a link streams from.</param>
+    /// <param name="grants">The plays in progress.</param>
+    /// <param name="health">Which servers are down.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="stallTimeout">How long a stream may stall.</param>
+    /// <param name="cache">The link cache, or null.</param>
     public LinkStreamer(
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
@@ -195,7 +217,7 @@ public sealed class LinkStreamer
 
                 if (end == CopyEnd.Refused)
                 {
-                    _logger.LogInformation("Stopped a read of the link {Path}: {Reason}", link.LinkPath, outcome);
+                    _logger.LogInformation("Stopped a read of the link {Path}: {Reason}", FormatUtilities.SanitizeForLog(link.LinkPath), FormatUtilities.SanitizeForLog(outcome, 300));
                     context.Abort();
                     return Written;
                 }
@@ -211,7 +233,7 @@ public sealed class LinkStreamer
                     var (again, _) = await OpenAsync(route, grant, false, rest, sourcePath, clients, aborted).ConfigureAwait(false);
                     if (Continues(again, w, sent))
                     {
-                        _logger.LogInformation("'{Server}' stopped sending {Path} partway ({Reason}), so the rest was asked for again", serverName, sourcePath, outcome);
+                        _logger.LogInformation("'{Server}' stopped sending {Path} partway ({Reason}), so the rest was asked for again", FormatUtilities.SanitizeForLog(serverName), FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(outcome, 300));
                         response = again;
                         continue;
                     }
@@ -221,7 +243,7 @@ public sealed class LinkStreamer
                     {
                         if (Continues(next.Response, w, sent))
                         {
-                            _logger.LogInformation("'{Server}' stopped sending {Path} partway ({Reason}), so another server sends the rest", serverName, sourcePath, outcome);
+                            _logger.LogInformation("'{Server}' stopped sending {Path} partway ({Reason}), so another server sends the rest", FormatUtilities.SanitizeForLog(serverName), FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(outcome, 300));
                             (response, route) = next;
                             continue;
                         }
@@ -232,7 +254,7 @@ public sealed class LinkStreamer
 
                 // The response has begun, so the connection is closed to tell the player rather than
                 // sending an error it cannot read.
-                _logger.LogWarning("'{Server}' stopped sending {Path} partway and the rest could not be had: {Reason}", serverName, sourcePath, outcome);
+                _logger.LogWarning("'{Server}' stopped sending {Path} partway and the rest could not be had: {Reason}", FormatUtilities.SanitizeForLog(serverName), FormatUtilities.SanitizeForLog(sourcePath), FormatUtilities.SanitizeForLog(outcome, 300));
                 context.Abort();
                 return Written;
             }

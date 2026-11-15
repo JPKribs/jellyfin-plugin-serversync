@@ -1,12 +1,16 @@
-// ============================================
-// SERVER SYNC PLUGIN - SYNC PAGE: TABLE MODULE FACTORY
-// ============================================
-// Loaded by serversync_sync.js once the shared module is in. createSyncTableKit(ctx) returns the
-// factory every Sync view is built from, plus the row, health, and value helpers the views share.
-// ctx carries the view, the shared helper bag, the paginated table and dialog builders, and the
-// list of running task pollers the page stops on viewhide.
-// ============================================
+// serversync_sync_table.js
+// The table kit every Sync view is built from. Loaded by serversync_sync.js once the shared module is in.
 
+// createSyncTableKit
+// Builds the factory every Sync view is built from, plus the row, health, and value helpers the views share.
+//
+// Inputs
+// ctx [object]: The page context, with the view, the shared helper bag, the paginated table and dialog builders,
+// and activePollIntervals, the list of running task pollers the page stops on viewhide.
+//
+// Output
+// [object]: A handle with createSyncTableModule, openSyncView, renderRowInfo, renderChangeBadges,
+// setHealthLastSync, setHealthCount, parseJsonSafe, formatImageDisplay, and showObjectVersion.
 export function createSyncTableKit(ctx) {
     'use strict';
 
@@ -16,9 +20,6 @@ export function createSyncTableKit(ctx) {
     var bindDialog = ctx.bindDialog;
     var _activePollIntervals = ctx.activePollIntervals;
 
-    // ============================================
-    // SYNC TABLE MODULE FACTORY
-    // ============================================
     // Builds the module behind one Sync view. Every view shares the table setup, the status counts,
     // the Refresh and Sync buttons, retrying errors, the bulk and modal actions, and the page load.
     // A spec supplies what differs: element ids, endpoints, columns, health figures, and the detail
@@ -48,10 +49,10 @@ export function createSyncTableKit(ctx) {
         if (!el) return;
         if (time) {
             el.textContent = ServerSyncShared.formatRelativeTime(new Date(time));
-            el.className = 'healthValue';
+            el.className = 'serversync-health-value';
         } else {
             el.textContent = 'Never';
-            el.className = 'healthValue';
+            el.className = 'serversync-health-value';
         }
     }
 
@@ -59,21 +60,21 @@ export function createSyncTableKit(ctx) {
         var el = view.querySelector('#' + elementId);
         if (!el) return;
         el.textContent = count;
-        el.className = count > 0 ? 'healthValue success' : 'healthValue warning';
+        el.className = count > 0 ? 'serversync-health-value serversync-success' : 'serversync-health-value serversync-warning';
     }
 
     // The thumbnail, name, second line, and error preview every Item column shows.
     function renderRowInfo(thumb, name, line, item, status, nameTitle) {
         var errorPreview = '';
         if (status === 'Errored' && item.ErrorMessage) {
-            errorPreview = '<div class="syncItemError" title="' + ServerSyncShared.escapeHtml(item.ErrorMessage) + '">' +
+            errorPreview = '<div class="serversync-item-error" title="' + ServerSyncShared.escapeHtml(item.ErrorMessage) + '">' +
                 ServerSyncShared.escapeHtml(item.ErrorMessage) + '</div>';
         }
         var title = nameTitle === undefined ? name : nameTitle;
         return thumb +
-            '<div class="syncItemInfo">' +
-            '<div class="syncItemName"' + (title ? ' title="' + ServerSyncShared.escapeHtml(title) + '"' : '') + '>' + ServerSyncShared.escapeHtml(name) + '</div>' +
-            (line === null ? '' : '<div class="syncItemPath">' + ServerSyncShared.escapeHtml(line) + '</div>') +
+            '<div class="serversync-item-info">' +
+            '<div class="serversync-item-name"' + (title ? ' title="' + ServerSyncShared.escapeHtml(title) + '"' : '') + '>' + ServerSyncShared.escapeHtml(name) + '</div>' +
+            (line === null ? '' : '<div class="serversync-item-path">' + ServerSyncShared.escapeHtml(line) + '</div>') +
             errorPreview +
             '</div>';
     }
@@ -81,7 +82,7 @@ export function createSyncTableKit(ctx) {
     // The orange badges for the categories that differ, or a gray one when none do.
     function renderChangeBadges(changes) {
         if (changes.length === 0) {
-            return '<span class="jpk-badge gray">No changes</span>';
+            return '<span class="jpk-badge gray">No Changes</span>';
         }
         return changes.map(function(c) { return '<span class="jpk-badge orange">' + c + '</span>'; }).join(' ');
     }
@@ -171,7 +172,7 @@ export function createSyncTableKit(ctx) {
 
                 container.innerHTML = bulkButtons.map(function(b) {
                     return '<button is="emby-button" type="button" id="' + ids.bulk(b.id) + '" class="raised ' + (b.className ? b.className + ' ' : '') +
-                        'pt-bulk-icon-btn" title="' + b.title + '" disabled><span class="material-icons">' + b.icon + '</span></button>';
+                        'serversync-bulk-icon-btn" title="' + b.title + '" aria-label="' + b.title + '" disabled><span class="material-icons" aria-hidden="true">' + b.icon + '</span></button>';
                 }).join('');
                 bulkButtons.forEach(function(b) {
                     container.querySelector('#' + ids.bulk(b.id)).addEventListener('click', function() { self[b.method](); });
@@ -225,14 +226,14 @@ export function createSyncTableKit(ctx) {
                 if (!btn || !task) return;
 
                 btn.disabled = true;
-                btn.querySelector('span').textContent = 'Starting...';
+                btn.querySelector('span').textContent = 'Starting…';
 
                 ServerSyncShared.apiRequest('Tasks/' + task.key + '/Run', 'POST').then(function() {
                     _activePollIntervals.push(ServerSyncShared.pollTaskProgress(btn, task.key, label, function() {
                         self.loadAll();
                     }));
                 }).catch(function() {
-                    ServerSyncShared.showAlert('Failed to start ' + (spec.taskNoun ? spec.taskNoun + ' ' : '') + label.toLowerCase() + ' task');
+                    ServerSyncShared.syncStatus('Could not start the ' + (spec.taskNoun ? spec.taskNoun + ' ' : '') + label.toLowerCase() + ' task.', true);
                     btn.querySelector('span').textContent = label;
                     btn.disabled = false;
                 });
@@ -240,7 +241,7 @@ export function createSyncTableKit(ctx) {
 
             retryErrors: function() {
                 var self = this;
-                return retryAllErrored(spec.retryEndpoint, spec.retryNoun || spec.pluralNoun, function() {
+                return retryAllErrored(spec.retryEndpoint, spec.retryOne || spec.nounOne, spec.retryMany || spec.nounMany, function() {
                     return Promise.all([self.loadStatus(), self.loadItems()]);
                 });
             },
@@ -266,8 +267,8 @@ export function createSyncTableKit(ctx) {
 
                 var body = spec.selectionBody ? spec.selectionBody(keys) : { Ids: keys };
                 this.postSelection(spec.itemsEndpoint + '/' + action, body,
-                    keys.length + ' ' + spec.pluralNoun + ' ' + done,
-                    'Failed to ' + action.toLowerCase() + ' ' + spec.failNoun);
+                    ServerSyncShared.plural(keys.length, spec.nounOne, spec.nounMany) + ' ' + done + '.',
+                    'Could not ' + action.toLowerCase() + ' the ' + spec.failNoun + '.');
             },
 
             // Posts an action on the selected rows and reloads. The done message may be a function of
@@ -279,10 +280,10 @@ export function createSyncTableKit(ctx) {
                     self.loadStatus();
                     self.loadItems();
                     var message = typeof doneMessage === 'function' ? doneMessage(result) : doneMessage;
-                    if (message) ServerSyncShared.showAlert(message);
+                    if (message) ServerSyncShared.syncStatus(message, false);
                 }).catch(function(err) {
                     console.error(failMessage + ':', err);
-                    ServerSyncShared.showAlert(failMessage);
+                    ServerSyncShared.syncStatus(failMessage, true);
                 });
             },
 
@@ -319,10 +320,10 @@ export function createSyncTableKit(ctx) {
                 var request = spec.statusRequest(item, status);
                 ServerSyncShared.apiRequest(request.endpoint, 'POST', request.body).then(function() {
                     self.closeModal();
-                    ServerSyncShared.showAlert(spec.singularNoun + ' status updated to ' + status);
+                    ServerSyncShared.syncStatus(spec.singularNoun + ' status updated to ' + status + '.', false);
                 }).catch(function(err) {
                     console.error('Failed to update status:', err);
-                    ServerSyncShared.showAlert('Failed to update ' + spec.singularNoun.toLowerCase() + ' status');
+                    ServerSyncShared.syncStatus('Could not update the ' + spec.singularNoun.toLowerCase() + ' status.', true);
                 });
             }
         };
@@ -346,10 +347,6 @@ export function createSyncTableKit(ctx) {
         });
     }
 
-    // ============================================
-    // VALUE HELPERS (shared by the detail modals)
-    // ============================================
-
     // Parses a stored JSON value, or returns null when it is missing or not JSON. Some user sync values
     // are plain strings rather than JSON, so a failed parse is expected and is not logged.
     function parseJsonSafe(value) {
@@ -372,27 +369,24 @@ export function createSyncTableKit(ctx) {
         return count > 1 ? sizeStr + ' (' + count + ')' : sizeStr;
     }
 
-    // ============================================
-    // RETRY ERRORED ROWS (shared by the History, Metadata, Users, and People tables)
-    // ============================================
     // Posts an empty id list with Status Errored to a module's Queue endpoint, which asks the server to
     // requeue every errored row itself. Listing ids from the page instead would only cover the rows that
     // happen to be loaded. The counts and rows reload whether or not the request worked, since the table
     // should show what the server holds now, and every promise in the chain is returned so nothing fails
-    // without an alert.
-    function retryAllErrored(endpoint, noun, reload) {
+    // without a status.
+    function retryAllErrored(endpoint, one, many, reload) {
         return ServerSyncShared.apiRequest(endpoint, 'POST', { Ids: [], Status: 'Errored' }).then(function(result) {
             var updated = result && typeof result.Updated === 'number' ? result.Updated : null;
             if (updated === 0) {
-                ServerSyncShared.showAlert('No errored ' + noun + ' to retry');
+                ServerSyncShared.syncStatus('No errored ' + many + ' to retry.', false);
             } else if (updated !== null) {
-                ServerSyncShared.showAlert(updated + ' errored ' + noun + ' queued for retry');
+                ServerSyncShared.syncStatus(ServerSyncShared.plural(updated, 'errored ' + one, 'errored ' + many) + ' queued for retry.', false);
             } else {
-                ServerSyncShared.showAlert('Errored ' + noun + ' queued for retry');
+                ServerSyncShared.syncStatus('Errored ' + many + ' queued for retry.', false);
             }
         }, function(err) {
             console.error('Retry of errored rows failed:', err);
-            ServerSyncShared.showAlert('Failed to retry errored ' + noun);
+            ServerSyncShared.syncStatus('Could not retry the errored ' + many + '.', true);
         }).then(function() {
             return reload();
         }).catch(function(err) {
@@ -400,9 +394,6 @@ export function createSyncTableKit(ctx) {
         });
     }
 
-    // ============================================
-    // OBJECT VERSION (shared by the detail modals)
-    // ============================================
     // Which server last edited an object and when, from Sync/Hints/Version. An object no one
     // has edited since versions began shows as not recorded.
 

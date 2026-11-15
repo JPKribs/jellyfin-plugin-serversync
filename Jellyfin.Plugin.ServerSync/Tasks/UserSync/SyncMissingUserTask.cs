@@ -34,8 +34,16 @@ public class SyncMissingUserTask
     private readonly AppliedVersionRecorder? _applied;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="SyncMissingUserTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="userManager">Reads Jellyfin's users.</param>
+    /// <param name="providerManager">Refreshes an item's metadata and images.</param>
+    /// <param name="serverConfigurationManager">Reads and saves Jellyfin's server settings.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="applied">Records the version each applied value carries, or null when versions are not kept.</param>
     public SyncMissingUserTask(
         ILogger<SyncMissingUserTask> logger,
         IPluginConfigurationManager configManager,
@@ -56,7 +64,9 @@ public class SyncMissingUserTask
     protected override IDisposable? EnterApplyGuard(UserSyncItem record)
         => _applied?.Enter(Models.Queue.HintKind.Users, Guid.TryParse(record?.LocalUserId, out var id) ? HintProtocol.UsersKey(id) : string.Empty);
 
-    // The version is recorded once per user.
+    /// <summary>
+    /// The version is recorded once per user.
+    /// </summary>
     /// <inheritdoc />
     protected override async Task AfterApplySucceededAsync(UserSyncItem record, CancellationToken cancellationToken)
     {
@@ -72,7 +82,7 @@ public class SyncMissingUserTask
     }
 
     /// <inheritdoc />
-    public override string Name => "Sync User";
+    public override string Name => "Sync Users";
 
     /// <inheritdoc />
     public override string Key => "ServerSyncMissingUserData";
@@ -83,9 +93,11 @@ public class SyncMissingUserTask
     /// <inheritdoc />
     public override string Category => "User Sync";
 
-    // The row holds what this server held when it was scanned. Once the other server's settings are
-    // applied, that is what this server holds, and the next scan tells a change made here by
-    // comparing against it.
+    /// <summary>
+    /// The row holds what this server held when it was scanned. Once the other server's settings are
+    /// applied, that is what this server holds, and the next scan tells a change made here by
+    /// comparing against it.
+    /// </summary>
     /// <inheritdoc />
     protected override void OnApplySucceeded(UserSyncItem record)
     {
@@ -325,12 +337,6 @@ public class SyncMissingUserTask
         ArgumentNullException.ThrowIfNull(config);
         config.LastUserSyncTime = utcNow;
     }
-
-    // ===================================================================
-    // Apply logic, per-category mutations on the local user. Each method
-    // updates the record's in-memory fields on success so the base's upsert
-    // captures the new state and the next Refresh sees no diff.
-    // ===================================================================
 
     private Task ApplyPolicyChangesAsync(User localUser, UserSyncItem item)
         => ApplyJsonPropertyChangesAsync(

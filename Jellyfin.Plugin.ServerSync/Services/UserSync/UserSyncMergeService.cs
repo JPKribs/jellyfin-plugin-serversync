@@ -28,7 +28,6 @@ public static class UserSyncMergeService
 
         var localIds = new List<string>();
 
-        // Find mapping for this source library
         foreach (var mapping in sourceLibraryIds.Select(sourceId => libraryMappings.FirstOrDefault(m =>
             m.SourceLibraryId == sourceId &&
             m.IsEnabled &&
@@ -58,7 +57,7 @@ public static class UserSyncMergeService
     /// <para>
     /// Guid-typed identifiers are rejected by <see cref="IsGuidBearingType"/>
     /// and don't need naming here. This list exists for the ones reflection
-    /// can't recognise: identifiers Jellyfin models as <c>string</c>, plus
+    /// cannot recognize: identifiers Jellyfin models as <c>string</c>, plus
     /// runtime state and local-only security settings.
     /// </para>
     /// </summary>
@@ -101,7 +100,7 @@ public static class UserSyncMergeService
     };
 
     /// <summary>
-    /// True when a type carries a Jellyfin identifier: a <see cref="Guid"/>, a
+    /// <c>true</c> when a type carries a Jellyfin identifier: a <see cref="Guid"/>, a
     /// nullable Guid, a collection of either, or a complex type with a Guid
     /// anywhere inside it.
     /// <para>
@@ -119,7 +118,7 @@ public static class UserSyncMergeService
     /// </para>
     /// </summary>
     /// <param name="type">Property type to inspect.</param>
-    /// <returns>True when the type can carry a server-specific identifier.</returns>
+    /// <returns><c>true</c> when the type can carry a server-specific identifier.</returns>
     public static bool IsGuidBearingType(Type type) => IsGuidBearingType(type, new HashSet<Type>());
 
     private static bool IsGuidBearingType(Type? type, HashSet<Type> visited)
@@ -183,6 +182,8 @@ public static class UserSyncMergeService
     /// Checks if a policy property should be synced, by name only. Prefer the
     /// <see cref="PropertyInfo"/> overload, it also rejects Guid-bearing types.
     /// </summary>
+    /// <param name="propertyName">The property's name.</param>
+    /// <returns><c>true</c> when the property is synced.</returns>
     public static bool ShouldSyncPolicyProperty(string propertyName)
     {
         return !ExcludedPolicyProperties.Contains(propertyName);
@@ -192,6 +193,8 @@ public static class UserSyncMergeService
     /// Checks if a configuration property should be synced, by name only.
     /// Prefer the <see cref="PropertyInfo"/> overload.
     /// </summary>
+    /// <param name="propertyName">The property's name.</param>
+    /// <returns><c>true</c> when the property is synced.</returns>
     public static bool ShouldSyncConfigurationProperty(string propertyName)
     {
         return !ExcludedConfigurationProperties.Contains(propertyName);
@@ -202,6 +205,8 @@ public static class UserSyncMergeService
     /// (which covers identifiers Jellyfin models as strings, so reflection
     /// can't see them) and not carrying a Guid.
     /// </summary>
+    /// <param name="property">The property to check.</param>
+    /// <returns><c>true</c> when the property is synced.</returns>
     public static bool ShouldSyncPolicyProperty(PropertyInfo property)
     {
         ArgumentNullException.ThrowIfNull(property);
@@ -212,6 +217,8 @@ public static class UserSyncMergeService
     /// Checks if a configuration property should be synced. See
     /// <see cref="ShouldSyncPolicyProperty(PropertyInfo)"/>.
     /// </summary>
+    /// <param name="property">The property to check.</param>
+    /// <returns><c>true</c> when the property is synced.</returns>
     public static bool ShouldSyncConfigurationProperty(PropertyInfo property)
     {
         ArgumentNullException.ThrowIfNull(property);
@@ -221,6 +228,8 @@ public static class UserSyncMergeService
     /// <summary>
     /// Checks if a property requires library ID translation.
     /// </summary>
+    /// <param name="propertyName">The property's name.</param>
+    /// <returns><c>true</c> when the property holds library ids.</returns>
     public static bool RequiresLibraryTranslation(string propertyName)
     {
         return LibraryIdProperties.Contains(propertyName);
@@ -229,6 +238,8 @@ public static class UserSyncMergeService
     /// <summary>
     /// Extracts syncable policy properties from a policy object and returns as JSON.
     /// </summary>
+    /// <param name="policy">The policy object, or null.</param>
+    /// <returns>The JSON, or null when there is no policy.</returns>
     public static string? ExtractPolicyJson(object? policy)
     {
         if (policy == null) return null;
@@ -256,6 +267,8 @@ public static class UserSyncMergeService
     /// <summary>
     /// Extracts syncable configuration properties from a config object and returns as JSON.
     /// </summary>
+    /// <param name="config">The configuration object, or null.</param>
+    /// <returns>The JSON, or null when there is no configuration.</returns>
     public static string? ExtractConfigurationJson(object? config)
     {
         if (config == null) return null;
@@ -281,8 +294,13 @@ public static class UserSyncMergeService
     /// <summary>
     /// Computes merged policy JSON (source-wins, with library ID translation).
     /// </summary>
+    /// <param name="sourcePolicy">The source's policy JSON, or empty.</param>
+    /// <param name="libraryMappings">The library mappings that translate library ids.</param>
+    /// <returns>The merged JSON, or null when the source policy is empty.</returns>
     public static string? ComputeMergedPolicy(string? sourcePolicy, List<LibraryMapping> libraryMappings)
     {
+        ArgumentNullException.ThrowIfNull(libraryMappings);
+
         if (string.IsNullOrEmpty(sourcePolicy)) return null;
 
         try

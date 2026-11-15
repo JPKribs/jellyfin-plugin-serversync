@@ -56,6 +56,18 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     private readonly LinkCache? _cache;
     private readonly IPluginConfigurationManager? _configManager;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkPlaybackFilter"/> class.
+    /// </summary>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="links">The link registry.</param>
+    /// <param name="grants">The plays in progress.</param>
+    /// <param name="access">Picks the server a link streams from.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="streamer">Streams the file, or null.</param>
+    /// <param name="configManager">Reads the plugin configuration, or null.</param>
+    /// <param name="services">Resolves services on demand, or null.</param>
+    /// <param name="cache">The link cache, or null.</param>
     public LinkPlaybackFilter(ILibraryManager libraryManager, ILinkRegistry links, LinkGrants grants, ILinkAccess access, ILogger<LinkPlaybackFilter> logger, LinkStreamer? streamer = null, IPluginConfigurationManager? configManager = null, IServiceProvider? services = null, LinkCache? cache = null)
     {
         _cache = cache;

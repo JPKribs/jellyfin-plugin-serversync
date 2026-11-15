@@ -52,6 +52,8 @@ public static class DiskSpaceService
     /// <returns>List of disk space info for each library path.</returns>
     public static List<DiskSpaceInfo> GetDiskSpaceInfo(PluginConfiguration config)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
         var requiredBytes = GigabytesToBytes(config.MinimumFreeDiskSpaceGb);
         var results = new List<DiskSpaceInfo>();
 
@@ -90,9 +92,11 @@ public static class DiskSpaceService
     /// </summary>
     /// <param name="config">Plugin configuration containing library mappings.</param>
     /// <param name="insufficientPath">Output parameter containing the path with insufficient space.</param>
-    /// <returns>True if all paths have sufficient space.</returns>
+    /// <returns><c>true</c> if all paths have sufficient space.</returns>
     public static bool HasSufficientSpace(PluginConfiguration config, out string? insufficientPath)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
         insufficientPath = null;
         var requiredBytes = GigabytesToBytes(config.MinimumFreeDiskSpaceGb);
 
@@ -115,7 +119,7 @@ public static class DiskSpaceService
     /// <param name="filePath">Target file path.</param>
     /// <param name="fileSize">Size of the file in bytes.</param>
     /// <param name="minimumReserveGb">Minimum free space to reserve in GB.</param>
-    /// <returns>True if there is sufficient space for the file plus reserve.</returns>
+    /// <returns><c>true</c> if there is sufficient space for the file plus reserve.</returns>
     public static bool HasSufficientSpaceForFile(string? filePath, long fileSize, int minimumReserveGb)
     {
         if (string.IsNullOrEmpty(filePath) || fileSize <= 0)
@@ -184,7 +188,7 @@ public static class DiskSpaceService
     /// <summary>Reads the free space on the volume that holds a path.</summary>
     /// <param name="path">A file or folder on the volume.</param>
     /// <param name="freeBytes">The free bytes.</param>
-    /// <returns>True when the space was read, false when it is unknown.</returns>
+    /// <returns><c>true</c> when the space was read, <c>false</c> when it is unknown.</returns>
     public static bool TryGetFreeBytes(string path, out long freeBytes) => TryGetSpace(path, out freeBytes, out _);
 
     /// <summary>Gets the bytes held on all volumes, for tests.</summary>
@@ -261,7 +265,7 @@ public static class DiskSpaceService
     /// <param name="path">A library root or a target file path.</param>
     /// <param name="freeBytes">The free space available to this process.</param>
     /// <param name="totalBytes">The filesystem size.</param>
-    /// <returns>True when the space was read, false when it is unknown.</returns>
+    /// <returns><c>true</c> when the space was read, <c>false</c> when it is unknown.</returns>
     private static bool TryGetSpace(string path, out long freeBytes, out long totalBytes)
         => TryGetSpace(path, out freeBytes, out totalBytes, out _);
 

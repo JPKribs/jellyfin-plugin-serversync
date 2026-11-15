@@ -265,7 +265,7 @@ public sealed class OutboundHintStore : QueueStoreBase
 
     /// <summary>Removes a row the peer declined, while it still carries the version sent.</summary>
     /// <param name="row">The row as sent.</param>
-    /// <returns>True when it was removed.</returns>
+    /// <returns><c>true</c> when it was removed.</returns>
     public bool DeleteSent(OutboundHint row)
     {
         ArgumentNullException.ThrowIfNull(row);

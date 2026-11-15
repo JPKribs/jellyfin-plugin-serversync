@@ -14,7 +14,7 @@ public class BulkHistoryItemsRequest
     public List<long> Ids { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets the list of items to operate on (legacy).
+    /// Gets or sets the list of items to operate on by reference.
     /// Use Ids instead when possible.
     /// </summary>
     public List<HistoryItemReference> Items { get; set; } = new();
@@ -24,20 +24,4 @@ public class BulkHistoryItemsRequest
     /// then queues every row in this status, which is how "Retry errors" reaches every errored row.
     /// </summary>
     public string? Status { get; set; }
-}
-
-/// <summary>
-/// Reference to a history sync item by user and item ID.
-/// </summary>
-public class HistoryItemReference
-{
-    /// <summary>
-    /// Gets or sets the source user ID.
-    /// </summary>
-    public string SourceUserId { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Gets or sets the source item ID.
-    /// </summary>
-    public string SourceItemId { get; set; } = string.Empty;
 }

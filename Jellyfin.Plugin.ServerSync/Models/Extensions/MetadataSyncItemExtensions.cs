@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Plugin.ServerSync.Models.Common;
@@ -24,6 +25,8 @@ public static class MetadataSyncItemExtensions
         string? sourceServerUrl,
         bool includeBlobs = true)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
         var mapping = libraryMappings?.FirstOrDefault(m => m.SourceLibraryId == item.SourceLibraryId);
         var hasMetadataChanges = item.HasMetadataChanges;
         var hasImagesChanges = item.HasImagesChanges;

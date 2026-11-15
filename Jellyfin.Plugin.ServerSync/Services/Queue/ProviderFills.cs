@@ -28,7 +28,7 @@ public static class ProviderFills
     /// <param name="path">The item's local path.</param>
     /// <param name="personName">The person's name, for a person.</param>
     /// <param name="utcNow">The current time.</param>
-    /// <returns>True when it was.</returns>
+    /// <returns><c>true</c> when it was.</returns>
     public static bool WasFilled(string? path, string? personName, DateTime utcNow)
         => Was(string.IsNullOrEmpty(path) ? null : "path:" + path.Replace('\\', '/'), utcNow)
            || Was(string.IsNullOrWhiteSpace(personName) ? null : HintTriage.PersonParkKey(personName), utcNow);

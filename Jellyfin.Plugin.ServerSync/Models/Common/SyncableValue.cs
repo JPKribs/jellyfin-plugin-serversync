@@ -77,6 +77,7 @@ public sealed class SyncableValue<T>
     /// in one step, equivalent to setting <see cref="Source"/> and then
     /// calling <see cref="RecomputeSourceHash"/>.
     /// </summary>
+    /// <param name="value">The new value.</param>
     public void UpdateSource(T? value)
     {
         Source = value;

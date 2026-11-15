@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
@@ -14,6 +15,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// <summary>The source's decision on one link stream, and the item and user it was made for.</summary>
 public sealed record LinkVerdict(bool Allowed, string? Reason, BaseItem? Item, Guid? UserId)
 {
+    /// <summary>Builds a verdict that refuses the stream.</summary>
+    /// <param name="reason">Why the stream is refused.</param>
+    /// <returns>The verdict.</returns>
     public static LinkVerdict Refuse(string reason) => new(false, reason, null, null);
 }
 
@@ -33,6 +37,13 @@ public sealed class LinkPolicy
     private readonly ISessionManager _sessionManager;
     private readonly LinkSessions _sessions;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkPolicy"/> class.
+    /// </summary>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="userManager">User manager.</param>
+    /// <param name="sessionManager">Session manager.</param>
+    /// <param name="sessions">The link sessions.</param>
     public LinkPolicy(ILibraryManager libraryManager, IUserManager userManager, ISessionManager sessionManager, LinkSessions sessions)
     {
         _libraryManager = libraryManager;
@@ -111,13 +122,13 @@ public sealed class LinkPolicy
         {
             if (peer.LinkMaxStreams > 0 && _sessions.CountForPeer(peer.Key) >= peer.LinkMaxStreams)
             {
-                return LinkVerdict.Refuse($"the source allows {peer.LinkMaxStreams} link stream(s) at once and all are in use");
+                return LinkVerdict.Refuse($"the source allows {ActivityText.Count(peer.LinkMaxStreams, "link stream")} at once and all are in use");
             }
 
             var most = peer.GetLinkMaxStreamsFor(userId);
             if (most > 0 && StreamsOf(userId, peer.LinkCountOwnSessions) >= most)
             {
-                return LinkVerdict.Refuse($"the source allows your account {most} stream(s) at once and all are in use");
+                return LinkVerdict.Refuse($"the source allows your account {ActivityText.Count(most, "stream")} at once and all are in use");
             }
         }
 
@@ -128,6 +139,10 @@ public sealed class LinkPolicy
     // Only when this server maps no users and names no fallback is the calling server trusted to name
     // the user, since its key already holds access to this server. Otherwise no one streams.
     /// <summary>The user here a link stream for a user on the calling server runs as, or null for none.</summary>
+    /// <param name="peer">The linking server.</param>
+    /// <param name="remoteUserId">The user's id on that server, or null.</param>
+    /// <param name="claimedUserId">The user id the request named, or null.</param>
+    /// <returns>The local user's id, or null.</returns>
     public static Guid? UserFor(SourceServer peer, string? remoteUserId, string? claimedUserId)
     {
         ArgumentNullException.ThrowIfNull(peer);
@@ -146,6 +161,9 @@ public sealed class LinkPolicy
     }
 
     /// <summary>The user's playback on this server outside links, when the setting counts it, otherwise 0.</summary>
+    /// <param name="userId">The local user.</param>
+    /// <param name="countOwnSessions">Whether the setting counts the user's own playback.</param>
+    /// <returns>The number of sessions.</returns>
     public int OwnPlayback(Guid userId, bool countOwnSessions)
         => countOwnSessions
             ? _sessionManager.Sessions.Count(s => s.UserId == userId

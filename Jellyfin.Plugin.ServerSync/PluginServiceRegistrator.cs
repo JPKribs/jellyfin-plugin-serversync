@@ -111,18 +111,24 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         }
     }
 
-    // Starts one of the plugin's background services, unless Server Sync is held for a database an
-    // older release wrote: building the service would read that database, and a hosted service that
-    // cannot be built stops Jellyfin itself. Each service is resolved as the one instance the
-    // controllers and the publisher use.
+    /// <summary>
+    /// Starts one of the plugin's background services unless Server Sync is held for a database an older
+    /// release wrote, since building the service would read that database and a hosted service that
+    /// cannot be built stops Jellyfin itself. The wrapped service is the one instance the controllers and
+    /// the publisher use.
+    /// </summary>
+    /// <typeparam name="T">The wrapped hosted service.</typeparam>
     private sealed class Gate<T> : Microsoft.Extensions.Hosting.IHostedService
         where T : class, Microsoft.Extensions.Hosting.IHostedService
     {
         private readonly IServiceProvider _services;
         private T? _inner;
 
+        /// <summary>Initializes a new instance of the <see cref="Gate{T}"/> class.</summary>
+        /// <param name="services">Resolves the wrapped service.</param>
         public Gate(IServiceProvider services) => _services = services;
 
+        /// <inheritdoc/>
         public System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken)
         {
             if (Plugin.Held)
@@ -134,6 +140,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             return _inner.StartAsync(cancellationToken);
         }
 
+        /// <inheritdoc/>
         public System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken)
             => _inner?.StopAsync(cancellationToken) ?? System.Threading.Tasks.Task.CompletedTask;
     }

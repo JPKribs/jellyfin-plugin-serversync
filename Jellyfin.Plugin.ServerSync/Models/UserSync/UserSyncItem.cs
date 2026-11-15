@@ -6,27 +6,6 @@ using JPKribs.Jellyfin.Base;
 namespace Jellyfin.Plugin.ServerSync.Models.UserSync;
 
 /// <summary>
-/// Property categories for user sync items.
-/// </summary>
-public static class UserPropertyCategory
-{
-    /// <summary>
-    /// User policy settings (permissions, restrictions).
-    /// </summary>
-    public const string Policy = "Policy";
-
-    /// <summary>
-    /// User configuration settings (preferences).
-    /// </summary>
-    public const string Configuration = "Configuration";
-
-    /// <summary>
-    /// User profile image.
-    /// </summary>
-    public const string ProfileImage = "ProfileImage";
-}
-
-/// <summary>
 /// One property sync record per (user mapping, category). Policy and
 /// Configuration use an internal <see cref="SyncableValue{T}"/> for change
 /// detection. ProfileImage uses its own hash-pair since its "value" is the
@@ -34,8 +13,6 @@ public static class UserPropertyCategory
 /// </summary>
 public class UserSyncItem : SyncRecord
 {
-    // ===== User Mapping =====
-
     /// <summary>
     /// Gets or sets the source server user ID.
     /// </summary>
@@ -56,14 +33,10 @@ public class UserSyncItem : SyncRecord
     /// </summary>
     public string? LocalUserName { get; set; }
 
-    // ===== Property Info =====
-
     /// <summary>
     /// Gets or sets the property category (Policy, Configuration, ProfileImage).
     /// </summary>
     public string PropertyCategory { get; set; } = string.Empty;
-
-    // ===== Values =====
 
     /// <summary>
     /// Raw source value (JSON for Policy/Config, display string for ProfileImage).
@@ -133,9 +106,8 @@ public class UserSyncItem : SyncRecord
     /// <see cref="SyncableValue{T}.SourceHash"/> stays consistent with
     /// the format the rest of the SyncableValue plumbing produces.
     /// </summary>
+    /// <param name="mergedValue">The value after merging both sides.</param>
     public void UpdateMergedValue(string? mergedValue) => Value.UpdateSource(mergedValue);
-
-    // ===== Profile Image specific =====
 
     /// <summary>
     /// Gets or sets the source profile image hash (SHA256, truncated).
@@ -166,8 +138,6 @@ public class UserSyncItem : SyncRecord
     /// Gets or sets the last synced image size.
     /// </summary>
     public long? SyncedImageSize { get; set; }
-
-    // ===== Computed change detection =====
 
     /// <inheritdoc />
     public override bool HasChanges

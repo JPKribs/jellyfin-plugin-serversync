@@ -21,11 +21,24 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Providers;
 
+/// <summary>An item found on another server, with the client that reached it.</summary>
+/// <param name="Parent">The server entry it was found on.</param>
+/// <param name="Client">The client for that server, which the match disposes.</param>
+/// <param name="ItemId">The item's id on that server.</param>
 public sealed record PeerMatch(SourceServer Parent, SourceServerClient Client, Guid ItemId) : IDisposable
 {
+    /// <inheritdoc />
     public void Dispose() => Client.Dispose();
 }
 
+/// <summary>What identifies an item when asking another server for it.</summary>
+/// <param name="ItemType">The item's type name.</param>
+/// <param name="LocalPath">The item's path here, or null.</param>
+/// <param name="Name">The item's name, or null.</param>
+/// <param name="ProviderIds">The item's provider ids, or null.</param>
+/// <param name="SeriesProviderIds">The provider ids of the item's series, or null.</param>
+/// <param name="IndexNumber">The item's index, or null.</param>
+/// <param name="ParentIndexNumber">The index of the item's season, or null.</param>
 public sealed record PeerItemKeys(
     string ItemType,
     string? LocalPath,
@@ -35,6 +48,10 @@ public sealed record PeerItemKeys(
     int? IndexNumber,
     int? ParentIndexNumber)
 {
+    /// <summary>Builds the keys from the lookup info Jellyfin gives a provider.</summary>
+    /// <param name="itemType">The item's type name.</param>
+    /// <param name="info">The lookup info.</param>
+    /// <returns>The keys.</returns>
     public static PeerItemKeys FromInfo(string itemType, ItemLookupInfo info) => new(
         itemType,
         info.Path,
@@ -49,6 +66,9 @@ public sealed record PeerItemKeys(
         info.IndexNumber,
         info.ParentIndexNumber);
 
+    /// <summary>Builds the keys from a local item.</summary>
+    /// <param name="item">The item.</param>
+    /// <returns>The keys.</returns>
     public static PeerItemKeys FromItem(BaseItem item) => new(
         item.GetType().Name,
         item.Path,
@@ -63,16 +83,25 @@ public sealed record PeerItemKeys(
         item.IndexNumber,
         item.ParentIndexNumber);
 
+    /// <summary>Names the item for a log line.</summary>
+    /// <returns>The path, or the type and name when there is no path.</returns>
     public string Describe() => string.IsNullOrEmpty(LocalPath) ? ItemType + " " + Name : LocalPath;
 }
 
+/// <summary>
+/// Finds an item on the servers this one pulls from, and reads its metadata and images, for the
+/// metadata and image providers.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerMetadataSource
 {
+    /// <summary>The name of the provider in Jellyfin.</summary>
     public const string ProviderName = "Server Sync";
 
+    /// <summary>The provider id key that pins an item to one server.</summary>
     public const string PinnedProviderKey = "ServerSyncPeerItem";
 
+    /// <summary>How long one server has to answer a lookup.</summary>
     public static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(10);
 
     private static readonly HashSet<string> ByName = new(StringComparer.Ordinal)
@@ -105,6 +134,13 @@ public sealed class PeerMetadataSource
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<PeerMetadataSource> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PeerMetadataSource"/> class.
+    /// </summary>
+    /// <param name="parents">Lists the servers this one pulls from.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="logger">Logger instance.</param>
     public PeerMetadataSource(ParentDirectory parents, ISourceServerClientFactory clientFactory, ILibraryManager libraryManager, ILogger<PeerMetadataSource> logger)
     {
         _parents = parents;
@@ -113,6 +149,10 @@ public sealed class PeerMetadataSource
         _logger = logger;
     }
 
+    /// <summary>Translates a local path to the path the item has on a server.</summary>
+    /// <param name="parent">The server entry.</param>
+    /// <param name="localPath">The local path, or null.</param>
+    /// <returns>The path there, or null when no library mapping holds the path.</returns>
     public static string? ToParentPath(SourceServer parent, string? localPath)
     {
         ArgumentNullException.ThrowIfNull(parent);
@@ -128,8 +168,14 @@ public sealed class PeerMetadataSource
         return relative.Length == 0 ? sourceRoot : sourceRoot + separator + relative.Replace('/', separator).Replace('\\', separator);
     }
 
+    /// <summary>Builds the request that asks a server for an item.</summary>
+    /// <param name="parent">The server entry.</param>
+    /// <param name="keys">What identifies the item.</param>
+    /// <returns>The request, or null when nothing in the keys can be matched there.</returns>
     public static PeerLookupRequest? LookupFor(SourceServer parent, PeerItemKeys keys)
     {
+        ArgumentNullException.ThrowIfNull(parent);
+
         ArgumentNullException.ThrowIfNull(keys);
         var parentPath = ToParentPath(parent, keys.LocalPath);
         var byName = ByName.Contains(keys.ItemType) && !string.IsNullOrWhiteSpace(keys.Name);
@@ -152,6 +198,10 @@ public sealed class PeerMetadataSource
         };
     }
 
+    /// <summary>Finds an item on one server, trying the server it was pinned to first.</summary>
+    /// <param name="keys">What identifies the item.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The match, or null.</returns>
     public async Task<PeerMatch?> FindAsync(PeerItemKeys keys, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(keys);
@@ -167,6 +217,11 @@ public sealed class PeerMetadataSource
         return (await FindAllAsync(keys, firstOnly: true, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
     }
 
+    /// <summary>Finds an item on the servers this one pulls from.</summary>
+    /// <param name="keys">What identifies the item.</param>
+    /// <param name="firstOnly"><c>true</c> to stop at the first server that has it.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The matches, which the caller disposes.</returns>
     public async Task<List<PeerMatch>> FindAllAsync(PeerItemKeys keys, bool firstOnly, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(keys);
@@ -240,6 +295,11 @@ public sealed class PeerMetadataSource
         return matches;
     }
 
+    /// <summary>Offers the items found on other servers as search results.</summary>
+    /// <param name="itemType">The item's type name.</param>
+    /// <param name="info">The lookup info.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The search results.</returns>
     public async Task<IEnumerable<RemoteSearchResult>> GetSearchResultsAsync(string itemType, ItemLookupInfo info, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(info);
@@ -294,6 +354,11 @@ public sealed class PeerMetadataSource
         return results;
     }
 
+    /// <summary>Reads an item's metadata from the first server that has it.</summary>
+    /// <typeparam name="TItem">The kind of item.</typeparam>
+    /// <param name="info">The lookup info.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The metadata, with <c>HasMetadata</c> <c>false</c> when no server has the item.</returns>
     public async Task<MetadataResult<TItem>> GetMetadataAsync<TItem>(ItemLookupInfo info, CancellationToken cancellationToken)
         where TItem : BaseItem, new()
     {
@@ -352,6 +417,10 @@ public sealed class PeerMetadataSource
         return result;
     }
 
+    /// <summary>Lists the images other servers hold for an item.</summary>
+    /// <param name="item">The item.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The images, with the pinned server's first.</returns>
     public async Task<IEnumerable<RemoteImageInfo>> GetImagesAsync(BaseItem item, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -411,6 +480,10 @@ public sealed class PeerMetadataSource
         return found;
     }
 
+    /// <summary>Fetches an image from a server this one pulls from.</summary>
+    /// <param name="url">The image's address.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The response, which the caller disposes.</returns>
     public async Task<HttpResponseMessage> GetImageResponseAsync(string url, CancellationToken cancellationToken)
     {
         var parent = _parents.FindByUrl(url) ?? throw new HttpRequestException("The image address is not on a server this one pulls from");
@@ -420,6 +493,10 @@ public sealed class PeerMetadataSource
         return await client.GetAuthorizedAsync(url, deadline.Token).ConfigureAwait(false);
     }
 
+    /// <summary>Builds the value that pins an item to a server.</summary>
+    /// <param name="parent">The server entry.</param>
+    /// <param name="itemId">The item's id on that server.</param>
+    /// <returns>The value.</returns>
     public static string PinValue(SourceServer parent, Guid itemId)
     {
         ArgumentNullException.ThrowIfNull(parent);

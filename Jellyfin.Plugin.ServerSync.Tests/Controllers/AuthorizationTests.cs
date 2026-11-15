@@ -18,7 +18,7 @@ public class AuthorizationTests
 
     // The one exemption. The URL inside a link is called by Jellyfin's own ffmpeg and static stream
     // proxy, which send no token. It answers loopback callers only, with a per link secret, and is
-    // covered by LinkControllerTests.
+    // covered by LinkRouteTests.
     private static readonly Type LinkRoute = typeof(Jellyfin.Plugin.ServerSync.Controllers.LinkController);
 
     [Fact]

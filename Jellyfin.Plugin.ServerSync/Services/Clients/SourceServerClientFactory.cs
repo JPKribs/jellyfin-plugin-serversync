@@ -22,6 +22,15 @@ public class SourceServerClientFactory : ISourceServerClientFactory
     private readonly Services.Peer.PeerPairingStore _pairings;
     private readonly MediaBrowser.Controller.IServerApplicationHost _applicationHost;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SourceServerClientFactory"/> class.
+    /// </summary>
+    /// <param name="httpClientFactory">Builds the named HTTP clients that carry the SSRF guard.</param>
+    /// <param name="loggerFactory">Builds each client's logger.</param>
+    /// <param name="configManager">Reads the plugin configuration and version.</param>
+    /// <param name="secrets">Decrypts a stored API key.</param>
+    /// <param name="pairings">Holds the secrets exchanged with peers.</param>
+    /// <param name="applicationHost">Names this server to a peer.</param>
     public SourceServerClientFactory(
         IHttpClientFactory httpClientFactory,
         ILoggerFactory loggerFactory,

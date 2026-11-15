@@ -8,8 +8,6 @@ namespace Jellyfin.Plugin.ServerSync.Models.UserSync;
 /// </summary>
 public class UserSyncUserDetailDto
 {
-    // ===== User Identification =====
-
     /// <summary>
     /// Gets or sets the source server user ID.
     /// </summary>
@@ -30,8 +28,6 @@ public class UserSyncUserDetailDto
     /// </summary>
     public string? LocalUserName { get; set; }
 
-    // ===== Aggregate Status =====
-
     /// <summary>
     /// Gets or sets the overall status (Errored > Queued > Ignored > Synced).
     /// </summary>
@@ -47,8 +43,6 @@ public class UserSyncUserDetailDto
     /// </summary>
     public string? ErrorMessage { get; set; }
 
-    // ===== Full Item Details for Modal =====
-
     /// <summary>
     /// Gets or sets the Policy sync item details (null if not available).
     /// </summary>
@@ -63,8 +57,6 @@ public class UserSyncUserDetailDto
     /// Gets or sets the ProfileImage sync item details (null if not available).
     /// </summary>
     public UserSyncItemDto? ProfileImageItem { get; set; }
-
-    // ===== Config Flags =====
 
     /// <summary>
     /// Gets or sets whether Policy sync is enabled in configuration.

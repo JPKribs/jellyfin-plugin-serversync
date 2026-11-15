@@ -36,8 +36,15 @@ public class SyncMissingHistoryTask
     private readonly ApplyGuard? _guard;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="SyncMissingHistoryTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="localClient">Calls this server's own API.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="applicationHost">Gives this server's id and name.</param>
+    /// <param name="guard">Stops a change this server applies from echoing back, or null when none is kept.</param>
     public SyncMissingHistoryTask(
         ILogger<SyncMissingHistoryTask> logger,
         IPluginConfigurationManager configManager,
@@ -53,9 +60,11 @@ public class SyncMissingHistoryTask
         _guard = guard;
     }
 
-    // A scheduled history write is a copy, not an edit made here. Registered with the guard so the
-    // change observer does not turn the save event into a hint back to every peer, which would also
-    // record this server as the editor of a value it only received.
+    /// <summary>
+    /// A scheduled history write is a copy, not an edit made here. Registered with the guard so the
+    /// change observer does not turn the save event into a hint back to every peer, which would also
+    /// record this server as the editor of a value it only received.
+    /// </summary>
     /// <inheritdoc />
     protected override IDisposable? EnterApplyGuard(HistorySyncItem record)
     {
@@ -69,19 +78,27 @@ public class SyncMissingHistoryTask
         return _guard.Enter(HintProtocol.GuardKey(HintKind.History, HintProtocol.HistoryKey(localUserId, localItemId)));
     }
 
-    // Answers from the group offer, consumed by ApplyAsync one row at a time. Keyed by reference
-    // because the same row instance flows from GetApplyGroups through PrepareGroupAsync to ApplyAsync.
+    /// <summary>
+    /// Answers from the group offer, consumed by ApplyAsync one row at a time. Keyed by reference
+    /// because the same row instance flows from GetApplyGroups through PrepareGroupAsync to ApplyAsync.
+    /// </summary>
     private readonly ConcurrentDictionary<HistorySyncItem, PeerHistoryResult> _peerAnswers = new(ReferenceEqualityComparer.Instance);
 
-    // Servers that cannot negotiate this run, by entry key, with the reason their rows will carry.
+    /// <summary>
+    /// Servers that cannot negotiate this run, by entry key, with the reason their rows will carry.
+    /// </summary>
     private readonly Dictionary<string, string> _negotiationBlocked = new(StringComparer.OrdinalIgnoreCase);
 
-    // Servers whose Server Sync refuses this server's key. History from them is applied one way, the
-    // way it was before negotiation existed, and no base is recorded.
+    /// <summary>
+    /// Servers whose Server Sync refuses this server's key. History from them is applied one way, the
+    /// way it was before negotiation existed, and no base is recorded.
+    /// </summary>
     private readonly HashSet<string> _oneWay = new(StringComparer.OrdinalIgnoreCase);
 
-    // Whether any library negotiates, which decides whether servers are asked about it at all. Each
-    // row then negotiates only when its own library does.
+    /// <summary>
+    /// Whether any library negotiates, which decides whether servers are asked about it at all. Each
+    /// row then negotiates only when its own library does.
+    /// </summary>
     private bool Negotiating => ConfigManager.Configuration.NegotiatesAnyHistory();
 
     private bool NegotiatesFor(HistorySyncItem record)
@@ -461,11 +478,13 @@ public class SyncMissingHistoryTask
         return (true, null);
     }
 
-    // HistorySyncItem has no SyncableValue fields (its base MarkSynced is
-    // a no-op), so on success the merged values are copied into the local
-    // snapshot. The next Refresh will re-pull the actual local state, but
-    // in the meantime <see cref="HistorySyncMergeService.HasChangesToSync"/>
-    // will see local == merged and not requeue.
+    /// <summary>
+    /// HistorySyncItem has no SyncableValue fields (its base MarkSynced is
+    /// a no-op), so on success the merged values are copied into the local
+    /// snapshot. The next Refresh will re-pull the actual local state, but
+    /// in the meantime <see cref="HistorySyncMergeService.HasChangesToSync"/>
+    /// will see local == merged and not requeue.
+    /// </summary>
     /// <inheritdoc />
     protected override void OnApplySucceeded(HistorySyncItem record)
     {

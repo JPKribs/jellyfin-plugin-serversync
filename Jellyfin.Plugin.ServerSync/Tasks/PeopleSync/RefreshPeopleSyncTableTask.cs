@@ -17,11 +17,6 @@ using SdkBaseItemDto = Jellyfin.Sdk.Generated.Models.BaseItemDto;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Source side work item for the People refresh task: one source person and the server it came from.
-/// </summary>
-public sealed record PersonWork(ScanSource Source, SdkBaseItemDto Person);
-
-/// <summary>
 /// Refresh phase for People sync. Fetches all source persons, looks up each
 /// by name on the local server, and writes a snapshot row for the matched
 /// ones. Persons without a local match are skipped (no row written).
@@ -41,8 +36,14 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
     private Dictionary<string, BaseItem>? _localPersonsByName;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="RefreshPeopleSyncTableTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="libraryManager">Reads and changes Jellyfin's library.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="conflicts">Settles which server speaks for an item both sides changed.</param>
     public RefreshPeopleSyncTableTask(
         ILogger<RefreshPeopleSyncTableTask> logger,
         ILibraryManager libraryManager,
@@ -56,7 +57,9 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         _conflicts = conflicts;
     }
 
-    // A single person from a hint: the cache holds just that one local person, found by name.
+    /// <summary>
+    /// A single person from a hint: the cache holds just that one local person, found by name.
+    /// </summary>
     /// <inheritdoc />
     protected override void PrepareForOne(PersonWork work)
     {
@@ -101,7 +104,9 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             : await _conflicts.ServersWithVersionsAsync(Sources, cancellationToken).ConfigureAwait(false);
 
-    // Among the servers offering one person, the one that holds the newest recorded edit speaks.
+    /// <summary>
+    /// Among the servers offering one person, the one that holds the newest recorded edit speaks.
+    /// </summary>
     /// <inheritdoc />
     protected override Task<IReadOnlyDictionary<string, PersonWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<PersonWork>> contested, CancellationToken cancellationToken)
         => _conflicts.NewestOffersAsync(
@@ -117,7 +122,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         => record?.ServerKey is { } key && _versionedServers.Contains(key);
 
     /// <inheritdoc />
-    public override string Name => "Refresh People Sync Table";
+    public override string Name => "Scan People";
 
     /// <inheritdoc />
     public override string Key => "ServerSyncRefreshPeopleTable";
@@ -131,11 +136,13 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
     /// <inheritdoc />
     protected override string ModuleMutexKey => "People";
 
-    // User-configurable (Configuration > Processing), shared with the
-    // Metadata refresh. <c>BuildRecordAsync</c> is HTTP-free in steady state
-    // (source data comes from the bulk <c>/Persons</c> fetch, image data
-    // from <c>BaseItemDto.ImageTags</c>), so this dial is effectively "how
-    // much CPU may a refresh use".
+    /// <summary>
+    /// User-configurable (Configuration &gt; Processing), shared with the
+    /// Metadata refresh. <c>BuildRecordAsync</c> is HTTP-free in steady state
+    /// (source data comes from the bulk <c>/Persons</c> fetch, image data
+    /// from <c>BaseItemDto.ImageTags</c>), so this dial is effectively "how
+    /// much CPU may a refresh use".
+    /// </summary>
     /// <inheritdoc />
     protected override int BuildRecordParallelism => Math.Clamp(ConfigManager.Configuration.RefreshParallelism, 1, 16);
 
@@ -146,21 +153,25 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         return config.EnablePeopleSync && config.GetPullServers().Count > 0;
     }
 
-    // The local person cache is built once per run, by the first server's list pass.
+    /// <summary>
+    /// The local person cache is built once per run, by the first server's list pass.
+    /// </summary>
     /// <inheritdoc />
     protected override void OnRunStarting()
     {
         _localPersonsByName = null;
     }
 
-    // Bulk fetch + in-memory join: enumerate local Person items, then pull
-    // the full source Person catalog in one /Persons call and intersect by
-    // name in memory. /Persons is the only route that works for every token
-    // type, /Items?recursive=true scopes to the requesting user's libraries
-    // and returns an empty 200 for non-admin tokens because Person items
-    // live outside library folders. The per-name fan-out this replaced cost
-    // one HTTP round-trip per local person (130k+ requests on a real
-    // library, 2.5 hours wall-clock).
+    /// <summary>
+    /// Bulk fetch + in-memory join: enumerate local Person items, then pull
+    /// the full source Person catalog in one /Persons call and intersect by
+    /// name in memory. /Persons is the only route that works for every token
+    /// type, /Items?recursive=true scopes to the requesting user's libraries
+    /// and returns an empty 200 for non-admin tokens because Person items
+    /// live outside library folders. The per-name fan-out this replaced cost
+    /// one HTTP round-trip per local person (130k+ requests on a real
+    /// library, 2.5 hours wall-clock).
+    /// </summary>
     /// <inheritdoc />
     protected override async Task<IList<PersonWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
     {
@@ -206,8 +217,8 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
             // Mirror of the zero-source guard below. Jellyfin rebuilds the
             // people table during a library rescan, so a momentary empty read
             // is normal, and with an empty work list every tracked row falls
-            // out of the seen set and looks removed. The table-wide circuit
-            // breaker only catches this above 50 rows. Below that the whole
+            // out of the seen set and looks removed. The table-wide prune
+            // safety limit only catches this above 50 rows. Below that the whole
             // table would go. Refuse to prune instead.
             if (Manager.Count() > 0)
             {
@@ -370,8 +381,10 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
     /// <inheritdoc />
     protected override string ExtractKey(PeopleSyncItem record) => record.PersonName;
 
-    // Two servers collide on the person's name, which is also the row key, so the first server in
-    // priority order supplies the person and the rest are dropped before any row is built.
+    /// <summary>
+    /// Two servers collide on the person's name, which is also the row key, so the first server in
+    /// rank order supplies the person and the rest are dropped before any row is built.
+    /// </summary>
     /// <inheritdoc />
     protected override string? PriorityKeyOf(PersonWork source) => source?.Person.Name;
 

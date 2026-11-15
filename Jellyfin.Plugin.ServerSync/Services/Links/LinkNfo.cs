@@ -26,9 +26,13 @@ public static class LinkNfo
     };
 
     /// <summary>Where the .nfo for a link sits: beside it, under the same name.</summary>
+    /// <param name="linkPath">The link's .strm path.</param>
+    /// <returns>The .nfo path.</returns>
     public static string PathFor(string linkPath) => Path.ChangeExtension(linkPath, ".nfo");
 
     /// <summary>Whether an .nfo at <paramref name="path"/> is one this plugin wrote for a link.</summary>
+    /// <param name="path">The .nfo's path.</param>
+    /// <returns><c>true</c> when this plugin wrote it.</returns>
     public static bool IsOurs(string path)
     {
         try
@@ -45,6 +49,8 @@ public static class LinkNfo
     /// Whether a link's row records that its .nfo was written. A recorded .nfo that is gone was removed
     /// by the user, to hand the metadata to Jellyfin, and is not written again.
     /// </summary>
+    /// <param name="row">The link's row.</param>
+    /// <returns><c>true</c> when the row records the .nfo.</returns>
     public static bool Recorded(Models.ContentSync.SyncItem row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -53,6 +59,7 @@ public static class LinkNfo
     }
 
     /// <summary>Records on a link's row that its .nfo was written.</summary>
+    /// <param name="row">The link's row.</param>
     public static void Record(Models.ContentSync.SyncItem row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -63,6 +70,8 @@ public static class LinkNfo
     }
 
     /// <summary>Whether the user removed a link's .nfo after it was written.</summary>
+    /// <param name="row">The link's row.</param>
+    /// <returns><c>true</c> when it was removed.</returns>
     public static bool RemovedByUser(Models.ContentSync.SyncItem row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -73,9 +82,12 @@ public static class LinkNfo
         => row.CompanionFiles?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
 
     /// <summary>
-    /// Writes the .nfo for a link, replacing only one this plugin wrote. Returns false when another .nfo
+    /// Writes the .nfo for a link, replacing only one this plugin wrote. Returns <c>false</c> when another .nfo
     /// is already there, which is left as it is.
     /// </summary>
+    /// <param name="linkPath">The link's .strm path.</param>
+    /// <param name="item">The source item the .nfo describes.</param>
+    /// <returns><c>true</c> when the .nfo was written.</returns>
     public static bool Write(string linkPath, BaseItemDto item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -92,6 +104,8 @@ public static class LinkNfo
     }
 
     /// <summary>The .nfo for an item, in the form Jellyfin's own reader expects for its type.</summary>
+    /// <param name="item">The source item.</param>
+    /// <returns>The .nfo text.</returns>
     public static string Build(BaseItemDto item)
     {
         ArgumentNullException.ThrowIfNull(item);

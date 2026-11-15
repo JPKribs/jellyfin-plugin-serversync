@@ -17,6 +17,10 @@ public sealed class TableLinkRegistry : ILinkRegistry
     private readonly object _loadLock = new();
     private volatile LoadedLinks? _snapshot;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TableLinkRegistry"/> class.
+    /// </summary>
+    /// <param name="services">Resolves services on demand.</param>
     public TableLinkRegistry(IServiceProvider services)
     {
         _services = services;

@@ -150,10 +150,10 @@ public class LocalServerClient
     /// <param name="lastPlayedDate">Last played date.</param>
     /// <param name="isFavorite">Favorite status.</param>
     /// <param name="clearLastPlayedDate">
-    /// When true and <paramref name="lastPlayedDate"/> is null, the stored date is removed instead
+    /// When <c>true</c> and <paramref name="lastPlayedDate"/> is null, the stored date is removed instead
     /// of left alone. Used when the target state is "unplayed", which Jellyfin records with no date.
     /// </param>
-    /// <returns>True if update succeeded.</returns>
+    /// <returns><c>true</c> if update succeeded.</returns>
     public bool UpdateUserItemData(
         Guid userId,
         Guid itemId,
@@ -238,7 +238,7 @@ public class LocalServerClient
     /// <param name="itemId">Item ID.</param>
     /// <param name="played">Whether the item is played.</param>
     /// <param name="datePlayed">Date when played (if marking as played).</param>
-    /// <returns>True if successful.</returns>
+    /// <returns><c>true</c> if successful.</returns>
     public bool SetPlayed(Guid userId, Guid itemId, bool played, DateTime? datePlayed = null)
     {
         try
@@ -284,7 +284,7 @@ public class LocalServerClient
     /// <param name="userId">User ID.</param>
     /// <param name="itemId">Item ID.</param>
     /// <param name="isFavorite">Whether the item is a favorite.</param>
-    /// <returns>True if successful.</returns>
+    /// <returns><c>true</c> if successful.</returns>
     public bool SetFavorite(Guid userId, Guid itemId, bool isFavorite)
     {
         try

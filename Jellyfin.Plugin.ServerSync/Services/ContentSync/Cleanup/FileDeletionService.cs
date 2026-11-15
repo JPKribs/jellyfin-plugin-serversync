@@ -38,7 +38,7 @@ public static class FileDeletionService
     /// <param name="logger">Logger for operation output.</param>
     /// <param name="removeEmptyFolders">Whether to remove parent folders if they become empty.</param>
     /// <param name="libraryRootPath">The library root bounding the empty-folder cleanup, or null to skip it.</param>
-    /// <returns>True if main file was deleted successfully.</returns>
+    /// <returns><c>true</c> if main file was deleted successfully.</returns>
     public static bool DeleteWithCompanions(string filePath, ILogger logger, bool removeEmptyFolders = false, string? libraryRootPath = null)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -87,7 +87,7 @@ public static class FileDeletionService
     /// <param name="linkPath">The .strm.</param>
     /// <param name="logger">Logger for operation output.</param>
     /// <param name="libraryRootPath">The library root, which bounds the folders removed.</param>
-    /// <returns>True when the .strm was deleted.</returns>
+    /// <returns><c>true</c> when the .strm was deleted.</returns>
     public static bool DeleteLinkWithFolders(string linkPath, ILogger logger, string? libraryRootPath)
     {
         if (!DeleteWithCompanions(linkPath, logger, removeEmptyFolders: true, libraryRootPath))
@@ -349,6 +349,9 @@ public static class FileDeletionService
         bool deleteFileLocation,
         ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(localItem);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+
         try
         {
             libraryManager.DeleteItem(
@@ -383,6 +386,9 @@ public static class FileDeletionService
         PluginConfiguration config,
         ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(config);
+
         var useRecyclingBin = config.EnableRecyclingBin && !string.IsNullOrEmpty(config.RecyclingBinPath);
 
         // If item exists in Jellyfin library
@@ -448,7 +454,7 @@ public static class FileDeletionService
     /// split into stacked parts. Anything that is not a video is one file.
     /// </summary>
     /// <param name="localItem">The Jellyfin item.</param>
-    /// <returns>True when the item is a single file.</returns>
+    /// <returns><c>true</c> when the item is a single file.</returns>
     public static bool IsSingleFileItem(BaseItem localItem)
         => localItem is not Video video
             || (!video.IsStacked && video.VideoType is MediaBrowser.Model.Entities.VideoType.VideoFile or MediaBrowser.Model.Entities.VideoType.Iso);
@@ -556,7 +562,6 @@ public static class FileDeletionService
 
         logger.LogInformation("Processing {Count} items marked for deletion", itemsToDelete.Count);
 
-        // Build lookup for library root paths to bound empty folder cleanup
         var libraryRootLookup = config.GetAllLibraryMappings()
             .Where(m => !string.IsNullOrEmpty(m.SourceLibraryId) && !string.IsNullOrEmpty(m.LocalRootPath))
             .GroupBy(m => m.SourceLibraryId, StringComparer.OrdinalIgnoreCase)

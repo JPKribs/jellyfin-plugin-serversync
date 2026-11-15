@@ -15,6 +15,8 @@ namespace Jellyfin.Plugin.ServerSync.Utilities;
 /// not see this run must treat partial discovery as unsafe to prune, since
 /// the unseen items may just be ones the loop never reached.
 /// </summary>
+/// <param name="ProcessedItems">How many items the loop handled.</param>
+/// <param name="CompletedFully">Whether the loop reached the end of the list.</param>
 public readonly record struct PaginatedFetchOutcome(int ProcessedItems, bool CompletedFully);
 
 /// <summary>
@@ -37,11 +39,16 @@ public static class PaginatedFetchUtility
     /// <summary>
     /// Fetches a single page of items from the source server.
     /// </summary>
+    /// <param name="startIndex">The index of the first item to fetch.</param>
+    /// <param name="batchSize">How many items each page holds.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     public delegate Task<BaseItemDtoQueryResult?> FetchPageAsync(int startIndex, int batchSize, CancellationToken cancellationToken);
 
     /// <summary>
     /// Processes a single item. Returns true to count it toward the processed total.
     /// </summary>
+    /// <param name="item">The source item.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     public delegate Task<bool> ProcessItemAsync(BaseItemDto item, CancellationToken cancellationToken);
 
     /// <summary>
@@ -55,6 +62,16 @@ public static class PaginatedFetchUtility
     /// Drives a paginated fetch loop, applying library filters per item and stopping
     /// after <see cref="MaxConsecutiveErrors"/> consecutive failures.
     /// </summary>
+    /// <param name="fetchPage">Fetches one page of items.</param>
+    /// <param name="processItem">Handles one item.</param>
+    /// <param name="libraryName">The library's name, for log entries.</param>
+    /// <param name="sourceRootPath">The library's root folder on the source.</param>
+    /// <param name="filterMode">The Library Filter mode.</param>
+    /// <param name="filteredItems">The paths the Library Filter lists, or null.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <param name="onItemProcessed">Called after each item, or null.</param>
+    /// <returns>How many items were handled and whether the loop reached the end.</returns>
     public static async Task<PaginatedFetchOutcome> FetchAllPagesAsync(
         FetchPageAsync fetchPage,
         ProcessItemAsync processItem,
@@ -110,15 +127,21 @@ public static class PaginatedFetchUtility
         Stopped
     }
 
-    // Survives from one pass to the next, so a second pass only handles what the first did not.
+    /// <summary>
+    /// Survives from one pass to the next, so a second pass only handles what the first did not.
+    /// </summary>
     private sealed class FetchState
     {
+        /// <summary>Gets the items already processed.</summary>
         public HashSet<Guid> Handled { get; } = new();
 
+        /// <summary>Gets the items that failed.</summary>
         public HashSet<Guid> Failed { get; } = new();
 
+        /// <summary>Gets the items skipped for having no path.</summary>
         public HashSet<Guid> PathlessSkipped { get; } = new();
 
+        /// <summary>Gets or sets how many items have been processed.</summary>
         public int ProcessedItems { get; set; }
     }
 

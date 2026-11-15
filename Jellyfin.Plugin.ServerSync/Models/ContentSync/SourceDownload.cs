@@ -32,8 +32,8 @@ public sealed record SourceDownload(Stream Stream, long? ContentLength, long? To
     }
 
     /// <summary>Turns a validator back into the If-Range condition for a resume.</summary>
-    /// <param name="validator">The validator.</param>
-    /// <param name="condition">The condition.</param>
+    /// <param name="validator">The validator a download recorded, or null.</param>
+    /// <param name="condition">The If-Range condition, set when the method returns <c>true</c>.</param>
     /// <returns>True when the validator can be presented.</returns>
     public static bool TryParseIfRange(string? validator, out RangeConditionHeaderValue? condition)
     {

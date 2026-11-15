@@ -17,14 +17,3 @@ public class UserMappingRequest
     /// </summary>
     public string LocalUserId { get; set; } = string.Empty;
 }
-
-/// <summary>
-/// Request model for bulk operations on user mappings.
-/// </summary>
-public class BulkUserMappingsRequest
-{
-    /// <summary>
-    /// Gets or sets the list of user mappings to operate on.
-    /// </summary>
-    public List<UserMappingRequest> UserMappings { get; set; } = new();
-}

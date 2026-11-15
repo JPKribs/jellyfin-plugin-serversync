@@ -1,3 +1,4 @@
+using System;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using JPKribs.Jellyfin.Base;
 
@@ -14,6 +15,8 @@ public static class UserSyncItemExtensions
     /// <returns>The DTO representation.</returns>
     public static UserSyncItemDto ToDto(this UserSyncItem item, string? sourceServerUrl = null)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
         return new UserSyncItemDto
         {
             Id = item.Id,

@@ -23,8 +23,11 @@ public static class ActiveDownloadTracker
     private const int StaleDownloadHours = 2;
 
     /// <summary>
-    /// Attempts to register a download. Returns false if already downloading.
+    /// Attempts to register a download. Returns <c>false</c> if already downloading.
     /// </summary>
+    /// <param name="sourceItemId">The source item being downloaded.</param>
+    /// <param name="tempFilePath">The temp file the download writes to.</param>
+    /// <returns><c>true</c> when the download was registered.</returns>
     public static bool TryStartDownload(string sourceItemId, string tempFilePath)
     {
         var info = new DownloadInfo(DateTime.UtcNow, tempFilePath);
@@ -34,6 +37,7 @@ public static class ActiveDownloadTracker
     /// <summary>
     /// Marks a download as complete and removes it from tracking.
     /// </summary>
+    /// <param name="sourceItemId">The source item whose download ended.</param>
     public static void CompleteDownload(string sourceItemId)
     {
         ActiveDownloads.TryRemove(sourceItemId, out _);
@@ -42,6 +46,8 @@ public static class ActiveDownloadTracker
     /// <summary>
     /// Checks if a temp file path is currently in use by an active download.
     /// </summary>
+    /// <param name="tempFilePath">The temp file to check.</param>
+    /// <returns><c>true</c> when a download is writing to it.</returns>
     public static bool IsTempFileInUse(string tempFilePath)
     {
         return ActiveDownloads.Values.Any(d =>
@@ -51,6 +57,7 @@ public static class ActiveDownloadTracker
     /// <summary>
     /// Gets all currently active temp file paths.
     /// </summary>
+    /// <returns>The temp file paths.</returns>
     public static IReadOnlyCollection<string> GetActiveTempFiles()
     {
         return ActiveDownloads.Values
@@ -63,6 +70,7 @@ public static class ActiveDownloadTracker
     /// Removes stale download entries (downloads that have been running too long).
     /// Returns the count of removed entries.
     /// </summary>
+    /// <returns>How many entries were removed.</returns>
     public static int CleanupStaleEntries()
     {
         var staleThreshold = DateTime.UtcNow.AddHours(-StaleDownloadHours);

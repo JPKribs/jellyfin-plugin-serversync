@@ -1,17 +1,18 @@
-// ============================================
-// SETTINGS - PAGE CONTROLLER
-// ============================================
+// serversync_settings.js
+// The Settings tab: bandwidth, processing, the whitelist, one section for each sync type, and table resets.
 
+// serversync_settings
+// Builds the Settings tab. It loads the config into each section, saves a section on its own, and resets
+// sync tables after a question.
+//
+// Inputs
+// view [HTMLElement]: The page the dashboard passes to the controller.
 export default function (view) {
     'use strict';
 
-    // ============================================
-    // TAB NAVIGATION (local copy for synchronous access)
-    // ============================================
-
-    // The Storage tab shows only while content sync is on. The last known answer is kept per browser
-    // and refreshed whenever the shared module loads or saves the config (see serversync_shared.js).
-    // An unknown answer shows the tab.
+    // storageTabShown
+    // Tells whether the Storage tab shows. The last known answer is kept per browser and refreshed whenever
+    // the shared module loads or saves the config (see serversync_shared.js). An unknown answer shows the tab.
     function storageTabShown() {
         try {
             return window.localStorage.getItem('serversync.storageTab') !== '0';
@@ -20,6 +21,11 @@ export default function (view) {
         }
     }
 
+    // getTabs
+    // Lists the dashboard tabs in order.
+    //
+    // Output
+    // [object[]]: Each tab's href and name.
     function getTabs() {
         var tabs = [
             { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
@@ -30,14 +36,14 @@ export default function (view) {
         return tabs;
     }
 
-    // Settings is the last tab, after Storage when that shows.
+    // settingsTabIndex
+    // Finds this tab's place in the list. Settings is the last tab, after Storage when that shows.
+    //
+    // Output
+    // [number]: The tab index.
     function settingsTabIndex() {
         return getTabs().length - 1;
     }
-
-    // ============================================
-    // SHARED MODULE IMPORT (deferred)
-    // ============================================
 
     var ServerSyncShared = null;
     var confirmDialog = null;
@@ -58,25 +64,28 @@ export default function (view) {
         ({ escapeHtml, apiRequest, bindClick, setChecked, getChecked, setValue, getValue, getIntValue, requestFor, getEl, setVisible } = ServerSyncShared.pageHelpers());
     });
 
-    // ============================================
-    // CONSTANTS & STATE
-    // ============================================
     var _initialized = false;
 
     var currentConfig = null;
 
-    // The config is replaced only once a save has landed, so the page never holds a change the server
-    // did not keep.
-    function saveSection(mutator, successMessage, failureMessage) {
-        return ServerSyncShared.saveSection(mutator, successMessage, failureMessage).then(function (saved) {
+    // saveSection
+    // Saves one section and reports the result on its status line. The config is replaced only once a save
+    // has landed, so the page never holds a change the server did not keep.
+    //
+    // Inputs
+    // mutator [function]: Changes the fresh config in place.
+    // statusId [string]: The id of the status element beside the section's Save button.
+    // successMessage [string]: What the status says when the save landed.
+    // failureMessage [string]: What the status says when it did not.
+    //
+    // Output
+    // [Promise]: Resolves true when the save landed.
+    function saveSection(mutator, statusId, successMessage, failureMessage) {
+        return ServerSyncShared.saveSection(mutator, statusId, successMessage, failureMessage).then(function (saved) {
             if (saved) currentConfig = saved;
             return !!saved;
         });
     }
-
-    // ============================================
-    // WATCHED BY ALL FILTER USERS
-    // ============================================
 
     // The watched by all filter lists the users of every scan server, each
     // tagged with its server, since user ids are only meaningful per server.
@@ -117,36 +126,36 @@ export default function (view) {
         container.innerHTML = '';
 
         if (watchedFilterUsers.length === 0) {
-            container.innerHTML = '<div class="filterBrowserStatus">No source users available. Add a server and connect to it to load users.</div>';
+            container.innerHTML = ServerSyncShared.emptySection('No source users available. Add a server and connect to it to load users.', { inline: true });
             return;
         }
 
         var list = document.createElement('div');
-        list.className = 'filterItemsList';
+        list.className = 'serversync-filter-items-list';
 
         watchedFilterUsers.forEach(function(user) {
             var isSelected = !!selectedSet[user.Id];
 
             var itemEl = document.createElement('div');
-            itemEl.className = 'filterItem watchedFilterUserItem' + (isSelected ? ' selected' : '');
+            itemEl.className = 'serversync-filter-item serversync-watched-user-item' + (isSelected ? ' serversync-selected' : '');
             itemEl.dataset.userId = user.Id;
 
             var thumbHtml;
             if (user.Id) {
                 var userThumbId = 'ss-user-thumb-' + escapeHtml(String(user.Id));
                 ServerSyncShared.scheduleProxyImage(userThumbId, user.Id, true, 120, user.ServerKey);
-                thumbHtml = '<img id="' + userThumbId + '" class="filterItemThumb filterItemThumbSquare" />' +
-                    '<div class="filterItemThumbPlaceholder filterItemThumbSquare" style="display:none"><span class="material-icons">person</span></div>';
+                thumbHtml = '<img id="' + userThumbId + '" class="serversync-filter-item-thumb serversync-filter-item-thumb-square" />' +
+                    '<div class="serversync-filter-item-thumb-placeholder serversync-filter-item-thumb-square hidden"><span class="material-icons">person</span></div>';
             } else {
-                thumbHtml = '<div class="filterItemThumbPlaceholder filterItemThumbSquare"><span class="material-icons">person</span></div>';
+                thumbHtml = '<div class="serversync-filter-item-thumb-placeholder serversync-filter-item-thumb-square"><span class="material-icons">person</span></div>';
             }
 
             itemEl.innerHTML = thumbHtml +
-                '<div class="filterItemInfo">' +
-                    '<div class="filterItemName">' + escapeHtml(user.Name || '') + '</div>' +
-                    '<div class="filterItemMeta">' + escapeHtml(user.ServerName || '') + '</div>' +
+                '<div class="serversync-filter-item-info">' +
+                    '<div class="serversync-filter-item-name">' + escapeHtml(user.Name || '') + '</div>' +
+                    '<div class="serversync-filter-item-meta">' + escapeHtml(user.ServerName || '') + '</div>' +
                 '</div>' +
-                '<div class="filterItemCheck"><span class="material-icons">' + (isSelected ? 'check_box' : 'check_box_outline_blank') + '</span></div>';
+                '<div class="serversync-filter-item-check"><span class="material-icons">' + (isSelected ? 'check_box' : 'check_box_outline_blank') + '</span></div>';
 
             itemEl.addEventListener('click', function() {
                 toggleWatchedFilterUser(itemEl);
@@ -159,26 +168,20 @@ export default function (view) {
     }
 
     function toggleWatchedFilterUser(itemEl) {
-        var selected = itemEl.classList.toggle('selected');
-        var icon = itemEl.querySelector('.filterItemCheck .material-icons');
+        var selected = itemEl.classList.toggle('serversync-selected');
+        var icon = itemEl.querySelector('.serversync-filter-item-check .material-icons');
         if (icon) icon.textContent = selected ? 'check_box' : 'check_box_outline_blank';
     }
 
     function collectWatchedFilterUsers() {
         var ids = [];
-        view.querySelectorAll('.watchedFilterUserItem.selected').forEach(function(row) {
+        view.querySelectorAll('.serversync-watched-user-item.serversync-selected').forEach(function(row) {
             if (row.dataset.userId) {
                 ids.push(row.dataset.userId);
             }
         });
         return ids;
     }
-
-    // ============================================
-    // SYNC SETTINGS MODULE
-    // ============================================
-
-    // --- Content Settings ---
 
     function loadContentSettings(config) {
         setChecked('chkEnableContentSync', config.EnableContentSync || false);
@@ -196,9 +199,9 @@ export default function (view) {
                 var pulls = server.Mode === 'Pull' || server.Mode === 'Sync' || server.Mode === 0 || server.Mode === 2;
                 return server.IsEnabled !== false && pulls && (server.LibraryMappings || []).some(function (m) { return m.IsEnabled !== false && (m.StorageMode === 'Link' || m.StorageMode === 1); });
             }).map(function (server) {
-                return '<div class="ssFormRow" data-server-key="' + escapeHtml(server.Key) + '">' +
-                    '<span class="ssFormLabel">From ' + escapeHtml(ServerSyncShared.serverDisplayName(server)) + '<span class="ssFormHint">Links this server takes from it at once</span></span>' +
-                    '<span class="ssFormCell"><input is="emby-input" type="number" min="0" max="1000" class="ssFormInput linkTake" value="' + (server.LinkTakeMaxStreams || 0) + '" /></span>' +
+                return '<div class="serversync-form-row" data-server-key="' + escapeHtml(server.Key) + '">' +
+                    '<span class="serversync-form-label">From ' + escapeHtml(ServerSyncShared.serverDisplayName(server)) + '<span class="serversync-form-hint">Links this server takes from it at once</span></span>' +
+                    '<span class="serversync-form-cell"><input is="emby-input" type="number" min="0" max="1000" class="serversync-form-input serversync-link-take" value="' + escapeHtml(String(server.LinkTakeMaxStreams || 0)) + '" /></span>' +
                 '</div>';
             }).join('');
         }
@@ -240,16 +243,12 @@ export default function (view) {
         ServerSyncShared.bindReveal('chkEnableRecyclingBin', 'recyclingBinSettings');
     }
 
-    // ============================================
-    // BANDWIDTH
-    // ============================================
-
-    // The servers a stream goes to: Stream, Push, and Sync servers allowed to link here.
+    // The servers a link streams to: Push and Sync servers allowed to link here.
     function linkingServers(config) {
         return ((config && config.Servers) || []).filter(function (server) {
             var mode = server.Mode;
             return server.IsEnabled !== false && server.AllowLinking === true
-                && (mode === 'Stream' || mode === 'Push' || mode === 'Sync' || mode === 3 || mode === 1 || mode === 2);
+                && (mode === 'Push' || mode === 'Sync' || mode === 1 || mode === 2);
         });
     }
 
@@ -264,10 +263,10 @@ export default function (view) {
         var rows = getEl('streamSpeedRows');
         if (rows) {
             rows.innerHTML = linkingServers(config).map(function (server) {
-                return '<div class="ssFormRow" data-server-key="' + escapeHtml(server.Key) + '">' +
-                    '<span class="ssFormLabel">Streams to ' + escapeHtml(ServerSyncShared.serverDisplayName(server)) + '<span class="ssFormHint">Each stream and cache download it gets</span></span>' +
-                    '<span class="ssFormCell"><input is="emby-input" type="number" min="0" max="100000" class="ssFormInput streamSpeed" value="' + (server.LinkStreamSpeedMbps || 0) + '" /><span class="ssUnit">Mbps</span></span>' +
-                    '<span class="ssFormCell ssScheduleCell"><input is="emby-input" type="number" min="0" max="100000" class="ssFormInput streamScheduledSpeed" value="' + (server.LinkScheduledStreamSpeedMbps || 0) + '" /><span class="ssUnit">Mbps</span></span>' +
+                return '<div class="serversync-form-row" data-server-key="' + escapeHtml(server.Key) + '">' +
+                    '<span class="serversync-form-label">Streams to ' + escapeHtml(ServerSyncShared.serverDisplayName(server)) + '<span class="serversync-form-hint">Each stream and cache download it gets</span></span>' +
+                    '<span class="serversync-form-cell"><input is="emby-input" type="number" min="0" max="100000" class="serversync-form-input serversync-stream-speed" value="' + escapeHtml(String(server.LinkStreamSpeedMbps || 0)) + '" /><span class="serversync-unit">Mbps</span></span>' +
+                    '<span class="serversync-form-cell serversync-schedule-cell"><input is="emby-input" type="number" min="0" max="100000" class="serversync-form-input serversync-stream-scheduled-speed" value="' + escapeHtml(String(server.LinkScheduledStreamSpeedMbps || 0)) + '" /><span class="serversync-unit">Mbps</span></span>' +
                 '</div>';
             }).join('');
         }
@@ -275,9 +274,9 @@ export default function (view) {
         var scheduleToggle = getEl('chkEnableBandwidthScheduling');
         var reflectSchedule = function () {
             var on = getChecked('chkEnableBandwidthScheduling');
-            view.querySelectorAll('.ssScheduleRow').forEach(function (row) { row.classList.toggle('hidden', !on); });
+            view.querySelectorAll('.serversync-schedule-row').forEach(function (row) { row.classList.toggle('hidden', !on); });
             var table = getEl('bandwidthTable');
-            if (table) table.classList.toggle('ssNoSchedule', !on);
+            if (table) table.classList.toggle('serversync-no-schedule', !on);
         };
         if (scheduleToggle && !scheduleToggle.dataset.bound) {
             scheduleToggle.dataset.bound = '1';
@@ -290,8 +289,8 @@ export default function (view) {
         var speeds = {};
         view.querySelectorAll('#streamSpeedRows [data-server-key]').forEach(function (row) {
             speeds[row.getAttribute('data-server-key')] = {
-                normal: Math.max(0, parseInt(row.querySelector('.streamSpeed').value, 10) || 0),
-                scheduled: Math.max(0, parseInt(row.querySelector('.streamScheduledSpeed').value, 10) || 0)
+                normal: Math.max(0, parseInt(row.querySelector('.serversync-stream-speed').value, 10) || 0),
+                scheduled: Math.max(0, parseInt(row.querySelector('.serversync-stream-scheduled-speed').value, 10) || 0)
             };
         });
         saveSection(function (config) {
@@ -309,7 +308,7 @@ export default function (view) {
                     server.LinkScheduledStreamSpeedMbps = speed.scheduled;
                 }
             });
-        }, 'Bandwidth saved', 'Failed to save bandwidth');
+        }, 'saveBandwidthStatus', 'Bandwidth saved.', 'Could not save the bandwidth.');
     }
 
     // What the link cache holds now, shown under its settings.
@@ -321,16 +320,24 @@ export default function (view) {
                 status.textContent = 'The cache is off.';
                 return;
             }
-            status.textContent = cache.Files + ' file(s), ' + cache.UsedFormatted + ' of ' + cache.LimitFormatted + ' used'
-                + (cache.Waiting ? ', ' + cache.Waiting + ' waiting to be cached' : '') + '. Kept at ' + cache.Location;
+            status.textContent = ServerSyncShared.plural(cache.Files, 'file', 'files') + ', ' + cache.UsedFormatted + ' of ' + cache.LimitFormatted + ' used'
+                + (cache.Waiting ? ', ' + cache.Waiting + ' waiting to be cached' : '') + '. Kept at ' + cache.Location + '.';
         }).catch(function () {
             status.textContent = '';
         });
     }
 
+    // clearLinkCache
+    // Asks first, then deletes every file in the link cache.
     function clearLinkCache() {
-        if (!window.confirm('Empty the link cache? Every cached file is deleted. Links keep playing from their sources.')) return;
-        apiRequest('LinkCache/Clear', 'POST').then(loadLinkCacheStatus).catch(loadLinkCacheStatus);
+        confirmDialog('Delete every cached file? Links keep playing from their sources.', {
+            title: 'Delete Cached Files',
+            confirmText: 'Delete',
+            destructive: true
+        }).then(function (confirmed) {
+            if (!confirmed) return;
+            apiRequest('LinkCache/Clear', 'POST').then(loadLinkCacheStatus).catch(loadLinkCacheStatus);
+        });
     }
 
     function saveContentSettings() {
@@ -346,7 +353,7 @@ export default function (view) {
             config.LinkMaxStreamsTotal = Math.max(0, getIntValue('txtLinkMaxStreamsTotal', 0));
             var takes = {};
             view.querySelectorAll('#linkTakeRows [data-server-key]').forEach(function (row) {
-                takes[row.getAttribute('data-server-key')] = Math.max(0, parseInt(row.querySelector('.linkTake').value, 10) || 0);
+                takes[row.getAttribute('data-server-key')] = Math.max(0, parseInt(row.querySelector('.serversync-link-take').value, 10) || 0);
             });
             (config.Servers || []).forEach(function (server) {
                 if (Object.prototype.hasOwnProperty.call(takes, server.Key)) server.LinkTakeMaxStreams = takes[server.Key];
@@ -382,10 +389,8 @@ export default function (view) {
             config.MaxConcurrentDownloads = getIntValue('txtMaxConcurrentDownloads', 2);
             config.TempDownloadPath = getValue('txtTempDownloadPath') || null;
             config.MinimumFreeDiskSpaceGb = getIntValue('txtMinFreeDiskSpace', 10);
-        }, 'Content settings saved', 'Failed to save content settings').then(loadLinkCacheStatus);
+        }, 'saveContentStatus', 'Content settings saved.', 'Could not save the content settings.').then(loadLinkCacheStatus);
     }
-
-    // --- History Settings ---
 
     function loadHistorySettings(config) {
         needsUserMapping(config, 'chkEnableHistorySync', 'historyNeedsMapping', config.EnableHistorySync === true);
@@ -404,10 +409,8 @@ export default function (view) {
             config.HistorySyncPlayCount = getChecked('chkHistorySyncPlayCount');
             config.HistorySyncLastPlayedDate = getChecked('chkHistorySyncLastPlayedDate');
             config.HistorySyncFavorites = getChecked('chkHistorySyncFavorites');
-        }, 'History settings saved', 'Failed to save history settings');
+        }, 'saveHistoryStatus', 'History settings saved.', 'Could not save the history settings.');
     }
-
-    // --- Metadata Settings ---
 
     // A choice is saved by name and may be read back by name or by number.
     var PRECEDENCE = ['Newest', 'Rank'];
@@ -440,10 +443,8 @@ export default function (view) {
             config.MetadataSyncImages = getChecked('chkMetadataSyncImages');
             config.MetadataSyncFolderItems = getChecked('chkMetadataSyncFolderItems');
             config.MetadataSyncPrecedence = getValue('selMetadataSyncPrecedence') || 'Newest';
-        }, 'Metadata settings saved', 'Failed to save metadata settings');
+        }, 'saveMetadataStatus', 'Metadata settings saved.', 'Could not save the metadata settings.');
     }
-
-    // --- People Sync Settings ---
 
     function loadPeopleSettings(config) {
         setChecked('chkEnablePeopleSync', config.EnablePeopleSync === true);
@@ -456,10 +457,8 @@ export default function (view) {
             config.EnablePeopleSync = getChecked('chkEnablePeopleSync');
             config.PeopleSyncImages = getChecked('chkPeopleSyncImages');
             config.PeopleSyncPrecedence = getValue('selPeopleSyncPrecedence') || 'Newest';
-        }, 'People settings saved', 'Failed to save people settings');
+        }, 'savePeopleStatus', 'People settings saved.', 'Could not save the people settings.');
     }
-
-    // --- User Sync Settings ---
 
     function loadUserSyncSettings(config) {
         needsUserMapping(config, 'chkEnableUserSync', 'userNeedsMapping', config.EnableUserSync === true);
@@ -478,7 +477,7 @@ export default function (view) {
             config.UserSyncProfileImage = getChecked('chkUserSyncProfileImage');
             config.UserSyncPrecedence = getValue('selUserSyncPrecedence') || 'Newest';
             config.UserSyncConflict = getValue('selUserSyncConflict') || 'Newest';
-        }, 'User sync settings saved', 'Failed to save user sync settings');
+        }, 'saveUserSyncStatus', 'User settings saved.', 'Could not save the user settings.');
     }
 
     function hasUserMapping(config) {
@@ -514,10 +513,8 @@ export default function (view) {
             config.PlaylistSyncShares = getChecked('chkPlaylistSyncShares');
             config.PlaylistSyncPrecedence = getValue('selPlaylistSyncPrecedence') || 'Newest';
             config.PlaylistRemovedAction = getValue('selPlaylistRemovedAction') || 'Delete';
-        }, 'Playlist settings saved', 'Failed to save playlist settings');
+        }, 'savePlaylistStatus', 'Playlist settings saved.', 'Could not save the playlist settings.');
     }
-
-    // --- Processing Settings ---
 
     function loadProcessingSettings(config) {
         setValue('txtHintDebounceSeconds', config.HintDebounceSeconds || 60);
@@ -550,7 +547,7 @@ export default function (view) {
             config.FullScanIntervalHours = Math.min(720, Math.max(0, getIntValue('txtFullScanIntervalHours', 24)));
             config.DeepImageVerification = getChecked('chkDeepImageVerification');
             config.MaxRetryCount = Math.min(10, Math.max(1, getIntValue('txtMaxRetryCount', 3)));
-        }, 'Processing settings saved', 'Failed to save processing settings');
+        }, 'saveProcessingStatus', 'Processing settings saved.', 'Could not save the processing settings.');
     }
 
     var grantUsers = [];
@@ -569,16 +566,16 @@ export default function (view) {
         var container = getEl('callerGrants');
         if (!container) return;
         var row = document.createElement('div');
-        row.className = 'ssGrantRow';
-        var options = '<option value="">Select user...</option><option value="apikey">API keys</option>' + grantUsers.map(function (u) {
+        row.className = 'serversync-grant-row';
+        var options = '<option value="">Select a user</option><option value="apikey">API Keys</option>' + grantUsers.map(function (u) {
             return '<option value="' + escapeHtml(u.Id) + '">' + escapeHtml(u.Name) + '</option>';
         }).join('');
         row.innerHTML =
-            '<select class="grantUser ssGrantField" aria-label="User">' + options + '</select>' +
-            '<input type="text" class="grantLocations ssGrantField" aria-label="Locations" placeholder="Default" />' +
-            '<button is="emby-button" type="button" class="raised jpk-button-destructive jpk-button-small grantRemove"><span>Remove</span></button>';
+            '<select class="serversync-grant-user serversync-grant-field" aria-label="User">' + options + '</select>' +
+            '<input type="text" class="serversync-grant-locations serversync-grant-field" aria-label="Locations" placeholder="Default" />' +
+            '<button is="emby-button" type="button" class="raised jpk-button-destructive jpk-button-small serversync-grant-remove"><span>Remove</span></button>';
         container.appendChild(row);
-        var select = row.querySelector('.grantUser');
+        var select = row.querySelector('.serversync-grant-user');
         var id = (grant.UserId || '').replace(/-/g, '').toLowerCase();
         if (id && !Array.prototype.some.call(select.options, function (o) { return o.value === id; })) {
             var missing = document.createElement('option');
@@ -587,19 +584,19 @@ export default function (view) {
             select.appendChild(missing);
         }
         select.value = id;
-        row.querySelector('.grantLocations').value = (grant.Locations || []).join(', ');
-        row.querySelector('.grantRemove').addEventListener('click', function () { row.remove(); });
+        row.querySelector('.serversync-grant-locations').value = (grant.Locations || []).join(', ');
+        row.querySelector('.serversync-grant-remove').addEventListener('click', function () { row.remove(); });
     }
 
     function collectGrants() {
         var grants = [];
-        view.querySelectorAll('#callerGrants .ssGrantRow').forEach(function (row) {
-            var select = row.querySelector('.grantUser');
+        view.querySelectorAll('#callerGrants .serversync-grant-row').forEach(function (row) {
+            var select = row.querySelector('.serversync-grant-user');
             if (!select.value) return;
             grants.push({
                 UserId: select.value,
                 UserName: select.options[select.selectedIndex] ? select.options[select.selectedIndex].textContent : '',
-                Locations: row.querySelector('.grantLocations').value.split(',').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; })
+                Locations: row.querySelector('.serversync-grant-locations').value.split(',').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; })
             });
         });
         return grants;
@@ -620,12 +617,8 @@ export default function (view) {
         var grants = collectGrants();
         saveSection(function (config) {
             config.PeerCallerGrants = grants;
-        }, 'Whitelist saved', 'Failed to save whitelist');
+        }, 'saveCallerAccessStatus', 'Whitelist saved.', 'Could not save the whitelist.');
     }
-
-    // ============================================
-    // PAGE INITIALIZATION
-    // ============================================
 
     function loadConfig() {
         ServerSyncShared.getConfig().then(function(config) {
@@ -649,54 +642,67 @@ export default function (view) {
             loadCallerAccessSettings(config);
             fetchWatchedFilterUsers();
         }).catch(function() {
-            Dashboard.alert('Failed to load plugin configuration');
+            ServerSyncShared.setStatus('settingsStatus', 'Could not load the settings. Reload the page.', true, { timeout: 0 });
         });
     }
 
-    // ============================================
-    // TROUBLESHOOTING: DATABASE RESET
-    // ============================================
-
-    // Asks in the shared dialog. Each paragraph of the question is its own line.
-    function confirmReset(paragraphs) {
-        return confirmDialog(paragraphs.map(function (p) { return '<p>' + escapeHtml(p) + '</p>'; }).join(''), { html: true, destructive: true });
+    // confirmReset
+    // Asks in the shared dialog before a reset. Each paragraph of the question is its own line.
+    //
+    // Inputs
+    // title [string]: The dialog title.
+    // paragraphs [string[]]: The question, then what it costs.
+    //
+    // Output
+    // [Promise]: Resolves true when the reset is confirmed.
+    function confirmReset(title, paragraphs) {
+        return confirmDialog(paragraphs.map(function (p) { return '<p>' + escapeHtml(p) + '</p>'; }).join(''), {
+            html: true,
+            title: title,
+            confirmText: 'Reset',
+            destructive: true
+        });
     }
 
+    // resetTable
+    // Asks first, then forgets one sync table's tracking. Media is untouched.
+    //
+    // Inputs
+    // table [string]: The route name of the table.
+    // tableName [string]: What the table is called in the question and the result, such as "content sync".
     function resetTable(table, tableName) {
-        confirmReset([
-            'Are you sure you want to reset the ' + tableName + ' table?',
-            'This will delete all ' + tableName + ' tracking data and you will need to re-sync. This cannot be undone.'
+        confirmReset('Reset Table', [
+            'Reset the ' + tableName + ' table?',
+            'This forgets all of its tracking data, and the next scan starts over. It cannot be undone.'
         ]).then(function (confirmed) {
             if (!confirmed) return;
 
             ServerSyncShared.apiRequest('Reset/' + table, 'POST').then(function() {
-                ServerSyncShared.showAlert('The ' + tableName + ' table has been reset.');
+                ServerSyncShared.setStatus('resetStatus', tableName.charAt(0).toUpperCase() + tableName.slice(1) + ' table reset.', false);
             }).catch(function(err) {
                 console.error('Reset ' + table + ' error:', err);
-                ServerSyncShared.showAlert('Failed to reset ' + tableName + ' table.');
+                ServerSyncShared.setStatus('resetStatus', 'Could not reset the ' + tableName + ' table.', true, { timeout: 10000 });
             });
         });
     }
 
+    // resetEntireDatabase
+    // Asks first, then forgets the tracking of every sync table. Media is untouched.
     function resetEntireDatabase() {
-        confirmReset([
-            'Are you sure you want to reset the ENTIRE sync database?',
-            'This will delete ALL tracking data across all sync types (Content, History, Metadata, People, Playlists, Users). You will need to re-sync everything from scratch. This cannot be undone.'
+        confirmReset('Reset Database', [
+            'Reset the entire sync database?',
+            'This forgets all tracking data for every sync type, and everything starts over. It cannot be undone.'
         ]).then(function (confirmed) {
             if (!confirmed) return;
 
             ServerSyncShared.apiRequest('Reset/All', 'POST').then(function() {
-                ServerSyncShared.showAlert('The entire sync database has been reset.');
+                ServerSyncShared.setStatus('resetStatus', 'Database reset.', false);
             }).catch(function(err) {
                 console.error('Reset All error:', err);
-                ServerSyncShared.showAlert('Failed to reset sync database.');
+                ServerSyncShared.setStatus('resetStatus', 'Could not reset the database.', true, { timeout: 10000 });
             });
         });
     }
-
-    // ============================================
-    // EVENT LISTENERS
-    // ============================================
 
     view.addEventListener('viewshow', function () {
         LibraryMenu.setTabs('serversync', settingsTabIndex(), getTabs);

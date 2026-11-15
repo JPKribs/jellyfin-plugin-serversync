@@ -1,18 +1,23 @@
-// ============================================
-// STORAGE - PAGE CONTROLLER
-// ============================================
+// serversync_storage.js
 // How each library mapping keeps its files: Copy or Link, the link cache, Always Keep, and the
 // Library Filter, plus the permanent copies of the Link libraries. The mappings themselves are made on
 // the Servers tab. A save here changes only these fields of the matching stored mapping.
 
+// serversync_storage
+// Builds the Storage tab. It draws a card for each enabled library mapping of the picked server, saves
+// their storage settings, and lists the permanent copies of its Link libraries.
+//
+// Inputs
+// view [HTMLElement]: The page the dashboard passes to the controller.
 export default function (view) {
     'use strict';
 
-    // ============================================
-    // TAB NAVIGATION (local copy for synchronous access)
-    // ============================================
-
-    // This page always lists itself, so opening it while content sync is off still marks a tab.
+    // getTabs
+    // Lists the dashboard tabs in order. This page always lists itself, so opening it while content sync is
+    // off still marks a tab.
+    //
+    // Output
+    // [object[]]: Each tab's href and name.
     function getTabs() {
         return [
             { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
@@ -21,10 +26,6 @@ export default function (view) {
             { href: 'configurationpage?name=serversync_settings', name: 'Settings' }
         ];
     }
-
-    // ============================================
-    // SHARED MODULE IMPORT (deferred)
-    // ============================================
 
     var ServerSyncShared = null;
     var createPaginatedTable = null;
@@ -39,10 +40,6 @@ export default function (view) {
         createPaginatedTable = shared.createPaginatedTable;
         ({ escapeHtml, apiRequest, setVisible, bindClick, getEl } = ServerSyncShared.pageHelpers());
     });
-
-    // ============================================
-    // CONSTANTS & STATE
-    // ============================================
 
     var _initialized = false;
     var contentOn = true;
@@ -65,7 +62,7 @@ export default function (view) {
     // The servers whose libraries are mapped here. A Push server sends files and maps no libraries.
     function storageServers(config) {
         return ((config && config.Servers) || []).filter(function (s) {
-            return s && !isPushServer(s) && s.Mode !== 'Stream' && s.Mode !== 3 && (s.LibraryMappings || []).length > 0;
+            return s && !isPushServer(s) && (s.LibraryMappings || []).length > 0;
         });
     }
 
@@ -113,10 +110,6 @@ export default function (view) {
         });
     }
 
-    // ============================================
-    // SERVER PICKER
-    // ============================================
-
     function renderServerPicker() {
         var list = storageServers(currentConfig);
         var select = getEl('selStorageServer');
@@ -138,10 +131,6 @@ export default function (view) {
         setVisible('storageNoServers', list.length === 0);
         setVisible('storageLibrariesSection', list.length > 0);
     }
-
-    // ============================================
-    // LIBRARY CARDS
-    // ============================================
 
     function clearCards() {
         cards.forEach(function (card) { card.disconnect(); });
@@ -191,72 +180,72 @@ export default function (view) {
         var negotiable = !!(currentConfig && currentConfig.EnableHistorySync) && !!owner && (owner.Mode === 'Sync' || owner.Mode === 2);
         var container = getEl('storageLibrariesContainer');
         var div = document.createElement('div');
-        div.className = 'storageMapping';
+        div.className = 'serversync-library-card';
         var filterTableId = 'storageFilterTable_' + (++_tableSeq);
         var permanentTableId = 'storagePermanentTable_' + _tableSeq;
         var sourceName = mapping.SourceLibraryName || mapping.SourceLibraryId || 'Source library';
         var localName = mapping.LocalLibraryName || mapping.LocalLibraryId || 'Local library';
         div.innerHTML =
-            '<div class="storageMappingHeader">' +
-                '<span class="storageMappingIcon material-icons" aria-hidden="true">video_library</span>' +
-                '<div class="storageMappingRoute" title="' + escapeHtml(sourceName + ' to ' + localName) + '">' +
-                    '<div class="storageMappingEnd">' +
-                        '<span class="storageMappingLabel">From</span>' +
-                        '<span class="storageMappingName">' + escapeHtml(sourceName) + '</span>' +
+            '<div class="serversync-library-card-header">' +
+                '<span class="serversync-library-card-icon material-icons" aria-hidden="true">video_library</span>' +
+                '<div class="serversync-library-card-route" title="' + escapeHtml(sourceName + ' to ' + localName) + '">' +
+                    '<div class="serversync-library-card-end">' +
+                        '<span class="serversync-library-card-label">From</span>' +
+                        '<span class="serversync-library-card-name">' + escapeHtml(sourceName) + '</span>' +
                     '</div>' +
-                    '<span class="storageMappingArrow material-icons" aria-hidden="true">arrow_forward</span>' +
-                    '<div class="storageMappingEnd">' +
-                        '<span class="storageMappingLabel">To</span>' +
-                        '<span class="storageMappingName">' + escapeHtml(localName) + '</span>' +
+                    '<span class="serversync-library-card-arrow material-icons" aria-hidden="true">arrow_forward</span>' +
+                    '<div class="serversync-library-card-end">' +
+                        '<span class="serversync-library-card-label">To</span>' +
+                        '<span class="serversync-library-card-name">' + escapeHtml(localName) + '</span>' +
                     '</div>' +
                 '</div>' +
-                '<span class="storageModeBadge"></span>' +
+                '<span class="jpk-badge gray serversync-storage-mode-badge"></span>' +
             '</div>' +
-            '<div class="selectContainer storageModeBlock">' +
+            '<div class="selectContainer serversync-storage-mode-block">' +
                 '<label>Storage</label>' +
-                '<select is="emby-select" class="storageModeSelect">' +
+                '<select is="emby-select" class="serversync-storage-mode-select">' +
                     '<option value="Copy">Copy</option>' +
                     '<option value="Link">Link</option>' +
                 '</select>' +
-                '<div class="fieldDescription">Copy downloads each file and follows that server: a file it removes is handled by Removed files here. Link writes a .strm that streams from any server that holds the file and allows linking, and goes only when none holds it.</div>' +
+                '<div class="fieldDescription">Copy downloads each file and follows that server, so a file it removes is handled by Removed files here. Link writes a .strm that streams from any server that holds the file and allows linking, and goes only when none holds it.</div>' +
             '</div>' +
-            '<div class="linkCacheSection hidden">' +
+            '<div class="serversync-link-cache-section hidden">' +
                 '<h3 class="jpk-subsection-title">Link Cache</h3>' +
                 '<div class="checkboxContainer checkboxContainer-withDescription">' +
-                    '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="cacheLinks" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">Cache This Library\'s Links</span></label>' +
+                    '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-cache-links" ' + (mapping.ExcludeFromLinkCache ? '' : 'checked') + ' /><span class="checkboxLabel">Cache This Library\'s Links</span></label>' +
                     '<div class="fieldDescription checkboxFieldDescription">Cache played links and upcoming episodes. The cache is set up under Settings &gt; Content.</div>' +
                 '</div>' +
             '</div>' +
-            '<div class="permanentSection hidden">' +
+            '<div class="serversync-permanent-section hidden">' +
                 '<h3 class="jpk-subsection-title">Always Keep</h3>' +
-                '<div class="fieldDescription mb-md">Picked shows and films, every version included, are full copies here instead of links. Removing a pick turns them back into links on the next sync.</div>' +
-                '<div class="filterTableContainer" id="' + permanentTableId + '"></div>' +
+                '<div class="fieldDescription serversync-mb-md">Picked shows and films, every version included, are full copies here instead of links. Removing a pick turns them back into links on the next sync.</div>' +
+                '<div class="serversync-filter-table-container" id="' + permanentTableId + '"></div>' +
             '</div>' +
-            '<div class="filterSection">' +
+            '<div class="serversync-filter-section">' +
                 '<h3 class="jpk-subsection-title">Library Filter</h3>' +
                 '<div class="selectContainer">' +
                     '<label>Filter Mode</label>' +
-                    '<select is="emby-select" class="filterModeSelect">' +
+                    '<select is="emby-select" class="serversync-filter-mode-select">' +
                         '<option value="AllowAll">Allow All</option>' +
                         '<option value="Whitelist">Whitelist</option>' +
                         '<option value="Blacklist">Blacklist</option>' +
                     '</select>' +
                     '<div class="fieldDescription">Allow All syncs everything. Whitelist syncs only what is picked. Blacklist syncs everything but what is picked.</div>' +
                 '</div>' +
-                '<div class="filterBrowserContainer hidden">' +
-                    '<div class="qFilters filterBrowseToggle">' +
-                        '<button type="button" class="qFilter on" data-browse="items">Files</button>' +
-                        '<button type="button" class="qFilter" data-browse="collections">Collections</button>' +
-                        '<button type="button" class="qFilter" data-browse="playlists">Playlists</button>' +
+                '<div class="serversync-filter-browser-container hidden">' +
+                    '<div class="serversync-filter-pills serversync-filter-browse-toggle">' +
+                        '<button type="button" class="serversync-filter-pill serversync-on" data-browse="items">Files</button>' +
+                        '<button type="button" class="serversync-filter-pill" data-browse="collections">Collections</button>' +
+                        '<button type="button" class="serversync-filter-pill" data-browse="playlists">Playlists</button>' +
                     '</div>' +
-                    '<div class="filterTableContainer" id="' + filterTableId + '"></div>' +
+                    '<div class="serversync-filter-table-container" id="' + filterTableId + '"></div>' +
                 '</div>' +
             '</div>' +
             (negotiable
-                ? '<div class="historySection">' +
+                ? '<div class="serversync-history-section">' +
                     '<h3 class="jpk-subsection-title">History</h3>' +
                     '<div class="checkboxContainer checkboxContainer-withDescription">' +
-                        '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="negotiateHistory" ' + (mapping.NegotiateHistory ? 'checked' : '') + ' /><span class="checkboxLabel">Negotiate History</span></label>' +
+                        '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="serversync-negotiate-history" ' + (mapping.NegotiateHistory ? 'checked' : '') + ' /><span class="checkboxLabel">Negotiate History</span></label>' +
                         '<div class="fieldDescription checkboxFieldDescription">Write merged watch history back to that server too.</div>' +
                     '</div>' +
                   '</div>'
@@ -264,14 +253,14 @@ export default function (view) {
         container.appendChild(div);
 
         var libraryId = mapping.SourceLibraryId || '';
-        var storageModeSelect = div.querySelector('.storageModeSelect');
-        setLibraryIcon(div.querySelector('.storageMappingIcon'), mapping.LocalLibraryId);
-        var filterModeSelect = div.querySelector('.filterModeSelect');
-        var cacheLinks = div.querySelector('.cacheLinks');
-        var negotiateBox = div.querySelector('.negotiateHistory');
-        var linkCacheSection = div.querySelector('.linkCacheSection');
-        var permanentSection = div.querySelector('.permanentSection');
-        var filterBrowserContainer = div.querySelector('.filterBrowserContainer');
+        var storageModeSelect = div.querySelector('.serversync-storage-mode-select');
+        setLibraryIcon(div.querySelector('.serversync-library-card-icon'), mapping.LocalLibraryId);
+        var filterModeSelect = div.querySelector('.serversync-filter-mode-select');
+        var cacheLinks = div.querySelector('.serversync-cache-links');
+        var negotiateBox = div.querySelector('.serversync-negotiate-history');
+        var linkCacheSection = div.querySelector('.serversync-link-cache-section');
+        var permanentSection = div.querySelector('.serversync-permanent-section');
+        var filterBrowserContainer = div.querySelector('.serversync-filter-browser-container');
         var selectedFilterItems = storedPicks(mapping.FilteredItems);
         var selectedPermanentItems = storedPicks(mapping.PermanentItems);
         var filterTable = null;
@@ -288,10 +277,10 @@ export default function (view) {
             if (item.Id) {
                 var thumbId = 'ss-storage-thumb-' + (++_thumbSeq);
                 ServerSyncShared.scheduleProxyImage(thumbId, item.Id, false, 120, serverKey);
-                thumbHtml = '<img id="' + thumbId + '" class="filterItemThumb" />' +
-                    '<div class="filterItemThumbPlaceholder" style="display:none"><span class="material-icons">movie</span></div>';
+                thumbHtml = '<img id="' + thumbId + '" class="serversync-filter-item-thumb" />' +
+                    '<div class="serversync-filter-item-thumb-placeholder hidden"><span class="material-icons">movie</span></div>';
             } else {
-                thumbHtml = '<div class="filterItemThumbPlaceholder"><span class="material-icons">movie</span></div>';
+                thumbHtml = '<div class="serversync-filter-item-thumb-placeholder"><span class="material-icons">movie</span></div>';
             }
             var metaParts = [];
             if (item.Year) metaParts.push(item.Year);
@@ -299,17 +288,17 @@ export default function (view) {
             var overviewHtml = '';
             if (item.Overview) {
                 var snippet = item.Overview.substring(0, 120);
-                if (item.Overview.length > 120) snippet += '...';
-                overviewHtml = '<div class="filterItemOverview">' + escapeHtml(snippet) + '</div>';
+                if (item.Overview.length > 120) snippet += '…';
+                overviewHtml = '<div class="serversync-filter-item-overview">' + escapeHtml(snippet) + '</div>';
             }
-            return '<div class="filterItem' + (sel ? ' selected' : '') + '">' +
+            return '<div class="serversync-filter-item' + (sel ? ' serversync-selected' : '') + '">' +
                 thumbHtml +
-                '<div class="filterItemInfo">' +
-                    '<div class="filterItemName">' + escapeHtml(item.Name || '') + '</div>' +
-                    '<div class="filterItemMeta">' + escapeHtml(metaParts.join(' • ')) + '</div>' +
+                '<div class="serversync-filter-item-info">' +
+                    '<div class="serversync-filter-item-name">' + escapeHtml(item.Name || '') + '</div>' +
+                    '<div class="serversync-filter-item-meta">' + escapeHtml(metaParts.join(' • ')) + '</div>' +
                     overviewHtml +
                 '</div>' +
-                '<div class="filterItemCheck"><span class="material-icons">' + (sel ? 'check_box' : 'check_box_outline_blank') + '</span></div>' +
+                '<div class="serversync-filter-item-check"><span class="material-icons">' + (sel ? 'check_box' : 'check_box_outline_blank') + '</span></div>' +
             '</div>';
         }
 
@@ -323,9 +312,9 @@ export default function (view) {
             var sel = !!selected[item.Id];
             pickerContainer.querySelectorAll('.jpk-table-row').forEach(function (rowEl) {
                 if (rowEl.getAttribute('data-id') !== String(item.Id)) return;
-                var wrap = rowEl.querySelector('.filterItem');
-                if (wrap) wrap.classList.toggle('selected', sel);
-                var icon = rowEl.querySelector('.filterItemCheck .material-icons');
+                var wrap = rowEl.querySelector('.serversync-filter-item');
+                if (wrap) wrap.classList.toggle('serversync-selected', sel);
+                var icon = rowEl.querySelector('.serversync-filter-item-check .material-icons');
                 if (icon) icon.textContent = sel ? 'check_box' : 'check_box_outline_blank';
             });
         }
@@ -335,9 +324,9 @@ export default function (view) {
                 containerId: containerId,
                 endpoint: 'SourceLibraryItems',
                 pagination: { pageSize: 50, loadMore: true },
-                search: { enabled: true, placeholder: 'Search items...' },
+                search: { enabled: true, placeholder: 'Search items' },
                 selection: { enabled: false, idKey: 'Id' },
-                emptyState: { message: 'No items found' },
+                emptyState: { message: 'No items found.' },
                 filters: { buildParams: function () { var mode = browse(); return { libraryId: libraryId, serverKey: serverKey, collections: mode === 'collections', playlists: mode === 'playlists' }; } },
                 columns: [{ key: 'Id', type: 'custom', render: function (item) { return renderPickerItem(item, selected); } }],
                 actions: { onRowClick: function (item) { onPickerItemClick(item, selected, section); } }
@@ -359,10 +348,11 @@ export default function (view) {
         // The cache and Always Keep only apply to links, so they show for a Link library.
         function updateLinkVisibility() {
             var linked = storageModeSelect.value === 'Link';
-            var badge = div.querySelector('.storageModeBadge');
+            var badge = div.querySelector('.serversync-storage-mode-badge');
             if (badge) {
                 badge.textContent = linked ? 'Link' : 'Copy';
-                badge.classList.toggle('storageModeBadge-link', linked);
+                badge.classList.toggle('blue', linked);
+                badge.classList.toggle('gray', !linked);
             }
             linkCacheSection.classList.toggle('hidden', !linked);
             permanentSection.classList.toggle('hidden', !linked);
@@ -374,11 +364,11 @@ export default function (view) {
 
         // Files / Collections / Playlists. Whitelisting a collection or playlist syncs its members, and
         // blacklisting one excludes them. The pill that is on marks the side in use.
-        var browseButtons = div.querySelectorAll('.filterBrowseToggle > button');
+        var browseButtons = div.querySelectorAll('.serversync-filter-browse-toggle > button');
         browseButtons.forEach(function (btn) {
             btn.addEventListener('click', function () {
                 filterBrowseMode = btn.dataset.browse;
-                browseButtons.forEach(function (b) { b.classList.toggle('on', b.dataset.browse === filterBrowseMode); });
+                browseButtons.forEach(function (b) { b.classList.toggle('serversync-on', b.dataset.browse === filterBrowseMode); });
                 if (filterTable) filterTable.reload();
             });
         });
@@ -435,11 +425,11 @@ export default function (view) {
                 }
                 Object.keys(edit.values).forEach(function (field) { target[field] = edit.values[field]; });
             });
-        }, 'Storage saved', 'Failed to save storage').then(function (saved) {
+        }, 'saveStorageStatus', 'Storage saved.', 'Could not save the storage.').then(function (saved) {
             if (!saved) return;
             currentConfig = saved;
             if (missing > 0) {
-                ServerSyncShared.showAlert(missing + ' library mapping(s) changed on the Servers tab meanwhile and were not saved. The page has been reloaded.');
+                ServerSyncShared.setStatus('saveStorageStatus', ServerSyncShared.plural(missing, 'library mapping', 'library mappings') + ' changed on the Servers tab meanwhile and ' + (missing === 1 ? 'was' : 'were') + ' not saved. The cards were reloaded.', true, { timeout: 10000 });
                 renderServerPicker();
                 renderLibraries();
             }
@@ -447,17 +437,13 @@ export default function (view) {
         });
     }
 
-    // ============================================
-    // PERMANENT COPIES
-    // ============================================
-
     var keptTable = null;
     var keptRows = {};
     var KEPT_BADGES = {
-        Pick: { label: 'Always Keep', cls: 'blue', title: 'Copied because of an Always Keep pick' },
-        Hand: { label: 'Kept By Hand', cls: 'purple', title: 'Downloaded by hand with Download' },
-        Own: { label: 'Already Here', cls: 'green', title: 'On this server before it was matched to that server\'s file. It stays when that server removes its file' },
-        Unknown: { label: 'Earlier Copy', cls: 'gray', title: 'A copy from before Server Sync recorded why it is a copy' }
+        Pick: { label: 'Always Keep', cls: 'blue', title: 'Copied because of an Always Keep pick.' },
+        Hand: { label: 'Kept by Hand', cls: 'purple', title: 'Downloaded by hand with Download.' },
+        Own: { label: 'Already Here', cls: 'green', title: 'On this server before it was matched to that server\'s file. It stays when that server removes its file.' },
+        Unknown: { label: 'Earlier Copy', cls: 'gray', title: 'A copy from before Server Sync recorded why it is a copy.' }
     };
 
     function ensureKeptTable() {
@@ -466,7 +452,7 @@ export default function (view) {
             containerId: 'keptCopiesTableContainer',
             endpoint: 'KeptCopies',
             pagination: { pageSize: 50 },
-            search: { enabled: true, placeholder: 'Search permanent copies...' },
+            search: { enabled: true, placeholder: 'Search permanent copies' },
             selection: {
                 enabled: true,
                 idKey: 'Id',
@@ -476,7 +462,7 @@ export default function (view) {
                 }
             },
             filters: { buildParams: function () { return { serverKey: selectedKey }; } },
-            emptyState: { message: 'No permanent copies in this server\'s Link libraries' },
+            emptyState: { message: 'No permanent copies in this server\'s Link libraries.' },
             columns: [
                 {
                     key: 'name',
@@ -488,9 +474,9 @@ export default function (view) {
                         var path = item.LocalPath || item.SourcePath || '';
                         var thumb = ServerSyncShared.renderItemThumb(item.SourceItemId, item.ServerKey || selectedKey);
                         return thumb +
-                            '<div class="syncItemInfo">' +
-                                '<div class="syncItemName" title="' + escapeHtml(path) + '">' + escapeHtml(ServerSyncShared.getFileName(path)) + '</div>' +
-                                '<div class="syncItemPath">' + escapeHtml(path) + '</div>' +
+                            '<div class="serversync-item-info">' +
+                                '<div class="serversync-item-name" title="' + escapeHtml(path) + '">' + escapeHtml(ServerSyncShared.getFileName(path)) + '</div>' +
+                                '<div class="serversync-item-path">' + escapeHtml(path) + '</div>' +
                             '</div>';
                     }
                 },
@@ -498,7 +484,7 @@ export default function (view) {
                     key: 'details',
                     label: 'Details',
                     type: 'custom',
-                    className: 'pt-cell-details',
+                    className: 'serversync-details-cell',
                     render: function (item) {
                         var badge = KEPT_BADGES[item.Kept] || KEPT_BADGES.Unknown;
                         var size = item.SourceSizeFormatted || '';
@@ -511,7 +497,7 @@ export default function (view) {
         });
         var bulk = keptTable.getBulkActionsContainer();
         if (bulk) {
-            bulk.innerHTML = '<button is="emby-button" type="button" id="btnUnkeepCopies" class="raised jpk-button-submit jpk-button-small keptBulkButton" title="Turn the selected copies back into links" disabled>' +
+            bulk.innerHTML = '<button is="emby-button" type="button" id="btnUnkeepCopies" class="raised jpk-button-submit jpk-button-small serversync-kept-bulk-button" disabled>' +
                 '<span class="material-icons" aria-hidden="true">link</span><span>Turn Back Into Links</span></button>';
             bulk.querySelector('#btnUnkeepCopies').addEventListener('click', unkeepSelected);
         }
@@ -538,6 +524,8 @@ export default function (view) {
             var table = ensureKeptTable();
             if (!table) return;
             keptRows = {};
+            // Leaving the page disconnected the scroll observer, so showing the table again connects it.
+            table.reconnectObserver();
             table.clearSelection();
             table.setFilterValue(key);
             table.reload();
@@ -550,6 +538,7 @@ export default function (view) {
             setVisible('keptCopiesSection', true);
             var table = ensureKeptTable();
             if (table) {
+                table.reconnectObserver();
                 table.setFilterValue(key);
                 table.reload();
             }
@@ -576,28 +565,23 @@ export default function (view) {
                     var reason = s.Reason || 'Skipped';
                     reasons[reason] = (reasons[reason] || 0) + 1;
                 });
-                lines.push(skipped.length + ' skipped:');
-                Object.keys(reasons).forEach(function (reason) {
-                    lines.push(reasons[reason] + ' – ' + reason);
-                });
+                lines.push(skipped.length + ' skipped. ' + Object.keys(reasons).map(function (reason) {
+                    return reason + ' (' + reasons[reason] + ')';
+                }).join(', ') + '.');
                 if (picked > 0) {
                     lines.push('Copies covered by an Always Keep pick stay copies. Remove the pick under Always Keep on this tab instead.');
                 }
             }
-            ServerSyncShared.showAlert(lines.join('\n'));
+            ServerSyncShared.setStatus('keptCopiesStatus', lines.join(' '), false, { timeout: 15000 });
         }, function (err) {
             console.error('Unkeep failed:', err);
-            ServerSyncShared.showAlert('Failed to turn the copies back into links');
+            ServerSyncShared.setStatus('keptCopiesStatus', 'Could not turn the copies back into links.', true, { timeout: 10000 });
         }).then(function () {
             keptTable.clearSelection();
             keptRows = {};
             keptTable.reload();
         });
     }
-
-    // ============================================
-    // PAGE INITIALIZATION
-    // ============================================
 
     function loadConfig() {
         ServerSyncShared.getConfig().then(function (config) {
@@ -610,7 +594,7 @@ export default function (view) {
             setVisible('storageFiltersOnly', on && !contentOn);
             setVisible('storageContent', on);
             var libraries = getEl('storageLibrariesContainer');
-            if (libraries) libraries.classList.toggle('storageFiltersOnly', !contentOn);
+            if (libraries) libraries.classList.toggle('serversync-filters-only', !contentOn);
             if (!on) {
                 clearCards();
                 return;
@@ -619,7 +603,7 @@ export default function (view) {
             renderLibraries();
             reloadKeptCopies();
         }).catch(function () {
-            Dashboard.alert('Failed to load plugin configuration');
+            ServerSyncShared.setStatus('storageStatus', 'Could not load the storage settings. Reload the page.', true, { timeout: 0 });
         });
     }
 

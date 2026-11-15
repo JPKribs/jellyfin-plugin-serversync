@@ -20,7 +20,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// <summary>
 /// Applies a content hint: a file appeared on the origin. The content refresh task builds the row the
 /// scan would, which respects the approval mode, and when the row is queued the download task fetches
-/// the file the way a run would. A file a higher priority server already tracks is left to that
+/// the file the way a run would. A file a higher ranked server already tracks is left to that
 /// server. Replacements and removals are not hinted and stay with the scheduled Sync Content task.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]

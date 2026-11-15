@@ -36,7 +36,7 @@ public interface ILinkAccess
 /// Asks the source whether a user here may play one of this server's links, before Jellyfin starts on
 /// it, so a refusal shows when they press play rather than partway into the stream. When the link's own
 /// server is down, full, or refuses, the other servers this one pulls from that map the same folder are
-/// asked for the same file, by its path there and its size, and the highest in priority that allows it
+/// asked for the same file, by its path there and its size, and the highest ranked that allows it
 /// is used. A server that did not answer a moment ago is passed over, and the others are asked together
 /// once the link's own server is slow to answer, so a dead server never holds up play.
 /// </summary>
@@ -52,6 +52,15 @@ public sealed class LinkAccess : ILinkAccess
     private readonly LinkHealth _health;
     private readonly TimeSpan _hedge;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkAccess"/> class.
+    /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="health">Which servers are down.</param>
+    /// <param name="grants">The plays in progress, or null to apply no limits of this server.</param>
     public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health, LinkGrants? grants = null)
         : this(configManager, clientFactory, applicationHost, logger, health, Hedge)
     {
@@ -64,7 +73,15 @@ public sealed class LinkAccess : ILinkAccess
     /// </summary>
     public LinkGrants? Grants { get; set; }
 
-    /// <summary>Initializes a new instance of the <see cref="LinkAccess"/> class, for tests.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkAccess"/> class, for tests.
+    /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="health">Which servers are down.</param>
+    /// <param name="hedge">How long the link's own server has before others are asked.</param>
     public LinkAccess(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<LinkAccess> logger, LinkHealth health, TimeSpan hedge)
     {
         _configManager = configManager;
@@ -81,6 +98,9 @@ public sealed class LinkAccess : ILinkAccess
     public static TimeSpan Hedge { get; } = TimeSpan.FromSeconds(2);
 
     /// <summary>The source user this server maps a local user to on that server's entry, or null.</summary>
+    /// <param name="server">The server entry.</param>
+    /// <param name="localUserId">The local user, or null.</param>
+    /// <returns>The source user's id, or null.</returns>
     public static string? SourceUserFor(SourceServer server, Guid? localUserId)
     {
         ArgumentNullException.ThrowIfNull(server);
@@ -90,6 +110,8 @@ public sealed class LinkAccess : ILinkAccess
     }
 
     /// <summary>The configured entry a link streams from, when it is still configured and on.</summary>
+    /// <param name="link">The link.</param>
+    /// <returns>The server entry, or null.</returns>
     public SourceServer? ServerFor(LinkEntry link)
     {
         ArgumentNullException.ThrowIfNull(link);
@@ -159,7 +181,7 @@ public sealed class LinkAccess : ILinkAccess
             }
         }
 
-        // The others are asked together, and answer in priority order.
+        // The others are asked together, and answer in rank order.
         var alsoTried = new List<string>();
         var alternates = LinkFallback.Alternates(config, link).Where(a => !Skipped(a.Server)).ToList();
         var asks = alternates.Select(a => _health.IsDown(a.Server.Key)
@@ -238,7 +260,7 @@ public sealed class LinkAccess : ILinkAccess
         for (var i = 0; i < alternates.Count; i++)
         {
             var answer = await asks[i].ConfigureAwait(false);
-            _logger.LogDebug("'{Server}' cannot stand in for the link {Path}: {Reason}", alternates[i].Server.DisplayName, link.LinkPath, answer.Reason);
+            _logger.LogDebug("'{Server}' cannot stand in for the link {Path}: {Reason}", FormatUtilities.SanitizeForLog(alternates[i].Server.DisplayName), FormatUtilities.SanitizeForLog(link.LinkPath), FormatUtilities.SanitizeForLog(answer.Reason, 300));
             alsoTried.Add(alternates[i].Server.DisplayName);
             firstRefusal ??= answer.Reason;
         }

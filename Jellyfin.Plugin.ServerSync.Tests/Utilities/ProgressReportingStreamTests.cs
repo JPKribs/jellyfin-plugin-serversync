@@ -7,6 +7,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 
+/// <summary>
+/// The progress stream reports bytes written as a fraction of the expected size, in whole percent steps.
+/// </summary>
 public class ProgressReportingStreamTests
 {
     private sealed class CapturingProgress : IProgress<double>

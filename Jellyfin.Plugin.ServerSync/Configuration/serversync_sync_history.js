@@ -1,10 +1,17 @@
-// ============================================
-// SERVER SYNC PLUGIN - SYNC PAGE: HISTORY VIEW
-// ============================================
+// serversync_sync_history.js
 // The History Sync table and its detail modal. Built by serversync_sync.js from the page context
 // and the table kit in serversync_sync_table.js.
-// ============================================
 
+// createHistorySyncTableModule
+// Builds the History Sync view: its table, status counts, health figures, and detail modal.
+//
+// Inputs
+// ctx [object]: The page context from serversync_sync.js.
+// kit [object]: The table kit from createSyncTableKit.
+//
+// Output
+// [object]: The view's module, with table, currentConfig, init, loadAll, loadStatus, loadItems, and the
+// modal and bulk actions.
 export function createHistorySyncTableModule(ctx, kit) {
     'use strict';
 
@@ -15,10 +22,6 @@ export function createHistorySyncTableModule(ctx, kit) {
     var setHealthLastSync = kit.setHealthLastSync;
     var setHealthCount = kit.setHealthCount;
     var showObjectVersion = kit.showObjectVersion;
-
-    // ============================================
-    // HISTORY SYNC TABLE MODULE
-    // ============================================
 
     var HistorySyncTableModule = createSyncTableModule({
         name: 'History',
@@ -36,8 +39,10 @@ export function createHistorySyncTableModule(ctx, kit) {
         },
         taskNoun: 'history',
         singularNoun: 'Item',
-        pluralNoun: 'item(s)',
-        retryNoun: 'history item(s)',
+        nounOne: 'item',
+        nounMany: 'items',
+        retryOne: 'history item',
+        retryMany: 'history items',
         failNoun: 'items',
         filterStatuses: ['Synced', 'Queued', 'Pending', 'Errored', 'Ignored'],
         emptyMessage: 'No history items found. Run a refresh to scan for watch history.',
@@ -59,10 +64,10 @@ export function createHistorySyncTableModule(ctx, kit) {
                     key: 'details',
                     label: 'Changes',
                     type: 'custom',
-                    className: 'pt-cell-details',
+                    className: 'serversync-details-cell',
                     render: function(item) {
                         if (!item.HasChanges) {
-                            return '<span class="jpk-badge gray">No changes</span>';
+                            return '<span class="jpk-badge gray">No Changes</span>';
                         }
 
                         var details = [];
@@ -109,7 +114,7 @@ export function createHistorySyncTableModule(ctx, kit) {
 
                 var statusBadge = view.querySelector('#historyModalStatusBadge');
                 statusBadge.textContent = item.Status;
-                statusBadge.className = 'itemModal-statusBadge ' + item.Status;
+                statusBadge.className = 'jpk-table-status-badge ' + item.Status;
 
                 var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';
@@ -229,7 +234,7 @@ export function createHistorySyncTableModule(ctx, kit) {
                 var merged = (mergedValue === null || mergedValue === undefined) ? null : mergedValue;
                 var local = (localValue === null || localValue === undefined) ? null : localValue;
 
-                row.classList.toggle('historySyncModal-changedRow', merged !== local);
+                row.classList.toggle('serversync-modal-changed-row', merged !== local);
             },
 
             // Finds the user mapping a row was synced through. Only the mappings of the row's own server are

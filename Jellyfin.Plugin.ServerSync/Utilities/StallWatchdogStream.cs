@@ -25,7 +25,7 @@ public sealed class StallWatchdogStream : Stream
     private readonly Action _onProgress;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="StallWatchdogStream"/> class.
     /// </summary>
     /// <param name="inner">Source stream. Not disposed by this wrapper.</param>
     /// <param name="onProgress">Called after every read that returned at least one byte.</param>

@@ -1,4 +1,5 @@
-<!-- SETTINGS - PAGE -->
+<!-- serversync_settings.html -->
+<!-- The Settings tab, with bandwidth, processing, the whitelist, one section for each sync type, and table resets. -->
 
 <div id="ServerSyncSettingsPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs"
      data-require="emby-input,emby-button,emby-select,emby-checkbox"
@@ -8,14 +9,15 @@
             <form id="ServerSyncSettingsForm">
                 <div class="verticalSection verticalSection-extrabottompadding">
 
-                    <!-- SECTION: Configuration Header -->
+                    <!-- Settings Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
                         <h1 class="sectionTitle">Settings</h1>
                     </div>
-                    <div class="fieldDescription mb-md">How this server sends changes and who may call it. Each section saves on its own.</div>
+                    <div class="fieldDescription serversync-mb-md">Sets how this server sends changes and who may call it. Each section saves on its own.</div>
+                    <div id="settingsStatus" class="jpk-status-text" role="status"></div>
 
-                    <!-- COLLAPSIBLE SECTION: Bandwidth -->
+                    <!-- Bandwidth -->
 
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="bandwidthConfigContent">
@@ -23,7 +25,7 @@
                             <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
                         <div id="bandwidthConfigContent" class="jpk-collapsible-content collapsed">
-                            <div class="fieldDescription mb-md">How fast files move: downloads to this server, and what it sends to each server allowed to link.</div>
+                            <div class="fieldDescription serversync-mb-md">Sets how fast files move to this server and to each server allowed to link.</div>
 
                             <div class="checkboxContainer checkboxContainer-withDescription">
                                 <label class="emby-checkbox-label">
@@ -33,23 +35,24 @@
                                 <div class="fieldDescription checkboxFieldDescription">Use other speeds during set hours.</div>
                             </div>
 
-                            <div class="ssFormTable ssFormTable3 ssBandwidth mb-md" id="bandwidthTable">
-                                <div class="ssFormRow ssFormHead"><span></span><span>Normal</span><span class="ssScheduleCell">Scheduled</span></div>
-                                <div class="ssFormRow"><span class="ssFormLabel">Downloads<span class="ssFormHint">Shared by every download to here</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtMaxDownloadSpeed" min="0" class="ssFormInput" /><span class="ssUnit">Mbps</span></span><span class="ssFormCell ssScheduleCell"><input is="emby-input" type="number" id="txtScheduledDownloadSpeed" min="0" class="ssFormInput" /><span class="ssUnit">Mbps</span></span></div>
+                            <div class="serversync-form-table serversync-form-table3 serversync-bandwidth serversync-mb-md" id="bandwidthTable">
+                                <div class="serversync-form-row serversync-form-head"><span></span><span>Normal</span><span class="serversync-schedule-cell">Scheduled</span></div>
+                                <div class="serversync-form-row"><span class="serversync-form-label">Downloads<span class="serversync-form-hint">Shared by every download to here</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtMaxDownloadSpeed" min="0" class="serversync-form-input" /><span class="serversync-unit">Mbps</span></span><span class="serversync-form-cell serversync-schedule-cell"><input is="emby-input" type="number" id="txtScheduledDownloadSpeed" min="0" class="serversync-form-input" /><span class="serversync-unit">Mbps</span></span></div>
                                 <div id="streamSpeedRows"></div>
-                                <div class="ssFormRow ssScheduleRow"><span class="ssFormLabel">Hours<span class="ssFormHint">Server time. 22 to 6 runs overnight; equal hours run all day</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtScheduledStartHour" min="0" max="23" class="ssFormInput" /><span class="ssUnit">to</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtScheduledEndHour" min="0" max="24" class="ssFormInput" /></span></div>
+                                <div class="serversync-form-row serversync-schedule-row"><span class="serversync-form-label">Hours<span class="serversync-form-hint">Uses the server's clock. 22 to 6 runs overnight. Equal hours run all day.</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtScheduledStartHour" min="0" max="23" class="serversync-form-input" /><span class="serversync-unit">to</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtScheduledEndHour" min="0" max="24" class="serversync-form-input" /></span></div>
                             </div>
-                            <div class="fieldDescription mb-md">0 is no limit. Set stream speeds above your files' bitrate, or playback buffers. A user mapping can set a lower one.</div>
+                            <div class="fieldDescription serversync-mb-md">Set stream speeds above your files' bitrate, or playback buffers. 0 is no limit, and a user mapping can set a lower one.</div>
 
                             <div class="jpk-collapsible-actions">
                                 <button is="emby-button" type="button" id="btnSaveBandwidth" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="saveBandwidthStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- COLLAPSIBLE SECTION: Processing -->
+                    <!-- Processing -->
 
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="processingConfigContent">
@@ -57,40 +60,40 @@
                             <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
                         <div id="processingConfigContent" class="jpk-collapsible-content collapsed">
-                            <div class="fieldDescription mb-md">How much work runs at once and how fast changes are sent.</div>
+                            <div class="fieldDescription serversync-mb-md">Sets how much work runs at once and how fast changes are sent.</div>
 
                             <div id="hintSettings">
                             <div class="inputContainer">
                                 <label for="txtHintDebounceSeconds">Send Changes After (seconds)</label>
                                 <input is="emby-input" type="number" id="txtHintDebounceSeconds" min="1" max="3600" />
-                                <div class="fieldDescription">Quiet time after an edit before it is sent.</div>
+                                <div class="fieldDescription">Waits for an item to go untouched this long before its hint goes out.</div>
                             </div>
 
                             <h3 class="jpk-subsection-title">Change Retries</h3>
-                            <div class="ssFormTable ssFormTable3 mb-md">
-                                <div class="ssFormRow ssFormHead"><span>Setting</span><span>No Answer</span><span>Refused</span></div>
-                                <div class="ssFormRow"><span class="ssFormLabel">First wait<span class="ssFormHint">No Answer doubles each try</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRetrySeconds" min="5" max="3600" class="ssFormInput" /><span class="ssUnit">sec</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRefusedRetryMinutes" min="1" max="1440" class="ssFormInput" /><span class="ssUnit">min</span></span></div>
-                                <div class="ssFormRow"><span class="ssFormLabel">Longest wait</span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRetryMaxMinutes" min="1" max="1440" class="ssFormInput" /><span class="ssUnit">min</span></span><span class="ssFormCell ssFormNone">Fixed</span></div>
-                                <div class="ssFormRow"><span class="ssFormLabel">Max tries<span class="ssFormHint">0 retries forever</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintMaxRetries" min="0" max="1000" class="ssFormInput" /><span class="ssUnit"></span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtHintRefusedMaxRetries" min="0" max="1000" class="ssFormInput" /><span class="ssUnit"></span></span></div>
+                            <div class="serversync-form-table serversync-form-table3 serversync-mb-md">
+                                <div class="serversync-form-row serversync-form-head"><span>Setting</span><span>No Answer</span><span>Refused</span></div>
+                                <div class="serversync-form-row"><span class="serversync-form-label">First Wait<span class="serversync-form-hint">No Answer doubles each try</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRetrySeconds" min="5" max="3600" class="serversync-form-input" /><span class="serversync-unit">sec</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRefusedRetryMinutes" min="1" max="1440" class="serversync-form-input" /><span class="serversync-unit">min</span></span></div>
+                                <div class="serversync-form-row"><span class="serversync-form-label">Longest Wait</span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRetryMaxMinutes" min="1" max="1440" class="serversync-form-input" /><span class="serversync-unit">min</span></span><span class="serversync-form-cell serversync-form-none">Fixed</span></div>
+                                <div class="serversync-form-row"><span class="serversync-form-label">Max Tries<span class="serversync-form-hint">0 retries forever</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintMaxRetries" min="0" max="1000" class="serversync-form-input" /><span class="serversync-unit"></span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtHintRefusedMaxRetries" min="0" max="1000" class="serversync-form-input" /><span class="serversync-unit"></span></span></div>
                             </div>
                             </div>
 
                             <div class="inputContainer">
                                 <label for="txtMaxRetryCount">Failed Item Retries</label>
                                 <input is="emby-input" type="number" id="txtMaxRetryCount" min="1" max="10" />
-                                <div class="fieldDescription">Tries for a failed download or item within one run. One that still fails is tried again on the next run. 1 to 10.</div>
+                                <div class="fieldDescription">Sets the tries for a failed download or item within one run. One that still fails is tried again on the next run. 1 to 10.</div>
                             </div>
 
                             <div class="inputContainer">
                                 <label for="txtRefreshParallelism">Refresh Parallelism</label>
                                 <input is="emby-input" type="number" id="txtRefreshParallelism" min="1" max="16" />
-                                <div class="fieldDescription">Metadata and People items at once.</div>
+                                <div class="fieldDescription">Sets how many Metadata and People items refresh at once.</div>
                             </div>
 
                             <div class="inputContainer">
                                 <label for="txtFullScanIntervalHours">Full Scan Every (hours)</label>
                                 <input is="emby-input" type="number" id="txtFullScanIntervalHours" min="0" max="720" />
-                                <div class="fieldDescription">Read everything this often. 0 makes every scan a full scan.</div>
+                                <div class="fieldDescription">Checks everything this often. 0 makes every scan a full scan.</div>
                             </div>
 
                             <div class="checkboxContainer checkboxContainer-withDescription">
@@ -105,9 +108,12 @@
                                 <button is="emby-button" type="button" id="btnSaveProcessing" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="saveProcessingStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
+
+                    <!-- Whitelist -->
 
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="callerAccessContent">
@@ -115,14 +121,14 @@
                             <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
                         <div id="callerAccessContent" class="jpk-collapsible-content collapsed">
-                            <div class="fieldDescription mb-md">Who may call the sync endpoints. An administrator or API key calling from an enabled server's address always may.</div>
+                            <div class="fieldDescription serversync-mb-md">Limits who may call this server's sync routes. An administrator or API Key calling from an enabled server's address always may.</div>
 
-                            <div class="ssFormTable ssGrantTable mb-md">
-                                <div class="ssGrantRow ssFormHead"><span>User</span><span>Locations</span><span></span></div>
+                            <div class="serversync-form-table serversync-grant-table serversync-mb-md">
+                                <div class="serversync-grant-row serversync-form-head"><span>User</span><span>Locations</span><span></span></div>
                                 <div id="callerGrants"></div>
-                                <div class="ssRoleNote">Hosts, URLs, IPs, or ranges, separated by commas. Empty allows every location.</div>
+                                <div class="serversync-role-note">Accepts hosts, URLs, IPs, or ranges, separated by commas. Empty allows every location.</div>
                             </div>
-                            <div class="ssGrantAdd">
+                            <div class="serversync-grant-add">
                                 <button is="emby-button" type="button" id="btnAddCallerGrant" class="raised jpk-secondary jpk-button-small">
                                     <span>Add User</span>
                                 </button>
@@ -132,18 +138,19 @@
                                 <button is="emby-button" type="button" id="btnSaveCallerAccess" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="saveCallerAccessStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- SECTION: Synchronization Header -->
+                    <!-- Synchronization Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
                         <h1 class="sectionTitle">Synchronization</h1>
                     </div>
-                    <div class="fieldDescription mb-md">What each sync type copies and who can use it.</div>
+                    <div class="fieldDescription serversync-mb-md">Sets what each sync type copies and who can use it.</div>
 
-                    <!-- COLLAPSIBLE SECTION: Content Sync Settings -->
+                    <!-- Content -->
 
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="contentSyncSettingsContent">
@@ -153,7 +160,7 @@
                         <div id="contentSyncSettingsContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Enable Content Sync -->
-                            <div class="settingsGroup">
+                            <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableContentSync" />
@@ -161,22 +168,22 @@
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription">Copies or links the media files of mapped libraries to this server.</div>
                                 </div>
-                                <div class="ssRoleTable">
-                                    <div class="ssRoleRow ssRoleHead"><span>Permission</span><span>User</span><span>Admin</span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Libraries the key's user can see</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Every library</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Folder paths in the library picker</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">File downloads</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">New files as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleNote">Signed in users need Allow media downloading. Limited live changes need the user on that server's whitelist.</div>
+                                <div class="serversync-role-table">
+                                    <div class="serversync-role-row serversync-role-head"><span>Permission</span><span>User</span><span>Admin</span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Libraries the key's user can see</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Every library</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Folder paths in the library picker</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">File downloads</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">New files as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-note">Signed in users need Allow media downloading. Limited live changes need the user on that server's whitelist.</div>
                                 </div>
                             </div>
 
                             <div id="contentSyncOptions">
 
-                                <!-- Sync Parameters Subsection -->
+                                <!-- Sync Parameters -->
                                 <h3 class="jpk-subsection-title">Sync Parameters</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkDetectUpdatedFiles" />
@@ -210,13 +217,13 @@
                                 </div>
 
                                 <h3 class="jpk-subsection-title">Approvals</h3>
-                                <div class="settingsGroup">
-                                    <div class="ssFormTable ssFormTable2 mb-md">
-                                        <div class="ssFormRow ssFormHead"><span>Change</span><span>Action</span></div>
-                                        <div class="ssFormRow"><span class="ssFormLabel">New files<span class="ssFormHint">Missing here</span></span><span class="ssFormCell"><select is="emby-select" id="selDownloadNewContentMode" class="emby-select-withcolor emby-select ssFormSelect"><option value="Enabled">Enabled</option><option value="RequireApproval">Require Approval</option><option value="Disabled">Disabled</option></select></span></div>
-                                        <div class="ssFormRow"><span class="ssFormLabel">Changed files<span class="ssFormHint">Differ from the source</span></span><span class="ssFormCell"><select is="emby-select" id="selReplaceExistingContentMode" class="emby-select-withcolor emby-select ssFormSelect"><option value="Enabled">Enabled</option><option value="RequireApproval">Require Approval</option><option value="Disabled">Disabled</option></select></span></div>
-                                        <div class="ssFormRow"><span class="ssFormLabel">Removed files<span class="ssFormHint">Gone from the source</span></span><span class="ssFormCell"><select is="emby-select" id="selMissingContent" class="emby-select-withcolor emby-select ssFormSelect"><option value="Keep">Keep</option><option value="Delete">Delete</option><option value="DeleteAfterApproval">Delete After Approval</option><option value="Ignore">Ignore</option></select></span></div>
-                                        <div class="ssRoleNote">Ignore keeps the files and hides an emptied movie or show folder with a .ignore file. Uncertain deletions always wait for approval.</div>
+                                <div class="serversync-settings-group">
+                                    <div class="serversync-form-table serversync-mb-md">
+                                        <div class="serversync-form-row serversync-form-head"><span>Change</span><span>Action</span></div>
+                                        <div class="serversync-form-row"><span class="serversync-form-label">New Files<span class="serversync-form-hint">Missing here</span></span><span class="serversync-form-cell"><select is="emby-select" id="selDownloadNewContentMode" class="emby-select-withcolor emby-select serversync-form-select"><option value="Enabled">Enabled</option><option value="RequireApproval">Require Approval</option><option value="Disabled">Disabled</option></select></span></div>
+                                        <div class="serversync-form-row"><span class="serversync-form-label">Changed Files<span class="serversync-form-hint">Differ from the source</span></span><span class="serversync-form-cell"><select is="emby-select" id="selReplaceExistingContentMode" class="emby-select-withcolor emby-select serversync-form-select"><option value="Enabled">Enabled</option><option value="RequireApproval">Require Approval</option><option value="Disabled">Disabled</option></select></span></div>
+                                        <div class="serversync-form-row"><span class="serversync-form-label">Removed Files<span class="serversync-form-hint">Gone from the source</span></span><span class="serversync-form-cell"><select is="emby-select" id="selMissingContent" class="emby-select-withcolor emby-select serversync-form-select"><option value="Keep">Keep</option><option value="Delete">Delete</option><option value="DeleteAfterApproval">Delete After Approval</option><option value="Ignore">Ignore</option></select></span></div>
+                                        <div class="serversync-role-note">Ignore keeps the files and hides an emptied movie or show folder with a .ignore file. Uncertain deletions always wait for approval.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -231,13 +238,13 @@
                                         <div class="inputContainer">
                                             <label for="txtRecyclingBinPath">Recycling Bin Path</label>
                                             <input is="emby-input" type="text" id="txtRecyclingBinPath" />
-                                            <div class="fieldDescription">Folder for the bin.</div>
+                                            <div class="fieldDescription">Sets the folder for the bin.</div>
                                         </div>
 
                                         <div class="inputContainer">
                                             <label for="txtRecyclingBinRetentionDays">Keep For (days)</label>
                                             <input is="emby-input" type="number" id="txtRecyclingBinRetentionDays" min="1" max="365" />
-                                            <div class="fieldDescription">Days before a file in the bin is deleted. 1 to 365.</div>
+                                            <div class="fieldDescription">Keeps a file in the bin this many days before it is deleted. 1 to 365.</div>
                                         </div>
                                     </div>
 
@@ -250,25 +257,25 @@
                                     </div>
                                 </div>
 
-                                <!-- Download Preferences Subsection -->
+                                <!-- Downloads -->
                                 <h3 class="jpk-subsection-title">Downloads</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="inputContainer">
                                         <label for="txtMaxConcurrentDownloads">Downloads At Once</label>
                                         <input is="emby-input" type="number" id="txtMaxConcurrentDownloads" min="1" max="10" />
-                                        <div class="fieldDescription">Files downloaded at the same time. 1 to 10.</div>
+                                        <div class="fieldDescription">Sets how many files download at the same time. 1 to 10.</div>
                                     </div>
 
                                     <div class="inputContainer">
                                         <label for="txtTempDownloadPath">Temporary Folder</label>
                                         <input is="emby-input" type="text" id="txtTempDownloadPath" placeholder="Default" />
-                                        <div class="fieldDescription">Empty uses a serversync folder in Jellyfin's cache folder.</div>
+                                        <div class="fieldDescription">Sets where downloads wait before they move into place. Empty uses a serversync folder in Jellyfin's cache folder.</div>
                                     </div>
 
                                     <div class="inputContainer">
                                         <label for="txtMinFreeDiskSpace">Minimum Free Space (GB)</label>
                                         <input is="emby-input" type="number" id="txtMinFreeDiskSpace" min="0" max="1000" />
-                                        <div class="fieldDescription">Free space kept on the library's disk. A file that would leave less is not downloaded.</div>
+                                        <div class="fieldDescription">Keeps this much space free on the library's disk. A file that would leave less is not downloaded.</div>
                                     </div>
 
                                     <h3 class="jpk-subsection-title">Links</h3>
@@ -288,15 +295,15 @@
                                         <div class="fieldDescription checkboxFieldDescription">Stream a link's direct play from its source per user, so two viewers are counted apart. Turn off if a player cannot direct play links.</div>
                                     </div>
 
-                                    <div class="ssFormTable ssFormTable2 mb-md" id="linkStreamsTable">
-                                        <div class="ssFormRow ssFormHead"><span>Link streams</span><span>At once</span></div>
-                                        <div class="ssFormRow"><span class="ssFormLabel">All servers<span class="ssFormHint">Links this server streams at once, in all</span></span><span class="ssFormCell"><input is="emby-input" type="number" id="txtLinkMaxStreamsTotal" min="0" max="1000" class="ssFormInput" /></span></div>
+                                    <div class="serversync-form-table serversync-mb-md" id="linkStreamsTable">
+                                        <div class="serversync-form-row serversync-form-head"><span>Link Streams</span><span>At Once</span></div>
+                                        <div class="serversync-form-row"><span class="serversync-form-label">All servers<span class="serversync-form-hint">Links this server streams at once, in all</span></span><span class="serversync-form-cell"><input is="emby-input" type="number" id="txtLinkMaxStreamsTotal" min="0" max="1000" class="serversync-form-input" /></span></div>
                                         <div id="linkTakeRows"></div>
                                     </div>
-                                    <div class="fieldDescription mb-md">0 is no limit. When several servers hold a film, the highest in the Servers list streams it while it is doing nothing else for this server, and otherwise the one with the most streams free. A server at its limit here is passed over. A link that plays from the link cache is not counted.</div>
+                                    <div class="fieldDescription serversync-mb-md">Streams a film from the highest ranked server that is idle for this server, or else the one with the most streams free. 0 is no limit.</div>
 
                                     <h3 class="jpk-subsection-title">Link Cache</h3>
-                                    <div class="fieldDescription mb-md">Local copies of played links and upcoming episodes, which play from here even while the source is down. Each library can opt out on the Storage tab.</div>
+                                    <div class="fieldDescription serversync-mb-md">Keeps local copies of played links and upcoming episodes, which play from here even while the source is down. Each library can opt out on the Storage tab.</div>
                                     <div class="selectContainer">
                                         <label for="selLinkCacheSizing">Cache Size</label>
                                         <select is="emby-select" id="selLinkCacheSizing">
@@ -305,7 +312,7 @@
                                             <option value="Fixed">Use up to a fixed amount</option>
                                             <option value="Percent">Use a percentage of available space</option>
                                         </select>
-                                        <div class="fieldDescription">Most disk the cache may use, across all servers. Available space is what the cache holds plus what is free on its disk, less Minimum Free Space. Off empties the cache.</div>
+                                        <div class="fieldDescription">Sets the most disk the cache may use, across all servers. Available space is what the cache holds plus what is free on its disk, less Minimum Free Space. Off empties the cache.</div>
                                     </div>
                                     <div class="inputContainer" id="linkCacheFixedRow">
                                         <label for="txtLinkCacheSizeGb">Fixed Amount (GB)</label>
@@ -315,23 +322,23 @@
                                     <div class="inputContainer" id="linkCachePercentRow">
                                         <label for="txtLinkCachePercent">Share of Available Space (%)</label>
                                         <input is="emby-input" type="number" id="txtLinkCachePercent" min="1" max="100" />
-                                        <div class="fieldDescription">Share of the available space the cache may use. 1 to 100.</div>
+                                        <div class="fieldDescription">Sets the share of the available space the cache may use. 1 to 100.</div>
                                     </div>
                                     <div id="linkCacheOptions">
                                     <div class="inputContainer">
                                         <label for="txtLinkCachePath">Cache Location</label>
                                         <input is="emby-input" type="text" id="txtLinkCachePath" placeholder="Default" />
-                                        <div class="fieldDescription">Files go in a serversync-links folder here. Empty uses Jellyfin's cache folder. Changing it empties the old location.</div>
+                                        <div class="fieldDescription">Keeps files in a serversync-links folder here. Empty uses Jellyfin's cache folder. Changing it empties the old location.</div>
                                     </div>
                                     <div class="inputContainer">
                                         <label for="txtLinkCacheRetentionDays">Cache Retention (days)</label>
                                         <input is="emby-input" type="number" id="txtLinkCacheRetentionDays" min="0" max="3650" />
-                                        <div class="fieldDescription">Days a file is kept after it was last played, or after it was cached if never played. 0 keeps files until the space is needed.</div>
+                                        <div class="fieldDescription">Keeps a file this many days after it was last played, or after it was cached if never played. 0 keeps files until the space is needed.</div>
                                     </div>
                                     <div class="inputContainer">
                                         <label for="txtLinkCachePreCacheEpisodes">Pre-cache Episodes</label>
                                         <input is="emby-input" type="number" id="txtLinkCachePreCacheEpisodes" min="0" max="50" />
-                                        <div class="fieldDescription">Episodes cached ahead of the one a user is watching. 0 caches none ahead.</div>
+                                        <div class="fieldDescription">Caches this many episodes ahead of the one a user is watching. 0 caches none ahead.</div>
                                     </div>
                                     <div class="selectContainer">
                                         <label for="selLinkCacheRemovalOrder">Removal Order</label>
@@ -341,12 +348,12 @@
                                             <option value="Newest">Newest in the cache first</option>
                                             <option value="Largest">Largest first</option>
                                         </select>
-                                        <div class="fieldDescription">Which file is dropped first when the cache is full.</div>
+                                        <div class="fieldDescription">Decides which file is dropped first when the cache is full.</div>
                                     </div>
                                     </div>
-                                    <div id="linkCacheStatus" class="jpk-neutral mb-md"></div>
+                                    <div id="linkCacheStatus" class="jpk-neutral serversync-mb-md"></div>
                                     <button is="emby-button" type="button" id="btnClearLinkCache" class="raised jpk-button-destructive jpk-button-small">
-                                        <span>Empty the Cache</span>
+                                        <span>Delete Cached Files</span>
                                     </button>
                                 </div>
                             </div>
@@ -355,11 +362,12 @@
                                 <button is="emby-button" type="button" id="btnSaveContentSettings" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="saveContentStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- COLLAPSIBLE SECTION: History Sync Settings -->
+                    <!-- History -->
 
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="historySyncSettingsContent">
@@ -369,7 +377,7 @@
                         <div id="historySyncSettingsContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Enable History Sync -->
-                            <div class="settingsGroup">
+                            <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableHistorySync" />
@@ -377,29 +385,29 @@
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription">Copies played state, progress, play count, last played date, and favorites.</div>
                                 </div>
-                                <div class="ssRoleTable">
-                                    <div class="ssRoleRow ssRoleHead"><span>Permission</span><span>User</span><span>Admin</span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">The key's own user</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Other mapped users</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Two way history</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Changes as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleNote">Limited needs the user on that server's whitelist.</div>
+                                <div class="serversync-role-table">
+                                    <div class="serversync-role-row serversync-role-head"><span>Permission</span><span>User</span><span>Admin</span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">The key's own user</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Other mapped users</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Two way history</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Changes as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-note">Limited needs the user on that server's whitelist.</div>
                                 </div>
                             </div>
 
-                            <div id="historyNeedsMapping" class="jpk-warn hidden mb-md">Add a user mapping on the Servers tab first.</div>
+                            <div id="historyNeedsMapping" class="jpk-warn hidden serversync-mb-md">Add a user mapping on the Servers tab first.</div>
 
                             <div id="historySyncOptions">
 
-                                <!-- Sync Parameters Subsection -->
+                                <!-- Sync Parameters -->
                                 <h3 class="jpk-subsection-title">Sync Parameters</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncPlayedStatus" checked />
                                             <span class="checkboxLabel">Played / Unplayed Status</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Whether an item is played.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies whether an item is played.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -407,7 +415,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncPlaybackPosition" checked />
                                             <span class="checkboxLabel">Playback Position</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Where to resume.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies where to resume.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -415,7 +423,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncPlayCount" checked />
                                             <span class="checkboxLabel">Play Count</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">How often it was played.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies how often it was played.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -423,7 +431,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncLastPlayedDate" checked />
                                             <span class="checkboxLabel">Last Played Date</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">When it was last played.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies when it was last played.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -431,7 +439,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkHistorySyncFavorites" checked />
                                             <span class="checkboxLabel">Favorites</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Whether it is a favorite.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies whether it is a favorite.</div>
                                     </div>
                                 </div>
 
@@ -441,11 +449,12 @@
                                 <button is="emby-button" type="button" id="btnSaveHistorySettings" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="saveHistoryStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- COLLAPSIBLE SECTION: Metadata Sync Settings -->
+                    <!-- Metadata -->
 
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="metadataSyncSettingsContent">
@@ -454,7 +463,7 @@
                         </button>
                         <div id="metadataSyncSettingsContent" class="jpk-collapsible-content collapsed">
                             <!-- Enable Metadata Sync -->
-                            <div class="settingsGroup">
+                            <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableMetadataSync" />
@@ -462,39 +471,39 @@
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription">Copies titles, descriptions, ratings, and images.</div>
                                 </div>
-                                <div class="ssRoleTable">
-                                    <div class="ssRoleRow ssRoleHead"><span>Permission</span><span>User</span><span>Admin</span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Items the key's user can see</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Every item</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Newest edit wins on conflicts</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Changes as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleNote">Limited needs the user on that server's whitelist.</div>
+                                <div class="serversync-role-table">
+                                    <div class="serversync-role-row serversync-role-head"><span>Permission</span><span>User</span><span>Admin</span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Items the key's user can see</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Every item</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Newest edit wins on conflicts</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Changes as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-note">Limited needs the user on that server's whitelist.</div>
                                 </div>
                             </div>
 
                             <div id="metadataSyncOptions">
 
                                 <h3 class="jpk-subsection-title">Several Servers</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="selectContainer">
                                         <label for="selMetadataSyncPrecedence">Precedence</label>
                                         <select is="emby-select" id="selMetadataSyncPrecedence">
                                             <option value="Newest">Newest</option>
                                             <option value="Rank">Ranked</option>
                                         </select>
-                                        <div class="fieldDescription">Ranked follows the Servers tab order.</div>
+                                        <div class="fieldDescription">Decides which server speaks for an item that several servers hold. Ranked follows the Servers tab order.</div>
                                     </div>
                                 </div>
 
-                                <!-- Sync Parameters Subsection -->
+                                <!-- Sync Parameters -->
                                 <h3 class="jpk-subsection-title">Sync Parameters</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncMetadata" checked />
                                             <span class="checkboxLabel">Metadata</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Title, overview, ratings, dates, and ids.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies the title, overview, ratings, dates, and ids.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -502,7 +511,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncGenres" checked />
                                             <span class="checkboxLabel">Genres</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Genres.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies each item's genres.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -510,7 +519,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncTags" checked />
                                             <span class="checkboxLabel">Tags</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Tags.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies each item's tags.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -518,15 +527,15 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncStudios" checked />
                                             <span class="checkboxLabel">Studios</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Studios.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies each item's studios.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncPeople" />
-                                            <span class="checkboxLabel">Cast &amp; Crew</span>
+                                            <span class="checkboxLabel">People</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Who appears in each item. Can be slow.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies who appears in each item. Can be slow.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -534,7 +543,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkMetadataSyncImages" checked />
                                             <span class="checkboxLabel">Images</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Posters, backdrops, logos, and more.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies posters, backdrops, logos, and more.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -551,11 +560,12 @@
                                 <button is="emby-button" type="button" id="btnSaveMetadataSettings" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="saveMetadataStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- COLLAPSIBLE SECTION: People Sync Settings -->
+                    <!-- People -->
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="peopleSyncSettingsContent">
                             <span class="jpk-collapsible-title">People</span>
@@ -564,7 +574,7 @@
                         <div id="peopleSyncSettingsContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Enable People Sync -->
-                            <div class="settingsGroup">
+                            <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnablePeopleSync" />
@@ -572,36 +582,36 @@
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription">Copies each person's biography and images, matched by name.</div>
                                 </div>
-                                <div class="ssRoleTable">
-                                    <div class="ssRoleRow ssRoleHead"><span>Permission</span><span>User</span><span>Admin</span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">People in libraries the key's user can see</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Every person</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Changes as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleNote">Limited needs the user on that server's whitelist.</div>
+                                <div class="serversync-role-table">
+                                    <div class="serversync-role-row serversync-role-head"><span>Permission</span><span>User</span><span>Admin</span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">People in libraries the key's user can see</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Every person</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Changes as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-note">Limited needs the user on that server's whitelist.</div>
                                 </div>
                             </div>
 
                             <div id="peopleSyncOptions">
                                 <h3 class="jpk-subsection-title">Several Servers</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="selectContainer">
                                         <label for="selPeopleSyncPrecedence">Precedence</label>
                                         <select is="emby-select" id="selPeopleSyncPrecedence">
                                             <option value="Newest">Newest</option>
                                             <option value="Rank">Ranked</option>
                                         </select>
-                                        <div class="fieldDescription">Ranked follows the Servers tab order.</div>
+                                        <div class="fieldDescription">Decides which server speaks for an item that several servers hold. Ranked follows the Servers tab order.</div>
                                     </div>
                                 </div>
 
                                 <h3 class="jpk-subsection-title">Sync Parameters</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkPeopleSyncImages" checked />
                                             <span class="checkboxLabel">Images</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Each person's photo.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies each person's photo.</div>
                                     </div>
                                 </div>
                             </div>
@@ -610,11 +620,12 @@
                                 <button is="emby-button" type="button" id="btnSavePeopleSettings" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="savePeopleStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- COLLAPSIBLE SECTION: Playlist Sync Settings -->
+                    <!-- Playlists -->
 
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="playlistSyncSettingsContent">
@@ -622,7 +633,7 @@
                             <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
                         <div id="playlistSyncSettingsContent" class="jpk-collapsible-content collapsed">
-                            <div class="settingsGroup">
+                            <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnablePlaylistSync" />
@@ -630,15 +641,15 @@
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription">Copies mapped users' playlists. Needs a user mapping.</div>
                                 </div>
-                                <div class="ssRoleTable">
-                                    <div class="ssRoleRow ssRoleHead"><span>Permission</span><span>User</span><span>Admin</span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Playlists the key's user can see</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Every mapped user's playlists</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Exact owners and shares</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Changes and deletions as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleNote">Limited needs the user on that server's whitelist.</div>
+                                <div class="serversync-role-table">
+                                    <div class="serversync-role-row serversync-role-head"><span>Permission</span><span>User</span><span>Admin</span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Playlists the key's user can see</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Every mapped user's playlists</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Exact owners and shares</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Changes and deletions as they happen</span><span><span class="jpk-badge orange">Limited</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-note">Limited needs the user on that server's whitelist.</div>
                                 </div>
-                                <div id="playlistNeedsMapping" class="jpk-warn hidden mb-md">Add a user mapping on the Servers tab first.</div>
+                                <div id="playlistNeedsMapping" class="jpk-warn hidden serversync-mb-md">Add a user mapping on the Servers tab first.</div>
 
                                 <div id="playlistSyncOptions">
                                     <div class="selectContainer">
@@ -647,7 +658,7 @@
                                             <option value="Newest">Newest</option>
                                             <option value="Rank">Ranked</option>
                                         </select>
-                                        <div class="fieldDescription">Ranked follows the Servers tab order.</div>
+                                        <div class="fieldDescription">Decides which server speaks for an item that several servers hold. Ranked follows the Servers tab order.</div>
                                     </div>
                                     <div class="selectContainer">
                                         <label for="selPlaylistRemovedAction">Removed Playlists</label>
@@ -655,7 +666,7 @@
                                             <option value="Delete">Delete</option>
                                             <option value="Keep">Keep</option>
                                         </select>
-                                        <div class="fieldDescription">When the source deletes a playlist.</div>
+                                        <div class="fieldDescription">Decides what happens to a copy when its source deletes the playlist.</div>
                                     </div>
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
@@ -671,11 +682,12 @@
                                 <button is="emby-button" type="button" id="btnSavePlaylistSettings" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="savePlaylistStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- COLLAPSIBLE SECTION: User Sync Settings -->
+                    <!-- Users -->
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="userSyncSettingsContent">
                             <span class="jpk-collapsible-title">Users</span>
@@ -684,7 +696,7 @@
                         <div id="userSyncSettingsContent" class="jpk-collapsible-content collapsed">
 
                             <!-- Enable User Sync -->
-                            <div class="settingsGroup">
+                            <div class="serversync-settings-group">
                                 <div class="checkboxContainer checkboxContainer-withDescription">
                                     <label class="emby-checkbox-label">
                                         <input type="checkbox" is="emby-checkbox" id="chkEnableUserSync" />
@@ -692,27 +704,27 @@
                                     </label>
                                     <div class="fieldDescription checkboxFieldDescription">Copies each mapped user's policy, configuration, and profile image.</div>
                                 </div>
-                                <div class="ssRoleTable">
-                                    <div class="ssRoleRow ssRoleHead"><span>Permission</span><span>User</span><span>Admin</span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">The key's own user</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">Other mapped users</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
-                                    <div class="ssRoleRow"><span class="ssRoleLabel">As changes happen</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge red">No</span></span></div>
+                                <div class="serversync-role-table">
+                                    <div class="serversync-role-row serversync-role-head"><span>Permission</span><span>User</span><span>Admin</span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">The key's own user</span><span><span class="jpk-badge green">Yes</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">Other mapped users</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge green">Yes</span></span></div>
+                                    <div class="serversync-role-row"><span class="serversync-role-label">As changes happen</span><span><span class="jpk-badge red">No</span></span><span><span class="jpk-badge red">No</span></span></div>
                                 </div>
                             </div>
 
-                            <div id="userNeedsMapping" class="jpk-warn hidden mb-md">Add a user mapping on the Servers tab first.</div>
+                            <div id="userNeedsMapping" class="jpk-warn hidden serversync-mb-md">Add a user mapping on the Servers tab first.</div>
 
                             <div id="userSyncOptions">
 
                                 <h3 class="jpk-subsection-title">Several Servers</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="selectContainer">
                                         <label for="selUserSyncPrecedence">Precedence</label>
                                         <select is="emby-select" id="selUserSyncPrecedence">
                                             <option value="Newest">Newest</option>
                                             <option value="Rank">Ranked</option>
                                         </select>
-                                        <div class="fieldDescription">Ranked follows the Servers tab order.</div>
+                                        <div class="fieldDescription">Decides which server speaks for an item that several servers hold. Ranked follows the Servers tab order.</div>
                                     </div>
                                     <div class="selectContainer">
                                         <label for="selUserSyncConflict">User Conflicts</label>
@@ -721,19 +733,19 @@
                                             <option value="Permissive">Permissive</option>
                                             <option value="Restrictive">Restrictive</option>
                                         </select>
-                                        <div class="fieldDescription">Permissive allows the most. Restrictive allows the least.</div>
+                                        <div class="fieldDescription">Decides a user's permissions when both servers changed them. Other Server takes theirs, Permissive allows the most, and Restrictive allows the least.</div>
                                     </div>
                                 </div>
 
-                                <!-- Sync Parameters Subsection -->
+                                <!-- Sync Parameters -->
                                 <h3 class="jpk-subsection-title">Sync Parameters</h3>
-                                <div class="settingsGroup">
+                                <div class="serversync-settings-group">
                                     <div class="checkboxContainer checkboxContainer-withDescription">
                                         <label class="emby-checkbox-label">
                                             <input type="checkbox" is="emby-checkbox" id="chkUserSyncConfiguration" checked />
                                             <span class="checkboxLabel">User Configuration</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Subtitle, audio, and display preferences.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies subtitle, audio, and display preferences.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -741,7 +753,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkUserSyncPolicy" checked />
                                             <span class="checkboxLabel">User Policy</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Permissions and parental ratings.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies permissions and parental ratings.</div>
                                     </div>
 
                                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -749,7 +761,7 @@
                                             <input type="checkbox" is="emby-checkbox" id="chkUserSyncProfileImage" checked />
                                             <span class="checkboxLabel">Profile Image</span>
                                         </label>
-                                        <div class="fieldDescription checkboxFieldDescription">Profile pictures.</div>
+                                        <div class="fieldDescription checkboxFieldDescription">Copies profile pictures.</div>
                                     </div>
                                 </div>
                             </div>
@@ -758,18 +770,19 @@
                                 <button is="emby-button" type="button" id="btnSaveUserSyncSettings" class="raised jpk-button-submit jpk-button-small">
                                     <span>Save</span>
                                 </button>
+                                <span id="saveUserSyncStatus" class="jpk-status-text" role="status"></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- SECTION: Troubleshooting Header -->
+                    <!-- Troubleshooting Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
                         <h1 class="sectionTitle">Troubleshooting</h1>
                     </div>
-                    <div class="fieldDescription mb-md">Resets forget tracking only. Media is untouched.</div>
+                    <div class="fieldDescription serversync-mb-md">Resets forget tracking only. Media is untouched.</div>
 
-                    <!-- COLLAPSIBLE SECTION: Database -->
+                    <!-- Database -->
 
                     <div class="jpk-collapsible-section">
                         <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="databaseTroubleshootingContent">
@@ -777,13 +790,14 @@
                             <span class="jpk-collapsible-icon">&#9660;</span>
                         </button>
                         <div id="databaseTroubleshootingContent" class="jpk-collapsible-content collapsed">
-                            <div class="fieldDescription mb-md">Resets cannot be undone.</div>
+                            <div class="fieldDescription serversync-mb-md">Resets cannot be undone.</div>
+                            <div id="resetStatus" class="jpk-status-text serversync-mb-md" role="status"></div>
 
-                            <!-- Individual Table Resets -->
+                            <!-- Individual table resets -->
                             <h3 class="jpk-subsection-title">Reset Individual Tables</h3>
-                            <div class="resetButtonGroup">
-                                <div class="resetButtonRow">
-                                    <div class="resetButtonInfo">
+                            <div class="jpk-reset-group">
+                                <div class="jpk-reset-row">
+                                    <div class="jpk-reset-info">
                                         <div>Content Sync</div>
                                         <div class="fieldDescription">Forgets content tracking.</div>
                                     </div>
@@ -791,8 +805,8 @@
                                         <span>Reset</span>
                                     </button>
                                 </div>
-                                <div class="resetButtonRow">
-                                    <div class="resetButtonInfo">
+                                <div class="jpk-reset-row">
+                                    <div class="jpk-reset-info">
                                         <div>History Sync</div>
                                         <div class="fieldDescription">Forgets history tracking.</div>
                                     </div>
@@ -800,8 +814,8 @@
                                         <span>Reset</span>
                                     </button>
                                 </div>
-                                <div class="resetButtonRow">
-                                    <div class="resetButtonInfo">
+                                <div class="jpk-reset-row">
+                                    <div class="jpk-reset-info">
                                         <div>Metadata Sync</div>
                                         <div class="fieldDescription">Forgets metadata tracking.</div>
                                     </div>
@@ -809,8 +823,8 @@
                                         <span>Reset</span>
                                     </button>
                                 </div>
-                                <div class="resetButtonRow">
-                                    <div class="resetButtonInfo">
+                                <div class="jpk-reset-row">
+                                    <div class="jpk-reset-info">
                                         <div>People Sync</div>
                                         <div class="fieldDescription">Forgets people tracking.</div>
                                     </div>
@@ -818,8 +832,8 @@
                                         <span>Reset</span>
                                     </button>
                                 </div>
-                                <div class="resetButtonRow">
-                                    <div class="resetButtonInfo">
+                                <div class="jpk-reset-row">
+                                    <div class="jpk-reset-info">
                                         <div>Playlist Sync</div>
                                         <div class="fieldDescription">Forgets playlist tracking.</div>
                                     </div>
@@ -827,8 +841,8 @@
                                         <span>Reset</span>
                                     </button>
                                 </div>
-                                <div class="resetButtonRow">
-                                    <div class="resetButtonInfo">
+                                <div class="jpk-reset-row">
+                                    <div class="jpk-reset-info">
                                         <div>User Sync</div>
                                         <div class="fieldDescription">Forgets user tracking.</div>
                                     </div>
@@ -838,11 +852,11 @@
                                 </div>
                             </div>
 
-                            <!-- Full Database Reset -->
+                            <!-- Full database reset -->
                             <h3 class="jpk-subsection-title">Reset Entire Database</h3>
-                            <div class="resetButtonGroup">
-                                <div class="resetButtonRow resetButtonRow-nuclear">
-                                    <div class="resetButtonInfo">
+                            <div class="jpk-reset-group">
+                                <div class="jpk-reset-row jpk-reset-row-nuclear">
+                                    <div class="jpk-reset-info">
                                         <div>Full Database Reset</div>
                                         <div class="fieldDescription">Forgets all tracking.</div>
                                     </div>
@@ -859,7 +873,7 @@
         </div>
     </div>
 
-    <!-- STYLES: Shared -->
+    <!-- Styles -->
     <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
     <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
 

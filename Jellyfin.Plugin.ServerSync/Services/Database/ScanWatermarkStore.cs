@@ -6,16 +6,36 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 
+/// <summary>
+/// Where a clean scan of one server reached, so the next scan can list only what changed since.
+/// </summary>
+/// <param name="ScopeHash">A hash of the settings that decide what the scan keeps. A change to them forces a full scan.</param>
+/// <param name="ListedFrom">When the last clean scan started.</param>
+/// <param name="FullAt">When the last full scan started.</param>
 public sealed record ScanWatermark(string ScopeHash, DateTime ListedFrom, DateTime FullAt);
 
+/// <summary>
+/// Keeps one <see cref="ScanWatermark"/> for each scan task and server, in the sync database.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class ScanWatermarkStore : QueueStoreBase
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ScanWatermarkStore"/> class.
+    /// </summary>
+    /// <param name="databaseProvider">Database provider.</param>
+    /// <param name="logger">Logger.</param>
     public ScanWatermarkStore(ISyncDatabaseProvider databaseProvider, ILogger<ScanWatermarkStore> logger)
         : base(databaseProvider, logger)
     {
     }
 
+    /// <summary>
+    /// Reads the watermark for a scan task and server.
+    /// </summary>
+    /// <param name="taskKey">The scan task's key.</param>
+    /// <param name="serverKey">The server entry's key.</param>
+    /// <returns>The watermark, or null when there is none.</returns>
     public ScanWatermark? Get(string taskKey, string serverKey) => Read(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -28,6 +48,12 @@ public sealed class ScanWatermarkStore : QueueStoreBase
             : null;
     });
 
+    /// <summary>
+    /// Saves the watermark for a scan task and server, replacing any earlier one.
+    /// </summary>
+    /// <param name="taskKey">The scan task's key.</param>
+    /// <param name="serverKey">The server entry's key.</param>
+    /// <param name="watermark">The watermark to keep.</param>
     public void Set(string taskKey, string serverKey, ScanWatermark watermark)
     {
         ArgumentNullException.ThrowIfNull(watermark);
@@ -46,6 +72,11 @@ public sealed class ScanWatermarkStore : QueueStoreBase
         });
     }
 
+    /// <summary>
+    /// Forgets watermarks, so the next scan lists everything.
+    /// </summary>
+    /// <param name="taskKey">The scan task to forget, or null for every task.</param>
+    /// <returns>How many watermarks were removed.</returns>
     public int Clear(string? taskKey = null) => Write(conn =>
     {
         using var cmd = conn.CreateCommand();

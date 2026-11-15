@@ -95,7 +95,7 @@ public sealed class VersionStore : QueueStoreBase
     /// so no stored version can outrank every later edit made here.
     /// </summary>
     /// <param name="version">The version.</param>
-    /// <returns>True when it was stored, false when the one held is at least as new.</returns>
+    /// <returns><c>true</c> when it was stored, <c>false</c> when the one held is at least as new.</returns>
     public bool Set(ObjectVersion version)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -159,7 +159,7 @@ public sealed class VersionStore : QueueStoreBase
     /// </summary>
     /// <param name="kind">The kind.</param>
     /// <param name="key">This server's key.</param>
-    /// <returns>True when a pending version existed.</returns>
+    /// <returns><c>true</c> when a pending version existed.</returns>
     public bool PromotePending(HintKind kind, string key)
     {
         var pending = Read(conn =>

@@ -36,6 +36,10 @@ public class MetadataSyncTableService
     /// <summary>
     /// Initializes a new instance of the <see cref="MetadataSyncTableService"/> class.
     /// </summary>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="localItems">Finds local items by path.</param>
+    /// <param name="links">Tells which local files are links.</param>
     public MetadataSyncTableService(
         ILogger<MetadataSyncTableService> logger,
         ILibraryManager libraryManager,
@@ -57,6 +61,13 @@ public class MetadataSyncTableService
     /// Source-side fields (and all hashes) are left untouched, so this is
     /// a read-only refresh of the displayed Local columns.
     /// </summary>
+    /// <param name="item">The record whose local side is re-read.</param>
+    /// <param name="syncMetadata"><c>true</c> to re-read the metadata.</param>
+    /// <param name="syncImages"><c>true</c> to re-read the images.</param>
+    /// <param name="syncPeople"><c>true</c> to re-read the people.</param>
+    /// <param name="syncStudios"><c>true</c> to re-read the studios.</param>
+    /// <param name="syncGenres"><c>true</c> to include genres in the metadata.</param>
+    /// <param name="syncTags"><c>true</c> to include tags in the metadata.</param>
     public void RefreshLocalSnapshot(
         MetadataSyncItem item,
         bool syncMetadata,
@@ -101,11 +112,16 @@ public class MetadataSyncTableService
     /// render source-side as "0 B" while local has a real KB value. This
     /// per-modal-open helper compensates with one HTTP call.
     /// </summary>
+    /// <param name="item">The record whose source images are enriched.</param>
+    /// <param name="client">The client for the source server.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task EnrichSourceImageSizesAsync(
         MetadataSyncItem item,
         SourceServerClient client,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(client);
+
         ArgumentNullException.ThrowIfNull(item);
         if (!Guid.TryParse(item.SourceItemId, out var sourceItemGuid)) return;
 
@@ -125,6 +141,8 @@ public class MetadataSyncTableService
     /// of source metadata first. Folders and leaves are returned in
     /// separate dictionaries so callers can match by item type.
     /// </summary>
+    /// <param name="localLibraryId">The local library to read.</param>
+    /// <returns>The leaves and the folders, each by path.</returns>
     public (Dictionary<string, BaseItem> Leaves, Dictionary<string, BaseItem> Folders) GetLocalItemsByPath(Guid localLibraryId)
     {
         var leaves = new Dictionary<string, BaseItem>(StringComparer.OrdinalIgnoreCase);
@@ -167,6 +185,20 @@ public class MetadataSyncTableService
     /// source image manifest for this key, image sizes carry forward from it
     /// when tags are unchanged, skipping the per-item enrichment HTTP call.
     /// </summary>
+    /// <param name="libraryMapping">The library mapping the item came through.</param>
+    /// <param name="sourceItem">The item as the source returned it.</param>
+    /// <param name="isFolder"><c>true</c> when the item is a folder.</param>
+    /// <param name="syncMetadata"><c>true</c> to build the metadata blobs.</param>
+    /// <param name="syncImages"><c>true</c> to build the image manifests.</param>
+    /// <param name="syncPeople"><c>true</c> to build the people blobs.</param>
+    /// <param name="syncStudios"><c>true</c> to build the studio blobs.</param>
+    /// <param name="syncGenres"><c>true</c> to include genres in the metadata.</param>
+    /// <param name="syncTags"><c>true</c> to include tags in the metadata.</param>
+    /// <param name="priorSourceImagesJson">The last refresh's source image manifest for this key, or null.</param>
+    /// <param name="deepImageVerification"><c>true</c> to read each image's size from the source.</param>
+    /// <param name="client">The client for the source server.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The record, or null when the item is not to be tracked.</returns>
     public async Task<MetadataSyncItem?> BuildRecordAsync(
         LibraryMapping libraryMapping,
         BaseItemDto sourceItem,

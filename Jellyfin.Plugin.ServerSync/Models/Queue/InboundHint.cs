@@ -60,10 +60,11 @@ public class InboundHint
     /// <summary>Gets or sets what went wrong on the last attempt.</summary>
     public string? LastError { get; set; }
 
+    /// <summary>Gets or sets the key the hint is parked under while it waits for its item to arrive, or null when it is not parked.</summary>
     public string? ParkedPath { get; set; }
 
     /// <summary>Builds a row from a received hint.</summary>
-    /// <param name="hint">The hint.</param>
+    /// <param name="hint">The hint as the peer sent it.</param>
     /// <param name="utcNow">The time of receipt.</param>
     /// <returns>The row, not yet stored.</returns>
     public static InboundHint FromHint(SyncHint hint, DateTime utcNow)

@@ -59,12 +59,12 @@ public sealed class PeerPairingStore : QueueStoreBase
 
     /// <summary>Whether this server is asking an entry to pair right now.</summary>
     /// <param name="peerKey">The server entry's key.</param>
-    /// <returns>True while a question to it is open.</returns>
+    /// <returns><c>true</c> while a question to it is open.</returns>
     public bool Expecting(string peerKey) => _expected.TryGetValue(peerKey, out var open) && open > 0;
 
     /// <summary>Whether a value has the shape of a secret from <see cref="NewSecret"/>: URL safe text, which is also all a header can carry.</summary>
     /// <param name="secret">The value.</param>
-    /// <returns>True when it could be a pairing secret.</returns>
+    /// <returns><c>true</c> when it could be a pairing secret.</returns>
     public static bool WellFormed(string? secret)
     {
         if (secret is null || secret.Length is < 32 or > 256)
@@ -90,7 +90,7 @@ public sealed class PeerPairingStore : QueueStoreBase
     /// <summary>Whether a presented secret matches an expected one, compared in constant time.</summary>
     /// <param name="presented">What the request carried.</param>
     /// <param name="expected">What this server issued.</param>
-    /// <returns>True when they match.</returns>
+    /// <returns><c>true</c> when they match.</returns>
     public static bool Matches(string? presented, string? expected)
     {
         if (string.IsNullOrEmpty(presented) || string.IsNullOrEmpty(expected))

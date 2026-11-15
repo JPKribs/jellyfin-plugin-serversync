@@ -21,8 +21,10 @@ namespace Jellyfin.Plugin.ServerSync;
 /// </remarks>
 public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 {
-    // The name the secret key folder, application name and purpose derive from. Changing it makes
-    // every stored API key unreadable.
+    /// <summary>
+    /// The name the secret key folder, application name and purpose derive from. Changing it makes
+    /// every stored API key unreadable.
+    /// </summary>
     public const string SecretsName = "Jellyfin.Plugin.ServerSync";
 
     private readonly ILogger<Plugin> _logger;
@@ -45,9 +47,9 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
     /// </summary>
-    /// <param name="applicationPaths">The application paths.</param>
-    /// <param name="xmlSerializer">The XML serializer.</param>
-    /// <param name="logger">The logger.</param>
+    /// <param name="applicationPaths">Gives the data and cache paths.</param>
+    /// <param name="xmlSerializer">Reads and writes the settings file.</param>
+    /// <param name="logger">Writes log entries.</param>
     public Plugin(
         IApplicationPaths applicationPaths,
         IXmlSerializer xmlSerializer,
@@ -109,8 +111,10 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
         _logger.LogInformation("Server Sync plugin initialized");
     }
 
-    // A database from a release this one cannot read means the settings beside it are that release's
-    // too. They are copied aside once, and the reason is returned so every save is turned away.
+    /// <summary>
+    /// A database from a release this one cannot read means the settings beside it are that release's
+    /// too. They are copied aside once, and the reason is returned so every save is turned away.
+    /// </summary>
     private static string? HoldIfOlderDatabase(string dataPath, string settingsPath, ILogger logger)
     {
         var stored = Services.SyncSchema.StoredVersion(dataPath);
@@ -165,6 +169,8 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     /// encryption of the API key. The kept-sentinel posted by the page
     /// resolves to the already-stored secret so it never round-trips.
     /// </summary>
+    /// <param name="incoming">The settings being saved.</param>
+    /// <param name="stored">The settings already stored.</param>
     protected override void OnConfigurationSaving(PluginConfiguration incoming, PluginConfiguration stored)
     {
         ArgumentNullException.ThrowIfNull(incoming);
@@ -229,6 +235,7 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
     /// Saves from the settings page also take the plugin-wide save lock, so the write cannot
     /// interleave with a task recording a run failure (see ConfigurationSaveLock).
     /// </summary>
+    /// <param name="configuration">The settings that were saved.</param>
     public override void UpdateConfiguration(BasePluginConfiguration configuration)
     {
         lock (Services.Configuration.ConfigurationSaveLock.Sync)

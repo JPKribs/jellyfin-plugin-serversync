@@ -58,7 +58,7 @@ public static class VersionDecider
     /// <summary>Whether two versions name the same edit: the same server at the same instant.</summary>
     /// <param name="a">One version.</param>
     /// <param name="b">The other.</param>
-    /// <returns>True when they are the same edit.</returns>
+    /// <returns><c>true</c> when they are the same edit.</returns>
     public static bool SameVersion(ObjectVersion a, ObjectVersion b)
     {
         ArgumentNullException.ThrowIfNull(a);

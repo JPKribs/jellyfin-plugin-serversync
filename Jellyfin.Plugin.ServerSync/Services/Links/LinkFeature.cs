@@ -9,9 +9,12 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// </summary>
 public static class LinkFeature
 {
+    /// <summary>The name of the feature in a peer's capabilities.</summary>
     public const string Name = "Link";
 
     /// <summary>Whether this server offers links to anyone.</summary>
+    /// <param name="config">The plugin configuration.</param>
+    /// <returns><c>true</c> when a server entry offers links.</returns>
     public static bool Offered(PluginConfiguration config)
         => config?.Servers?.Any(server => server.OffersLinks) == true;
 }

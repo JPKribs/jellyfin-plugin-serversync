@@ -12,12 +12,12 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Settles the rows a full scan queued against peers that carry versions. For a Both peer the scan is
-/// no longer "source wins": a row whose value was edited here more recently than on the peer stays as
-/// it is, marked synced with the reason, and a peer this server sends to is told to pull this
-/// server's value. Any peer that carries versions is asked, whatever its mode, since the question is
-/// about the value and not the direction. Rows from peers that predate hints keep today's rule and
-/// stay queued.
+/// Settles the rows a full scan queued against peers that carry versions. For a Sync server the scan
+/// does not simply take the source's value: a row whose value was edited here more recently than on
+/// the peer stays as it is, marked synced with the reason, and a peer this server sends to is told to
+/// pull this server's value. Any peer that carries versions is asked, whatever its direction, since
+/// the question is about the value and not the direction. Rows from peers that carry no versions stay
+/// queued and take the source's value.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class ScanConflictSettler
@@ -184,7 +184,7 @@ public sealed class ScanConflictSettler
     /// ones ranked above it that keep versions too.
     /// </summary>
     /// <typeparam name="TSource">The offer type.</typeparam>
-    /// <param name="contested">The offers of each contested key, highest priority first.</param>
+    /// <param name="contested">The offers of each contested key, highest ranked first.</param>
     /// <param name="kind">The kind.</param>
     /// <param name="versioned">The servers that keep versions, as <see cref="ServersWithVersionsAsync"/> gives them.</param>
     /// <param name="sourceOf">The server an offer came from.</param>

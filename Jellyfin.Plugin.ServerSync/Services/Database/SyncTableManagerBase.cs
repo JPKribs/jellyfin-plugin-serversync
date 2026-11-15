@@ -29,7 +29,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     private readonly ISyncDatabaseProvider _provider;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="SyncTableManagerBase{TRecord, TKey}"/> class.
     /// </summary>
     /// <param name="databaseProvider">Provider of the database whose connection and write-lock back this manager.</param>
     /// <param name="logger">Logger.</param>
@@ -91,10 +91,25 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         END";
 
     /// <summary>
+    /// Builds the query for one page of full rows. It sorts the ids alone, then reads only that page's
+    /// rows, so a deep page never sorts every wide row. It takes <c>@take</c> and <c>@skip</c>.
+    /// </summary>
+    /// <param name="table">The table to page through.</param>
+    /// <param name="whereClause">The filter, with its <c>WHERE</c>, or empty for every row.</param>
+    /// <param name="orderBy">The sort, ending in the id so the order is total.</param>
+    /// <returns>The SQL text.</returns>
+    protected static string PageQuery(string table, string whereClause, string orderBy) => $@"
+        SELECT * FROM {table}
+        WHERE Id IN (SELECT Id FROM {table} {whereClause} ORDER BY {orderBy} LIMIT @take OFFSET @skip)
+        ORDER BY {orderBy}";
+
+    /// <summary>
     /// Maps the current row of <paramref name="reader"/> into a record. Must
     /// populate the standard <see cref="SyncRecord"/> fields plus the subclass
     /// payload.
     /// </summary>
+    /// <param name="reader">The reader, positioned on the row.</param>
+    /// <returns>The record.</returns>
     protected abstract TRecord MapFromReader(IDataRecord reader);
 
     /// <inheritdoc />
@@ -108,10 +123,6 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
 
     /// <inheritdoc />
     public abstract PagedResult<TRecord> Paginate(PaginationRequest request);
-
-    // ===================================================================
-    // Universal CRUD on standard columns
-    // ===================================================================
 
     /// <inheritdoc />
     public TRecord? GetById(long id) => ExecuteRead(
@@ -194,6 +205,7 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// Returns a per-<see cref="SyncStatus"/> row count for the table. Statuses
     /// not present in the table are omitted from the result.
     /// </summary>
+    /// <returns>The row count for each status that has rows.</returns>
     public Dictionary<SyncStatus, int> GetStatusCounts() => ExecuteRead(
         conn =>
         {
@@ -349,8 +361,9 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
 
     /// <summary>
     /// Truncates the table, deletes every row regardless of status.
-    /// Powers the per-module "Reset Database" admin actions.
+    /// Powers each sync type's Reset action.
     /// </summary>
+    /// <returns>How many rows were deleted.</returns>
     public int ResetTable()
     {
         var deleted = 0;
@@ -382,6 +395,10 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// by the bulk endpoints to surface "5 of 10 items updated. 5 not
     /// found" in the UI instead of silently dropping the missing ones.
     /// </summary>
+    /// <param name="ids">The primary-key ids to update.</param>
+    /// <param name="status">The new status.</param>
+    /// <param name="reason">The reason, for a status that carries one.</param>
+    /// <returns>How many rows were updated, and the ids that were not found.</returns>
     public (int Updated, IReadOnlyList<long> NotFoundIds) BulkUpdateStatusWithDetails(
         IReadOnlyList<long> ids,
         SyncStatus status,
@@ -466,19 +483,13 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         cmd.ExecuteNonQuery();
     });
 
-    // ===================================================================
-    // Status transition helpers, used by every UpdateStatus variant so
-    // transition semantics (LastSyncTime on Synced, Reason auto-clear,
-    // optional retry-count tracking) stay consistent across modules.
-    // ===================================================================
-
     /// <summary>
     /// Builds the universal SET clauses for a status transition. Always
     /// includes Status, StatusDate, Reason. Adds LastSyncTime when
     /// transitioning to <see cref="SyncStatus.Synced"/>. When
-    /// <paramref name="trackRetryCount"/> is true, also resets RetryCount on
-    /// Synced and increments it on Errored. Every module's table has had a
-    /// RetryCount column since schema v22.
+    /// <paramref name="trackRetryCount"/> is <c>true</c>, also resets RetryCount on
+    /// Synced and increments it on Errored. Every module's table has a
+    /// RetryCount column.
     /// </summary>
     /// <param name="status">Target status.</param>
     /// <param name="trackRetryCount">Whether to manage RetryCount column.</param>
@@ -523,6 +534,9 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// Synced auto-clears the reason regardless of the caller's input, the
     /// row's prior error text shouldn't survive a successful sync.
     /// </summary>
+    /// <param name="cmd">The command to bind onto.</param>
+    /// <param name="status">The new status.</param>
+    /// <param name="reason">The reason, which is dropped for Synced.</param>
     protected static void AddStatusTransitionParameters(SqliteCommand cmd, SyncStatus status, string? reason)
     {
         ArgumentNullException.ThrowIfNull(cmd);
@@ -532,14 +546,12 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         cmd.Parameters.AddWithValue("@reason", (object?)effectiveReason ?? DBNull.Value);
     }
 
-    // ===================================================================
-    // Reader helpers, used by MapFromReader implementations to keep
-    // null-handling and timestamp parsing identical across modules.
-    // ===================================================================
-
     /// <summary>
     /// Reads a nullable string column.
     /// </summary>
+    /// <param name="reader">The reader, positioned on the row.</param>
+    /// <param name="column">The column's name.</param>
+    /// <returns>The value, or null when the column is null.</returns>
     protected static string? ReadNullableString(IDataRecord reader, string column)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -550,6 +562,9 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <summary>
     /// Reads a nullable Int64 column.
     /// </summary>
+    /// <param name="reader">The reader, positioned on the row.</param>
+    /// <param name="column">The column's name.</param>
+    /// <returns>The value, or null when the column is null.</returns>
     protected static long? ReadNullableInt64(IDataRecord reader, string column)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -560,6 +575,9 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <summary>
     /// Reads a nullable Int32 column.
     /// </summary>
+    /// <param name="reader">The reader, positioned on the row.</param>
+    /// <param name="column">The column's name.</param>
+    /// <returns>The value, or null when the column is null.</returns>
     protected static int? ReadNullableInt32(IDataRecord reader, string column)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -570,6 +588,9 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <summary>
     /// Reads a non-null timestamp column stored as ISO-8601 round-trip text.
     /// </summary>
+    /// <param name="reader">The reader, positioned on the row.</param>
+    /// <param name="column">The column's name.</param>
+    /// <returns>The value.</returns>
     protected static DateTime ReadDateTime(IDataRecord reader, string column)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -579,6 +600,9 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <summary>
     /// Reads a nullable timestamp column stored as ISO-8601 round-trip text.
     /// </summary>
+    /// <param name="reader">The reader, positioned on the row.</param>
+    /// <param name="column">The column's name.</param>
+    /// <returns>The value, or null when the column is null.</returns>
     protected static DateTime? ReadNullableDateTime(IDataRecord reader, string column)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -586,13 +610,12 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
         return reader.IsDBNull(ord) ? null : ParseTimestamp(reader.GetString(ord));
     }
 
-    // ===================================================================
-    // Parameter helpers
-    // ===================================================================
-
     /// <summary>
     /// Adds a nullable parameter, mapping null to <see cref="DBNull.Value"/>.
     /// </summary>
+    /// <param name="cmd">The command to bind onto.</param>
+    /// <param name="name">The parameter's name.</param>
+    /// <param name="value">The value to bind.</param>
     protected static void AddNullable(SqliteCommand cmd, string name, object? value)
     {
         ArgumentNullException.ThrowIfNull(cmd);
@@ -602,6 +625,9 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <summary>
     /// Adds a timestamp parameter as ISO-8601 round-trip text.
     /// </summary>
+    /// <param name="cmd">The command to bind onto.</param>
+    /// <param name="name">The parameter's name.</param>
+    /// <param name="value">The value to bind.</param>
     protected static void AddTimestamp(SqliteCommand cmd, string name, DateTime value)
     {
         ArgumentNullException.ThrowIfNull(cmd);
@@ -611,37 +637,38 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// <summary>
     /// Adds a nullable timestamp parameter as ISO-8601 round-trip text or DBNull.
     /// </summary>
+    /// <param name="cmd">The command to bind onto.</param>
+    /// <param name="name">The parameter's name.</param>
+    /// <param name="value">The value to bind.</param>
     protected static void AddNullableTimestamp(SqliteCommand cmd, string name, DateTime? value)
     {
         ArgumentNullException.ThrowIfNull(cmd);
         cmd.Parameters.AddWithValue(name, value.HasValue ? FormatTimestamp(value.Value) : (object)DBNull.Value);
     }
 
-    // ===================================================================
-    // Time helpers
-    // ===================================================================
-
     /// <summary>
     /// Formats a <see cref="DateTime"/> as UTC round trip text, the format for every timestamp column in
     /// this database. See <see cref="Utilities.UtcTime"/>.
     /// </summary>
+    /// <param name="value">The time to format.</param>
+    /// <returns>The text.</returns>
     protected static string FormatTimestamp(DateTime value) => Utilities.UtcTime.Format(value);
 
     /// <summary>
     /// Parses an ISO-8601 round-trip text timestamp written by
     /// <see cref="FormatTimestamp"/>. Returns <see cref="DateTime.MinValue"/>
-    /// on parse failure (legacy rows occasionally have malformed dates).
+    /// on parse failure.
     /// </summary>
+    /// <param name="value">The text to parse.</param>
+    /// <returns>The time.</returns>
     protected static DateTime ParseTimestamp(string value)
         => Utilities.UtcTime.TryParse(value, out var dt) ? dt : DateTime.MinValue;
-
-    // ===================================================================
-    // Helpers for subclasses
-    // ===================================================================
 
     /// <summary>
     /// Reads all rows from <paramref name="cmd"/> using <see cref="MapFromReader"/>.
     /// </summary>
+    /// <param name="cmd">The command to run.</param>
+    /// <returns>The records.</returns>
     protected IList<TRecord> ReadAll(SqliteCommand cmd)
     {
         ArgumentNullException.ThrowIfNull(cmd);
@@ -659,6 +686,11 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// Executes a read on a read connection, beside any write in progress,
     /// returning <paramref name="fallback"/> on transient errors.
     /// </summary>
+    /// <typeparam name="T">The type the read returns.</typeparam>
+    /// <param name="readOperation">The read to run.</param>
+    /// <param name="fallback">What to return when the read fails transiently.</param>
+    /// <param name="callerName">The calling member, for the log.</param>
+    /// <returns>The read's result, or the fallback.</returns>
     protected T ExecuteRead<T>(
         Func<SqliteConnection, T> readOperation,
         T fallback,
@@ -694,6 +726,8 @@ public abstract class SyncTableManagerBase<TRecord, TKey> : ISyncTableManager<TR
     /// Executes a write against the connection under the write-lock. Errors
     /// propagate. Callers decide retry policy.
     /// </summary>
+    /// <param name="writeOperation">The write to run.</param>
+    /// <param name="callerName">The calling member, for the log.</param>
     protected void ExecuteWrite(
         Action<SqliteConnection> writeOperation,
         [CallerMemberName] string? callerName = null)

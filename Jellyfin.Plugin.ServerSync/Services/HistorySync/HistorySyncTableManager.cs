@@ -26,8 +26,11 @@ public sealed class HistorySyncTableManager
     private readonly IPluginConfigurationManager? _configManager;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="HistorySyncTableManager"/> class.
     /// </summary>
+    /// <param name="databaseProvider">Gives the sync database.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="configManager">Reads whether a source that is behind counts as work, or null.</param>
     public HistorySyncTableManager(
         ISyncDatabaseProvider databaseProvider,
         ILogger<HistorySyncTableManager> logger,
@@ -225,6 +228,9 @@ public sealed class HistorySyncTableManager
     /// Returns all history rows for a given user mapping, regardless of
     /// library, used by the controller to scope queries by user.
     /// </summary>
+    /// <param name="sourceUserId">The source user's id.</param>
+    /// <param name="localUserId">The local user's id.</param>
+    /// <returns>The user's history rows.</returns>
     public IList<HistorySyncItem> GetByUserMapping(string sourceUserId, string localUserId) => ExecuteRead(
         conn =>
         {
@@ -241,6 +247,12 @@ public sealed class HistorySyncTableManager
     /// filter beyond what <see cref="Paginate"/> exposes, used by the
     /// admin UI which can scope the list to a single source user.
     /// </summary>
+    /// <param name="searchTerm">Text to find in the item name or source path, or null.</param>
+    /// <param name="status">Only rows with this status, or null.</param>
+    /// <param name="sourceUserId">Only this source user's rows, or null.</param>
+    /// <param name="skip">Rows to skip.</param>
+    /// <param name="take">Rows to return.</param>
+    /// <returns>The page and the total.</returns>
     public (IList<HistorySyncItem> Items, int TotalCount) SearchHistoryItemsPaginated(
         string? searchTerm = null,
         SyncStatus? status = null,
@@ -276,11 +288,7 @@ public sealed class HistorySyncTableManager
             }
 
             using var dataCmd = conn.CreateCommand();
-            dataCmd.CommandText = $@"
-                SELECT * FROM HistorySyncItems
-                {whereClause}
-                ORDER BY {StatusPriorityOrderBy}, ItemName ASC, Id ASC
-                LIMIT @take OFFSET @skip";
+            dataCmd.CommandText = PageQuery("HistorySyncItems", whereClause, $"{StatusPriorityOrderBy}, ItemName ASC, Id ASC");
             BindFilters(dataCmd, searchTerm, status, sourceUserId);
             dataCmd.Parameters.AddWithValue("@take", take);
             dataCmd.Parameters.AddWithValue("@skip", skip);

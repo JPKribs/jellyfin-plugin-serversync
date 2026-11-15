@@ -23,8 +23,10 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, string>
 {
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="ContentSyncTableManager"/> class.
     /// </summary>
+    /// <param name="databaseProvider">Gives the sync database.</param>
+    /// <param name="logger">Logger instance.</param>
     public ContentSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<ContentSyncTableManager> logger)
         : base(databaseProvider, logger)
     {
@@ -130,14 +132,17 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     }
 
     /// <summary>
-    /// Convenience alias for <see cref="GetByKey"/> matching the
-    /// historical method name used widely in callers.
+    /// Returns the sync item for a source item, or null if none. Alias for <see cref="ISyncTableManager{TRecord, TKey}.GetByKey"/>.
     /// </summary>
+    /// <param name="sourceItemId">The source item's id.</param>
+    /// <returns>The row, or null.</returns>
     public SyncItem? GetBySourceItemId(string sourceItemId) => GetByKey(sourceItemId);
 
     /// <summary>
     /// Returns the sync item with the given local path, or null if none.
     /// </summary>
+    /// <param name="localPath">The local path.</param>
+    /// <returns>The row, or null.</returns>
     public SyncItem? GetByLocalPath(string localPath) => ExecuteRead(
         conn =>
         {
@@ -184,6 +189,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// Returns every link row with a local path, and throws when the table cannot be read. The link
     /// cache drops the files of links that are gone, so it must never take a failed read for no links.
     /// </summary>
+    /// <returns>The link rows.</returns>
     public IList<SyncItem> GetLinksStrict() => ReadStrict(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -194,6 +200,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// <summary>
     /// Returns every link row with a local path. The link registry reads this as one snapshot.
     /// </summary>
+    /// <returns>The link rows, or an empty list when the table cannot be read.</returns>
     public IList<SyncItem> GetLinks() => ExecuteRead<IList<SyncItem>>(
         conn =>
         {
@@ -256,10 +263,11 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: null);
 
     /// <summary>
-    /// Returns true if another item already uses this local path.
+    /// Returns <c>true</c> if another item already uses this local path.
     /// </summary>
     /// <param name="localPath">Path to check.</param>
     /// <param name="excludeSourceItemId">Optional item ID to exclude from check.</param>
+    /// <returns><c>true</c> when another row holds the path.</returns>
     public bool CheckPathCollision(string localPath, string? excludeSourceItemId = null) => ExecuteRead(
         conn =>
         {
@@ -285,8 +293,9 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
         fallback: false);
 
     /// <summary>
-    /// Convenience alias for <see cref="DeleteByKey"/>.
+    /// Deletes the row for a source item. Alias for <see cref="ISyncTableManager{TRecord, TKey}.DeleteByKey"/>.
     /// </summary>
+    /// <param name="sourceItemId">The source item's id.</param>
     public void Delete(string sourceItemId) => DeleteByKey(sourceItemId);
 
     /// <summary>
@@ -295,6 +304,14 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// items such as the links in the cache, beyond what the universal
     /// <see cref="Paginate"/> exposes.
     /// </summary>
+    /// <param name="searchTerm">Text to find in the paths, or null.</param>
+    /// <param name="status">Only rows with this status, or null.</param>
+    /// <param name="pendingType">Only rows with this pending type, or null.</param>
+    /// <param name="skip">Rows to skip.</param>
+    /// <param name="take">Rows to return.</param>
+    /// <param name="sourceItemIds">Only these source items, or null.</param>
+    /// <param name="links"><c>true</c> for links only, <c>false</c> for copies only, or null for both.</param>
+    /// <returns>The page and the total.</returns>
     public (IList<SyncItem> Items, int TotalCount) SearchPaginated(
         string? searchTerm,
         SyncStatus? status = null,
@@ -343,11 +360,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             }
 
             using var dataCmd = conn.CreateCommand();
-            dataCmd.CommandText = $@"
-                SELECT * FROM SyncItems
-                {whereClause}
-                ORDER BY {StatusPriorityOrderBy}, LocalPath ASC, Id ASC
-                LIMIT @take OFFSET @skip";
+            dataCmd.CommandText = PageQuery("SyncItems", whereClause, $"{StatusPriorityOrderBy}, LocalPath ASC, Id ASC");
             BindSearchFilters(dataCmd, searchTerm, status, pendingType, sourceItemIds);
             dataCmd.Parameters.AddWithValue("@take", take);
             dataCmd.Parameters.AddWithValue("@skip", skip);
@@ -406,7 +419,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
                 }
 
                 using var data = conn.CreateCommand();
-                data.CommandText = $"SELECT * FROM SyncItems {where} ORDER BY LocalPath ASC, Id ASC LIMIT @take OFFSET @skip";
+                data.CommandText = PageQuery("SyncItems", where, "LocalPath ASC, Id ASC");
                 Bind(data);
                 data.Parameters.AddWithValue("@take", take);
                 data.Parameters.AddWithValue("@skip", skip);
@@ -429,6 +442,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// <summary>
     /// Returns counts of Pending rows grouped by <see cref="PendingType"/>.
     /// </summary>
+    /// <returns>The count for each pending type that has rows.</returns>
     public Dictionary<PendingType, int> GetPendingCounts() => ExecuteRead(
         conn =>
         {
@@ -450,6 +464,7 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// Returns the byte-size breakdown for the items that affect storage:
     /// pending downloads/replacements + queued, minus pending deletions.
     /// </summary>
+    /// <returns>The bytes under PendingDownload, PendingReplacement, PendingDeletion, Queued, and Total.</returns>
     public Dictionary<string, long> GetPendingSizes() => ExecuteRead(
         conn =>
         {
@@ -469,6 +484,8 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// Returns errored items that haven't exceeded the retry threshold,
     /// the candidates for the next sync run's retry pass.
     /// </summary>
+    /// <param name="maxRetries">The tries a row gets.</param>
+    /// <returns>The rows to retry.</returns>
     public IList<SyncItem> GetErroredItemsForRetry(int maxRetries) => ExecuteRead(
         conn =>
         {
@@ -508,6 +525,14 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// (zero on Synced, increment on Errored) match the rest of the
     /// universal transition logic.
     /// </summary>
+    /// <param name="sourceItemId">The source item's id.</param>
+    /// <param name="status">The new status.</param>
+    /// <param name="pendingType">The pending type, kept only when the status is Pending.</param>
+    /// <param name="localItemId">The local item id to record, or null to keep it.</param>
+    /// <param name="localPath">The local path to record, or null to keep it.</param>
+    /// <param name="errorMessage">The reason, for an Errored row.</param>
+    /// <param name="sourceSize">The source size to record, or null to keep it.</param>
+    /// <param name="companionFiles">The companion files to record, or null to keep them.</param>
     public void UpdateStatus(
         string sourceItemId,
         SyncStatus status,
@@ -580,6 +605,10 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
     /// retry tracking, Synced clears RetryCount, Errored increments it.
     /// Always clears PendingType (these batch transitions don't carry one).
     /// </summary>
+    /// <param name="sourceItemIds">The source items to update.</param>
+    /// <param name="status">The new status.</param>
+    /// <param name="errorMessage">The reason, for Errored rows.</param>
+    /// <returns>How many rows changed.</returns>
     public int BatchUpdateStatus(IEnumerable<string> sourceItemIds, SyncStatus status, string? errorMessage = null)
     {
         ArgumentNullException.ThrowIfNull(sourceItemIds);

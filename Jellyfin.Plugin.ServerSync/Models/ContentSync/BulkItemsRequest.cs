@@ -8,6 +8,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.ContentSync;
 /// </summary>
 public class BulkItemsRequest
 {
+    /// <summary>Gets or sets the source item ids the operation applies to.</summary>
     [Required]
     public List<string> SourceItemIds { get; set; } = new();
 }

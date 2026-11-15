@@ -34,8 +34,15 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
     private readonly AppliedVersionRecorder _applied;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="SyncMissingPeopleTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="libraryManager">Reads and changes Jellyfin's library.</param>
+    /// <param name="providerManager">Refreshes an item's metadata and images.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="applied">Records the version each applied value carries, or null when versions are not kept.</param>
     public SyncMissingPeopleTask(
         ILogger<SyncMissingPeopleTask> logger,
         ILibraryManager libraryManager,
@@ -106,10 +113,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             }
         }
 
-        // Persist metadata immediately, independent of any image outcome.
-        // Previously this was gated on failures.Count == 0, which meant a
-        // later image apply failure would skip the metadata DB write, the
-        // mutation lived only in Jellyfin's in-memory cache until eviction.
+        // Saved whatever the images do, so a failed image never leaves the change only in Jellyfin's cache.
         if (metadataChanged)
         {
             try
@@ -161,9 +165,11 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         }
     }
 
-    // Re-reads the local person and confirms each applied category landed.
-    // Categories whose verify passes are per-category <c>MarkSynced</c>'d
-    // inline so partial progress sticks even if a later category fails.
+    /// <summary>
+    /// Re-reads the local person and confirms each applied category landed.
+    /// Categories whose verify passes are per-category <c>MarkSynced</c>'d
+    /// inline so partial progress sticks even if a later category fails.
+    /// </summary>
     /// <inheritdoc />
     protected override async Task VerifyAfterApplyAsync(PeopleSyncItem record, CancellationToken cancellationToken)
     {
@@ -230,10 +236,12 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         }
     }
 
-    // Prefer the id the refresh matched. The fallback looks the person up by
-    // name with a query, the same lookup the refresh uses for a single item,
-    // because GetPerson creates a blank Person when none exists and recreates
-    // one over the real Person when the name differs only by casing.
+    /// <summary>
+    /// Prefer the id the refresh matched. The fallback looks the person up by
+    /// name with a query, the same lookup the refresh uses for a single item,
+    /// because GetPerson creates a blank Person when none exists and recreates
+    /// one over the real Person when the name differs only by casing.
+    /// </summary>
     private (Guid LocalPersonId, BaseItem LocalPerson) ResolveLocalPerson(PeopleSyncItem record)
     {
         if (Guid.TryParse(record.LocalPersonId, out var knownId)
@@ -261,10 +269,12 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         return (found[0].Id, found[0]);
     }
 
-    // No-op: per-category MarkSynced already happens inside VerifyAfterApplyAsync
-    // for the categories this run actually applied and verified. Marking the
-    // whole record here would advance SyncedHash on un-applied categories
-    // too, falsely short-circuiting the next Refresh.
+    /// <summary>
+    /// No-op: per-category MarkSynced already happens inside VerifyAfterApplyAsync
+    /// for the categories this run actually applied and verified. Marking the
+    /// whole record here would advance SyncedHash on un-applied categories
+    /// too, falsely short-circuiting the next Refresh.
+    /// </summary>
     /// <inheritdoc />
     protected override void OnApplySucceeded(PeopleSyncItem record)
     {
@@ -679,10 +689,6 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         }
     }
 
-    // ===================================================================
-    // Verification helpers
-    // ===================================================================
-
     private (bool Succeeded, string? FailureReason) VerifyMetadataApplied(BaseItem freshPerson, PeopleSyncItem record)
     {
         // Rebuild the local blob via the canonical builder, then JSON-equals
@@ -698,7 +704,7 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         var differingFields = JsonComparisonUtility.GetDifferingFields(record.Metadata.Source, freshBlob);
         var fieldList = differingFields.Count == 0 ? "(none)" : string.Join(",", differingFields);
         var detail = JsonComparisonUtility.DescribeDifferingFields(record.Metadata.Source, freshBlob);
-        return (false, $"verification found {differingFields.Count} divergent field(s) [{fieldList}]. {detail}");
+        return (false, $"verification found {JPKribs.Jellyfin.Base.ActivityText.Count(differingFields.Count, "divergent field")} [{fieldList}]. {detail}");
     }
 
     private async Task<(bool Succeeded, string? FailureReason)> VerifyImagesAppliedAsync(

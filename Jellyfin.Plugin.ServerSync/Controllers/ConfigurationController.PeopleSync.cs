@@ -21,6 +21,11 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets a specific people sync item by its database ID.
     /// </summary>
+    /// <param name="id">The row id.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="peopleService">Builds and compares people sync rows.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>The row, or 404 when there is none.</returns>
     [HttpGet("PeopleItems/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -75,6 +80,12 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets paginated people sync items with optional search and status filtering.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="search">Text to find in the item names, or null for no filter.</param>
+    /// <param name="status">The item status to list, or null for every status.</param>
+    /// <param name="skip">How many rows to skip.</param>
+    /// <param name="take">How many rows to return.</param>
+    /// <returns>The requested page of rows.</returns>
     [HttpGet("PeopleItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PagedResult<PeopleSyncItemDto>> GetPeopleSyncItems(
@@ -108,6 +119,8 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets people sync status counts.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <returns>The row counts by status.</returns>
     [HttpGet("PeopleStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PeopleSyncStatusResponse> GetPeopleSyncStatus([FromServices] PeopleSyncTableManager manager)
@@ -131,6 +144,9 @@ public partial class ConfigurationController
     /// Moves people sync items to Queued status. With no ids and a Status, queues every row in that
     /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
+    /// <param name="request">The request body.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <returns>The result of the bulk change.</returns>
     [HttpPost("PeopleItems/Queue")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -146,7 +162,7 @@ public partial class ConfigurationController
 
         if (request?.Ids == null || request.Ids.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         try
@@ -157,13 +173,16 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue people sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
+            return StatusCode(500, new { Error = "Could not queue the items. See the server log." });
         }
     }
 
     /// <summary>
     /// Marks people sync items as ignored.
     /// </summary>
+    /// <param name="request">The request body.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <returns>The result of the bulk change.</returns>
     [HttpPost("PeopleItems/Ignore")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -174,7 +193,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids == null || request.Ids.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         try
@@ -185,7 +204,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore people sync items by IDs");
-            return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
+            return StatusCode(500, new { Error = "Could not ignore the items. See the server log." });
         }
     }
 }

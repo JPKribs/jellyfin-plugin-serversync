@@ -141,6 +141,7 @@ public partial class PeerController
     /// <param name="policy">The link checks.</param>
     /// <param name="userManager">The users here.</param>
     /// <param name="libraryManager">The library, to find a file by its path.</param>
+    /// <param name="sessions">Tracks the link streams that are open, or null when none are kept.</param>
     /// <returns>The answer.</returns>
     [HttpPost("Stream/Check")]
     [RequireCompatibleProtocol]
@@ -158,7 +159,7 @@ public partial class PeerController
         var itemId = Guid.Empty;
         if (request is null || (!byPath && !Guid.TryParse(request.ItemId, out itemId)) || request.Path?.Length > 4096)
         {
-            return BadRequest("A request body with an ItemId or a Path is required");
+            return BadRequest("A request body with an ItemId or a Path is required.");
         }
 
         var (peer, refusal) = Sender(request.ServerId);
@@ -210,7 +211,7 @@ public partial class PeerController
     /// Receives playback of a link from the server that holds it, and shows it here as a session for the
     /// user it streams as.
     /// </summary>
-    /// <param name="report">The report.</param>
+    /// <param name="report">What the linking server reports about the playback.</param>
     /// <param name="sessions">Applies the report.</param>
     /// <returns>No content, or why the report was refused.</returns>
     [HttpPost("Playback")]
@@ -222,7 +223,7 @@ public partial class PeerController
         ArgumentNullException.ThrowIfNull(sessions);
         if (report is null || report.SessionKey?.Length > 256 || report.ClientName?.Length > 256 || report.UserName?.Length > 256)
         {
-            return BadRequest("A playback report is required");
+            return BadRequest("A playback report is required.");
         }
 
         var (peer, refusal) = Sender(report.ServerId);
@@ -275,7 +276,7 @@ public partial class PeerController
         ArgumentNullException.ThrowIfNull(grants);
         if (request is null || string.IsNullOrWhiteSpace(request.SessionKey) || request.Text?.Length > 1024 || request.Header?.Length > 256)
         {
-            return BadRequest("A control request with a SessionKey is required");
+            return BadRequest("A control request with a SessionKey is required.");
         }
 
         var (peer, refusal) = Sender(request.ServerId);
@@ -298,7 +299,7 @@ public partial class PeerController
         {
             if (!Enum.TryParse<MediaBrowser.Model.Session.PlaystateCommand>(request.Command, true, out var command))
             {
-                return BadRequest("Unknown command");
+                return BadRequest("Unknown command.");
             }
 
             await sessionManager.SendPlaystateCommand(null!, session.Id, new MediaBrowser.Model.Session.PlaystateRequest { Command = command, SeekPositionTicks = request.SeekPositionTicks }, aborted).ConfigureAwait(false);
@@ -312,7 +313,9 @@ public partial class PeerController
         return NoContent();
     }
 
-    // A standard user's key is held to that user: it streams as them, and its probe reads only what they can see.
+    /// <summary>
+    /// A standard user's key is held to that user: it streams as them, and its probe reads only what they can see.
+    /// </summary>
     private LinkVerdict HeldToScopedUser(LinkVerdict verdict, IUserManager userManager)
     {
         if (!verdict.Allowed || PeerCallerGuard.ScopedUser(HttpContext) is not { } scoped)
@@ -361,7 +364,7 @@ public partial class PeerController
         ArgumentNullException.ThrowIfNull(trickplay);
         if (request?.ItemIds is null || request.ItemIds.Count > PeerLinkDescribeRequest.MaxItems)
         {
-            return BadRequest($"A request body naming at most {PeerLinkDescribeRequest.MaxItems} items is required");
+            return BadRequest($"A request body naming at most {PeerLinkDescribeRequest.MaxItems} items is required.");
         }
 
         var (peer, refusal) = Sender(request.ServerId);
@@ -581,7 +584,7 @@ public partial class PeerController
         ArgumentNullException.ThrowIfNull(removed);
         if (since is not { } from)
         {
-            return BadRequest("A since time is required");
+            return BadRequest("A since time is required.");
         }
 
         from = from.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(from, DateTimeKind.Utc) : from.ToUniversalTime();

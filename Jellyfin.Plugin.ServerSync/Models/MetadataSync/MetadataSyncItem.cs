@@ -17,8 +17,6 @@ namespace Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 /// </summary>
 public class MetadataSyncItem : SyncRecord
 {
-    // ===== Item Identification =====
-
     /// <summary>
     /// Gets or sets the source library ID, first component of the natural key.
     /// </summary>
@@ -66,8 +64,6 @@ public class MetadataSyncItem : SyncRecord
     /// </summary>
     public bool IsFolder { get; set; }
 
-    // ===== Syncable JSON-blob categories =====
-
     /// <summary>
     /// Gets the metadata blob (name, overview, ratings, dates, genres, tags,
     /// provider IDs, etc.). JSON-equality comparison.
@@ -90,8 +86,6 @@ public class MetadataSyncItem : SyncRecord
     /// Gets the studios array (just studio names). JSON-equality comparison.
     /// </summary>
     public SyncableValue<string> Studios { get; } = new() { Comparator = new JsonBlobComparator() };
-
-    // ===== Per-category change detection =====
 
     /// <summary>
     /// Gets a value indicating whether the metadata blob has changes worth
@@ -183,6 +177,8 @@ public class MetadataSyncItem : SyncRecord
     /// Tries to deserialize <see cref="Images"/>.<see cref="SyncableValue{T}.Source"/>
     /// as an image manifest. Returns false if missing or malformed.
     /// </summary>
+    /// <param name="manifest">The parsed manifest, set when the method returns true.</param>
+    /// <returns><c>true</c> when the row holds a manifest that could be read.</returns>
     public bool TryGetSourceImageManifest(out Dictionary<string, List<ImageInfoDto>>? manifest)
     {
         manifest = null;

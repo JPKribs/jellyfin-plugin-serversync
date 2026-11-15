@@ -19,8 +19,10 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem, string>
 {
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="PeopleSyncTableManager"/> class.
     /// </summary>
+    /// <param name="databaseProvider">Gives the sync database.</param>
+    /// <param name="logger">Logger instance.</param>
     public PeopleSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<PeopleSyncTableManager> logger)
         : base(databaseProvider, logger)
     {
@@ -171,11 +173,7 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
                 var items = new List<PeopleSyncItem>();
                 using (var dataCmd = conn.CreateCommand())
                 {
-                    dataCmd.CommandText = $@"
-                        SELECT * FROM PeopleSyncItems
-                        {whereClause}
-                        ORDER BY {StatusPriorityOrderBy}, PersonName ASC, Id ASC
-                        LIMIT @take OFFSET @skip";
+                    dataCmd.CommandText = PageQuery("PeopleSyncItems", whereClause, $"{StatusPriorityOrderBy}, PersonName ASC, Id ASC");
                     if (!string.IsNullOrWhiteSpace(searchTerm))
                     {
                         dataCmd.Parameters.AddWithValue("@search", $"%{searchTerm}%");

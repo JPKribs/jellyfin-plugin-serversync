@@ -19,6 +19,12 @@ public sealed class LinkWriter
     private readonly ILogger<LinkWriter> _logger;
     private bool _floorRaised;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkWriter"/> class.
+    /// </summary>
+    /// <param name="files">Reads and writes the link files.</param>
+    /// <param name="links">The link registry.</param>
+    /// <param name="logger">Logger instance.</param>
     public LinkWriter(LinkFiles files, ILinkRegistry links, ILogger<LinkWriter> logger)
     {
         _files = files;
@@ -26,16 +32,9 @@ public sealed class LinkWriter
         _logger = logger;
     }
 
-    /// <summary>
-    /// Writes the link, or throws with a reason the Sync tab shows when the path is taken.
-    /// </summary>
-    /// <param name="row">The link's row.</param>
-    /// <param name="table">The content table, for path collisions.</param>
-    /// <param name="config">The plugin configuration.</param>
-    /// <param name="replacing">A kept copy this link takes over from, which may stay beside it until the link is in place.</param>
     /// <summary>Whether the row's .strm is on disk and points at this link as this server answers it now.</summary>
     /// <param name="row">The link row.</param>
-    /// <returns>True when nothing needs writing.</returns>
+    /// <returns><c>true</c> when nothing needs writing.</returns>
     public bool IsCurrent(SyncItem row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -49,6 +48,13 @@ public sealed class LinkWriter
         }
     }
 
+    /// <summary>
+    /// Writes the link, or throws with a reason the Sync tab shows when the path is taken.
+    /// </summary>
+    /// <param name="row">The link's row.</param>
+    /// <param name="table">The content table, for path collisions.</param>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="replacing">A kept copy this link takes over from, which may stay beside it until the link is in place.</param>
     public void Write(SyncItem row, ContentSyncTableManager table, PluginConfiguration config, string? replacing = null)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -178,6 +184,7 @@ public sealed class LinkWriter
     /// Removes a link once its copy is in place. A .strm that does not point at this plugin's link route
     /// is left alone.
     /// </summary>
+    /// <param name="path">The .strm path.</param>
     public void Remove(string path)
     {
         if (File.Exists(path) && LinkFiles.PointsAtLinkRoute(LinkFiles.ReadUrl(path)))

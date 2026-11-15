@@ -10,6 +10,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
+/// <summary>
+/// Lets a server that lists this one ask to pair, so the two share a secret that proves who sends each call.
+/// </summary>
 [ApiController]
 [Authorize]
 [Route("Sync/Peer")]
@@ -22,6 +25,10 @@ public class PeerPairController : ControllerBase
     private readonly PeerPairingStore _pairings;
     private readonly ILogger<PeerPairController> _logger;
 
+    /// <summary>Initializes a new instance of the <see cref="PeerPairController"/> class.</summary>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="pairings">The store of pairing secrets.</param>
+    /// <param name="logger">Writes log entries.</param>
     public PeerPairController(IPluginConfigurationManager configManager, PeerPairingStore pairings, ILogger<PeerPairController> logger)
     {
         _configManager = configManager;
@@ -29,6 +36,9 @@ public class PeerPairController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>Takes the secret a server offers and records it for that server.</summary>
+    /// <param name="request">The sender's id and the secret.</param>
+    /// <returns>The result of the pairing.</returns>
     [HttpPost("Pair")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -38,7 +48,7 @@ public class PeerPairController : ControllerBase
     {
         if (request is null || string.IsNullOrWhiteSpace(request.ServerId) || !PeerPairingStore.WellFormed(request.Secret))
         {
-            return BadRequest("A request body with ServerId and a Secret of 32 to 256 letters, digits, - or _ is required");
+            return BadRequest("A request body with ServerId and a Secret of 32 to 256 letters, digits, - or _ is required.");
         }
 
         var entry = _configManager.Configuration.FindServerById(request.ServerId);

@@ -17,6 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 [AttributeUsage(AttributeTargets.Method)]
 public sealed class RequireCompatibleProtocolAttribute : ActionFilterAttribute
 {
+    /// <inheritdoc />
     public override void OnActionExecuting(ActionExecutingContext context)
     {
         ArgumentNullException.ThrowIfNull(context);

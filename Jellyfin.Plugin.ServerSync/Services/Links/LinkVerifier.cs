@@ -43,6 +43,13 @@ public sealed class LinkVerifier
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LinkVerifier> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkVerifier"/> class.
+    /// </summary>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="mediaInfo">Takes the source's media info, or null.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="logger">Logger instance.</param>
     public LinkVerifier(ILibraryManager libraryManager, LinkMediaInfo? mediaInfo, IServerApplicationHost applicationHost, ILogger<LinkVerifier> logger)
     {
         _libraryManager = libraryManager;
@@ -52,6 +59,8 @@ public sealed class LinkVerifier
     }
 
     /// <summary>Whether a row is errored because this check found its link could not play.</summary>
+    /// <param name="row">The row.</param>
+    /// <returns><c>true</c> when the check flagged it.</returns>
     public static bool Flagged(SyncItem row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -152,7 +161,7 @@ public sealed class LinkVerifier
                     var reason = Prefix + (refusal ?? (string.IsNullOrWhiteSpace(found?.Reason) ? "the file is no longer on the source" : FormatUtilities.SanitizeForLog(found!.Reason, 300)));
                     if (!Flagged(row) || !string.Equals(row.Reason, reason, StringComparison.Ordinal))
                     {
-                        _logger.LogWarning("The link {Path} cannot play: {Reason}", row.LocalPath, reason[Prefix.Length..]);
+                        _logger.LogWarning("The link {Path} cannot play: {Reason}", FormatUtilities.SanitizeForLog(row.LocalPath), FormatUtilities.SanitizeForLog(reason[Prefix.Length..], 300));
                         row.Status = SyncStatus.Errored;
                         row.Reason = reason;
                         row.RetryCount = NoRetry;
@@ -171,14 +180,14 @@ public sealed class LinkVerifier
     }
 
     /// <summary>
-    /// Whether a link's own server says the file is no longer there. False when the server could not be
+    /// Whether a link's own server says the file is no longer there. <c>false</c> when the server could not be
     /// asked, refused the question, or only failed to read the file, so an outage is never taken for a
     /// removal.
     /// </summary>
     /// <param name="row">The link's row.</param>
     /// <param name="client">The server the link streams from.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True when the server answered that it no longer has the file.</returns>
+    /// <returns><c>true</c> when the server answered that it no longer has the file.</returns>
     public async Task<bool> GoneFromSourceAsync(SyncItem row, SourceServerClient client, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -204,7 +213,7 @@ public sealed class LinkVerifier
     /// <param name="row">The link's row.</param>
     /// <param name="client">The server the link streams from.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True when the item now has the source's media info.</returns>
+    /// <returns><c>true</c> when the item now has the source's media info.</returns>
     public async Task<bool> RedescribeAsync(SyncItem row, SourceServerClient client, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(row);

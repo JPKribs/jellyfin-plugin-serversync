@@ -6,6 +6,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 
+/// <summary>
+/// Path translation maps a source path under a local root and never lets a result leave that root.
+/// </summary>
 public class PathUtilitiesTests
 {
     /// <summary>

@@ -1,23 +1,27 @@
-// ============================================
-// SERVER SYNC PLUGIN - SYNC PAGE: CONTENT VIEW
-// ============================================
+// serversync_sync_content.js
 // The Content Sync table and the controller that opens it. Built by serversync_sync.js from the
 // page context and the table kit in serversync_sync_table.js.
-// ============================================
 
+// createContentSyncTableModule
+// Builds the Content Sync view: its table, status counts, health figures, detail modal, and bulk actions.
+//
+// Inputs
+// ctx [object]: The page context from serversync_sync.js.
+// kit [object]: The table kit from createSyncTableKit.
+//
+// Output
+// [object]: The view's module, with table, currentConfig, init, loadAll, loadStatus, loadItems, and the
+// modal and bulk actions.
 export function createContentSyncTableModule(ctx, kit) {
     'use strict';
 
     var view = ctx.view;
     var ServerSyncShared = ctx.shared;
+    var confirmDialog = ctx.confirmDialog;
     var createSyncTableModule = kit.createSyncTableModule;
     var renderRowInfo = kit.renderRowInfo;
     var setHealthLastSync = kit.setHealthLastSync;
     var setHealthCount = kit.setHealthCount;
-
-    // ============================================
-    // CONTENT SYNC TABLE MODULE
-    // ============================================
 
     var SyncTableModule = createSyncTableModule({
         name: '',
@@ -37,8 +41,8 @@ export function createContentSyncTableModule(ctx, kit) {
             { id: 'Ignore', title: 'Ignore', icon: 'block', method: 'bulkIgnore' },
             { id: 'MarkSynced', title: 'Mark Synced', icon: 'check_circle', method: 'bulkMarkSynced' },
             { id: 'Queue', title: 'Queue', icon: 'playlist_add', className: 'jpk-button-submit', method: 'bulkQueue' },
-            { id: 'MakeCopy', title: 'Keep a full local copy. A cached file is moved into place', icon: 'push_pin', method: 'bulkMakeCopy' },
-            { id: 'Delete', title: 'Delete from local server only', icon: 'delete', className: 'jpk-button-destructive', method: 'bulkDelete' }
+            { id: 'MakeCopy', title: 'Keep a Copy', icon: 'push_pin', method: 'bulkMakeCopy' },
+            { id: 'Delete', title: 'Delete Local File', icon: 'delete', className: 'jpk-button-destructive', method: 'bulkDelete' }
         ],
         idKey: 'SourceItemId',
         tasks: {
@@ -47,12 +51,13 @@ export function createContentSyncTableModule(ctx, kit) {
         },
         taskNoun: '',
         singularNoun: 'Item',
-        pluralNoun: 'item(s)',
+        nounOne: 'item',
+        nounMany: 'items',
         failNoun: 'items',
         emptyMessage: 'No content items found. Run a refresh to scan for content.',
         filters: {
             options: [
-                { value: 'Downloaded', label: 'Downloaded' },
+                { value: 'Synced', label: 'Synced' },
                 { value: 'Linked', label: 'Linked' },
                 { value: 'Queued', label: 'Queued' },
                 { value: 'Errored', label: 'Errored' },
@@ -60,16 +65,16 @@ export function createContentSyncTableModule(ctx, kit) {
                 { value: 'Pending', label: 'Pending' },
                 { value: 'Cached', label: 'Cached' },
                 { value: 'Pending:Download', label: 'Pending Download', id: 'optPendingDownload', hidden: true },
-                { value: 'Pending:Replacement', label: 'Pending Replace', id: 'optPendingReplacement', hidden: true },
-                { value: 'Pending:Deletion', label: 'Pending Delete', id: 'optPendingDeletion', hidden: true },
+                { value: 'Pending:Replacement', label: 'Pending Replacement', id: 'optPendingReplacement', hidden: true },
+                { value: 'Pending:Deletion', label: 'Pending Deletion', id: 'optPendingDeletion', hidden: true },
                 { value: 'Deleting', label: 'Deleting', id: 'optDeleting', hidden: true }
             ],
             buildParams: function(filterValue) {
                 if (filterValue === 'Cached') {
                     return { cached: true };
                 }
-                // A synced row is a downloaded file or a written link, so the two are filtered apart.
-                if (filterValue === 'Downloaded') {
+                // A synced row is a copy or a link, so the two are filtered apart.
+                if (filterValue === 'Synced') {
                     return { status: 'Synced', storage: 'Copy' };
                 }
                 if (filterValue === 'Linked') {
@@ -106,10 +111,10 @@ export function createContentSyncTableModule(ctx, kit) {
                     key: 'details',
                     label: 'Details',
                     type: 'custom',
-                    className: 'pt-cell-details',
+                    className: 'serversync-details-cell',
                     render: function(item) {
                         if (item.Status === 'Synced') {
-                            return '<span class="jpk-badge gray">No changes</span>';
+                            return '<span class="jpk-badge gray">No Changes</span>';
                         }
                         var size = item.SourceSizeFormatted || '';
                         return size ? '<span class="jpk-badge purple">' + ServerSyncShared.escapeHtml(size) + '</span>' : '';
@@ -130,10 +135,10 @@ export function createContentSyncTableModule(ctx, kit) {
                 var pendingCountEl = view.querySelector('#healthPendingCount');
                 if (pendingSizeData && typeof pendingSizeData.TotalPendingBytes === 'number') {
                     pendingCountEl.textContent = ServerSyncShared.formatSize(pendingSizeData.TotalPendingBytes);
-                    pendingCountEl.className = pendingSizeData.TotalPendingBytes > 0 ? 'healthValue warning' : 'healthValue';
+                    pendingCountEl.className = pendingSizeData.TotalPendingBytes > 0 ? 'serversync-health-value warning' : 'serversync-health-value';
                 } else {
                     pendingCountEl.textContent = '0 B';
-                    pendingCountEl.className = 'healthValue';
+                    pendingCountEl.className = 'serversync-health-value';
                 }
             });
         },
@@ -156,7 +161,7 @@ export function createContentSyncTableModule(ctx, kit) {
                     };
 
                     show('pendingCount', 'statusGroupPending', totalPending,
-                        'Pending: ' + totalPending + ' (Download: ' + pendingDownload + ', Replace: ' + pendingReplacement + ', Delete: ' + pendingDeletion + ')');
+                        'Pending: ' + totalPending + ' (Download: ' + pendingDownload + ', Replacement: ' + pendingReplacement + ', Deletion: ' + pendingDeletion + ')');
                     show('pendingDownloadCount', 'statusGroupPendingDownload', pendingDownload, 'Pending Download: ' + pendingDownload);
                     show('pendingReplacementCount', 'statusGroupPendingReplacement', pendingReplacement, 'Pending Replacement: ' + pendingReplacement);
                     show('pendingDeletionCount', 'statusGroupPendingDeletion', pendingDeletion, 'Pending Deletion: ' + pendingDeletion);
@@ -169,18 +174,18 @@ export function createContentSyncTableModule(ctx, kit) {
             retryErrors: function() {
                 var self = this;
                 ServerSyncShared.apiRequest('RetryErroredItems', 'POST', {}).then(function() {
-                    ServerSyncShared.showAlert('Errored items queued for retry');
+                    ServerSyncShared.syncStatus('Errored items queued for retry.', false);
                     self.loadStatus();
                     self.loadItems();
                 }).catch(function() {
-                    ServerSyncShared.showAlert('Failed to retry errored items');
+                    ServerSyncShared.syncStatus('Could not retry the errored items.', true);
                 });
             },
 
             bulkIgnore: function() {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
-                this.postSelection('IgnoreItems', { SourceItemIds: ids }, ids.length + ' item(s) ignored', 'Failed to ignore items');
+                this.postSelection('IgnoreItems', { SourceItemIds: ids }, ServerSyncShared.plural(ids.length, 'item', 'items') + ' ignored.', 'Could not ignore the items.');
             },
 
             // Pending deletions cannot be queued, so they are left out.
@@ -194,11 +199,11 @@ export function createContentSyncTableModule(ctx, kit) {
                     return !(item && item.Status === 'Pending' && item.PendingType === 'Deletion');
                 });
                 if (queueable.length === 0) {
-                    ServerSyncShared.showAlert('No items to queue (deletion items cannot be queued)');
+                    ServerSyncShared.syncStatus('No items to queue. Items pending deletion cannot be queued.', false);
                     return;
                 }
 
-                this.postSelection('QueueItems', { SourceItemIds: queueable }, queueable.length + ' item(s) queued', 'Failed to queue items');
+                this.postSelection('QueueItems', { SourceItemIds: queueable }, ServerSyncShared.plural(queueable.length, 'item', 'items') + ' queued.', 'Could not queue the items.');
             },
 
             // The server checks the local files exist before marking.
@@ -206,19 +211,19 @@ export function createContentSyncTableModule(ctx, kit) {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
                 this.postSelection('MarkSynced', { SourceItemIds: ids }, function(result) {
-                    var msg = ((result && result.Synced) || 0) + ' item(s) marked as synced';
+                    var msg = ServerSyncShared.plural((result && result.Synced) || 0, 'item', 'items') + ' marked as synced';
                     if (result && result.NotFound > 0) {
-                        msg += ', ' + result.NotFound + ' local file(s) not found';
+                        msg += ', ' + ServerSyncShared.plural(result.NotFound, 'local file', 'local files') + ' not found';
                     }
-                    return msg;
-                }, 'Failed to mark items as synced');
+                    return msg + '.';
+                }, 'Could not mark the items as synced.');
             },
 
             // Only links can become copies. The server skips anything else, and moves cached files into place now.
             bulkMakeCopy: function() {
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
-                this.postSelection('PromoteItems', { SourceItemIds: ids }, this.keepMessage, 'Failed to keep local copies');
+                this.postSelection('PromoteItems', { SourceItemIds: ids }, this.keepMessage, 'Could not keep the local copies.');
             },
 
             modalKeep: function() {
@@ -226,9 +231,9 @@ export function createContentSyncTableModule(ctx, kit) {
                 if (!this.currentModalItem) return;
                 ServerSyncShared.apiRequest('PromoteItems', 'POST', { SourceItemIds: [this.currentModalItem.SourceItemId] }).then(function(result) {
                     self.closeModal();
-                    ServerSyncShared.showAlert(self.keepMessage(result));
+                    ServerSyncShared.syncStatus(self.keepMessage(result), false);
                 }).catch(function() {
-                    ServerSyncShared.showAlert('Failed to keep a local copy');
+                    ServerSyncShared.syncStatus('Could not keep a local copy.', true);
                 });
             },
 
@@ -236,32 +241,37 @@ export function createContentSyncTableModule(ctx, kit) {
                 var promoted = (result && result.Promoted) || 0;
                 var fromCache = (result && result.FromCache) || 0;
                 var msg = fromCache > 0
-                    ? fromCache + ' cached link(s) are being moved into the library now'
-                    : promoted + ' link(s) will be copied on the next sync';
+                    ? ServerSyncShared.plural(fromCache, 'cached link is', 'cached links are') + ' being moved into the library now'
+                    : ServerSyncShared.plural(promoted, 'link', 'links') + ' will be copied on the next sync';
                 if (fromCache > 0 && promoted > fromCache) {
                     msg += ', and ' + (promoted - fromCache) + ' will be downloaded';
                 }
                 if (result && result.Skipped > 0) {
-                    msg += ', ' + result.Skipped + ' item(s) were not links';
+                    msg += ', ' + ServerSyncShared.plural(result.Skipped, 'item was not a link', 'items were not links');
                 }
-                return msg;
+                return msg + '.';
             },
 
             bulkDelete: function() {
+                var self = this;
                 var ids = this.table.getSelectedIds();
                 if (ids.length === 0) return;
-                if (!confirm('Delete ' + ids.length + ' item(s) from the local server? This cannot be undone.')) {
-                    return;
-                }
-                this.postSelection('DeleteLocalItems', { SourceItemIds: ids }, function(result) {
-                    return result && result.Deleted > 0 ? 'Deleted ' + result.Deleted + ' item(s)' : null;
-                }, 'Failed to delete items');
+                confirmDialog('Delete ' + ServerSyncShared.plural(ids.length, 'item', 'items') + ' from this server? This cannot be undone.', {
+                    title: 'Delete Items',
+                    confirmText: 'Delete',
+                    destructive: true
+                }).then(function(confirmed) {
+                    if (!confirmed) return;
+                    self.postSelection('DeleteLocalItems', { SourceItemIds: ids }, function(result) {
+                        return result && result.Deleted > 0 ? 'Deleted ' + ServerSyncShared.plural(result.Deleted, 'item', 'items') + '.' : null;
+                    }, 'Could not delete the items.');
+                });
             },
 
             getDisplayStatus: function(item) {
                 var linked = item.StorageMode === 'Link' || item.StorageMode === 'Promoting';
                 if (item.Status === 'Synced') {
-                    if (!linked) return 'Downloaded';
+                    if (!linked) return 'Synced';
                     return item.StorageMode === 'Promoting' ? 'Linked (Copy Next)' : item.Cached ? 'Linked (Cached)' : 'Linked';
                 }
                 var suffix = item.StorageMode === 'Link' ? (item.Cached ? ' (Link, Cached)' : ' (Link)')
@@ -298,7 +308,7 @@ export function createContentSyncTableModule(ctx, kit) {
                 var displayStatus = self.getDisplayStatus(item);
                 var statusClass = self.getStatusClass(item);
                 statusBadge.textContent = displayStatus;
-                statusBadge.className = 'itemModal-statusBadge ' + statusClass;
+                statusBadge.className = 'jpk-table-status-badge ' + statusClass;
 
                 var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, item.ServerKey);
                 var localServerName = ServerSyncShared.localServerName || 'Local';
@@ -340,9 +350,9 @@ export function createContentSyncTableModule(ctx, kit) {
                     });
                     if (companionList.length > 0) {
                         view.querySelector('#modalCompanionFiles').innerHTML = companionList.map(function(f) {
-                            return '<div class="itemModal-companionItem">' +
-                                '<span class="itemModal-companionIcon">&#128196;</span>' +
-                                '<span class="itemModal-companionName">' + ServerSyncShared.escapeHtml(f) + '</span>' +
+                            return '<div class="serversync-companion-item">' +
+                                '<span class="serversync-companion-icon material-icons" aria-hidden="true">description</span>' +
+                                '<span class="serversync-companion-name">' + ServerSyncShared.escapeHtml(f) + '</span>' +
                                 '</div>';
                         }).join('');
                         companionSection.classList.remove('hidden');
@@ -370,7 +380,7 @@ export function createContentSyncTableModule(ctx, kit) {
                         localSizeEl.textContent = ServerSyncShared.formatSize(item.LocalSize || item.SourceSize);
                         localSizeRowEl.classList.remove('hidden');
                     } else {
-                        localPathNoteEl.textContent = 'File will be synced to this location';
+                        localPathNoteEl.textContent = 'The file will be synced to this location.';
                         localPathNoteEl.classList.remove('hidden');
                         localSizeRowEl.classList.add('hidden');
                     }
@@ -425,12 +435,12 @@ export function createContentSyncTableModule(ctx, kit) {
                 ServerSyncShared.apiRequest('MarkSynced', 'POST', { SourceItemIds: [this.currentModalItem.SourceItemId] }).then(function(result) {
                     self.closeModal();
                     if (result && result.Synced > 0) {
-                        ServerSyncShared.showAlert('Item marked as synced');
+                        ServerSyncShared.syncStatus('Item marked as synced.', false);
                     } else {
-                        ServerSyncShared.showAlert('Local file not found, so it cannot be marked as synced');
+                        ServerSyncShared.syncStatus('Local file not found, so it cannot be marked as synced.', true);
                     }
                 }).catch(function() {
-                    ServerSyncShared.showAlert('Failed to mark item as synced');
+                    ServerSyncShared.syncStatus('Could not mark the item as synced.', true);
                 });
             },
 
@@ -438,16 +448,20 @@ export function createContentSyncTableModule(ctx, kit) {
                 var self = this;
                 if (!this.currentModalItem) return;
 
-                var fileName = ServerSyncShared.getFileName(this.currentModalItem.LocalPath || this.currentModalItem.SourcePath);
-                if (!confirm('Delete "' + fileName + '" from the local server? This cannot be undone.')) {
-                    return;
-                }
-
-                ServerSyncShared.apiRequest('DeleteLocalItems', 'POST', { SourceItemIds: [this.currentModalItem.SourceItemId] }).then(function() {
-                    self.closeModal();
-                    ServerSyncShared.showAlert('Item deleted');
-                }).catch(function() {
-                    ServerSyncShared.showAlert('Failed to delete item');
+                var item = this.currentModalItem;
+                var fileName = ServerSyncShared.getFileName(item.LocalPath || item.SourcePath);
+                confirmDialog('Delete "' + fileName + '" from this server? This cannot be undone.', {
+                    title: 'Delete File',
+                    confirmText: 'Delete',
+                    destructive: true
+                }).then(function(confirmed) {
+                    if (!confirmed) return;
+                    return ServerSyncShared.apiRequest('DeleteLocalItems', 'POST', { SourceItemIds: [item.SourceItemId] }).then(function() {
+                        self.closeModal();
+                        ServerSyncShared.syncStatus('Item deleted.', false);
+                    }).catch(function() {
+                        ServerSyncShared.syncStatus('Could not delete the item.', true);
+                    });
                 });
             },
 
@@ -486,14 +500,19 @@ export function createContentSyncTableModule(ctx, kit) {
     return SyncTableModule;
 }
 
+// createContentPageController
+// Builds the controller that opens the Content Sync view the first time it is shown.
+//
+// Inputs
+// ctx [object]: The page context from serversync_sync.js.
+// SyncTableModule [object]: The view's module from createContentSyncTableModule.
+//
+// Output
+// [object]: A handle with init, which starts the table, reads the config, and loads the rows.
 export function createContentPageController(ctx, SyncTableModule) {
     'use strict';
 
     var ServerSyncShared = ctx.shared;
-
-    // ============================================
-    // CONTENT PAGE CONTROLLER
-    // ============================================
 
     var ContentPageController = {
         init: function() {

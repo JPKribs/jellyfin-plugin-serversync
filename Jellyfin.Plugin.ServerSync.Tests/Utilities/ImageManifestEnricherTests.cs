@@ -6,6 +6,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 
+/// <summary>
+/// The image manifest enricher carries measured sizes forward so unchanged images are not measured again.
+/// </summary>
 public class ImageManifestEnricherTests
 {
     private static string Manifest(params (string Type, long Size, string? Tag)[] images)
@@ -35,6 +38,11 @@ public class ImageManifestEnricherTests
     private static ImageInfoDto First(string json, string type)
         => JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(json)![type][0];
 
+    /// <summary>
+    /// A fresh image that has no size takes the size from the prior manifest when its tag is the same.
+    /// True: an image that did not change is not measured again.
+    /// False: every refresh would measure every image again.
+    /// </summary>
     [Fact]
     public void CarryForwardSizes_FillsSize_WhenTagUnchanged()
     {
@@ -48,6 +56,11 @@ public class ImageManifestEnricherTests
         Assert.Equal(200, merged.Height);
     }
 
+    /// <summary>
+    /// A fresh image whose tag changed does not take the prior size.
+    /// True: a replaced image is measured again.
+    /// False: a new image would be reported with the old image's size.
+    /// </summary>
     [Fact]
     public void CarryForwardSizes_DoesNotFill_WhenTagChanged()
     {
@@ -59,6 +72,11 @@ public class ImageManifestEnricherTests
         Assert.Equal(0, merged.Size);
     }
 
+    /// <summary>
+    /// A fresh image that already has a size keeps it.
+    /// True: a measured size is never overwritten by an older one.
+    /// False: a fresh measurement would be replaced by a stale size.
+    /// </summary>
     [Fact]
     public void CarryForwardSizes_LeavesAlreadyMeasuredSizeAlone()
     {
@@ -70,6 +88,11 @@ public class ImageManifestEnricherTests
         Assert.Equal(999, merged.Size);
     }
 
+    /// <summary>
+    /// Images with no tag never take a prior size.
+    /// True: an image that cannot be told apart from an older one is measured again.
+    /// False: an untagged image could carry another image's size.
+    /// </summary>
     [Fact]
     public void CarryForwardSizes_DoesNotFill_WhenTagMissing()
     {
@@ -81,6 +104,11 @@ public class ImageManifestEnricherTests
         Assert.Equal(0, merged.Size);
     }
 
+    /// <summary>
+    /// With no prior manifest the fresh manifest comes back unchanged.
+    /// True: the first scan of an item needs no prior state.
+    /// False: a first scan would throw or lose images.
+    /// </summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]

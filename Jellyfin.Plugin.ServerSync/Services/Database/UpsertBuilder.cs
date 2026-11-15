@@ -9,9 +9,9 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
 /// Builds the insert-or-update every sync table writes its rows with, from one list of columns and
-/// how each is updated. Each table used to spell the statement out by hand, and the copies drifted:
-/// one table let a refresh overwrite an Ignored row's retry count while the others kept it. The rules
-/// that every table shares live in <see cref="SyncColumns"/> now, written once.
+/// how each is updated. The rules that every table shares live in <see cref="SyncColumns"/>, written
+/// once, so no table can differ from the others, such as by letting a refresh overwrite an Ignored
+/// row's retry count.
 /// </summary>
 public sealed class UpsertBuilder
 {

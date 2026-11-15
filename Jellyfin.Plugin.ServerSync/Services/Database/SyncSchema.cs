@@ -104,7 +104,6 @@ public static class SyncSchema
     {
         ArgumentNullException.ThrowIfNull(connection);
 
-        // ===== Content Sync (SyncItems) =====
         // Tracks files to be downloaded/replaced/deleted on the local server.
         // Change detection uses Size only. StorageMode says whether a row is a
         // full copy or a .strm link, Kept why a copy in a Link mapping is kept,
@@ -143,7 +142,6 @@ public static class SyncSchema
         ";
         syncItemsCmd.ExecuteNonQuery();
 
-        // ===== History Sync (HistorySyncItems) =====
         // One row per (user, library, item). Source/Local/Merged are five
         // primitive fields (IsPlayed/PlayCount/PositionTicks/LastPlayedDate/
         // IsFavorite). SourceStateHash/SyncedStateHash bundle the five
@@ -200,7 +198,6 @@ public static class SyncSchema
         ";
         historyCmd.ExecuteNonQuery();
 
-        // ===== User Sync (UserSyncItems) =====
         // One row per (user mapping, property category). Categories are Policy,
         // Configuration, ProfileImage. SourceValueHash/SyncedValueHash provide
         // the fast-path skip. SourceImageHash/LocalImageHash/SyncedImageHash
@@ -239,7 +236,6 @@ public static class SyncSchema
         ";
         userCmd.ExecuteNonQuery();
 
-        // ===== People Sync (PeopleSyncItems) =====
         // One row per person, matched by name across servers. Two SyncableValue
         // fields: Metadata (JSON blob) and Images (JSON manifest). Hashes
         // enable the SourceHash == SyncedHash fast-path.
@@ -271,7 +267,6 @@ public static class SyncSchema
         ";
         peopleCmd.ExecuteNonQuery();
 
-        // ===== Metadata Sync (MetadataSyncItems) =====
         // One row per item, four SyncableValue fields (Metadata, Images,
         // People, Studios). Hashes per category enable per-field
         // short-circuiting.
@@ -318,7 +313,6 @@ public static class SyncSchema
         ";
         metadataCmd.ExecuteNonQuery();
 
-        // ===== Hints, versions, and upkeep =====
         // What this server has told its peers and what they have told it, the version each tracked
         // object carries, pairing secrets, scan watermarks, the playlists copied from peers, when each
         // failing row first failed, and the record of the files that left the library.

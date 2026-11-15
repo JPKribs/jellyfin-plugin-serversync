@@ -10,20 +10,35 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Playlists;
 
+/// <summary>
+/// The record of one local playlist that is a copy of another server's.
+/// </summary>
+/// <param name="Root">The id of the playlist the copy was first made as, shared by every copy of it.</param>
+/// <param name="Server">The key of the server the copy came from.</param>
 public sealed record PlaylistCopy(string Root, string Server);
 
+/// <summary>
+/// Remembers which local playlists are copies of another server's, and which playlist each began as.
+/// The record lives in the sync database, and in memory alone before the database is available.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PlaylistCopyStore : QueueStoreBase
 {
     private static readonly ConcurrentDictionary<string, PlaylistCopy> Detached = new(StringComparer.OrdinalIgnoreCase);
     private static PlaylistCopyStore? _current;
 
+    /// <summary>Initializes a new instance of the <see cref="PlaylistCopyStore"/> class.</summary>
+    /// <param name="databaseProvider">The provider of the sync database.</param>
+    /// <param name="logger">The logger.</param>
     public PlaylistCopyStore(ISyncDatabaseProvider databaseProvider, ILogger<PlaylistCopyStore> logger)
         : base(databaseProvider, logger)
     {
         _current = this;
     }
 
+    /// <summary>Reads the record of one local playlist.</summary>
+    /// <param name="playlistId">The local playlist.</param>
+    /// <returns>The record, or null when the playlist is not a copy.</returns>
     public static PlaylistCopy? Get(Guid playlistId)
     {
         var key = Key(playlistId);
@@ -42,6 +57,10 @@ public sealed class PlaylistCopyStore : QueueStoreBase
         });
     }
 
+    /// <summary>Records that a local playlist is a copy, replacing any earlier record of it.</summary>
+    /// <param name="playlistId">The local playlist.</param>
+    /// <param name="root">The id of the playlist the copy was first made as.</param>
+    /// <param name="serverKey">The key of the server the copy came from.</param>
     public static void Set(Guid playlistId, string root, string serverKey)
     {
         var key = Key(playlistId);
@@ -65,6 +84,8 @@ public sealed class PlaylistCopyStore : QueueStoreBase
         });
     }
 
+    /// <summary>Forgets that a local playlist is a copy.</summary>
+    /// <param name="playlistId">The local playlist.</param>
     public static void Remove(Guid playlistId)
     {
         var key = Key(playlistId);
@@ -83,6 +104,8 @@ public sealed class PlaylistCopyStore : QueueStoreBase
         });
     }
 
+    /// <summary>Counts the local playlists recorded as copies.</summary>
+    /// <returns>The count.</returns>
     public static int Count()
         => _current?.Read(conn =>
         {
@@ -91,6 +114,8 @@ public sealed class PlaylistCopyStore : QueueStoreBase
             return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
         }) ?? Detached.Count;
 
+    /// <summary>Lists the local playlists recorded as copies.</summary>
+    /// <returns>The playlist ids.</returns>
     public static List<Guid> Ids()
         => _current?.Read(conn =>
         {

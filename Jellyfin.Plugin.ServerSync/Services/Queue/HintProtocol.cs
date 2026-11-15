@@ -54,7 +54,7 @@ public static class HintProtocol
     /// <summary>Whether a hint has used up its attempts.</summary>
     /// <param name="maxRetries">The configured most attempts, where zero means no limit.</param>
     /// <param name="attemptsSoFar">How many attempts have failed, including this one.</param>
-    /// <returns>True when the hint should be marked failed instead of tried again.</returns>
+    /// <returns><c>true</c> when the hint should be marked failed instead of tried again.</returns>
     public static bool OutOfRetries(int maxRetries, int attemptsSoFar) => maxRetries > 0 && attemptsSoFar >= maxRetries;
 
     /// <summary>
@@ -155,7 +155,7 @@ public static class HintProtocol
     /// <summary>Whether two plugin versions are the same, ignoring surrounding space. A missing version matches nothing.</summary>
     /// <param name="a">One version.</param>
     /// <param name="b">The other version.</param>
-    /// <returns>True when both name the same version.</returns>
+    /// <returns><c>true</c> when both name the same version.</returns>
     public static bool SameVersion(string? a, string? b)
         => !string.IsNullOrWhiteSpace(a) && string.Equals(a.Trim(), b?.Trim(), StringComparison.Ordinal);
 
@@ -168,7 +168,7 @@ public static class HintProtocol
     /// <param name="peerMinProtocol">The oldest protocol the peer speaks, or null for its own protocol.</param>
     /// <param name="peerVersion">The peer's plugin version.</param>
     /// <param name="thisVersion">This server's plugin version.</param>
-    /// <returns>True when the two can exchange hints.</returns>
+    /// <returns><c>true</c> when the two can exchange hints.</returns>
     public static bool Compatible(int? peerProtocol, int? peerMinProtocol, string? peerVersion, string thisVersion)
     {
         if (peerProtocol is not { } protocol)
@@ -183,7 +183,7 @@ public static class HintProtocol
     /// <summary>Whether a peer's advertised capabilities are compatible with this build.</summary>
     /// <param name="capabilities">The peer's capabilities.</param>
     /// <param name="thisVersion">This server's plugin version.</param>
-    /// <returns>True when the two can exchange hints.</returns>
+    /// <returns><c>true</c> when the two can exchange hints.</returns>
     public static bool Compatible(PeerCapabilities capabilities, string thisVersion)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
@@ -256,7 +256,7 @@ public static class HintProtocol
     /// <summary>Whether a version lies too far ahead of this server's clock to be trusted at all.</summary>
     /// <param name="timestamp">The version's timestamp.</param>
     /// <param name="utcNow">This server's clock.</param>
-    /// <returns>True when it is beyond the allowed lead.</returns>
+    /// <returns><c>true</c> when it is beyond the allowed lead.</returns>
     public static bool IsFutureVersion(DateTime timestamp, DateTime utcNow) => UtcTime.AsUtc(timestamp) - utcNow > MaxVersionLead;
 
     /// <summary>The kinds a server applies from hints, by its module switches. Users are never among them.</summary>
@@ -420,19 +420,19 @@ public static class HintProtocol
 
     /// <summary>Whether a content hint says its file left the library.</summary>
     /// <param name="itemType">The item type.</param>
-    /// <returns>True for a removal.</returns>
+    /// <returns><c>true</c> for a removal.</returns>
     public static bool IsContentRemoval(string? itemType)
         => string.Equals(itemType, ContentRemoved, StringComparison.Ordinal);
 
     /// <summary>Whether a playlist hint's item type is a deletion.</summary>
     /// <param name="itemType">The item type.</param>
-    /// <returns>True for a deletion.</returns>
+    /// <returns><c>true</c> for a deletion.</returns>
     public static bool IsPlaylistDeletion(string? itemType)
         => itemType is PlaylistDeleted or PlaylistCopyDeleted;
 
     /// <summary>Whether a playlist hint's item type is a copy.</summary>
     /// <param name="itemType">The item type.</param>
-    /// <returns>True for a copy.</returns>
+    /// <returns><c>true</c> for a copy.</returns>
     public static bool IsPlaylistCopy(string? itemType)
         => itemType is PlaylistCopy or PlaylistCopyDeleted;
 

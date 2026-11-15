@@ -51,12 +51,32 @@ public sealed class LinkProbe : IHostedService, IDisposable
     private Timer? _timer;
     private int _sweeping;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkProbe"/> class.
+    /// </summary>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="providerManager">Provider manager.</param>
+    /// <param name="fileSystem">File system.</param>
+    /// <param name="links">The link registry.</param>
+    /// <param name="grants">The plays in progress.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="mediaInfo">Takes the source's media info, or null.</param>
     public LinkProbe(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, ILinkRegistry links, LinkGrants grants, ILogger<LinkProbe> logger, LinkMediaInfo mediaInfo)
         : this(libraryManager, providerManager, fileSystem, links, grants, logger, () => DateTime.UtcNow, mediaInfo)
     {
     }
 
-    /// <summary>Initializes a new instance of the <see cref="LinkProbe"/> class, for tests.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkProbe"/> class, for tests.
+    /// </summary>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="providerManager">Provider manager.</param>
+    /// <param name="fileSystem">File system.</param>
+    /// <param name="links">The link registry.</param>
+    /// <param name="grants">The plays in progress.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="now">Gives the current time.</param>
+    /// <param name="mediaInfo">Takes the source's media info, or null.</param>
     public LinkProbe(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, ILinkRegistry links, LinkGrants grants, ILogger<LinkProbe> logger, Func<DateTime> now, LinkMediaInfo? mediaInfo = null)
     {
         _mediaInfo = mediaInfo;
@@ -96,6 +116,7 @@ public sealed class LinkProbe : IHostedService, IDisposable
     }
 
     /// <summary>Starts watching a newly added item, if it is one of this server's links.</summary>
+    /// <param name="item">The item the library added, or null.</param>
     public void Track(BaseItem? item)
     {
         try

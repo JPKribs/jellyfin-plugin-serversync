@@ -57,6 +57,18 @@ public sealed class LinkPlaybackReporter : BackgroundService
 
     private readonly LinkCache? _cache;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkPlaybackReporter"/> class.
+    /// </summary>
+    /// <param name="sessionManager">Session manager.</param>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="links">The link registry.</param>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="grants">The plays in progress.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="cache">The link cache, or null.</param>
     public LinkPlaybackReporter(
         ISessionManager sessionManager,
         ILibraryManager libraryManager,
@@ -83,6 +95,10 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// Whether a progress report is due: the first for a viewer, a pause or resume, or 30 seconds after
     /// the last one sent.
     /// </summary>
+    /// <param name="last">The last report sent for the viewer, or null when none was.</param>
+    /// <param name="paused">Whether the viewer is paused now.</param>
+    /// <param name="now">The current time.</param>
+    /// <returns><c>true</c> when a report is due.</returns>
     public static bool ProgressDue((DateTime At, bool Paused)? last, bool paused, DateTime now)
         => last is not { } sent || sent.Paused != paused || now - sent.At >= ProgressEvery;
 
@@ -92,6 +108,8 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// the next progress report makes up for either. A retry waits outside the queue, so a source that
     /// is down never holds up reports to the others.
     /// </summary>
+    /// <param name="kind">The kind of report.</param>
+    /// <returns>The wait before each retry, or none.</returns>
     public static TimeSpan[] RetryDelays(LinkPlaybackEvent kind)
         => kind == LinkPlaybackEvent.Stop
             ? new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10) }
@@ -102,7 +120,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// reached, or failed itself. A refusal, such as a user the source does not map, is final.
     /// </summary>
     /// <param name="ex">What the send threw.</param>
-    /// <returns>True when a retry may help.</returns>
+    /// <returns><c>true</c> when a retry may help.</returns>
     public static bool Retryable(Exception ex)
         => ex is OperationCanceledException
             || (ex is HttpRequestException http && (http.StatusCode is null || (int)http.StatusCode >= 500));
@@ -128,7 +146,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
     /// <param name="kind">The event.</param>
     /// <param name="viewer">The viewer and link.</param>
     /// <param name="cached">Whether the link's file is in the cache now.</param>
-    /// <returns>True when nothing is sent to the source.</returns>
+    /// <returns><c>true</c> when nothing is sent to the source.</returns>
     public bool PlaysLocally(LinkPlaybackEvent kind, string viewer, Func<bool> cached)
     {
         ArgumentNullException.ThrowIfNull(cached);
@@ -309,7 +327,7 @@ public sealed class LinkPlaybackReporter : BackgroundService
         }
         catch (Exception ex) when (report.Event == LinkPlaybackEvent.Stop)
         {
-            // The source ends the session itself ten minutes after the last report it had.
+            // The source stops the playback itself ten minutes after the last report it had.
             _logger.LogWarning("Could not report the stop of {Path} to '{Server}', so it lists the viewer until it gives up on them: {Reason}", link.LinkPath, server.DisplayName, ex.Message);
         }
         catch (Exception ex)

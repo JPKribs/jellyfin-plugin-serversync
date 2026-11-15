@@ -14,6 +14,12 @@ public sealed class LinkStreamResult : IActionResult
     private readonly LinkEntry _link;
     private readonly LinkGrant _grant;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkStreamResult"/> class.
+    /// </summary>
+    /// <param name="streamer">Streams the file.</param>
+    /// <param name="link">The link.</param>
+    /// <param name="grant">The grant that allows the stream.</param>
     public LinkStreamResult(LinkStreamer streamer, LinkEntry link, LinkGrant grant)
     {
         _streamer = streamer;

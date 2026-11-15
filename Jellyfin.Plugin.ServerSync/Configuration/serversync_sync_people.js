@@ -1,10 +1,17 @@
-// ============================================
-// SERVER SYNC PLUGIN - SYNC PAGE: PEOPLE VIEW
-// ============================================
+// serversync_sync_people.js
 // The People Sync table and its detail modal. Built by serversync_sync.js from the page context
 // and the table kit in serversync_sync_table.js.
-// ============================================
 
+// createPeopleSyncTableModule
+// Builds the People Sync view: its table, status counts, health figures, and detail modal.
+//
+// Inputs
+// ctx [object]: The page context from serversync_sync.js.
+// kit [object]: The table kit from createSyncTableKit.
+//
+// Output
+// [object]: The view's module, with table, currentConfig, init, loadAll, loadStatus, loadItems, and the
+// modal and bulk actions.
 export function createPeopleSyncTableModule(ctx, kit) {
     'use strict';
 
@@ -18,10 +25,6 @@ export function createPeopleSyncTableModule(ctx, kit) {
     var parseJsonSafe = kit.parseJsonSafe;
     var formatImageDisplay = kit.formatImageDisplay;
     var showObjectVersion = kit.showObjectVersion;
-
-    // ============================================
-    // PEOPLE SYNC TABLE MODULE
-    // ============================================
 
     var PeopleSyncTableModule = createSyncTableModule({
         name: 'People',
@@ -41,9 +44,10 @@ export function createPeopleSyncTableModule(ctx, kit) {
         },
         taskNoun: 'people',
         singularNoun: 'Person',
-        pluralNoun: 'person(s)',
+        nounOne: 'person',
+        nounMany: 'people',
         failNoun: 'people',
-        searchPlaceholder: 'Search people...',
+        searchPlaceholder: 'Search people',
         emptyMessage: 'No people sync items found. Run a refresh to scan for people.',
         columns: function() {
             return [
@@ -61,7 +65,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                     key: 'changes',
                     label: 'Changes',
                     type: 'custom',
-                    className: 'pt-cell-details',
+                    className: 'serversync-details-cell',
                     render: function(item) {
                         var changes = [];
                         if (item.HasChanges && item.HasMetadataChanges) changes.push('Metadata');
@@ -96,7 +100,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                 ServerSyncShared.apiRequest('PeopleItems/' + item.Id).then(function(detail) {
                     if (seq !== self._detailSeq) return;
                     if (!detail) {
-                        ServerSyncShared.showAlert('Person not found');
+                        ServerSyncShared.syncStatus('Person not found.', true);
                         return;
                     }
 
@@ -106,7 +110,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
 
                     var statusBadge = view.querySelector('#peopleSyncModalStatusBadge');
                     statusBadge.textContent = detail.Status || 'Unknown';
-                    statusBadge.className = 'itemModal-statusBadge ' + (detail.Status || 'unknown');
+                    statusBadge.className = 'jpk-table-status-badge ' + (detail.Status || 'unknown');
 
                     if (detail.LastSyncTime) {
                         view.querySelector('#peopleSyncModalLastSync').textContent =
@@ -131,8 +135,8 @@ export function createPeopleSyncTableModule(ctx, kit) {
                     view.querySelector('#peopleSyncModalLocalHeader').textContent = localServerName;
 
                     var summaryHtml = '';
-                    summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasMetadataChanges ? 'has-changes' : 'no-changes') + '">Metadata: ' + (detail.HasMetadataChanges ? 'Changes' : 'Synced') + '</span> ';
-                    summaryHtml += '<span class="peopleSyncBadge ' + (detail.HasImagesChanges ? 'has-changes' : 'no-changes') + '">Images: ' + (detail.HasImagesChanges ? 'Changes' : 'Synced') + '</span>';
+                    summaryHtml += ServerSyncShared.badge(detail.HasMetadataChanges ? 'orange' : 'green', 'Metadata: ' + (detail.HasMetadataChanges ? 'Changes' : 'Synced'));
+                    summaryHtml += ServerSyncShared.badge(detail.HasImagesChanges ? 'orange' : 'green', 'Images: ' + (detail.HasImagesChanges ? 'Changes' : 'Synced'));
                     view.querySelector('#peopleSyncModalChangesSummary').innerHTML = summaryHtml;
 
                     var tbody = view.querySelector('#peopleSyncModalTableBody');
@@ -224,7 +228,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                 }).catch(function(err) {
                     if (seq !== self._detailSeq) return;
                     console.error('Failed to load person detail:', err);
-                    ServerSyncShared.showAlert('Failed to load person details');
+                    ServerSyncShared.syncStatus('Could not load the person details.', true);
                 });
             },
 
@@ -234,7 +238,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                 var row = document.createElement('tr');
                 var cell = document.createElement('td');
                 cell.colSpan = 4;
-                cell.classList.add('ssNoteCell');
+                cell.classList.add('serversync-note-cell');
                 cell.textContent = 'Changed: ' + text;
                 row.appendChild(cell);
                 tbody.appendChild(row);
@@ -242,7 +246,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
 
             _addSectionHeader: function(tbody, title) {
                 var row = document.createElement('tr');
-                row.className = 'metadataSyncModal-sectionHeader';
+                row.className = 'serversync-modal-section-header';
                 var cell = document.createElement('td');
                 cell.colSpan = 4;
                 cell.textContent = title;
@@ -261,7 +265,7 @@ export function createPeopleSyncTableModule(ctx, kit) {
                     } catch (e) { return String(val); }
                 }
                 if (field && field.truncate && typeof val === 'string' && val.length > 200) {
-                    return val.substring(0, 200) + '...';
+                    return val.substring(0, 200) + '…';
                 }
                 if (Array.isArray(val)) {
                     return val.length > 0 ? val.join(', ') : '-';
@@ -273,22 +277,22 @@ export function createPeopleSyncTableModule(ctx, kit) {
 
             _addComparisonRow: function(tbody, property, sourceVal, localVal, isChanged) {
                 var row = document.createElement('tr');
-                if (isChanged) row.className = 'metadataSyncModal-changedRow';
+                if (isChanged) row.className = 'serversync-modal-changed-row';
 
                 var propCell = document.createElement('td');
-                propCell.className = 'historyCompareTable-property';
+                propCell.className = 'serversync-compare-table-property';
                 propCell.textContent = property;
 
                 var sourceCell = document.createElement('td');
-                sourceCell.className = 'historyCompareTable-value';
+                sourceCell.className = 'serversync-compare-table-value';
                 sourceCell.textContent = sourceVal || '-';
 
                 var localCell = document.createElement('td');
-                localCell.className = 'historyCompareTable-value';
+                localCell.className = 'serversync-compare-table-value';
                 localCell.textContent = localVal || '-';
 
                 var afterSyncCell = document.createElement('td');
-                afterSyncCell.className = 'historyCompareTable-value historyCompareTable-merged';
+                afterSyncCell.className = 'serversync-compare-table-value serversync-compare-table-merged';
                 afterSyncCell.textContent = sourceVal || '-';
 
                 row.appendChild(propCell);

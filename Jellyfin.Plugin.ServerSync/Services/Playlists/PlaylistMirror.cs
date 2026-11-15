@@ -10,6 +10,7 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -21,6 +22,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Playlists;
 
+/// <summary>What applying a source playlist did.</summary>
 public enum PlaylistMirrorOutcome
 {
     Created,
@@ -30,6 +32,17 @@ public enum PlaylistMirrorOutcome
     Skipped
 }
 
+/// <summary>A playlist as another server holds it.</summary>
+/// <param name="Id">The playlist's id there.</param>
+/// <param name="RootId">The id of the playlist it was first made as.</param>
+/// <param name="Name">The playlist's name.</param>
+/// <param name="MediaType">The playlist's media type, or null.</param>
+/// <param name="OwnerUserId">The owner's id there.</param>
+/// <param name="OpenAccess">Whether any user may open the playlist.</param>
+/// <param name="Shares">The users it is shared with, and whether each may edit.</param>
+/// <param name="EntryPaths">The path of each entry, in order.</param>
+/// <param name="OwnerKnown"><c>true</c> when the owner is known exactly, not assumed from the key in use.</param>
+/// <param name="IsCopy"><c>true</c> when the playlist is itself a copy of another.</param>
 public sealed record SourcePlaylist(
     string Id,
     string RootId,
@@ -42,14 +55,21 @@ public sealed record SourcePlaylist(
     bool OwnerKnown,
     bool IsCopy)
 {
+    /// <summary>Gets a value indicating whether the playlist is the original and not a copy.</summary>
     public bool IsOriginal => !IsCopy;
 }
 
+/// <summary>
+/// Keeps a playlist here in step with the same playlist on another server, with its owner, entries,
+/// and shares. It also remembers which local playlists are copies, and from which server.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PlaylistMirror
 {
+    /// <summary>The provider id key that holds the id of the playlist a copy was made from.</summary>
     public const string SourcePlaylistProviderKey = "ServerSyncSourcePlaylist";
 
+    /// <summary>The provider id key that holds the server a copy came from.</summary>
     public const string SourceServerProviderKey = "ServerSyncSourceServer";
 
     private readonly ILibraryManager _libraryManager;
@@ -71,6 +91,18 @@ public sealed class PlaylistMirror
     /// </summary>
     public static readonly TimeSpan ResaveWindow = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PlaylistMirror"/> class.
+    /// </summary>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="playlistManager">Playlist manager.</param>
+    /// <param name="userManager">User manager.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="providerManager">Provider manager.</param>
+    /// <param name="guard">Marks a write as one a peer asked for, so it is not announced back.</param>
+    /// <param name="copies">Holds which local playlists are copies.</param>
+    /// <param name="localItems">Finds local items by path.</param>
+    /// <param name="logger">Logger instance.</param>
     public PlaylistMirror(ILibraryManager libraryManager, IPlaylistManager playlistManager, IUserManager userManager, IServerApplicationHost applicationHost, MediaBrowser.Controller.Providers.IProviderManager providerManager, ApplyGuard guard, PlaylistCopyStore copies, ILocalItems localItems, ILogger<PlaylistMirror> logger)
     {
         ArgumentNullException.ThrowIfNull(copies);
@@ -85,16 +117,27 @@ public sealed class PlaylistMirror
         _providerManager.RefreshCompleted += (_, e) => OnRefreshCompleted(e?.Argument);
     }
 
+    /// <summary>Gives the id of the playlist a playlist was first made as, which is its own id for an original.</summary>
+    /// <param name="playlist">The playlist.</param>
+    /// <returns>The root key.</returns>
     public static string RootKey(BaseItem playlist)
     {
         ArgumentNullException.ThrowIfNull(playlist);
         return TaggedRoot(playlist) ?? IdKey(playlist.Id);
     }
 
+    /// <summary>Writes an id in the form the keys use.</summary>
+    /// <param name="id">The id.</param>
+    /// <returns>The key.</returns>
     public static string IdKey(Guid id) => id.ToString("N", CultureInfo.InvariantCulture);
 
+    /// <summary>Tells whether a playlist is a copy of another.</summary>
+    /// <param name="playlist">The playlist.</param>
+    /// <returns><c>true</c> for a copy.</returns>
     public static bool IsMirror(BaseItem playlist) => TaggedRoot(playlist) is not null;
 
+    /// <summary>Lists the playlists here.</summary>
+    /// <returns>The playlists.</returns>
     public List<Playlist> LocalPlaylists()
         => _libraryManager.GetItemList(new InternalItemsQuery
         {
@@ -102,6 +145,11 @@ public sealed class PlaylistMirror
             Recursive = true
         }).OfType<Playlist>().ToList();
 
+    /// <summary>Finds the local playlist that stands for a source playlist.</summary>
+    /// <param name="rootKey">The root key of the source playlist.</param>
+    /// <param name="sourceIsOriginal"><c>true</c> when the source playlist is an original, so only a copy here can match.</param>
+    /// <param name="local">The playlists here, or null to read them.</param>
+    /// <returns>The playlist, or null.</returns>
     public Playlist? FindByRoot(string rootKey, bool sourceIsOriginal, IReadOnlyList<Playlist>? local = null)
     {
         foreach (var playlist in local ?? LocalPlaylists())
@@ -120,6 +168,8 @@ public sealed class PlaylistMirror
         return null;
     }
 
+    /// <summary>Records which playlists are copies from their tags, when nothing is recorded yet.</summary>
+    /// <returns>How many copies were recorded.</returns>
     public int RebuildCopiesFromTags()
     {
         if (PlaylistCopyStore.Count() > 0)
@@ -148,6 +198,9 @@ public sealed class PlaylistMirror
         return rebuilt;
     }
 
+    /// <summary>Maps the source users of a server entry to local users, for the user mappings that are on.</summary>
+    /// <param name="server">The server entry.</param>
+    /// <returns>The local user of each source user key.</returns>
     public Dictionary<string, Guid> UserMap(SourceServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
@@ -163,6 +216,16 @@ public sealed class PlaylistMirror
         return users;
     }
 
+    /// <summary>
+    /// Reads the playlists a server offers. Server Sync there lists them with their owners. Without it, a
+    /// standard user's key lists only that user's playlists.
+    /// </summary>
+    /// <param name="server">The server entry.</param>
+    /// <param name="client">The client for that server.</param>
+    /// <param name="users">The local user of each source user key.</param>
+    /// <param name="onlyId">The one playlist to read, or null for all.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The playlists.</returns>
     public async Task<List<SourcePlaylist>> ReadAsync(SourceServer server, SourceServerClient client, Dictionary<string, Guid> users, Guid? onlyId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(server);
@@ -225,6 +288,14 @@ public sealed class PlaylistMirror
         return found;
     }
 
+    /// <summary>Creates or updates the local playlist for a source playlist.</summary>
+    /// <param name="server">The server entry.</param>
+    /// <param name="source">The source playlist.</param>
+    /// <param name="users">The local user of each source user key.</param>
+    /// <param name="syncShares"><c>true</c> to copy who the playlist is shared with.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="local">The playlists here, or null to read them.</param>
+    /// <returns>What was done.</returns>
     public async Task<PlaylistMirrorOutcome> ApplyAsync(SourceServer server, SourcePlaylist source, Dictionary<string, Guid> users, bool syncShares, CancellationToken cancellationToken, IReadOnlyList<Playlist>? local = null)
     {
         ArgumentNullException.ThrowIfNull(server);
@@ -258,7 +329,7 @@ public sealed class PlaylistMirror
         {
             if (desired.Count == 0 && source.EntryPaths.Count > 0)
             {
-                _logger.LogInformation("Playlists: none of the items in '{Name}' are here yet. The playlist is created once some arrive", source.Name);
+                _logger.LogInformation("Playlists: none of the items in '{Name}' are here yet. The playlist is created once some arrive", FormatUtilities.SanitizeForLog(source.Name));
                 return PlaylistMirrorOutcome.Waiting;
             }
 
@@ -286,7 +357,7 @@ public sealed class PlaylistMirror
                 }
             }
 
-            _logger.LogInformation("Playlists: created '{Name}' for {User} with {Count} item(s), {Dropped} not here", source.Name, owner.Username, desired.Count, source.EntryPaths.Count - desired.Count);
+            _logger.LogInformation("Playlists: created '{Name}' for {User} with {Count} item(s), {Dropped} not here", FormatUtilities.SanitizeForLog(source.Name), owner.Username, desired.Count, source.EntryPaths.Count - desired.Count);
             return PlaylistMirrorOutcome.Created;
         }
 
@@ -300,7 +371,7 @@ public sealed class PlaylistMirror
         var current = existing.GetManageableItems().Select(e => e.Item2.Id).ToList();
         if (desired.Count == 0 && source.EntryPaths.Count > 0 && current.Count > 0)
         {
-            _logger.LogWarning("Playlists: none of the {Count} item(s) in '{Name}' resolved here. Leaving the local playlist unchanged this run", source.EntryPaths.Count, source.Name);
+            _logger.LogWarning("Playlists: none of the {Count} item(s) in '{Name}' resolved here. Leaving the local playlist unchanged this run", source.EntryPaths.Count, FormatUtilities.SanitizeForLog(source.Name));
             return PlaylistMirrorOutcome.Waiting;
         }
 
@@ -350,10 +421,12 @@ public sealed class PlaylistMirror
             }
         }
 
-        _logger.LogInformation("Playlists: updated '{Name}' for {User}, {Count} item(s), {Dropped} not here", source.Name, owner.Username, desired.Count, source.EntryPaths.Count - desired.Count);
+        _logger.LogInformation("Playlists: updated '{Name}' for {User}, {Count} item(s), {Dropped} not here", FormatUtilities.SanitizeForLog(source.Name), owner.Username, desired.Count, source.EntryPaths.Count - desired.Count);
         return PlaylistMirrorOutcome.Updated;
     }
 
+    /// <summary>Deletes a local playlist, and watches for a refresh that saves it back.</summary>
+    /// <param name="playlist">The playlist.</param>
     public void Delete(Playlist playlist)
     {
         ArgumentNullException.ThrowIfNull(playlist);
@@ -409,6 +482,9 @@ public sealed class PlaylistMirror
         }
     }
 
+    /// <summary>Gives the server a playlist copy came from.</summary>
+    /// <param name="playlist">The playlist.</param>
+    /// <returns>The server's key, or null for an original.</returns>
     public static string? CopyServer(BaseItem playlist)
     {
         ArgumentNullException.ThrowIfNull(playlist);

@@ -204,7 +204,7 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
     /// <summary>One delivery pass over every peer. Public so the dashboard and tests can run it on demand.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="refreshCapabilities">Re-read what every peer accepts now, rather than only when the last answer is old.</param>
-    /// <returns>True when a peer was sent a full batch and more may be due.</returns>
+    /// <returns><c>true</c> when a peer was sent a full batch and more may be due.</returns>
     public async Task<bool> DeliverAsync(CancellationToken cancellationToken, bool refreshCapabilities = false)
     {
         await _pass.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -243,11 +243,11 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
 
             if (!peer.Pushes)
             {
-                // Rows for a peer that is disabled or no longer in Push or Sync mode have nowhere to go.
+                // Rows for a peer that is disabled or no longer set to Push or Sync have nowhere to go.
                 // The scheduled tasks cover the change if the peer is switched back on.
                 var stale = _outbound.DeleteForPeer(peerKey);
                 _peers.TryRemove(peerKey, out _);
-                _logger.LogInformation("Dropped {Count} queued hint(s) for '{Peer}', which is disabled or no longer in Push or Sync mode", stale, peer.DisplayName);
+                _logger.LogInformation("Dropped {Count} queued hint(s) for '{Peer}', which is disabled or no longer set to Push or Sync", stale, peer.DisplayName);
                 continue;
             }
 

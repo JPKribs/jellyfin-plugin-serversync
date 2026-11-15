@@ -18,7 +18,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Links;
 /// <summary>
 /// Settles a link whose own server no longer has the file. A film is there for as long as any server
 /// this one reads from holds a real copy, so the other servers are asked first: the link moves to the
-/// first that holds the file, in priority order, and goes only when none does.
+/// first that holds the file, in rank order, and goes only when none does.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkRehomer
@@ -33,6 +33,12 @@ public sealed class LinkRehomer
     /// <summary>
     /// Initializes a new instance of the <see cref="LinkRehomer"/> class.
     /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="table">The content sync table.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="writer">Rewrites a link, or null.</param>
     public LinkRehomer(
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,

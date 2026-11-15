@@ -8,8 +8,6 @@ namespace Jellyfin.Plugin.ServerSync.Models.UserSync;
 /// </summary>
 public class UserSyncUserDto
 {
-    // ===== User Identification =====
-
     /// <summary>
     /// Gets or sets the source server user ID.
     /// </summary>
@@ -30,8 +28,6 @@ public class UserSyncUserDto
     /// </summary>
     public string? LocalUserName { get; set; }
 
-    // ===== Record IDs (for bulk operations) =====
-
     /// <summary>
     /// Gets or sets the database ID of the Policy sync item.
     /// </summary>
@@ -47,8 +43,6 @@ public class UserSyncUserDto
     /// </summary>
     public long? ProfileImageId { get; set; }
 
-    // ===== Individual Category Statuses =====
-
     /// <summary>
     /// Gets or sets the Policy sync status.
     /// </summary>
@@ -63,8 +57,6 @@ public class UserSyncUserDto
     /// Gets or sets the ProfileImage sync status.
     /// </summary>
     public string? ProfileImageStatus { get; set; }
-
-    // ===== Individual Category Change Detection =====
 
     /// <summary>
     /// Gets or sets whether the Policy has changes.
@@ -96,8 +88,6 @@ public class UserSyncUserDto
     /// </summary>
     public string? ProfileImageChangesSummary { get; set; }
 
-    // ===== Source Server =====
-
     /// <summary>
     /// Gets or sets the source server URL (for image display).
     /// </summary>
@@ -105,8 +95,6 @@ public class UserSyncUserDto
 
     /// <summary>Gets or sets the configured server entry the row came from.</summary>
     public string? ServerKey { get; set; }
-
-    // ===== Computed Aggregate Fields =====
 
     /// <summary>
     /// Gets or sets the overall status (Errored > Queued > Ignored > Synced).

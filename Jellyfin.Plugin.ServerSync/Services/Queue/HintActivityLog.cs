@@ -196,8 +196,6 @@ public sealed class HintActivityLog : IDisposable
             LogLevel.Warning);
     }
 
-    // ===== Summaries =====
-
     // Changes from peers are summed by Base's ActivitySummary: one entry per outcome once the queue is
     // quiet, at least every few minutes during a long burst, and whatever is waiting on shutdown.
     private static readonly ActivityOutcome Synced = new(

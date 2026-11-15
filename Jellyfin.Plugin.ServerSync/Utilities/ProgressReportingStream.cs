@@ -26,7 +26,7 @@ public sealed class ProgressReportingStream : Stream
     private int _lastReportedPercent = -1;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="ProgressReportingStream"/> class.
     /// </summary>
     /// <param name="inner">Destination stream. Not disposed by this wrapper.</param>
     /// <param name="expectedBytes">Total bytes expected. Must be positive.</param>

@@ -10,10 +10,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Removes the schedules of this plugin's hidden per module tasks. They used to run on their own
-/// timers and Jellyfin keeps those timers in its own files across upgrades, so without this an
-/// upgraded install would keep running the old tasks beside Sync Content and Sync Information.
-/// The tasks stay registered for the dashboard's run buttons.
+/// Removes the schedules of this plugin's hidden per module tasks. Jellyfin keeps a task's timer in
+/// its own files across upgrades, so a stale timer would run a hidden task beside Sync Content and
+/// Sync Information. The tasks stay registered for the dashboard's run buttons.
 /// </summary>
 /// <remarks>
 /// Jellyfin starts hosted services before it registers scheduled tasks, so the task list is empty
@@ -34,9 +33,9 @@ public sealed class HiddenTaskScheduleCleaner : IHostedService, IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="HiddenTaskScheduleCleaner"/> class.
     /// </summary>
-    /// <param name="taskManager">The task manager.</param>
+    /// <param name="taskManager">Reads and changes the scheduled tasks.</param>
     /// <param name="applicationHost">The server host, which says when startup has finished.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="logger">Writes log entries.</param>
     public HiddenTaskScheduleCleaner(ITaskManager taskManager, IServerApplicationHost applicationHost, ILogger<HiddenTaskScheduleCleaner> logger)
     {
         _taskManager = taskManager;

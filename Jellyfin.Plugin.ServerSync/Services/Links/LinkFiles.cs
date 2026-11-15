@@ -27,6 +27,11 @@ public sealed class LinkFiles
     private readonly object _keyLock = new();
     private byte[]? _key;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkFiles"/> class.
+    /// </summary>
+    /// <param name="host">Names this server.</param>
+    /// <param name="paths">Jellyfin's folders.</param>
     public LinkFiles(IServerApplicationHost host, IApplicationPaths paths)
     {
         ArgumentNullException.ThrowIfNull(paths);
@@ -35,10 +40,15 @@ public sealed class LinkFiles
     }
 
     /// <summary>The URL a link with <paramref name="linkId"/> holds.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <returns>The URL.</returns>
     public string UrlFor(string linkId)
         => $"{_host.GetLocalApiUrl("127.0.0.1", "http", _host.HttpPort)}/{Route}/{linkId}?k={Secret(linkId)}";
 
     /// <summary>Whether <paramref name="presented"/> is the secret for <paramref name="linkId"/>.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="presented">The secret a request carried, or null.</param>
+    /// <returns><c>true</c> when it matches.</returns>
     public bool SecretMatches(string linkId, string? presented)
     {
         if (string.IsNullOrEmpty(linkId) || string.IsNullOrEmpty(presented))
@@ -50,6 +60,9 @@ public sealed class LinkFiles
     }
 
     /// <summary>Whether the file at <paramref name="path"/> already holds the current URL for <paramref name="linkId"/>.</summary>
+    /// <param name="path">The .strm's path.</param>
+    /// <param name="linkId">The link's id.</param>
+    /// <returns><c>true</c> when the file holds the current URL.</returns>
     public bool IsCurrent(string path, string linkId)
     {
         try
@@ -70,6 +83,9 @@ public sealed class LinkFiles
     /// Writes the link, replacing the file only once the new one is complete. Throws when a different
     /// file already sits there, so a user's own .strm or another link is never overwritten.
     /// </summary>
+    /// <param name="path">Where the .strm goes.</param>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="replace"><c>true</c> to replace a file already at the path, which the caller has checked is its own link.</param>
     public void Write(string path, string linkId, bool replace)
     {
         if (File.Exists(path) && !replace)
@@ -105,12 +121,16 @@ public sealed class LinkFiles
     }
 
     /// <summary>The first URL line in a .strm, the same line Jellyfin reads.</summary>
+    /// <param name="path">The .strm's path.</param>
+    /// <returns>The URL, or null when the file has none.</returns>
     public static string? ReadUrl(string path)
         => File.ReadLines(path)
             .Select(line => line.Replace("\t", string.Empty, StringComparison.Ordinal).Trim())
             .FirstOrDefault(line => line.Length > 0 && !line.StartsWith('#'));
 
     /// <summary>Whether a .strm's URL points at this plugin's link route, whatever id and secret it holds.</summary>
+    /// <param name="url">The URL, or null.</param>
+    /// <returns><c>true</c> when it points at the route.</returns>
     public static bool PointsAtLinkRoute(string? url)
         => url is not null && url.Contains("/" + Route + "/", StringComparison.OrdinalIgnoreCase);
 
@@ -118,6 +138,8 @@ public sealed class LinkFiles
     /// Whether the file at <paramref name="path"/> is a .strm this plugin wrote, whatever id and secret
     /// it holds. A file that cannot be read is not taken as one.
     /// </summary>
+    /// <param name="path">The .strm's path.</param>
+    /// <returns><c>true</c> when this plugin wrote it.</returns>
     public static bool IsOwnLink(string path)
     {
         try

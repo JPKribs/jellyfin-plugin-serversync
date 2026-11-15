@@ -43,8 +43,10 @@ public class SyncMissingContentTask
     private readonly ILibraryMonitor _libraryMonitor;
     private readonly DownloadService _downloadService;
 
-    // Every file this run wrote, skipped as already present, or removed, so the refresh afterwards
-    // only looks at the folders that changed.
+    /// <summary>
+    /// Every file this run wrote, skipped as already present, or removed, so the refresh afterwards
+    /// only looks at the folders that changed.
+    /// </summary>
     private readonly ConcurrentQueue<string> _changedFiles = new();
 
     private readonly ConcurrentDictionary<long, byte> _skippedByBreaker = new();
@@ -55,8 +57,19 @@ public class SyncMissingContentTask
     private int _deletedCount;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="SyncMissingContentTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="libraryManager">Reads and changes Jellyfin's library.</param>
+    /// <param name="libraryMonitor">Tells Jellyfin to ignore a path while a file is written to it.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="downloadService">Downloads files from a source.</param>
+    /// <param name="linkWriter">Writes link files, or null when linking is not available.</param>
+    /// <param name="linkVerifier">Checks that a link still streams, or null when linking is not available.</param>
+    /// <param name="linkCacheFiller">Fills the link cache, or null when linking is not available.</param>
+    /// <param name="linkCache">Holds local copies of links that were played, or null when linking is not available.</param>
     public SyncMissingContentTask(
         ILogger<SyncMissingContentTask> logger,
         ILibraryManager libraryManager,
@@ -86,7 +99,7 @@ public class SyncMissingContentTask
     private readonly LinkCache? _linkCache;
 
     /// <inheritdoc />
-    public override string Name => "Sync Content";
+    public override string Name => "Copy Content";
 
     /// <inheritdoc />
     public override string Key => "ServerSyncDownloadContent";
@@ -117,9 +130,11 @@ public class SyncMissingContentTask
         return true;
     }
 
-    // Errored-for-retry rows are pulled in alongside Queued so a previously
-    // failed download gets another shot, capped by
-    // <see cref="PluginConfiguration.MaxRetryCount"/>.
+    /// <summary>
+    /// Errored-for-retry rows are pulled in alongside Queued so a previously
+    /// failed download gets another shot, capped by
+    /// <see cref="PluginConfiguration.MaxRetryCount"/>.
+    /// </summary>
     /// <inheritdoc />
     protected override IList<SyncItem> GetItemsToApply()
     {
@@ -236,8 +251,10 @@ public class SyncMissingContentTask
         return true;
     }
 
-    // A single row from a hint: the same disk check and download setup as a run, without connecting
-    // every server, since the hint already names the one to pull from.
+    /// <summary>
+    /// A single row from a hint: the same disk check and download setup as a run, without connecting
+    /// every server, since the hint already names the one to pull from.
+    /// </summary>
     /// <inheritdoc />
     protected override Task<bool> BeforeRowAsync(SyncItem record, CancellationToken cancellationToken)
     {
@@ -256,9 +273,11 @@ public class SyncMissingContentTask
         return Task.FromResult(true);
     }
 
-    // A file that arrived through a hint is reported to the library as changed, the way the library
-    // monitor reports a file it saw, so Jellyfin refreshes that one folder rather than every library.
-    // When Jellyfin could not take the folder, as for a first file in an empty library, a scan is queued.
+    /// <summary>
+    /// A file that arrived through a hint is reported to the library as changed, the way the library
+    /// monitor reports a file it saw, so Jellyfin refreshes that one folder rather than every library.
+    /// When Jellyfin could not take the folder, as for a first file in an empty library, a scan is queued.
+    /// </summary>
     /// <inheritdoc />
     protected override Task AfterRowAsync(bool applied, CancellationToken cancellationToken)
     {
@@ -287,7 +306,9 @@ public class SyncMissingContentTask
         _changedFiles.Clear();
     }
 
-    // A library's own folder or one inside it. The roots above every library never lead a refresh anywhere.
+    /// <summary>
+    /// A library's own folder or one inside it. The roots above every library never lead a refresh anywhere.
+    /// </summary>
     private bool IsLibraryFolder(string path)
         => _libraryManager.FindByPath(path, true) is Folder
             and not AggregateFolder
@@ -321,9 +342,10 @@ public class SyncMissingContentTask
         return true;
     }
 
-    // Weight items by file size so the run's percentage tracks bytes moved,
-    // not item count, one 50 GB movie plus nine small episodes used to jump
-    // 10% per episode and then freeze for the movie's entire download.
+    /// <summary>
+    /// Weight items by file size so the run's percentage tracks bytes moved, not item count.
+    /// Otherwise one 50 GB movie plus nine small episodes would jump 10% per episode and then freeze.
+    /// </summary>
     /// <inheritdoc />
     protected override long GetApplyWeight(SyncItem record)
     {
@@ -450,13 +472,12 @@ public class SyncMissingContentTask
         _changedFiles.Enqueue(record.LocalPath!);
     }
 
-    // A source file that changes only its extension is a new item on the source, and its link sits
-    // exactly where the old file's link does. Left alone, the new link is refused for as long as the
-    // old row lasts, and the old link is then deleted with its folder before the new one is written,
-    // so the title is dead and then missing for a day or more. Instead, once the old file's own server
-    // says it is gone, or its removal is already scheduled, the new link takes the .strm over in place.
-    // While the old file is still on the source the two really do collide, and the write is refused
-    // as before.
+    /// <summary>
+    /// Lets a new link take over the .strm of the link for the old file it replaces. A source file that
+    /// changes only its extension is a new item whose link sits where the old file's link does. Once the
+    /// old file's own server says it is gone, or its removal is scheduled, the new link takes the .strm
+    /// over in place. While the old file is still on the source the two collide and the write is refused.
+    /// </summary>
     private async Task TakeOverLinkPathAsync(SyncItem record, CancellationToken cancellationToken)
     {
         if (_linkWriter is null || LinkWriter.Predecessor(record, TypedManager) is not { } old)
@@ -476,10 +497,12 @@ public class SyncMissingContentTask
         _linkCache?.Remove(old.SourceItemId);
     }
 
-    // The copy is the only one this server holds, so it is let go only when the source still has the
-    // file as it was and offers it as a link. Then the link is written beside the copy, and the copy
-    // moves into the link cache, or is removed when the cache is off or cannot take it. Until the link
-    // is in place the copy stays and plays.
+    /// <summary>
+    /// The copy is the only one this server holds, so it is let go only when the source still has the
+    /// file as it was and offers it as a link. Then the link is written beside the copy, and the copy
+    /// moves into the link cache, or is removed when the cache is off or cannot take it. Until the link
+    /// is in place the copy stays and plays.
+    /// </summary>
     private async Task UnkeepAsync(SyncItem record, CancellationToken cancellationToken)
     {
         var copyPath = record.LocalPath ?? throw new InvalidOperationException($"The copy has no path (source: {record.SourcePath})");
@@ -536,8 +559,10 @@ public class SyncMissingContentTask
         }
     }
 
-    // Subtitles and other companions are small and Jellyfin pairs them by name, so a link gets them
-    // beside it the same way a copy does. A link is still written when they cannot be fetched.
+    /// <summary>
+    /// Subtitles and other companions are small and Jellyfin pairs them by name, so a link gets them
+    /// beside it the same way a copy does. A link is still written when they cannot be fetched.
+    /// </summary>
     private async Task DownloadLinkCompanionsAsync(SyncItem record, CancellationToken cancellationToken)
     {
         var config = ConfigManager.Configuration;
@@ -554,9 +579,11 @@ public class SyncMissingContentTask
         }
     }
 
-    // An .nfo beside the link tells Jellyfin what it is from the source's own details, rather than from
-    // the file name. A link is still written when the details cannot be read, and an .nfo the plugin did
-    // not write is never replaced.
+    /// <summary>
+    /// An .nfo beside the link tells Jellyfin what it is from the source's own details, rather than from
+    /// the file name. A link is still written when the details cannot be read, and an .nfo the plugin did
+    /// not write is never replaced.
+    /// </summary>
     private async Task WriteLinkNfoAsync(SyncItem record, bool recorded, CancellationToken cancellationToken)
     {
         // An .nfo written on an earlier run stays recorded when this run cannot write it again.
@@ -597,9 +624,11 @@ public class SyncMissingContentTask
         }
     }
 
-    // A link becoming a copy takes the cached file when the cache holds all of it, held to the same
-    // checks as a download: the copy's place in the library, the disk's room, and one apply at a time.
-    // False when it cannot, and the copy is downloaded instead, where any of those checks says why.
+    /// <summary>
+    /// A link becoming a copy takes the cached file when the cache holds all of it, held to the same
+    /// checks as a download: the copy's place in the library, the disk's room, and one apply at a time.
+    /// False when it cannot, and the copy is downloaded instead, where any of those checks says why.
+    /// </summary>
     private async Task<bool> MoveFromCacheAsync(SyncItem record, CancellationToken cancellationToken)
     {
         if (_linkCache?.HoldsWhole(record.SourceItemId, record.SourceSize) != true || string.IsNullOrEmpty(record.LocalPath))
@@ -638,7 +667,9 @@ public class SyncMissingContentTask
         return true;
     }
 
-    // The copy path: disk space, validation, and the download itself.
+    /// <summary>
+    /// The copy path: disk space, validation, and the download itself.
+    /// </summary>
     private async Task DownloadAsync(SyncItem record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
     {
         if (_tempPath == null)
@@ -745,12 +776,14 @@ public class SyncMissingContentTask
         }
     }
 
-    // A file replaced on the source by one of the same name in another container, as Film.mkv by
-    // Film.mp4, arrives as a new item, and the old copy would sit beside the new one until the next
-    // full scan, where Jellyfin may play either. Once the new file is down, a copy of the same name
-    // from the same server is handled the way that scan would handle it, by Removed files, as soon as
-    // the source answers that it no longer holds the old file. A source that cannot be asked, or that
-    // still holds both, changes nothing here.
+    /// <summary>
+    /// A file replaced on the source by one of the same name in another container, as Film.mkv by
+    /// Film.mp4, arrives as a new item, and the old copy would sit beside the new one until the next
+    /// full scan, where Jellyfin may play either. Once the new file is down, a copy of the same name
+    /// from the same server is handled the way that scan would handle it, by Removed files, as soon as
+    /// the source answers that it no longer holds the old file. A source that cannot be asked, or that
+    /// still holds both, changes nothing here.
+    /// </summary>
     private async Task RetireReplacedCopiesAsync(SyncItem record, ScanSource source, CancellationToken cancellationToken)
     {
         var config = ConfigManager.Configuration;
@@ -806,9 +839,11 @@ public class SyncMissingContentTask
         }
     }
 
-    // The server a downloaded file first came from: the origin its source names for it when the source
-    // was itself given the file, and otherwise the source. Left empty when the source cannot say, so a
-    // file whose origin is not known is never treated as another server's.
+    /// <summary>
+    /// The server a downloaded file first came from: the origin its source names for it when the source
+    /// was itself given the file, and otherwise the source. Left empty when the source cannot say, so a
+    /// file whose origin is not known is never treated as another server's.
+    /// </summary>
     private async Task<string?> OriginOfDownloadAsync(ScanSource source, SyncItem record, CancellationToken cancellationToken)
     {
         try
@@ -823,10 +858,12 @@ public class SyncMissingContentTask
         }
     }
 
-    // Content has no SyncableValue fields, so there is nothing to mark synced.
-    // The base's post-apply Status, LastSyncTime, and Reason write covers the
-    // rest, and <see cref="ApplyAsync"/> already populated CompanionFiles.
-    // The retry count resets so a later failure gets the full allowance again.
+    /// <summary>
+    /// Content has no SyncableValue fields, so there is nothing to mark synced.
+    /// The base's post-apply Status, LastSyncTime, and Reason write covers the
+    /// rest, and <see cref="ApplyAsync"/> already populated CompanionFiles.
+    /// The retry count resets so a later failure gets the full allowance again.
+    /// </summary>
     /// <inheritdoc />
     protected override void OnApplySucceeded(SyncItem record)
     {
@@ -834,9 +871,11 @@ public class SyncMissingContentTask
         record.RetryCount = 0;
     }
 
-    // Increments <see cref="SyncItem.RetryCount"/> so the
-    // <c>MaxRetryCount</c> cap in <see cref="GetItemsToApply"/> is honored. A row the circuit
-    // breaker skipped was never tried, so it keeps its count.
+    /// <summary>
+    /// Increments <see cref="SyncItem.RetryCount"/> so the
+    /// <c>MaxRetryCount</c> cap in <see cref="GetItemsToApply"/> is honored. A row the circuit
+    /// breaker skipped was never tried, so it keeps its count.
+    /// </summary>
     /// <inheritdoc />
     protected override void OnApplyFailed(SyncItem record)
     {
@@ -920,9 +959,11 @@ public class SyncMissingContentTask
         _tempPath = null;
     }
 
-    // Every run checks this server's links against the servers they stream from, so a link that can
-    // no longer play shows on the Sync tab before someone presses play, and a link still without
-    // media info takes the source's.
+    /// <summary>
+    /// Every run checks this server's links against the servers they stream from, so a link that can
+    /// no longer play shows on the Sync tab before someone presses play, and a link still without
+    /// media info takes the source's.
+    /// </summary>
     private async Task VerifyLinksAsync(CancellationToken cancellationToken)
     {
         if (_linkVerifier is null || cancellationToken.IsCancellationRequested)
@@ -958,8 +999,10 @@ public class SyncMissingContentTask
         }
     }
 
-    // Every run brings the link cache in line with the settings: files whose link is gone or became
-    // a copy are dropped, and retention and the size limit are applied.
+    /// <summary>
+    /// Every run brings the link cache in line with the settings: files whose link is gone or became
+    /// a copy are dropped, and retention and the size limit are applied.
+    /// </summary>
     private void ReconcileLinkCache()
     {
         try
@@ -972,9 +1015,11 @@ public class SyncMissingContentTask
         }
     }
 
-    // Jellyfin never makes chapter images for a link, and on a refresh it drops the ones taken from the
-    // source unless the library has chapter image extraction on. So a Link mapping into a library with
-    // it off is called out, since its links would lose their chapter images.
+    /// <summary>
+    /// Jellyfin never makes chapter images for a link, and on a refresh it drops the ones taken from the
+    /// source unless the library has chapter image extraction on. So a Link mapping into a library with
+    /// it off is called out, since its links would lose their chapter images.
+    /// </summary>
     private void WarnAboutChapterImages()
     {
         var config = ConfigManager.Configuration;
@@ -1018,8 +1063,10 @@ public class SyncMissingContentTask
 
     private ContentSyncTableManager TypedManager => (ContentSyncTableManager)Manager;
 
-    // Writing a link reads nothing from its server, so it goes ahead when that server is down, refused
-    // by its breaker, or holds a key that may not download.
+    /// <summary>
+    /// Writing a link reads nothing from its server, so it goes ahead when that server is down, refused
+    /// by its breaker, or holds a key that may not download.
+    /// </summary>
     /// <inheritdoc />
     protected override bool AppliesWithoutSource(SyncItem record)
     {
@@ -1028,11 +1075,13 @@ public class SyncMissingContentTask
             && ConfigManager.Configuration.FindServer(record.ServerKey) is { IsEnabled: true };
     }
 
-    // A link is a few bytes this plugin wrote, so one that is missing, or that points at an address
-    // this server no longer answers on, is simply written again. Every settled link is looked at on
-    // every run, here, rather than waiting for a full scan with its source connected. The writer
-    // refuses whatever is not a link of its own: a real copy at the name, a .strm someone else wrote,
-    // a path another row holds. Those are left as they are.
+    /// <summary>
+    /// A link is a few bytes this plugin wrote, so one that is missing, or that points at an address
+    /// this server no longer answers on, is simply written again. Every settled link is looked at on
+    /// every run, here, rather than waiting for a full scan with its source connected. The writer
+    /// refuses whatever is not a link of its own: a real copy at the name, a .strm someone else wrote,
+    /// a path another row holds. Those are left as they are.
+    /// </summary>
     private void RepairLinks(PluginConfiguration config, CancellationToken cancellationToken)
     {
         if (_linkWriter is null)
@@ -1067,10 +1116,12 @@ public class SyncMissingContentTask
         }
     }
 
-    // A run with only links to write needs no disk space to speak of and no server to download from,
-    // so the checks that guard downloads do not stop it. Any copy queued keeps them in force.
-    // Rows from a server that is not set up here are left alone by every run, so they neither count as
-    // copies to guard nor as links to write.
+    /// <summary>
+    /// A run with only links to write needs no disk space to speak of and no server to download from,
+    /// so the checks that guard downloads do not stop it. Any copy queued keeps them in force.
+    /// Rows from a server that is not set up here are left alone by every run, so they neither count as
+    /// copies to guard nor as links to write.
+    /// </summary>
     private bool OnlyLinksQueued()
     {
         var pulling = ConfigManager.Configuration.GetPullServers().Select(s => s.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);

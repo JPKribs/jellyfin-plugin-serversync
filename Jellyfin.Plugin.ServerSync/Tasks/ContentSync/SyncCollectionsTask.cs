@@ -47,8 +47,14 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
     private readonly ILocalItems _localItems;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="SyncCollectionsTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="libraryManager">Reads and changes Jellyfin's library.</param>
+    /// <param name="collectionManager">Creates and updates Jellyfin collections.</param>
+    /// <param name="localItems">Finds items in this server's library.</param>
     public SyncCollectionsTask(
         ILogger<SyncCollectionsTask> logger,
         IPluginConfigurationManager configManager,
@@ -77,7 +83,9 @@ public class SyncCollectionsTask : IScheduledTask, IConfigurableScheduledTask
     /// <inheritdoc />
     public string Category => "Content Sync";
 
-    // Runs as the last step of Sync Content, so it leaves the task list like the other module steps.
+    /// <summary>
+    /// Runs as the last step of Sync Content, so it leaves the task list like the other module steps.
+    /// </summary>
     /// <inheritdoc />
     public bool IsHidden => true;
 

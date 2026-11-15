@@ -113,7 +113,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _logger = logger;
     }
 
-    /// <summary>Gets how many objects are waiting for their debounce to end.</summary>
+    /// <summary>Gets how many objects are waiting out Send Changes After.</summary>
     public int PendingCount => _pending.Count;
 
     /// <summary>
@@ -185,7 +185,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         Flush(DateTime.MaxValue);
     }
 
-    /// <summary>Raises every gathered change whose debounce has ended. Public so tests and the dashboard can force it.</summary>
+    /// <summary>Raises every gathered change whose Send Changes After wait has ended. Public so tests and the dashboard can force it.</summary>
     /// <param name="utcNow">Now. Pass <see cref="DateTime.MaxValue"/> to raise everything.</param>
     /// <returns>How many changes were raised.</returns>
     public int Flush(DateTime utcNow)

@@ -25,8 +25,10 @@ public sealed class MetadataSyncTableManager
     : SyncTableManagerBase<MetadataSyncItem, (string SourceLibraryId, string SourceItemId)>
 {
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="MetadataSyncTableManager"/> class.
     /// </summary>
+    /// <param name="databaseProvider">Gives the sync database.</param>
+    /// <param name="logger">Logger instance.</param>
     public MetadataSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<MetadataSyncTableManager> logger)
         : base(databaseProvider, logger)
     {
@@ -201,6 +203,12 @@ public sealed class MetadataSyncTableManager
     /// the Compare phase produce. The DTO mapper drops the blobs from the
     /// response (they aren't shipped to the UI). Only the flags are.
     /// </summary>
+    /// <param name="searchTerm">Text to find in the item name or paths, or null.</param>
+    /// <param name="status">Only rows with this status, or null.</param>
+    /// <param name="sourceLibraryId">Only rows from this source library, or null.</param>
+    /// <param name="skip">Rows to skip.</param>
+    /// <param name="take">Rows to return.</param>
+    /// <returns>The page and the total.</returns>
     public (IList<MetadataSyncItem> Items, int TotalCount) SearchMetadataSyncItemsPaginated(
         string? searchTerm = null,
         SyncStatus? status = null,
@@ -236,14 +244,7 @@ public sealed class MetadataSyncTableManager
             }
 
             using var dataCmd = conn.CreateCommand();
-            // SELECT * like every other query that feeds MapFromReader. A
-            // hand-written column list drifts from the mapper when the schema
-            // grows, and GetOrdinal then throws on every row.
-            dataCmd.CommandText = $@"
-                SELECT * FROM MetadataSyncItems
-                {whereClause}
-                ORDER BY {StatusPriorityOrderBy}, ItemName ASC, Id ASC
-                LIMIT @take OFFSET @skip";
+            dataCmd.CommandText = PageQuery("MetadataSyncItems", whereClause, $"{StatusPriorityOrderBy}, ItemName ASC, Id ASC");
             BindFilters(dataCmd, searchTerm, status, sourceLibraryId);
             dataCmd.Parameters.AddWithValue("@take", take);
             dataCmd.Parameters.AddWithValue("@skip", skip);
@@ -280,6 +281,10 @@ public sealed class MetadataSyncTableManager
     /// "5 of 10 items updated. 5 not found" instead of silently swallowing
     /// the partial failure.
     /// </summary>
+    /// <param name="ids">The primary-key ids to update.</param>
+    /// <param name="status">The new status.</param>
+    /// <param name="reason">The reason, for a status that carries one.</param>
+    /// <returns>How many rows were updated, and the ids that were not found.</returns>
     public (int Updated, IReadOnlyList<long> NotFoundIds) BatchUpdateStatusByIdsWithDetails(
         IEnumerable<long> ids,
         SyncStatus status,

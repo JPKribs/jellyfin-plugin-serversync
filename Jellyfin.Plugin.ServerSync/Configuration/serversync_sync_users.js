@@ -1,9 +1,30 @@
-// ============================================
-// SERVER SYNC PLUGIN - SYNC PAGE: USERS VIEW
-// ============================================
+// serversync_sync_users.js
 // The User Sync table and its detail modal. Built by serversync_sync.js from the page context
 // and the table kit in serversync_sync_table.js.
-// ============================================
+
+// createUserSyncTableModule
+// Builds the User Sync view: its table, status counts, health figures, and detail modal.
+//
+// Inputs
+// ctx [object]: The page context from serversync_sync.js.
+// kit [object]: The table kit from createSyncTableKit.
+//
+// Output
+// [object]: The view's module, with table, currentConfig, init, loadAll, loadStatus, loadItems, and the
+// modal and bulk actions.
+// hasSynced
+// Says whether a last sync time is a real date. A user that never synced carries the default date of year 1.
+//
+// Inputs
+// value [string]: The last sync time the server sent, or nothing.
+//
+// Output
+// [boolean]: True when the user has synced.
+export function hasSynced(value) {
+    if (!value) return false;
+    var year = new Date(value).getUTCFullYear();
+    return !isNaN(year) && year > 1970;
+}
 
 export function createUserSyncTableModule(ctx, kit) {
     'use strict';
@@ -17,10 +38,6 @@ export function createUserSyncTableModule(ctx, kit) {
     var setHealthCount = kit.setHealthCount;
     var parseJsonSafe = kit.parseJsonSafe;
     var showObjectVersion = kit.showObjectVersion;
-
-    // ============================================
-    // USER SYNC TABLE MODULE
-    // ============================================
 
     // A user row is keyed by its source and local user, joined by a bar.
     function userMappingsFromKeys(keys) {
@@ -48,10 +65,12 @@ export function createUserSyncTableModule(ctx, kit) {
         },
         taskNoun: 'user',
         singularNoun: 'User',
-        pluralNoun: 'user(s)',
-        retryNoun: 'user item(s)',
+        nounOne: 'user',
+        nounMany: 'users',
+        retryOne: 'user item',
+        retryMany: 'user items',
         failNoun: 'users',
-        searchPlaceholder: 'Search users...',
+        searchPlaceholder: 'Search users',
         emptyMessage: 'No user sync items found. Run a refresh to scan for user data.',
         columns: function(self) {
             return [
@@ -71,7 +90,7 @@ export function createUserSyncTableModule(ctx, kit) {
                     key: 'changes',
                     label: 'Changes',
                     type: 'custom',
-                    className: 'pt-cell-details',
+                    className: 'serversync-details-cell',
                     render: function(item) {
                         // Only categories enabled in the config count.
                         var config = self.currentConfig || {};
@@ -116,7 +135,7 @@ export function createUserSyncTableModule(ctx, kit) {
                 ServerSyncShared.apiRequest('UserSyncUsers/' + encodeURIComponent(sourceUserId) + '/' + encodeURIComponent(localUserId)).then(function(detail) {
                     if (seq !== self._detailSeq) return;
                     if (!detail) {
-                        ServerSyncShared.showAlert('User not found');
+                        ServerSyncShared.syncStatus('User not found.', true);
                         return;
                     }
 
@@ -127,7 +146,7 @@ export function createUserSyncTableModule(ctx, kit) {
 
                     var statusBadge = view.querySelector('#userSyncModalStatusBadge');
                     statusBadge.textContent = detail.OverallStatus || 'Unknown';
-                    statusBadge.className = 'itemModal-statusBadge ' + (detail.OverallStatus || 'unknown');
+                    statusBadge.className = 'jpk-table-status-badge ' + (detail.OverallStatus || 'unknown');
 
                     var sourceServerName = ServerSyncShared.serverNameFor(self.currentConfig, detail.ServerKey);
                     var localServerName = ServerSyncShared.localServerName || 'Local';
@@ -135,9 +154,9 @@ export function createUserSyncTableModule(ctx, kit) {
                         sourceServerName + ' \u2192 ' + localServerName;
 
                     view.querySelector('#userSyncModalInfoGrid').classList.remove('hidden');
-                    view.querySelector('#userSyncModalLastSync').textContent = detail.LastSyncTime
+                    view.querySelector('#userSyncModalLastSync').textContent = hasSynced(detail.LastSyncTime)
                         ? ServerSyncShared.formatRelativeTime(new Date(detail.LastSyncTime))
-                        : '-';
+                        : 'Never';
                     showObjectVersion('userSyncModalVersion', { kind: 'Users', localUserId: detail.LocalUserId });
 
                     var errorSection = view.querySelector('#userSyncModalErrorSection');
@@ -192,13 +211,13 @@ export function createUserSyncTableModule(ctx, kit) {
                 }).catch(function(err) {
                     if (seq !== self._detailSeq) return;
                     console.error('Failed to load user detail:', err);
-                    ServerSyncShared.showAlert('Failed to load user details');
+                    ServerSyncShared.syncStatus('Could not load the user details.', true);
                 });
             },
 
             _createSectionHeader: function(title) {
                 var row = document.createElement('tr');
-                row.className = 'userSyncModal-sectionHeader';
+                row.className = 'serversync-modal-section-header';
                 var cell = document.createElement('td');
                 cell.colSpan = 4;
                 cell.textContent = title;
@@ -208,10 +227,10 @@ export function createUserSyncTableModule(ctx, kit) {
 
             _createDisabledRow: function(category, message) {
                 var row = document.createElement('tr');
-                row.className = 'userSyncModal-disabledRow';
+                row.className = 'serversync-modal-disabled-row';
                 var cell = document.createElement('td');
                 cell.colSpan = 4;
-                cell.innerHTML = '<span class="ssMuted">' + ServerSyncShared.escapeHtml(category) + ': ' + ServerSyncShared.escapeHtml(message) + '</span>';
+                cell.innerHTML = '<span class="serversync-muted">' + ServerSyncShared.escapeHtml(category) + ': ' + ServerSyncShared.escapeHtml(message) + '</span>';
                 row.appendChild(cell);
                 return row;
             },
@@ -226,23 +245,23 @@ export function createUserSyncTableModule(ctx, kit) {
                 if (!sourceObj && !localObj && !mergedObj) {
                     var row = document.createElement('tr');
                     if (item.HasChanges) {
-                        row.className = 'userSyncModal-changedRow';
+                        row.className = 'serversync-modal-changed-row';
                     }
 
                     var propCell = document.createElement('td');
-                    propCell.className = 'historyCompareTable-property';
+                    propCell.className = 'serversync-compare-table-property';
                     propCell.textContent = item.PropertyCategory || 'Value';
 
                     var sourceCell = document.createElement('td');
-                    sourceCell.className = 'historyCompareTable-value';
+                    sourceCell.className = 'serversync-compare-table-value';
                     sourceCell.textContent = self._formatValue(item.SourceValue);
 
                     var localCell = document.createElement('td');
-                    localCell.className = 'historyCompareTable-value';
+                    localCell.className = 'serversync-compare-table-value';
                     localCell.textContent = self._formatValue(item.LocalValue);
 
                     var mergedCell = document.createElement('td');
-                    mergedCell.className = 'historyCompareTable-value historyCompareTable-merged';
+                    mergedCell.className = 'serversync-compare-table-value serversync-compare-table-merged';
                     mergedCell.textContent = self._formatValue(item.MergedValue);
 
                     row.appendChild(propCell);
@@ -267,23 +286,23 @@ export function createUserSyncTableModule(ctx, kit) {
                     var isChanged = JSON.stringify(sourceVal) !== JSON.stringify(localVal);
 
                     if (isChanged) {
-                        row.className = 'userSyncModal-changedRow';
+                        row.className = 'serversync-modal-changed-row';
                     }
 
                     var propCell = document.createElement('td');
-                    propCell.className = 'historyCompareTable-property';
+                    propCell.className = 'serversync-compare-table-property';
                     propCell.textContent = key;
 
                     var sourceCell = document.createElement('td');
-                    sourceCell.className = 'historyCompareTable-value';
+                    sourceCell.className = 'serversync-compare-table-value';
                     sourceCell.textContent = self._formatValue(sourceVal);
 
                     var localCell = document.createElement('td');
-                    localCell.className = 'historyCompareTable-value';
+                    localCell.className = 'serversync-compare-table-value';
                     localCell.textContent = self._formatValue(localVal);
 
                     var mergedCell = document.createElement('td');
-                    mergedCell.className = 'historyCompareTable-value historyCompareTable-merged';
+                    mergedCell.className = 'serversync-compare-table-value serversync-compare-table-merged';
                     mergedCell.textContent = self._formatValue(mergedVal);
 
                     row.appendChild(propCell);
@@ -298,26 +317,26 @@ export function createUserSyncTableModule(ctx, kit) {
             _addProfileImageRow: function(tbody, item) {
                 var row = document.createElement('tr');
                 if (item.HasChanges) {
-                    row.className = 'userSyncModal-changedRow';
+                    row.className = 'serversync-modal-changed-row';
                 }
 
                 var propCell = document.createElement('td');
-                propCell.className = 'historyCompareTable-property';
+                propCell.className = 'serversync-compare-table-property';
                 propCell.textContent = 'Profile Image';
 
                 var sourceDisplay = item.SourceImageSizeFormatted || (item.SourceImageSize > 0 ? item.SourceImageSize + ' bytes' : 'None');
                 var localDisplay = item.LocalImageSizeFormatted || (item.LocalImageSize > 0 ? item.LocalImageSize + ' bytes' : 'None');
 
                 var sourceCell = document.createElement('td');
-                sourceCell.className = 'historyCompareTable-value';
+                sourceCell.className = 'serversync-compare-table-value';
                 sourceCell.textContent = sourceDisplay;
 
                 var localCell = document.createElement('td');
-                localCell.className = 'historyCompareTable-value';
+                localCell.className = 'serversync-compare-table-value';
                 localCell.textContent = localDisplay;
 
                 var mergedCell = document.createElement('td');
-                mergedCell.className = 'historyCompareTable-value historyCompareTable-merged';
+                mergedCell.className = 'serversync-compare-table-value serversync-compare-table-merged';
                 mergedCell.textContent = sourceDisplay;
 
                 row.appendChild(propCell);
@@ -332,31 +351,14 @@ export function createUserSyncTableModule(ctx, kit) {
                 var container = view.querySelector('#userSyncModalChangesSummary');
                 var config = this.currentConfig || {};
                 var html = '';
+                var badge = function(label, item) {
+                    var changed = !!item && item.HasChanges === true;
+                    html += ServerSyncShared.badge(changed ? 'orange' : 'green', label + ': ' + (changed ? 'Changes' : 'Synced'));
+                };
 
-                var policyEnabled = config.UserSyncPolicy !== false;
-                var configurationEnabled = config.UserSyncConfiguration !== false;
-                var profileImageEnabled = config.UserSyncProfileImage !== false;
-
-                if (configurationEnabled) {
-                    var hasConfigChanges = detail.ConfigurationItem && detail.ConfigurationItem.HasChanges === true;
-                    html += '<span class="userSyncModal-changesBadge ' + (hasConfigChanges ? 'has-changes' : 'no-changes') + '">';
-                    html += 'Configuration: ' + (hasConfigChanges ? 'Changes' : 'Synced');
-                    html += '</span>';
-                }
-
-                if (policyEnabled) {
-                    var hasPolicyChanges = detail.PolicyItem && detail.PolicyItem.HasChanges === true;
-                    html += '<span class="userSyncModal-changesBadge ' + (hasPolicyChanges ? 'has-changes' : 'no-changes') + '">';
-                    html += 'Policy: ' + (hasPolicyChanges ? 'Changes' : 'Synced');
-                    html += '</span>';
-                }
-
-                if (profileImageEnabled) {
-                    var hasImageChanges = detail.ProfileImageItem && detail.ProfileImageItem.HasChanges === true;
-                    html += '<span class="userSyncModal-changesBadge ' + (hasImageChanges ? 'has-changes' : 'no-changes') + '">';
-                    html += 'Image: ' + (hasImageChanges ? 'Changes' : 'Synced');
-                    html += '</span>';
-                }
+                if (config.UserSyncConfiguration !== false) badge('Configuration', detail.ConfigurationItem);
+                if (config.UserSyncPolicy !== false) badge('Policy', detail.PolicyItem);
+                if (config.UserSyncProfileImage !== false) badge('Image', detail.ProfileImageItem);
 
                 container.innerHTML = html;
             },

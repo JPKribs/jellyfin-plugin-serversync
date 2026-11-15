@@ -5,6 +5,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 
+/// <summary>
+/// Local image slots are numbered in source order, one run of slots for each image type.
+/// </summary>
 public class LocalImageUtilitiesTests
 {
     /// <summary>

@@ -1,28 +1,13 @@
-// ============================================
-// SERVER SYNC PLUGIN - SHARED MODULE (base shim)
-// ============================================
-// Thin wrapper over the JPKribs.Jellyfin.Base shared bundle.
-// The base package embeds jpkribs_shared.js into this plugin's assembly and
-// PluginBase.GetSharedPages("serversync") serves it as
-// configurationpage?name=serversync_jpkribs_shared.js.
+// serversync_shared.js
+// Wraps the Base shared bundle for the Server Sync pages. It re-exports Base's table and dialog builders
+// and adds createServerSyncShared(view), the helper bag with the Server Sync helpers the pages use.
 //
-// This module re-exports the base paginated table unchanged and exposes
-// createServerSyncShared(view), the base shared helper bag (bound to this
-// plugin's id + "ServerSync" controller prefix) plus the few ServerSync-domain
-// helpers the pages rely on (item/user/person thumbnails, local server name).
-//
-// Note: getTabs() is defined locally in each page controller (sync, servers,
-// storage, settings) because LibraryMenu.setTabs() must be called synchronously
-// during the viewshow event.
-//
-// The Storage tab shows only while content sync is on. A page cannot wait for
-// the config before setting its tabs, so the last known value of
-// EnableContentSync is kept per browser under STORAGE_TAB_KEY ('1' shown, '0'
-// hidden, missing means shown). Every config this module loads or saves
-// refreshes it, and when it changes the page's onTabsChanged callback runs so
-// the page can set its tabs again.
-// ============================================
+// The Storage tab shows while content, history, or metadata sync is on. A page cannot wait for the config
+// before it sets its tabs, so the last known answer is kept per browser under STORAGE_TAB_KEY.
+// A missing answer shows the tab. When the answer changes, the page's onTabsChanged callback runs.
 
+// The specifier is relative so it resolves against this module's own URL, and a server hosted under
+// a base URL still loads the bundle.
 import {
     createShared as baseCreateShared,
     createPaginatedTable,
@@ -32,20 +17,24 @@ import {
     bindDialog,
     confirmDialog,
     SECRET_KEPT
-// Relative specifier, not '/web/...': it resolves against this module's own
-// URL, so a server hosted under a base URL (http://host:8096/jellyfin) still
-// loads the bundle. An absolute path skipped the base URL, the import
-// rejected, and the page controller never initialized, the settings
-// categories silently refused to expand.
 } from './configurationpage?name=serversync_jpkribs_shared.js';
 
+// Re-exports
+// The Base builders and the kept secret sentinel, so a page takes everything from this one module.
 export { createPaginatedTable, createSortableCardList, createChoiceGroup, generateGuid, bindDialog, confirmDialog, SECRET_KEPT };
 
 var PLUGIN_ID = 'ebd650b5-6f4c-4ccb-b10d-23dffb3a7286';
 
-// Mirrors the inline readers in each page controller, which run before this module loads.
+// STORAGE_TAB_KEY
+// The browser storage key that holds whether the Storage tab shows. Each page controller reads it
+// inline before this module loads, so a page sets its tabs without waiting for the config.
 export var STORAGE_TAB_KEY = 'serversync.storageTab';
 
+// readStorageTabFlag
+// Reads the stored answer for whether the Storage tab shows.
+//
+// Output
+// [string]: '1' or '0', or null when nothing is stored or storage is blocked.
 function readStorageTabFlag() {
     try {
         return window.localStorage.getItem(STORAGE_TAB_KEY);
@@ -54,6 +43,11 @@ function readStorageTabFlag() {
     }
 }
 
+// writeStorageTabFlag
+// Stores whether the Storage tab shows. A blocked storage leaves the tab at its default of shown.
+//
+// Inputs
+// value [string]: '1' to show the tab or '0' to hide it.
 function writeStorageTabFlag(value) {
     try {
         window.localStorage.setItem(STORAGE_TAB_KEY, value);
@@ -62,6 +56,16 @@ function writeStorageTabFlag(value) {
     }
 }
 
+// createServerSyncShared
+// Builds the helper bag a Server Sync page uses. It is Base's bag for the Sync route, plus the config
+// readers, the thumbnail renderers, the save helpers, and the health banner. Loading it also checks the
+// plugin's health and shows its banner when the plugin cannot run.
+//
+// Inputs
+// view [HTMLElement]: The page the helpers work in.
+//
+// Output
+// [object]: The helper bag, with every Base helper and the Server Sync helpers below.
 export function createServerSyncShared(view) {
     var shared = baseCreateShared(view, PLUGIN_ID, 'Sync');
 
@@ -70,10 +74,14 @@ export function createServerSyncShared(view) {
     // Set by a page to set its tabs again when the Storage tab appears or disappears.
     shared.onTabsChanged = null;
 
-    // Records whether content sync is on, and tells the page when that changed the tab list.
+    // rememberContentSync
+    // Records whether the Storage tab shows, and tells the page when that changed the tab list. The tab
+    // holds the library filter, which content, history, and metadata sync all apply.
+    //
+    // Inputs
+    // config [object]: The plugin configuration. Anything without EnableContentSync is ignored.
     shared.rememberContentSync = function (config) {
         if (!config || typeof config !== 'object' || !('EnableContentSync' in config)) return;
-        // The Storage tab holds the library filter, which content, history, and metadata sync all apply.
         var value = config.EnableContentSync || config.EnableHistorySync || config.EnableMetadataSync ? '1' : '0';
         var before = readStorageTabFlag();
         if (before === value) return;
@@ -87,12 +95,27 @@ export function createServerSyncShared(view) {
 
     var baseGetConfig = shared.getConfig;
     var baseSaveConfig = shared.saveConfig;
+
+    // getConfig
+    // Reads the plugin configuration and remembers whether the Storage tab shows.
+    //
+    // Output
+    // [Promise]: Resolves with the configuration.
     shared.getConfig = function () {
         return baseGetConfig.apply(shared, arguments).then(function (config) {
             shared.rememberContentSync(config);
             return config;
         });
     };
+
+    // saveConfig
+    // Saves the plugin configuration and remembers whether the Storage tab shows.
+    //
+    // Inputs
+    // config [object]: The configuration to save.
+    //
+    // Output
+    // [Promise]: Resolves when the save landed.
     shared.saveConfig = function (config) {
         return baseSaveConfig.apply(shared, arguments).then(function (result) {
             shared.rememberContentSync(config);
@@ -100,18 +123,24 @@ export function createServerSyncShared(view) {
         });
     };
 
-    // Local server name (fetched once via fetchLocalServerName).
+    // This server's name, filled by fetchLocalServerName.
     shared.localServerName = null;
 
-    // Source images go through the plugin's ImageProxy endpoint so the
-    // source API key never reaches the browser. The image bytes are fetched
-    // with ApiClient (session token in the Authorization header, never in
-    // the URL, URLs land in proxy logs and browser caches) and attached as
-    // a blob object-URL after the row is in the DOM.
+    // Source images go through the plugin's ImageProxy endpoint so the source API key never reaches the
+    // browser. The image bytes are fetched with ApiClient, which keeps the session token in the
+    // Authorization header and out of the URL, and attached as an object URL once the row is in the DOM.
     var thumbSeq = 0;
 
-    // Which configured server a row came from decides which peer the proxy
-    // asks for the image. A row with no key belongs to the first scan server.
+    // scheduleProxyImage
+    // Loads a source image through the proxy into an image element that is already in the DOM, or soon
+    // will be. When the load fails, the image hides and the placeholder after it shows.
+    //
+    // Inputs
+    // imgId [string]: The id of the image element.
+    // id [string]: The item, person, or user to show.
+    // isUser [boolean]: Whether id is a user.
+    // maxHeight [number]: The tallest image to ask for, in pixels. Defaults to 80.
+    // serverKey [string]: The configured server that holds it. A row with none belongs to the first scan server.
     shared.scheduleProxyImage = function (imgId, id, isUser, maxHeight, serverKey) {
         var attempts = 0;
         function tryLoad() {
@@ -137,23 +166,44 @@ export function createServerSyncShared(view) {
                 img.addEventListener('load', function () { URL.revokeObjectURL(objectUrl); }, { once: true });
                 img.src = objectUrl;
             }).catch(function () {
-                img.style.display = 'none';
-                if (img.nextElementSibling) img.nextElementSibling.style.display = 'flex';
+                img.classList.add('hidden');
+                if (img.nextElementSibling) img.nextElementSibling.classList.remove('hidden');
             });
         }
         setTimeout(tryLoad, 0);
     };
 
+    // renderProxyThumb
+    // Builds an image and its hidden placeholder, and starts loading the image through the proxy.
+    //
+    // Inputs
+    // id [string]: The item, person, or user to show.
+    // isUser [boolean]: Whether id is a user.
+    // imgClass [string]: The class of the image.
+    // extraAttrs [string]: Attributes added to the image tag.
+    // placeholderHtml [string]: The placeholder to show when there is no image. It must start with a class attribute.
+    // serverKey [string]: The configured server that holds it.
+    //
+    // Output
+    // [string]: The HTML, or the placeholder alone when there is no id.
     function renderProxyThumb(id, isUser, imgClass, extraAttrs, placeholderHtml, serverKey) {
         if (!id) return placeholderHtml;
         var imgId = 'ss-thumb-' + (++thumbSeq);
         shared.scheduleProxyImage(imgId, id, isUser, 80, serverKey);
         return '<img id="' + imgId + '" class="' + imgClass + '"' + extraAttrs + ' />' +
-            placeholderHtml.replace('class="', 'style="display:none" class="');
+            placeholderHtml.replace('class="', 'class="hidden ');
     }
 
-    // Item thumbnail. Starts as portrait (40×60). On load, if the image is
-    // landscape (width > height), it swaps to the landscape class (106×60).
+    // renderItemThumb
+    // Builds an item thumbnail. It starts as a portrait (40 by 60) and swaps to the landscape class
+    // (106 by 60) once the image loads wider than it is tall.
+    //
+    // Inputs
+    // itemId [string]: The source item.
+    // serverKey [string]: The configured server that holds it.
+    //
+    // Output
+    // [string]: The HTML.
     shared.renderItemThumb = function (itemId, serverKey) {
         return renderProxyThumb(itemId, false,
             'jpk-table-row-thumb jpk-table-row-thumb-portrait',
@@ -162,6 +212,15 @@ export function createServerSyncShared(view) {
             serverKey);
     };
 
+    // renderUserThumb
+    // Builds a round thumbnail of a source user.
+    //
+    // Inputs
+    // userId [string]: The source user.
+    // serverKey [string]: The configured server that holds it.
+    //
+    // Output
+    // [string]: The HTML.
     shared.renderUserThumb = function (userId, serverKey) {
         return renderProxyThumb(userId, true,
             'jpk-table-row-thumb-user',
@@ -170,7 +229,15 @@ export function createServerSyncShared(view) {
             serverKey);
     };
 
-    // Always portrait (no landscape auto-detection) since person images are headshots.
+    // renderPersonThumb
+    // Builds a portrait thumbnail of a person. It never swaps to landscape, since person images are headshots.
+    //
+    // Inputs
+    // personId [string]: The source person.
+    // serverKey [string]: The configured server that holds it.
+    //
+    // Output
+    // [string]: The HTML.
     shared.renderPersonThumb = function (personId, serverKey) {
         return renderProxyThumb(personId, false,
             'jpk-table-row-thumb jpk-table-row-thumb-portrait',
@@ -179,10 +246,16 @@ export function createServerSyncShared(view) {
             serverKey);
     };
 
-    // The configured servers in priority order, and the mappings across the ones that scan.
-    // Rows carry a ServerKey. A row with none belongs to the first scan server.
-    // A server with no Mode is a Pull server, matching the server side default. The mode arrives as
-    // the enum name or, from older writers, as its number, so both spellings of Pull and Sync count.
+    // scanServers
+    // Lists the configured servers that scan, in rank order. A server scans when it is on, has a Server
+    // URL and API Key, and pulls. A server with no Mode is a Pull server, matching the server side default.
+    // The mode arrives as the enum name or, from older writers, as its number, so both spellings count.
+    //
+    // Inputs
+    // config [object]: The plugin configuration.
+    //
+    // Output
+    // [object[]]: The servers that scan.
     shared.scanServers = function (config) {
         return ((config && config.Servers) || []).filter(function (s) {
             if (!s || s.IsEnabled === false || !s.Url || !s.ApiKey) return false;
@@ -191,18 +264,44 @@ export function createServerSyncShared(view) {
         });
     };
 
+    // allLibraryMappings
+    // Gathers the library mappings of every server that scans.
+    //
+    // Inputs
+    // config [object]: The plugin configuration.
+    //
+    // Output
+    // [object[]]: The mappings, in server rank order.
     shared.allLibraryMappings = function (config) {
         var out = [];
         shared.scanServers(config).forEach(function (s) { out = out.concat(s.LibraryMappings || []); });
         return out;
     };
 
+    // allUserMappings
+    // Gathers the user mappings of every server that scans.
+    //
+    // Inputs
+    // config [object]: The plugin configuration.
+    //
+    // Output
+    // [object[]]: The mappings, in server rank order.
     shared.allUserMappings = function (config) {
         var out = [];
         shared.scanServers(config).forEach(function (s) { out = out.concat(s.UserMappings || []); });
         return out;
     };
 
+    // serverFor
+    // Finds the configured server a row came from. A row with no key, or a key that no server holds,
+    // belongs to the first scan server.
+    //
+    // Inputs
+    // config [object]: The plugin configuration.
+    // serverKey [string]: The key the row carries.
+    //
+    // Output
+    // [object]: The server, or null when none scans.
     shared.serverFor = function (config, serverKey) {
         var servers = (config && config.Servers) || [];
         if (serverKey) {
@@ -212,17 +311,42 @@ export function createServerSyncShared(view) {
         return shared.scanServers(config)[0] || null;
     };
 
+    // serverDisplayName
+    // Names a server for a table or a message: its name, else the name it reported, else its Server URL.
+    //
+    // Inputs
+    // server [object]: The configured server.
+    //
+    // Output
+    // [string]: The name, or "Source" when there is none.
     shared.serverDisplayName = function (server) {
         if (!server) return 'Source';
         return server.Name || server.ServerName || server.Url || 'Source';
     };
 
+    // serverNameFor
+    // Names the server a row came from.
+    //
+    // Inputs
+    // config [object]: The plugin configuration.
+    // serverKey [string]: The key the row carries.
+    //
+    // Output
+    // [string]: The server's display name.
     shared.serverNameFor = function (config, serverKey) {
         return shared.serverDisplayName(shared.serverFor(config, serverKey));
     };
 
-    // The body of a request that names one configured server, for the endpoints that talk to it. The
-    // server resolves a kept key sentinel against the stored entry with the same key.
+    // requestFor
+    // Builds the body of a request that names one configured server, for the endpoints that talk to it.
+    // The server resolves a kept key sentinel against the stored entry with the same key.
+    //
+    // Inputs
+    // server [object]: The configured server.
+    // apiKeyOverride [string]: An API Key to send in place of the server's own.
+    //
+    // Output
+    // [object]: The request body.
     shared.requestFor = function (server, apiKeyOverride) {
         return {
             ServerUrl: server.Url,
@@ -233,28 +357,42 @@ export function createServerSyncShared(view) {
         };
     };
 
-    // Section saves re-fetch the config and apply only that section's fields. Posting a page load
-    // snapshot whole would overwrite values other writers changed since, such as the timestamps and
-    // failure records the tasks write, or the sections of the other dashboard page.
-    // Resolves with the saved config once the save landed and with null when it did not. The caller
+    // saveSection
+    // Saves one section of the config. It reads the config again, applies only that section's fields, and
+    // saves, since posting a page load snapshot whole would overwrite what other writers changed since,
+    // such as the timestamps and failure records the tasks write, or the other dashboard pages' sections.
+    // The result shows on the status element.
+    //
+    // Inputs
+    // mutator [function]: Called with the fresh config, and changes it in place.
+    // statusId [string]: The id of the status element that reports the result.
+    // successMessage [string]: What the status says when the save landed.
+    // failureMessage [string]: What the status says when it did not.
+    //
+    // Output
+    // [Promise]: Resolves with the saved config when the save landed and null when it did not. The caller
     // keeps its own copy of the config and updates it only from a save the server really kept.
-    shared.saveSection = function (mutator, successMessage, failureMessage) {
+    shared.saveSection = function (mutator, statusId, successMessage, failureMessage) {
         var pending = null;
         return shared.getConfig().then(function (config) {
             mutator(config);
             pending = config;
             return shared.saveConfig(config);
         }).then(function () {
-            Dashboard.alert(successMessage);
+            shared.setStatus(statusId, successMessage, false);
             return pending;
         }, function () {
-            Dashboard.alert(failureMessage);
+            shared.setStatus(statusId, failureMessage, true, { timeout: 10000 });
             return null;
         });
     };
 
-    // The helpers the Servers and Settings pages call by bare name, bound to this shared object so a
-    // page can take the ones it uses in one destructuring assignment once the module has loaded.
+    // pageHelpers
+    // Binds the helpers the Servers, Settings, and Storage pages call by bare name to this bag, so a page
+    // takes the ones it uses in one destructuring assignment once the module has loaded.
+    //
+    // Output
+    // [object]: The bound helpers.
     shared.pageHelpers = function () {
         return {
             escapeHtml: shared.escapeHtml.bind(shared),
@@ -271,6 +409,35 @@ export function createServerSyncShared(view) {
         };
     };
 
+    // plural
+    // Writes a count with the right form of a noun, such as "1 item" or "3 items".
+    //
+    // Inputs
+    // count [number]: How many there are.
+    // one [string]: The noun for exactly one.
+    // many [string]: The noun for any other count.
+    //
+    // Output
+    // [string]: The count, a space, and the noun.
+    shared.plural = function (count, one, many) {
+        return count + ' ' + (count === 1 ? one : many);
+    };
+
+    // syncStatus
+    // Reports a result on the Sync tab's status line.
+    //
+    // Inputs
+    // message [string]: What happened, as one sentence.
+    // isError [boolean]: Whether it went wrong.
+    shared.syncStatus = function (message, isError) {
+        shared.setStatus('syncStatus', message, !!isError, { timeout: 10000 });
+    };
+
+    // fetchLocalServerName
+    // Reads this server's name, once, and keeps it in localServerName.
+    //
+    // Output
+    // [Promise]: Resolves with the name, or "Local" when it could not be read.
     shared.fetchLocalServerName = function () {
         return ApiClient.getPublicSystemInfo().then(function (info) {
             shared.localServerName = info.ServerName || 'Local';
@@ -281,19 +448,24 @@ export function createServerSyncShared(view) {
         });
     };
 
-    // A page cannot work while Server Sync is held for a database an older release wrote, so each
-    // one says so at its top instead of only failing to load its data.
+    // showHealth
+    // Shows a banner at the top of the page while Server Sync is held for a database an older release
+    // wrote, and removes it once the plugin is ready. A page cannot work while it is held, so each one
+    // says so instead of only failing to load its data.
+    //
+    // Output
+    // [Promise]: Resolves once the banner is in step with the health.
     shared.showHealth = function () {
         return shared.apiRequest('Health', 'GET').then(function (health) {
             var host = view.querySelector('.content-primary');
-            var banner = view.querySelector('.ssHealthBanner');
+            var banner = view.querySelector('.serversync-health-banner');
             if (!health || health.Ready || !host) {
                 if (banner) banner.remove();
                 return;
             }
             if (!banner) {
                 banner = document.createElement('div');
-                banner.className = 'ssHealthBanner jpk-error';
+                banner.className = 'serversync-health-banner jpk-error';
                 banner.setAttribute('role', 'alert');
                 host.insertBefore(banner, host.firstChild);
             }

@@ -7,9 +7,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// </summary>
 public interface IPluginConfigurationManager
 {
-    /// <summary>
-    /// Gets the current plugin configuration.
-    /// </summary>
+    /// <summary>Gets the current plugin configuration.</summary>
     PluginConfiguration Configuration { get; }
 
     /// <summary>
@@ -41,13 +39,9 @@ public interface IPluginConfigurationManager
     /// <returns>Path to the temp download directory.</returns>
     string GetTempDownloadPath();
 
-    /// <summary>
-    /// Gets the local server's friendly name.
-    /// </summary>
+    /// <summary>Gets this server's name.</summary>
     string LocalServerName { get; }
 
-    /// <summary>
-    /// Gets the plugin version string.
-    /// </summary>
+    /// <summary>Gets the plugin version.</summary>
     string PluginVersion { get; }
 }

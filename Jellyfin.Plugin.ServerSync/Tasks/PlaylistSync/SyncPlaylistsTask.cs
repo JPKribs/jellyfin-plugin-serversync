@@ -15,9 +15,14 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
+/// <summary>
+/// Copies the playlists of mapped users between this server and the servers it syncs playlists with, as the last step of Sync Information.
+/// </summary>
 public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
 {
-    // The playlists a higher ranked server already spoke for this run, when rank decides.
+    /// <summary>
+    /// The playlists a higher ranked server already spoke for this run, when rank decides.
+    /// </summary>
     private readonly HashSet<string> _spokenFor = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ILogger<SyncPlaylistsTask> _logger;
@@ -26,6 +31,12 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
     private readonly PlaylistMirror _mirror;
     private readonly VersionConflictResolver _resolver;
 
+    /// <summary>Initializes a new instance of the <see cref="SyncPlaylistsTask"/> class.</summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="mirror">The service that makes a local playlist match another server's.</param>
+    /// <param name="resolver">The resolver that decides which of two edits wins.</param>
     public SyncPlaylistsTask(
         ILogger<SyncPlaylistsTask> logger,
         IPluginConfigurationManager configManager,
@@ -40,22 +51,31 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
         _resolver = resolver;
     }
 
+    /// <inheritdoc />
     public string Name => "Sync Playlists";
 
+    /// <inheritdoc />
     public string Key => "ServerSyncPlaylists";
 
+    /// <inheritdoc />
     public string Description => "Mirrors the playlists of mapped users, holding the local copies of their items.";
 
+    /// <inheritdoc />
     public string Category => "Server Sync";
 
+    /// <inheritdoc />
     public bool IsHidden => true;
 
+    /// <inheritdoc />
     public bool IsEnabled => true;
 
+    /// <inheritdoc />
     public bool IsLogged => true;
 
+    /// <inheritdoc />
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
+    /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
@@ -227,12 +247,14 @@ public class SyncPlaylistsTask : IScheduledTask, IConfigurableScheduledTask
         }
     }
 
-    // A copy this server took from a Sync server that the server no longer lists was deleted there,
-    // when that server also holds a newer version of it than this one does: the deletion. A deletion
-    // announced as it happened is settled the same way, so this only catches the ones that were missed.
-    // The copy is deleted or kept by Removed Playlists, and the deletion is recorded either way, so
-    // the playlist is not handed back to the server that deleted it. A copy edited here since is kept
-    // and stays this server's newer edit, which that server takes back on its own scan.
+    /// <summary>
+    /// A copy this server took from a Sync server that the server no longer lists was deleted there,
+    /// when that server also holds a newer version of it than this one does: the deletion. A deletion
+    /// announced as it happened is settled the same way, so this only catches the ones that were missed.
+    /// The copy is deleted or kept by Removed Playlists, and the deletion is recorded either way, so
+    /// the playlist is not handed back to the server that deleted it. A copy edited here since is kept
+    /// and stays this server's newer edit, which that server takes back on its own scan.
+    /// </summary>
     private async Task SettleDeletedAsync(ScanSource source, List<SourcePlaylist> listed, Dictionary<string, Guid> users, PlaylistRemovedAction action, CancellationToken cancellationToken)
     {
         var roots = new HashSet<string>(listed.Select(p => p.RootId), StringComparer.OrdinalIgnoreCase);

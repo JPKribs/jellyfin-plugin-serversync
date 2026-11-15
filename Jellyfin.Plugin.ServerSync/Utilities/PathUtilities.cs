@@ -17,6 +17,10 @@ public static class PathUtilities
     /// path-traversal segments and falling back to <paramref name="localRoot"/> + filename
     /// when the source path doesn't lie under <paramref name="sourceRoot"/>.
     /// </summary>
+    /// <param name="sourcePath">The file to move.</param>
+    /// <param name="sourceRoot">The library's root folder on the source.</param>
+    /// <param name="localRoot">The library's root folder on this server.</param>
+    /// <returns>The path under the local root.</returns>
     public static string TranslatePath(string sourcePath, string sourceRoot, string localRoot)
     {
         if (string.IsNullOrEmpty(sourcePath))
@@ -65,8 +69,10 @@ public static class PathUtilities
         return CombineWithLastPart(localRoot, sourcePath);
     }
 
-    // The local root plus the last part of a source path, cut on either kind of separator. A last
-    // part that names no file, such as "..", leaves the root itself, which no caller writes to.
+    /// <summary>
+    /// The local root plus the last part of a source path, cut on either kind of separator. A last
+    /// part that names no file, such as "..", leaves the root itself, which no caller writes to.
+    /// </summary>
     private static string CombineWithLastPart(string localRoot, string sourcePath)
     {
         var parts = sourcePath.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries);
@@ -104,6 +110,10 @@ public static class PathUtilities
     /// Returns true if the item should be SKIPPED for the given filter mode + list.
     /// Whitelist skips non-matches, Blacklist skips matches, AllowAll skips nothing.
     /// </summary>
+    /// <param name="sourcePath">The file to move.</param>
+    /// <param name="sourceRootPath">The library's root folder on the source.</param>
+    /// <param name="filterMode">The Library Filter mode.</param>
+    /// <param name="filteredItems">The paths the Library Filter lists, or null.</param>
     public static bool IsItemFiltered(
         string sourcePath,
         string sourceRootPath,

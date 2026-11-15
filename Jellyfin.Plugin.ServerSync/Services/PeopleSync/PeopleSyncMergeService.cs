@@ -32,16 +32,14 @@ public static class PeopleSyncMergeService
         LocalImageType.Backdrop
     };
 
-    // ===================================================================
-    // Per-category source + local blob building
-    // ===================================================================
-
     /// <summary>
     /// Builds a metadata JSON blob from a source <see cref="BaseItemDto"/>
     /// (person). Mirrors <see cref="MetadataSyncMergeService.MergeMetadataFields"/>'s
     /// shape so source and local blobs serialize identically (sorted arrays,
     /// unwrapped Kiota primitives, normalized strings).
     /// </summary>
+    /// <param name="sourcePerson">The person as the source returned it.</param>
+    /// <returns>The blob.</returns>
     public static string BuildSourceMetadata(BaseItemDto sourcePerson)
     {
         ArgumentNullException.ThrowIfNull(sourcePerson);
@@ -93,6 +91,8 @@ public static class PeopleSyncMergeService
     /// (person). Symmetric with <see cref="BuildSourceMetadata"/>, same
     /// keys, same sort order, same normalization.
     /// </summary>
+    /// <param name="localPerson">The local person.</param>
+    /// <returns>The blob.</returns>
     public static string BuildLocalMetadata(BaseItem localPerson)
     {
         ArgumentNullException.ThrowIfNull(localPerson);
@@ -127,6 +127,9 @@ public static class PeopleSyncMergeService
     /// <see cref="BaseItemDto.BackdropImageTags"/>, and local side reads the
     /// on disk size and dimensions for the same types.
     /// </summary>
+    /// <param name="sourcePerson">The person as the source returned it, or null.</param>
+    /// <param name="localPerson">The local person, or null.</param>
+    /// <returns>The source and local manifests, each null when its person is null.</returns>
     public static (string? SourceImagesValue, string? LocalImagesValue) PopulateImageData(
         BaseItemDto? sourcePerson,
         BaseItem? localPerson)

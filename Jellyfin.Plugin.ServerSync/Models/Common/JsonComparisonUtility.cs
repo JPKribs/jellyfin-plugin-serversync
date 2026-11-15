@@ -130,6 +130,9 @@ public static class JsonComparisonUtility
     /// JSON objects, with the same null/empty/missing equivalence as
     /// <see cref="JsonElementEquals"/>.
     /// </summary>
+    /// <param name="json1">The first JSON document.</param>
+    /// <param name="json2">The second JSON document.</param>
+    /// <returns>The names of the fields that differ.</returns>
     public static IReadOnlyList<string> GetDifferingFields(string? json1, string? json2)
     {
         if (string.IsNullOrEmpty(json1) || string.IsNullOrEmpty(json2))
@@ -200,6 +203,11 @@ public static class JsonComparisonUtility
     /// few divergent properties, with values JSON-serialised and truncated
     /// to fit in a log line.
     /// </summary>
+    /// <param name="json1">The first JSON document.</param>
+    /// <param name="json2">The second JSON document.</param>
+    /// <param name="maxFields">The most fields to describe.</param>
+    /// <param name="maxValueLength">The longest value to show before it is cut.</param>
+    /// <returns>The differing fields with their values, in words.</returns>
     public static string DescribeDifferingFields(
         string? json1,
         string? json2,
@@ -310,6 +318,8 @@ public static class JsonComparisonUtility
     /// provider quirks like 07:01), and comparing timestamps left rows
     /// permanently diverged that the apply step correctly refused to touch.
     /// </summary>
+    /// <param name="value">The date.</param>
+    /// <returns>The date as text, or null when there is none.</returns>
     public static string? ToDateOnlyString(DateTime? value) =>
         value.HasValue
             ? Utilities.UtcTime.AsUtc(value.Value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
@@ -318,6 +328,8 @@ public static class JsonComparisonUtility
     /// <summary>
     /// <see cref="ToDateOnlyString(DateTime?)"/> for the SDK's offset-typed dates.
     /// </summary>
+    /// <param name="value">The date.</param>
+    /// <returns>The date as text, or null when there is none.</returns>
     public static string? ToDateOnlyString(DateTimeOffset? value) =>
         value.HasValue
             ? value.Value.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)

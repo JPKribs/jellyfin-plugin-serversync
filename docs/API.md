@@ -1,6 +1,6 @@
 # Server Sync API
 
-Server Sync adds a small HTTP API to Jellyfin. Two servers that both run the plugin talk to each other through the **Peer** routes, and the dashboard's Servers tab and Queue view use the **Hints** and **Servers** routes. The dashboard routes sit behind Jellyfin's own `RequiresElevation` policy. The `Peer` routes accept any signed in caller that the receiver's **Whitelist** allows: an administrator from a server on its Servers tab, or a user listed there calling from one of their locations. The plugin adds no login of its own. A standard user's token is refused with `403` on the dashboard routes, and no token gets `401` everywhere. See **[Permissions](Permissions.md)**.
+Server Sync adds a small HTTP API to Jellyfin. Two servers that both run the plugin talk to each other through the **Peer** routes, and the dashboard's **Servers** tab and **Queue** view use the **Hints** and **Servers** routes. The dashboard routes sit behind Jellyfin's own `RequiresElevation` policy. The `Peer` routes accept any signed in caller that the receiver's **Whitelist** allows. That is an administrator from a server on its **Servers** tab, or a user listed there calling from one of their locations. The plugin adds no login of its own. A standard user's token is refused with `403` on the dashboard routes, and no token gets `401` everywhere. See **[Permissions](Permissions.md)**.
 
 Requests and responses are JSON. Property names are Pascal case, enums travel as their names, and dates are UTC in ISO 8601. The server reads property names without regard to case.
 
@@ -8,27 +8,29 @@ Requests and responses are JSON. Property names are Pascal case, enums travel as
 curl -H 'Authorization: MediaBrowser Token="YOUR_API_KEY"' http://server:8096/Sync/Peer/Capabilities
 ```
 
-## Peer routes
+## Peer Routes
 
 These are what one Server Sync installation calls on another. You will not normally call them yourself, but they are plain HTTP and can be exercised from the command line.
 
-Servers in a pool must speak overlapping wire protocols, not the same plugin version. Every peer route except `Capabilities` needs the headers `X-ServerSync-Version` (the caller's plugin version), `X-ServerSync-Protocol` (the protocol it speaks) and `X-ServerSync-Min-Protocol` (the oldest protocol it still speaks). A route answers `426` with the reason when neither side's protocol reaches the other's minimum. A caller that sends no protocol header predates protocol versions and is only accepted on exactly the same plugin version. `Capabilities` reports `ProtocolVersion` and `MinProtocolVersion` beside `PluginVersion`. Check Link reports a mismatch as an error.
+Servers in a pool must speak overlapping wire protocols, not the same plugin version. Every peer route except `Capabilities` needs the headers `X-ServerSync-Version` (the caller's plugin version), `X-ServerSync-Protocol` (the protocol it speaks) and `X-ServerSync-Min-Protocol` (the oldest protocol it still speaks). A route answers `426` with the reason when neither side's protocol reaches the other's minimum. A caller that sends no protocol header is only accepted on exactly the same plugin version. `Capabilities` reports `ProtocolVersion` and `MinProtocolVersion` beside `PluginVersion`. **Check Link** reports a mismatch as an error.
 
 ### GET /Sync/Peer/Capabilities
 
-Which server this is and what it applies. A `404` means the plugin is not installed there, and a `403` with `{ "Code", "Message" }` means the whitelist refuses the caller. It answers whatever version the caller runs, so Check Link can name both versions when they differ.
+Which server this is and what it applies. A `404` means the plugin is not installed there, and a `403` with `{ "Code", "Message" }` means the whitelist refuses the caller. It answers whatever version the caller runs, so **Check Link** can name both versions when they differ.
 
 ```json
 {
   "ServerId": "2f40d5d86aba4689819184b48738d2ad",
-  "PluginVersion": "12.2.1.1",
+  "PluginVersion": "12.4.14.0",
+  "ProtocolVersion": 1,
+  "MinProtocolVersion": 1,
   "Accepts": ["History", "Metadata", "People", "Content"],
   "Features": ["Link"],
   "ServerTime": "2026-10-03T19:30:47.9590000Z"
 }
 ```
 
-`Accepts` lists the kinds this server applies, which are the modules that are on. A sender announces only those kinds. `Features` lists optional features this server offers: `Link` when it allows linking for at least one server, see [Links](Links.md). Older releases send no `Features`. `ServerTime` is the peer's clock, which Check Link compares against the caller's.
+`Accepts` lists the kinds this server applies, which are the sync types that are on. A sender announces only those kinds. `Features` lists optional features this server offers, which is `Link` when it allows linking for at least one server. See [Links](Links.md). `ServerTime` is the peer's clock, which **Check Link** compares against the caller's.
 
 ### GET /Sync/Peer/Link?serverId={id}
 
@@ -51,7 +53,7 @@ Whether, and how, this server lists the asking server, and the pairing. When the
 }
 ```
 
-`AccessLevel`, `AccessUser`, and `CanDownload` describe the key this server holds for the asking server, so the asker knows what it may read here. `PairingError` says why no secret could be issued: the listed server refused this server's key, which happens when the key was revoked or its Server Sync is older than this one, or could not be reached at its URL.
+`AccessLevel`, `AccessUser`, and `CanDownload` describe the key this server holds for the asking server, so the asker knows what it may read here. `PairingError` says why no secret could be issued. Either the listed server refused this server's key, which happens when the key was revoked or its Server Sync is older than this one, or it could not be reached at its URL.
 
 ### POST /Sync/Peer/Pair
 
@@ -63,7 +65,7 @@ A peer hands this server the secret it must present on requests that name it as 
 
 Answers `{ "Paired": true }`. A secret is only taken while this server is asking the issuing server's `Link` route, so a call at any other time answers `409`, as does an issuing server that is not listed here. `Secret` is 32 to 256 letters, digits, `-` or `_`, and anything else answers `400`.
 
-#### The pairing header
+#### The Pairing Header
 
 Every request below that carries a `SenderServerId` must also carry the header `X-ServerSync-Pairing` with the secret that the receiver issued to that sender. A request without it, or with another server's secret, answers `428` with the reason, and the sender pairs through `Link` and tries once more.
 
@@ -92,7 +94,7 @@ Offer a batch of change hints. A hint says what changed and where, never the val
 }
 ```
 
-`Recorded` says whether the change was made by hand (`true`) or is a provider's work such as a poster a scan fetched (`false`). Provider work is applied only where the receiver has recorded no edit of its own and leaves no version behind. `Kind` is one of `History`, `Metadata`, `People`, `Content`, or `Playlists`. `Users` is declined, since user settings travel on the scheduled task only. A `Playlists` hint is keyed by the id of the playlist it was first made as, carries the owner in `UserId`, and an `ItemType` of `Playlist` or `PlaylistCopy`, or `PlaylistDeleted` or `PlaylistCopyDeleted` when it was deleted. A copy is a playlist Server Sync made from another server's, which matters because Jellyfin gives two playlists with the same name the same id on different servers. `Key` is the sender's own key for the object: the item id for metadata and content, the user id for users, the person's name for people, and `userId|itemId` for history. `ItemPath` and `UserName` are what the receiver maps through its own library and user mappings for the sender.
+`Recorded` says whether the change was made by hand (`true`) or is a provider's work such as a poster a scan fetched (`false`). Provider work is applied only where the receiver has recorded no edit of its own and leaves no version behind. `Kind` is one of `History`, `Metadata`, `People`, `Content`, or `Playlists`. `Users` is declined, since user settings travel on the scheduled task only. A `Playlists` hint is keyed by the id of the playlist it was first made as, carries the owner in `UserId`, and an `ItemType` of `Playlist` or `PlaylistCopy`, or `PlaylistDeleted` or `PlaylistCopyDeleted` when it was deleted. A copy is a playlist Server Sync made from another server's, which matters because Jellyfin gives two playlists with the same name the same id on different servers. `Key` is the sender's own key for the object. It is the item id for metadata and content, the user id for users, the person's name for people, and `userId|itemId` for history. `ItemPath` and `UserName` are what the receiver maps through its own library and user mappings for the sender.
 
 The answer is one result per hint, in request order, each with a `Code` and the `Reason` when it is not `Queued`. `Queued` is stored and applied in turn. `NoLocalItem` is stored but parked until the local item arrives, and the receiver now holds it, so the sender treats it as done the same as every other code.
 
@@ -161,7 +163,7 @@ The hints the server named by `serverId` sent this one that are still queued, an
 
 ### GET /Sync/Peer/Interest?serverId={id}
 
-What this server wants from the server named by `serverId`: the kinds whose module is on, the source roots it maps with their whitelists and blacklists, and the source users it maps. The caller must be that server, paired. A sender reads it every minute and queues nothing outside it. `Revision` changes whenever any of it does, and a new revision lets every held back hint for this server go again. A server this one does not pull from is answered with an empty interest.
+What this server wants from the server named by `serverId`. It lists the kinds whose sync type is on, the source roots it maps with their whitelists and blacklists, and the source users it maps. The caller must be that server, paired. A sender reads it every minute and queues nothing outside it. `Revision` changes whenever any of it does, and a new revision lets every held back hint for this server go again. A server this one does not pull from is answered with an empty interest.
 
 ```json
 {
@@ -184,7 +186,7 @@ Answers `{ "Found": true, "ItemId": "9c1e0f…", "ItemType": "Movie" }`, or `{ "
 
 ### GET /Sync/Peer/Playlists?serverId={id}&id={id}
 
-Every playlist on this server with its owner, shares, open access, and items in order, so a server that pulls from this one can copy them to the right users. Any whitelisted caller may call it, and it records nothing. `serverId` names the caller: when this server lists it, only playlists owned by users it maps are returned. `id` limits the answer to one playlist. A standard user only gets playlists they can see, and only the items they can see. Each item carries its id and path, and the caller finds its own copy by path. `RootId` is the id of the playlist it was first made as, and `IsCopy` says whether Server Sync made it from another server's playlist.
+Every playlist on this server with its owner, shares, open access, and items in order, so a server that pulls from this one can copy them to the right users. Any whitelisted caller may call it, and it records nothing. `serverId` names the caller. When this server lists it, only playlists owned by users it maps are returned. `id` limits the answer to one playlist. A standard user only gets playlists they can see, and only the items they can see. Each item carries its id and path, and the caller finds its own copy by path. `RootId` is the id of the playlist it was first made as, and `IsCopy` says whether Server Sync made it from another server's playlist.
 
 ```json
 { "Playlists": [ { "Id": "5d2c…", "Name": "Road Trip", "MediaType": "Audio", "OwnerUserId": "0f8f…", "OpenAccess": false, "Shares": [ { "UserId": "7c9e…", "CanEdit": false } ], "Entries": [ { "ItemId": "9c1e…", "Path": "/media/Music/Artist/Album/01 Song.flac" } ] } ] }
@@ -232,15 +234,15 @@ Negotiate watch history. Each entry proposes a merged state for one of the recei
 
 `Outcome` is `Applied`, `Unchanged`, `Stale`, `NotFound`, or `Failed`. A null field in a state means no opinion and matches anything.
 
-### Link routes
+### Link Routes
 
-These serve [links](Links.md). The source answers `Stream`, `Stream/Check`, `Playback`, `Links/Describe`, and `Links/{itemId}/Images`. The linking server answers `Control` and `Links`. All need the protocol headers. `Stream`, `Stream/Check`, `Playback`, `Control`, `Links/Describe`, and `Links/{itemId}/Images` also need the caller to be paired, as for `Queue`, and answer `400` when the server id or body is missing, `409` when the caller is not on the Servers tab, and `428` when it is not paired.
+These serve [links](Links.md). The source answers `Stream`, `Stream/Check`, `Playback`, `Links/Describe`, and `Links/{itemId}/Images`. The linking server answers `Control` and `Links`. All need the protocol headers. `Stream`, `Stream/Check`, `Playback`, `Control`, `Links/Describe`, and `Links/{itemId}/Images` also need the caller to be paired, as for `Queue`, and answer `400` when the server id or body is missing, `409` when the caller is not on the **Servers** tab, and `428` when it is not paired.
 
 #### GET /Sync/Peer/Stream/{itemId}?serverId={id}&userId={id}&sourceUserId={id}&probe={bool}&fill={bool}
 
-Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted. `fill=true` is a download into the calling server's [link cache](Links.md#the-link-cache): it passes the same checks for the user apart from the stream limits, is held to the speed limits for that server and user, and is not counted as a stream. A caller holds at most two at once, and a third answers `429`. A stream for a user is held to that server's speed under **Settings > Bandwidth**, or the user's own, after the first three seconds' worth.
+Streams one of this server's files to a server that links to it, with range support. `HEAD` answers the headers alone. `itemId` is this server's id. `userId` is the user's id on the calling server, and `sourceUserId` is the user here the calling server maps them to, if it does. See [who the source streams as](Links.md#who-the-source-streams-as). `probe=true` with no user is the calling server's media probe, which is checked for the server and the item only and is not counted. `fill=true` is a download into the calling server's [link cache](Links.md#the-link-cache). It passes the same checks for the user apart from the stream limits, is held to the speed limits for that server and user, and is not counted as a stream. A caller holds at most two at once, and a third answers `429`. A stream for a user is held to that server's speed under **Settings > Bandwidth**, or the user's own, after the first three seconds' worth.
 
-Answers `200` or `206` with the file, or `403` with the reason as text: linking is off for the caller, the user cannot be resolved or may not play or see the item, the bitrate is over the user's limit, or a limit is reached. A file that is itself a `.strm` here is refused. A standard user's key only streams as that user.
+Answers `200` or `206` with the file, or `403` with the reason as text. The reason is that linking is off for the caller, the user cannot be resolved or may not play or see the item, the bitrate is over the user's limit, or a limit is reached. A file that is itself a `.strm` here is refused. A standard user's key only streams as that user.
 
 #### POST /Sync/Peer/Stream/Check
 
@@ -265,10 +267,10 @@ An allowed answer carries this server's id for the item and the file's size in b
 `StreamsInUse` is how many link streams this server is running for the caller now, and `StreamLimit` the most it runs for the caller at once, where 0 is no limit. A caller with several servers that hold the same file uses them to [pick the one with the most room](Links.md#when-the-source-cannot-stream).
 
 ```json
-{ "Allowed": false, "Reason": "the source allows 2 link stream(s) at once and all are in use" }
+{ "Allowed": false, "Reason": "the source allows 2 link streams at once and all are in use" }
 ```
 
-A source older than fallback answers `400` to a request by path, and is listed as tried.
+A server that answers `400` to a request by path is listed as tried.
 
 #### POST /Sync/Peer/Playback
 
@@ -287,11 +289,11 @@ Playback of a link, reported by the linking server. The first report opens a ses
   "IsPaused": true,
   "PlayMethod": "DirectPlay",
   "ClientName": "Jellyfin Web",
-  "UserName": "Joe"
+  "UserName": "viewer"
 }
 ```
 
-Answers `204`, or `403` with the reason: linking is off, the item or user is not here, the user cannot see the item, the report names no session, or a standard user's key reports for another user.
+Answers `204`, or `403` with the reason. The reason is that linking is off, the item or user is not here, the user cannot see the item, the report names no session, or a standard user's key reports for another user.
 
 #### POST /Sync/Peer/Control
 
@@ -305,7 +307,7 @@ Answers `204`, `400` for an unknown command, or `404` when no session here is pl
 
 #### POST /Sync/Peer/Links/Describe
 
-Answers for files the caller holds links to: whether each is still here to stream and its size, and with `Details` its media info. The linking server asks on every content sync to [check its links](Links.md#the-link-check), and asks with `Details` to give a link its media info without probing the file. At most 200 items a request. More, or no `ItemIds`, answers `400`. A folder or an unknown id answers `Exists: false`.
+Answers for files the caller holds links to. It gives whether each is still here to stream and its size, and with `Details` its media info. The linking server asks on every content sync to [check its links](Links.md#the-link-check), and asks with `Details` to give a link its media info without probing the file. At most 200 items a request. More, or no `ItemIds`, answers `400`. A folder or an unknown id answers `Exists: false`.
 
 ```json
 { "ServerId": "…", "ItemIds": [ "…" ], "Details": true }
@@ -326,7 +328,7 @@ Answers for files the caller holds links to: whether each is still here to strea
 }
 ```
 
-`Streams` and `Attachments` are Jellyfin's own media stream and attachment objects, for the streams inside the file only. Answers `403` with the reason when linking is off for the caller. A standard user's key only learns about items that user can see. Releases before this route answer `404`, and the linking server then probes its links instead and does not check them.
+`Streams` and `Attachments` are Jellyfin's own media stream and attachment objects, for the streams inside the file only. Answers `403` with the reason when linking is off for the caller. A standard user's key only learns about items that user can see. A server that answers `404` has no such route, and the linking server then probes its links instead and does not check them.
 
 #### GET /Sync/Peer/Links/{itemId}/Images/{kind}/{index}?serverId={id}&width={width}
 
@@ -334,7 +336,7 @@ One image this server made for a file the caller links to. `kind` is `Chapter`, 
 
 #### GET /Sync/Peer/Links
 
-This server's links, each with the path its full copy would have, in this server's paths. A server that reads this server's items asks once it meets a `.strm`, matches each link by the file it stands in for, and never copies one as content. Releases before links answer `404`, which means no links.
+This server's links, each with the path its full copy would have, in this server's paths. A server that reads this server's items asks once it meets a `.strm`, matches each link by the file it stands in for, and never copies one as content. A server that answers `404` has no links.
 
 ```json
 { "Links": [ { "LinkPath": "/media/Movies/Film (2020)/Film (2020).strm", "CopiedPath": "/media/Movies/Film (2020)/Film (2020).mkv" } ] }
@@ -348,11 +350,11 @@ The media files that left this server's library since a UTC time. A server that 
 { "CoveredFrom": "2026-10-15T08:00:00Z", "TooOld": false, "RemovedItemIds": [ "9c1e0f…", "4b07c2…" ] }
 ```
 
-Removals are remembered for 30 days, and `CoveredFrom` is how far back the record reaches. With `since` before it, `TooOld` is true: removals were missed that this answer cannot name, and the caller finds them on its next full scan. A server that answers `404` or refuses keeps no such record, and its removals are found by a full scan.
+Removals are remembered for 30 days, and `CoveredFrom` is how far back the record reaches. With `since` before it, `TooOld` is true. Removals were missed that this answer cannot name, and the caller finds them on its next full scan. A server that answers `404` or refuses keeps no such record, and its removals are found by a full scan.
 
 #### GET /Sync/Peer/Copies
 
-The copies this server downloaded from other servers, each with the id of the server it first came from, in this server's paths. A server that reads this server's items asks once per run, so it can tell a file that is this server's own from one it was given. See [Servers that sync with each other](Content.md#servers-that-sync-with-each-other). A copy removed within the last day is still listed, since Jellyfin lists a removed file until it next scans the folder. A server that answers `404` or refuses names no origins, and every file on it counts as its own.
+The copies this server downloaded from other servers, each with the id of the server it first came from, in this server's paths. A server that reads this server's items asks once per run, so it can tell a file that is this server's own from one it was given. See [Servers That Sync With Each Other](Content.md#servers-that-sync-with-each-other). A copy removed within the last day is still listed, since Jellyfin lists a removed file until it next scans the folder. A server that answers `404` or refuses names no origins, and every file on it counts as its own.
 
 ```json
 { "Copies": [ { "Path": "/media/Movies/Film (2020)/Film (2020).mkv", "OriginServerId": "0f6f1b0e8f4c4f0a9d6c2d1f5a7b3c9e" } ] }
@@ -362,7 +364,7 @@ The copies this server downloaded from other servers, each with the id of the se
 
 The address written inside each link. Jellyfin's own ffmpeg and stream proxy call it while playing a link, with no token, so it is the one plugin route that needs no Jellyfin sign in. It only answers a request from and to this server's own loopback address that carries no proxy header, with the link's secret, while a user who was allowed at play, or this server's media probe, may read it. It sends the file from the link cache when it is there, and otherwise streams it from the source, with range support, and `HEAD` answers the headers alone. The probe's read ends after 256 MB. Direct play does not come through here unless **Stream Direct Play of Links Per User** is off. Anything else is `403`, an unknown link is `404`, and a source that cannot be reached or is no longer set up is `502` or `503`.
 
-## Operator routes
+## Operator Routes
 
 These back the dashboard, and are handy for scripting or for watching a pool from the outside.
 
@@ -383,7 +385,7 @@ Both queues on this server and the delivery state of every peer it sends to.
 }
 ```
 
-`Pending` counts local edits still gathering before they become hints, and `Gathering` names them with when each goes out. `Unmatched` counts local changes since start that no Push or Sync server mapped, with the last one described in `LastUnmatched`, which is the first thing to check when nothing is being sent. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. `Sends` lists the kinds this server sends to that peer, which are the modules selected there, or is null until the peer has said. The lists hold at most five hundred rows each. `OutboundCounts` by state name and `InboundCount` cover the whole table, and `InboundFailingCount` counts the inbound rows whose apply has failed at least once.
+`Pending` counts local edits still gathering before they become hints, and `Gathering` names them with when each goes out. `Unmatched` counts local changes since start that no Push or Sync server mapped, with the last one described in `LastUnmatched`, which is the first thing to check when nothing is being sent. `State` is `Pending`, `Sent`, or `Failed`. A paused peer carries `PausedUntil` and the `Reason`. `Sends` lists the kinds this server sends to that peer, which are the sync types selected there, or is null until the peer has said. The lists hold at most five hundred rows each. `OutboundCounts` by state name and `InboundCount` cover the whole table, and `InboundFailingCount` counts the inbound rows whose apply has failed at least once.
 
 ### POST /Sync/Hints/Run
 
@@ -391,7 +393,7 @@ Raises every gathering edit, delivers, and applies now instead of waiting for th
 
 ### POST /Sync/Hints/CheckPeer
 
-What the Servers tab's Check Link button calls. Judges a server entry against the direction it is about to be saved with.
+What the **Servers** tab's **Check Link** button calls. Judges a server entry against the direction it is about to be saved with.
 
 ```json
 { "ServerUrl": "http://source-a:8096", "ApiKey": "…", "ServerKey": "entry key", "AllowPrivateNetwork": true, "Mode": "Sync" }
@@ -402,7 +404,7 @@ What the Servers tab's Check Link button calls. Judges a server entry against th
 ```json
 {
   "Reachable": true, "ServerName": "source-a", "ServerId": "…",
-  "HasPlugin": true, "PluginVersion": "12.2.1.0", "Incompatible": false,
+  "HasPlugin": true, "PluginVersion": "12.4.14.0", "Incompatible": false,
   "ListsThisServer": true, "PeerMode": "Sync", "SendsToThisServer": true,
   "Accepts": ["History", "Metadata", "People"],
   "ClockSkewSeconds": 0,
@@ -411,18 +413,18 @@ What the Servers tab's Check Link button calls. Judges a server entry against th
   "Severity": "ok",
   "Headline": "Ready. Changes travel both ways as they happen.",
   "Details": [
-    { "Title": "Its entry for this server", "Text": "Server Sync 12.2.1.0 there has this server on its Servers tab.", "Badge": "Sync", "State": "ok" },
+    { "Title": "Its entry for this server", "Text": "Server Sync 12.4.14.0 there has this server on its Servers tab.", "Badge": "Sync", "State": "ok" },
     { "Title": "What it applies from this server", "Text": "Watch history, metadata, and people. Off there: files, user settings, and playlists.", "Badge": "3 of 6", "State": "limited" }
   ],
-  "Message": "Ready. Server Sync 12.2.1.0 there lists this server as Sync, so changes travel both ways as they happen."
+  "Message": "Ready. Server Sync 12.4.14.0 there lists this server as Sync, so changes travel both ways as they happen."
 }
 ```
 
-`Severity` is `ok`, `warn`, or `error`, which the page shows as green, yellow, or red. `Headline` is the verdict in one line and `Details` holds one line for each thing learned: how the other server lists this one, which way changes travel, what it applies, the access it holds here, pairing, and the clocks when they differ. A line's `State` is `ok`, `limited`, or `no`, which colours its badge. `Details` is empty when the check ended before the link could be judged, and `Message` then says why. `Incompatible` is true when the two servers' protocols do not overlap, and the Servers tab then refuses to save the entry as Push or Sync, or with a library kept as links. `Message` always holds the whole answer as sentences.
+`Severity` is `ok`, `warn`, or `error`, which the page shows as green, orange, or red. `Headline` is the verdict in one line and `Details` holds one line for each thing learned. These are how the other server lists this one, which way changes travel, what it applies, the access it holds here, pairing, and the clocks when they differ. A line's `State` is `ok`, `limited`, `no`, or `none` when it is not known, which colors its badge. `Details` is empty when the check ended before the link could be judged, and `Message` then says why. `Incompatible` is true when the two servers' protocols do not overlap, and the **Servers** tab then refuses to save the entry as Push or Sync, or with a library kept as links. `Message` always holds the whole answer as sentences.
 
 ### GET /Sync/Hints/Version?kind={kind}&localItemId={id}&localUserId={id}&name={name}
 
-The version an object carries on this server: which server last edited it and when. Pass `localItemId` for `Metadata` and `Content`, `localUserId` for `Users`, both for `History`, and `name` for `People`. Answers `204` when no edit has been recorded since versions began.
+The version an object carries on this server, which is the server that last edited it and when. Pass `localItemId` for `Metadata` and `Content`, `localUserId` for `Users`, both for `History`, and `name` for `People`. Answers `204` when no edit has been recorded since versions began.
 
 ```json
 { "ServerId": "…", "ServerName": "source-a", "Timestamp": "2026-10-03T19:30:47Z", "IsThisServer": false }
@@ -430,11 +432,11 @@ The version an object carries on this server: which server last edited it and wh
 
 ### POST /Sync/Hints/Failed/Retry and DELETE /Sync/Hints/Failed
 
-Every failed row at once, the **Retry Failed** and **Dismiss Failed** buttons on the Queue tab. A failed row is an outbound row in the `Failed` state, or an inbound row whose apply has failed at least once and waits to be tried again. Retry clears each row's attempts, then delivers the outbound rows and applies the inbound rows now, and answers `{ "Retried": 1200, "Outbound": 1150, "Inbound": 50 }`. Delete discards them, and answers `{ "Removed": 1200, "Outbound": 1150, "Inbound": 50 }`. A discarded inbound row is reported to its sender as finished, so it is not sent again. The scheduled tasks still carry the changes either way.
+Every failed row at once, the **Retry Failed** and **Dismiss Failed** buttons on the **Queue** view. A failed row is an outbound row in the `Failed` state, or an inbound row whose apply has failed at least once and waits to be tried again. Retry clears each row's attempts, then delivers the outbound rows and applies the inbound rows now, and answers `{ "Retried": 1200, "Outbound": 1150, "Inbound": 50 }`. Delete discards them, and answers `{ "Removed": 1200, "Outbound": 1150, "Inbound": 50 }`. A discarded inbound row is reported to its sender as finished, so it is not sent again. The scheduled tasks still carry the changes either way.
 
 ### DELETE /Sync/Hints/Unmatched
 
-Clears the count of local changes that no server entry wanted, the **Dismiss** button beside that count on the Queue tab.
+Clears the count of local changes that no server entry wanted, the **Dismiss** button beside that count on the **Queue** view.
 
 ### DELETE /Sync/Hints/Outbound/{id} and DELETE /Sync/Hints/Inbound/{id}
 
@@ -442,7 +444,7 @@ Discard one row from either queue by its `Id`. A discarded inbound row is report
 
 ### POST /Sync/PromoteItems
 
-Turns links into full copies, the **Keep a full local copy** action on the Sync tab and **Download** in an item's details. A link whose whole file is in the link cache, at the size the source reports, has the cached file moved into place by a Sync Content run that starts now, or right after the one already running. Any other copy downloads on the next Sync Content run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
+Turns links into full copies, the **Keep a full local copy** action on the **Sync** tab and **Download** in an item's details. A link whose whole file is in the link cache, at the size the source reports, has the cached file moved into place by a **Sync Content** run that starts now, or right after the one already running. Any other copy downloads on the next **Sync Content** run. The `.strm` is removed once the copy is in place. Rows that are not links, are ignored, or are on their way to deletion are skipped. `FromCache` counts the promoted links that come from the cache.
 
 ```json
 { "SourceItemIds": ["9c1e0f…", "77ab12…"] }
@@ -452,15 +454,15 @@ Turns links into full copies, the **Keep a full local copy** action on the Sync 
 { "Promoted": 2, "FromCache": 1, "Skipped": 0 }
 ```
 
-Content rows from `GET /Sync/Items` carry `StorageMode`: `Copy`, `Link`, `Promoting` for a link on its way to a copy, or `Unkeeping` for a copy on its way back to a link, and `Cached`, true for a link whose file is in the link cache. On `GET /Sync/Items`, `cached=true` lists only those, and `storage=Copy` or `storage=Link` lists only copies or links.
+Content rows from `GET /Sync/Items` carry `StorageMode`, which is `Copy`, `Link`, `Promoting` for a link on its way to a copy, or `Unkeeping` for a copy on its way back to a link. They also carry `Cached`, true for a link whose file is in the link cache. On `GET /Sync/Items`, `cached=true` lists only those, and `storage=Copy` or `storage=Link` lists only copies or links.
 
 ### GET /Sync/KeptCopies?serverKey={key}&search={text}&skip={n}&take={n}
 
-The full copies held in one server entry's Link mappings, the Storage tab's **Permanent Copies**, as content rows, including copies already on their way back to links. `Kept` says why each is a copy: `Pick` for an Always Keep pick, `Hand` for one kept from the Sync tab, or `Unknown` for one from before Server Sync recorded why. `take` is at most 200.
+The full copies held in one server entry's Link mappings, the **Storage** tab's **Permanent Copies**, as content rows, including copies already on their way back to links. `Kept` says why each is a copy. It is `Pick` for an Always Keep pick, `Hand` for one kept from the **Sync** tab, `Own` for a file that was already here, or `Unknown` for one whose reason was not recorded. `take` is at most 200.
 
 ### POST /Sync/KeptCopies/Unkeep
 
-Turns copies back into links, as **Turn Back Into Links** does, and starts a Sync Content run. That run checks the source still has the file, writes the link, and moves the copy into the link cache, or removes it when the cache is off or cannot take it. A copy an Always Keep pick covers is skipped, since the next refresh would copy it again, as is a row that is not a synced copy in a Link mapping or whose file is not here.
+Turns copies back into links, as **Turn Back Into Links** does, and starts a **Sync Content** run. That run checks the source still has the file, writes the link, and moves the copy into the link cache, or removes it when the cache is off or cannot take it. A copy an Always Keep pick covers is skipped, since the next refresh would copy it again, as is a row that is not a synced copy in a Link mapping or whose file is not here.
 
 ```json
 { "Ids": [ 812, 813 ] }
@@ -472,13 +474,13 @@ Turns copies back into links, as **Turn Back Into Links** does, and starts a Syn
 
 ### GET /Sync/LinkCache
 
-What the [link cache](Links.md#the-link-cache) holds now. The Settings tab shows it under the cache's settings.
+What the [link cache](Links.md#the-link-cache) holds now. The **Settings** tab shows it under the cache's settings.
 
 ```json
 { "Enabled": true, "Sizing": "Fixed", "Location": "/cache/serversync-links", "Files": 12, "UsedBytes": 48318382080, "UsedFormatted": "45 GB", "LimitBytes": 107374182400, "LimitFormatted": "100 GB", "Waiting": 2 }
 ```
 
-`Sizing` is `Off`, `All`, `Fixed`, or `Percent`, and `LimitBytes` is what that comes to now: a cache sized by its disk has a limit that moves with the disk. `Waiting` counts files queued to be cached. With the cache off, `Enabled` is false and the counts are 0.
+`Sizing` is `Off`, `All`, `Fixed`, or `Percent`, and `LimitBytes` is what that comes to now. A cache sized by its disk has a limit that moves with the disk. `Waiting` counts files queued to be cached. With the cache off, `Enabled` is false and the counts are 0.
 
 ### POST /Sync/LinkCache/Clear
 
@@ -486,7 +488,7 @@ Deletes every cached file, as **Empty the Cache** does. Links keep playing from 
 
 ### DELETE /Sync/Servers/{key}/Rows
 
-Removes every sync row and queued hint that came from one server entry, by the entry's `Key`. The Servers tab calls this after a server is removed. The links that streamed from that server are removed with their rows. Files already downloaded are not touched.
+Removes every sync row and queued hint that came from one server entry, by the entry's `Key`. The **Servers** tab calls this after a server is removed. The links that streamed from that server are removed with their rows. Files already downloaded are not touched.
 
 ```json
 { "Content": 11, "History": 4, "Metadata": 11, "People": 1, "Users": 2, "Hints": 0 }
@@ -494,7 +496,7 @@ Removes every sync row and queued hint that came from one server entry, by the e
 
 ### POST /Sync/Tasks/{taskKey}/Run
 
-Starts one of Server Sync's refresh or sync tasks now, as the **Refresh** and **Sync** buttons on the Sync tab do. Answers `404` for any other key.
+Starts one of Server Sync's refresh or sync tasks now, as the **Refresh** and **Sync** buttons on the **Sync** tab do. Answers `404` for any other key.
 
 | Sync type | Refresh | Sync |
 | :--- | :--- | :--- |
@@ -508,7 +510,7 @@ Starts one of Server Sync's refresh or sync tasks now, as the **Refresh** and **
 
 Empties one sync table, as the resets under **Settings > Troubleshooting** do. `table` is `Content`, `History`, `Metadata`, `People`, `Playlists`, or `Users`. `Playlists` forgets which playlists are copies of another server's, which the next playlist sync works out again from the copies themselves. `All` deletes the whole sync database and creates it again. Tracking is forgotten and media is never touched. Answers `404` for any other name.
 
-### Ignoring and queueing rows
+### Ignoring and Queueing Rows
 
 One row or many go through the same routes. Each takes the rows to act on and answers with how many it changed.
 
@@ -528,4 +530,4 @@ Whether Server Sync can run here. Every page asks, and shows `Message` at its to
 { "Ready": false, "Message": "The Server Sync database is schema v35, written by a release before 12.4.13.0, …" }
 ```
 
-`Ready` is false while the database is one an older release wrote. See [Updating from an older release](Versioning.md#updating-from-an-older-release).
+`Ready` is false while the database is one an older release wrote. See [Updating From an Older Release](Versioning.md#updating-from-an-older-release).

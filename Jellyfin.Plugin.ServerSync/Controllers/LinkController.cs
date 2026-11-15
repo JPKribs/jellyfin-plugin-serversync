@@ -25,10 +25,12 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 [Route(LinkFiles.Route)]
 public class LinkController : ControllerBase
 {
-    // A request that passed through a proxy carries one of these. Jellyfin's own callers never do, and a
-    // reverse proxy on this machine would otherwise look like this server itself. When Jellyfin trusts a
-    // proxy, it takes the address from X-Forwarded-For and removes that header, but leaves the
-    // X-Original ones behind, so a request whose address came from a header is still refused.
+    /// <summary>
+    /// A request that passed through a proxy carries one of these. Jellyfin's own callers never do, and a
+    /// reverse proxy on this machine would otherwise look like this server itself. When Jellyfin trusts a
+    /// proxy, it takes the address from X-Forwarded-For and removes that header, but leaves the
+    /// X-Original ones behind, so a request whose address came from a header is still refused.
+    /// </summary>
     private static readonly string[] ProxyHeaders = { "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-IP", "Forwarded", "Via", "X-Original-For", "X-Original-Host", "X-Original-Proto" };
 
     private readonly LinkFiles _files;
@@ -37,6 +39,12 @@ public class LinkController : ControllerBase
     private readonly LinkStreamer _streamer;
     private readonly ILogger<LinkController> _logger;
 
+    /// <summary>Initializes a new instance of the <see cref="LinkController"/> class.</summary>
+    /// <param name="files">Reads and writes link files.</param>
+    /// <param name="grants">Records which user a link streams for.</param>
+    /// <param name="table">Reads the Content sync table.</param>
+    /// <param name="streamer">Streams a file from its source.</param>
+    /// <param name="logger">Writes log entries.</param>
     public LinkController(LinkFiles files, LinkGrants grants, ContentSyncTableManager table, LinkStreamer streamer, ILogger<LinkController> logger)
     {
         _files = files;
@@ -50,6 +58,8 @@ public class LinkController : ControllerBase
     /// Whether a request comes from this server itself: from and to a loopback address, with nothing to
     /// say it passed through a proxy on the way.
     /// </summary>
+    /// <param name="context">The current request.</param>
+    /// <returns><c>true</c> when the request comes from this server itself.</returns>
     public static bool FromThisServer(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);

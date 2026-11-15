@@ -19,6 +19,12 @@ public class PluginConfigurationManager : IPluginConfigurationManager
     private readonly IServerConfigurationManager _serverConfigurationManager;
     private readonly SecretProtector _secrets;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PluginConfigurationManager"/> class.
+    /// </summary>
+    /// <param name="applicationPaths">Locates Jellyfin's cache folder.</param>
+    /// <param name="serverConfigurationManager">Gives this server's name.</param>
+    /// <param name="secrets">Protects and reads stored secrets.</param>
     public PluginConfigurationManager(
         IApplicationPaths applicationPaths,
         IServerConfigurationManager serverConfigurationManager,

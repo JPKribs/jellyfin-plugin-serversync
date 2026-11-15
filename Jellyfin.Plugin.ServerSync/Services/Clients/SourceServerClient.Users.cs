@@ -14,8 +14,6 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// </summary>
 public partial class SourceServerClient
 {
-    // ===== User Sync Methods =====
-
     /// <summary>
     /// Gets a user's full details including Policy and Configuration.
     /// </summary>
@@ -120,7 +118,6 @@ public partial class SourceServerClient
                 return (null, null);
             }
 
-            // Read the stream to compute hash and count bytes simultaneously
             using var sha256 = System.Security.Cryptography.SHA256.Create();
             var buffer = new byte[8192];
             long totalBytes = 0;
@@ -188,6 +185,11 @@ public partial class SourceServerClient
     /// image file is replaced on disk without re-scanning), so the
     /// post-replacement size shows up in the table on the next refresh.
     /// </summary>
+    /// <param name="itemId">The source item the image belongs to.</param>
+    /// <param name="imageType">The image type, such as Primary.</param>
+    /// <param name="imageIndex">The image's index, or null for the first.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The size in bytes, or null when it cannot be read.</returns>
     public async Task<long?> GetItemImageContentLengthAsync(
         Guid itemId,
         string imageType,
@@ -285,5 +287,22 @@ public partial class SourceServerClient
                 DisposeQuiet(request);
             }
         }
+    }
+
+    /// <summary>
+    /// Opens the primary image of an item or a user on the source, scaled to a height. The caller disposes the response.
+    /// </summary>
+    /// <param name="id">The source's id of the item or the user.</param>
+    /// <param name="user">Whether the id names a user.</param>
+    /// <param name="maxHeight">The tallest image to ask for, in pixels.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The source's response, with only its headers read.</returns>
+    public async Task<HttpResponseMessage> OpenPrimaryImageAsync(Guid id, bool user, int maxHeight, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            _serverUrl + (user ? "/Users/" : "/Items/") + id.ToString() + "/Images/Primary?maxHeight=" + maxHeight.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddAuthorizationHeader(request);
+        return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 }

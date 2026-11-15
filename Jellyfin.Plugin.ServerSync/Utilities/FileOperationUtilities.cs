@@ -25,7 +25,9 @@ public static class FileOperationUtilities
 
     private static readonly string[] ItemImageExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tbn" };
 
-    // Images Jellyfin saves next to one media file, named after it: "<name>-thumb.jpg" and the like.
+    /// <summary>
+    /// Images Jellyfin saves next to one media file, named after it: "&lt;name&gt;-thumb.jpg" and the like.
+    /// </summary>
     private static readonly Regex ItemImageSuffix = new(
         "^-(thumb|poster|fanart|landscape|banner|logo|clearlogo|clearart|disc|backdrop|background|art)[0-9]*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -81,6 +83,12 @@ public static class FileOperationUtilities
     /// Moves a file with overwrite semantics, retrying on transient IO failures. Retry waits use
     /// <see cref="Task.Delay(int, CancellationToken)"/> so they don't block thread-pool threads.
     /// </summary>
+    /// <param name="sourcePath">The file to move.</param>
+    /// <param name="destinationPath">Where the file goes.</param>
+    /// <param name="logger">Writes log entries, or null.</param>
+    /// <param name="maxRetries">How many attempts to make.</param>
+    /// <param name="retryDelayMs">The wait before the first retry, in milliseconds. Each retry waits longer.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     public static async Task MoveFileWithOverwriteAsync(
         string sourcePath,
         string destinationPath,
@@ -122,6 +130,8 @@ public static class FileOperationUtilities
     /// would make a name longer than the filesystem allows, so the folder part is then cut to its end,
     /// behind a short hash of the whole folder path that keeps two cut names apart.
     /// </summary>
+    /// <param name="originalPath">The file's path before it was recycled.</param>
+    /// <returns>The recycled file name.</returns>
     public static string GenerateRecycledFileName(string originalPath)
         => GenerateRecycledFileName(originalPath, DateTime.UtcNow);
 
@@ -163,9 +173,11 @@ public static class FileOperationUtilities
         return FitName(hash + "~" + encodedPath, nameWithoutExt, timestamp, extension, keepPrefixChars: hash.Length + 1);
     }
 
-    // Shortens the folder part from its start, keeping its first keepPrefixChars (the hash), then the
-    // file's own name if it alone is too long. The timestamp and extension always survive, since the
-    // retention cleanup reads the one and Jellyfin users recognise files by the other.
+    /// <summary>
+    /// Shortens the folder part from its start, keeping its first keepPrefixChars (the hash), then the
+    /// file's own name if it alone is too long. The timestamp and extension always survive, since the
+    /// retention cleanup reads the one and Jellyfin users recognise files by the other.
+    /// </summary>
     private static string FitName(string folderPart, string stem, string timestamp, string extension, int keepPrefixChars = 0)
     {
         var suffix = $"_{timestamp}{extension}";
@@ -190,7 +202,9 @@ public static class FileOperationUtilities
 
     private static int Utf8Length(string value) => Encoding.UTF8.GetByteCount(value);
 
-    // The longest end of the text that fits in the given bytes, never splitting a character.
+    /// <summary>
+    /// The longest end of the text that fits in the given bytes, never splitting a character.
+    /// </summary>
     private static string KeepEnd(string text, int maxBytes)
     {
         var start = 0;
@@ -202,7 +216,9 @@ public static class FileOperationUtilities
         return text[start..];
     }
 
-    // The longest start of the text that fits in the given bytes, never splitting a character.
+    /// <summary>
+    /// The longest start of the text that fits in the given bytes, never splitting a character.
+    /// </summary>
     private static string KeepStart(string text, int maxBytes)
     {
         var end = text.Length;
@@ -214,8 +230,10 @@ public static class FileOperationUtilities
         return text[..end];
     }
 
-    // A recycled file as the bin names it: "<name>_yyyy-MM-dd_HH-mm-ss<ext>", with "_" and eight hex
-    // digits before the extension when that name was taken.
+    /// <summary>
+    /// A recycled file as the bin names it: "&lt;name&gt;_yyyy-MM-dd_HH-mm-ss&lt;ext&gt;", with "_" and eight hex
+    /// digits before the extension when that name was taken.
+    /// </summary>
     private static readonly Regex RecycledFileName = new(
         "^.+_(?<at>[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2})(_[0-9a-f]{8})?(\\.[^.]*)?$",
         RegexOptions.CultureInvariant);
@@ -242,6 +260,8 @@ public static class FileOperationUtilities
     /// <summary>
     /// Extracts the UTC timestamp from a recycled file name, or null if the pattern doesn't match.
     /// </summary>
+    /// <param name="filePath">The recycled file's path.</param>
+    /// <returns>The time the file was recycled, or null.</returns>
     public static DateTime? ExtractTimestampFromFileName(string filePath)
         => TryReadRecycledTime(filePath, out var at) ? at : null;
 
@@ -249,6 +269,8 @@ public static class FileOperationUtilities
     /// Returns companion files (subtitles, NFOs, images) that share the main file's stem.
     /// Match is exact on <c>{base}.</c> so siblings like <c>Foo 2.mkv</c> don't bleed into <c>Foo.mkv</c>'s companions.
     /// </summary>
+    /// <param name="mainFilePath">The media file's path.</param>
+    /// <returns>The companion file paths.</returns>
     public static List<string> GetCompanionFiles(string mainFilePath)
     {
         var companions = new List<string>();
@@ -294,8 +316,10 @@ public static class FileOperationUtilities
         return companions;
     }
 
-    // Whether the folder holds another file with the same name and a different extension that is not a
-    // companion, such as a second container of the same title.
+    /// <summary>
+    /// Whether the folder holds another file with the same name and a different extension that is not a
+    /// companion, such as a second container of the same title.
+    /// </summary>
     private static bool HasSameNamedMedia(string directory, string stem, string mainFilePath)
         => Directory.EnumerateFiles(directory, stem + ".*")
             .Any(path => !string.Equals(path, mainFilePath, StringComparison.OrdinalIgnoreCase)
@@ -310,6 +334,8 @@ public static class FileOperationUtilities
     /// Probes a directory for write permission by creating and deleting a sentinel file.
     /// Creates the directory if it doesn't exist.
     /// </summary>
+    /// <param name="directoryPath">The folder to probe.</param>
+    /// <returns><c>true</c> when files can be written there.</returns>
     public static bool HasWritePermission(string directoryPath)
     {
         if (string.IsNullOrEmpty(directoryPath))

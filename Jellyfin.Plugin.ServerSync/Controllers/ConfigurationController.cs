@@ -39,13 +39,13 @@ public partial class ConfigurationController : ControllerBase
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigurationController"/> class.
     /// </summary>
-    /// <param name="libraryManager">The library manager.</param>
-    /// <param name="taskManager">The task manager.</param>
-    /// <param name="httpClientFactory">The HTTP client factory.</param>
-    /// <param name="configManager">The plugin configuration manager.</param>
+    /// <param name="libraryManager">Reads Jellyfin's library.</param>
+    /// <param name="taskManager">Runs Jellyfin's scheduled tasks.</param>
+    /// <param name="httpClientFactory">Builds the named HTTP clients that carry the SSRF guard.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
     /// <param name="databaseProvider">The sync database provider.</param>
-    /// <param name="clientFactory">The source server client factory.</param>
-    /// <param name="logger">The logger.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="logger">Writes log entries.</param>
     public ConfigurationController(
         ILibraryManager libraryManager,
         ITaskManager taskManager,
@@ -143,7 +143,7 @@ public partial class ConfigurationController : ControllerBase
     {
         if (!Enum.TryParse<SyncStatus>(status, ignoreCase: true, out var fromStatus) || !Enum.IsDefined(fromStatus))
         {
-            return BadRequest("Invalid status value");
+            return BadRequest("The status is not valid.");
         }
 
         try
@@ -155,7 +155,7 @@ public partial class ConfigurationController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "{Operation}: failed to queue rows that were {Status}", operation, fromStatus);
-            return StatusCode(500, new { Error = "Bulk queue failed, see the server log" });
+            return StatusCode(500, new { Error = "Could not queue the items. See the server log." });
         }
     }
 
@@ -196,7 +196,9 @@ public partial class ConfigurationController : ControllerBase
         return Ok(new { Ready = held is null, Message = held });
     }
 
-    // The scheduled tasks the Sync tab may start, by key.
+    /// <summary>
+    /// The scheduled tasks the Sync tab may start, by key.
+    /// </summary>
     private static readonly HashSet<string> RunnableTasks = new(StringComparer.Ordinal)
     {
         "ServerSyncUpdateTables", "ServerSyncDownloadContent",
@@ -221,11 +223,11 @@ public partial class ConfigurationController : ControllerBase
             : null;
         if (task == null)
         {
-            return NotFound("Task not found");
+            return NotFound("Task not found.");
         }
 
         _taskManager.Execute(task, new TaskOptions());
-        return Ok(new { Message = "Task started" });
+        return Ok(new { Message = "Task started." });
     }
 
     /// <summary>
@@ -256,19 +258,19 @@ public partial class ConfigurationController : ControllerBase
         };
         if (reset is null)
         {
-            return NotFound("Unknown table");
+            return NotFound("Unknown table.");
         }
 
         try
         {
             var deleted = reset();
             _logger.LogInformation("Sync reset of {Table} finished, {Count} rows deleted", SanitizeForLog(table), deleted);
-            return Ok(new { Success = true, Message = "Reset successfully" });
+            return Ok(new { Success = true, Message = "Table reset." });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to reset {Table}", SanitizeForLog(table));
-            return StatusCode(500, new { Success = false, Error = "An internal error occurred. Check server logs for details." });
+            return StatusCode(500, new { Success = false, Error = "Could not reset the table. See the server log." });
         }
     }
 

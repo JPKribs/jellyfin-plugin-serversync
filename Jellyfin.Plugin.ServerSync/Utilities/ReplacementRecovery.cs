@@ -20,7 +20,7 @@ public static class ReplacementRecovery
     /// is there, and every set-aside file that goes with it whose own name is free.
     /// </summary>
     /// <param name="localPath">Where the file belongs.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="logger">Writes log entries.</param>
     /// <returns>How many files were put back.</returns>
     public static int Restore(string? localPath, ILogger logger)
     {
@@ -74,7 +74,9 @@ public static class ReplacementRecovery
         return restored;
     }
 
-    // The name a set-aside file had: what comes before ".replacing." when 32 hex digits follow it.
+    /// <summary>
+    /// The name a set-aside file had: what comes before ".replacing." when 32 hex digits follow it.
+    /// </summary>
     private static string? OriginalNameOf(string path)
     {
         var file = Path.GetFileName(path);

@@ -14,6 +14,11 @@ public class ChangedFoldersTests
 {
     private static string P(params string[] parts) => Path.Combine(parts);
 
+    /// <summary>
+    /// Many files in one folder report that folder once.
+    /// True: a season of episodes and a subtitle name one folder.
+    /// False: Jellyfin would be told about the same folder once per file.
+    /// </summary>
     [Fact]
     public void ManyFilesInOneFolder_AreOneFolder()
     {
@@ -23,6 +28,11 @@ public class ChangedFoldersTests
         Assert.Equal(new[] { season }, folders);
     }
 
+    /// <summary>
+    /// A folder inside another reported folder is covered by it.
+    /// True: only the show folder is reported when its season and its poster both changed.
+    /// False: Jellyfin would refresh the same files twice.
+    /// </summary>
     [Fact]
     public void FolderInsideAnotherReportedFolder_IsCoveredByIt()
     {
@@ -32,6 +42,11 @@ public class ChangedFoldersTests
         Assert.Equal(new[] { show }, folders);
     }
 
+    /// <summary>
+    /// A sibling whose name starts with another folder's name is not inside it.
+    /// True: Alien and Aliens are reported as two folders.
+    /// False: a new film in Aliens would be skipped because Alien was already reported.
+    /// </summary>
     [Fact]
     public void SiblingWithACommonPrefix_IsNotTreatedAsInside()
     {
@@ -42,6 +57,11 @@ public class ChangedFoldersTests
         Assert.Equal(2, folders.Count);
     }
 
+    /// <summary>
+    /// Empty and blank paths report no folder.
+    /// True: a row with no local path adds nothing.
+    /// False: the library root, or an error, would come from a blank path.
+    /// </summary>
     [Fact]
     public void BlankPaths_AreIgnored()
     {
@@ -82,6 +102,11 @@ public class ChangedFoldersTests
         Assert.Contains(Path.GetPathRoot(shows)!, asked);
     }
 
+    /// <summary>
+    /// With no folders there is nothing unreachable.
+    /// True: a run that changed nothing does not force a full scan.
+    /// False: every empty run would fall back to a full scan.
+    /// </summary>
     [Fact]
     public void AllReachable_NoFolders_IsReachable()
     {

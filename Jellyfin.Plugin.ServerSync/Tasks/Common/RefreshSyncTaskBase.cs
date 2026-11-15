@@ -38,15 +38,17 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     private readonly Dictionary<string, DateTime> _changedSince = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _runStartedAt;
 
+    /// <summary>How far before its last scan an incremental scan reaches back, so a change made while that scan ran is not missed.</summary>
     public static readonly TimeSpan IncrementalOverlap = TimeSpan.FromHours(1);
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="RefreshSyncTaskBase{TRecord, TSource, TKey}"/> class.
     /// </summary>
-    /// <param name="logger">Logger.</param>
+    /// <param name="logger">Writes log entries.</param>
     /// <param name="manager">Table manager for upsert/prune operations.</param>
-    /// <param name="clientFactory">Factory for the source-server HTTP client.</param>
-    /// <param name="configManager">Plugin configuration accessor.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="watermarks">Holds when each source was last scanned, or null when scans are never incremental.</param>
     protected RefreshSyncTaskBase(
         ILogger logger,
         ISyncTableManager<TRecord, TKey> manager,
@@ -65,14 +67,21 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         _watermarks = watermarks;
     }
 
+    /// <summary>Gets a value indicating whether the module can scan only what changed since the last scan. Off unless a module overrides it.</summary>
     protected virtual bool SupportsIncremental => false;
 
+    /// <summary>Gets the settings that decide what a scan reads, which an incremental scan compares so a change to them forces a full scan.</summary>
     protected virtual string ScopeSettings => string.Empty;
 
+    /// <summary>Gets a value indicating whether the current run reads only what changed since each source's last scan.</summary>
     protected bool IsIncrementalRun { get; private set; }
 
+    /// <summary>Gets the rows stored when the current run started, by key.</summary>
     protected IReadOnlyDictionary<TKey, TRecord> ExistingRows { get; private set; } = new Dictionary<TKey, TRecord>();
 
+    /// <summary>Gets the time an incremental run reads changes since for one source.</summary>
+    /// <param name="source">The server being read.</param>
+    /// <returns>The time, or null when the run reads everything from that source.</returns>
     protected DateTime? ChangedSince(ScanSource source)
         => IsIncrementalRun && source is not null && _changedSince.TryGetValue(source.Key, out var since) ? since : null;
 
@@ -92,7 +101,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected IPluginConfigurationManager ConfigManager => _configManager;
 
     /// <summary>
-    /// Gets or sets the scan servers connected for the current run, in priority order. Populated by the
+    /// Gets or sets the scan servers connected for the current run, in rank order. Populated by the
     /// default <see cref="TestConnectionAsync"/>, disposed at the end of <c>ExecuteAsync</c>, empty
     /// outside a run. The setter exists for subclasses and tests that provide their own sources.
     /// </summary>
@@ -106,8 +115,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <returns>The source, or null when that server did not connect this run.</returns>
     protected ScanSource? SourceFor(string? serverKey) => ScanSources.Find(Sources, _configManager, serverKey);
 
-    // The per module tasks run inside Sync Content and Sync Information and from the dashboard, so
-    // they stay registered but leave the scheduled task list.
+    /// <summary>
+    /// The per module tasks run inside Sync Content and Sync Information and from the dashboard, so
+    /// they stay registered but leave the scheduled task list.
+    /// </summary>
     /// <inheritdoc />
     public bool IsHidden => true;
 
@@ -135,6 +146,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <summary>
     /// Returns true if this task should run given current configuration.
     /// </summary>
+    /// <returns><c>true</c> when the module is on.</returns>
     protected abstract bool IsEnabled();
 
     /// <summary>
@@ -154,11 +166,13 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected virtual int BuildRecordParallelism => 1;
 
     /// <summary>
-    /// Connects every scan server and keeps the ones that answer, in priority order. A server that
+    /// Connects every scan server and keeps the ones that answer, in rank order. A server that
     /// does not answer is logged and skipped for this run, and the run skips pruning, because rows
     /// that came from it cannot be re-confirmed. Returns false only when no server connects.
     /// Subclasses that override this should populate <see cref="Sources"/> themselves.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns><c>false</c> only when no server connected.</returns>
     protected virtual async Task<bool> TestConnectionAsync(CancellationToken cancellationToken)
     {
         var connected = await ScanSources.ConnectAsync(_configManager, _clientFactory, Logger, Name, MarkServerUnreachable, cancellationToken).ConfigureAwait(false);
@@ -169,7 +183,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <summary>
     /// Runs once per run after the servers have connected and before any list is fetched. Default is a
     /// no-op. A module that keeps per run state should reset it here rather than in
-    /// <see cref="GetListAsync"/>, which now runs once per server.
+    /// <see cref="GetListAsync"/>, which runs once per server.
     /// </summary>
     protected virtual void OnRunStarting()
     {
@@ -177,18 +191,18 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
     /// <summary>
     /// Fetches the items one scan server offers this run. Called once per connected server, highest
-    /// priority first. <paramref name="progress"/> reports 0 to 100 for this server only.
+    /// highest ranked first. <paramref name="progress"/> reports 0 to 100 for this server only.
     /// </summary>
     /// <param name="source">The server to list from.</param>
     /// <param name="progress">Progress for this server's fetch.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The work items this server contributes.</returns>
     protected abstract Task<IList<TSource>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken);
 
     /// <summary>
     /// The key two servers collide on when they offer the same thing: a local path, a person name, a
     /// local user. Null means the item never collides. When several servers produce the same key the
-    /// first in priority order keeps it and the rest are dropped before any record is built.
+    /// first in rank order keeps it and the rest are dropped before any record is built.
     /// </summary>
     /// <param name="source">A work item.</param>
     /// <returns>The collision key, or null.</returns>
@@ -196,11 +210,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
     /// <summary>
     /// Chooses between several servers' offers of the same thing, for the collision keys more than one
-    /// server offered. Each list is in priority order. A key left out of the answer goes to the first
-    /// server in priority order, which is what the default does for every key.
+    /// server offered. Each list is in rank order. A key left out of the answer goes to the first
+    /// server in rank order, which is what the default does for every key.
     /// </summary>
-    /// <param name="contested">The offers of each contested key, highest priority first.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="contested">The offers of each contested key, highest ranked first.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The offer that speaks for a key, for the keys rank does not decide.</returns>
     protected virtual Task<IReadOnlyDictionary<string, TSource>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<TSource>> contested, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyDictionary<string, TSource>>(new Dictionary<string, TSource>());
@@ -216,12 +230,12 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     protected virtual TSource? ObservedOffer(TSource passedOver, TSource speaking) => default;
 
     /// <summary>
-    /// Whether a row built from a lower priority server's offer may be weighed against this server's
-    /// value on a run that lists only what changed, although a higher priority server holds the item.
+    /// Whether a row built from a lower ranked server's offer may be weighed against this server's
+    /// value on a run that lists only what changed, although a higher ranked server holds the item.
     /// The higher server listed nothing for it, so it has nothing new, and the lower one has. Default
     /// is no, and the higher server keeps the item until a full scan.
     /// </summary>
-    /// <param name="record">The row built from the lower priority server's offer.</param>
+    /// <param name="record">The row built from the lower ranked server's offer.</param>
     /// <returns>True when the row goes on to be weighed.</returns>
     protected virtual bool MayOutrankOwner(TRecord record) => false;
 
@@ -229,7 +243,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// Runs once per run after every server has been listed and before the offers are weighed. Default
     /// does nothing.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>A task.</returns>
     protected virtual Task PrepareContestAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -237,15 +251,15 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
     /// <summary>
     /// Whether a server listed earlier this run already offered the item with this collision key. A
-    /// module can check it while listing a lower priority server and skip fetching the details of an
+    /// module can check it while listing a lower ranked server and skip fetching the details of an
     /// item that server would lose anyway. The dedupe after listing still decides.
     /// </summary>
     /// <param name="priorityKey">The collision key, as <see cref="PriorityKeyOf(TSource)"/> gives it.</param>
-    /// <returns>True when a higher priority server already covers it.</returns>
+    /// <returns>True when a higher ranked server already covers it.</returns>
     protected bool ClaimedByHigherServer(string priorityKey) => _claimedByHigherServers.Contains(priorityKey);
 
     /// <summary>
-    /// The same collision key read from a stored row, so a row that lost its priority to another
+    /// The same collision key read from a stored row, so a row that lost to another
     /// server can be recognized and retired instead of treated as a removal.
     /// </summary>
     /// <param name="record">A stored row.</param>
@@ -255,7 +269,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <summary>
     /// Keys of the connected servers whose listing this run finished without a source error. A server
     /// that connected but whose listing threw or reported a failure is left out, so it counts as absent
-    /// when a row it holds is offered by a lower priority server.
+    /// when a row it holds is offered by a lower ranked server.
     /// </summary>
     private readonly HashSet<string> _listedCleanly = new(StringComparer.OrdinalIgnoreCase);
 
@@ -266,7 +280,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     private volatile bool _currentListingFailed;
 
     /// <summary>
-    /// Lists every connected server in priority order and keeps the first offer for each collision
+    /// Lists every connected server in rank order and keeps the first offer for each collision
     /// key. Progress is split evenly across the servers. A server whose listing throws is marked
     /// unavailable and contributes nothing this run, and the other servers are still listed.
     /// </summary>
@@ -410,7 +424,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </summary>
     /// <param name="existing">The stored rows, as the run started.</param>
     /// <param name="seenKeys">The keys this run saw on a source.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>How many rows were settled.</returns>
     protected virtual Task<int> ApplyReportedRemovalsAsync(IReadOnlyDictionary<TKey, TRecord> existing, HashSet<TKey> seenKeys, CancellationToken cancellationToken)
         => Task.FromResult(0);
@@ -425,8 +439,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// Leaves out offers that are not the offering server's to make, once every server has been listed.
     /// Default keeps them all.
     /// </summary>
-    /// <param name="items">Every server's offers, in priority order.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="items">Every server's offers, in rank order.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The offers that count.</returns>
     protected virtual Task<List<TSource>> DropOffersNotTheirsAsync(List<TSource> items, CancellationToken cancellationToken)
         => Task.FromResult(items);
@@ -440,6 +454,9 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// Applies user/library filters to <paramref name="items"/>. Default
     /// implementation returns input unchanged.
     /// </summary>
+    /// <param name="items">The work items.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>The items to keep.</returns>
     protected virtual Task<IList<TSource>> FilterAsync(IList<TSource> items, CancellationToken cancellationToken)
         => Task.FromResult(items);
 
@@ -450,7 +467,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// loading the whole table for one item would defeat the point of a hint.
     /// </summary>
     /// <param name="work">The source item and the server it came from.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The stored row, or null when the item has no local counterpart.</returns>
     public async Task<TRecord?> RefreshOneAsync(TSource work, CancellationToken cancellationToken)
     {
@@ -496,7 +513,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// Default does nothing. Rows changed here must be stored again by the override.
     /// </summary>
     /// <param name="queued">The rows that ended the build queued.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>A task.</returns>
     protected virtual Task ResolveConflictsAsync(IList<TRecord> queued, CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -511,6 +528,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </list>
     /// Returning null skips this source item entirely (no row written).
     /// </summary>
+    /// <param name="source">The work item.</param>
+    /// <param name="existing">The rows already stored, by key.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>The row, or null to skip the item.</returns>
     protected abstract Task<TRecord?> BuildRecordAsync(
         TSource source,
         IReadOnlyDictionary<TKey, TRecord> existing,
@@ -520,6 +541,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// Extracts the natural key from a record (used for matching against
     /// the existing-rows dictionary and for stale-row detection).
     /// </summary>
+    /// <param name="record">The sync row.</param>
+    /// <returns>The row's key.</returns>
     protected abstract TKey ExtractKey(TRecord record);
 
     /// <summary>
@@ -533,6 +556,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// approval gate where new items go to <see cref="SyncStatus.Pending"/>
     /// awaiting user approval rather than auto-Queued.
     /// </summary>
+    /// <param name="record">The sync row.</param>
     protected virtual void DecideStatus(TRecord record)
     {
         if (record.Status == SyncStatus.Ignored)
@@ -559,7 +583,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         else
         {
             // Source matches local, record the current source as the synced
-            // baseline. This no longer suppresses future comparisons (see
+            // baseline. This never suppresses future comparisons (see
             // SyncableValue.HasChanges). It keeps Synced/SyncedHash meaningful
             // for the modal and for per-module bookkeeping.
             record.MarkSynced();
@@ -578,6 +602,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// its tracking history (or, for Content, schedule its files for
     /// deletion). Default returns true (no scoping).
     /// </summary>
+    /// <param name="record">The sync row.</param>
+    /// <returns><c>true</c> when the row belongs to a mapping that is still on.</returns>
     protected virtual bool IsInScope(TRecord record) => true;
 
     /// <summary>
@@ -630,15 +656,17 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// Returns true if pruning this record would actually change anything.
     /// Rows the module's prune would no-op on (e.g. Content's already
     /// Ignored / pending-deletion rows) must not count toward the prune
-    /// circuit breaker, or gradual legitimate removals accumulate until the
-    /// breaker trips permanently. Default counts every row.
+    /// safety limit, or gradual legitimate removals accumulate until the
+    /// limit refuses every prune. Default counts every row.
     /// </summary>
+    /// <param name="record">The sync row.</param>
+    /// <returns><c>true</c> when pruning the row would change anything.</returns>
     protected virtual bool IsPruneCandidate(TRecord record) => true;
 
     /// <summary>
     /// Returns false when the module's prune is configured to be a complete
-    /// no-op (e.g. Content with deletion disabled), so the circuit breaker
-    /// doesn't record a scary "prune blocked" failure for a prune that would
+    /// no-op (e.g. Content with deletion disabled), so the prune safety limit
+    /// does not record a "prune blocked" failure for a prune that would
     /// have done nothing anyway.
     /// </summary>
     protected virtual bool PruneGuardApplies => true;
@@ -650,15 +678,17 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </summary>
     private volatile bool _sourceUnavailable;
 
-    // Whether a server is being listed right now, and whether a failure was raised while none was.
-    // A failure during one server's listing leaves that server out of the cleanly listed set, and
-    // only its rows are held back from the prune. Any other failure holds the whole prune.
+    /// <summary>
+    /// Whether a server is being listed right now, and whether a failure was raised while none was.
+    /// A failure during one server's listing leaves that server out of the cleanly listed set, and
+    /// only its rows are held back from the prune. Any other failure holds the whole prune.
+    /// </summary>
     private volatile bool _listingServer;
     private volatile bool _unavailableBeyondOneServer;
 
     /// <summary>
     /// Set when this run's prune was fully or partially refused by a safety
-    /// guard (the base circuit breaker or a subclass guard such as Content's
+    /// limit (the base prune safety limit or a subclass limit such as Content's
     /// per-mapping empty-catalog check). While set, the end-of-run summary
     /// keeps the recorded failure instead of clearing it, otherwise a
     /// blocked prune would look like a fully successful run on the dashboard.
@@ -666,10 +696,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     private bool _pruneBlocked;
 
     /// <summary>
-    /// Records that a prune safety guard refused to remove rows this run.
+    /// Records that a prune safety limit refused to remove rows this run.
     /// The reason is surfaced on the dashboard and preserved through the
     /// end-of-run summary.
     /// </summary>
+    /// <param name="reason">Why the run failed.</param>
     protected void MarkPruneBlocked(string reason)
     {
         _pruneBlocked = true;
@@ -688,8 +719,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <param name="reason">Short description of what failed, for the log.</param>
     protected void MarkSourceUnavailable(string reason) => MarkUnavailable(reason, oneServer: _listingServer);
 
-    // A server that could not be reached at all. It is one server's failure: it is not among the
-    // servers listed, so its rows are held back and the rest are cleaned up.
+    /// <summary>
+    /// A server that could not be reached at all. It is one server's failure: it is not among the
+    /// servers listed, so its rows are held back and the rest are cleaned up.
+    /// </summary>
     private void MarkServerUnreachable(string reason) => MarkUnavailable(reason, oneServer: true);
 
     private void MarkUnavailable(string reason, bool oneServer)
@@ -741,6 +774,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// (100k+ rows) take real time and the bar must move through them.
     /// Returns the number of rows pruned.
     /// </summary>
+    /// <param name="existing">The rows already stored, by key.</param>
+    /// <param name="seenKeys">The keys of every item the source still holds.</param>
+    /// <param name="progress">Receives progress from 0 to 100.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>How many rows were pruned.</returns>
     protected virtual Task<int> PruneStaleAsync(
         IReadOnlyDictionary<TKey, TRecord> existing,
         HashSet<TKey> seenKeys,
@@ -782,6 +820,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <see cref="RecordRunCompleted"/> instead, the base saves the config
     /// uniformly for all modules.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the work.</param>
     protected virtual Task FinalizeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
@@ -791,6 +830,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// configuration with a single try/catch, modules don't repeat that
     /// save plumbing.
     /// </summary>
+    /// <param name="config">The plugin settings.</param>
+    /// <param name="utcNow">The current time in UTC.</param>
     protected virtual void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         // Default: nothing to record.
@@ -857,16 +898,20 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
     }
 
-    // Progress allocation. The snapshot takes 0 to 3 %, the source fetch 3 to 50 %, and 50 to 99 % is
-    // split between the build and the prune by how many rows each will touch, so a run that builds
-    // nothing but prunes 100k rows spends its band on the prune instead of freezing at the tail. The
-    // finalize takes the last 1 %.
+    /// <summary>
+    /// Progress allocation. The snapshot takes 0 to 3 %, the source fetch 3 to 50 %, and 50 to 99 % is
+    /// split between the build and the prune by how many rows each will touch, so a run that builds
+    /// nothing but prunes 100k rows spends its band on the prune instead of freezing at the tail. The
+    /// finalize takes the last 1 %.
+    /// </summary>
     private const double SnapshotEnd = 3.0;
     private const double FetchEnd = 50.0;
     private const double WorkEnd = 99.0;
 
-    // Deletes are weighted cheaper than builds when the band is split, since they make no HTTP calls
-    // and touch no blobs.
+    /// <summary>
+    /// Deletes are weighted cheaper than builds when the band is split, since they make no HTTP calls
+    /// and touch no blobs.
+    /// </summary>
     private const double PruneRowWeight = 0.25;
 
     private async Task RunAsync(IProgress<double> progress, CancellationToken cancellationToken)
@@ -903,7 +948,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         if (IsIncrementalRun)
         {
             // A server that keeps a record of what left its library is asked for it, so a removal is
-            // settled on this run. Anything it cannot name waits for the next full scan, as before.
+            // settled on this run. Anything it cannot name waits for the next full scan.
             if (!_sourceUnavailable && !run.HadFailures)
             {
                 pruned = await ApplyReportedRemovalsAsync(run.Existing, run.SeenKeySet, cancellationToken).ConfigureAwait(false);
@@ -1028,9 +1073,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(shape)))[..16];
     }
 
-    // Strict read. If this degraded to an empty list on a transient database error, every source item
-    // would look new and the upserts would overwrite statuses the operator set, such as Ignored and
-    // pending approvals. Failing the run is the safe outcome.
+    /// <summary>
+    /// Strict read. If this degraded to an empty list on a transient database error, every source item
+    /// would look new and the upserts would overwrite statuses the operator set, such as Ignored and
+    /// pending approvals. Failing the run is the safe outcome.
+    /// </summary>
     private Dictionary<TKey, TRecord> SnapshotExistingRows()
     {
         var existingList = Manager.GetAllStrict();
@@ -1090,9 +1137,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         return run;
     }
 
-    // Builds and stores one row per source item. When BuildRecordAsync spends most of its time on per
-    // item HTTP calls, as Metadata does, parallelism turns hours into minutes. The rows are written in
-    // batches, one transaction each, through the manager's write lock.
+    /// <summary>
+    /// Builds and stores one row per source item. When BuildRecordAsync spends most of its time on per
+    /// item HTTP calls, as Metadata does, parallelism turns hours into minutes. The rows are written in
+    /// batches, one transaction each, through the manager's write lock.
+    /// </summary>
     private async Task BuildAllAsync(RefreshRun run, IList<TSource> sourceItems, IProgress<double> progress, CancellationToken cancellationToken)
     {
         var parallelism = Math.Max(1, BuildRecordParallelism);
@@ -1123,8 +1172,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// </summary>
     protected const int WriteBatchSize = 250;
 
-    // Writes the rows built so far in one transaction. One writer at a time, so batches stay whole
-    // while the builders keep adding behind it.
+    /// <summary>
+    /// Writes the rows built so far in one transaction. One writer at a time, so batches stay whole
+    /// while the builders keep adding behind it.
+    /// </summary>
     private void FlushWrites(RefreshRun run, bool all)
     {
         lock (run.FlushLock)
@@ -1146,8 +1197,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
     }
 
-    // A single bad item never aborts the refresh. Its failure is counted so the run skips the prune and
-    // the summary says how many rows did not make it.
+    /// <summary>
+    /// A single bad item never aborts the refresh. Its failure is counted so the run skips the prune and
+    /// the summary says how many rows did not make it.
+    /// </summary>
     private async ValueTask BuildOneAsync(RefreshRun run, TSource src, IProgress<double> progress, CancellationToken ct)
     {
         try
@@ -1219,8 +1272,10 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
     }
 
-    // A failed conflict pass leaves the queued rows as they were built. It counts as a failure so the
-    // run skips the prune and the dashboard shows why.
+    /// <summary>
+    /// A failed conflict pass leaves the queued rows as they were built. It counts as a failure so the
+    /// run skips the prune and the dashboard shows why.
+    /// </summary>
     private async Task ResolveRunConflictsAsync(RefreshRun run, CancellationToken cancellationToken)
     {
         if (run.QueuedThisRun.IsEmpty)
@@ -1244,12 +1299,14 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
     }
 
-    // When priorities change or a higher priority server gains an item, the row that tracked it under a
-    // lower priority server is not a removal. The thing is still here, tracked by the new winner's row,
-    // so the old row is deleted quietly and counted as seen, and neither the prune nor the circuit
-    // breaker treats it as stale. Never while a server did not answer this run: its items were never
-    // offered, so a lower server's rows would claim them, and the unanswered server's rows, negotiated
-    // bases included, would be deleted over an outage rather than a real change of ownership.
+    /// <summary>
+    /// When ranks change or a higher ranked server gains an item, the row that tracked it under a
+    /// lower ranked server is not a removal. The thing is still here, tracked by the new winner's row,
+    /// so the old row is deleted quietly and counted as seen, and neither the prune nor the prune
+    /// safety limit treats it as stale. Never while a server did not answer this run: its items were never
+    /// offered, so a lower server's rows would claim them, and the unanswered server's rows, negotiated
+    /// bases included, would be deleted over an outage rather than a real change of ownership.
+    /// </summary>
     private void RetireCoveredRows(RefreshRun run)
     {
         if (_sourceUnavailable)
@@ -1269,10 +1326,12 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
     }
 
-    // Removes rows no longer present on the source, but only after a clean discovery. When a source
-    // answered with anything but a real response, a row missing from the seen set might still exist
-    // there, and when an item could not be built or stored it is missing from the seen set too. Either
-    // way deleting would be data loss, so the next clean run reconciles instead.
+    /// <summary>
+    /// Removes rows no longer present on the source, but only after a clean discovery. When a source
+    /// answered with anything but a real response, a row missing from the seen set might still exist
+    /// there, and when an item could not be built or stored it is missing from the seen set too. Either
+    /// way deleting would be data loss, so the next clean run reconciles instead.
+    /// </summary>
     private async Task<int> PruneIfSafeAsync(RefreshRun run, IProgress<double> progress, CancellationToken cancellationToken)
     {
         if (_sourceUnavailable)
@@ -1311,7 +1370,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             Logger.LogWarning(
                 "{Task}: refusing to prune {Stale} of {Existing} in-scope rows (>{Percent:P0}) in one run. This usually means the source answered with a truncated or empty catalog. If the removal is real, it will reconcile once the source returns a majority of the rows. To force it, reset this module's sync table from the dashboard",
                 Name, staleInScope, inScope, MaxPruneFraction);
-            MarkPruneBlocked($"Prune of {staleInScope}/{inScope} rows blocked by safety limit, source likely returned a truncated catalog");
+            MarkPruneBlocked($"The prune safety limit stopped a prune of {staleInScope} of {JPKribs.Jellyfin.Base.ActivityText.Count(inScope, "row")}. The source likely returned a truncated catalog.");
             return 0;
         }
 
@@ -1327,16 +1386,16 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     }
 
     /// <summary>
-    /// The circuit breaker. A discovery that looked clean but would delete most of the table is taken as
+    /// The prune safety limit. A discovery that looked clean but would delete most of the table is taken as
     /// a truncated answer from the source, not a real mass removal, since an empty catalog answered with
-    /// success passes every other guard. It is the last line of defense before the table, and for
+    /// success passes every other check. It is the last line of defense before the table, and for
     /// Content the local files, are destroyed. Counts cover the rows in scope only, so rows under a
     /// disabled mapping cannot dilute the fraction, and only rows the prune would act on count as stale,
-    /// so pending and ignored rows cannot pile up into a breaker that never resets. It is judged per
+    /// so pending and ignored rows cannot pile up into a limit that never resets. It is judged per
     /// server as well as for the table, since one server answering with an empty catalog is only a
     /// share of the table and would slip under a table wide limit while every row it tracks is deleted.
     /// </summary>
-    /// <param name="run">The run.</param>
+    /// <param name="run">The state of the current refresh.</param>
     /// <param name="stale">The stale rows in the count that tripped, for the message.</param>
     /// <param name="inScope">The rows in scope in the count that tripped, for the message.</param>
     /// <returns>True when the prune must not run.</returns>
@@ -1380,9 +1439,11 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         return true;
     }
 
-    // Tells "no rows changed" apart from "rows failed to build or store", and records a failure the
-    // dashboard shows. A source outage or a blocked prune recorded its own failure earlier in the run,
-    // which is kept rather than cleared here.
+    /// <summary>
+    /// Tells "no rows changed" apart from "rows failed to build or store", and records a failure the
+    /// dashboard shows. A source outage or a blocked prune recorded its own failure earlier in the run,
+    /// which is kept rather than cleared here.
+    /// </summary>
     private void ReportRunOutcome(RefreshRun run, int pruned)
     {
         if (_sourceUnavailable)
@@ -1428,7 +1489,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <summary>
     /// Deletes rows that were not seen this run but whose collision key was claimed by a row that
     /// was, and marks them seen. Rows that may not be retired are marked seen and kept. Retiring counts
-    /// toward the same safety limit as the prune, per server, since a higher priority server that
+    /// toward the same safety limit as the prune, per server, since a higher ranked server that
     /// answers with a catalog it cannot fully describe would otherwise take a lower one's rows with it.
     /// Returns how many were retired.
     /// </summary>
@@ -1492,7 +1553,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             Logger.LogWarning(
                 "{Task}: refusing to retire {Count} of {Total} rows tracked from one server in one run. Another server claimed them, which usually means it answered without the paths that tell items apart",
                 Name, tripped.Count(), inScopeByServer[tripped.Key]);
-            MarkPruneBlocked($"Retiring {tripped.Count()} rows to another server blocked by safety limit");
+            MarkPruneBlocked($"The prune safety limit stopped {JPKribs.Jellyfin.Base.ActivityText.Count(tripped.Count(), "row")} from moving to another server.");
             foreach (var kvp in candidates)
             {
                 seenKeySet.Add(kvp.Key);
@@ -1551,6 +1612,13 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         private int _buildFailures;
         private int _persistFailures;
 
+        /// <summary>Initializes a new instance of the <see cref="RefreshRun"/> class.</summary>
+        /// <param name="existing">The rows stored when the run started, by key.</param>
+        /// <param name="sourceCount">How many sources the run reads.</param>
+        /// <param name="buildEnd">The progress value at which the build phase ends.</param>
+        /// <param name="pullOrder">The rank of each scan server, by server key.</param>
+        /// <param name="heldServerKeys">The server each stored row belonged to before the build, by row key.</param>
+        /// <param name="listedCleanly">The servers whose listing finished without a failure.</param>
         public RefreshRun(
             Dictionary<TKey, TRecord> existing,
             int sourceCount,
@@ -1567,51 +1635,75 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
             _listedCleanly = listedCleanly;
         }
 
+        /// <summary>Gets the rows stored when the run started, by key.</summary>
         public Dictionary<TKey, TRecord> Existing { get; }
 
+        /// <summary>Gets or sets which server entry owns each source in an incremental run, by rank.</summary>
         public Dictionary<string, int>? IncrementalOwners { get; set; }
 
+        /// <summary>Gets the rank of a scan server, with unknown servers last.</summary>
+        /// <param name="serverKey">The server entry's key, or null.</param>
+        /// <returns>The rank, where a lower number ranks higher.</returns>
         public int OrderOf(string? serverKey) => serverKey is not null && _pullOrder.TryGetValue(serverKey, out var order) ? order : int.MaxValue;
 
+        /// <summary>Gets the number of sources, at least one, that progress is spread across.</summary>
         public int Total { get; }
 
+        /// <summary>Gets the progress value at which the build phase ends.</summary>
         public double BuildEnd { get; }
 
+        /// <summary>Gets the keys of every item the sources offered.</summary>
         public ConcurrentDictionary<TKey, byte> SeenKeys { get; } = new();
 
+        /// <summary>Gets the collision keys the sources offered.</summary>
         public ConcurrentDictionary<string, byte> SeenPriorityKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>Gets the rows this run set to Queued.</summary>
         public ConcurrentBag<TRecord> QueuedThisRun { get; } = new();
 
+        /// <summary>Gets the rows built but not yet written to the table.</summary>
         public ConcurrentQueue<TRecord> PendingWrites { get; } = new();
 
+        /// <summary>Gets the lock that lets one worker at a time write <see cref="PendingWrites"/>.</summary>
         public object FlushLock { get; } = new();
 
         /// <summary>Gets or sets the keys the build saw, fixed once the build is done.</summary>
         public HashSet<TKey> SeenKeySet { get; set; } = new();
 
+        /// <summary>Gets or sets a value indicating whether settling conflicts failed this run.</summary>
         public bool ConflictsFailed { get; set; }
 
+        /// <summary>Gets how many items have been built.</summary>
         public int Processed => Volatile.Read(ref _processed);
 
+        /// <summary>Gets how many items could not be built.</summary>
         public int BuildFailures => Volatile.Read(ref _buildFailures);
 
+        /// <summary>Gets how many rows could not be written.</summary>
         public int PersistFailures => Volatile.Read(ref _persistFailures);
 
+        /// <summary>Gets a value indicating whether anything failed this run.</summary>
         public bool HadFailures => BuildFailures > 0 || PersistFailures > 0 || ConflictsFailed;
 
+        /// <summary>Counts one built item.</summary>
+        /// <returns>How many items have been built.</returns>
         public int CountProcessed() => Interlocked.Increment(ref _processed);
 
+        /// <summary>Counts one item that could not be built.</summary>
         public void CountBuildFailure() => Interlocked.Increment(ref _buildFailures);
 
+        /// <summary>Counts one row that could not be written.</summary>
         public void CountPersistFailure() => Interlocked.Increment(ref _persistFailures);
 
         /// <summary>
-        /// Whether a stored row belongs to a higher priority server that did not answer this run. A
+        /// Whether a stored row belongs to a higher ranked server that did not answer this run. A
         /// lower one would otherwise take it over for the outage and hand it back afterwards, writing
         /// its values and then the first server's values over the same row twice. A server that
         /// connected but whose listing failed counts as absent too, since it offered nothing trustworthy.
         /// </summary>
+        /// <param name="key">The row's key.</param>
+        /// <param name="built">The row this scan built.</param>
+        /// <returns><c>true</c> when the row stays as it is this run.</returns>
         public bool IsHeldByAbsentHigherServer(TKey key, TRecord built)
         {
             if (!_heldServerKeys.TryGetValue(key, out var heldKey)
@@ -1627,29 +1719,40 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         }
     }
 
-    // Reads stored rows on demand for RefreshOneAsync. Only TryGetValue is used by the record builders.
+    /// <summary>
+    /// Reads stored rows on demand for <c>RefreshOneAsync</c>. The record builders use only <c>TryGetValue</c>.
+    /// </summary>
     private sealed class StoredRows : IReadOnlyDictionary<TKey, TRecord>
     {
         private readonly RefreshSyncTaskBase<TRecord, TSource, TKey> _owner;
 
+        /// <summary>Initializes a new instance of the <see cref="StoredRows"/> class.</summary>
+        /// <param name="owner">The task whose table is read.</param>
         public StoredRows(RefreshSyncTaskBase<TRecord, TSource, TKey> owner) => _owner = owner;
 
+        /// <inheritdoc/>
         public IEnumerable<TKey> Keys => Array.Empty<TKey>();
 
+        /// <inheritdoc/>
         public IEnumerable<TRecord> Values => Array.Empty<TRecord>();
 
+        /// <inheritdoc/>
         public int Count => 0;
 
+        /// <inheritdoc/>
         public TRecord this[TKey key] => _owner.Manager.GetByKey(key) ?? throw new KeyNotFoundException();
 
+        /// <inheritdoc/>
         public bool ContainsKey(TKey key) => _owner.Manager.GetByKey(key) is not null;
 
+        /// <inheritdoc/>
         public bool TryGetValue(TKey key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out TRecord value)
         {
             value = _owner.Manager.GetByKey(key);
             return value is not null;
         }
 
+        /// <inheritdoc/>
         public IEnumerator<KeyValuePair<TKey, TRecord>> GetEnumerator() => Enumerable.Empty<KeyValuePair<TKey, TRecord>>().GetEnumerator();
 
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();

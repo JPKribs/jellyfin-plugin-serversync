@@ -14,6 +14,6 @@ public class PeerCheckDetail
     /// <summary>Gets or sets the badge's words.</summary>
     public string Badge { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets how the badge is coloured: ok, limited, no, or none.</summary>
+    /// <summary>Gets or sets how the badge is colored: ok, limited, no, or none.</summary>
     public string State { get; set; } = "ok";
 }

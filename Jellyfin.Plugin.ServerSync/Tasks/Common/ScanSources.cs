@@ -15,15 +15,15 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 internal static class ScanSources
 {
     /// <summary>
-    /// Connects every scan server and keeps the ones that answer, in priority order. A server that is
+    /// Connects every scan server and keeps the ones that answer, in rank order. A server that is
     /// rejected or does not answer is logged and reported through <paramref name="onUnavailable"/>.
     /// </summary>
-    /// <param name="configManager">The configuration.</param>
-    /// <param name="clientFactory">Creates a client per server.</param>
-    /// <param name="logger">The task's logger.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="logger">Writes log entries.</param>
     /// <param name="taskName">The task's name, for the log.</param>
     /// <param name="onUnavailable">Told why each server was skipped, or null.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The connected sources. The caller disposes them.</returns>
     public static async Task<List<ScanSource>> ConnectAsync(
         IPluginConfigurationManager configManager,
@@ -98,7 +98,7 @@ internal static class ScanSources
     /// configured scan server, not to whichever server happened to connect first.
     /// </summary>
     /// <param name="sources">The sources connected this run.</param>
-    /// <param name="configManager">The configuration.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
     /// <param name="serverKey">The entry key carried on a row, or null.</param>
     /// <returns>The source, or null when that server did not connect this run.</returns>
     public static ScanSource? Find(IReadOnlyList<ScanSource> sources, IPluginConfigurationManager configManager, string? serverKey)
@@ -129,9 +129,9 @@ internal static class ScanSources
     /// Lets the task stamp its module's last-run timestamp, then saves the configuration. Failures
     /// here are logged but never propagate, a failed save mustn't mask the actual run result.
     /// </summary>
-    /// <param name="configManager">The configuration.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
     /// <param name="recordRunCompleted">Stamps the module's last-run time.</param>
-    /// <param name="logger">The task's logger.</param>
+    /// <param name="logger">Writes log entries.</param>
     /// <param name="taskName">The task's name, for the log.</param>
     public static void RecordCompletedAndSave(
         IPluginConfigurationManager configManager,

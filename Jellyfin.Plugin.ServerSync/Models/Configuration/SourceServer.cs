@@ -4,18 +4,21 @@ using System.Globalization;
 using System.Linq;
 using System.Text.Json.Serialization;
 using System.Xml.Serialization;
+using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 
 /// <summary>
 /// One configured peer server. The position of an entry in <see cref="Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration.Servers"/>
-/// is its scan priority: when two servers offer the same item, the earlier entry wins and the later one only
+/// is its rank: when two servers offer the same item, the earlier entry wins and the later one only
 /// contributes what the earlier lacks.
 /// </summary>
 public class SourceServer
 {
+    /// <summary>The <see cref="AccessLevel"/> of a key that belongs to an administrator.</summary>
     public const string AdministratorAccess = "Administrator";
 
+    /// <summary>The <see cref="AccessLevel"/> of a key that belongs to a standard user.</summary>
     public const string StandardUserAccess = "User";
 
     /// <summary>
@@ -65,6 +68,7 @@ public class SourceServer
     /// </summary>
     public string AccessLevel { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets a value indicating whether the key's user may download files there, or null when not yet known.</summary>
     public bool? CanDownload { get; set; }
 
     /// <summary>Gets or sets what this server does with the peer.</summary>
@@ -89,9 +93,9 @@ public class SourceServer
     public int LinkTakeMaxStreams { get; set; }
 
     /// <summary>
-    /// Gets or sets the server wide per user limit from before 12.4.12.0. It is read once, when the
-    /// configuration loads, and copied onto every user mapping that sets none, since a per user limit
-    /// is now set only on a user mapping. Always 0 afterwards.
+    /// Gets or sets a server wide per user limit. <see cref="Jellyfin.Plugin.ServerSync.Configuration.PluginConfiguration.SanitizeValues"/>
+    /// copies it onto every user mapping that sets none and sets it to 0, since a per user limit lives
+    /// on a user mapping.
     /// </summary>
     public int LinkMaxStreamsPerUser { get; set; }
 
@@ -123,7 +127,7 @@ public class SourceServer
     /// <param name="scheduled">Whether the bandwidth schedule's hours apply now.</param>
     /// <returns>The rate.</returns>
     public long GetLinkStreamSpeedBytes(bool scheduled)
-        => Math.Max(0, scheduled ? LinkScheduledStreamSpeedMbps : LinkStreamSpeedMbps) * 1_000_000L / 8;
+        => RateUtilities.MbpsToBytesPerSecond(scheduled ? LinkScheduledStreamSpeedMbps : LinkStreamSpeedMbps);
 
     /// <summary>
     /// The most a link stream or cache download for one user here is sent at, in bytes per second, or
@@ -135,7 +139,7 @@ public class SourceServer
     public long GetLinkStreamSpeedBytes(bool scheduled, Guid? localUserId)
     {
         var server = GetLinkStreamSpeedBytes(scheduled);
-        var user = Math.Max(0, MappingForLocalUser(localUserId)?.LinkStreamSpeedMbps ?? 0) * 1_000_000L / 8;
+        var user = RateUtilities.MbpsToBytesPerSecond(MappingForLocalUser(localUserId)?.LinkStreamSpeedMbps ?? 0);
         return server > 0 && user > 0 ? Math.Min(server, user) : Math.Max(server, user);
     }
 
@@ -196,9 +200,8 @@ public class SourceServer
 
     /// <summary>
     /// Gets a value indicating whether the peer may link to this server's files: linking is allowed for
-    /// it, and it is a Stream, Push, or Sync server. A Pull server only gives this server things to read,
-    /// so it may never link here. A Stream server may be there only to download, so it needs the switch
-    /// too.
+    /// it, and it is a Push or Sync server. A Pull server only gives this server things to read, so it
+    /// may never link here.
     /// </summary>
     [XmlIgnore]
     [JsonIgnore]
@@ -214,6 +217,7 @@ public class SourceServer
     public List<LibraryMapping> GetEnabledLibraryMappings()
         => LibraryMappings?.Where(m => m.IsEnabled).ToList() ?? new List<LibraryMapping>();
 
+    /// <summary>Gets a value indicating whether the key belongs to a standard user.</summary>
     [XmlIgnore]
     [JsonIgnore]
     public bool IsStandardUser => string.Equals(AccessLevel, StandardUserAccess, StringComparison.OrdinalIgnoreCase);
@@ -223,6 +227,9 @@ public class SourceServer
     public List<UserMapping> GetEnabledUserMappings()
         => UserMappings?.Where(m => m.IsEnabled && MaySyncUser(m.SourceUserId)).ToList() ?? new List<UserMapping>();
 
+    /// <summary>Whether a source user's settings and history may be synced, which a standard user's key limits to that user.</summary>
+    /// <param name="sourceUserId">The user's id on the source.</param>
+    /// <returns><c>true</c> when the user may be synced.</returns>
     public bool MaySyncUser(string? sourceUserId)
     {
         if (!IsStandardUser)

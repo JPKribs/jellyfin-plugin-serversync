@@ -33,9 +33,12 @@ public class PeerLinkResponse
     /// <summary>Gets or sets why pairing did not happen, when it did not.</summary>
     public string? PairingError { get; set; }
 
+    /// <summary>Gets or sets what the caller's key can do here, as <see cref="Jellyfin.Plugin.ServerSync.Models.Configuration.SourceServer.AccessLevel"/>.</summary>
     public string? AccessLevel { get; set; }
 
+    /// <summary>Gets or sets the name of the user the caller's key belongs to here.</summary>
     public string? AccessUser { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the caller's user may download files here, or null when unknown.</summary>
     public bool? CanDownload { get; set; }
 }

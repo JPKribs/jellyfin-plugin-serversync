@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Xml.Serialization;
 using Jellyfin.Plugin.ServerSync.Configuration;
@@ -238,5 +239,79 @@ public class PluginConfigurationTests
         var on = new PluginConfiguration { SkipWatchedByAllUsers = true, WatchedFilterUserIds = new() { "a" } };
         on.SanitizeValues();
         Assert.True(on.SkipWatchedByAllUsers);
+    }
+
+    private const string SelfId = "0f8fad5bd9cb469fa16570867728950e";
+
+    private const string OtherId = "7c9e6679742540de944be07fc1f90ae7";
+
+    /// <summary>
+    /// Saved grants collapse to one row per user, with trimmed, deduplicated, lowercase locations.
+    /// True: the page can post messy grant rows and the stored list stays clean.
+    /// False: duplicate or untrimmed locations would reach the caller policy.
+    /// </summary>
+    [Fact]
+    public void Grants_AreOneRowPerUserWithCleanLocations()
+    {
+        var config = new PluginConfiguration
+        {
+            PeerCallerGrants = new List<PeerCallerGrant>
+            {
+                new() { UserId = "0f8fad5b-d9cb-469f-a165-70867728950e", Locations = new List<string> { " myserver.example.com , google.net", "" } },
+                new() { UserId = SelfId, Locations = new List<string> { "MYSERVER.example.com", "10.0.0.0/8" } },
+                new() { UserId = " " }
+            }
+        };
+
+        config.SanitizeValues();
+
+        var grant = Assert.Single(config.PeerCallerGrants);
+        Assert.Equal(SelfId, grant.UserId);
+        Assert.Equal(new[] { "myserver.example.com", "google.net", "10.0.0.0/8" }, grant.Locations);
+    }
+
+    /// <summary>
+    /// A user's empty grant row means every location, and a row whose only locations are invalid is dropped.
+    /// True: an empty row lifts the user's other restrictions, and only unusable rows disappear.
+    /// False: a grant would lose its meaning on save, or garbage rows would stay.
+    /// </summary>
+    [Fact]
+    public void Grants_AnEmptyRowKeepsEveryLocation_AndInvalidOnlyRowsAreDropped()
+    {
+        var config = new PluginConfiguration
+        {
+            PeerCallerGrants = new List<PeerCallerGrant>
+            {
+                new() { UserId = SelfId, Locations = new List<string> { "10.0.0.5" } },
+                new() { UserId = SelfId },
+                new() { UserId = OtherId, Locations = new List<string> { new string('a', 300) } }
+            }
+        };
+
+        config.SanitizeValues();
+
+        var grant = Assert.Single(config.PeerCallerGrants);
+        Assert.Equal(SelfId, grant.UserId);
+        Assert.Empty(grant.Locations);
+    }
+
+    /// <summary>
+    /// A server list that holds a null entry is repaired, and each server's stream limits are clamped.
+    /// True: a hand edited settings file never stops the plugin from loading.
+    /// False: the first save or load would throw and the settings could not be read.
+    /// </summary>
+    [Fact]
+    public void SanitizeValues_NullServerEntry_IsDroppedAndLimitsClamped()
+    {
+        var config = new PluginConfiguration();
+        config.Servers.Add(null!);
+        config.Servers.Add(new SourceServer { Name = "a", LinkTakeMaxStreams = 5000, LinkMaxStreams = -3 });
+
+        var exception = Xunit.Record.Exception(() => config.SanitizeValues());
+
+        Assert.Null(exception);
+        var server = Assert.Single(config.Servers);
+        Assert.Equal(1000, server.LinkTakeMaxStreams);
+        Assert.Equal(0, server.LinkMaxStreams);
     }
 }

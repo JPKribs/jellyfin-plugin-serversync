@@ -4,6 +4,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 
+/// <summary>
+/// String lists are trimmed, sorted, and emptied the same way on both servers so they compare equal.
+/// </summary>
 public class StringNormalizationUtilityTests
 {
     /// <summary>

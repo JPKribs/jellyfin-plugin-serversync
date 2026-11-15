@@ -1,4 +1,3 @@
-// SHA256 here is a content fingerprint, not a security primitive.
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
@@ -14,12 +13,12 @@ namespace Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 /// trimmed, case-insensitive name and role, plus the person type, in list
 /// order.
 /// </summary>
-// A plain JSON compare can never settle here. Jellyfin's UpdatePeople matches
-// an incoming credit to an existing row case-insensitively and then keeps the
-// existing row's name and role text, trims both, and drops duplicate credits.
-// So a source "Jean-Claude van Damme" written over a local "Jean-Claude Van
-// Damme" leaves local unchanged, an exact compare reports a diff on the very
-// next refresh, and the row re-queues forever.
+/// <remarks>
+/// A plain JSON compare can never settle here. Jellyfin's UpdatePeople matches an incoming credit to an
+/// existing row case-insensitively and keeps the existing row's name and role text, so a source
+/// "Jean-Claude van Damme" written over a local "Jean-Claude Van Damme" leaves local unchanged and an
+/// exact compare would re-queue the row forever.
+/// </remarks>
 public sealed class PeopleListComparator : ISyncComparator<string>
 {
     private const string UnknownType = "Unknown";
@@ -32,6 +31,9 @@ public sealed class PeopleListComparator : ISyncComparator<string>
     /// Returns the first detected mismatch between two credit lists, or null
     /// when they match.
     /// </summary>
+    /// <param name="source">The source's value.</param>
+    /// <param name="local">This server's value.</param>
+    /// <returns>The first difference in words, or null when they match.</returns>
     public string? DescribeDifference(string? source, string? local)
     {
         var sourceKeys = Normalize(source);
@@ -44,7 +46,7 @@ public sealed class PeopleListComparator : ISyncComparator<string>
 
         if (sourceKeys.Count != localKeys.Count)
         {
-            return $"source has {sourceKeys.Count} credit(s), local has {localKeys.Count}";
+            return $"source has {JPKribs.Jellyfin.Base.ActivityText.Count(sourceKeys.Count, "credit")}, local has {localKeys.Count}";
         }
 
         for (var i = 0; i < sourceKeys.Count; i++)
@@ -67,6 +69,7 @@ public sealed class PeopleListComparator : ISyncComparator<string>
             return null;
         }
 
+        // SHA256 here is a content fingerprint, not a security primitive.
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", keys)));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }

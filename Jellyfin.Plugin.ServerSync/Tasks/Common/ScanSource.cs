@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.ServerSync.Tasks.Common;
 
 /// <summary>
 /// One scan server for the duration of a run: the configured entry, a connected client for it, and its
-/// priority, which is its position in the configured list. Lower is better.
+/// rank, which is its position in the configured list. Lower is better.
 /// </summary>
 public sealed class ScanSource : IDisposable
 {
@@ -15,7 +15,7 @@ public sealed class ScanSource : IDisposable
     /// </summary>
     /// <param name="server">The configured entry.</param>
     /// <param name="client">A client bound to that entry.</param>
-    /// <param name="priority">The entry's position in the configured list.</param>
+    /// <param name="priority">The entry's rank, which is its position in the configured list.</param>
     public ScanSource(SourceServer server, SourceServerClient client, int priority)
     {
         Server = server ?? throw new ArgumentNullException(nameof(server));
@@ -29,7 +29,7 @@ public sealed class ScanSource : IDisposable
     /// <summary>Gets the client bound to the entry for this run.</summary>
     public SourceServerClient Client { get; }
 
-    /// <summary>Gets the entry's priority. Lower wins.</summary>
+    /// <summary>Gets the entry's rank, where a lower number outranks a higher one.</summary>
     public int Priority { get; }
 
     /// <summary>Gets the entry key, carried onto every row built from this source.</summary>

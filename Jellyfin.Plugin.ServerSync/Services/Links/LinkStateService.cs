@@ -20,6 +20,15 @@ public static class LinkStateService
     /// Builds a row for a source file that is new here, or null when new files are switched off.
     /// The caller persists.
     /// </summary>
+    /// <param name="mapping">The library mapping the file came through.</param>
+    /// <param name="sourceItemId">The file's id on the source.</param>
+    /// <param name="sourcePath">The file's path on the source.</param>
+    /// <param name="sourceSize">The file's size on the source, in bytes.</param>
+    /// <param name="sourceCreateDate">When the file was created on the source.</param>
+    /// <param name="linkPath">Where the link sits here.</param>
+    /// <param name="downloadMode">Whether new files are added on their own, wait for approval, or are left alone.</param>
+    /// <param name="files">Reads and writes the link files.</param>
+    /// <returns>The new row, or null.</returns>
     public static SyncItem? ProcessNewLink(
         LibraryMapping mapping,
         string sourceItemId,
@@ -65,8 +74,16 @@ public static class LinkStateService
     /// <summary>
     /// Brings an existing link row up to date with the source and returns it. The caller persists.
     /// </summary>
+    /// <param name="row">The link's row.</param>
+    /// <param name="sourcePath">The file's path on the source.</param>
+    /// <param name="sourceSize">The file's size on the source, in bytes.</param>
+    /// <param name="sourceCreateDate">When the file was created on the source.</param>
+    /// <param name="linkPath">Where the link sits here.</param>
+    /// <param name="files">Reads and writes the link files.</param>
+    /// <param name="logger">Logger for operation output.</param>
     /// <param name="promoteMode">The new files approval when the mapping now copies, so the link is
     /// turned into a copy under that approval, or null when the mapping links.</param>
+    /// <returns>The updated row.</returns>
     public static SyncItem ProcessExistingLink(
         SyncItem row,
         string sourcePath,
@@ -184,8 +201,11 @@ public static class LinkStateService
 
     /// <summary>
     /// Marks a link to be turned into a full copy. It keeps playing as a link until the copy is in place.
-    /// Returns false for a row that is not a link.
+    /// Returns <c>false</c> for a row that is not a link.
     /// </summary>
+    /// <param name="row">The link's row.</param>
+    /// <param name="requireApproval"><c>true</c> when the copy waits for approval.</param>
+    /// <returns><c>true</c> when the row was marked.</returns>
     public static bool MarkPromoting(SyncItem row, bool requireApproval)
     {
         ArgumentNullException.ThrowIfNull(row);

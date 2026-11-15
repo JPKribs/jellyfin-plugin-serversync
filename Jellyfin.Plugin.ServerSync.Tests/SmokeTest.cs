@@ -2,6 +2,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests;
 
+/// <summary>
+/// The test project is wired up, so every other test can be trusted to run.
+/// </summary>
 public class SmokeTest
 {
     /// <summary>

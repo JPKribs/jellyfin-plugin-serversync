@@ -48,6 +48,11 @@ public partial class SourceServerClient
         return parsed;
     }
 
+    /// <summary>
+    /// Asks the peer whether its Server Sync lets this server's key use the sync routes.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A result code, such as Allowed or NotInstalled, and a message that says it.</returns>
     public async Task<(string Code, string Message)> CheckSyncAccessAsync(CancellationToken cancellationToken = default)
     {
         int status;
@@ -101,6 +106,13 @@ public partial class SourceServerClient
         return ("Refused", $"Server Sync there refused this key ({status})");
     }
 
+    /// <summary>
+    /// Reads the playlists the peer's Server Sync offers this server.
+    /// </summary>
+    /// <param name="callerServerId">This server's id.</param>
+    /// <param name="onlyId">The one playlist to read, or null for all.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The playlists, or null when the peer's Server Sync does not list them.</returns>
     public async Task<PeerPlaylistsResponse?> GetPeerPlaylistsAsync(string callerServerId, Guid? onlyId = null, CancellationToken cancellationToken = default)
     {
         var path = "/Sync/Peer/Playlists?serverId=" + Uri.EscapeDataString(callerServerId ?? string.Empty)
@@ -113,7 +125,7 @@ public partial class SourceServerClient
 
         if (status is 401 or 403 or 404)
         {
-            _logger.LogDebug("The peer's Server Sync did not list its playlists ({Status}): {Body}", status, body);
+            _logger.LogDebug("The peer's Server Sync did not list its playlists ({Status}): {Body}", status, FormatUtilities.SanitizeForLog(body));
             return null;
         }
 
@@ -125,6 +137,12 @@ public partial class SourceServerClient
         return parsed ?? new PeerPlaylistsResponse();
     }
 
+    /// <summary>
+    /// Lists the playlists a source user can see through Jellyfin's own API.
+    /// </summary>
+    /// <param name="userId">The source user whose playlists are listed.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The playlists, sorted by name.</returns>
     public async Task<List<BaseItemDto>> GetVisiblePlaylistsAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var client = GetApiClient();
@@ -142,6 +160,13 @@ public partial class SourceServerClient
         return result?.Items?.ToList() ?? throw new InvalidOperationException("The source returned no playlist list");
     }
 
+    /// <summary>
+    /// Lists the entries of a playlist in order, keeping repeats.
+    /// </summary>
+    /// <param name="playlistId">The source playlist.</param>
+    /// <param name="userId">The source user the playlist is read as.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The playlist's entries.</returns>
     public Task<List<BaseItemDto>> GetPlaylistEntriesAsync(Guid playlistId, Guid userId, CancellationToken cancellationToken = default)
         => GetPlaylistItemsAsync(playlistId, userId, cancellationToken, distinct: false);
 
@@ -257,6 +282,12 @@ public partial class SourceServerClient
         return status is >= 200 and < 300;
     }
 
+    /// <summary>
+    /// Reads which hints the peer wants this server to send it.
+    /// </summary>
+    /// <param name="thisServerId">This server's id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's interest, or null when it gave none.</returns>
     public async Task<PeerInterest?> GetPeerInterestAsync(string thisServerId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(thisServerId);
@@ -269,6 +300,12 @@ public partial class SourceServerClient
         return parsed;
     }
 
+    /// <summary>
+    /// Asks the peer to find an item by its ids or path.
+    /// </summary>
+    /// <param name="lookupRequest">What to find.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The peer's answer, or null when it gave none.</returns>
     public async Task<PeerLookupResponse?> LookupPeerItemAsync(PeerLookupRequest lookupRequest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(lookupRequest);
@@ -281,6 +318,12 @@ public partial class SourceServerClient
         return parsed;
     }
 
+    /// <summary>
+    /// Sends an authorized GET to an address on this server entry's server.
+    /// </summary>
+    /// <param name="url">The address, which must start with the server URL.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The response, which the caller disposes.</returns>
     public async Task<HttpResponseMessage> GetAuthorizedAsync(string url, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(url);
@@ -294,6 +337,7 @@ public partial class SourceServerClient
         return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Gets the base address this client calls.</summary>
     public string ServerUrl => _serverUrl;
 
     /// <summary>Reads the hints this server sent the peer that it still holds, and those it finished.</summary>
@@ -351,6 +395,8 @@ public partial class SourceServerClient
     /// <returns>The peer's answer.</returns>
     public async Task<LinkStreamCheckResponse> CheckLinkStreamAsync(LinkStreamCheckRequest request, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         var (status, parsed, body) = await PeerRequestAsync<LinkStreamCheckResponse>(HttpMethod.Post, "/Sync/Peer/Stream/Check", request, cancellationToken).ConfigureAwait(false);
         if (status is < 200 or >= 300 || parsed is null)
         {
@@ -366,6 +412,8 @@ public partial class SourceServerClient
     /// <returns>A task.</returns>
     public async Task ReportLinkPlaybackAsync(PeerPlaybackReport report, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(report);
+
         var (status, _, body) = await PeerRequestAsync<object>(HttpMethod.Post, "/Sync/Peer/Playback", report, cancellationToken).ConfigureAwait(false);
         if (status is < 200 or >= 300)
         {
@@ -379,6 +427,8 @@ public partial class SourceServerClient
     /// <returns>A task.</returns>
     public async Task SendLinkControlAsync(PeerControlRequest request, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         var (status, _, body) = await PeerRequestAsync<object>(HttpMethod.Post, "/Sync/Peer/Control", request, cancellationToken).ConfigureAwait(false);
         if (status is < 200 or >= 300)
         {
@@ -396,6 +446,8 @@ public partial class SourceServerClient
     /// <returns>One answer per item, or null.</returns>
     public async Task<PeerLinkDescribeResponse?> DescribeLinksAsync(PeerLinkDescribeRequest request, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         var (status, parsed, body) = await PeerRequestAsync<PeerLinkDescribeResponse>(HttpMethod.Post, "/Sync/Peer/Links/Describe", request, cancellationToken).ConfigureAwait(false);
         if (status is 404 or 405)
         {
@@ -468,7 +520,7 @@ public partial class SourceServerClient
         // then the peer's .strm files are left alone.
         if (status == 404)
         {
-            _logger.LogDebug("The peer has no links route: {Body}", body);
+            _logger.LogDebug("The peer has no links route: {Body}", FormatUtilities.SanitizeForLog(body));
             return null;
         }
 
@@ -494,7 +546,7 @@ public partial class SourceServerClient
         var (status, parsed, body) = await PeerRequestAsync<PeerChangesResponse>(HttpMethod.Get, path, null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         if (status is >= 400 and < 500)
         {
-            _logger.LogDebug("The peer does not say what it removed ({Status}): {Body}", status, body);
+            _logger.LogDebug("The peer does not say what it removed ({Status}): {Body}", status, FormatUtilities.SanitizeForLog(body));
             return null;
         }
 
@@ -520,7 +572,7 @@ public partial class SourceServerClient
         var (status, parsed, body) = await PeerRequestAsync<PeerCopiesResponse>(HttpMethod.Get, "/Sync/Peer/Copies", null, cancellationToken, pairOnRefusal: false).ConfigureAwait(false);
         if (status is >= 400 and < 500)
         {
-            _logger.LogDebug("The peer does not say where its copies came from ({Status}): {Body}", status, body);
+            _logger.LogDebug("The peer does not say where its copies came from ({Status}): {Body}", status, FormatUtilities.SanitizeForLog(body));
             return null;
         }
 

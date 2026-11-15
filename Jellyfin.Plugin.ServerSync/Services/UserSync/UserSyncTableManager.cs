@@ -22,8 +22,10 @@ public sealed class UserSyncTableManager
     : SyncTableManagerBase<UserSyncItem, (string SourceUserId, string LocalUserId, string PropertyCategory)>
 {
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="UserSyncTableManager"/> class.
     /// </summary>
+    /// <param name="databaseProvider">Gives the sync database.</param>
+    /// <param name="logger">Logger instance.</param>
     public UserSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<UserSyncTableManager> logger)
         : base(databaseProvider, logger)
     {
@@ -126,6 +128,8 @@ public sealed class UserSyncTableManager
     /// with one category Queued and another Errored counts in both buckets,
     /// matching how the row is rendered by worst-case status.
     /// </summary>
+    /// <param name="status">The status to count.</param>
+    /// <returns>The number of user mappings.</returns>
     public int CountUserMappingsByStatus(SyncStatus status) => ExecuteRead(
         conn =>
         {
@@ -147,6 +151,9 @@ public sealed class UserSyncTableManager
     /// the user-grouping UI which displays all three categories per user as
     /// one logical row.
     /// </summary>
+    /// <param name="sourceUserId">The source user's id.</param>
+    /// <param name="localUserId">The local user's id.</param>
+    /// <returns>The user's rows.</returns>
     public IList<UserSyncItem> GetByUserMapping(string sourceUserId, string localUserId) => ExecuteRead(
         conn =>
         {
@@ -165,6 +172,8 @@ public sealed class UserSyncTableManager
     /// Returns one page of distinct user mappings, each with its grouped
     /// category items. Used by the user-grouping UI.
     /// </summary>
+    /// <param name="request">The page, search, and status filter asked for.</param>
+    /// <returns>The page.</returns>
     public PagedResult<UserMappingGroup> PaginateUserMappings(PaginationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -322,6 +331,10 @@ public sealed class UserSyncTableManager
     /// Updates status for all categories of multiple user mappings in one
     /// transaction. Returns the count of rows updated.
     /// </summary>
+    /// <param name="mappings">The source and local user ids of each mapping.</param>
+    /// <param name="status">The new status.</param>
+    /// <param name="reason">The reason, for a status that carries one.</param>
+    /// <returns>How many rows were updated.</returns>
     public int BulkUpdateStatusByMappings(
         IEnumerable<(string SourceUserId, string LocalUserId)> mappings,
         SyncStatus status,
@@ -358,6 +371,9 @@ public sealed class UserSyncTableManager
     /// Deletes all rows for a given user mapping (all three categories).
     /// Returns the number of rows deleted.
     /// </summary>
+    /// <param name="sourceUserId">The source user's id.</param>
+    /// <param name="localUserId">The local user's id.</param>
+    /// <returns>How many rows were deleted.</returns>
     public int DeleteByUserMapping(string sourceUserId, string localUserId)
     {
         var deleted = 0;
@@ -491,11 +507,7 @@ public sealed class UserSyncTableManager
                 var items = new List<UserSyncItem>();
                 using (var dataCmd = conn.CreateCommand())
                 {
-                    dataCmd.CommandText = $@"
-                        SELECT * FROM UserSyncItems
-                        {whereClause}
-                        ORDER BY {StatusPriorityOrderBy}, SourceUserName ASC, PropertyCategory ASC, Id ASC
-                        LIMIT @take OFFSET @skip";
+                    dataCmd.CommandText = PageQuery("UserSyncItems", whereClause, $"{StatusPriorityOrderBy}, SourceUserName ASC, PropertyCategory ASC, Id ASC");
                     BindFilters(dataCmd);
                     dataCmd.Parameters.AddWithValue("@take", pageSize);
                     dataCmd.Parameters.AddWithValue("@skip", skip);

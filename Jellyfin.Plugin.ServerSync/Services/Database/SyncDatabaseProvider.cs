@@ -19,6 +19,12 @@ public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
     private volatile SchemaTooOldException? _tooOld;
     private volatile bool _disposed;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SyncDatabaseProvider"/> class.
+    /// </summary>
+    /// <param name="loggerFactory">Builds the database's logger.</param>
+    /// <param name="applicationPaths">Locates Jellyfin's data folder.</param>
+    /// <param name="services">Resolves services the database may need, or null.</param>
     public SyncDatabaseProvider(ILoggerFactory loggerFactory, IApplicationPaths applicationPaths, IServiceProvider? services = null)
     {
         _loggerFactory = loggerFactory;
@@ -75,6 +81,7 @@ public sealed class SyncDatabaseProvider : ISyncDatabaseProvider, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         lock (_lock)

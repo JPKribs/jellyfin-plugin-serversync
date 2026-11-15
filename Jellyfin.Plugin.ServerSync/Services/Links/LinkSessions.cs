@@ -40,6 +40,9 @@ public sealed class LinkSessions
     /// </summary>
     public const int MaxFillsPerPeer = 2;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkSessions"/> class.
+    /// </summary>
     public LinkSessions()
         : this(() => DateTime.UtcNow)
     {
@@ -53,6 +56,10 @@ public sealed class LinkSessions
     }
 
     /// <summary>Marks a request for a stream as open until the returned handle is disposed.</summary>
+    /// <param name="peerKey">The linking server's key.</param>
+    /// <param name="userId">The user streaming.</param>
+    /// <param name="itemId">The item streamed.</param>
+    /// <returns>Ends the request when disposed.</returns>
     public IDisposable Open(string peerKey, Guid userId, Guid itemId)
     {
         var key = (peerKey.ToUpperInvariant(), userId, itemId);
@@ -108,7 +115,7 @@ public sealed class LinkSessions
     /// <param name="peerKey">The calling server's entry key.</param>
     /// <param name="itemId">The file probed.</param>
     /// <param name="bytes">The bytes about to be sent, or 0 to ask whether any are left.</param>
-    /// <returns>True while the allowance holds.</returns>
+    /// <returns><c>true</c> while the allowance holds.</returns>
     public bool TakeProbe(string peerKey, Guid itemId, int bytes)
     {
         var key = (peerKey.ToUpperInvariant(), itemId);
@@ -196,6 +203,10 @@ public sealed class LinkSessions
     }
 
     /// <summary>Whether this user already streams this item to that server, so a new request is not a new stream.</summary>
+    /// <param name="peerKey">The linking server's key.</param>
+    /// <param name="userId">The user streaming.</param>
+    /// <param name="itemId">The item streamed.</param>
+    /// <returns><c>true</c> when the stream is already open.</returns>
     public bool IsActive(string peerKey, Guid userId, Guid itemId)
     {
         lock (_lock)
@@ -206,6 +217,8 @@ public sealed class LinkSessions
     }
 
     /// <summary>The streams that server holds.</summary>
+    /// <param name="peerKey">The linking server's key.</param>
+    /// <returns>The number of streams.</returns>
     public int CountForPeer(string peerKey)
     {
         var peer = peerKey.ToUpperInvariant();
@@ -217,6 +230,8 @@ public sealed class LinkSessions
     }
 
     /// <summary>The streams one user holds, through any server.</summary>
+    /// <param name="userId">The user.</param>
+    /// <returns>The number of streams.</returns>
     public int CountForUser(Guid userId)
     {
         lock (_lock)

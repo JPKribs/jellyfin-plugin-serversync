@@ -19,7 +19,7 @@ public static class RecyclingBinService
     /// <param name="filePath">Path to the file to move.</param>
     /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
     /// <param name="logger">Logger for operation output.</param>
-    /// <returns>True if successful, false otherwise.</returns>
+    /// <returns><c>true</c> if successful, <c>false</c> otherwise.</returns>
     public static bool MoveToRecyclingBin(string filePath, string recyclingBinPath, ILogger logger)
     {
         if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(recyclingBinPath))
@@ -74,7 +74,7 @@ public static class RecyclingBinService
     /// <param name="folderPath">The folder to move.</param>
     /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
     /// <param name="logger">Logger for operation output.</param>
-    /// <returns>True when it was moved.</returns>
+    /// <returns><c>true</c> when it was moved.</returns>
     public static bool MoveFolderToRecyclingBin(string folderPath, string recyclingBinPath, ILogger logger)
     {
         if (string.IsNullOrEmpty(folderPath) || string.IsNullOrEmpty(recyclingBinPath) || !Directory.Exists(folderPath))
@@ -106,14 +106,14 @@ public static class RecyclingBinService
     /// Moves a sidecar/backup file to the recycling bin, naming it as if it
     /// were the original file. Used by the download pipeline after a successful
     /// atomic rename: the previous version was first moved to a sidecar (so it
-    /// could be restored on rename failure), and is now archived under its
+    /// could be restored on rename failure), and is archived under its
     /// original path's recycled filename.
     /// </summary>
     /// <param name="backupPath">Current location of the sidecar to archive.</param>
     /// <param name="originalDisplayPath">Original path of the file (used to derive the recycled filename).</param>
     /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
     /// <param name="logger">Logger for operation output.</param>
-    /// <returns>True if successful, false otherwise.</returns>
+    /// <returns><c>true</c> if successful, <c>false</c> otherwise.</returns>
     public static bool ArchiveBackupToRecyclingBin(string backupPath, string originalDisplayPath, string recyclingBinPath, ILogger logger)
     {
         if (string.IsNullOrEmpty(backupPath) || string.IsNullOrEmpty(originalDisplayPath) || string.IsNullOrEmpty(recyclingBinPath))
@@ -167,7 +167,7 @@ public static class RecyclingBinService
     /// <param name="filePath">Path to the main file to move.</param>
     /// <param name="recyclingBinPath">Path to the recycling bin directory.</param>
     /// <param name="logger">Logger for operation output.</param>
-    /// <returns>True if the main file was moved successfully.</returns>
+    /// <returns><c>true</c> if the main file was moved successfully.</returns>
     public static bool MoveWithCompanionsToRecyclingBin(string filePath, string recyclingBinPath, ILogger logger)
     {
         if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(recyclingBinPath))
@@ -212,10 +212,13 @@ public static class RecyclingBinService
     }
 
     /// <summary>
-    /// Returns true when a folder the plugin cleans up on its own (the recycling bin, or the temp
+    /// Returns <c>true</c> when a folder the plugin cleans up on its own (the recycling bin, or the temp
     /// folder) overlaps a configured library root: the folder inside a library, or a library inside
     /// the folder. Running that cleanup against a media folder could permanently delete library files.
     /// </summary>
+    /// <param name="recyclingBinPath">The folder to check.</param>
+    /// <param name="config">The plugin configuration that holds the library roots.</param>
+    /// <returns><c>true</c> when the folder and a library root overlap.</returns>
     public static bool OverlapsLibraryRoot(string recyclingBinPath, PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -359,7 +362,7 @@ public static class RecyclingBinService
     /// </summary>
     /// <param name="folderName">The folder's name.</param>
     /// <param name="recycledAt">The UTC time it was recycled at.</param>
-    /// <returns>True when the name is one of the plugin's recycled trickplay folders.</returns>
+    /// <returns><c>true</c> when the name is one of the plugin's recycled trickplay folders.</returns>
     public static bool TryReadRecycledTrickplayTime(string folderName, out DateTime recycledAt)
     {
         recycledAt = default;

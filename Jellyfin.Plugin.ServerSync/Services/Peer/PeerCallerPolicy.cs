@@ -7,27 +7,52 @@ using System.Net.Sockets;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
+/// <summary>Why a caller was let in or turned away.</summary>
 public enum PeerCallerCode
 {
+    /// <summary>The caller may use the peer routes.</summary>
     Allowed,
+
+    /// <summary>The caller is a user the Whitelist does not name.</summary>
     UserNotWhitelisted,
+
+    /// <summary>The caller is an administrator or API key whose address the Whitelist does not allow.</summary>
     IpNotWhitelisted,
+
+    /// <summary>The caller's user is on the Whitelist, but not for the address the call came from.</summary>
     UserNotWhitelistedForIp
 }
 
+/// <summary>The decision on one caller of a peer route.</summary>
+/// <param name="Code">Why the caller was let in or turned away.</param>
+/// <param name="Refusal">The reason to show a refused caller, or null when allowed.</param>
+/// <param name="ScopedUserId">The user whose view the caller is limited to, or null for the whole library.</param>
 public readonly record struct PeerCallerVerdict(PeerCallerCode Code, string? Refusal, Guid? ScopedUserId)
 {
+    /// <summary>Builds a verdict that lets the caller in.</summary>
+    /// <param name="scopedUserId">The user whose view the caller is limited to, or null for the whole library.</param>
+    /// <returns>The verdict.</returns>
     public static PeerCallerVerdict Allow(Guid? scopedUserId) => new(PeerCallerCode.Allowed, null, scopedUserId);
 
+    /// <summary>Builds a verdict that turns the caller away.</summary>
+    /// <param name="code">Why the caller is refused.</param>
+    /// <param name="reason">The reason to show the caller.</param>
+    /// <returns>The verdict.</returns>
     public static PeerCallerVerdict Refuse(PeerCallerCode code, string reason) => new(code, reason, null);
 }
 
+/// <summary>
+/// Decides whether a caller may use this server's peer routes, by the Whitelist of users and locations.
+/// An administrator or API key also passes from the address of a server entry that is turned on. A name
+/// in the Whitelist is looked up again when its address has moved.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerCallerPolicy
 {
@@ -43,12 +68,20 @@ public sealed class PeerCallerPolicy
     private readonly ILogger<PeerCallerPolicy> _logger;
     private readonly ConcurrentDictionary<string, (DateTime ResolvedAt, IPAddress[] Addresses)> _resolved = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PeerCallerPolicy"/> class.
+    /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="logger">Logger instance.</param>
     public PeerCallerPolicy(IPluginConfigurationManager configManager, ILogger<PeerCallerPolicy> logger)
     {
         _configManager = configManager;
         _logger = logger;
     }
 
+    /// <summary>Words a refusal for a caller.</summary>
+    /// <param name="code">The refusal's code.</param>
+    /// <returns>The text.</returns>
     public static string Describe(PeerCallerCode code) => code switch
     {
         PeerCallerCode.UserNotWhitelisted => "This user is not whitelisted",
@@ -57,6 +90,13 @@ public sealed class PeerCallerPolicy
         _ => "Allowed"
     };
 
+    /// <summary>
+    /// Checks a caller against the Whitelist.
+    /// </summary>
+    /// <param name="caller">The address the call came from, or null when it is unknown.</param>
+    /// <param name="principal">The authenticated user or API key.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The decision.</returns>
     public async Task<PeerCallerVerdict> CheckAsync(IPAddress? caller, ClaimsPrincipal principal, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(principal);
@@ -105,6 +145,9 @@ public sealed class PeerCallerPolicy
             : PeerCallerVerdict.Refuse(PeerCallerCode.UserNotWhitelisted, Describe(PeerCallerCode.UserNotWhitelisted));
     }
 
+    /// <summary>Reads the host out of a Whitelist entry, which may be an address, a range, or a URL.</summary>
+    /// <param name="entry">The entry.</param>
+    /// <returns>The host, or null when the entry names none.</returns>
     public static string? HostOf(string entry)
     {
         var value = entry.Trim();
@@ -143,6 +186,10 @@ public sealed class PeerCallerPolicy
         return value.Length == 0 ? null : value;
     }
 
+    /// <summary>Reads an address range written as an address and a prefix length, such as <c>10.0.0.0/8</c>.</summary>
+    /// <param name="value">The text to read.</param>
+    /// <param name="network">The range, when the text is one.</param>
+    /// <returns><c>true</c> when the text is a range.</returns>
     public static bool TryParseRange(string value, out IPNetwork network)
     {
         network = default;
@@ -220,7 +267,7 @@ public sealed class PeerCallerPolicy
         {
             if ((await ResolveAsync(host, fresh: true, cancellationToken).ConfigureAwait(false)).Any(a => Normalize(a).Equals(caller)))
             {
-                _logger.LogInformation("Whitelist entry '{Host}' moved to a new address, which now matches {Caller}", host, caller);
+                _logger.LogInformation("Whitelist entry '{Host}' moved to a new address, which now matches {Caller}", FormatUtilities.SanitizeForLog(host), FormatUtilities.SanitizeForLog(caller?.ToString()));
                 return true;
             }
         }
@@ -249,7 +296,7 @@ public sealed class PeerCallerPolicy
         }
         catch (Exception ex) when (ex is SocketException or ArgumentException)
         {
-            _logger.LogError("Could not look up the whitelist entry '{Host}': {Reason}", host, ex.Message);
+            _logger.LogError("Could not look up the whitelist entry '{Host}': {Reason}", FormatUtilities.SanitizeForLog(host), FormatUtilities.SanitizeForLog(ex.Message, 300));
             var stale = known ? cached.Addresses : Array.Empty<IPAddress>();
             _resolved[host] = (DateTime.UtcNow, stale);
             return stale;

@@ -51,6 +51,15 @@ public sealed class LinkMediaInfo
     private readonly ILogger<LinkMediaInfo> _logger;
     private readonly Lazy<Stores?> _stores;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkMediaInfo"/> class.
+    /// </summary>
+    /// <param name="services">Resolves services on demand.</param>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="logger">Logger instance.</param>
     public LinkMediaInfo(
         IServiceProvider services,
         ILibraryManager libraryManager,
@@ -69,6 +78,8 @@ public sealed class LinkMediaInfo
     }
 
     /// <summary>Whether a link's item has no media info yet.</summary>
+    /// <param name="item">The local item.</param>
+    /// <returns><c>true</c> when it has none.</returns>
     public static bool Lacks(BaseItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -117,13 +128,13 @@ public sealed class LinkMediaInfo
         => text is { Length: > MaxTextLength } ? text[..MaxTextLength] : text;
 
     /// <summary>
-    /// Asks a link's own server for the file's media info and saves it on the link's item. False when
+    /// Asks a link's own server for the file's media info and saves it on the link's item. <c>false</c> when
     /// the server could not give it, so the caller can fall back to probing the file.
     /// </summary>
     /// <param name="item">The link's item here.</param>
     /// <param name="link">The link.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True when the item now has the source's media info.</returns>
+    /// <returns><c>true</c> when the item now has the source's media info.</returns>
     public async Task<bool> ShipAsync(BaseItem item, LinkEntry link, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -155,13 +166,13 @@ public sealed class LinkMediaInfo
 
     /// <summary>
     /// Saves the source's media info for a file on the link's item, and takes the source's chapter
-    /// images and trickplay tiles when that setting is on. False when the answer holds nothing to save.
+    /// images and trickplay tiles when that setting is on. <c>false</c> when the answer holds nothing to save.
     /// </summary>
     /// <param name="item">The link's item here.</param>
     /// <param name="description">The source's answer for the file.</param>
     /// <param name="client">The source, for its images, or null to take none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True when the media info was saved.</returns>
+    /// <returns><c>true</c> when the media info was saved.</returns>
     public async Task<bool> ApplyAsync(BaseItem item, PeerLinkDescription description, SourceServerClient? client, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);

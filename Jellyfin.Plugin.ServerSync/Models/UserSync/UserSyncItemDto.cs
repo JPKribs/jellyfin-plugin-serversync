@@ -13,8 +13,6 @@ public class UserSyncItemDto
     /// </summary>
     public long Id { get; set; }
 
-    // ===== User Mapping =====
-
     /// <summary>
     /// Gets or sets the source server user ID.
     /// </summary>
@@ -35,14 +33,10 @@ public class UserSyncItemDto
     /// </summary>
     public string? LocalUserName { get; set; }
 
-    // ===== Property Info =====
-
     /// <summary>
     /// Gets or sets the property category (Policy, Configuration, ProfileImage).
     /// </summary>
     public string PropertyCategory { get; set; } = string.Empty;
-
-    // ===== Values =====
 
     /// <summary>
     /// Gets or sets the source value.
@@ -58,8 +52,6 @@ public class UserSyncItemDto
     /// Gets or sets the merged value (what will be applied).
     /// </summary>
     public string? MergedValue { get; set; }
-
-    // ===== Image Size (for ProfileImage category) =====
 
     /// <summary>
     /// Gets or sets the source image size in bytes.
@@ -81,8 +73,6 @@ public class UserSyncItemDto
     /// </summary>
     public string? LocalImageSizeFormatted { get; set; }
 
-    // ===== Change Detection =====
-
     /// <summary>
     /// Gets or sets whether there are changes to sync.
     /// </summary>
@@ -93,8 +83,6 @@ public class UserSyncItemDto
     /// </summary>
     public string? ChangesSummary { get; set; }
 
-    // ===== Source Server =====
-
     /// <summary>
     /// Gets or sets the source server URL (for image display).
     /// </summary>
@@ -102,8 +90,6 @@ public class UserSyncItemDto
 
     /// <summary>Gets or sets the configured server entry the row came from.</summary>
     public string? ServerKey { get; set; }
-
-    // ===== Sync Status =====
 
     /// <summary>
     /// Gets or sets the sync status.

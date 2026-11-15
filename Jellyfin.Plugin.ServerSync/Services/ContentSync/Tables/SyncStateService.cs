@@ -11,9 +11,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services;
 
 /// <summary>
-/// State transitions for content sync items. Change detection is size-only:
-/// the ETag-based detection it replaced was unstable because Jellyfin's ETag
-/// changes whenever UserData changes. <see cref="ProcessMissingItem"/> owns
+/// State transitions for content sync items. Change detection is size-only,
+/// since Jellyfin's ETag changes whenever UserData changes. <see cref="ProcessMissingItem"/> owns
 /// its own writes (delete vs upsert). Other Process* methods are pure and
 /// leave persistence to the caller.
 /// </summary>
@@ -29,6 +28,16 @@ public static class SyncStateService
     /// A file already at the local path with the source's size is taken as the same file. Any other
     /// file there was not written by this plugin, so replacing it follows the changed files setting.
     /// </summary>
+    /// <param name="mapping">The library mapping the item came through.</param>
+    /// <param name="sourceItemId">The item's id on the source.</param>
+    /// <param name="sourcePath">The item's path on the source.</param>
+    /// <param name="sourceSize">The item's size on the source, in bytes.</param>
+    /// <param name="sourceCreateDate">When the item was created on the source.</param>
+    /// <param name="localPath">Where the file belongs on this server.</param>
+    /// <param name="downloadMode">Whether new files download on their own, wait for approval, or are left alone.</param>
+    /// <param name="replaceMode">Whether a different file already at the path is replaced on its own, waits, or is left alone.</param>
+    /// <param name="sizeMatchToleranceBytes">How far a local size may differ from the source's and still match.</param>
+    /// <returns>The new row, or null when the item is not to be tracked.</returns>
     public static SyncItem? ProcessNewItem(
         LibraryMapping mapping,
         string sourceItemId,
@@ -87,6 +96,16 @@ public static class SyncStateService
     /// Mutates an existing record based on current source-side state and
     /// returns it. The caller persists.
     /// </summary>
+    /// <param name="existingItem">The row to update.</param>
+    /// <param name="sourcePath">The item's path on the source.</param>
+    /// <param name="sourceSize">The item's size on the source, in bytes.</param>
+    /// <param name="sourceCreateDate">When the item was created on the source.</param>
+    /// <param name="localPath">Where the file belongs on this server.</param>
+    /// <param name="replaceMode">Whether a changed file is replaced on its own, waits for approval, or is left alone.</param>
+    /// <param name="detectUpdatedFiles">Whether a synced file is checked on disk.</param>
+    /// <param name="sizeMatchToleranceBytes">How far a local size may differ from the source's and still match.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <returns>The updated row.</returns>
     public static SyncItem ProcessExistingItem(
         SyncItem existingItem,
         string sourcePath,
@@ -194,8 +213,17 @@ public static class SyncStateService
         return existingItem;
     }
 
+    /// <summary>The reason a row carries once its file is hidden.</summary>
     public const string HiddenReason = "Hidden with a .ignore file because it is gone from the source";
 
+    /// <summary>
+    /// Marks a row whose item is gone from the source as Ignored because its folder was hidden. A row whose
+    /// file is gone is dropped instead.
+    /// </summary>
+    /// <param name="manager">The content sync table.</param>
+    /// <param name="item">The row to mark.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <returns>What changed.</returns>
     public static TransitionResult MarkHidden(ContentSyncTableManager manager, SyncItem item, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(manager);
@@ -241,14 +269,7 @@ public static class SyncStateService
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(logger);
 
-        // Deleting belongs here alongside pending-deletion: the row is already
-        // scheduled and the file is still on disk waiting for the next Sync run
-        // to remove it. Falling through to the status checks below would delete
-        // the tracking row instead, stranding the file permanently with nothing
-        // left pointing at it. Reachable whenever a Refresh lands between the
-        // mark and the Sync that would execute it, an aborted pre-flight
-        // (disk space, circuit breaker, connection), a cancelled run, or just
-        // the default 10h refresh / 12h sync cadence drifting.
+        // A scheduled row keeps its tracking until Sync removes the file, or the file would be stranded.
         if (item.Status == SyncStatus.Ignored ||
             item.Status == SyncStatus.Deleting ||
             (item.Status == SyncStatus.Pending && item.PendingType == PendingType.Deletion))
@@ -408,6 +429,15 @@ public static class SyncStateService
         return item.SourcePath != sourcePath || item.SourceSize != sourceSize;
     }
 
+    /// <summary>
+    /// Copies the source's path, size, and creation date onto a row, and follows a rename on the source.
+    /// </summary>
+    /// <param name="item">The row to update.</param>
+    /// <param name="sourcePath">The item's path on the source.</param>
+    /// <param name="sourceSize">The item's size on the source, in bytes.</param>
+    /// <param name="sourceCreateDate">When the item was created on the source.</param>
+    /// <param name="localPath">Where the file belongs on this server.</param>
+    /// <param name="logger">Logger for operation output.</param>
     internal static void UpdateItemMetadata(
         SyncItem item,
         string sourcePath,

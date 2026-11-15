@@ -21,5 +21,6 @@ public enum HintKind
     /// <summary>A user's policy, configuration, and profile image. The key is the origin's user id.</summary>
     Users = 4,
 
+    /// <summary>A playlist, its shares, and its items. The key is the playlist's root id.</summary>
     Playlists = 5
 }

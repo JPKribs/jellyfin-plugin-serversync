@@ -28,8 +28,12 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     private readonly IPluginConfigurationManager _configManager;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="SyncQueueTaskBase{TRecord, TKey}"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
     protected SyncQueueTaskBase(
         ILogger logger,
         ISyncTableManager<TRecord, TKey> manager,
@@ -62,7 +66,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     protected IPluginConfigurationManager ConfigManager => _configManager;
 
     /// <summary>
-    /// Gets or sets the scan servers connected for the current run, in priority order. Populated by the
+    /// Gets or sets the scan servers connected for the current run, in rank order. Populated by the
     /// default <see cref="BeforeRunAsync"/>, disposed at the end of <c>ExecuteAsync</c>, empty outside a
     /// run. Rows carry the key of the server they came from, and <see cref="SourceFor"/> turns that
     /// back into the connected source to talk to.
@@ -103,8 +107,10 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         throw new InvalidOperationException($"Source server '{name}' is not available this run");
     }
 
-    // The per module tasks run inside Sync Content and Sync Information and from the dashboard, so
-    // they stay registered but leave the scheduled task list.
+    /// <summary>
+    /// The per module tasks run inside Sync Content and Sync Information and from the dashboard, so
+    /// they stay registered but leave the scheduled task list.
+    /// </summary>
     /// <inheritdoc />
     public bool IsHidden => true;
 
@@ -132,6 +138,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <summary>
     /// Returns true if this task should run given current configuration.
     /// </summary>
+    /// <returns><c>true</c> when the module is on.</returns>
     protected abstract bool IsEnabled();
 
     /// <summary>
@@ -158,6 +165,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// connects. Subclasses with custom pre-flight (disk space, circuit
     /// breaker, etc.) should override and call <c>base.BeforeRunAsync</c>.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns><c>false</c> to stop the run.</returns>
     protected virtual async Task<bool> BeforeRunAsync(CancellationToken cancellationToken)
     {
         var connected = await ScanSources.ConnectAsync(_configManager, _clientFactory, Logger, Name, null, cancellationToken).ConfigureAwait(false);
@@ -188,7 +197,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// lets <see cref="ApplyAsync(TRecord, CancellationToken)"/> consume the result per record.
     /// </summary>
     /// <param name="group">The records about to be applied.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>A task.</returns>
     protected virtual Task PrepareGroupAsync(IList<TRecord> group, CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -197,6 +206,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// the record to <see cref="SyncStatus.Errored"/>.
     /// <see cref="OperationCanceledException"/> always propagates.
     /// </summary>
+    /// <param name="record">The sync row.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     protected abstract Task ApplyAsync(TRecord record, CancellationToken cancellationToken);
 
     /// <summary>
@@ -207,6 +218,9 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// (fraction 0 to 1 of the item) so a multi-hour file moves the bar instead
     /// of freezing it.
     /// </summary>
+    /// <param name="record">The sync row.</param>
+    /// <param name="itemProgress">Receives progress for the item, or null.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     protected virtual Task ApplyAsync(TRecord record, IProgress<double>? itemProgress, CancellationToken cancellationToken)
         => ApplyAsync(record, cancellationToken);
 
@@ -218,6 +232,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// and counting them equally made the bar sprint through small files and
     /// crawl through large ones.
     /// </summary>
+    /// <param name="record">The sync row.</param>
+    /// <returns>The weight, which sets how much of the run's progress the row takes.</returns>
     protected virtual long GetApplyWeight(TRecord record) => 1;
 
     /// <summary>
@@ -229,6 +245,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <c>record.Foo.MarkSynced()</c> on individual categories before throwing
     /// so partial success persists alongside the Errored row.
     /// </summary>
+    /// <param name="record">The sync row.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     protected virtual Task VerifyAfterApplyAsync(TRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
@@ -237,7 +255,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// </summary>
     /// <param name="record">The queued row.</param>
     /// <param name="source">The connected server the row came from.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns><c>true</c> when the row is now synced. On failure the row holds the reason.</returns>
     public async Task<bool> ApplyRowAsync(TRecord record, ScanSource source, CancellationToken cancellationToken)
     {
@@ -280,7 +298,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <see cref="FailPreflight"/> with the reason before returning false.
     /// </summary>
     /// <param name="record">The row about to be applied.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns><c>true</c> to go ahead.</returns>
     protected virtual Task<bool> BeforeRowAsync(TRecord record, CancellationToken cancellationToken)
     {
@@ -290,7 +308,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>Follow up after a single row apply, such as asking the library to notice a new file. Default does nothing.</summary>
     /// <param name="applied">Whether the row applied.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>A task.</returns>
     protected virtual Task AfterRowAsync(bool applied, CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -307,7 +325,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// the source, such as recording the version the applied value carries. Default does nothing.
     /// </summary>
     /// <param name="record">The applied row.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>A task.</returns>
     protected virtual Task AfterApplySucceededAsync(TRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -318,6 +336,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <see cref="SyncableValue{T}"/>. Override only if some fields are
     /// applied conditionally and shouldn't all be marked at once.
     /// </summary>
+    /// <param name="record">The sync row.</param>
     protected virtual void OnApplySucceeded(TRecord record) => record.MarkSynced();
 
     /// <summary>
@@ -329,6 +348,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// query, and to leave the count alone for a row its circuit breaker
     /// skipped without trying.
     /// </summary>
+    /// <param name="record">The sync row.</param>
     protected virtual void OnApplyFailed(TRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -343,6 +363,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// <paramref name="progress"/> reports 0 to 100 for the finalize phase only,
     /// and the base scales it into the run's overall 90 to 100% band.
     /// </summary>
+    /// <param name="progress">Receives progress from 0 to 100.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     protected virtual Task FinalizeAsync(IProgress<double> progress, CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
@@ -352,6 +374,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// configuration with a single try/catch, modules don't repeat that
     /// save plumbing.
     /// </summary>
+    /// <param name="config">The plugin settings.</param>
+    /// <param name="utcNow">The current time in UTC.</param>
     protected virtual void RecordRunCompleted(PluginConfiguration config, DateTime utcNow)
     {
         // Default: nothing to record.
@@ -372,6 +396,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// which would make this run stamp a clean completion while the queue
     /// silently went unprocessed.
     /// </summary>
+    /// <returns>The rows to apply.</returns>
     protected virtual IList<TRecord> GetItemsToApply() => Manager.GetByStatusStrict(SyncStatus.Queued);
 
     /// <summary>
@@ -390,6 +415,8 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
     /// (Series/Season/…) are fully applied before their leaves, a sorted
     /// flat list alone doesn't guarantee that once the loop is parallel.
     /// </summary>
+    /// <param name="items">The rows to sync.</param>
+    /// <returns>The groups, which are applied one after another with the rows of each group in parallel.</returns>
     protected virtual IEnumerable<IList<TRecord>> GetApplyGroups(IList<TRecord> items)
     {
         yield return items;
@@ -641,7 +668,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         // Any errored item makes the run a non-clean one.
         if (failures > 0)
         {
-            RecordRunFailure("Sync", $"{failures} of {queued.Count} item(s) errored, open the table to see per-row reasons");
+            RecordRunFailure("Sync", $"{failures} of {JPKribs.Jellyfin.Base.ActivityText.Count(queued.Count, "item")} errored, open the table to see per-row reasons");
         }
         else
         {
@@ -667,16 +694,19 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
         => RunFailureLog.Clear(_configManager, ModuleMutexKey, "Sync", Logger, Name);
 
     /// <summary>
-    /// Plain-lambda IProgress. <see cref="Progress{T}"/> posts through the
-    /// captured SynchronizationContext, which reorders and defers reports.
-    /// The progress math here is already thread-safe, so report inline.
+    /// Reports progress inline. <see cref="Progress{T}"/> posts through the captured
+    /// SynchronizationContext, which reorders and defers reports, and the progress math here is
+    /// already thread-safe.
     /// </summary>
     private sealed class DelegateProgress : IProgress<double>
     {
         private readonly Action<double> _handler;
 
+        /// <summary>Initializes a new instance of the <see cref="DelegateProgress"/> class.</summary>
+        /// <param name="handler">Called with each report.</param>
         public DelegateProgress(Action<double> handler) => _handler = handler;
 
+        /// <inheritdoc/>
         public void Report(double value) => _handler(value);
     }
 

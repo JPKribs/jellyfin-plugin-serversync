@@ -13,6 +13,10 @@ using Jellyfin.Plugin.ServerSync.Services.Links;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Playlists;
 
+/// <summary>
+/// Reads this server's playlists for a peer, with their shares and entries. An entry that is a link goes
+/// out under the path of the file it stands in for.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerPlaylistReader
 {
@@ -20,6 +24,12 @@ public sealed class PeerPlaylistReader
     private readonly IUserManager _userManager;
     private readonly ILinkRegistry? _links;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PeerPlaylistReader"/> class.
+    /// </summary>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="userManager">User manager.</param>
+    /// <param name="links">The link registry, or null.</param>
     public PeerPlaylistReader(ILibraryManager libraryManager, IUserManager userManager, ILinkRegistry? links = null)
     {
         _libraryManager = libraryManager;
@@ -27,6 +37,11 @@ public sealed class PeerPlaylistReader
         _links = links;
     }
 
+    /// <summary>Reads the playlists a caller may see.</summary>
+    /// <param name="onlyId">The one playlist to read, or null for all.</param>
+    /// <param name="scopedUserId">The user whose view limits the playlists and their entries, or null for no limit.</param>
+    /// <param name="owners">Only playlists owned by these users, or null for any owner.</param>
+    /// <returns>The playlists.</returns>
     public PeerPlaylistsResponse ReadAll(Guid? onlyId = null, Guid? scopedUserId = null, IReadOnlyCollection<Guid>? owners = null)
     {
         var scoped = scopedUserId is { } userId ? _userManager.GetUserById(userId) : null;

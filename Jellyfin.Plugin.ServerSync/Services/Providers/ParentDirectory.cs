@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
@@ -13,13 +14,20 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Providers;
 
+/// <summary>
+/// Lists the servers this one pulls from whose Server Sync can answer a metadata lookup. Each is asked
+/// once and the answer is remembered for a while.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class ParentDirectory
 {
+    /// <summary>How long a server that answered is remembered.</summary>
     public static readonly TimeSpan Remembered = TimeSpan.FromMinutes(5);
 
+    /// <summary>How long a server has to answer.</summary>
     public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>How long a server that did not qualify is remembered.</summary>
     public static readonly TimeSpan FailedRemembered = TimeSpan.FromSeconds(30);
 
     private readonly IPluginConfigurationManager _configManager;
@@ -30,6 +38,13 @@ public sealed class ParentDirectory
     private readonly ConcurrentDictionary<string, byte> _failed = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (DateTime At, string Url, Task<bool> Runs)> _known = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ParentDirectory"/> class.
+    /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="logger">Logger instance.</param>
     public ParentDirectory(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<ParentDirectory> logger)
     {
         _configManager = configManager;
@@ -38,6 +53,9 @@ public sealed class ParentDirectory
         _logger = logger;
     }
 
+    /// <summary>Lists the servers this one pulls from that run a Server Sync able to answer.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The server entries.</returns>
     public async Task<IReadOnlyList<SourceServer>> ParentsAsync(CancellationToken cancellationToken)
     {
         var servers = _configManager.Configuration.GetPullServers();
@@ -50,6 +68,9 @@ public sealed class ParentDirectory
         return servers.Where((_, i) => runs[i]).ToList();
     }
 
+    /// <summary>Finds the server entry an address belongs to.</summary>
+    /// <param name="url">The address.</param>
+    /// <returns>The entry with the longest matching server URL, or null.</returns>
     public SourceServer? FindByUrl(string url)
     {
         if (string.IsNullOrEmpty(url))
@@ -63,8 +84,10 @@ public sealed class ParentDirectory
             .FirstOrDefault();
     }
 
+    /// <summary>Gets the plugin version.</summary>
     public string Version => _configManager.PluginVersion;
 
+    /// <summary>Forgets every answer, so each server is asked again.</summary>
     public void Forget()
     {
         lock (_gate)
@@ -118,7 +141,7 @@ public sealed class ParentDirectory
 
             if (!HintProtocol.Compatible(capabilities, _configManager.PluginVersion))
             {
-                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: {Reason}", server.DisplayName, HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion));
+                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: {Reason}", FormatUtilities.SanitizeForLog(server.DisplayName), FormatUtilities.SanitizeForLog(HintProtocol.ProtocolMismatch(capabilities, _configManager.PluginVersion), 300));
                 return false;
             }
 
@@ -132,7 +155,7 @@ public sealed class ParentDirectory
         }
         catch (Exception ex)
         {
-            _logger.LogInformation("Server Sync will not ask '{Server}' for metadata for now: it could not be reached ({Error})", server.DisplayName, ex.Message);
+            _logger.LogInformation("Server Sync will not ask '{Server}' for metadata for now: it could not be reached ({Error})", FormatUtilities.SanitizeForLog(server.DisplayName), FormatUtilities.SanitizeForLog(ex.Message, 300));
             return false;
         }
     }

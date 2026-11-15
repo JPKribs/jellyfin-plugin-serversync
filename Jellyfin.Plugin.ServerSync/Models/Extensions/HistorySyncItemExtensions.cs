@@ -1,3 +1,4 @@
+using System;
 using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 
 namespace Jellyfin.Plugin.ServerSync.Models;
@@ -13,6 +14,8 @@ public static class HistorySyncItemExtensions
     /// <returns>The DTO representation.</returns>
     public static HistorySyncItemDto ToDto(this HistorySyncItem item, string? sourceServerUrl)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
         return new HistorySyncItemDto
         {
             Id = item.Id,

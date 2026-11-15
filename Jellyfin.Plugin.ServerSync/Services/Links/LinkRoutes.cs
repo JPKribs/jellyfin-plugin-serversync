@@ -15,13 +15,15 @@ public sealed record LinkAlternate(SourceServer Server, string SourcePath);
 /// <summary>
 /// A link streams from the server that won its file in sync. When that server is down, full, or
 /// refuses, the same file may be on another server this one pulls from: one that maps the folder the
-/// link sits in. Those are tried in priority order, by the path the file would have there.
+/// link sits in. Those are tried in rank order, by the path the file would have there.
 /// </summary>
 public static class LinkFallback
 {
     private static readonly char[] Separators = { '/', '\\' };
 
     /// <summary>The route a link streams from when nothing has moved it: the server that won its file.</summary>
+    /// <param name="link">The link.</param>
+    /// <returns>The route.</returns>
     public static LinkRoute PrimaryOf(LinkEntry link)
     {
         ArgumentNullException.ThrowIfNull(link);
@@ -30,8 +32,11 @@ public static class LinkFallback
 
     /// <summary>
     /// The other servers this one pulls from whose enabled library mappings cover the folder a link
-    /// sits in, highest priority first, each with the path the file would have there.
+    /// sits in, highest ranked first, each with the path the file would have there.
     /// </summary>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="link">The link.</param>
+    /// <returns>The other servers, highest ranked first.</returns>
     public static IEnumerable<LinkAlternate> Alternates(PluginConfiguration config, LinkEntry link)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -58,6 +63,10 @@ public static class LinkFallback
     /// <paramref name="localRoot"/> here, written with that server's separator, or null when the file
     /// is not under <paramref name="localRoot"/>.
     /// </summary>
+    /// <param name="localPath">The local file's path, or null.</param>
+    /// <param name="localRoot">The local library root, or null.</param>
+    /// <param name="sourceRoot">The source library root, or null.</param>
+    /// <returns>The source path, or null.</returns>
     public static string? SourcePathFor(string? localPath, string? localRoot, string? sourceRoot)
     {
         localRoot = localRoot?.TrimEnd(Separators);

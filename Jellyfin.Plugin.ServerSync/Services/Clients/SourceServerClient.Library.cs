@@ -26,6 +26,10 @@ public partial class SourceServerClient
     /// nothing for a Series since episodes carry the Season's ID, not the
     /// Series'.
     /// </summary>
+    /// <param name="whitelistedId">The source id of the whitelisted item.</param>
+    /// <param name="playlistUserId">The source user a playlist is read as, or null for any other item.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The leaf items the whitelisted item stands for.</returns>
     public async Task<List<BaseItemDto>> GetWhitelistedItemLeavesAsync(
         Guid whitelistedId,
         Guid? playlistUserId = null,
@@ -567,6 +571,8 @@ public partial class SourceServerClient
         DateTime? changedSince = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(includeTypes);
+
         BaseItemDtoQueryResult? page;
         try
         {
@@ -612,12 +618,20 @@ public partial class SourceServerClient
     /// locally are fetched with their heavy <see cref="ItemFields"/>, so the
     /// refresh doesn't pay for source items the user doesn't have.
     /// </summary>
+    /// <param name="ids">The source item ids to fetch.</param>
+    /// <param name="fields">The fields to read for each item.</param>
+    /// <param name="batchSize">How many ids go in one request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The items the source returned.</returns>
     public async Task<List<BaseItemDto>> GetItemsByIdsAsync(
         IReadOnlyList<Guid> ids,
         ItemFields[] fields,
         int batchSize = 50,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(ids);
+        ArgumentNullException.ThrowIfNull(fields);
+
         var result = new List<BaseItemDto>();
         if (ids.Count == 0)
         {

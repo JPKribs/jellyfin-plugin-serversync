@@ -19,14 +19,6 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// Source-side work item for the Metadata refresh task: a (library mapping,
-/// source item, isFolder) triple turned into a
-/// <see cref="MetadataSyncItem"/> by
-/// <see cref="MetadataSyncTableService.BuildRecordAsync"/>.
-/// </summary>
-public sealed record MetadataWork(ScanSource Source, LibraryMapping LibraryMapping, BaseItemDto SourceItem, bool IsFolder);
-
-/// <summary>
 /// Refresh phase for Metadata sync. Walks every enabled library, fetches
 /// items (with optional folder-items pass) from each, and builds a
 /// <see cref="MetadataSyncItem"/> per (library, item) pair.
@@ -38,8 +30,15 @@ public class RefreshMetadataSyncTableTask
     private readonly ScanConflictSettler _conflicts;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="RefreshMetadataSyncTableTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="metadataService">Builds and compares metadata sync rows.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="conflicts">Settles which server speaks for an item both sides changed.</param>
+    /// <param name="watermarks">Holds when each source was last scanned, or null when scans are never incremental.</param>
     public RefreshMetadataSyncTableTask(
         ILogger<RefreshMetadataSyncTableTask> logger,
         IPluginConfigurationManager configManager,
@@ -76,8 +75,10 @@ public class RefreshMetadataSyncTableTask
         }
     }
 
-    // Against a peer that carries versions, a queued row whose local value was edited here more
-    // recently than on the peer is kept, and the peer is told to pull it instead.
+    /// <summary>
+    /// Against a peer that carries versions, a queued row whose local value was edited here more
+    /// recently than on the peer is kept, and the peer is told to pull it instead.
+    /// </summary>
     /// <inheritdoc />
     protected override Task ResolveConflictsAsync(IList<MetadataSyncItem> queued, CancellationToken cancellationToken)
         => _conflicts.SettleAsync(
@@ -99,7 +100,9 @@ public class RefreshMetadataSyncTableTask
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             : await _conflicts.ServersWithVersionsAsync(Sources, cancellationToken).ConfigureAwait(false);
 
-    // Among the servers offering one item, the one that holds the newest recorded edit of it speaks.
+    /// <summary>
+    /// Among the servers offering one item, the one that holds the newest recorded edit of it speaks.
+    /// </summary>
     /// <inheritdoc />
     protected override Task<IReadOnlyDictionary<string, MetadataWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<MetadataWork>> contested, CancellationToken cancellationToken)
         => _conflicts.NewestOffersAsync(
@@ -110,14 +113,16 @@ public class RefreshMetadataSyncTableTask
             work => work.SourceItem.Id?.ToString("N", CultureInfo.InvariantCulture),
             cancellationToken);
 
-    // On a run that lists only what changed, a change on a lower ranked server that keeps versions is
-    // weighed against this server's value by ResolveConflictsAsync, not dropped for its rank.
+    /// <summary>
+    /// On a run that lists only what changed, a change on a lower ranked server that keeps versions is
+    /// weighed against this server's value by ResolveConflictsAsync, not dropped for its rank.
+    /// </summary>
     /// <inheritdoc />
     protected override bool MayOutrankOwner(MetadataSyncItem record)
         => record?.ServerKey is { } key && _versionedServers.Contains(key);
 
     /// <inheritdoc />
-    public override string Name => "Refresh Metadata Sync Table";
+    public override string Name => "Scan Metadata";
 
     /// <inheritdoc />
     public override string Key => "ServerSyncRefreshMetadataTable";
@@ -131,11 +136,11 @@ public class RefreshMetadataSyncTableTask
     /// <inheritdoc />
     protected override string ModuleMutexKey => "Metadata";
 
-    // User-configurable (Configuration > Processing). The build loop is
-    // mostly CPU-bound now that image sizes carry forward, so this dial is
-    // effectively "how much CPU may a refresh use": 8 (the default) finishes
-    // fastest but can saturate a typical host for the build phase. Lower it
-    // to leave headroom for playback/transcode.
+    /// <summary>
+    /// The build loop is mostly CPU-bound, so this is effectively how much CPU a refresh may use. The
+    /// default of 8 finishes fastest but can saturate a typical host for the build phase. Lower it to
+    /// leave headroom for playback and transcoding.
+    /// </summary>
     /// <inheritdoc />
     protected override int BuildRecordParallelism => Math.Clamp(ConfigManager.Configuration.RefreshParallelism, 1, 16);
 
@@ -151,20 +156,22 @@ public class RefreshMetadataSyncTableTask
             || config.MetadataSyncPeople || config.MetadataSyncStudios;
     }
 
-    // Light discovery, then a heavy fetch, instead of "bulk-fetch everything heavy":
-    //   <list type="number">
-    //   <item>Enumerate local items per library and build a path lookup.</item>
-    //   <item>Light source discovery, paginate every library asking for
-    //   only <c>Path</c> + <c>Id</c>. Per-page payload is tiny.</item>
-    //   <item>Filter source items to those whose translated path exists
-    //   locally, that's the actual sync set.</item>
-    //   <item>Heavy fetch by IDs, only request full metadata fields for
-    //   matched items, batched.</item>
-    //   </list>
-    // On a typical install where local is a subset of source, this
-    // dramatically reduces both bytes-over-wire and the build phase's
-    // work, since full metadata is no longer fetched for tens of thousands
-    // of source items the user doesn't have.
+    /// <summary>
+    /// Light discovery, then a heavy fetch, instead of "bulk-fetch everything heavy":
+    ///   <list type="number">
+    ///   <item>Enumerate local items per library and build a path lookup.</item>
+    ///   <item>Light source discovery, paginate every library asking for
+    ///   only <c>Path</c> + <c>Id</c>. Per-page payload is tiny.</item>
+    ///   <item>Filter source items to those whose translated path exists
+    ///   locally, that's the actual sync set.</item>
+    ///   <item>Heavy fetch by IDs, only request full metadata fields for
+    ///   matched items, batched.</item>
+    ///   </list>
+    /// On a typical install where local is a subset of source, this
+    /// dramatically reduces both bytes-over-wire and the build phase's
+    /// work, since full metadata is not fetched for tens of thousands
+    /// of source items the user doesn't have.
+    /// </summary>
     /// <inheritdoc />
     protected override async Task<IList<MetadataWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
     {
@@ -466,7 +473,7 @@ public class RefreshMetadataSyncTableTask
                     continue;
                 }
 
-                // A file a higher priority server already described this run is its to describe, so its
+                // A file a higher ranked server already described this run is its to describe, so its
                 // details are not fetched from this one only to be dropped.
                 var localPath = PathUtilities.TranslatePath(item.Path, mapping.SourceRootPath, mapping.LocalRootPath);
                 if (localPaths.ContainsKey(localPath) && !ClaimedByHigherServer(localPath))
@@ -615,7 +622,9 @@ public class RefreshMetadataSyncTableTask
         return (record.SourceLibraryId, record.SourceItemId);
     }
 
-    // Two servers collide when they describe the same local file.
+    /// <summary>
+    /// Two servers collide when they describe the same local file.
+    /// </summary>
     /// <inheritdoc />
     protected override string? PriorityKeyOf(MetadataWork source)
     {
@@ -631,9 +640,11 @@ public class RefreshMetadataSyncTableTask
         return string.IsNullOrEmpty(record.LocalPath) ? null : record.LocalPath;
     }
 
-    // In scope when the row's library mapping is currently enabled. Disabling
-    // a mapping preserves its metadata rows so the user's Ignored overrides
-    // survive a toggle.
+    /// <summary>
+    /// In scope when the row's library mapping is currently enabled. Disabling
+    /// a mapping preserves its metadata rows so the user's Ignored overrides
+    /// survive a toggle.
+    /// </summary>
     /// <inheritdoc />
     protected override bool IsInScope(MetadataSyncItem record)
     {

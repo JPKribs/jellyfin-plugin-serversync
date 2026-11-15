@@ -67,6 +67,10 @@ public class DownloadService
         ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".smi", ".sami", ".sup", ".pgs", ".mks", ".ttml", ".dfxp", ".lrc"
     };
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DownloadService"/> class.
+    /// </summary>
+    /// <param name="logger">Logger instance.</param>
     public DownloadService(ILogger<DownloadService> logger)
     {
         _logger = logger;
@@ -100,6 +104,10 @@ public class DownloadService
         IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(config);
+
         if (string.IsNullOrEmpty(item.LocalPath))
         {
             return new DownloadResult(false, "No local path configured");
@@ -366,6 +374,9 @@ public class DownloadService
         PluginConfiguration config,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(config);
+
         var downloadedFiles = new List<string>();
         var networkRetries = config.MaxRetryCount > 0 ? config.MaxRetryCount : DefaultNetworkRetries;
 
@@ -399,7 +410,7 @@ public class DownloadService
                 var tempFilePath = Path.Combine(tempPath, tempFileName);
                 var targetPath = Path.Combine(targetDir, companionFileName);
 
-                // Verify the resolved target path is still within the target directory
+                // A companion name from the source must not lead out of the target folder.
                 var resolvedTargetPath = Path.GetFullPath(targetPath);
                 var resolvedTargetDir = Path.GetFullPath(targetDir);
                 if (!string.Equals(Path.GetDirectoryName(resolvedTargetPath), resolvedTargetDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.Ordinal))
@@ -477,6 +488,9 @@ public class DownloadService
         ContentSyncTableManager manager)
     {
         ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(manager);
+
         var pathValidation = FileValidationService.ValidatePath(item.LocalPath, item.SourceItemId, config, manager);
         if (!pathValidation.IsValid)
         {
@@ -502,9 +516,11 @@ public class DownloadService
     /// <param name="item">Sync item to check.</param>
     /// <param name="sizeMatchToleranceBytes">Tolerance in bytes for size comparison (0 = strict).</param>
     /// <param name="skipReason">Output parameter with reason for skipping.</param>
-    /// <returns>True if download should be skipped.</returns>
+    /// <returns><c>true</c> if download should be skipped.</returns>
     public static bool ShouldSkipDownload(SyncItem item, long sizeMatchToleranceBytes, out string? skipReason)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
         return FileValidationService.ShouldSkipDownload(item, sizeMatchToleranceBytes, out skipReason);
     }
 

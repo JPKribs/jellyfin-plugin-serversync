@@ -15,33 +15,6 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks;
 
 /// <summary>
-/// One unit of refresh work for User Sync, a single (mapping, category)
-/// pairing carrying the source-fetched data needed to build that record.
-/// Pre-fetching at the mapping level (rather than per-category) keeps the
-/// network calls down to one per source user.
-/// </summary>
-public sealed class UserCategoryWork
-{
-    public required ScanSource Source { get; init; }
-
-    /// <summary>
-    /// Gets a value indicating whether another server speaks for this user this run, so the row is
-    /// only brought up to date with what this server holds and nothing is applied from it.
-    /// </summary>
-    public bool Observe { get; init; }
-
-    public required UserMapping Mapping { get; init; }
-
-    public required string Category { get; init; }
-
-    public required Jellyfin.Sdk.Generated.Models.UserDto SourceUser { get; init; }
-
-    public required MediaBrowser.Model.Dto.UserDto LocalUserDto { get; init; }
-
-    public required Jellyfin.Database.Implementations.Entities.User LocalUser { get; init; }
-}
-
-/// <summary>
 /// Refresh phase for User Sync. Expands each enabled user mapping into one
 /// work item per enabled category (Policy / Configuration / ProfileImage),
 /// then builds one <see cref="UserSyncItem"/> per work item. The base handles
@@ -54,8 +27,14 @@ public class RefreshUserSyncTableTask
     private readonly UserSyncTableService _builder;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="RefreshUserSyncTableTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="userManager">Reads Jellyfin's users.</param>
+    /// <param name="builder">Builds user sync rows.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
     public RefreshUserSyncTableTask(
         ILogger<RefreshUserSyncTableTask> logger,
         IPluginConfigurationManager configManager,
@@ -70,7 +49,7 @@ public class RefreshUserSyncTableTask
     }
 
     /// <inheritdoc />
-    public override string Name => "Refresh User Sync Table";
+    public override string Name => "Scan Users";
 
     /// <inheritdoc />
     public override string Key => "ServerSyncRefreshUserTable";
@@ -234,15 +213,19 @@ public class RefreshUserSyncTableTask
 
     private bool Newest => ConfigManager.Configuration.UserSyncPrecedence == SyncPrecedence.Newest;
 
-    // Settings go both ways with a Sync server: a change made here stays until that server takes it.
-    // From a Pull server they only ever arrive.
+    /// <summary>
+    /// Settings go both ways with a Sync server: a change made here stays until that server takes it.
+    /// From a Pull server they only ever arrive.
+    /// </summary>
     private UserConflictRule? BothWaysRule(SourceServer server)
         => Newest && server.Mode == ServerMode.Sync ? ConfigManager.Configuration.UserSyncConflict : null;
 
-    // One server speaks for a local user's settings on each run: the highest ranked one that changed
-    // them since this server last looked. When none has, the server whose settings were applied last
-    // goes on speaking, so a lower ranked server's change is not undone by a higher one that has
-    // nothing new. Rank decides before anything has been applied.
+    /// <summary>
+    /// One server speaks for a local user's settings on each run: the highest ranked one that changed
+    /// them since this server last looked. When none has, the server whose settings were applied last
+    /// goes on speaking, so a lower ranked server's change is not undone by a higher one that has
+    /// nothing new. Rank decides before anything has been applied.
+    /// </summary>
     /// <inheritdoc />
     protected override Task<IReadOnlyDictionary<string, UserCategoryWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<UserCategoryWork>> contested, CancellationToken cancellationToken)
     {
@@ -267,8 +250,10 @@ public class RefreshUserSyncTableTask
         return Task.FromResult<IReadOnlyDictionary<string, UserCategoryWork>>(winners);
     }
 
-    // A server passed over before this server has ever looked at it is recorded, so the next run can
-    // tell whether it has changed since. One already recorded and unchanged needs nothing.
+    /// <summary>
+    /// A server passed over before this server has ever looked at it is recorded, so the next run can
+    /// tell whether it has changed since. One already recorded and unchanged needs nothing.
+    /// </summary>
     /// <inheritdoc />
     protected override UserCategoryWork? ObservedOffer(UserCategoryWork passedOver, UserCategoryWork speaking)
     {
@@ -293,7 +278,9 @@ public class RefreshUserSyncTableTask
     /// <inheritdoc />
     protected override bool MayOutrankOwner(UserSyncItem record) => Newest;
 
-    // Each server's row records what was last seen of it, which is how it is known to have changed.
+    /// <summary>
+    /// Each server's row records what was last seen of it, which is how it is known to have changed.
+    /// </summary>
     /// <inheritdoc />
     protected override bool CanRetire(UserSyncItem record) => !Newest && base.CanRetire(record);
 
@@ -338,8 +325,10 @@ public class RefreshUserSyncTableTask
         return now is not null && !new Models.Common.Comparators.JsonBlobComparator().Equals(seen.SourceValue, now);
     }
 
-    // Two servers collide when both map a user onto the same local user. The higher priority
-    // server's user supplies that local user's settings.
+    /// <summary>
+    /// Two servers collide when both map a user onto the same local user. The higher ranked
+    /// server's user supplies that local user's settings.
+    /// </summary>
     /// <inheritdoc />
     protected override string? PriorityKeyOf(UserCategoryWork source)
         => source is null ? null : source.Mapping.LocalUserId + "|" + source.Category;
@@ -352,9 +341,11 @@ public class RefreshUserSyncTableTask
     protected override (string SourceUserId, string LocalUserId, string PropertyCategory) ExtractKey(UserSyncItem record)
         => (record.SourceUserId, record.LocalUserId, record.PropertyCategory);
 
-    // In scope when the row's user mapping is currently enabled. Disabling a
-    // mapping preserves its rows (including Ignored overrides) instead of
-    // pruning them.
+    /// <summary>
+    /// In scope when the row's user mapping is currently enabled. Disabling a
+    /// mapping preserves its rows (including Ignored overrides) instead of
+    /// pruning them.
+    /// </summary>
     /// <inheritdoc />
     protected override bool IsInScope(UserSyncItem record)
     {

@@ -42,7 +42,7 @@ public class ServersController : ControllerBase
     /// <param name="outbound">The outbound hint store.</param>
     /// <param name="inbound">The inbound hint store.</param>
     /// <param name="pairings">The pairing secrets.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="logger">Writes log entries.</param>
     public ServersController(
         ContentSyncTableManager content,
         HistorySyncTableManager history,
@@ -68,6 +68,7 @@ public class ServersController : ControllerBase
     /// <summary>Removes every sync row and queued hint that came from one server entry.</summary>
     /// <param name="key">The entry key.</param>
     /// <param name="serverId">The removed server's id, so hints it sent and that wait here go too.</param>
+    /// <param name="libraryManager">Reads and changes Jellyfin's library, or null to skip the library.</param>
     /// <returns>How many rows were removed per table.</returns>
     [HttpDelete("{key}/Rows")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -76,7 +77,7 @@ public class ServersController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(key))
         {
-            return BadRequest("A server key is required");
+            return BadRequest("A server key is required.");
         }
 
         // The removed server's links point at a server this one no longer talks to, so they go with
@@ -118,26 +119,4 @@ public class ServersController : ControllerBase
             FormatUtilities.SanitizeForLog(key), removed.Content, removed.History, removed.Metadata, removed.People, removed.Users, removed.Hints);
         return Ok(removed);
     }
-}
-
-/// <summary>What was removed when a server entry was forgotten.</summary>
-public class ServerRowsRemoved
-{
-    /// <summary>Gets or sets the content rows removed.</summary>
-    public int Content { get; set; }
-
-    /// <summary>Gets or sets the history rows removed.</summary>
-    public int History { get; set; }
-
-    /// <summary>Gets or sets the metadata rows removed.</summary>
-    public int Metadata { get; set; }
-
-    /// <summary>Gets or sets the people rows removed.</summary>
-    public int People { get; set; }
-
-    /// <summary>Gets or sets the user rows removed.</summary>
-    public int Users { get; set; }
-
-    /// <summary>Gets or sets the queued hints removed.</summary>
-    public int Hints { get; set; }
 }

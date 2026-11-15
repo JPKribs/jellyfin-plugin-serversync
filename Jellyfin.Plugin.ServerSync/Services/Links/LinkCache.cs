@@ -88,13 +88,26 @@ public sealed class LinkCache
     // Counts every folder emptied, by any caller, so an index held in memory is read again afterwards.
     private static int _wipes;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkCache"/> class.
+    /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="paths">Jellyfin's folders.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="libraryManager">Library manager, or null.</param>
     public LinkCache(IPluginConfigurationManager configManager, IApplicationPaths paths, ILogger<LinkCache> logger, ILibraryManager? libraryManager = null)
         : this(configManager, Path.Combine((paths ?? throw new ArgumentNullException(nameof(paths))).CachePath, DefaultFolder), logger, () => DateTime.UtcNow)
     {
         _libraryManager = libraryManager;
     }
 
-    /// <summary>Initializes a new instance of the <see cref="LinkCache"/> class, for tests.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkCache"/> class, for tests.
+    /// </summary>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="defaultRoot">The cache folder used when none is set.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="now">Gives the current time.</param>
     public LinkCache(IPluginConfigurationManager configManager, string defaultRoot, ILogger<LinkCache> logger, Func<DateTime> now)
     {
         _configManager = configManager;
@@ -236,6 +249,8 @@ public sealed class LinkCache
     public string DefaultRoot => _defaultRoot;
 
     /// <summary>The whole file for a link, when the cache is on and holds it, or null.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <returns>The file's path, or null.</returns>
     public string? PathFor(string linkId)
     {
         if (!Enabled || string.IsNullOrEmpty(linkId))
@@ -273,9 +288,12 @@ public sealed class LinkCache
     }
 
     /// <summary>Whether the cache holds a link's file.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <returns><c>true</c> when the cache holds the file.</returns>
     public bool Holds(string linkId) => PathFor(linkId) is not null;
 
     /// <summary>Records that a cached link was played now.</summary>
+    /// <param name="linkId">The link's id.</param>
     public void Played(string linkId)
     {
         if (!Enabled)
@@ -295,6 +313,9 @@ public sealed class LinkCache
     }
 
     /// <summary>Where a link's file is written while it downloads. The folder is made if needed.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="extension">The file's extension, with its dot.</param>
+    /// <returns>The path of the partial file.</returns>
     public string PartPathFor(string linkId, string extension)
     {
         Directory.CreateDirectory(Root);
@@ -302,14 +323,14 @@ public sealed class LinkCache
     }
 
     /// <summary>
-    /// Takes a finished download into the cache. False when the file is not the size it should be, in
+    /// Takes a finished download into the cache. <c>false</c> when the file is not the size it should be, in
     /// which case it is deleted.
     /// </summary>
     /// <param name="linkId">The link's id.</param>
     /// <param name="extension">The source file's extension.</param>
     /// <param name="expectedSize">The size the source reports for the file, or 0 when unknown.</param>
     /// <param name="reason">Why it was cached.</param>
-    /// <returns>True when the file is now in the cache.</returns>
+    /// <returns><c>true</c> when the file is now in the cache.</returns>
     public bool Complete(string linkId, string extension, long expectedSize, CacheReason reason)
     {
         var name = FileNameFor(linkId, extension);
@@ -342,7 +363,7 @@ public sealed class LinkCache
     /// <summary>Whether the cache holds a link's whole file, at <paramref name="size"/>.</summary>
     /// <param name="linkId">The link's id.</param>
     /// <param name="size">The size the source reports for the file now.</param>
-    /// <returns>True when the cached file is whole and that size.</returns>
+    /// <returns><c>true</c> when the cached file is whole and that size.</returns>
     public bool HoldsWhole(string linkId, long size)
     {
         lock (_lock)
@@ -355,13 +376,13 @@ public sealed class LinkCache
     /// Moves a link's cached file out of the cache to <paramref name="destination"/>, where it becomes
     /// the link's copy. The cache forgets the file first, under its lock, and the move runs outside it,
     /// so a move that is a copy between two disks never holds up playback. A move that fails is undone
-    /// and the file is cached again. False, with nothing moved, when the cache does not hold the whole
+    /// and the file is cached again. <c>false</c>, with nothing moved, when the cache does not hold the whole
     /// file at <paramref name="expectedSize"/>, or something is already at the destination.
     /// </summary>
     /// <param name="linkId">The link's id.</param>
     /// <param name="destination">Where the copy belongs.</param>
     /// <param name="expectedSize">The size the source reports for the file.</param>
-    /// <returns>True when the file is now at the destination.</returns>
+    /// <returns><c>true</c> when the file is now at the destination.</returns>
     public bool MoveTo(string linkId, string destination, long expectedSize)
     {
         CacheEntry entry;
@@ -419,13 +440,13 @@ public sealed class LinkCache
 
     /// <summary>
     /// Takes a kept copy into the cache when it goes back to being a link, so it still plays from this
-    /// server until the cache needs the room. False, with the file left where it was, when the cache is
+    /// server until the cache needs the room. <c>false</c>, with the file left where it was, when the cache is
     /// off, the file is larger than the whole cache, room cannot be made, or the move fails.
     /// </summary>
     /// <param name="linkId">The link's id.</param>
     /// <param name="file">The copy.</param>
     /// <param name="size">The size the source reports for the file.</param>
-    /// <returns>True when the file is now in the cache.</returns>
+    /// <returns><c>true</c> when the file is now in the cache.</returns>
     public bool Adopt(string linkId, string file, long size)
     {
         ArgumentException.ThrowIfNullOrEmpty(file);
@@ -459,6 +480,7 @@ public sealed class LinkCache
     }
 
     /// <summary>Drops a link's file from the cache.</summary>
+    /// <param name="linkId">The link's id.</param>
     public void Remove(string linkId)
     {
         lock (_lock)
@@ -472,6 +494,7 @@ public sealed class LinkCache
     }
 
     /// <summary>The files in the cache.</summary>
+    /// <returns>The cached files.</returns>
     public IReadOnlyList<CacheEntry> List()
     {
         lock (_lock)
@@ -481,6 +504,7 @@ public sealed class LinkCache
     }
 
     /// <summary>The disk the cache uses, in bytes.</summary>
+    /// <returns>The bytes used.</returns>
     public long UsedBytes()
     {
         lock (_lock)
@@ -490,6 +514,9 @@ public sealed class LinkCache
     }
 
     /// <summary>The order files are dropped in when room is needed, by the setting.</summary>
+    /// <param name="entries">The cached files.</param>
+    /// <param name="order">The setting that says which go first.</param>
+    /// <returns>The files, first to drop first.</returns>
     public static IEnumerable<CacheEntry> RemovalOrder(IEnumerable<CacheEntry> entries, CacheRemovalOrder order)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -504,12 +531,12 @@ public sealed class LinkCache
 
     /// <summary>
     /// Drops what retention says is too old, then drops files in the removal order until the cache,
-    /// with <paramref name="incoming"/> more bytes, fits its size. False when it still does not fit,
+    /// with <paramref name="incoming"/> more bytes, fits its size. <c>false</c> when it still does not fit,
     /// because what is left may not be dropped.
     /// </summary>
     /// <param name="incoming">The size of a file about to be cached, or 0.</param>
     /// <param name="keep">Links that must not be dropped now, such as one being played.</param>
-    /// <returns>True when there is room.</returns>
+    /// <returns><c>true</c> when there is room.</returns>
     public bool MakeRoom(long incoming, IReadOnlySet<string>? keep = null)
     {
         var config = _configManager.Configuration;

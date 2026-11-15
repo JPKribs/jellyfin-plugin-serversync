@@ -12,10 +12,19 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// </summary>
 public partial class SourceServerClient
 {
-    // ===== History Sync Methods =====
-
+    /// <summary>
+    /// Lists the items in a library whose user data changed for a user since a time.
+    /// </summary>
+    /// <param name="userId">The source user whose changes are listed.</param>
+    /// <param name="libraryId">The source library to look in.</param>
+    /// <param name="includeTypes">The item kinds to list.</param>
+    /// <param name="changedSince">The time after which a change counts.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The ids of the items changed since then.</returns>
     public async Task<HashSet<Guid>> GetItemIdsChangedForUserAsync(Guid userId, Guid libraryId, BaseItemKind[] includeTypes, DateTime changedSince, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(includeTypes);
+
         var ids = new HashSet<Guid>();
         var client = GetApiClient();
         await PageThroughAsync(
@@ -73,11 +82,17 @@ public partial class SourceServerClient
     /// so only items whose translated path exists locally get user data
     /// fetched, rather than every played item per user and library.
     /// </summary>
+    /// <param name="userId">The source user whose user data is read.</param>
+    /// <param name="ids">The source item ids to fetch.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The items with their user data, or null when the source gave no answer.</returns>
     public async Task<BaseItemDtoQueryResult?> GetItemsWithUserDataByIdsAsync(
         Guid userId,
         Guid?[] ids,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(ids);
+
         if (ids.Length == 0)
         {
             return null;
@@ -95,8 +110,7 @@ public partial class SourceServerClient
                     config.QueryParameters.Fields = new[]
                     {
                         ItemFields.Path,
-                        ItemFields.DateCreated,
-                        ItemFields.MediaSources
+                        ItemFields.DateCreated
                     };
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
@@ -124,6 +138,10 @@ public partial class SourceServerClient
     /// "user played nothing", a silent empty return would let downstream
     /// filters skip items they shouldn't.
     /// </summary>
+    /// <param name="userId">The source user whose plays are listed.</param>
+    /// <param name="libraryId">The source library to look in.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The ids of the played items.</returns>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the source server returns a null page (failure) rather
     /// than an explicit empty page.
@@ -186,8 +204,7 @@ public partial class SourceServerClient
                     config.QueryParameters.Fields = new[]
                     {
                         ItemFields.Path,
-                        ItemFields.DateCreated,
-                        ItemFields.MediaSources
+                        ItemFields.DateCreated
                     };
                     config.QueryParameters.EnableUserData = true;
                     config.QueryParameters.IsPlayed = true;

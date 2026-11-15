@@ -8,6 +8,42 @@ Run with no setup:
 dotnet test
 ```
 
+The tests use xUnit with plain `Assert` and no mocking library. See [skills/testing.md](../skills/testing.md) for how to write them.
+
+### Layout
+
+Each test file sits in the folder that mirrors the source file it tests, so `Jellyfin.Plugin.ServerSync/Services/Queue/VersionDecider.cs` is tested by `Services/Queue/VersionDeciderTests.cs`. The test namespace follows the folder.
+
+| Folder | Tests |
+| :--- | :--- |
+| `Configuration/` | `PluginConfiguration` |
+| `Controllers/` | Routes and their attributes |
+| `Models/` | Models, DTOs, and comparators, in the source's subfolders |
+| `Services/` | Stores, merge services, clients, links, queue, peers, and playlists, in the source's subfolders |
+| `Tasks/` | Scheduled tasks and their base classes |
+| `Utilities/` | Helpers and streams |
+| `Fakes/` | Shared fakes, one per file |
+| `ApiIntegration/` | The read-only suite against a real server |
+| `js/` | JavaScript tests, run with `node --test` |
+
+`PluginTests.cs` covers `Plugin.cs`, and `StableSecretProtectionTests.cs` covers the secret protector the plugin builds on Base.
+
+### Fakes
+
+`Fakes/` holds the stand-ins tests share.
+
+| Fake | Stands in for |
+| :--- | :--- |
+| `FakeConfigManager` | The plugin configuration manager |
+| `FakeClientFactory` | The client factory, for tests that never reach a source |
+| `StubPeerClientFactory` | The client factory, building clients over a `StubPeerHandler` |
+| `FixedProvider` | The database provider, handing back one database |
+| `StubHandler` | An `HttpMessageHandler` that answers from a function |
+| `ScriptedHandler` | An `HttpMessageHandler` that answers in sequence |
+| `StubPeerHandler` | A peer that answers the connection test and the playlist listing |
+| `InterfaceStub` | A large Jellyfin interface, recording every call |
+| `PlaylistTestHarness` | A playlist mirror over a real store and recording Jellyfin stubs |
+
 ## API Integration Tests
 
 A read-only suite that exercises every source server call the plugin makes (pagination, person catalog parity, image probes, downloads) against a real Jellyfin server. These tests are skipped unless you point them at a server:

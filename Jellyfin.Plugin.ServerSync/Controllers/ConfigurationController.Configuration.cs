@@ -24,7 +24,7 @@ public partial class ConfigurationController
     /// Tests connection to the source server using API key authentication.
     /// </summary>
     /// <param name="request">Connection test request.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>Connection test response.</returns>
     [HttpPost("TestConnection")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -45,7 +45,7 @@ public partial class ConfigurationController
             return Ok(new ConnectionTestResult
             {
                 Success = false,
-                Message = "API key is required"
+                Message = "Enter the API Key."
             });
         }
 
@@ -87,7 +87,7 @@ public partial class ConfigurationController
     /// Authenticates with a source server using username and password to generate an access token.
     /// </summary>
     /// <param name="request">Authentication request with credentials.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>Authentication response with access token if successful.</returns>
     [HttpPost("Authenticate")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -108,7 +108,7 @@ public partial class ConfigurationController
             return Ok(new AuthenticateResponse
             {
                 Success = false,
-                Message = "Username is required"
+                Message = "Enter the username."
             });
         }
 
@@ -117,7 +117,7 @@ public partial class ConfigurationController
             return Ok(new AuthenticateResponse
             {
                 Success = false,
-                Message = "Password is required"
+                Message = "Enter the password."
             });
         }
 
@@ -160,7 +160,7 @@ public partial class ConfigurationController
 
             result.ServerName = connectionTest.ServerName;
             result.ServerId = connectionTest.ServerId;
-            result.Message = "Authentication successful";
+            result.Message = "Signed in.";
             if (connectionTest.Success)
             {
                 (result.SyncAccess, result.SyncAccessMessage) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
@@ -174,7 +174,7 @@ public partial class ConfigurationController
     /// Gets libraries from the source server.
     /// </summary>
     /// <param name="request">Connection request with credentials.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>List of library DTOs.</returns>
     [HttpPost("GetSourceLibraries")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -191,7 +191,7 @@ public partial class ConfigurationController
 
         if (string.IsNullOrWhiteSpace(request.ApiKey))
         {
-            return BadRequest("API key is required");
+            return BadRequest("Enter the API Key.");
         }
 
         try
@@ -228,7 +228,7 @@ public partial class ConfigurationController
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "Failed to get libraries from source server");
-            return BadRequest("Failed to connect to source server. Check server logs for details.");
+            return BadRequest("Could not connect to the server. See the server log.");
         }
     }
 
@@ -236,7 +236,7 @@ public partial class ConfigurationController
     /// Gets users from the source server.
     /// </summary>
     /// <param name="request">Connection request with credentials.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>List of user info DTOs.</returns>
     [HttpPost("GetSourceUsers")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -253,7 +253,7 @@ public partial class ConfigurationController
 
         if (string.IsNullOrWhiteSpace(request.ApiKey))
         {
-            return BadRequest("API key is required");
+            return BadRequest("Enter the API Key.");
         }
 
         try
@@ -288,7 +288,7 @@ public partial class ConfigurationController
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "Failed to get users from source server");
-            return BadRequest("Failed to connect to source server. Check server logs for details.");
+            return BadRequest("Could not connect to the server. See the server log.");
         }
     }
 
@@ -304,7 +304,7 @@ public partial class ConfigurationController
     /// <param name="take">Alias for <paramref name="limit"/>, used when present.</param>
     /// <param name="collections">Browse the server's collections instead of a library.</param>
     /// <param name="playlists">Browse the server's playlists instead of a library.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>A page of top-level source items.</returns>
     [HttpGet("SourceLibraryItems")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -323,7 +323,7 @@ public partial class ConfigurationController
     {
         if (!collections && !playlists && string.IsNullOrWhiteSpace(libraryId))
         {
-            return BadRequest("Library ID is required");
+            return BadRequest("Select a library.");
         }
 
         // Same clamps as every other list endpoint, an unclamped take pulls
@@ -343,12 +343,12 @@ public partial class ConfigurationController
         var server = _configManager.Configuration.ResolveServer(serverKey);
         if (server is null || !server.IsConfigured)
         {
-            return BadRequest("Source server is not configured");
+            return BadRequest("The server is not configured.");
         }
 
         if (!collections && !playlists && !Guid.TryParse(libraryId, out _))
         {
-            return BadRequest("Invalid library ID format");
+            return BadRequest("The library ID is not valid.");
         }
 
         try
@@ -405,7 +405,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to get source files for library {LibraryId}", SanitizeForLog(libraryId));
-            return BadRequest("Failed to fetch items from source server");
+            return BadRequest("Could not load the items from the server.");
         }
     }
 
@@ -417,7 +417,7 @@ public partial class ConfigurationController
     /// </summary>
     /// <param name="url">URL to validate.</param>
     /// <param name="allowPrivateNetwork">Whether a private network address is acceptable for this entry.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>Validation response with normalized URL.</returns>
     private static async Task<ValidateUrlResponse> ValidateServerUrlAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken)
     {
@@ -459,7 +459,7 @@ public partial class ConfigurationController
         {
             IsValid = true,
             NormalizedUrl = normalizedUrl,
-            Message = isLocalhost ? "Warning: Using localhost URL. Make sure this is intentional." : null
+            Message = isLocalhost ? "This URL uses localhost. Make sure that is intended." : null
         };
     }
 }

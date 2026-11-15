@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What happens on every other server when files change on one, across four pool shapes.
+"""What happens on every other server when files change on one, across five pool shapes.
 
 Usage:
   matrix.py run [shape ...] [copy|link] [hints|scan]   build, start the pool, run the chosen rounds
@@ -61,6 +61,7 @@ log, expect, wait_until = it.log, it.expect, it.wait_until
 
 
 def compose(*args):
+    """Runs docker compose for the matrix pool."""
     env = dict(os.environ, JELLYFIN_IMAGE=it.IMAGE)
     meta = os.path.join(it.PLUGIN_DIR, "meta.json")
     if os.path.exists(meta):
@@ -126,6 +127,7 @@ def setup_pool():
 # --------------------------------------------------------------------------------------------------
 
 def movies_dir(node):
+    """Returns a node's Movies folder."""
     return os.path.join(STATE, "media", node, "Movies")
 
 
@@ -151,16 +153,19 @@ def video_files(node, tag):
 
 
 def folders(node, tag):
+    """Returns the film folders a node holds for a tag."""
     root = movies_dir(node)
     return sorted(d for d in os.listdir(root) if tag in d) if os.path.isdir(root) else []
 
 
 def items(api, tag):
+    """Returns the movies a server lists for a tag."""
     listed = api.get("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path,MediaSources")["Items"]
     return [i for i in listed if tag in (i.get("Path") or "")]
 
 
 def codec_of(api, item):
+    """Returns the video codec of an item."""
     user = api.get("/Users")[0]["Id"]
     full = api.get(f"/Items/{item['Id']}?userId={user}")
     for source in full.get("MediaSources") or []:
@@ -171,6 +176,7 @@ def codec_of(api, item):
 
 
 def played_bytes(api, user, item):
+    """Returns the status and the bytes from streaming an item as a user."""
     status, body = api.call("POST", f"/Items/{item['Id']}/PlaybackInfo?userId={user}", {}, raw=True)
     if status != 200:
         return status, None
@@ -182,6 +188,7 @@ def played_bytes(api, user, item):
 
 
 def rows(api, tag):
+    """Returns the content sync rows a server holds for a tag."""
     return [r for r in it.all_rows(api) if tag in (r.get("SourcePath") or "") or tag in (r.get("LocalPath") or "")]
 
 
@@ -195,8 +202,7 @@ CONTENT = dict(EnableContentSync=True, DownloadNewContentMode="Enabled", Replace
 
 
 def configure(creds, apis, shape, storage, hints):
-    """Writes every server's peer list for a shape. The main server sends to its children and pulls
-    nothing. Equal partners and siblings sync with each other."""
+    """Writes every server's peer list for a shape."""
     members, followers, origin_pulls, siblings = SHAPES[shape]
     for name in NODES:
         if name not in members:
@@ -229,6 +235,7 @@ def configure(creds, apis, shape, storage, hints):
 
 
 def set_flag(apis, names, **flags):
+    """Sets plugin flags on each named server."""
     for name in names:
         config = it.plugin_config(apis[name])
         config.update(flags)
@@ -238,6 +245,7 @@ def set_flag(apis, names, **flags):
 def quiet(apis, members, timeout=120):
     """Waits for every hint queue in the round to drain."""
     def empty():
+        """Returns whether every member has no hint waiting, sent, or pending."""
         return all(not it.hints(apis[n])["Outbound"] and not it.hints(apis[n])["Inbound"] and it.hints(apis[n])["Pending"] == 0 for n in members)
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -251,6 +259,7 @@ def quiet(apis, members, timeout=120):
 
 
 def sync_pass(apis, names):
+    """Runs one scan then one sync on each named server."""
     for name in names:
         it.wait_scans_idle(apis[name])
         it.run_task(apis[name], "ServerSyncUpdateTables")
@@ -300,8 +309,7 @@ def clean(creds, apis):
 # --------------------------------------------------------------------------------------------------
 
 def stays_quiet(apis, members, label, watch=15):
-    """Expects every hint queue to drain and then nothing new to be raised: a change that came to rest
-    must not start another one anywhere in the pool."""
+    """Expects every hint queue to drain and then nothing new to be raised: a change that came to rest must not start another one anywhere in the pool."""
     expect(quiet(apis, members), f"{label}: every hint queue drained")
     raised = {}
     deadline = time.time() + watch
@@ -329,6 +337,7 @@ def expected_files(tag, storage):
 
 
 def describe(apis, node, tag):
+    """Returns a readable list of what a node holds for a tag."""
     lines = []
     for r in rows(apis[node], tag):
         lines.append(f"      row {os.path.basename(r.get('SourcePath') or '')} -> {os.path.basename(r.get('LocalPath') or '')}: {r.get('StorageMode')} {r.get('Status')} {r.get('PendingType') or ''} {r.get('ErrorMessage') or ''}".rstrip())
@@ -336,8 +345,7 @@ def describe(apis, node, tag):
 
 
 def check(apis, creds, node, tag, storage, stage, final):
-    """Compares one follower with n1. Before the full scan only what must already hold is asserted:
-    every film n1 holds now is here and plays n1's bytes. After it, nothing else may be left."""
+    """Compares one follower with n1."""
     api = apis[node]
     user = creds["servers"][node]["userId"]
     label = f"{node} {stage}"
@@ -414,6 +422,7 @@ def check(apis, creds, node, tag, storage, stage, final):
 
 
 def round_(creds, apis, shape, storage, hints):
+    """Runs one round of file changes in a shape and checks every other server."""
     tag = uuid.uuid4().hex[:6]
     title = f"{shape} {storage} {'hints' if hints else 'scan'}"
     log(f"== round: {title} ({tag})")
@@ -424,6 +433,7 @@ def round_(creds, apis, shape, storage, hints):
     origin = apis[ORIGIN]
 
     def name(kind, suffix=""):
+        """Returns the title of a kind of film."""
         return f"{kind} {tag}{suffix} (2024)"
 
     # Seed: every film as HEVC in a Matroska file.
@@ -458,6 +468,7 @@ def round_(creds, apis, shape, storage, hints):
     encode(ORIGIN, name("Overlap"), name("Overlap") + ".mp4", "av1")
 
     def origin_settled(count):
+        """Returns whether the origin holds the expected films after a settle."""
         listed = items(origin, tag)
         paths = sorted(os.path.relpath(i["Path"], "/media/Movies") for i in listed)
         sources = sorted(os.path.relpath(s["Path"], "/media/Movies") for i in listed for s in i.get("MediaSources") or [] if s.get("Path"))
@@ -520,10 +531,12 @@ def round_(creds, apis, shape, storage, hints):
 # --------------------------------------------------------------------------------------------------
 
 def docker(*args):
+    """Runs a docker command."""
     subprocess.run(["docker", *args], check=True, capture_output=True)
 
 
 def start_task(api, key):
+    """Starts a scheduled task by key without waiting for it."""
     task = next(t for t in api.get("/ScheduledTasks") if t["Key"] == key)
     api.post(f"/ScheduledTasks/Running/{task['Id']}", expect=204)
 
@@ -544,6 +557,7 @@ def leftovers(node, tag):
 
 
 def settle(apis, creds, tag, storage, stage):
+    """Runs every pass a round needs and checks what the follower holds."""
     sync_pass(apis, ["n2"])
     sync_pass(apis, ["n2"])
     api = apis["n2"]
@@ -556,9 +570,7 @@ def settle(apis, creds, tag, storage, stage):
 
 
 def interrupt_round(creds, apis, storage):
-    """One main server and one child, with the child killed mid-download and mid-replacement, the main
-    server gone for several runs, and links removed and emptied by hand. Nothing is retried by hand:
-    every recovery is the next scheduled run's."""
+    """One main server and one child, with the child killed mid-download and mid-replacement, the main server gone for several runs, and links removed and emptied by hand."""
     tag = uuid.uuid4().hex[:6]
     title = f"1:1 {storage} interrupted"
     log(f"== round: {title} ({tag})")
@@ -569,9 +581,11 @@ def interrupt_round(creds, apis, storage):
     origin, child = apis[ORIGIN], apis["n2"]
 
     def name(kind):
+        """Returns the title of a kind of film."""
         return f"{kind} {tag} (2024)"
 
     def film(kind):
+        """Returns the path of a kind of film on the origin."""
         return os.path.join(movies_dir(ORIGIN), name(kind), name(kind) + ".mkv")
 
     encode(ORIGIN, name("Small"), name("Small") + ".mkv", "hevc")
@@ -651,10 +665,7 @@ def interrupt_round(creds, apis, storage):
 
 
 def holders_round(creds, apis):
-    """Two servers hold the same two films and a third links to them. Each link streams from the
-    higher of the two while it is idle. With one film held open on it, the other film plays from
-    the second server. When the first server removes a film, its link moves to the second and keeps
-    playing, and when the second removes it too, the link goes. Nothing waits for a full scan."""
+    """Two servers hold the same two films and a third links to them."""
     import threading
     import urllib.request
     tag = uuid.uuid4().hex[:6]
@@ -700,16 +711,20 @@ def holders_round(creds, apis):
     rescan(child, lambda: len(items(child, tag)) == 2, "n2 lists both films")
 
     def item_of(folder):
+        """Returns the item the child holds for a folder."""
         return next((i for i in items(child, tag) if folder in i["Path"]), None)
 
     def row_of(folder):
+        """Returns the content sync row the child holds for a folder."""
         return next((r for r in rows(child, tag) if folder in (r.get("LocalPath") or "")), None)
 
     def server_of(folder):
+        """Returns the server the child's row for a folder comes from."""
         row = row_of(folder)
         return (row.get("ServerName") or row.get("ServerKey")) if row else None
 
     def plays(folder):
+        """Returns whether a user can play the item the child holds for a folder."""
         item = item_of(folder)
         if item is None:
             return False
@@ -729,6 +744,7 @@ def holders_round(creds, apis):
     stop = threading.Event()
 
     def hold():
+        """Holds a stream of the film open on the child."""
         request = urllib.request.Request(child.base + f"/Videos/{held_item['Id']}/stream?static=true&mediaSourceId={source.get('Id')}", headers=child._headers())
         try:
             with urllib.request.urlopen(request, timeout=180) as response:
@@ -784,11 +800,7 @@ def holders_round(creds, apis):
 
 
 def own_round(creds, apis):
-    """One main server and one child kept as copies, with Removed files on Delete. A film the child
-    already had before the two were matched is the child's own and stays when the main server
-    removes its copy. A film the child downloaded from the main server is removed, as a mirror
-    removes it. A film changed on the main server replaces the child's own, and is then the main
-    server's file like any other."""
+    """One main server and one child kept as copies, with Removed files on Delete."""
     tag = uuid.uuid4().hex[:6]
     title = "1:1 copy own files"
     log(f"== round: {title} ({tag})")
@@ -798,9 +810,11 @@ def own_round(creds, apis):
     origin, child = apis[ORIGIN], apis["n2"]
 
     def name(kind):
+        """Returns the title of a kind of film."""
         return f"{kind} {tag} (2024)"
 
     def on(node, kind):
+        """Returns the path of a kind of film on a node."""
         return os.path.join(movies_dir(node), name(kind), name(kind) + ".mkv")
 
     for kind in ("Mine", "Theirs", "Swapped"):
@@ -851,10 +865,7 @@ def own_round(creds, apis):
 
 
 def own_link_round(creds, apis):
-    """A server that brings its own films into a Link library. A film it already has is its own:
-    the other server's file at the same name is never downloaded over it, whether that file is the
-    same, different, or changes later, and it stays when the other server removes theirs. A film
-    only the other server has arrives as a link, and that link goes when the film does."""
+    """A server that brings its own films into a Link library."""
     tag = uuid.uuid4().hex[:6]
     title = "1:1 link own films"
     log(f"== round: {title} ({tag})")
@@ -865,12 +876,15 @@ def own_link_round(creds, apis):
     user = creds["servers"]["n2"]["userId"]
 
     def name(kind):
+        """Returns the title of a kind of film."""
         return f"{kind} {tag} (2024)"
 
     def on(node, kind, extension=".mkv"):
+        """Returns the path of a kind of film on a node."""
         return os.path.join(movies_dir(node), name(kind), name(kind) + extension)
 
     def read(path):
+        """Returns a file's bytes."""
         with open(path, "rb") as f:
             return f.read()
 
@@ -891,6 +905,7 @@ def own_link_round(creds, apis):
     sync_pass(apis, ["n2"])
 
     def untouched(stage):
+        """Expects each film to still be the file its server brought."""
         for kind in ("Same", "Different"):
             expect(os.path.exists(on("n2", kind)) and read(on("n2", kind)) == mine[kind], f"n2 {stage}: its own {kind} film is the file it brought")
             expect(not os.path.exists(on("n2", kind, ".strm")), f"n2 {stage}: no link is written beside its own {kind} film")
@@ -935,10 +950,7 @@ def own_link_round(creds, apis):
 
 
 def clash_round(creds, apis):
-    """Two equal partners that each already hold the same title as a different file, and one film
-    the other lacks. Both scan before either downloads, the worst case for a swap. Each keeps its
-    own file for the title they share, and each gets the film it lacked. Taking the partner's file
-    is a choice made by hand, and afterwards the partner neither takes it back nor loses its own."""
+    """Two equal partners that each already hold the same title as a different file, and one film the other lacks."""
     tag = uuid.uuid4().hex[:6]
     title = "1=1 copy same title, different files"
     log(f"== round: {title} ({tag})")
@@ -948,12 +960,15 @@ def clash_round(creds, apis):
     pair = ["n1", "n2"]
 
     def name(kind):
+        """Returns the title of a kind of film."""
         return f"{kind} {tag} (2024)"
 
     def on(node, kind):
+        """Returns the path of a kind of film on a node."""
         return os.path.join(movies_dir(node), name(kind), name(kind) + ".mkv")
 
     def read(path):
+        """Returns a file's bytes."""
         with open(path, "rb") as f:
             return f.read()
 
@@ -968,6 +983,7 @@ def clash_round(creds, apis):
     quiet(apis, pair)
 
     def both_scan_then_both_sync():
+        """Scans both servers and then syncs both."""
         for node in pair:
             it.wait_scans_idle(apis[node])
             it.run_task(apis[node], "ServerSyncUpdateTables")
@@ -977,6 +993,7 @@ def clash_round(creds, apis):
             it.wait_scans_idle(apis[node])
 
     def each_keeps_its_own(stage):
+        """Expects each server to still hold its own film."""
         for node in pair:
             expect(os.path.exists(on(node, "Clash")) and read(on(node, "Clash")) == own[node], f"{node} {stage}: the title they share is still its own file")
 
@@ -1024,8 +1041,7 @@ def clash_round(creds, apis):
 
 
 def idle_round(creds, apis):
-    """Three equal partners hold the same films and nothing changes. A pool at rest sends nothing: no
-    server announces what it was given, so no change travels round the ring a second time."""
+    """Three equal partners hold the same films and nothing changes."""
     tag = uuid.uuid4().hex[:6]
     title = "1:1:1 copy left idle"
     log(f"== round: {title} ({tag})")
@@ -1052,6 +1068,7 @@ def idle_round(creds, apis):
 
 
 def cmd_run(args):
+    """Runs the chosen shapes and rounds."""
     shapes = [a for a in args if a in SHAPES] or list(SHAPES)
     storages = [a for a in args if a in ("copy", "link")] or ["copy", "link"]
     discovery = [a for a in args if a in ("hints", "scan")]
@@ -1121,6 +1138,7 @@ def cmd_run(args):
 
 
 def main():
+    """Runs the command named on the command line."""
     command = sys.argv[1] if len(sys.argv) > 1 else "run"
     if command == "run":
         sys.exit(cmd_run(sys.argv[2:]))

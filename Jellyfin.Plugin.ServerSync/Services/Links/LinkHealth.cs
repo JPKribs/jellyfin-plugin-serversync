@@ -18,6 +18,9 @@ public sealed class LinkHealth
     private readonly Func<DateTime> _now;
     private readonly ConcurrentDictionary<string, DateTime> _failedAt = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkHealth"/> class.
+    /// </summary>
     public LinkHealth()
         : this(() => DateTime.UtcNow)
     {
@@ -31,12 +34,16 @@ public sealed class LinkHealth
     }
 
     /// <summary>Records that a server did not answer.</summary>
+    /// <param name="serverKey">The server entry's key.</param>
     public void Failed(string serverKey) => _failedAt[serverKey ?? string.Empty] = _now();
 
     /// <summary>Records that a server answered, whatever it said.</summary>
+    /// <param name="serverKey">The server entry's key.</param>
     public void Answered(string serverKey) => _failedAt.TryRemove(serverKey ?? string.Empty, out _);
 
     /// <summary>Whether a server failed to answer within the last minute.</summary>
+    /// <param name="serverKey">The server entry's key, or null.</param>
+    /// <returns><c>true</c> when it did not answer.</returns>
     public bool IsDown(string? serverKey)
     {
         if (string.IsNullOrEmpty(serverKey) || !_failedAt.TryGetValue(serverKey, out var at))

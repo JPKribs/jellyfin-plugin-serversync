@@ -31,7 +31,9 @@ namespace Jellyfin.Plugin.ServerSync.Controllers;
 [Produces(MediaTypeNames.Application.Json)]
 public class HintsController : ControllerBase
 {
-    // The queue view polls every few seconds, so each lane is capped and the counts come from the table.
+    /// <summary>
+    /// The queue view polls every few seconds, so each lane is capped and the counts come from the table.
+    /// </summary>
     private const int OverviewRows = 500;
 
     private readonly OutboundHintStore _outbound;
@@ -54,8 +56,8 @@ public class HintsController : ControllerBase
     /// <param name="outboundWorker">The delivery worker.</param>
     /// <param name="inboundWorker">The apply worker.</param>
     /// <param name="observer">The local change observer.</param>
-    /// <param name="configManager">Plugin configuration.</param>
-    /// <param name="clientFactory">Client factory for peers.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="versions">The version store, for the detail modals.</param>
     /// <param name="libraryManager">Library manager, to name the changes still gathering.</param>
@@ -94,7 +96,7 @@ public class HintsController : ControllerBase
     /// list this server as Sync too. A link that would only fail in the queue is caught at setup.
     /// </summary>
     /// <param name="request">The entry's URL and key, as the connection test takes them.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>What was learned.</returns>
     [HttpPost("CheckPeer")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -107,7 +109,7 @@ public class HintsController : ControllerBase
             : ServerMode.Pull;
         if (string.IsNullOrWhiteSpace(request.ServerUrl) || string.IsNullOrWhiteSpace(request.ApiKey))
         {
-            result.Message = "Enter the server URL and API key first.";
+            result.Message = "Enter the Server URL and API Key.";
             return Ok(result);
         }
 
@@ -147,7 +149,7 @@ public class HintsController : ControllerBase
             catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             {
                 var (_, why) = await client.CheckSyncAccessAsync(cancellationToken).ConfigureAwait(false);
-                result.Message = $"Connected, but its Server Sync refused this call: {why}. Add this server or its user to the whitelist there.";
+                result.Message = $"Connected, but its Server Sync refused this call: {why}. Add this server or its user to the Whitelist there.";
                 return Ok(result);
             }
             catch (Exception ex)
@@ -235,7 +237,9 @@ public class HintsController : ControllerBase
         }
     }
 
-    // The verdict for the chosen direction, given how the peer lists this server.
+    /// <summary>
+    /// The verdict for the chosen direction, given how the peer lists this server.
+    /// </summary>
     private static (string Severity, string Message, string Headline) Verdict(ServerMode mode, PeerLinkResponse? link, string? version, PeerCheckResult result)
     {
         var listing = link is { Listed: true }
@@ -253,8 +257,10 @@ public class HintsController : ControllerBase
         };
     }
 
-    // The same answer as lines with badges: how the other server lists this one, which way changes
-    // travel, what it applies, the access it holds here, and anything that would stop the two talking.
+    /// <summary>
+    /// The same answer as lines with badges: how the other server lists this one, which way changes
+    /// travel, what it applies, the access it holds here, and anything that would stop the two talking.
+    /// </summary>
     private static List<PeerCheckDetail> Details(ServerMode mode, PeerLinkResponse? link, PeerCapabilities capabilities, PeerCheckResult result, TimeSpan skew)
     {
         var rows = new List<PeerCheckDetail>();
@@ -400,7 +406,9 @@ public class HintsController : ControllerBase
         return string.Empty;
     }
 
-    // Adds a caveat to the message. A ready link with a caveat is shown as a warning.
+    /// <summary>
+    /// Adds a caveat to the message. A ready link with a caveat is shown as a warning.
+    /// </summary>
     private static void AppendWarning(PeerCheckResult result, string note)
     {
         if (note.Length == 0)
@@ -415,8 +423,10 @@ public class HintsController : ControllerBase
         }
     }
 
-    // The answer for a link that works on a schedule only: a warning for Pull, which still pulls, and an
-    // error for Push and Sync, which need more than a schedule.
+    /// <summary>
+    /// The answer for a link that works on a schedule only: a warning for Pull, which still pulls, and an
+    /// error for Push and Sync, which need more than a schedule.
+    /// </summary>
     private static ActionResult<PeerCheckResult> Limited(PeerCheckResult result, ServerMode mode, string pullMessage, string otherMessage)
     {
         result.Severity = mode == ServerMode.Pull ? "warn" : "error";
@@ -424,8 +434,10 @@ public class HintsController : ControllerBase
         return result;
     }
 
-    // Jellyfin's own title for a local item, and a second line: the episode under its series, the year
-    // under a film, the user under a watch history change. Falls back to the file or the name.
+    /// <summary>
+    /// Jellyfin's own title for a local item, and a second line: the episode under its series, the year
+    /// under a film, the user under a watch history change. Falls back to the file or the name.
+    /// </summary>
     private static (string Title, string? Subtitle) DisplayOf(MediaBrowser.Controller.Entities.BaseItem? item, HintKind kind, string? userName)
     {
         if (item is null)
@@ -463,7 +475,9 @@ public class HintsController : ControllerBase
         _ => kind.ToLowerInvariant()
     };
 
-    // "a", "a and b", "a, b, and c".
+    /// <summary>
+    /// "a", "a and b", "a, b, and c".
+    /// </summary>
     private static string JoinWords(List<string> words) => words.Count switch
     {
         0 => string.Empty,
@@ -473,7 +487,7 @@ public class HintsController : ControllerBase
     };
 
     private static string FormatSkew(TimeSpan skew)
-        => skew.TotalMinutes >= 1 ? $"{Math.Round(skew.TotalMinutes)} minute(s)" : $"{Math.Round(skew.TotalSeconds)} second(s)";
+        => skew.TotalMinutes >= 1 ? ActivityText.Count((int)Math.Round(skew.TotalMinutes), "minute") : ActivityText.Count((int)Math.Round(skew.TotalSeconds), "second");
 
     /// <summary>Returns both queues and the state of every peer.</summary>
     /// <returns>The queues.</returns>
@@ -569,7 +583,7 @@ public class HintsController : ControllerBase
     /// The version an object carries on this server, for the detail modals: which server last edited it
     /// and when, or nothing when no edit has been recorded since versions began.
     /// </summary>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The kind of object.</param>
     /// <param name="localItemId">The local item id, for metadata, content, and history.</param>
     /// <param name="localUserId">The local user id, for history and users.</param>
     /// <param name="name">The person's name, for people.</param>
@@ -593,7 +607,7 @@ public class HintsController : ControllerBase
         };
         if (key is null)
         {
-            return BadRequest("The ids for that kind are missing");
+            return BadRequest("The ids for that kind are missing.");
         }
 
         var version = _versions.Get(kind, key);
@@ -610,7 +624,7 @@ public class HintsController : ControllerBase
     }
 
     /// <summary>Raises every gathered local change now, re-reads what each peer accepts, delivers, and applies, instead of waiting for the workers.</summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>No content.</returns>
     [HttpPost("Run")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -637,7 +651,7 @@ public class HintsController : ControllerBase
     /// on are delivered, and inbound rows whose apply kept failing are applied. For a server that was
     /// down, or a fault that is fixed, long enough ago that its changes stopped being tried.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>How many rows were put back, in all and each way.</returns>
     [HttpPost("Failed/Retry")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -689,180 +703,4 @@ public class HintsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult RemoveInbound([FromRoute] long id) => _inboundWorker.Dismiss(id) ? NoContent() : NotFound();
-}
-
-/// <summary>The version an object carries, as the detail modals show it.</summary>
-public class ObjectVersionDto
-{
-    /// <summary>Gets or sets the id of the server where the edit was made.</summary>
-    public string ServerId { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets that server's display name, or this server's name.</summary>
-    public string ServerName { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets when the edit was made, in UTC.</summary>
-    public DateTime Timestamp { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether the edit was made on this server.</summary>
-    public bool IsThisServer { get; set; }
-}
-
-/// <summary>Both queues and every peer's delivery state.</summary>
-public class HintsOverview
-{
-    /// <summary>Gets or sets how many local changes are still gathering before they become hints.</summary>
-    public int Pending { get; set; }
-
-    /// <summary>Gets or sets how many local changes since start matched no mapping on any Push or Sync server.</summary>
-    public int Unmatched { get; set; }
-
-    /// <summary>Gets or sets the last such change, described.</summary>
-    public string? LastUnmatched { get; set; }
-
-    /// <summary>Gets or sets the changes still gathering before they become hints, newest edit first.</summary>
-    public List<GatheringDto> Gathering { get; set; } = new();
-
-    /// <summary>Gets or sets the newest outbound rows, at most a few hundred.</summary>
-    public List<OutboundHintDto> Outbound { get; set; } = new();
-
-    /// <summary>Gets or sets how many outbound rows exist per state, by state name.</summary>
-    public Dictionary<string, int> OutboundCounts { get; set; } = new();
-
-    /// <summary>Gets or sets the newest inbound rows, at most a few hundred.</summary>
-    public List<InboundHintDto> Inbound { get; set; } = new();
-
-    /// <summary>Gets or sets how many inbound rows exist.</summary>
-    public int InboundCount { get; set; }
-
-    /// <summary>Gets or sets how many inbound rows have failed to apply at least once and wait to be tried again.</summary>
-    public int InboundFailingCount { get; set; }
-
-    /// <summary>Gets or sets the delivery state of every server this one sends to.</summary>
-    public List<PeerHintStateDto> Peers { get; set; } = new();
-}
-
-/// <summary>One change still gathering, as shown to the operator.</summary>
-public class GatheringDto
-{
-    /// <summary>Gets or sets the kind.</summary>
-    public HintKind Kind { get; set; }
-
-    /// <summary>Gets or sets what changed, named.</summary>
-    public string Change { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets Jellyfin's title for the item, or the person or user.</summary>
-    public string Title { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the second line: the episode, the year, or null.</summary>
-    public string? Subtitle { get; set; }
-
-    /// <summary>Gets or sets the item's Jellyfin type, so the view can pick the poster's shape.</summary>
-    public string? ItemType { get; set; }
-
-    /// <summary>Gets or sets the local item id, for its poster.</summary>
-    public string? ItemId { get; set; }
-
-    /// <summary>Gets or sets the local user id, for the avatar on a watch history change.</summary>
-    public string? UserId { get; set; }
-
-    /// <summary>Gets or sets the local username.</summary>
-    public string? UserName { get; set; }
-
-    /// <summary>Gets or sets when it was last edited, in UTC.</summary>
-    public DateTime EditedAt { get; set; }
-
-    /// <summary>Gets or sets when it is sent unless edited again, in UTC.</summary>
-    public DateTime DueAt { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether a hand made edit is among the gathered changes.</summary>
-    public bool Recorded { get; set; } = true;
-}
-
-/// <summary>One outbound row as shown to the operator.</summary>
-public class OutboundHintDto
-{
-    /// <summary>Gets or sets the row id.</summary>
-    public long Id { get; set; }
-
-    /// <summary>Gets or sets Jellyfin's title for the item, or the person or user.</summary>
-    public string Title { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the second line: the episode, the year, or null.</summary>
-    public string? Subtitle { get; set; }
-
-    /// <summary>Gets or sets the item's Jellyfin type, so the view can pick the poster's shape.</summary>
-    public string? ItemType { get; set; }
-
-    /// <summary>Gets or sets the local item id, for its poster.</summary>
-    public string? ItemId { get; set; }
-
-    /// <summary>Gets or sets the local user id, for the avatar on a watch history change.</summary>
-    public string? UserId { get; set; }
-
-    /// <summary>Gets or sets the hint id.</summary>
-    public string HintId { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the peer's entry key.</summary>
-    public string PeerKey { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the peer's display name.</summary>
-    public string PeerName { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the kind.</summary>
-    public HintKind Kind { get; set; }
-
-    /// <summary>Gets or sets this server's key for the object.</summary>
-    public string Key { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the item's local path.</summary>
-    public string? ItemPath { get; set; }
-
-    /// <summary>Gets or sets the local username.</summary>
-    public string? UserName { get; set; }
-
-    /// <summary>Gets or sets the state.</summary>
-    public OutboundState State { get; set; }
-
-    /// <summary>Gets or sets how many deliveries have been tried.</summary>
-    public int Attempts { get; set; }
-
-    /// <summary>Gets or sets when the next delivery may be tried.</summary>
-    public DateTime NextAttempt { get; set; }
-
-    /// <summary>Gets or sets when the peer accepted the hint.</summary>
-    public DateTime? SentAt { get; set; }
-
-    /// <summary>Gets or sets the last error.</summary>
-    public string? LastError { get; set; }
-
-    /// <summary>Gets or sets when the row was created.</summary>
-    public DateTime CreatedAt { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether the change was made by hand rather than by a provider.</summary>
-    public bool Recorded { get; set; } = true;
-}
-
-/// <summary>Delivery state of one peer as shown to the operator.</summary>
-public class PeerHintStateDto
-{
-    /// <summary>Gets or sets the entry key.</summary>
-    public string Key { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the display name.</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets when delivery was last tried.</summary>
-    public DateTime? LastAttempt { get; set; }
-
-    /// <summary>Gets or sets until when the peer is paused, or null.</summary>
-    public DateTime? PausedUntil { get; set; }
-
-    /// <summary>Gets or sets why the last delivery did not go through.</summary>
-    public string? Reason { get; set; }
-
-    /// <summary>
-    /// Gets or sets the kinds this server sends to the peer, which are the modules selected there, or
-    /// null when the peer has not said yet, in which case everything is sent.
-    /// </summary>
-    public List<string>? Sends { get; set; }
 }

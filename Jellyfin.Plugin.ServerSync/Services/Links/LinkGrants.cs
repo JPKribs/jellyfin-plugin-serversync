@@ -47,6 +47,9 @@ public sealed class LinkGrants
     // Per link, the live grants by user. The probe's grant is keyed by the empty id.
     private readonly Dictionary<string, Dictionary<Guid, Entry>> _grants = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkGrants"/> class.
+    /// </summary>
     public LinkGrants()
         : this(() => DateTime.UtcNow)
     {
@@ -60,6 +63,9 @@ public sealed class LinkGrants
     }
 
     /// <summary>Records that a source allowed a user to play a link, and which server that was.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="userId">The user the source allowed.</param>
+    /// <param name="route">The server the playback streams from, or null for the link's own.</param>
     public void Grant(string linkId, Guid userId, LinkRoute? route = null)
     {
         lock (_lock)
@@ -74,6 +80,9 @@ public sealed class LinkGrants
     /// The server a user's playback of a link streams from, or null for the link's own server. The
     /// probe's grant is named by the empty id.
     /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="userId">The user playing.</param>
+    /// <returns>The route, or null.</returns>
     public LinkRoute? RouteFor(string linkId, Guid userId)
     {
         lock (_lock)
@@ -88,6 +97,9 @@ public sealed class LinkGrants
     /// Moves a live grant to another server, after its own failed partway and another stood in. A
     /// grant that has lapsed is not brought back.
     /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="userId">The user playing.</param>
+    /// <param name="route">The server that stood in.</param>
     public void Reroute(string linkId, Guid userId, LinkRoute route)
     {
         lock (_lock)
@@ -100,9 +112,12 @@ public sealed class LinkGrants
     }
 
     /// <summary>
-    /// Keeps a user's grant alive while they stream. False when the user holds no live grant, so the
+    /// Keeps a user's grant alive while they stream. <c>false</c> when the user holds no live grant, so the
     /// request was never allowed by the source and must not reach the link.
     /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="userId">The user streaming.</param>
+    /// <returns><c>true</c> when the user holds a live grant.</returns>
     public bool Refresh(string linkId, Guid userId)
     {
         lock (_lock)
@@ -118,6 +133,7 @@ public sealed class LinkGrants
     }
 
     /// <summary>Lets this server's own media probe read a link nobody is playing.</summary>
+    /// <param name="linkId">The link's id.</param>
     public void GrantProbe(string linkId)
     {
         lock (_lock)
@@ -131,6 +147,8 @@ public sealed class LinkGrants
     }
 
     /// <summary>The live grant seen most recently for a link, marked as used, or null when nobody may read it now.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <returns>The grant, or null.</returns>
     public LinkGrant? Use(string linkId)
     {
         lock (_lock)
@@ -164,9 +182,12 @@ public sealed class LinkGrants
     }
 
     /// <summary>
-    /// Counts bytes read under a link's probe grant. False once the grant has read as much as a probe
+    /// Counts bytes read under a link's probe grant. <c>false</c> once the grant has read as much as a probe
     /// may, or is gone, which ends the read.
     /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="bytes">The bytes read.</param>
+    /// <returns><c>true</c> while the read may go on.</returns>
     public bool SpendProbe(string linkId, long bytes)
     {
         lock (_lock)

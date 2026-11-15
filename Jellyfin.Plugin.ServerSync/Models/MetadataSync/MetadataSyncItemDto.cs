@@ -13,8 +13,6 @@ public class MetadataSyncItemDto
     /// </summary>
     public long Id { get; set; }
 
-    // ===== Item Identification =====
-
     /// <summary>
     /// Gets or sets the source library ID.
     /// </summary>
@@ -60,8 +58,6 @@ public class MetadataSyncItemDto
     /// </summary>
     public string? LocalPath { get; set; }
 
-    // ===== Category Values (for modal display) =====
-
     /// <summary>
     /// Gets or sets the source metadata value (JSON).
     /// </summary>
@@ -101,8 +97,6 @@ public class MetadataSyncItemDto
     /// Gets or sets the local studios value (JSON array of studio names).
     /// </summary>
     public string? LocalStudiosValue { get; set; }
-
-    // ===== Change Detection =====
 
     /// <summary>
     /// Gets or sets whether metadata has changes.
@@ -151,8 +145,6 @@ public class MetadataSyncItemDto
     /// </summary>
     public string? MetadataChangesDetail { get; set; }
 
-    // ===== Source Server =====
-
     /// <summary>
     /// Gets or sets the source server URL (for image display).
     /// </summary>
@@ -160,8 +152,6 @@ public class MetadataSyncItemDto
 
     /// <summary>Gets or sets the configured server entry the row came from.</summary>
     public string? ServerKey { get; set; }
-
-    // ===== Sync Status =====
 
     /// <summary>
     /// Gets or sets the sync status.

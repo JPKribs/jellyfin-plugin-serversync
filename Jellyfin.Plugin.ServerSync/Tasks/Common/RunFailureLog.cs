@@ -27,6 +27,12 @@ internal static class RunFailureLog
     /// module and phase together, so a Refresh failure and a Sync failure of the same module are kept
     /// side by side and neither phase's clean run hides the other's failure.
     /// </summary>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="moduleKey">The sync type's mutex key, such as Content or History.</param>
+    /// <param name="phase">Refresh or Sync.</param>
+    /// <param name="reason">Why the run failed.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="taskName">The task's name, for log entries.</param>
     public static void Record(
         IPluginConfigurationManager configManager,
         string moduleKey,
@@ -64,6 +70,11 @@ internal static class RunFailureLog
     /// Clears the recorded failure for a module's phase after a clean run of that phase. The other
     /// phase's entry is left in place.
     /// </summary>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="moduleKey">The sync type's mutex key, such as Content or History.</param>
+    /// <param name="phase">Refresh or Sync.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="taskName">The task's name, for log entries.</param>
     public static void Clear(
         IPluginConfigurationManager configManager,
         string moduleKey,
@@ -94,6 +105,9 @@ internal static class RunFailureLog
     /// administrator has not been told about. Each is marked as told, so it is raised once, and is
     /// raised again only after a clean run has cleared it and it comes back.
     /// </summary>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="standing">How long a failure must stand before it counts.</param>
+    /// <returns>The failures to raise now.</returns>
     public static IReadOnlyList<SyncRunFailure> TakeUnreported(IPluginConfigurationManager configManager, TimeSpan standing)
     {
         lock (_lock)

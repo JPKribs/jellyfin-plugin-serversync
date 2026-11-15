@@ -1,4 +1,5 @@
-<!-- STORAGE - PAGE -->
+<!-- serversync_storage.html -->
+<!-- The Storage tab, how each mapped library keeps its files, and the permanent copies of the Link libraries. -->
 
 <div id="ServerSyncStoragePage" data-role="page" class="page type-interior pluginConfigurationPage withTabs"
      data-require="emby-input,emby-button,emby-select,emby-checkbox"
@@ -8,19 +9,20 @@
             <form id="ServerSyncStorageForm">
                 <div class="verticalSection verticalSection-extrabottompadding">
 
-                    <!-- SECTION: Configuration Header -->
+                    <!-- Storage Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
                         <h1 class="sectionTitle">Storage</h1>
                     </div>
-                    <div class="fieldDescription mb-md">How each mapped library keeps its files: copies or links, what it always keeps, and which items it syncs. Libraries are mapped on the Servers tab.</div>
+                    <div class="fieldDescription serversync-mb-md">Sets how each mapped library keeps its files, and which items it syncs. Libraries are mapped on the Servers tab.</div>
 
-                    <div id="storageDisabled" class="jpk-neutral mb-md hidden">Content, history, and metadata sync are off, so nothing here applies. Turn one on under Settings.</div>
-                    <div id="storageFiltersOnly" class="jpk-neutral mb-md hidden">Content sync is off, so only each library's filter and history setting apply here.</div>
+                    <div id="storageStatus" class="jpk-status-text" role="status"></div>
+                    <div id="storageDisabled" class="jpk-neutral serversync-mb-md hidden">Content, history, and metadata sync are off, so nothing here applies. Turn one on under Settings.</div>
+                    <div id="storageFiltersOnly" class="jpk-neutral serversync-mb-md hidden">Content sync is off, so only each library's filter and history setting apply here.</div>
 
                     <div id="storageContent" class="hidden">
 
-                        <!-- SECTION: Server -->
+                        <!-- Server picker -->
 
                         <div id="storageServerContainer" class="selectContainer">
                             <label for="selStorageServer">Server</label>
@@ -28,7 +30,7 @@
                         </div>
                         <div id="storageNoServers" class="jpk-empty-section hidden">No server has library mappings yet. Map libraries on the Servers tab.</div>
 
-                        <!-- COLLAPSIBLE SECTION: Libraries -->
+                        <!-- Libraries -->
 
                         <div id="storageLibrariesSection" class="jpk-collapsible-section hidden">
                             <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="storageLibrariesContent">
@@ -36,18 +38,19 @@
                                 <span class="jpk-collapsible-icon">&#9660;</span>
                             </button>
                             <div id="storageLibrariesContent" class="jpk-collapsible-content collapsed">
-                                <div class="fieldDescription mb-md">One card per enabled library mapping of this server.</div>
+                                <div class="fieldDescription serversync-mb-md">Shows one card for each enabled library mapping of this server.</div>
                                 <div id="storageLibrariesContainer"></div>
                                 <div id="storageNoLibraries" class="jpk-empty-section hidden">This server has no enabled library mappings. Map libraries on the Servers tab.</div>
                                 <div class="jpk-collapsible-actions">
                                     <button is="emby-button" type="button" id="btnSaveStorage" class="raised jpk-button-submit jpk-button-small">
                                         <span>Save</span>
                                     </button>
+                                    <span id="saveStorageStatus" class="jpk-status-text" role="status"></span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- COLLAPSIBLE SECTION: Permanent Copies -->
+                        <!-- Permanent Copies -->
 
                         <div id="keptCopiesSection" class="jpk-collapsible-section hidden">
                             <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="keptCopiesContent">
@@ -55,7 +58,8 @@
                                 <span class="jpk-collapsible-icon">&#9660;</span>
                             </button>
                             <div id="keptCopiesContent" class="jpk-collapsible-content collapsed">
-                                <div class="fieldDescription mb-md">Full copies in this server's Link libraries. Turning one back into a link moves the copy into the link cache.</div>
+                                <div class="fieldDescription serversync-mb-md">Lists the full copies in this server's Link libraries. Turning one back into a link moves the copy into the link cache.</div>
+                                <div id="keptCopiesStatus" class="jpk-status-text serversync-mb-md" role="status"></div>
                                 <div id="keptCopiesTableContainer"></div>
                             </div>
                         </div>
@@ -67,7 +71,7 @@
         </div>
     </div>
 
-    <!-- STYLES: Shared -->
+    <!-- Styles -->
     <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
     <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
 

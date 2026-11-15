@@ -1,4 +1,5 @@
-<!-- SERVERS - PAGE -->
+<!-- serversync_servers.html -->
+<!-- The Servers tab, the map of servers and an editor with a step for each part of one server's setup. -->
 
 <div id="ServerSyncServersPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs"
      data-require="emby-input,emby-button,emby-select,emby-checkbox"
@@ -8,27 +9,28 @@
             <form id="ServerSyncServersForm">
                 <div class="verticalSection verticalSection-extrabottompadding">
 
-                    <!-- SECTION: Configuration Header -->
+                    <!-- Servers Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
                         <h1 class="sectionTitle">Servers</h1>
                     </div>
-                    <div id="poolMap" class="ssPoolMap hidden" role="img"></div>
-                    <div class="fieldDescription mb-md">Higher servers win when two offer the same item. Drag to reorder.</div>
+                    <div id="poolMap" class="serversync-pool-map hidden" role="img"></div>
+                    <div class="fieldDescription serversync-mb-md">Ranks servers from the top down. Drag a server to move it.</div>
 
-                    <!-- SECTION: Servers -->
+                    <!-- Servers -->
 
                     <div class="jpk-section">
                         <div id="serversConfigContent" class="jpk-section-content">
 
-                            <!-- Server list, in priority order -->
+                            <!-- Server list, in rank order -->
                             <div id="serverList" class="jpk-card-list"></div>
                             <div id="serverEmpty" class="jpk-empty-section hidden">No servers yet. Add one below.</div>
                             <div class="jpk-card-list-actions">
-                                <button is="emby-button" type="button" id="btnAddServer" class="raised jpk-icon-btn jpk-button-submit" title="Add a server">
+                                <button is="emby-button" type="button" id="btnAddServer" class="raised jpk-icon-btn jpk-button-submit">
                                     <span class="material-icons" aria-hidden="true">add</span>
                                     <span>Add Server</span>
                                 </button>
+                                <span id="serverListStatus" class="jpk-status-text" role="status"></span>
                             </div>
 
                             <!-- The editor lives inside whichever card is open. It parks here while the list re-renders. -->
@@ -46,7 +48,7 @@
                                         <div class="inputContainer">
                                             <label for="txtServerName">Name</label>
                                             <input is="emby-input" type="text" id="txtServerName" placeholder="Default" />
-                                            <div class="fieldDescription">Shown in tables and logs. Empty uses the server's own name.</div>
+                                            <div class="fieldDescription">Names the server in tables and logs. Empty uses the server's own name.</div>
                                         </div>
 
                                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -54,19 +56,19 @@
                                                 <input type="checkbox" is="emby-checkbox" id="chkServerEnabled" />
                                                 <span class="checkboxLabel">Enabled</span>
                                             </label>
-                                            <div class="fieldDescription checkboxFieldDescription">Off keeps the settings but skips this server.</div>
+                                            <div class="fieldDescription checkboxFieldDescription">Keeps the settings and skips this server while off.</div>
                                         </div>
 
                                         <div class="inputContainer">
                                             <label for="txtSourceServerUrl">Server URL</label>
                                             <input is="emby-input" type="text" id="txtSourceServerUrl" />
-                                            <div class="fieldDescription">URL this server connects to, such as http://server:8096.</div>
+                                            <div class="fieldDescription">Sets the URL this server uses to reach that one, such as http://server:8096.</div>
                                         </div>
 
                                         <div class="inputContainer">
                                             <label for="txtSourceServerExternalUrl">External URL</label>
                                             <input is="emby-input" type="text" id="txtSourceServerExternalUrl" placeholder="Default" />
-                                            <div class="fieldDescription">Its public address, if different. Empty uses the Server URL.</div>
+                                            <div class="fieldDescription">Sets the URL a browser uses for that server, when it differs. Empty uses the Server URL.</div>
                                         </div>
 
                                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -74,7 +76,7 @@
                                                 <input type="checkbox" is="emby-checkbox" id="chkAllowPrivateNetwork" checked />
                                                 <span class="checkboxLabel">Allow Private Network Address</span>
                                             </label>
-                                            <div class="fieldDescription checkboxFieldDescription">Accept a loopback or LAN address.</div>
+                                            <div class="fieldDescription checkboxFieldDescription">Lets the Server URL be a loopback or LAN address.</div>
                                         </div>
 
                                     </div>
@@ -88,7 +90,7 @@
                                     </button>
                                     <div id="serverStepAuthentication" class="jpk-collapsible-content collapsed">
 
-                                        <div id="serverInfoContainer" class="jpk-record-card hidden mb-md">
+                                        <div id="serverInfoContainer" class="jpk-record-card hidden serversync-mb-md">
                                             <div class="jpk-record-row">
                                                 <span class="jpk-record-label">Server</span>
                                                 <span id="txtSourceServerName" class="jpk-mono"></span>
@@ -120,11 +122,11 @@
                                             <div class="inputContainer">
                                                 <label for="txtSourceServerApiKey">API Key</label>
                                                 <input is="emby-input" type="password" id="txtSourceServerApiKey" />
-                                                <div class="fieldDescription">The key is stored encrypted and never shown again.</div>
+                                                <div class="fieldDescription">Stores the key encrypted and never shows it again.</div>
                                             </div>
                                         </div>
 
-                                        <div id="authUserPanel" class="jpk-bulk-edit-bar ssPanel hidden">
+                                        <div id="authUserPanel" class="jpk-bulk-edit-bar serversync-panel hidden">
                                             <div id="authSignedIn" class="jpk-info hidden">Signed in as <strong id="authSignedInUser"></strong>. Sign in again to replace the token.</div>
                                             <div class="jpk-edit-line">
                                                 <div class="jpk-field">
@@ -136,7 +138,7 @@
                                                     <input is="emby-input" type="password" id="txtAuthPassword" />
                                                 </div>
                                             </div>
-                                            <div class="flex align-items-center gap-sm">
+                                            <div class="flex align-items-center serversync-gap-sm">
                                                 <button is="emby-button" type="button" id="btnGenerateToken" class="raised jpk-button-submit jpk-button-small">
                                                     <span>Generate Token</span>
                                                 </button>
@@ -144,7 +146,7 @@
                                             </div>
                                         </div>
 
-                                        <div id="savedSecretNote" class="fieldDescription text-warn hidden" role="status"></div>
+                                        <div id="savedSecretNote" class="jpk-warn serversync-mb-md hidden" role="status"></div>
 
                                         <div class="jpk-collapsible-actions">
                                             <button is="emby-button" type="button" id="btnTestConnection" class="raised jpk-button-small">
@@ -153,15 +155,15 @@
                                             <span id="connectionStatus" class="jpk-status-text"></span>
                                         </div>
 
-                                        <div id="accessUnknown" class="jpk-neutral mt-md hidden">Test the connection to see what this key can do.</div>
-                                        <div id="accessSummary" class="mt-md hidden">
-                                            <div id="accessHeadline" class="mb-md"></div>
-                                            <div id="accessRows" class="ssAccessGrid mb-md"></div>
-                                            <div class="fieldDescription">What that server reads here depends on its own key. Check Link shows it.</div>
+                                        <div id="accessUnknown" class="jpk-neutral serversync-mt-md hidden">Test the connection to see what this key can do.</div>
+                                        <div id="accessSummary" class="serversync-mt-md hidden">
+                                            <div id="accessHeadline" class="serversync-mb-md"></div>
+                                            <div id="accessRows" class="serversync-access-grid serversync-mb-md"></div>
+                                            <div class="fieldDescription">Select Check Link to see what that server's own key reads here.</div>
                                         </div>
 
                                         <h3 class="jpk-subsection-title">Direction</h3>
-                                        <div class="jpk-choice-group" id="modeChoices" role="radiogroup" aria-label="Mode">
+                                        <div class="jpk-choice-group" id="modeChoices" role="radiogroup" aria-label="Direction">
                                             <label class="jpk-choice" data-mode="Pull">
                                                 <input type="radio" name="serverMode" value="Pull" />
                                                 <span class="jpk-choice-name">Pull</span>
@@ -178,18 +180,18 @@
                                                 <span class="jpk-choice-text">Pull and Push together. Needs Server Sync there set to Sync.</span>
                                             </label>
                                         </div>
-                                        <div id="modeLimited" class="jpk-warn mt-sm hidden">A standard user must be on that server's whitelist.</div>
+                                        <div id="modeLimited" class="jpk-warn serversync-mt-sm hidden">A standard user must be on that server's whitelist.</div>
 
                                         <div id="peerCheckArea" class="hidden">
-                                            <div class="jpk-collapsible-actions mt-sm">
+                                            <div class="jpk-collapsible-actions serversync-mt-sm">
                                                 <button is="emby-button" type="button" id="btnCheckPeer" class="raised jpk-button-small">
                                                     <span>Check Link</span>
                                                 </button>
                                                 <span id="peerCheckStatus" class="jpk-status-text"></span>
                                             </div>
-                                            <div id="peerCheckResult" class="mt-md hidden">
-                                                <div id="peerCheckHeadline" class="mb-md"></div>
-                                                <div id="peerCheckRows" class="ssAccessGrid"></div>
+                                            <div id="peerCheckResult" class="serversync-mt-md hidden">
+                                                <div id="peerCheckHeadline" class="serversync-mb-md"></div>
+                                                <div id="peerCheckRows" class="serversync-access-grid"></div>
                                             </div>
                                         </div>
                                     </div>
@@ -198,7 +200,7 @@
                                 <!-- Step 3: Stream. Only for Push and Sync servers, since a Pull server may never link here. -->
                                 <div class="jpk-collapsible-section hidden" id="serverStepStreamSection">
                                     <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepStream">
-                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">3</span> Stream</span>
+                                        <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">3</span> Linking</span>
                                         <span class="jpk-collapsible-icon">&#9660;</span>
                                     </button>
                                     <div id="serverStepStream" class="jpk-collapsible-content collapsed">
@@ -209,20 +211,20 @@
                                             </label>
                                             <div class="fieldDescription checkboxFieldDescription" id="allowLinkingDescription">Let that server stream files from here for libraries it maps as Link.</div>
                                         </div>
-                                        <div id="linkingNeedsPlugin" class="jpk-warn hidden mb-md"></div>
+                                        <div id="linkingNeedsPlugin" class="jpk-warn hidden serversync-mb-md"></div>
 
                                         <div id="linkLimits" class="hidden">
                                             <div class="inputContainer">
                                                 <label for="txtLinkMaxStreams">Link Streams At Once</label>
                                                 <input is="emby-input" type="number" id="txtLinkMaxStreams" min="0" max="1000" />
-                                                <div class="fieldDescription">Most streams that server may run at once. 0 is no limit.</div>
+                                                <div class="fieldDescription">Sets the most streams that server may run at once. 0 is no limit.</div>
                                             </div>
                                             <div class="checkboxContainer checkboxContainer-withDescription" id="countOwnSessionsContainer">
                                                 <label class="emby-checkbox-label">
                                                     <input type="checkbox" is="emby-checkbox" id="chkLinkCountOwnSessions" />
                                                     <span class="checkboxLabel">Count Their Own Playback</span>
                                                 </label>
-                                                <div class="fieldDescription checkboxFieldDescription">A user's own playback here counts toward the limit on their user mapping.</div>
+                                                <div class="fieldDescription checkboxFieldDescription">Counts a user's own playback here toward the limit on their user mapping.</div>
                                             </div>
                                             <div class="checkboxContainer checkboxContainer-withDescription">
                                                 <label class="emby-checkbox-label">
@@ -234,7 +236,7 @@
                                             <div class="selectContainer">
                                                 <label for="selLinkFallbackUser">Unmapped Users</label>
                                                 <select is="emby-select" id="selLinkFallbackUser"></select>
-                                                <div class="fieldDescription">Who streams for a user on that server with no user mapping here.</div>
+                                                <div class="fieldDescription">Sets who streams for a user on that server with no user mapping here.</div>
                                             </div>
                                         </div>
                                     </div>
@@ -247,9 +249,9 @@
                                         <span class="jpk-collapsible-icon">&#9660;</span>
                                     </button>
                                     <div id="serverStepLibraries" class="jpk-collapsible-content collapsed">
-                                        <div id="librariesLocked" class="jpk-neutral mb-md">Test the connection in step 2 to load libraries.</div>
+                                        <div id="librariesLocked" class="jpk-neutral serversync-mb-md">Test the connection in step 2 to load libraries.</div>
                                         <div id="librariesSection" class="hidden">
-                                            <div class="fieldDescription mb-md">Map that server's libraries to local ones. Storage mode, Always Keep, and filters are on the Storage tab.</div>
+                                            <div class="fieldDescription serversync-mb-md">Map that server's libraries to local ones. Storage, Always Keep, and filters are on the Storage tab.</div>
                                             <div id="libraryMappingsContainer"></div>
                                             <div class="jpk-collapsible-actions">
                                                 <button is="emby-button" type="button" id="btnAddMapping" class="raised jpk-secondary jpk-button-small">
@@ -260,17 +262,17 @@
                                     </div>
                                 </div>
 
-                                <!-- Step 4: Users -->
+                                <!-- Step 5: Users -->
                                 <div class="jpk-collapsible-section">
                                     <button type="button" class="jpk-collapsible-header collapsed" aria-expanded="false" data-target="serverStepUsers">
                                         <span class="jpk-collapsible-title jpk-step-title"><span class="jpk-step-number">5</span> Users</span>
                                         <span class="jpk-collapsible-icon">&#9660;</span>
                                     </button>
                                     <div id="serverStepUsers" class="jpk-collapsible-content collapsed">
-                                        <div id="usersLocked" class="jpk-neutral mb-md">Test the connection in step 2 to load users.</div>
+                                        <div id="usersLocked" class="jpk-neutral serversync-mb-md">Test the connection in step 2 to load users.</div>
                                         <div id="usersSection" class="hidden">
-                                            <div class="fieldDescription mb-md">Map that server's users to local ones. With Allow Linking on, each mapping can also cap the local user's link streams and speed.</div>
-                                            <div id="usersLimited" class="jpk-warn hidden mb-md"></div>
+                                            <div class="fieldDescription serversync-mb-md">Map that server's users to local ones. With Allow Linking on, each mapping can also cap the local user's link streams and speed.</div>
+                                            <div id="usersLimited" class="jpk-warn hidden serversync-mb-md"></div>
                                             <div id="userMappingsContainer"></div>
                                             <div class="jpk-collapsible-actions">
                                                 <button is="emby-button" type="button" id="btnAddUserMapping" class="raised jpk-secondary jpk-button-small">
@@ -282,11 +284,12 @@
                                 </div>
 
                                 <!-- Editor footer -->
-                                <div class="ssEditorFooter">
+                                <div class="serversync-editor-footer">
                                     <button is="emby-button" type="button" id="btnSaveServer" class="raised jpk-button-submit jpk-button-small">
                                         <span>Save Server</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnDeleteServer" class="raised jpk-button-destructive jpk-button-small" title="Remove this server">
+                                    <span id="saveServerStatus" class="serversync-save-status jpk-status-text" role="status"></span>
+                                    <button is="emby-button" type="button" id="btnDeleteServer" class="raised jpk-button-destructive jpk-button-small">
                                         <span>Remove Server</span>
                                     </button>
                                 </div>
@@ -300,7 +303,7 @@
         </div>
     </div>
 
-    <!-- STYLES: Shared -->
+    <!-- Styles -->
     <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
     <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
 

@@ -1,4 +1,6 @@
 #!/bin/bash
+# Builds the plugin and packs it into dist/ as a zip with its checksum and a bundled meta.json.
+# Run it from the repository root with ./build.sh [Release|Debug]. The version comes from build.yaml.
 
 set -e
 
@@ -225,13 +227,13 @@ main() {
         fi
     done < build.yaml
 
-    # CRITICAL: meta.json needs "name". Jellyfin 12 groups discovered plugins by
+    # meta.json needs "name". Jellyfin 12 groups discovered plugins by
     # name, so every nameless manifest collapses into one empty-name entry and all
     # but one of those plugins silently fails to load.
     # Bundle the plugin image AND a meta.json inside the package so the installed
     # plugin icon (/Plugins/{id}/{ver}/Image) is served straight from disk with
-    # ZERO dependency on the server downloading imageUrl at install time.
-    # CRITICAL: meta.json "version" must be 4-part to match the assembly version
+    # no dependency on the server downloading imageUrl at install time.
+    # meta.json "version" must be 4-part to match the assembly version
     # the web UI uses in the image URL (.NET pads to 4 parts), or GetPlugin()
     # returns null and the image 404s.
     local logo_src="$PROJECT_DIR/Assets/Logo.png"
@@ -345,7 +347,7 @@ with zipfile.ZipFile('$zip_path', 'w') as zf:
     [[ "$md5_hash" != "N/A" ]] && echo "  Checksum: $checksum_file"
     
     echo
-    log "SUCCESS" "Build completed successfully!"
+    log "SUCCESS" "Build completed."
     log "INFO" "Package ready for Jellyfin plugin installation"
 }
 

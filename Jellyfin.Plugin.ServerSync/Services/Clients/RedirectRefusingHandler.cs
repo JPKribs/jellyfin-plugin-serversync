@@ -6,8 +6,13 @@ using System.Threading.Tasks;
 
 namespace Jellyfin.Plugin.ServerSync.Services;
 
+/// <summary>
+/// Refuses to follow a redirect and fails with the address it pointed to, so a request never carries
+/// its credentials to a host other than the one saved on the server entry.
+/// </summary>
 public sealed class RedirectRefusingHandler : DelegatingHandler
 {
+    /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);

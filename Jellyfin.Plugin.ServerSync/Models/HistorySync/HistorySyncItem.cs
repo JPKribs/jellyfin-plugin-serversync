@@ -15,8 +15,6 @@ namespace Jellyfin.Plugin.ServerSync.Models.HistorySync;
 /// </summary>
 public class HistorySyncItem : SyncRecord
 {
-    // ===== Mapping Context =====
-
     /// <summary>
     /// Gets or sets the source server user ID.
     /// </summary>
@@ -36,8 +34,6 @@ public class HistorySyncItem : SyncRecord
     /// Gets or sets the local library ID.
     /// </summary>
     public string LocalLibraryId { get; set; } = string.Empty;
-
-    // ===== Item Identification =====
 
     /// <summary>
     /// Gets or sets the source server item ID, second component of the
@@ -65,8 +61,6 @@ public class HistorySyncItem : SyncRecord
     /// </summary>
     public string? LocalPath { get; set; }
 
-    // ===== Source History State =====
-
     /// <summary>
     /// Gets or sets whether the item is marked as played on source server.
     /// </summary>
@@ -91,8 +85,6 @@ public class HistorySyncItem : SyncRecord
     /// Gets or sets whether the item is a favorite on source server.
     /// </summary>
     public bool? SourceIsFavorite { get; set; }
-
-    // ===== Local History State =====
 
     /// <summary>
     /// Gets or sets whether the item is marked as played locally.
@@ -119,8 +111,6 @@ public class HistorySyncItem : SyncRecord
     /// </summary>
     public bool? LocalIsFavorite { get; set; }
 
-    // ===== Merged/Target State =====
-
     /// <summary>
     /// Gets or sets the merged played status to apply.
     /// </summary>
@@ -145,8 +135,6 @@ public class HistorySyncItem : SyncRecord
     /// Gets or sets the merged favorite status to apply.
     /// </summary>
     public bool? MergedIsFavorite { get; set; }
-
-    // ===== Negotiated base =====
 
     /// <summary>
     /// Gets or sets the played state both servers last agreed on. Only recorded when history sync
@@ -207,8 +195,6 @@ public class HistorySyncItem : SyncRecord
         NegotiatedIsFavorite = previous.NegotiatedIsFavorite;
         NegotiatedAt = previous.NegotiatedAt;
     }
-
-    // ===== Source-state bundle =====
 
     /// <summary>
     /// Source-side watch state rolled into one JSON blob. Its

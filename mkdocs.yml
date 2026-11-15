@@ -61,3 +61,5 @@ nav:
       - Permissions: Permissions.md
       - API: API.md
       - Versioning: Versioning.md
+  - Development:
+      - Architecture: Architecture.md

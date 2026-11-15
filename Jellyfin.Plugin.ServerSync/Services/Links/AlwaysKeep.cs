@@ -19,7 +19,7 @@ public static class AlwaysKeep
     /// </summary>
     /// <param name="mapping">The library mapping the file comes through.</param>
     /// <param name="sourcePath">The file's path on the source.</param>
-    /// <returns>True when the file is copied rather than linked.</returns>
+    /// <returns><c>true</c> when the file is copied rather than linked.</returns>
     public static bool Covers(LibraryMapping mapping, string? sourcePath)
     {
         ArgumentNullException.ThrowIfNull(mapping);
@@ -36,7 +36,7 @@ public static class AlwaysKeep
     /// </summary>
     /// <param name="pickedPath">The path of the item that was picked.</param>
     /// <param name="path">A link's source path.</param>
-    /// <returns>True for two versions of one film.</returns>
+    /// <returns><c>true</c> for two versions of one film.</returns>
     public static bool SameFilm(string? pickedPath, string? path)
     {
         if (string.IsNullOrEmpty(pickedPath) || string.IsNullOrEmpty(path) || !Path.HasExtension(pickedPath))

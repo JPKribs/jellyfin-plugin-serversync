@@ -27,6 +27,9 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
     /// when they match. Names the diverging type/index so verify failures
     /// pinpoint the cause instead of a generic message.
     /// </summary>
+    /// <param name="source">The source's value.</param>
+    /// <param name="local">This server's value.</param>
+    /// <returns>The first difference in words, or null when they match.</returns>
     public string? DescribeDifference(string? source, string? local)
     {
         if (string.IsNullOrEmpty(source))
@@ -61,12 +64,12 @@ public sealed class ImageManifestComparator : ISyncComparator<string>
         {
             if (!localMap.TryGetValue(type, out var localImages))
             {
-                return $"type {type} present on source ({sourceImages.Count} image(s)) but missing on local";
+                return $"type {type} present on source ({JPKribs.Jellyfin.Base.ActivityText.Count(sourceImages.Count, "image")}) but missing on local";
             }
 
             if (sourceImages.Count != localImages.Count)
             {
-                return $"type {type}: source has {sourceImages.Count} image(s), local has {localImages.Count}";
+                return $"type {type}: source has {JPKribs.Jellyfin.Base.ActivityText.Count(sourceImages.Count, "image")}, local has {localImages.Count}";
             }
 
             // Sizes are matched as a multiset, not by position. Jellyfin

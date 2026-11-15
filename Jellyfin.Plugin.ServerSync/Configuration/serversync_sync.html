@@ -1,4 +1,5 @@
-<!-- SERVERSYNC - UNIFIED SYNC PAGE -->
+<!-- serversync_sync.html -->
+<!-- The Sync tab, one view for each sync type and one for the Change Queue. -->
 
 <div id="ServerSyncSyncPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs"
      data-require="emby-input,emby-button,emby-select,emby-checkbox"
@@ -8,15 +9,16 @@
             <form id="ServerSyncForm">
                 <div class="verticalSection verticalSection-extrabottompadding">
 
-                    <!-- SECTION: Sync Header -->
+                    <!-- Sync Header -->
 
                     <div class="sectionTitleContainer flex align-items-center">
                         <h1 class="sectionTitle" id="syncPageTitle">Content Sync</h1>
                     </div>
 
-                    <!-- SECTION: Sync Type Selector -->
+                    <!-- Sync Type Selector -->
 
-                    <div id="syncTypeDescription" class="fieldDescription mb-md"></div>
+                    <div id="syncTypeDescription" class="fieldDescription serversync-mb-md"></div>
+                    <div id="syncStatus" class="jpk-status-text serversync-sync-status" role="status"></div>
 
                     <div id="syncTypeContainer" class="selectContainer">
                         <label for="syncTypeDropdown">Sync Type</label>
@@ -30,13 +32,11 @@
                         </select>
                     </div>
 
-                    <!-- ============================================
-                         VIEW: Content Sync
-                         ============================================ -->
+                    <!-- Content Sync View -->
 
-                    <div id="syncView-content" class="syncView">
+                    <div id="syncView-content" class="serversync-sync-view">
 
-                        <!-- Status Summary Cards -->
+                        <!-- Status summary cards -->
                         <div id="syncStatusSummary">
                             <div class="jpk-cards jpk-cards-rows" id="mainStatusRow">
                                 <div class="jpk-card green" id="statusGroupSynced" title="">
@@ -65,11 +65,11 @@
                                 </div>
                                 <div class="jpk-card yellow hidden" id="statusGroupPendingReplacement" title="">
                                     <span class="jpk-card-count" id="pendingReplacementCount">0</span>
-                                    <span class="jpk-card-label">Pending Replace</span>
+                                    <span class="jpk-card-label">Pending Replacement</span>
                                 </div>
                                 <div class="jpk-card pink hidden" id="statusGroupPendingDeletion" title="">
                                     <span class="jpk-card-count" id="pendingDeletionCount">0</span>
-                                    <span class="jpk-card-label">Pending Delete</span>
+                                    <span class="jpk-card-label">Pending Deletion</span>
                                 </div>
                                 <div class="jpk-card teal hidden" id="statusGroupDeleting" title="">
                                     <span class="jpk-card-count" id="deletingCount">0</span>
@@ -78,62 +78,62 @@
                             </div>
                         </div>
 
-                        <!-- Health Dashboard -->
-                        <div id="healthDashboard" class="healthDashboard">
-                            <div class="healthRow">
-                                <div class="healthCard">
-                                    <span class="healthLabel">Last Sync</span>
-                                    <span class="healthValue" id="healthLastSync">Never</span>
+                        <!-- Health dashboard -->
+                        <div id="healthDashboard" class="serversync-health-dashboard">
+                            <div class="serversync-health-row">
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Last Sync</span>
+                                    <span class="serversync-health-value" id="healthLastSync">Never</span>
                                 </div>
-                                <div class="healthCard">
-                                    <span class="healthLabel">Libraries Mapped</span>
-                                    <span class="healthValue" id="healthLibraryCount">0</span>
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Libraries Mapped</span>
+                                    <span class="serversync-health-value" id="healthLibraryCount">0</span>
                                 </div>
-                                <div class="healthCard">
-                                    <span class="healthLabel">Pending</span>
-                                    <span class="healthValue" id="healthPendingCount">0</span>
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Pending</span>
+                                    <span class="serversync-health-value" id="healthPendingCount">0</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Action Buttons -->
-                        <div class="syncActionButtonRow">
-                            <button is="emby-button" type="button" id="btnRefreshItems" class="raised syncActionButton">
+                        <!-- Action buttons -->
+                        <div class="serversync-action-button-row">
+                            <button is="emby-button" type="button" id="btnRefreshItems" class="raised serversync-action-button">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerSync" class="raised jpk-button-submit syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerSync" class="raised jpk-button-submit serversync-action-button">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryErrors" class="raised jpk-button-submit syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryErrors" class="raised jpk-button-submit serversync-action-button hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
 
-                        <div class="syncSectionSeparator"></div>
+                        <div class="serversync-section-separator"></div>
 
-                        <!-- Paginated Table Container -->
+                        <!-- Table -->
                         <div id="syncItemsTableContainer">
-                            <!-- PaginatedTable generates its structure here -->
+                            <!-- The table builds its own markup here. -->
                         </div>
 
                         <!-- Content Item Detail Modal -->
                         <div id="itemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-                            <div class="jpk-dialog-content contentModal-dialog modal-relative">
+                            <div class="jpk-dialog-content serversync-modal-dialog serversync-modal-relative">
                                 <button type="button" id="btnModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
                                 <h2 id="modalTitle" class="jpk-modal-title"></h2>
                                 <div id="modalContent" class="jpk-modal-body">
-                                    <div class="contentModal-topRow">
-                                        <span id="modalStatusBadge" class="itemModal-statusBadge"></span>
-                                        <span id="modalServerMapping" class="contentModal-serverMapping"></span>
+                                    <div class="serversync-modal-top-row">
+                                        <span id="modalStatusBadge" class="jpk-table-status-badge"></span>
+                                        <span id="modalServerMapping" class="serversync-modal-server-mapping"></span>
                                     </div>
-                                    <div class="contentModal-infoGrid">
-                                        <div class="contentModal-infoItem">
-                                            <div class="contentModal-infoLabel">Last Sync</div>
-                                            <div id="modalLastSync" class="contentModal-infoValue">-</div>
+                                    <div class="serversync-modal-info-grid">
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div id="modalLastSync" class="serversync-modal-info-value">-</div>
                                         </div>
-                                        <div class="contentModal-infoItem">
-                                            <div class="contentModal-infoLabel">Library</div>
-                                            <div id="modalLibraryMapping" class="contentModal-infoValue">-</div>
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Library</div>
+                                            <div id="modalLibraryMapping" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="modalErrorSection" class="jpk-modal-field hidden">
@@ -144,46 +144,46 @@
                                         <div class="jpk-modal-field-label">Retry Count</div>
                                         <div id="modalRetryCount"></div>
                                     </div>
-                                    <div class="contentModal-pathsSection">
-                                        <div class="contentModal-pathRow">
-                                            <div class="contentModal-pathBlock">
-                                                <div class="contentModal-pathLabel">Source Path</div>
-                                                <div id="modalSourcePath" class="contentModal-pathValue"></div>
-                                                <div class="contentModal-pathMeta">
-                                                    <span class="contentModal-pathMetaLabel">Size:</span>
-                                                    <span id="modalSourceSize" class="contentModal-pathMetaValue"></span>
+                                    <div class="serversync-modal-paths-section">
+                                        <div class="serversync-modal-path-row">
+                                            <div class="serversync-modal-path-block">
+                                                <div class="serversync-modal-path-label">Source Path</div>
+                                                <div id="modalSourcePath" class="serversync-modal-path-value"></div>
+                                                <div class="serversync-modal-path-meta">
+                                                    <span class="serversync-modal-path-meta-label">Size</span>
+                                                    <span id="modalSourceSize" class="serversync-modal-path-meta-value"></span>
                                                 </div>
                                             </div>
-                                            <div class="contentModal-pathBlock">
-                                                <div class="contentModal-pathLabel">Local Path</div>
-                                                <div id="modalLocalPath" class="contentModal-pathValue"></div>
-                                                <div id="modalLocalPathNote" class="contentModal-pathNote"></div>
-                                                <div id="modalLocalSizeRow" class="contentModal-pathMeta">
-                                                    <span class="contentModal-pathMetaLabel">Size:</span>
-                                                    <span id="modalLocalSize" class="contentModal-pathMetaValue"></span>
+                                            <div class="serversync-modal-path-block">
+                                                <div class="serversync-modal-path-label">Local Path</div>
+                                                <div id="modalLocalPath" class="serversync-modal-path-value"></div>
+                                                <div id="modalLocalPathNote" class="serversync-modal-path-note"></div>
+                                                <div id="modalLocalSizeRow" class="serversync-modal-path-meta">
+                                                    <span class="serversync-modal-path-meta-label">Size</span>
+                                                    <span id="modalLocalSize" class="serversync-modal-path-meta-value"></span>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                     <div id="modalCompanionFilesSection" class="jpk-modal-field hidden">
                                         <div class="jpk-modal-field-label">Companion Files</div>
-                                        <div id="modalCompanionFiles" class="jpk-modal-field-value"></div>
+                                        <div id="modalCompanionFiles"></div>
                                     </div>
                                 </div>
                                 <div class="jpk-modal-button-row">
                                     <button is="emby-button" type="button" id="btnModalIgnore" class="raised jpk-modal-button">
                                         <span>Ignore</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnModalMarkSynced" class="raised jpk-modal-button" title="Mark as synced">
+                                    <button is="emby-button" type="button" id="btnModalMarkSynced" class="raised jpk-modal-button">
                                         <span>Mark Synced</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnModalKeep" class="raised jpk-modal-button hidden" title="Keep a full local copy. A cached file is moved into place">
+                                    <button is="emby-button" type="button" id="btnModalKeep" class="raised jpk-modal-button hidden" title="Keep a Copy">
                                         <span>Download</span>
                                     </button>
                                     <button is="emby-button" type="button" id="btnModalQueue" class="raised jpk-button-submit jpk-modal-button">
                                         <span>Queue</span>
                                     </button>
-                                    <button is="emby-button" type="button" id="btnModalDelete" class="raised jpk-button-destructive jpk-modal-button" title="Delete from local server only">
+                                    <button is="emby-button" type="button" id="btnModalDelete" class="raised jpk-button-destructive jpk-modal-button" title="Delete Local File">
                                         <span>Delete</span>
                                     </button>
                                 </div>
@@ -191,13 +191,11 @@
                         </div>
                     </div>
 
-                    <!-- ============================================
-                         VIEW: History Sync
-                         ============================================ -->
+                    <!-- History Sync View -->
 
-                    <div id="syncView-history" class="syncView hidden">
+                    <div id="syncView-history" class="serversync-sync-view hidden">
 
-                        <!-- Status Summary Cards -->
+                        <!-- Status summary cards -->
                         <div id="historySyncStatusSummary">
                             <div class="jpk-cards" id="historyStatusRow">
                                 <div class="jpk-card green" id="historyStatusGroupSynced" title="">
@@ -219,124 +217,126 @@
                             </div>
                         </div>
 
-                        <!-- Health Dashboard -->
-                        <div id="historyHealthDashboard" class="healthDashboard">
-                            <div class="healthRow">
-                                <div class="healthCard">
-                                    <span class="healthLabel">Last Sync</span>
-                                    <span class="healthValue" id="historyHealthLastSync">Never</span>
+                        <!-- Health dashboard -->
+                        <div id="historyHealthDashboard" class="serversync-health-dashboard">
+                            <div class="serversync-health-row">
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Last Sync</span>
+                                    <span class="serversync-health-value" id="historyHealthLastSync">Never</span>
                                 </div>
-                                <div class="healthCard">
-                                    <span class="healthLabel">Users Mapped</span>
-                                    <span class="healthValue" id="historyHealthUserCount">0</span>
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Users Mapped</span>
+                                    <span class="serversync-health-value" id="historyHealthUserCount">0</span>
                                 </div>
-                                <div class="healthCard">
-                                    <span class="healthLabel">Libraries Mapped</span>
-                                    <span class="healthValue" id="historyHealthLibraryCount">0</span>
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Libraries Mapped</span>
+                                    <span class="serversync-health-value" id="historyHealthLibraryCount">0</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Action Buttons -->
-                        <div class="syncActionButtonRow">
-                            <button is="emby-button" type="button" id="btnRefreshHistoryItems" class="raised syncActionButton">
+                        <!-- Action buttons -->
+                        <div class="serversync-action-button-row">
+                            <button is="emby-button" type="button" id="btnRefreshHistoryItems" class="raised serversync-action-button">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerHistorySync" class="raised jpk-button-submit syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerHistorySync" class="raised jpk-button-submit serversync-action-button">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryHistoryErrors" class="raised jpk-button-submit syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryHistoryErrors" class="raised jpk-button-submit serversync-action-button hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
 
-                        <div class="syncSectionSeparator"></div>
+                        <div class="serversync-section-separator"></div>
 
-                        <!-- Paginated Table Container -->
+                        <!-- Table -->
                         <div id="historyItemsTableContainer">
-                            <!-- PaginatedTable generates its structure here -->
+                            <!-- The table builds its own markup here. -->
                         </div>
 
                         <!-- History Item Detail Modal -->
                         <div id="historyItemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
-                            <div class="jpk-dialog-content historyModal-dialog modal-relative">
+                            <div class="jpk-dialog-content serversync-modal-dialog serversync-modal-relative">
                                 <button type="button" id="btnHistoryModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
                                 <h2 id="historyModalTitle" class="jpk-modal-title"></h2>
                                 <div id="historyModalContent" class="jpk-modal-body">
-                                    <div class="historyModal-topRow">
-                                        <span id="historyModalStatusBadge" class="itemModal-statusBadge"></span>
-                                        <span id="historyModalServerMapping" class="historyModal-serverMapping"></span>
+                                    <div class="serversync-modal-top-row">
+                                        <span id="historyModalStatusBadge" class="jpk-table-status-badge"></span>
+                                        <span id="historyModalServerMapping" class="serversync-modal-server-mapping"></span>
                                     </div>
-                                    <div id="historyModalInfoGrid" class="historyModal-infoGrid">
-                                        <div class="historyModal-infoItem">
-                                            <div class="historyModal-infoLabel">Last Sync</div>
-                                            <div id="historyModalLastSync" class="historyModal-infoValue">-</div>
+                                    <div id="historyModalInfoGrid" class="serversync-modal-info-grid">
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div id="historyModalLastSync" class="serversync-modal-info-value">-</div>
                                         </div>
-                                        <div class="historyModal-infoItem">
-                                            <div class="historyModal-infoLabel">Last Edited</div>
-                                            <div id="historyModalVersion" class="historyModal-infoValue">-</div>
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Edited</div>
+                                            <div id="historyModalVersion" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="historyModalErrorSection" class="jpk-modal-field hidden">
                                         <div class="jpk-modal-field-label">Error</div>
                                         <div id="historyModalError" class="jpk-error-message"></div>
                                     </div>
-                                    <div class="historyModal-userSection">
-                                        <div class="historyModal-userRow">
-                                            <div class="historyModal-userBlock">
-                                                <div class="historyModal-userLabel">Source User</div>
-                                                <div id="historyModalSourceUserName" class="historyModal-userName"></div>
-                                                <div id="historyModalSourceUserId" class="historyModal-userGuid"></div>
+                                    <div class="serversync-history-user-section">
+                                        <div class="serversync-history-user-row">
+                                            <div class="serversync-history-user-block">
+                                                <div class="serversync-history-user-label">Source User</div>
+                                                <div id="historyModalSourceUserName" class="serversync-history-user-name"></div>
+                                                <div id="historyModalSourceUserId" class="serversync-history-user-guid"></div>
                                             </div>
-                                            <div class="historyModal-userBlock">
-                                                <div class="historyModal-userLabel">Local User</div>
-                                                <div id="historyModalLocalUserName" class="historyModal-userName"></div>
-                                                <div id="historyModalLocalUserId" class="historyModal-userGuid"></div>
+                                            <div class="serversync-history-user-block">
+                                                <div class="serversync-history-user-label">Local User</div>
+                                                <div id="historyModalLocalUserName" class="serversync-history-user-name"></div>
+                                                <div id="historyModalLocalUserId" class="serversync-history-user-guid"></div>
                                             </div>
                                         </div>
                                     </div>
-                                    <table class="historyCompareTable">
-                                        <thead>
-                                            <tr>
-                                                <th class="historyCompareTable-property">Property</th>
-                                                <th id="historyModalSourceHeader" class="historyCompareTable-server">Source</th>
-                                                <th id="historyModalLocalHeader" class="historyCompareTable-server">Local</th>
-                                                <th class="historyCompareTable-merged">After Sync</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr id="historyModalRowPlayed">
-                                                <td class="historyCompareTable-property">Played</td>
-                                                <td id="historyModalSourcePlayed" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalLocalPlayed" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalMergedPlayed" class="historyCompareTable-value historyCompareTable-merged">-</td>
-                                            </tr>
-                                            <tr id="historyModalRowFavorite">
-                                                <td class="historyCompareTable-property">Favorite</td>
-                                                <td id="historyModalSourceFavorite" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalLocalFavorite" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalMergedFavorite" class="historyCompareTable-value historyCompareTable-merged">-</td>
-                                            </tr>
-                                            <tr id="historyModalRowPlayCount">
-                                                <td class="historyCompareTable-property">Play Count</td>
-                                                <td id="historyModalSourcePlayCount" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalLocalPlayCount" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalMergedPlayCount" class="historyCompareTable-value historyCompareTable-merged">-</td>
-                                            </tr>
-                                            <tr id="historyModalRowPosition">
-                                                <td class="historyCompareTable-property">Position</td>
-                                                <td id="historyModalSourcePosition" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalLocalPosition" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalMergedPosition" class="historyCompareTable-value historyCompareTable-merged">-</td>
-                                            </tr>
-                                            <tr id="historyModalRowLastPlayed">
-                                                <td class="historyCompareTable-property">Last Played</td>
-                                                <td id="historyModalSourceLastPlayed" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalLocalLastPlayed" class="historyCompareTable-value">-</td>
-                                                <td id="historyModalMergedLastPlayed" class="historyCompareTable-value historyCompareTable-merged">-</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
+                                    <div class="serversync-modal-table-container">
+                                        <table class="serversync-compare-table">
+                                            <thead>
+                                                <tr>
+                                                    <th class="serversync-compare-table-property">Property</th>
+                                                    <th id="historyModalSourceHeader" class="serversync-compare-table-server">Source</th>
+                                                    <th id="historyModalLocalHeader" class="serversync-compare-table-server">Local</th>
+                                                    <th class="serversync-compare-table-merged">After Sync</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr id="historyModalRowPlayed">
+                                                    <td class="serversync-compare-table-property">Played</td>
+                                                    <td id="historyModalSourcePlayed" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalLocalPlayed" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalMergedPlayed" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
+                                                </tr>
+                                                <tr id="historyModalRowFavorite">
+                                                    <td class="serversync-compare-table-property">Favorite</td>
+                                                    <td id="historyModalSourceFavorite" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalLocalFavorite" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalMergedFavorite" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
+                                                </tr>
+                                                <tr id="historyModalRowPlayCount">
+                                                    <td class="serversync-compare-table-property">Play Count</td>
+                                                    <td id="historyModalSourcePlayCount" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalLocalPlayCount" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalMergedPlayCount" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
+                                                </tr>
+                                                <tr id="historyModalRowPosition">
+                                                    <td class="serversync-compare-table-property">Position</td>
+                                                    <td id="historyModalSourcePosition" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalLocalPosition" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalMergedPosition" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
+                                                </tr>
+                                                <tr id="historyModalRowLastPlayed">
+                                                    <td class="serversync-compare-table-property">Last Played</td>
+                                                    <td id="historyModalSourceLastPlayed" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalLocalLastPlayed" class="serversync-compare-table-value">-</td>
+                                                    <td id="historyModalMergedLastPlayed" class="serversync-compare-table-value serversync-compare-table-merged">-</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                                 <div class="jpk-modal-button-row">
                                     <button is="emby-button" type="button" id="btnHistoryModalIgnore" class="raised jpk-modal-button">
@@ -350,13 +350,11 @@
                         </div>
                     </div>
 
-                    <!-- ============================================
-                         VIEW: Metadata Sync
-                         ============================================ -->
+                    <!-- Metadata Sync View -->
 
-                    <div id="syncView-metadata" class="syncView hidden">
+                    <div id="syncView-metadata" class="serversync-sync-view hidden">
 
-                        <!-- Status Summary Cards -->
+                        <!-- Status summary cards -->
                         <div id="metadataSyncStatusSummary">
                             <div class="jpk-cards" id="metadataStatusRow">
                                 <div class="jpk-card green" id="metadataStatusGroupSynced" title="">
@@ -378,89 +376,89 @@
                             </div>
                         </div>
 
-                        <!-- Health Dashboard -->
-                        <div id="metadataHealthDashboard" class="healthDashboard">
-                            <div class="healthRow">
-                                <div class="healthCard">
-                                    <span class="healthLabel">Last Sync</span>
-                                    <span class="healthValue" id="metadataHealthLastSync">Never</span>
+                        <!-- Health dashboard -->
+                        <div id="metadataHealthDashboard" class="serversync-health-dashboard">
+                            <div class="serversync-health-row">
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Last Sync</span>
+                                    <span class="serversync-health-value" id="metadataHealthLastSync">Never</span>
                                 </div>
-                                <div class="healthCard">
-                                    <span class="healthLabel">Libraries Mapped</span>
-                                    <span class="healthValue" id="metadataHealthLibraryCount">0</span>
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Libraries Mapped</span>
+                                    <span class="serversync-health-value" id="metadataHealthLibraryCount">0</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Action Buttons -->
-                        <div class="syncActionButtonRow">
-                            <button is="emby-button" type="button" id="btnRefreshMetadataItems" class="raised syncActionButton">
+                        <!-- Action buttons -->
+                        <div class="serversync-action-button-row">
+                            <button is="emby-button" type="button" id="btnRefreshMetadataItems" class="raised serversync-action-button">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerMetadataSync" class="raised jpk-button-submit syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerMetadataSync" class="raised jpk-button-submit serversync-action-button">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryMetadataErrors" class="raised jpk-button-submit syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryMetadataErrors" class="raised jpk-button-submit serversync-action-button hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
 
-                        <div class="syncSectionSeparator"></div>
+                        <div class="serversync-section-separator"></div>
 
-                        <!-- Paginated Table Container -->
+                        <!-- Table -->
                         <div id="metadataSyncItemsTableContainer">
-                            <!-- PaginatedTable generates its structure here -->
+                            <!-- The table builds its own markup here. -->
                         </div>
 
                         <!-- Metadata Item Detail Modal -->
                         <div id="metadataSyncItemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="metadataSyncModalTitle">
-                            <div class="jpk-dialog-content metadataSyncModal-dialog modal-relative">
+                            <div class="jpk-dialog-content serversync-modal-dialog serversync-modal-relative">
                                 <button type="button" id="btnMetadataSyncModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
                                 <h2 id="metadataSyncModalTitle" class="jpk-modal-title"></h2>
                                 <div class="jpk-modal-body">
-                                    <div class="metadataSyncModal-topRow">
-                                        <span id="metadataSyncModalStatusBadge" class="itemModal-statusBadge"></span>
-                                        <span id="metadataSyncModalServerMapping" class="metadataSyncModal-serverMapping"></span>
+                                    <div class="serversync-modal-top-row">
+                                        <span id="metadataSyncModalStatusBadge" class="jpk-table-status-badge"></span>
+                                        <span id="metadataSyncModalServerMapping" class="serversync-modal-server-mapping"></span>
                                     </div>
-                                    <div id="metadataSyncModalInfoGrid" class="metadataSyncModal-infoGrid">
-                                        <div class="metadataSyncModal-infoItem">
-                                            <div class="metadataSyncModal-infoLabel">Last Sync</div>
-                                            <div id="metadataSyncModalLastSync" class="metadataSyncModal-infoValue">-</div>
+                                    <div id="metadataSyncModalInfoGrid" class="serversync-modal-info-grid">
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div id="metadataSyncModalLastSync" class="serversync-modal-info-value">-</div>
                                         </div>
-                                        <div class="metadataSyncModal-infoItem">
-                                            <div class="metadataSyncModal-infoLabel">Last Edited</div>
-                                            <div id="metadataSyncModalVersion" class="metadataSyncModal-infoValue">-</div>
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Edited</div>
+                                            <div id="metadataSyncModalVersion" class="serversync-modal-info-value">-</div>
                                         </div>
-                                        <div class="metadataSyncModal-infoItem">
-                                            <div class="metadataSyncModal-infoLabel">Library</div>
-                                            <div id="metadataSyncModalLibrary" class="metadataSyncModal-infoValue">-</div>
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Library</div>
+                                            <div id="metadataSyncModalLibrary" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="metadataSyncModalErrorSection" class="jpk-modal-field hidden">
                                         <div class="jpk-modal-field-label">Error</div>
                                         <div id="metadataSyncModalError" class="jpk-error-message"></div>
                                     </div>
-                                    <div id="metadataSyncModalChangesSummary" class="metadataSyncModal-changesSummary"></div>
-                                    <div class="metadataSyncModal-pathsSection">
-                                        <div class="metadataSyncModal-pathRow">
-                                            <div class="metadataSyncModal-pathBlock">
-                                                <div class="metadataSyncModal-pathLabel">Source File</div>
-                                                <div id="metadataSyncModalSourcePath" class="metadataSyncModal-pathValue"></div>
+                                    <div id="metadataSyncModalChangesSummary" class="serversync-modal-changes-summary"></div>
+                                    <div class="serversync-modal-paths-section">
+                                        <div class="serversync-modal-path-row">
+                                            <div class="serversync-modal-path-block">
+                                                <div class="serversync-modal-path-label">Source File</div>
+                                                <div id="metadataSyncModalSourcePath" class="serversync-modal-path-value"></div>
                                             </div>
-                                            <div class="metadataSyncModal-pathBlock">
-                                                <div class="metadataSyncModal-pathLabel">Local File</div>
-                                                <div id="metadataSyncModalLocalPath" class="metadataSyncModal-pathValue"></div>
+                                            <div class="serversync-modal-path-block">
+                                                <div class="serversync-modal-path-label">Local File</div>
+                                                <div id="metadataSyncModalLocalPath" class="serversync-modal-path-value"></div>
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="metadataSyncModal-tableContainer">
-                                        <table class="historyCompareTable">
+                                    <div class="serversync-modal-table-container">
+                                        <table class="serversync-compare-table">
                                             <thead>
                                                 <tr>
-                                                    <th class="historyCompareTable-property">Property</th>
-                                                    <th id="metadataSyncModalSourceHeader" class="historyCompareTable-server">Source</th>
-                                                    <th id="metadataSyncModalLocalHeader" class="historyCompareTable-server">Local</th>
-                                                    <th class="historyCompareTable-merged">After Sync</th>
+                                                    <th class="serversync-compare-table-property">Property</th>
+                                                    <th id="metadataSyncModalSourceHeader" class="serversync-compare-table-server">Source</th>
+                                                    <th id="metadataSyncModalLocalHeader" class="serversync-compare-table-server">Local</th>
+                                                    <th class="serversync-compare-table-merged">After Sync</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="metadataSyncModalTableBody"></tbody>
@@ -479,13 +477,11 @@
                         </div>
                     </div>
 
-                    <!-- ============================================
-                         VIEW: Users Sync
-                         ============================================ -->
+                    <!-- User Sync View -->
 
-                    <div id="syncView-users" class="syncView hidden">
+                    <div id="syncView-users" class="serversync-sync-view hidden">
 
-                        <!-- Status Summary Cards -->
+                        <!-- Status summary cards -->
                         <div id="userSyncStatusSummary">
                             <div class="jpk-cards">
                                 <div class="jpk-card green" id="userStatusGroupSynced" title="">
@@ -507,85 +503,85 @@
                             </div>
                         </div>
 
-                        <!-- Health Dashboard -->
-                        <div id="userHealthDashboard" class="healthDashboard">
-                            <div class="healthRow">
-                                <div class="healthCard">
-                                    <span class="healthLabel">Last Sync</span>
-                                    <span class="healthValue" id="userHealthLastSync">Never</span>
+                        <!-- Health dashboard -->
+                        <div id="userHealthDashboard" class="serversync-health-dashboard">
+                            <div class="serversync-health-row">
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Last Sync</span>
+                                    <span class="serversync-health-value" id="userHealthLastSync">Never</span>
                                 </div>
-                                <div class="healthCard">
-                                    <span class="healthLabel">Users Mapped</span>
-                                    <span class="healthValue" id="userHealthUserCount">0</span>
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Users Mapped</span>
+                                    <span class="serversync-health-value" id="userHealthUserCount">0</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Action Buttons -->
-                        <div class="syncActionButtonRow">
-                            <button is="emby-button" type="button" id="btnRefreshUserItems" class="raised syncActionButton">
+                        <!-- Action buttons -->
+                        <div class="serversync-action-button-row">
+                            <button is="emby-button" type="button" id="btnRefreshUserItems" class="raised serversync-action-button">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerUserSync" class="raised jpk-button-submit syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerUserSync" class="raised jpk-button-submit serversync-action-button">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryUserErrors" class="raised jpk-button-submit syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryUserErrors" class="raised jpk-button-submit serversync-action-button hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
 
-                        <div class="syncSectionSeparator"></div>
+                        <div class="serversync-section-separator"></div>
 
-                        <!-- Paginated Table Container -->
+                        <!-- Table -->
                         <div id="userSyncItemsTableContainer">
-                            <!-- PaginatedTable generates its structure here -->
+                            <!-- The table builds its own markup here. -->
                         </div>
 
                         <!-- User Item Detail Modal -->
                         <div id="userSyncItemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="userSyncModalTitle">
-                            <div class="jpk-dialog-content userSyncModal-dialog modal-relative">
+                            <div class="jpk-dialog-content serversync-modal-dialog serversync-modal-relative">
                                 <button type="button" id="btnUserSyncModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
                                 <h2 id="userSyncModalTitle" class="jpk-modal-title"></h2>
                                 <div class="jpk-modal-body">
-                                    <div class="userSyncModal-topRow">
-                                        <span id="userSyncModalStatusBadge" class="itemModal-statusBadge"></span>
-                                        <span id="userSyncModalServerMapping" class="userSyncModal-serverMapping"></span>
+                                    <div class="serversync-modal-top-row">
+                                        <span id="userSyncModalStatusBadge" class="jpk-table-status-badge"></span>
+                                        <span id="userSyncModalServerMapping" class="serversync-modal-server-mapping"></span>
                                     </div>
-                                    <div id="userSyncModalInfoGrid" class="userSyncModal-infoGrid hidden">
-                                        <div class="userSyncModal-infoItem">
-                                            <div class="userSyncModal-infoLabel">Last Sync</div>
-                                            <div id="userSyncModalLastSync" class="userSyncModal-infoValue"></div>
+                                    <div id="userSyncModalInfoGrid" class="serversync-modal-info-grid hidden">
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div id="userSyncModalLastSync" class="serversync-modal-info-value"></div>
                                         </div>
-                                        <div class="userSyncModal-infoItem">
-                                            <div class="userSyncModal-infoLabel">Last Edited</div>
-                                            <div id="userSyncModalVersion" class="userSyncModal-infoValue">-</div>
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Edited</div>
+                                            <div id="userSyncModalVersion" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="userSyncModalErrorSection" class="jpk-modal-field hidden">
                                         <div class="jpk-modal-field-label">Error</div>
                                         <div id="userSyncModalError" class="jpk-error-message"></div>
                                     </div>
-                                    <div id="userSyncModalChangesSummary" class="userSyncModal-changesSummary"></div>
-                                    <div class="userSyncModal-userSection">
-                                        <div class="userSyncModal-userBlock">
-                                            <div class="userSyncModal-userLabel">Source User</div>
-                                            <div id="userSyncModalSourceUser" class="userSyncModal-userName"></div>
-                                            <div id="userSyncModalSourceUserId" class="userSyncModal-userId"></div>
+                                    <div id="userSyncModalChangesSummary" class="serversync-modal-changes-summary"></div>
+                                    <div class="serversync-user-sync-section">
+                                        <div class="serversync-user-sync-block">
+                                            <div class="serversync-user-sync-label">Source User</div>
+                                            <div id="userSyncModalSourceUser" class="serversync-user-sync-name"></div>
+                                            <div id="userSyncModalSourceUserId" class="serversync-user-sync-id"></div>
                                         </div>
-                                        <div class="userSyncModal-userBlock">
-                                            <div class="userSyncModal-userLabel">Local User</div>
-                                            <div id="userSyncModalLocalUser" class="userSyncModal-userName"></div>
-                                            <div id="userSyncModalLocalUserId" class="userSyncModal-userId"></div>
+                                        <div class="serversync-user-sync-block">
+                                            <div class="serversync-user-sync-label">Local User</div>
+                                            <div id="userSyncModalLocalUser" class="serversync-user-sync-name"></div>
+                                            <div id="userSyncModalLocalUserId" class="serversync-user-sync-id"></div>
                                         </div>
                                     </div>
-                                    <div class="userSyncModal-tableContainer">
-                                        <table class="historyCompareTable">
+                                    <div class="serversync-modal-table-container">
+                                        <table class="serversync-compare-table">
                                             <thead>
                                                 <tr>
-                                                    <th class="historyCompareTable-property">Property</th>
-                                                    <th id="userSyncModalSourceHeader" class="historyCompareTable-server">Source</th>
-                                                    <th id="userSyncModalLocalHeader" class="historyCompareTable-server">Local</th>
-                                                    <th class="historyCompareTable-merged">After Sync</th>
+                                                    <th class="serversync-compare-table-property">Property</th>
+                                                    <th id="userSyncModalSourceHeader" class="serversync-compare-table-server">Source</th>
+                                                    <th id="userSyncModalLocalHeader" class="serversync-compare-table-server">Local</th>
+                                                    <th class="serversync-compare-table-merged">After Sync</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="userSyncModalTableBody"></tbody>
@@ -604,12 +600,10 @@
                         </div>
                     </div>
 
-                    <!-- ====================================================
-                         VIEW: People Sync
-                         ==================================================== -->
-                    <div id="syncView-people" class="syncView hidden">
+                    <!-- People Sync View -->
+                    <div id="syncView-people" class="serversync-sync-view hidden">
 
-                        <!-- Status Summary Cards -->
+                        <!-- Status summary cards -->
                         <div id="peopleSyncStatusSummary">
                             <div class="jpk-cards">
                                 <div class="jpk-card green" id="peopleStatusGroupSynced" title="">
@@ -631,82 +625,80 @@
                             </div>
                         </div>
 
-                        <!-- Health Dashboard -->
-                        <div id="peopleHealthDashboard" class="healthDashboard">
-                            <div class="healthRow">
-                                <div class="healthCard">
-                                    <span class="healthLabel">Last Sync</span>
-                                    <span class="healthValue" id="peopleHealthLastSync">Never</span>
+                        <!-- Health dashboard -->
+                        <div id="peopleHealthDashboard" class="serversync-health-dashboard">
+                            <div class="serversync-health-row">
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">Last Sync</span>
+                                    <span class="serversync-health-value" id="peopleHealthLastSync">Never</span>
                                 </div>
-                                <div class="healthCard">
-                                    <span class="healthLabel">People Tracked</span>
-                                    <span class="healthValue" id="peopleHealthPersonCount">0</span>
+                                <div class="serversync-health-card">
+                                    <span class="serversync-health-label">People Tracked</span>
+                                    <span class="serversync-health-value" id="peopleHealthPersonCount">0</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Action Buttons -->
-                        <div class="syncActionButtonRow">
-                            <button is="emby-button" type="button" id="btnRefreshPeopleItems" class="raised syncActionButton">
+                        <!-- Action buttons -->
+                        <div class="serversync-action-button-row">
+                            <button is="emby-button" type="button" id="btnRefreshPeopleItems" class="raised serversync-action-button">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnTriggerPeopleSync" class="raised jpk-button-submit syncActionButton">
+                            <button is="emby-button" type="button" id="btnTriggerPeopleSync" class="raised jpk-button-submit serversync-action-button">
                                 <span>Sync</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnRetryPeopleErrors" class="raised jpk-button-submit syncActionButton hidden">
+                            <button is="emby-button" type="button" id="btnRetryPeopleErrors" class="raised jpk-button-submit serversync-action-button hidden">
                                 <span>Retry Errors</span>
                             </button>
                         </div>
 
-                        <div class="syncSectionSeparator"></div>
+                        <div class="serversync-section-separator"></div>
 
-                        <!-- Paginated Table Container -->
+                        <!-- Table -->
                         <div id="peopleSyncItemsTableContainer">
-                            <!-- PaginatedTable generates its structure here -->
+                            <!-- The table builds its own markup here. -->
                         </div>
 
                         <!-- People Item Detail Modal -->
                         <div id="peopleSyncItemDetailModal" class="jpk-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="peopleSyncModalTitle">
-                            <div class="jpk-dialog-content peopleSyncModal-dialog modal-relative">
+                            <div class="jpk-dialog-content serversync-modal-dialog serversync-modal-relative">
                                 <button type="button" id="btnPeopleSyncModalClose" class="jpk-dialog-close" title="Close" aria-label="Close">&times;</button>
                                 <h2 id="peopleSyncModalTitle" class="jpk-modal-title"></h2>
                                 <div class="jpk-modal-body">
-                                    <div class="peopleSyncModal-topRow">
-                                        <span id="peopleSyncModalStatusBadge" class="itemModal-statusBadge"></span>
-                                        <span id="peopleSyncModalServerMapping" class="metadataSyncModal-serverMapping"></span>
+                                    <div class="serversync-modal-top-row">
+                                        <span id="peopleSyncModalStatusBadge" class="jpk-table-status-badge"></span>
+                                        <span id="peopleSyncModalServerMapping" class="serversync-modal-server-mapping"></span>
                                     </div>
-                                    <div id="peopleSyncModalInfoGrid" class="peopleSyncModal-infoGrid">
-                                        <div class="peopleSyncModal-infoItem">
-                                            <div class="peopleSyncModal-infoLabel">Last Sync</div>
-                                            <div id="peopleSyncModalLastSync" class="peopleSyncModal-infoValue">-</div>
+                                    <div id="peopleSyncModalInfoGrid" class="serversync-modal-info-grid">
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Sync</div>
+                                            <div id="peopleSyncModalLastSync" class="serversync-modal-info-value">-</div>
                                         </div>
-                                        <div class="peopleSyncModal-infoItem">
-                                            <div class="peopleSyncModal-infoLabel">Last Edited</div>
-                                            <div id="peopleSyncModalVersion" class="peopleSyncModal-infoValue">-</div>
+                                        <div class="serversync-modal-info-item">
+                                            <div class="serversync-modal-info-label">Last Edited</div>
+                                            <div id="peopleSyncModalVersion" class="serversync-modal-info-value">-</div>
                                         </div>
                                     </div>
                                     <div id="peopleSyncModalErrorSection" class="jpk-modal-field hidden">
                                         <div class="jpk-modal-field-label">Error</div>
                                         <div id="peopleSyncModalError" class="jpk-error-message"></div>
                                     </div>
-                                    <div id="peopleSyncModalChangesSummary" class="peopleSyncModal-changesSummary"></div>
+                                    <div id="peopleSyncModalChangesSummary" class="serversync-modal-changes-summary"></div>
 
-                                    <!-- Comparison Table -->
-                                    <div class="peopleSyncModal-tableContainer">
-                                        <table class="historyCompareTable">
+                                    <!-- Comparison table -->
+                                    <div class="serversync-modal-table-container">
+                                        <table class="serversync-compare-table">
                                             <thead>
                                                 <tr>
-                                                    <th class="historyCompareTable-property">Property</th>
-                                                    <th id="peopleSyncModalSourceHeader" class="historyCompareTable-server">Source</th>
-                                                    <th id="peopleSyncModalLocalHeader" class="historyCompareTable-server">Local</th>
-                                                    <th class="historyCompareTable-merged">After Sync</th>
+                                                    <th class="serversync-compare-table-property">Property</th>
+                                                    <th id="peopleSyncModalSourceHeader" class="serversync-compare-table-server">Source</th>
+                                                    <th id="peopleSyncModalLocalHeader" class="serversync-compare-table-server">Local</th>
+                                                    <th class="serversync-compare-table-merged">After Sync</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="peopleSyncModalTableBody"></tbody>
                                         </table>
                                     </div>
-                                    
-                                    <!-- Modal Action Buttons -->
                                 </div>
                                 <div class="jpk-modal-button-row">
                                     <button is="emby-button" type="button" id="btnPeopleSyncModalIgnore" class="raised jpk-modal-button">
@@ -720,73 +712,71 @@
                         </div>
                     </div>
 
-                    <!-- ============================================
-                         VIEW: Change Queue
-                         ============================================ -->
+                    <!-- Change Queue View -->
 
-                    <div id="syncView-queue" class="syncView hidden">
+                    <div id="syncView-queue" class="serversync-sync-view hidden">
 
-                        <!-- Summary cards double as filters -->
-                        <div class="jpk-cards qCards">
-                            <div class="jpk-card gray qCard on" data-state="Gathering" title="Local edits still gathering before they become hints">
+                        <!-- Summary cards, which double as filters -->
+                        <div class="jpk-cards serversync-queue-cards">
+                            <div class="jpk-card gray serversync-queue-card serversync-on" data-state="Gathering" title="Local changes waiting out Send Changes After.">
                                 <span class="jpk-card-count" id="queueGatheringCount">0</span>
                                 <span class="jpk-card-label">Gathering</span>
                             </div>
-                            <div class="jpk-card orange qCard on" data-state="Pending" title="Hints waiting to be delivered to a peer">
+                            <div class="jpk-card orange serversync-queue-card serversync-on" data-state="Pending" title="Hints waiting to be sent to a server.">
                                 <span class="jpk-card-count" id="queuePendingCount">0</span>
                                 <span class="jpk-card-label">Pending</span>
                             </div>
-                            <div class="jpk-card blue qCard on" data-state="Sent" title="Hints a peer has accepted and is working on">
+                            <div class="jpk-card blue serversync-queue-card serversync-on" data-state="Sent" title="Hints a server accepted and is still working on.">
                                 <span class="jpk-card-count" id="queueSentCount">0</span>
                                 <span class="jpk-card-label">Sent</span>
                             </div>
-                            <div class="jpk-card purple qCard on" data-state="Received" title="Hints received from peers and not yet applied">
+                            <div class="jpk-card purple serversync-queue-card serversync-on" data-state="Received" title="Hints received from servers and not yet applied.">
                                 <span class="jpk-card-count" id="queueInboundCount">0</span>
                                 <span class="jpk-card-label">Received</span>
                             </div>
-                            <div class="jpk-card red qCard on" data-state="Failed" title="Hints a peer rejected as malformed">
+                            <div class="jpk-card red serversync-queue-card serversync-on" data-state="Failed" title="Hints a server refused as malformed.">
                                 <span class="jpk-card-count" id="queueFailedCount">0</span>
                                 <span class="jpk-card-label">Failed</span>
                             </div>
                         </div>
 
-                        <!-- Peers -->
-                        <div id="queuePeers" class="healthDashboard">
-                            <div class="healthRow" id="queuePeerRow"></div>
+                        <!-- Servers -->
+                        <div id="queuePeers" class="serversync-health-dashboard">
+                            <div class="serversync-health-row" id="queuePeerRow"></div>
                         </div>
-                        <div id="queueNoPeers" class="jpk-info hidden">No server is in Push or Sync mode, so this server sends no hints. Hints it receives from peers still appear below.</div>
+                        <div id="queueNoPeers" class="jpk-info hidden">No server is set to Push or Sync, so this server sends no hints. Hints it receives from other servers still appear below.</div>
                         <div id="queueUnmatched" class="jpk-warn hidden"><span id="queueUnmatchedText"></span> <button is="emby-button" type="button" id="btnQueueUnmatchedDismiss" class="raised jpk-button-small"><span>Dismiss</span></button></div>
 
-                        <!-- Action Buttons -->
-                        <div class="syncActionButtonRow">
-                            <button is="emby-button" type="button" id="btnQueueRefresh" class="raised syncActionButton">
+                        <!-- Action buttons -->
+                        <div class="serversync-action-button-row">
+                            <button is="emby-button" type="button" id="btnQueueRefresh" class="raised serversync-action-button">
                                 <span>Refresh</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnQueueRun" class="raised jpk-button-submit syncActionButton" title="Raise every gathering edit, deliver, and apply now instead of waiting for the workers">
+                            <button is="emby-button" type="button" id="btnQueueRun" class="raised jpk-button-submit serversync-action-button">
                                 <span>Run Now</span>
                             </button>
                         </div>
-                        <div id="queueFailedActions" class="syncActionButtonRow hidden">
-                            <button is="emby-button" type="button" id="btnQueueRetryFailed" class="raised jpk-button-submit syncActionButton" title="Try every failed change again now, sent and received, with its attempts cleared">
+                        <div id="queueFailedActions" class="serversync-action-button-row hidden">
+                            <button is="emby-button" type="button" id="btnQueueRetryFailed" class="raised jpk-button-submit serversync-action-button">
                                 <span>Retry Failed</span>
                             </button>
-                            <button is="emby-button" type="button" id="btnQueueDismissFailed" class="raised jpk-button-destructive syncActionButton" title="Discard every failed change, sent and received. The scheduled tasks still carry them">
+                            <button is="emby-button" type="button" id="btnQueueDismissFailed" class="raised jpk-button-destructive serversync-action-button">
                                 <span>Dismiss Failed</span>
                             </button>
                         </div>
 
-                        <div class="syncSectionSeparator"></div>
+                        <div class="serversync-section-separator"></div>
 
-                        <!-- Direction and peer filters -->
-                        <div class="qFilters" id="queueFilters">
-                            <button type="button" class="qFilter on" data-dir="all">All</button>
-                            <button type="button" class="qFilter" data-dir="out">Outbound</button>
-                            <button type="button" class="qFilter" data-dir="in">Inbound</button>
+                        <!-- Direction and server filters -->
+                        <div class="serversync-filter-pills" id="queueFilters">
+                            <button type="button" class="serversync-filter-pill serversync-on" data-dir="all">All</button>
+                            <button type="button" class="serversync-filter-pill" data-dir="out">Outbound</button>
+                            <button type="button" class="serversync-filter-pill" data-dir="in">Inbound</button>
                         </div>
 
-                        <!-- One list: a change is one row for its whole life -->
+                        <!-- One list, a change is one row for its whole life -->
                         <div id="queueEmpty" class="jpk-empty hidden">Nothing is moving between servers right now.</div>
-                        <div id="queueList" class="qList"></div>
+                        <div id="queueList" class="serversync-queue-list"></div>
                     </div>
 
                 </div>
@@ -794,7 +784,7 @@
         </div>
     </div>
 
-    <!-- STYLES: Shared -->
+    <!-- Styles -->
     <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
     <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
 

@@ -240,6 +240,23 @@ public class SourceServerClientApiTests
         Assert.True(headSize > 0, "HEAD on the Primary image must report a positive Content-Length");
     }
 
+    /// <summary>
+    /// The primary image of an item opens as an image through the client.
+    /// True: the dashboard's thumbnails load through the same guarded client as every other call.
+    /// False: the image proxy would answer nothing, or would need a request of its own.
+    /// </summary>
+    [ApiFact]
+    public async Task OpenPrimaryImage_ReturnsAnImage()
+    {
+        var withImage = _fx.SampleItems.FirstOrDefault(i => i.ImageTags?.AdditionalData?.ContainsKey("Primary") == true);
+        Assert.True(withImage != null, "No sample item has a Primary image, so the primary image was not checked. Give one item in the first library an image.");
+
+        using var response = await _fx.Client.OpenPrimaryImageAsync(withImage.Id!.Value, user: false, maxHeight: 80);
+
+        Assert.True(response.IsSuccessStatusCode, $"the source answered {(int)response.StatusCode}");
+        Assert.StartsWith("image/", response.Content.Headers.ContentType?.MediaType ?? string.Empty, System.StringComparison.OrdinalIgnoreCase);
+    }
+
     [ApiFact]
     public async Task GetUserImageHashAndSize_ReturnsConsistentPair()
     {

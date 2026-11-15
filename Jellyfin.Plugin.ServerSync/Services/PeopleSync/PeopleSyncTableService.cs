@@ -25,6 +25,8 @@ public class PeopleSyncTableService
     /// <summary>
     /// Initializes a new instance of the <see cref="PeopleSyncTableService"/> class.
     /// </summary>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="libraryManager">Library manager.</param>
     public PeopleSyncTableService(
         ILogger<PeopleSyncTableService> logger,
         ILibraryManager libraryManager)
@@ -41,6 +43,8 @@ public class PeopleSyncTableService
     /// the pre-sync local blob until the user re-runs the full Refresh.
     /// Source-side fields (and all hashes) are left untouched.
     /// </summary>
+    /// <param name="record">The record whose local side is re-read.</param>
+    /// <param name="syncImages"><c>true</c> to re-read the images.</param>
     public void RefreshLocalSnapshot(PeopleSyncItem record, bool syncImages)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -76,11 +80,16 @@ public class PeopleSyncTableService
     /// as "1 (0 B)", looks like a sync failure even when nothing's wrong.
     /// One HTTP call per modal open.
     /// </summary>
+    /// <param name="record">The record whose source images are enriched.</param>
+    /// <param name="client">The client for the source server.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task EnrichSourceImageSizesAsync(
         PeopleSyncItem record,
         SourceServerClient client,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(client);
+
         ArgumentNullException.ThrowIfNull(record);
         if (!Guid.TryParse(record.SourcePersonId, out var sourcePersonId)) return;
 

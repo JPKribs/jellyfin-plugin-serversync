@@ -54,7 +54,7 @@ public static class UserPolicyCombiner
     /// <summary>Combines two policies.</summary>
     /// <param name="other">The other server's policy, in this server's terms, as JSON.</param>
     /// <param name="mine">This server's policy as JSON.</param>
-    /// <param name="rule">The rule.</param>
+    /// <param name="rule">Which rule settles a permission both servers changed.</param>
     /// <returns>The combined policy as JSON, or the other server's when either cannot be read.</returns>
     public static string? Combine(string? other, string? mine, UserConflictRule rule)
     {

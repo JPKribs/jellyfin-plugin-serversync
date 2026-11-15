@@ -7,6 +7,9 @@ using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 
+/// <summary>
+/// The JSON field helpers hand a present value to an assignment, and do nothing for an absent key.
+/// </summary>
 public class JsonFieldHelpersTests
 {
     private static Dictionary<string, JsonElement> Parse(string json)

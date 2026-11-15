@@ -8,8 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Links;
 
 /// <summary>
-/// Once a minute, ends the link sessions on this server, the source, whose server stopped reporting on
-/// them, so a viewer whose stop report was lost does not stay listed on the dashboard.
+/// Once a minute, stops and later removes the link sessions on this server, the source, whose server
+/// stopped reporting on them, so a viewer whose stop report was lost does not stay listed as playing.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LinkSessionSweeper : BackgroundService
@@ -20,6 +20,11 @@ public sealed class LinkSessionSweeper : BackgroundService
     private readonly LinkPlaybackSessions _sessions;
     private readonly ILogger<LinkSessionSweeper> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkSessionSweeper"/> class.
+    /// </summary>
+    /// <param name="sessions">The link sessions.</param>
+    /// <param name="logger">Logger instance.</param>
     public LinkSessionSweeper(LinkPlaybackSessions sessions, ILogger<LinkSessionSweeper> logger)
     {
         _sessions = sessions;

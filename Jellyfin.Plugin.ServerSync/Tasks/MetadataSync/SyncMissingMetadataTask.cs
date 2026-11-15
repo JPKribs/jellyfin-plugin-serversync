@@ -39,8 +39,16 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     private readonly AppliedVersionRecorder _applied;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="SyncMissingMetadataTask"/> class.
     /// </summary>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="libraryManager">Reads and changes Jellyfin's library.</param>
+    /// <param name="providerManager">Refreshes an item's metadata and images.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="metadataService">Builds and compares metadata sync rows.</param>
+    /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="applied">Records the version each applied value carries, or null when versions are not kept.</param>
     public SyncMissingMetadataTask(
         ILogger<SyncMissingMetadataTask> logger,
         ILibraryManager libraryManager,
@@ -73,13 +81,15 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     /// <inheritdoc />
     protected override string ModuleMutexKey => "Metadata";
 
-    // Image downloads dominate per-item wall time (HTTP round-trip per
-    // image type, then a file write). Without parallelism a few thousand
-    // items take 8+ minutes serially. Local writes (UpdatePeopleAsync,
-    // UpdateToRepositoryAsync, IProviderManager.SaveImage) go through
-    // Jellyfin's repository which has its own internal locking, so
-    // concurrent applies serialize cleanly at persist time while still
-    // overlapping the HTTP-bound download phase.
+    /// <summary>
+    /// Image downloads dominate per-item wall time (HTTP round-trip per
+    /// image type, then a file write). Without parallelism a few thousand
+    /// items take 8+ minutes serially. Local writes (UpdatePeopleAsync,
+    /// UpdateToRepositoryAsync, IProviderManager.SaveImage) go through
+    /// Jellyfin's repository which has its own internal locking, so
+    /// concurrent applies serialize cleanly at persist time while still
+    /// overlapping the HTTP-bound download phase.
+    /// </summary>
     /// <inheritdoc />
     protected override int MaxDegreeOfParallelism => 4;
 
@@ -94,9 +104,11 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             || config.MetadataSyncPeople || config.MetadataSyncStudios;
     }
 
-    // Sort: folder-type items first (Series → Season → MusicArtist →
-    // MusicAlbum → BoxSet) then leaf items, so parent metadata is in
-    // place before children would inherit anything from it.
+    /// <summary>
+    /// Sort: folder-type items first (Series → Season → MusicArtist →
+    /// MusicAlbum → BoxSet) then leaf items, so parent metadata is in
+    /// place before children would inherit anything from it.
+    /// </summary>
     /// <inheritdoc />
     protected override IList<MetadataSyncItem> GetItemsToApply()
     {
@@ -116,8 +128,10 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         return items;
     }
 
-    // Parallel applies within a tier are fine, but a Season must not apply
-    // while its Series is still in flight, group boundaries are barriers.
+    /// <summary>
+    /// Parallel applies within a tier are fine, but a Season must not apply
+    /// while its Series is still in flight, group boundaries are barriers.
+    /// </summary>
     /// <inheritdoc />
     protected override IEnumerable<IList<MetadataSyncItem>> GetApplyGroups(IList<MetadataSyncItem> items)
     {
@@ -127,9 +141,11 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             .Select(g => (IList<MetadataSyncItem>)g.ToList());
     }
 
-    // Only the item itself is held for the whole apply. Writing its cast touches Person items too, so
-    // ApplyAsync holds every people hint back as well, but only from the cast write to the save, never
-    // while images download.
+    /// <summary>
+    /// Only the item itself is held for the whole apply. Writing its cast touches Person items too, so
+    /// ApplyAsync holds every people hint back as well, but only from the cast write to the save, never
+    /// while images download.
+    /// </summary>
     /// <inheritdoc />
     protected override IDisposable? EnterApplyGuard(MetadataSyncItem record)
         => _applied.Enter(Models.Queue.HintKind.Metadata, record?.LocalItemId ?? string.Empty);
@@ -263,14 +279,16 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         }
     }
 
-    // Re-reads the local item and confirms each applied category landed in
-    // Jellyfin's repository, provider/aggregation logic can rewrite the
-    // written blob between apply and persist, so a write-then-trust loop
-    // produces silent green badges on rows that are actually still divergent.
-    // Categories whose verify passes are per-category <c>MarkSynced</c>'d
-    // inline so partial progress sticks even if a later category fails, and
-    // the base then upserts the record as Errored with the cumulative
-    // reason.
+    /// <summary>
+    /// Re-reads the local item and confirms each applied category landed in
+    /// Jellyfin's repository, provider/aggregation logic can rewrite the
+    /// written blob between apply and persist, so a write-then-trust loop
+    /// produces silent green badges on rows that are actually still divergent.
+    /// Categories whose verify passes are per-category <c>MarkSynced</c>'d
+    /// inline so partial progress sticks even if a later category fails, and
+    /// the base then upserts the record as Errored with the cumulative
+    /// reason.
+    /// </summary>
     /// <inheritdoc />
     protected override async Task VerifyAfterApplyAsync(MetadataSyncItem record, CancellationToken cancellationToken)
     {
@@ -395,10 +413,12 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             ?? throw new InvalidOperationException("Local item not found in library");
     }
 
-    // No-op: per-category MarkSynced already happens inside VerifyAfterApplyAsync
-    // for the categories whose verify passed. Marking the whole record here
-    // would advance SyncedHash on un-applied categories too, falsely
-    // short-circuiting the next Refresh.
+    /// <summary>
+    /// No-op: per-category MarkSynced already happens inside VerifyAfterApplyAsync
+    /// for the categories whose verify passed. Marking the whole record here
+    /// would advance SyncedHash on un-applied categories too, falsely
+    /// short-circuiting the next Refresh.
+    /// </summary>
     /// <inheritdoc />
     protected override void OnApplySucceeded(MetadataSyncItem record)
     {
@@ -717,12 +737,6 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         return true;
     }
 
-    // ===================================================================
-    // Verification, re-read local state and compare against source blob.
-    // Each helper takes the freshly-read local item + source record and
-    // returns (succeeded, failureReason).
-    // ===================================================================
-
     private (bool Succeeded, string? FailureReason) VerifyMetadataApplied(
         BaseItem freshLocal,
         MetadataSyncItem record,
@@ -743,7 +757,7 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
         var differingFields = JsonComparisonUtility.GetDifferingFields(source, fresh);
         var fieldList = differingFields.Count == 0 ? "(none)" : string.Join(",", differingFields);
         var detail = JsonComparisonUtility.DescribeDifferingFields(source, fresh);
-        return (false, $"verification found {differingFields.Count} divergent field(s) [{fieldList}] (item type {freshLocal.GetType().Name}). {detail}");
+        return (false, $"verification found {JPKribs.Jellyfin.Base.ActivityText.Count(differingFields.Count, "divergent field")} [{fieldList}] (item type {freshLocal.GetType().Name}). {detail}");
     }
 
     private async Task<(bool Succeeded, string? FailureReason)> VerifyImagesAppliedAsync(
@@ -864,10 +878,6 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             _ => 2
         };
     }
-
-    // ===================================================================
-    // Apply helpers, local extraction utilities.
-    // ===================================================================
 
     /// <summary>
     /// Removes image types that the metadata sync apply path can't actually

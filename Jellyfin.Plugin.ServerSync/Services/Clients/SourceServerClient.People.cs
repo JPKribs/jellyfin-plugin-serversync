@@ -12,8 +12,6 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// </summary>
 public partial class SourceServerClient
 {
-    // ===== People Sync Methods =====
-
     /// <summary>
     /// Bulk-fetches every Person from the source server in a single
     /// <c>/Persons?fields=…</c> call so callers can do a local name-keyed
@@ -28,6 +26,7 @@ public partial class SourceServerClient
     /// partial catalog would make the People refresh prune rows for persons
     /// it never saw.
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>All persons returned by the source server.</returns>
     public async Task<IReadOnlyList<BaseItemDto>> GetAllPersonsAsync(
         CancellationToken cancellationToken = default)

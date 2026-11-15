@@ -207,6 +207,8 @@ public partial class SourceServerClient : IDisposable
         bool allowPrivateNetwork,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+
         serverUrl = serverUrl.TrimEnd('/');
 
         // The URL check only classifies an address written into the URL. A name resolves at connect
@@ -649,12 +651,17 @@ public partial class SourceServerClient : IDisposable
         }
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         Dispose(true);
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Releases the API client once.
+    /// </summary>
+    /// <param name="disposing"><c>true</c> when called from <see cref="Dispose()"/>.</param>
     protected virtual void Dispose(bool disposing)
     {
         if (!_disposed && disposing)

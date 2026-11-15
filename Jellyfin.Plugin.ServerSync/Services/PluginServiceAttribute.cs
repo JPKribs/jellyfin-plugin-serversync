@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 public sealed class PluginServiceAttribute : Attribute
 {
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="PluginServiceAttribute"/> class.
     /// </summary>
     /// <param name="lifetime">DI lifetime for this service.</param>
     public PluginServiceAttribute(ServiceLifetime lifetime)

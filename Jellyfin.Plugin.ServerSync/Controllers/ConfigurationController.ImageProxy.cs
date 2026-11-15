@@ -1,6 +1,5 @@
 using System;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Configuration;
@@ -11,11 +10,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Controllers;
 
 /// <summary>
-/// Proxies source-server images for the admin pages. The pages used to embed
-/// the decrypted source API key in every image URL, which leaked it into
-/// browser devtools, caches, and the source server's access logs. This keeps
-/// the key server-side and lets the browser authenticate with its own local
-/// session instead.
+/// Proxies source-server images for the admin pages. The decrypted source API key never appears in an
+/// image URL, so it never reaches browser devtools, caches, or the source server's access logs. The key
+/// stays server-side and the browser authenticates with its own local session.
 /// </summary>
 public partial class ConfigurationController
 {
@@ -26,7 +23,8 @@ public partial class ConfigurationController
     /// <param name="user">True to fetch a user profile image instead of an item image.</param>
     /// <param name="maxHeight">Maximum image height in pixels.</param>
     /// <param name="serverKey">The server entry the image lives on. Defaults to the first scan server.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>The image bytes, or 404 when the server or image is unavailable.</returns>
     [HttpGet("ImageProxy")]
     public async Task<ActionResult> GetSourceImage(
         [FromQuery] Guid itemId,
@@ -41,27 +39,17 @@ public partial class ConfigurationController
             return NotFound();
         }
 
-        // Same SSRF gate every other source-server call path goes through
-        // (the factory validates too, but this endpoint bypasses the factory).
         if (await Utilities.ConfigurationUtilities.ValidateServerUrlForSsrfAsync(server.Url, server.AllowPrivateNetwork, cancellationToken).ConfigureAwait(false) != null)
         {
             return NotFound();
         }
 
         maxHeight = Math.Clamp(maxHeight, 1, 600);
-        var baseUrl = server.Url.TrimEnd('/');
-        var url = user
-            ? $"{baseUrl}/Users/{itemId}/Images/Primary?maxHeight={maxHeight}"
-            : $"{baseUrl}/Items/{itemId}/Images/Primary?maxHeight={maxHeight}";
 
         try
         {
-            var client = _httpClientFactory.CreateClient(server.AllowPrivateNetwork ? SourceServerClient.HttpClientName : SourceServerClient.PublicHttpClientName);
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue(
-                "MediaBrowser", $"Token=\"{_configManager.DecryptApiKey(server.ApiKey)}\"");
-
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            using var client = _clientFactory.Create(server);
+            using var response = await client.OpenPrimaryImageAsync(itemId, user, maxHeight, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 return NotFound();

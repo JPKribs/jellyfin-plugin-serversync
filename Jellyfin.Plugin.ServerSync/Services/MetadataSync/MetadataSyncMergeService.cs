@@ -23,10 +23,6 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 /// </summary>
 public static class MetadataSyncMergeService
 {
-    // ===================================================================
-    // Per-category source + local blob building (called from BuildRecordAsync)
-    // ===================================================================
-
     /// <summary>
     /// Builds the source-side and local-side metadata blobs (text/number
     /// fields, provider IDs, locked fields, etc.) on <paramref name="item"/>.
@@ -34,6 +30,11 @@ public static class MetadataSyncMergeService
     /// hash short-circuit stays honest: what you sync = what you compare =
     /// what you hash.
     /// </summary>
+    /// <param name="item">The record whose blobs are built.</param>
+    /// <param name="sourceItem">The item as the source returned it.</param>
+    /// <param name="localItem">The matching local item, or null when there is none.</param>
+    /// <param name="syncGenres"><c>true</c> to include genres.</param>
+    /// <param name="syncTags"><c>true</c> to include tags.</param>
     public static void MergeMetadataFields(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
@@ -41,6 +42,9 @@ public static class MetadataSyncMergeService
         bool syncGenres,
         bool syncTags)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(sourceItem);
+
         // Extract provider IDs as a simple dictionary (external IDs like IMDB, TMDB).
         // Sort by key to ensure consistent ordering for comparison.
         // UnwrapKiotaPrimitive is required: AdditionalData values are Kiota
@@ -136,6 +140,14 @@ public static class MetadataSyncMergeService
     /// against the sized local manifest without paying one GET + one HEAD per
     /// image on every unchanged item every refresh.
     /// </summary>
+    /// <param name="item">The record whose manifests are built.</param>
+    /// <param name="sourceItem">The item as the source returned it.</param>
+    /// <param name="localItem">The matching local item, or null when there is none.</param>
+    /// <param name="client">The client for the source server, or null to skip sizing.</param>
+    /// <param name="priorSourceManifestJson">The last refresh's source manifest, or null.</param>
+    /// <param name="deepVerification"><c>true</c> to read each image's size from the source.</param>
+    /// <param name="logger">Logger for operation output.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task MergeImagesAsync(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
@@ -146,6 +158,9 @@ public static class MetadataSyncMergeService
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(sourceItem);
+
         var sourceImagesByType = new Dictionary<string, List<ImageInfoDto>>();
         PopulateSourceImagesFromTags(sourceItem, sourceImagesByType);
 
@@ -198,12 +213,19 @@ public static class MetadataSyncMergeService
     /// and the local side is put through the same ordering so the apply can
     /// carry the cast order across instead of alphabetising it.
     /// </summary>
+    /// <param name="item">The record whose blobs are built.</param>
+    /// <param name="sourceItem">The item as the source returned it.</param>
+    /// <param name="localItem">The matching local item, or null when there is none.</param>
+    /// <param name="libraryManager">Reads the local item's people.</param>
     public static void MergePeople(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
         BaseItem? localItem,
         ILibraryManager libraryManager)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(sourceItem);
+
         if (sourceItem.People != null && sourceItem.People.Count > 0)
         {
             var sourcePeople = new List<Dictionary<string, string>>();
@@ -254,11 +276,17 @@ public static class MetadataSyncMergeService
     /// still matches. Both sides filter null/whitespace symmetrically to
     /// avoid permanent false-positive diffs.
     /// </summary>
+    /// <param name="item">The record whose blobs are built.</param>
+    /// <param name="sourceItem">The item as the source returned it.</param>
+    /// <param name="localItem">The matching local item, or null when there is none.</param>
     public static void MergeStudios(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
         BaseItem? localItem)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(sourceItem);
+
         if (sourceItem.Studios != null && sourceItem.Studios.Count > 0)
         {
             var studioNames = sourceItem.Studios
@@ -287,18 +315,21 @@ public static class MetadataSyncMergeService
         }
     }
 
-    // ===================================================================
-    // Local-side rebuild (used by RefreshLocalSnapshot for per-modal refresh)
-    // ===================================================================
-
     /// <summary>
     /// Rebuilds the local-side metadata blob on <paramref name="item"/> from
     /// the live <paramref name="localItem"/>. Also used by RefreshLocalSnapshot to
     /// show fresh local state in the modal after a sync apply without re-
     /// running the full Refresh task.
     /// </summary>
+    /// <param name="item">The record to update.</param>
+    /// <param name="localItem">The live local item.</param>
+    /// <param name="syncGenres"><c>true</c> to include genres.</param>
+    /// <param name="syncTags"><c>true</c> to include tags.</param>
     public static void RebuildLocalMetadataBlob(MetadataSyncItem item, BaseItem localItem, bool syncGenres, bool syncTags)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(localItem);
+
         var localVideo = localItem as MediaBrowser.Controller.Entities.Video;
 
         var localMetadata = new Dictionary<string, object?>
@@ -349,6 +380,9 @@ public static class MetadataSyncMergeService
     /// </summary>
     public static void RebuildLocalImagesBlob(MetadataSyncItem item, BaseItem localItem)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(localItem);
+
         var localImagesByType = new Dictionary<string, List<ImageInfoDto>>();
         var imageTypes = new[]
         {
@@ -404,8 +438,15 @@ public static class MetadataSyncMergeService
     /// <summary>
     /// Rebuilds the local-side people blob on <paramref name="item"/>.
     /// </summary>
+    /// <param name="item">The record to update.</param>
+    /// <param name="localItem">The live local item.</param>
+    /// <param name="libraryManager">Reads the local item's people.</param>
     public static void RebuildLocalPeopleBlob(MetadataSyncItem item, BaseItem localItem, ILibraryManager libraryManager)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(localItem);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+
         var localPeopleList = libraryManager.GetPeople(localItem);
         if (localPeopleList == null || localPeopleList.Count == 0)
         {
@@ -428,8 +469,13 @@ public static class MetadataSyncMergeService
     /// <summary>
     /// Rebuilds the local-side studios blob on <paramref name="item"/>.
     /// </summary>
+    /// <param name="item">The record to update.</param>
+    /// <param name="localItem">The live local item.</param>
     public static void RebuildLocalStudiosBlob(MetadataSyncItem item, BaseItem localItem)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(localItem);
+
         if (localItem.Studios == null || localItem.Studios.Length == 0)
         {
             item.Studios.Local = "[]";
@@ -445,10 +491,6 @@ public static class MetadataSyncMergeService
             ? JsonSerializer.Serialize(validStudios)
             : "[]";
     }
-
-    // ===================================================================
-    // Private helpers
-    // ===================================================================
 
     /// <summary>
     /// Populates the source-side image manifest from <see cref="BaseItemDto"/>
@@ -495,7 +537,6 @@ public static class MetadataSyncMergeService
             }
         }
 
-        // Process multiple backdrops
         if (sourceItem.BackdropImageTags?.Count > 0)
         {
             sourceImagesByType["Backdrop"] = sourceItem.BackdropImageTags

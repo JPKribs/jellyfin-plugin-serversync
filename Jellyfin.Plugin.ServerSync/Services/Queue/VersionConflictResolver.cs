@@ -67,7 +67,7 @@ public sealed class VersionConflictResolver
     };
 
     /// <summary>
-    /// Whether a peer runs a Server Sync that keeps versions: true, false when it answers that it does
+    /// Whether a peer runs a Server Sync that keeps versions: <c>true</c>, <c>false</c> when it answers that it does
     /// not, or null when it could not be asked. Only a real answer is cached. A failed read is not taken
     /// to mean "no versions", since a scan would then fall back to the source winning over edits made here.
     /// </summary>
@@ -116,7 +116,7 @@ public sealed class VersionConflictResolver
 
     /// <summary>Whether a version is an edit this server made itself.</summary>
     /// <param name="version">The version.</param>
-    /// <returns>True when this server made it.</returns>
+    /// <returns><c>true</c> when this server made it.</returns>
     public bool IsThisServer(ObjectVersion version)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -135,7 +135,7 @@ public sealed class VersionConflictResolver
     /// <summary>Records the pending version of a value that was just applied.</summary>
     /// <param name="kind">The kind.</param>
     /// <param name="localKey">This server's key.</param>
-    /// <returns>True when one was pending.</returns>
+    /// <returns><c>true</c> when one was pending.</returns>
     public bool PromotePending(HintKind kind, string localKey) => _versions.PromotePending(kind, localKey);
 
     /// <summary>

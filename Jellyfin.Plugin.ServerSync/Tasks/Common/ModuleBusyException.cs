@@ -19,7 +19,7 @@ public sealed class ModuleBusyException : Exception
     /// <summary>
     /// Initializes a new instance of the <see cref="ModuleBusyException"/> class.
     /// </summary>
-    /// <param name="message">The message.</param>
+    /// <param name="message">Why the module is busy.</param>
     public ModuleBusyException(string message)
         : base(message)
     {

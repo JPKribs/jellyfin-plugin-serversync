@@ -24,8 +24,9 @@ public class UserSyncTableService
     private readonly ILogger<UserSyncTableService> _logger;
 
     /// <summary>
-    /// Initializes a new instance.
+    /// Initializes a new instance of the <see cref="UserSyncTableService"/> class.
     /// </summary>
+    /// <param name="logger">Logger instance.</param>
     public UserSyncTableService(ILogger<UserSyncTableService> logger)
     {
         _logger = logger;
@@ -37,6 +38,18 @@ public class UserSyncTableService
     /// are private, callers go through this single entry point so adding a
     /// category is a switch-arm addition rather than a new public method.
     /// </summary>
+    /// <param name="mapping">The user mapping.</param>
+    /// <param name="category">The property category: Policy, Configuration, or ProfileImage.</param>
+    /// <param name="sourceUser">The user as the source returned it.</param>
+    /// <param name="localUserDto">The local user as Jellyfin's API shows it.</param>
+    /// <param name="localUser">The local user's entity.</param>
+    /// <param name="sourceClient">The client for the source server.</param>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="existingItem">The stored row, or null.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="libraryMappings">The enabled library mappings, or null to read them from the configuration.</param>
+    /// <param name="bothWays">The conflict rule for a Sync server, or null.</param>
+    /// <returns>The row, or null for an unknown category.</returns>
     public async Task<UserSyncItem?> BuildRecordAsync(
         UserMapping mapping,
         string category,

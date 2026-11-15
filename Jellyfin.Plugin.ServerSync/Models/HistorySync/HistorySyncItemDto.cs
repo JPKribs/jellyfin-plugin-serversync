@@ -57,8 +57,6 @@ public class HistorySyncItemDto
     /// </summary>
     public string? LocalPath { get; set; }
 
-    // ===== Source History State =====
-
     /// <summary>
     /// Gets or sets whether the item is marked as played on source server.
     /// </summary>
@@ -83,8 +81,6 @@ public class HistorySyncItemDto
     /// Gets or sets whether the item is a favorite on source server.
     /// </summary>
     public bool? SourceIsFavorite { get; set; }
-
-    // ===== Local History State =====
 
     /// <summary>
     /// Gets or sets whether the item is marked as played locally.
@@ -111,8 +107,6 @@ public class HistorySyncItemDto
     /// </summary>
     public bool? LocalIsFavorite { get; set; }
 
-    // ===== Merged/Target State =====
-
     /// <summary>
     /// Gets or sets the merged played status to apply.
     /// </summary>
@@ -138,8 +132,6 @@ public class HistorySyncItemDto
     /// </summary>
     public bool? MergedIsFavorite { get; set; }
 
-    // ===== Source Server =====
-
     /// <summary>
     /// Gets or sets the source server URL (for image display).
     /// </summary>
@@ -147,8 +139,6 @@ public class HistorySyncItemDto
 
     /// <summary>Gets or sets the configured server entry the row came from.</summary>
     public string? ServerKey { get; set; }
-
-    // ===== Sync Tracking =====
 
     /// <summary>
     /// Gets or sets the sync status.

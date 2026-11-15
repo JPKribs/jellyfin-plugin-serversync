@@ -28,7 +28,7 @@ public partial class SourceServerClient
 
     /// <summary>Whether an item read from the peer is one of the peer's links, and so not a file to copy.</summary>
     /// <param name="itemId">The peer's id of the item.</param>
-    /// <returns>True for a link.</returns>
+    /// <returns><c>true</c> for a link.</returns>
     public bool IsPeerLink(Guid? itemId) => itemId is { } id && _peerLinkIds.ContainsKey(id);
 
     /// <summary>

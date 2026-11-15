@@ -26,8 +26,8 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
     /// Initializes a new instance of the <see cref="SyncInformationTask"/> class.
     /// </summary>
     /// <param name="services">The service provider the module tasks are built from.</param>
-    /// <param name="configManager">Plugin configuration.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
+    /// <param name="logger">Writes log entries.</param>
     public SyncInformationTask(IServiceProvider services, IPluginConfigurationManager configManager, ILogger<SyncInformationTask> logger)
     {
         _services = services;
@@ -131,7 +131,7 @@ public class SyncInformationTask : IScheduledTask, IConfigurableScheduledTask
 
         if (failures.Count > 0)
         {
-            throw new AggregateException($"{Name}: {failures.Count} step(s) failed, see the log for each", failures);
+            throw new AggregateException($"{Name}: {JPKribs.Jellyfin.Base.ActivityText.Count(failures.Count, "step")} failed, see the log for each", failures);
         }
     }
 

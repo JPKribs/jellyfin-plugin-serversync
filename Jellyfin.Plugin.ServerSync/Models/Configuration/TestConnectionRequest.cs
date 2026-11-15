@@ -7,9 +7,11 @@ namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 /// </summary>
 public class TestConnectionRequest
 {
+    /// <summary>Gets or sets the Server URL to test.</summary>
     [Required]
     public string ServerUrl { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the API Key to test, or the kept sentinel when the stored key is to be used.</summary>
     [Required]
     public string ApiKey { get; set; } = string.Empty;
 

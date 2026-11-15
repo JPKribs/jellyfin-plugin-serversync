@@ -92,10 +92,12 @@ LIBRARY_OPTIONS = {
 # --------------------------------------------------------------------------------------------------
 
 def log(msg):
+    """Prints a line and flushes it."""
     print(msg, flush=True)
 
 
 def run(cmd, cwd=None, check=True, capture=False):
+    """Runs a command, and exits with its output when it fails and check is set."""
     result = subprocess.run(cmd, cwd=cwd or HERE, check=False, text=True, capture_output=capture)
     if check and result.returncode != 0:
         raise SystemExit(f"command failed ({result.returncode}): {' '.join(cmd)}\n{result.stdout if capture else ''}{result.stderr if capture else ''}")
@@ -103,6 +105,7 @@ def run(cmd, cwd=None, check=True, capture=False):
 
 
 def read_build_yaml():
+    """Reads the plugin name, version, target ABI, and artifacts from build.yaml."""
     info = {"artifacts": []}
     in_artifacts = False
     with open(os.path.join(REPO, "build.yaml"), encoding="utf-8") as f:
@@ -127,6 +130,7 @@ class Api:
     """Minimal Jellyfin client over urllib, one per server."""
 
     def __init__(self, name, port, device):
+        """Initializes a client for one server."""
         self.name = name
         self.base = f"http://127.0.0.1:{port}"
         self.device = device
@@ -135,12 +139,14 @@ class Api:
         self.protocol = "1"
 
     def _headers(self):
+        """Returns the authorization and protocol headers for a request."""
         auth = f'MediaBrowser Client="ServerSyncIT", Device="runner", DeviceId="{self.device}", Version="1.0"'
         if self.token:
             auth += f', Token="{self.token}"'
         return {"Authorization": auth, "Content-Type": "application/json", "Accept": "application/json", "X-ServerSync-Version": self.version, "X-ServerSync-Protocol": self.protocol, "X-ServerSync-Min-Protocol": self.protocol}
 
     def call(self, method, path, body=None, expect=None, raw=False):
+        """Sends a request and returns the status and parsed body, retrying a dropped connection."""
         data = None if body is None else json.dumps(body).encode()
         # A server that just started answers its public info endpoint a moment before it accepts
         # other requests, so a dropped connection is retried a few times before it counts.
@@ -171,12 +177,15 @@ class Api:
             return status, content
 
     def get(self, path, expect=200):
+        """Sends a GET and returns the parsed body."""
         return self.call("GET", path, expect=expect)[1]
 
     def post(self, path, body=None, expect=None):
+        """Sends a POST and returns the status and parsed body."""
         return self.call("POST", path, body, expect=expect)
 
     def wait_ready(self, timeout=240):
+        """Waits until the server answers its public info route."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -196,6 +205,7 @@ class Api:
 # --------------------------------------------------------------------------------------------------
 
 def build_plugin():
+    """Publishes the plugin and copies it into the folder the containers mount, returning that folder's name."""
     info = read_build_yaml()
     folder = f"{info['name']}_{info['version']}"
     log(f"== building plugin {info['version']} for ABI {info['targetAbi']}")
@@ -226,6 +236,7 @@ def build_plugin():
 
 
 def compose(*args, folder=None):
+    """Runs docker compose for the pool with the image and plugin folder set."""
     env = dict(os.environ, JELLYFIN_IMAGE=IMAGE)
     if folder:
         env["PLUGIN_FOLDER"] = folder
@@ -281,12 +292,14 @@ def seed_media():
 
 
 def image_base64(color):
+    """Returns a test image as base64."""
     import base64
     with open(os.path.join(STATE, "images", f"{color}.png"), "rb") as f:
         return base64.b64encode(f.read()).decode()
 
 
 def load_creds():
+    """Loads the saved credentials, or makes a new password when there are none."""
     if os.path.exists(CREDS):
         with open(CREDS, encoding="utf-8") as f:
             return json.load(f)
@@ -294,12 +307,14 @@ def load_creds():
 
 
 def save_creds(creds):
+    """Saves the credentials file."""
     os.makedirs(STATE, exist_ok=True)
     with open(CREDS, "w", encoding="utf-8") as f:
         json.dump(creds, f, indent=2)
 
 
 def connect(name):
+    """Returns an Api for one server in the pool."""
     return Api(name, SERVERS[name]["port"], f"it-{name}")
 
 
@@ -376,8 +391,7 @@ def wait_items(api, item_type, count, timeout=180):
 
 
 def find_item(api, item_type, needle):
-    """Finds an item whose name starts with the needle, or whose path contains it. Episodes with no
-    provider carry the series name, so they are found by path."""
+    """Finds an item whose name starts with the needle, or whose path contains it."""
     items = api.get(f"/Items?IncludeItemTypes={item_type}&Recursive=true&Fields=Overview,Genres,Tags,Studios,People,Path")["Items"]
     return next((i for i in items if (i.get("Name") or "").startswith(needle) or needle in (i.get("Path") or "")), None)
 
@@ -390,6 +404,7 @@ def update_item(api, item, changes):
 
 
 def upload_image(api, path, color):
+    """Uploads a test image to a Jellyfin image route."""
     data = image_base64(color).encode()
     req = urllib.request.Request(api.base + path, data=data, method="POST", headers={**api._headers(), "Content-Type": "image/png"})
     with urllib.request.urlopen(req, timeout=60) as resp:
@@ -433,11 +448,13 @@ def seed_metadata(creds, apis):
 # --------------------------------------------------------------------------------------------------
 
 def plugin_config(api):
+    """Returns a server's plugin configuration."""
     return api.get(f"/Plugins/{PLUGIN_GUID}/Configuration")
 
 
 # API keys may call the peer routes from anywhere, so the host and servers that do not list each other can.
 def open_grants(creds, name):
+    """Returns Whitelist entries that let API keys and the admin call the peer routes from anywhere."""
     return [{"UserId": "apikey", "UserName": "API keys", "Locations": []},
             {"UserId": creds["servers"][name]["userId"], "UserName": "admin", "Locations": []}]
 
@@ -446,6 +463,7 @@ POOL_APIS = {}
 
 
 def save_plugin_config(api, config):
+    """Saves a server's plugin configuration and asks every pool server to re-read what its peers accept."""
     api.post(f"/Plugins/{PLUGIN_GUID}/Configuration", config, expect=204)
     # A sender re-reads what a peer accepts once a minute. The scenarios change modules far faster than
     # that, so every server is asked to re-read now, the way Run Now on the dashboard does.
@@ -457,8 +475,7 @@ def save_plugin_config(api, config):
 
 
 def server_entry(creds, name, key=None, local="local", mode="Pull"):
-    """Builds the entry one server (local) keeps for a peer (name): internal URL, the key that peer issued,
-    and mappings by library name and username between the two."""
+    """Builds the entry one server (local) keeps for a peer (name): internal URL, the key that peer issued, and mappings by library name and username between the two."""
     e = creds["servers"][name]
     mine = creds["servers"][local]
     return {
@@ -487,8 +504,7 @@ def server_entry(creds, name, key=None, local="local", mode="Pull"):
 
 
 def apply_negotiation(servers, negotiate):
-    """History negotiation is chosen per library and only a Sync server negotiates, so turning it on
-    makes each Pull entry Sync and ticks Negotiate History on every library mapping."""
+    """History negotiation is chosen per library and only a Sync server negotiates, so turning it on makes each Pull entry Sync and ticks Negotiate History on every library mapping."""
     for entry in servers:
         if negotiate and entry.get("Mode") in ("Pull", 0):
             entry["Mode"] = "Sync"
@@ -497,8 +513,7 @@ def apply_negotiation(servers, negotiate):
 
 
 def configure_server(creds, api, local, order, modes=None, **flags):
-    """Writes one server's peer list in priority order, keeping stored entries so keys round trip, and sets
-    each peer's mode. All modules are off unless a flag turns one on."""
+    """Writes one server's peer list in priority order, keeping stored entries so keys round trip, and sets each peer's mode."""
     modes = modes or {}
     config = plugin_config(api)
     existing = {s["Name"]: s for s in config.get("Servers", [])}
@@ -550,6 +565,7 @@ def configure_local(creds, api, order, **flags):
 
 
 def run_task(api, key, timeout=300):
+    """Runs a scheduled task by key and waits for it to finish."""
     tasks = api.get("/ScheduledTasks")
     task = next(t for t in tasks if t["Key"] == key)
     api.post(f"/ScheduledTasks/Running/{task['Id']}", expect=204)
@@ -566,8 +582,7 @@ def run_task(api, key, timeout=300):
 
 
 def all_rows(api):
-    """Every content sync row, read a page at a time, since the route answers at most 200 per request
-    and a reused pool can hold more."""
+    """Every content sync row, read a page at a time, since the route answers at most 200 per request and a reused pool can hold more."""
     rows, skip = [], 0
     while True:
         page = api.get(f"/Sync/Items?skip={skip}&take=200")["Items"]
@@ -578,10 +593,12 @@ def all_rows(api):
 
 
 def content_rows(api):
+    """Returns the content sync rows by source file name."""
     return {os.path.basename(r["SourcePath"]): r for r in all_rows(api)}
 
 
 def local_files():
+    """Returns the mp4 files local holds, by file name."""
     out = {}
     root = os.path.join(STATE, "media", "local")
     for dirpath, _, files in os.walk(root):
@@ -592,10 +609,12 @@ def local_files():
 
 
 def user_data(api, user_id, item_id):
+    """Returns a user's data for an item."""
     return api.get(f"/Items/{item_id}?userId={user_id}")["UserData"]
 
 
 def movie_id(api, title):
+    """Returns the id of the movie whose name starts with the title."""
     items = api.get("/Items?IncludeItemTypes=Movie&Recursive=true")["Items"]
     return next(i["Id"] for i in items if i["Name"].startswith(title.split(" (")[0]))
 
@@ -605,6 +624,7 @@ def movie_id(api, title):
 # --------------------------------------------------------------------------------------------------
 
 def scenario_content_priority(creds, apis):
+    """Checks that a title both sources hold comes from the first server in the list."""
     local = apis["local"]
     configure_local(creds, local, ["source-a", "source-b"])
     run_task(local, "ServerSyncUpdateTables")
@@ -634,6 +654,7 @@ def scenario_content_priority(creds, apis):
 
 
 def scenario_reorder_rehomes(creds, apis):
+    """Checks that reordering the servers re-homes a shared title to the new first server."""
     local = apis["local"]
     configure_local(creds, local, ["source-b", "source-a"])
     run_task(local, "ServerSyncUpdateTables")
@@ -650,6 +671,7 @@ def scenario_reorder_rehomes(creds, apis):
 
 
 def scenario_history_negotiation(creds, apis):
+    """Checks that History Sync with negotiation merges played state and favorites between local and source-a."""
     local, a = apis["local"], apis["source-a"]
     configure_local(creds, local, ["source-a", "source-b"], EnableHistorySync=True, HistorySyncNegotiate=True)
     lu, au = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"]
@@ -679,16 +701,17 @@ def scenario_history_negotiation(creds, apis):
 
 
 def scenario_history_field_off(creds, apis):
-    """A part of history that is switched off is left alone on both servers, while the parts left on
-    still travel both ways."""
+    """A part of history that is switched off is left alone on both servers, while the parts left on still travel both ways."""
     local, a = apis["local"], apis["source-a"]
     lu, au = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"]
     li, ai = movie_id(local, "Only A"), movie_id(a, "Only A")
 
     def favorite(api, user, item, on):
+        """Turns a user's favorite on or off."""
         api.call("POST" if on else "DELETE", f"/UserFavoriteItems/{item}?userId={user}", expect=200)
 
     def sync():
+        """Runs the History Sync table and download tasks on local."""
         run_task(local, "ServerSyncRefreshHistoryTable")
         run_task(local, "ServerSyncMissingHistory")
 
@@ -730,9 +753,7 @@ def scenario_history_field_off(creds, apis):
 
 
 def restamp_seeds(apis):
-    """Saves the seeded values again on the sources, so each carries an edit newer than any local edit
-    an earlier run left behind. The pool keeps its databases between runs, and a scenario that expects a
-    source's value to arrive needs the source to hold the newest edit, not merely the same text."""
+    """Saves the seeded values again on the sources, so each carries an edit newer than any local edit an earlier run left behind."""
     a, b = apis["source-a"], apis["source-b"]
     for api, kind, needle, values in ((a, "Movie", "Only A", ONLY_A_METADATA), (a, "Person", "Alice Actor", {"Overview": ALICE_BIO}), (b, "Episode", "Pilot", PILOT_METADATA)):
         item = find_item(api, kind, needle)
@@ -741,6 +762,7 @@ def restamp_seeds(apis):
 
 
 def scenario_metadata_by_type(creds, apis):
+    """Checks that Metadata Sync brings each metadata type, its people, and its images from the source that holds them."""
     local = apis["local"]
     restamp_seeds(apis)
     configure_local(creds, local, ["source-a", "source-b"], EnableMetadataSync=True, MetadataSyncMetadata=True, MetadataSyncGenres=True,
@@ -760,6 +782,7 @@ def scenario_metadata_by_type(creds, apis):
 
 
 def scenario_people_sync(creds, apis):
+    """Checks that People Sync brings a person's bio and image from the source."""
     local = apis["local"]
     restamp_seeds(apis)
     configure_local(creds, local, ["source-a", "source-b"], EnablePeopleSync=True, PeopleSyncImages=True)
@@ -772,6 +795,7 @@ def scenario_people_sync(creds, apis):
 
 
 def scenario_user_sync(creds, apis):
+    """Checks that User Sync brings a user's settings, permissions, and avatar from the source."""
     local = apis["local"]
     configure_local(creds, local, ["source-a", "source-b"], EnableUserSync=True, UserSyncPolicy=True, UserSyncConfiguration=True, UserSyncProfileImage=True)
     run_task(local, "ServerSyncRefreshUserTable")
@@ -788,6 +812,7 @@ def scenario_user_sync(creds, apis):
 
 
 def hints(api):
+    """Returns a server's hint overview, with parked inbound rows split out."""
     overview = api.get("/Sync/Hints")
     rows = overview.get("Inbound") or []
     overview["Parked"] = [r for r in rows if r.get("Parked")]
@@ -813,8 +838,7 @@ def wait_until(check, timeout, message):
 
 
 def scenario_hints_three_servers(creds, apis):
-    """Every server tells the other two about history changes as they happen, and each pulls the change.
-    Movies exist on all three after the content scenarios, so one shared title is watched from each side."""
+    """Every server tells the other two about history changes as they happen, and each pulls the change."""
     names = ["source-a", "source-b", "local"]
     both = {n: "Sync" for n in names}
     for n in names:
@@ -823,12 +847,15 @@ def scenario_hints_three_servers(creds, apis):
     ids = {n: (creds["servers"][n]["userId"], movie_id(apis[n], "Shared Movie")) for n in names}
 
     def played(n):
+        """Returns whether the item is played on a server."""
         return bool(user_data(apis[n], *ids[n])["Played"])
 
     def favorite(n):
+        """Returns whether the item is a favorite on a server."""
         return bool(user_data(apis[n], *ids[n])["IsFavorite"])
 
     def queues_empty():
+        """Returns whether no server has a hint waiting, sent, or pending."""
         return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
 
     for n in names:
@@ -864,11 +891,13 @@ def scenario_hints_three_servers(creds, apis):
 
 
 def playlists_of(api, user_id, name):
+    """Returns the playlists a user holds under a name."""
     items = api.get(f"/Items?userId={user_id}&IncludeItemTypes=Playlist&Recursive=true")["Items"]
     return [i for i in items if i["Name"] == name]
 
 
 def playlist_paths(api, user_id, playlist_id):
+    """Returns the file paths of a playlist's items in order."""
     items = api.get(f"/Playlists/{playlist_id}/Items?userId={user_id}&Fields=Path")["Items"]
     return [i.get("Path") for i in items]
 
@@ -883,6 +912,7 @@ def scenario_playlist_hints(creds, apis):
     title = "IT Hint Playlist"
 
     def queues_empty():
+        """Returns whether no server has a hint waiting, sent, or pending."""
         return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
 
     for n in names:
@@ -898,6 +928,7 @@ def scenario_playlist_hints(creds, apis):
     local_paths = playlist_paths(apis["local"], admin["local"], made["Id"])
 
     def mirrored_paths():
+        """Returns the playlist's item paths on source-a, or None until exactly one playlist is there."""
         found = playlists_of(apis["source-a"], admin["source-a"], title)
         return playlist_paths(apis["source-a"], admin["source-a"], found[0]["Id"]) if len(found) == 1 else None
 
@@ -954,10 +985,12 @@ def scenario_playlist_pull(creds, apis):
 
 
 def peer_playlists(api, name):
+    """Returns the playlists a server offers to peers under a name."""
     return [p for p in api.get("/Sync/Peer/Playlists")["Playlists"] if p["Name"] == name]
 
 
 def clear_playlists(apis, names, title):
+    """Deletes every playlist with a title from each named server."""
     for n in names:
         api = apis[n]
         for p in peer_playlists(api, title):
@@ -981,6 +1014,7 @@ def scenario_playlist_push(creds, apis):
     clear_playlists(apis, ["local", "source-a"], title)
 
     def queues_empty():
+        """Returns whether local and source-a have no hint waiting, sent, or pending."""
         return all(not hints(api)["Outbound"] and not hints(api)["Inbound"] and hints(api)["Pending"] == 0 for api in (local, a))
 
     wait_until(queues_empty, 60, "the pair is quiet before the test")
@@ -1020,6 +1054,7 @@ def scenario_playlist_sharing(creds, apis):
                           "Users": [{"UserId": ea["viewerId"], "CanEdit": True}]}, expect=200)
 
     def copied():
+        """Returns local's copy of the playlist, or None until exactly one is there."""
         found = peer_playlists(local, title)
         return found[0] if len(found) == 1 else None
 
@@ -1084,10 +1119,12 @@ def scenario_whitelist(creds, apis):
     api = apis["source-a"]
 
     def capabilities():
+        """Returns the status of the Capabilities route and its body when the caller is refused."""
         status, body = api.call("GET", "/Sync/Peer/Capabilities", raw=True)
         return status, json.loads(body) if status == 403 and body else None
 
     def grants(value):
+        """Saves the Whitelist the server keeps."""
         config = plugin_config(api)
         config["PeerCallerGrants"] = value
         save_plugin_config(api, config)
@@ -1116,11 +1153,7 @@ def scenario_whitelist(creds, apis):
 
 
 def scenario_history_stale_base(creds, apis):
-    """A base two servers agreed on goes stale when one of them takes a change from a third. Source-b and
-    source-a first agree through a favorite from source-b, then local plays the title, which both take
-    from local. When source-b unmarks it, source-a's base with source-b still says unplayed, and a three
-    way merge would read source-a's play as its own and push it back. The versions say the unmark is the
-    newer edit, so it wins everywhere and stays."""
+    """A base two servers agreed on goes stale when one of them takes a change from a third."""
     names = ["source-a", "source-b", "local"]
     mesh = {n: "Sync" for n in names}
     for n in names:
@@ -1128,10 +1161,12 @@ def scenario_history_stale_base(creds, apis):
     ids = {n: (creds["servers"][n]["userId"], movie_id(apis[n], "Shared Movie")) for n in names}
 
     def state(n):
+        """Returns whether the item is played and whether it is a favorite on a server."""
         data = user_data(apis[n], *ids[n])
         return bool(data["Played"]), bool(data["IsFavorite"])
 
     def queues_empty():
+        """Returns whether no server has a hint waiting, sent, or pending."""
         return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
 
     for n in names:
@@ -1164,25 +1199,27 @@ INFO_FLAGS = dict(EnableMetadataSync=True, MetadataSyncMetadata=True, MetadataSy
 
 
 def overview(api, item_type, needle):
+    """Returns an item's overview, or None when the item is missing."""
     item = find_item(api, item_type, needle)
     return item.get("Overview") if item else None
 
 
 def set_overview(api, item_type, needle, text):
+    """Sets an item's overview."""
     item = find_item(api, item_type, needle)
     assert item is not None, f"{api.name} has no {item_type} matching {needle}"
     update_item(api, item, {"Overview": text})
 
 
 def scenario_item_hints(creds, apis):
-    """Metadata and people edits travel as hints, the newest edit wins across the pool, and a full scan
-    against a peer that carries versions keeps a newer local edit instead of taking the peer's."""
+    """Metadata and people edits travel as hints, the newest edit wins across the pool, and a full scan against a peer that carries versions keeps a newer local edit instead of taking the peer's."""
     names = ["source-a", "source-b", "local"]
     both = {n: "Sync" for n in names}
     for n in names:
         configure_server(creds, apis[n], n, [p for p in names if p != n], both, **INFO_FLAGS)
 
     def queues_empty():
+        """Returns whether no server has a hint waiting, sent, or pending."""
         return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
 
     wait_until(queues_empty, 60, "the pool is quiet before the test")
@@ -1237,8 +1274,7 @@ def scenario_item_hints(creds, apis):
 
 
 def scenario_content_and_user_hints(creds, apis):
-    """A file that appears on a source is downloaded by local on a hint, and a user's policy change
-    travels both ways with the newest edit winning. Sources send without pulling content themselves."""
+    """A file that appears on a source is downloaded by local on a hint, and a user's policy change travels both ways with the newest edit winning."""
     user_flags = dict(EnableUserSync=True, UserSyncPolicy=True, UserSyncConfiguration=True, UserSyncProfileImage=True)
     configure_server(creds, apis["local"], "local", ["source-a", "source-b"], {"source-a": "Sync", "source-b": "Sync"},
                      EnableContentSync=True, DownloadNewContentMode="Enabled", ReplaceExistingContentMode="Enabled",
@@ -1248,6 +1284,7 @@ def scenario_content_and_user_hints(creds, apis):
     names = ["source-a", "source-b", "local"]
 
     def queues_empty():
+        """Returns whether no server has a hint waiting, sent, or pending."""
         return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
 
     wait_until(queues_empty, 60, "the pool is quiet before the test")
@@ -1293,8 +1330,7 @@ POOL_FLAGS = dict(EnableHistorySync=True, HistorySyncNegotiate=True, EnablePlayl
 
 
 def pool_shape(creds, apis, links, **flags):
-    """Sets who syncs with whom. Each server lists its partners in rank order, every link is Sync, and
-    every information type is on. A server with no partners is left with none."""
+    """Sets who syncs with whom."""
     for n in POOL_NAMES:
         peers = links.get(n, [])
         # POOL_EXTRA holds settings to try a scenario under, as JSON, such as {"UserSyncPrecedence": "Rank"}.
@@ -1303,8 +1339,7 @@ def pool_shape(creds, apis, links, **flags):
 
 
 def pool_seed(creds, apis):
-    """The pool scenarios work on films every server holds. On a fresh pool local has none yet, so it
-    copies them the way the first content scenario does."""
+    """The pool scenarios work on films every server holds."""
     local = apis["local"]
     if find_item(local, "Movie", "Shared Movie") is not None and find_item(local, "Movie", "Only A") is not None:
         return
@@ -1315,6 +1350,7 @@ def pool_seed(creds, apis):
 
 
 def pool_quiet(apis):
+    """Returns whether no pool server has a hint waiting, sent, or pending."""
     return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in POOL_NAMES)
 
 
@@ -1326,6 +1362,7 @@ def pool_scan(apis, names, rounds=1):
 
 
 def pool_restore(creds, apis):
+    """Puts the pool's precedence, conflict, and playlist settings and server lists back to their starting state."""
     for n in POOL_NAMES:
         config = plugin_config(apis[n])
         config.update(MetadataSyncPrecedence="Newest", PeopleSyncPrecedence="Newest", UserSyncPrecedence="Newest",
@@ -1337,10 +1374,10 @@ def pool_restore(creds, apis):
 
 
 class PoolProbe:
-    """Reads and changes one thing of each information type on any server of the pool: the shared
-    film's overview, the administrator's watch history of it, a playlist, and the viewer's session limit."""
+    """Reads and changes one thing of each information type on any server of the pool: the shared film's overview, the administrator's watch history of it, a playlist, and the viewer's session limit."""
 
     def __init__(self, creds, apis, title):
+        """Initializes the probe and seeds the pool."""
         pool_seed(creds, apis)
         self.creds, self.apis, self.title = creds, apis, title
         self.admin = {n: creds["servers"][n]["userId"] for n in POOL_NAMES}
@@ -1348,32 +1385,39 @@ class PoolProbe:
         self.film = {n: movie_id(apis[n], "Shared Movie") for n in POOL_NAMES}
 
     def overview(self, n):
+        """Returns the shared film's overview on a server."""
         return overview(self.apis[n], "Movie", "Shared Movie")
 
     def set_overview(self, n, text):
+        """Sets the shared film's overview on a server."""
         set_overview(self.apis[n], "Movie", "Shared Movie", text)
 
     def editor(self, n):
+        """Returns the server that last edited the shared film's metadata."""
         status, version = self.apis[n].call("GET", f"/Sync/Hints/Version?kind=Metadata&localItemId={self.film[n]}")
         return (version or {}).get("ServerId") if status == 200 else None
 
     def history(self, n):
+        """Returns whether the shared film is played and whether it is a favorite on a server."""
         data = user_data(self.apis[n], self.admin[n], self.film[n])
         return bool(data["Played"]), bool(data["IsFavorite"])
 
     def play(self, n, on=True):
+        """Marks the shared film played or unplayed on a server."""
         if on:
             self.apis[n].post(f"/UserPlayedItems/{self.film[n]}?userId={self.admin[n]}&datePlayed={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}", expect=200)
         else:
             self.apis[n].call("DELETE", f"/UserPlayedItems/{self.film[n]}?userId={self.admin[n]}", expect=200)
 
     def favorite(self, n, on=True):
+        """Marks the shared film a favorite or not on a server."""
         if on:
             self.apis[n].post(f"/UserFavoriteItems/{self.film[n]}?userId={self.admin[n]}", expect=200)
         else:
             self.apis[n].call("DELETE", f"/UserFavoriteItems/{self.film[n]}?userId={self.admin[n]}", expect=200)
 
     def playlists(self, n):
+        """Returns the probe's playlists on a server."""
         return playlists_of(self.apis[n], self.admin[n], self.title)
 
     def playlist_size(self, n):
@@ -1390,33 +1434,36 @@ class PoolProbe:
             return None
 
     def make_playlist(self, n):
+        """Makes a playlist of the shared film on a server and returns its id."""
         _, made = self.apis[n].post("/Playlists", {"Name": self.title, "Ids": [self.film[n]], "UserId": self.admin[n], "MediaType": "Video"}, expect=200)
         return made["Id"]
 
     def delete_playlists(self, n):
+        """Deletes the probe's playlists on a server."""
         for p in self.playlists(n):
             # Another server's deletion may take this copy first.
             status, body = self.apis[n].call("DELETE", f"/Items/{p['Id']}", raw=True)
             assert status in (204, 404), f"{n}: deleting playlist {p['Id']} returned {status}: {body[:200]!r}"
 
     def limit(self, n):
+        """Returns the viewer's session limit on a server."""
         return self.apis[n].get(f"/Users/{self.viewer[n]}")["Policy"].get("MaxActiveSessions")
 
     def set_limit(self, n, value):
+        """Sets the viewer's session limit on a server."""
         policy = self.apis[n].get(f"/Users/{self.viewer[n]}")["Policy"]
         policy["MaxActiveSessions"] = value
         self.apis[n].post(f"/Users/{self.viewer[n]}/Policy", policy, expect=204)
 
     def reset_history(self):
+        """Marks the shared film unplayed and not a favorite on every pool server."""
         for n in POOL_NAMES:
             self.play(n, False)
             self.favorite(n, False)
 
 
 def scenario_pool_chain(creds, apis):
-    """Source-a and source-b each sync with local and do not know each other. A change made at one end
-    reaches local as it happens and the far end on its next scan, carrying the name of the server that
-    made it, and nothing goes round again. Deleting follows the same road."""
+    """Source-a and source-b each sync with local and do not know each other."""
     probe = PoolProbe(creds, apis, "IT Chain " + uuid.uuid4().hex[:6])
     pool_shape(creds, apis, {"source-a": ["local"], "source-b": ["local"], "local": ["source-a", "source-b"]})
     probe.reset_history()
@@ -1488,9 +1535,7 @@ def scenario_pool_chain(creds, apis):
 
 
 def scenario_pool_ring_missed(creds, apis):
-    """Three equals, each syncing with the other two. Source-b makes a change of every type while it
-    announces nothing, as when its changes are lost on the way, and both other servers rank it last.
-    The scheduled scans alone have to carry every change to every server."""
+    """Three equals, each syncing with the other two."""
     probe = PoolProbe(creds, apis, "IT Ring " + uuid.uuid4().hex[:6])
     ring = {"local": ["source-a", "source-b"], "source-a": ["local", "source-b"], "source-b": ["local", "source-a"]}
     pool_shape(creds, apis, ring)
@@ -1550,9 +1595,7 @@ def scenario_pool_ring_missed(creds, apis):
 
 
 def scenario_pool_rank(creds, apis):
-    """With Precedence set to Ranked, a scan hears only the highest ranked
-    server that holds a thing. A change on the server ranked last stays there, and a change on the
-    server ranked first arrives."""
+    """With Precedence set to Ranked, a scan hears only the highest ranked server that holds a thing."""
     probe = PoolProbe(creds, apis, "IT Rank " + uuid.uuid4().hex[:6])
     by_rank = dict(MetadataSyncPrecedence="Rank", PeopleSyncPrecedence="Rank", UserSyncPrecedence="Rank", PlaylistSyncPrecedence="Rank")
     ring = {"local": ["source-a", "source-b"], "source-a": ["local", "source-b"], "source-b": ["local", "source-a"]}
@@ -1593,23 +1636,24 @@ def scenario_pool_rank(creds, apis):
 
 
 def scenario_pool_user_conflict(creds, apis):
-    """Between two servers that sync, a user's permissions follow whichever server changed them since
-    the two last agreed. A change made on one alone carries to the other and is never undone by a scan.
-    Changed on both, Permissive ends with everything either allows and Restrictive with only what both do."""
+    """Between two servers that sync, a user's permissions follow whichever server changed them since the two last agreed."""
     probe = PoolProbe(creds, apis, "IT Users")
     pair = {"local": ["source-a"], "source-a": ["local"]}
     switches = ("EnableContentDownloading", "EnableMediaConversion", "EnableLiveTvAccess")
 
     def policy(n):
+        """Returns the viewer's permission switches on a server."""
         held = apis[n].get(f"/Users/{probe.viewer[n]}")["Policy"]
         return tuple(bool(held.get(k)) for k in switches)
 
     def set_policy(n, **changes):
+        """Changes the viewer's permissions on a server."""
         held = apis[n].get(f"/Users/{probe.viewer[n]}")["Policy"]
         held.update(changes)
         apis[n].post(f"/Users/{probe.viewer[n]}/Policy", held, expect=204)
 
     def scan(*names):
+        """Runs Sync Information on each named server."""
         for n in names:
             run_task(apis[n], "ServerSyncInformation")
 
@@ -1656,8 +1700,7 @@ def scenario_pool_user_conflict(creds, apis):
 
 
 def scenario_pool_playlist_keep(creds, apis):
-    """With Removed Playlists set to keep, a copy stays when the server it came from deletes its
-    playlist. It is not handed back to that server, until it is edited here, which is a newer change."""
+    """With Removed Playlists set to keep, a copy stays when the server it came from deletes its playlist."""
     probe = PoolProbe(creds, apis, "IT Keep " + uuid.uuid4().hex[:6])
     pair = {"local": ["source-a"], "source-a": ["local"]}
     pool_shape(creds, apis, pair)
@@ -1716,8 +1759,7 @@ def restart_container(name, api):
 
 
 def scenario_peer_endpoint_auth(creds, apis):
-    """The peer and operator endpoints sit behind Jellyfin's own authentication: no token is refused,
-    a standard user's token is refused, and an administrator's key is accepted."""
+    """The peer and operator endpoints sit behind Jellyfin's own authentication: no token is refused, a standard user's token is refused, and an administrator's key is accepted."""
     local = apis["local"]
     e = creds["servers"]["local"]
     anon = Api("local", SERVERS["local"]["port"], "it-anon")
@@ -1808,9 +1850,7 @@ def scenario_peer_endpoint_auth(creds, apis):
 
 
 def scenario_push_responses(creds, apis):
-    """Every answer a peer can give to a push is handled: a peer that does not list the sender pauses
-    with the reason, a refused key pauses, a server without the plugin pauses, a receiver with the module
-    off declines and the sender drops the row, and each pause writes an activity entry."""
+    """Every answer a peer can give to a push is handled: a peer that does not list the sender pauses with the reason, a refused key pauses, a server without the plugin pauses, a receiver with the module off declines and the sender drops the row, and each pause writes an activity entry."""
     local = apis["local"]
     e = creds["servers"]["local"]
     # 409: source-b wants metadata but does not list local. 403: a bad key for source-a. 404: a path with no plugin behind it.
@@ -1859,17 +1899,19 @@ def scenario_push_responses(creds, apis):
 
 
 def scenario_queue_failed_rows(creds, apis):
-    """Retry Failed and Dismiss Failed on the Queue act on every failed change at once, received and
-    sent: a received change whose apply keeps failing, and a sent change that was given up on."""
+    """Retry Failed and Dismiss Failed on the Queue act on every failed change at once, received and sent: a received change whose apply keeps failing, and a sent change that was given up on."""
     local, a = apis["local"], apis["source-a"]
 
     def failing():
+        """Returns how many inbound changes are failing."""
         return local.get("/Sync/Hints").get("InboundFailingCount", 0)
 
     def failed():
+        """Returns how many outbound changes failed."""
         return (local.get("/Sync/Hints").get("OutboundCounts") or {}).get("Failed", 0)
 
     def cut_off(**flags):
+        """Forbids private network addresses for source-a on local and sets the given flags."""
         config = plugin_config(local)
         for srv in config["Servers"]:
             if srv["Name"] == "source-a":
@@ -1916,14 +1958,13 @@ def scenario_queue_failed_rows(creds, apis):
 
 
 def scenario_check_link_by_direction(creds, apis):
-    """Check Link judges the pairing by the chosen direction: Pull is ready when the source pushes to us
-    and warns when it does not or lacks the plugin, Push needs the destination to list us as Pull or Sync,
-    and Sync needs the peer to list us as Sync."""
+    """Check Link judges the pairing by the chosen direction: Pull is ready when the source pushes to us and warns when it does not or lacks the plugin, Push needs the destination to list us as Pull or Sync, and Sync needs the peer to list us as Sync."""
     local = apis["local"]
     configure_server(creds, local, "local", ["source-a", "source-b"], {"source-a": "Pull", "source-b": "Pull"})
     entry_a = next(s for s in plugin_config(local)["Servers"] if s["Name"] == "source-a")
 
     def check(entry, mode):
+        """Asks local to check a server entry in a direction and returns the verdict."""
         status, r = local.post("/Sync/Hints/CheckPeer", {"ServerUrl": entry["Url"], "ApiKey": "__JPK_SECRET_KEPT__",
                                                             "ServerKey": entry["Key"], "AllowPrivateNetwork": True, "Mode": mode}, expect=200)
         return r["Severity"], r["Message"]
@@ -1959,10 +2000,7 @@ def scenario_check_link_by_direction(creds, apis):
 
 
 def scenario_non_admin_peer_key(creds, apis):
-    """Local holds source-a with a standard user's token (viewer). Changes on source-a still arrive on
-    local through hints for every category, applied with that user's access: history for that user only
-    and one way, metadata, people, content, and the user's own settings. Source-a announces with the
-    administrator's key it holds for local, which is what the inbound queue needs."""
+    """Local holds source-a with a standard user's token (viewer)."""
     local, a = apis["local"], apis["source-a"]
     ea, el = creds["servers"]["source-a"], creds["servers"]["local"]
     status, auth = a.post("/Users/AuthenticateByName", {"Username": "viewer", "Pw": ""}, expect=200)
@@ -1993,6 +2031,7 @@ def scenario_non_admin_peer_key(creds, apis):
     expect(r["Severity"] in ("ok", "warn"), "Check Link accepts Sync with a whitelisted standard user's key")
 
     def queues_empty():
+        """Returns whether local has no inbound hint and source-a has no outbound hint."""
         h = hints(local)
         return not h["Inbound"] and not hints(a)["Outbound"]
 
@@ -2034,9 +2073,7 @@ def scenario_non_admin_peer_key(creds, apis):
 
 
 def scenario_dashboard_endpoints(creds, apis):
-    """The dashboard's bulk and status endpoints answer as the pages expect: every module's Retry errors
-    queues errored rows without listing them, an unknown status is refused, a peer reads only its own
-    queue, and the queue overview answers with its parts."""
+    """The dashboard's bulk and status endpoints answer as the pages expect: every module's Retry errors queues errored rows without listing them, an unknown status is refused, a peer reads only its own queue, and the queue overview answers with its parts."""
     local = apis["local"]
     for route in ("HistoryItems/Queue", "MetadataItems/Queue", "PeopleItems/Queue", "UserItems/Queue"):
         status, body = local.call("POST", f"/Sync/{route}", {"Ids": [], "Status": "Errored"})
@@ -2050,6 +2087,7 @@ def scenario_dashboard_endpoints(creds, apis):
 
 
 def make_film(server, title, seconds=2, size="64x64", extension="mp4"):
+    """Makes a short film in a server's media folder and returns its folder."""
     folder = os.path.join(STATE, "media", server, "Movies", title)
     os.makedirs(folder, exist_ok=True)
     ffmpeg(folder, "-f", "lavfi", "-i", f"testsrc=duration={seconds}:size={size}:rate=10", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
@@ -2058,13 +2096,13 @@ def make_film(server, title, seconds=2, size="64x64", extension="mp4"):
 
 
 def rescan_until(api, item_type, needle, present, message):
+    """Refreshes the libraries until an item is present or gone."""
     api.post("/Library/Refresh", None, expect=204)
     return wait_until(lambda: (find_item(api, item_type, needle) is not None) == present, 150, message)
 
 
 def scenario_removed_files_ignore(creds, apis):
-    """Ignore hides a whole title folder with an empty .ignore, never a season, shows it again when it
-    returns or the setting changes, leaves a user's own .ignore alone, and cancels waiting deletions."""
+    """Ignore hides a whole title folder with an empty .ignore, never a season, shows it again when it returns or the setting changes, leaves a user's own .ignore alone, and cancels waiting deletions."""
     local, a, b = apis["local"], apis["source-a"], apis["source-b"]
     title = "Hidden Title (2019)"
     file_name = f"{title}.mp4"
@@ -2077,6 +2115,7 @@ def scenario_removed_files_ignore(creds, apis):
     configure_local(creds, local, ["source-a", "source-b"], FullScanIntervalHours=0)
 
     def row():
+        """Returns the content sync row for the film."""
         return content_rows(local).get(file_name)
 
     run_task(local, "ServerSyncUpdateTables")
@@ -2086,6 +2125,7 @@ def scenario_removed_files_ignore(creds, apis):
     expect(os.path.exists(os.path.join(copy, file_name)), "local downloaded the film")
 
     def set_action(action, delete_mode):
+        """Sets the Removed files action and its delete mode."""
         config = plugin_config(local)
         config["MissingContentAction"] = action
         config["DeleteMissingContentMode"] = delete_mode
@@ -2093,6 +2133,7 @@ def scenario_removed_files_ignore(creds, apis):
         save_plugin_config(local, config)
 
     def remove_from_source():
+        """Removes the film from source-a and waits until it is no longer listed."""
         shutil.rmtree(source, ignore_errors=True)
         rescan_until(a, "Movie", "Hidden Title", False, "source-a no longer lists the film")
 
@@ -2165,8 +2206,7 @@ def scenario_removed_files_ignore(creds, apis):
 
 
 def scenario_older_database_refused(creds, apis):
-    """A database from a release older than the oldest this one reads is refused and left exactly as
-    it was, and is used again untouched once it is back at this release's version."""
+    """A database from a release older than the oldest this one reads is refused and left exactly as it was, and is used again untouched once it is back at this release's version."""
     local = apis["local"]
     container = "serversync-it-local"
     db = os.path.join(STATE, "local", "config", "data", "serversync", "sync.db")
@@ -2220,8 +2260,7 @@ def scenario_older_database_refused(creds, apis):
 
 
 def set_linking(api, peer, allow):
-    """Lets a peer link here or stops it. A Pull entry may never link, so allowing it makes the entry
-    Push, which gives and takes nothing back. Stopping it leaves the direction and turns linking off."""
+    """Lets a peer link here or stops it."""
     config = plugin_config(api)
     for entry in config["Servers"]:
         if entry["Name"] == peer:
@@ -2243,8 +2282,7 @@ def set_storage(api, server, library, mode):
 
 
 def scenario_links(creds, apis):
-    """A Link mapping writes a .strm that streams from the source through both servers, while copies
-    already there stay copies, and history matches the link in both directions."""
+    """A Link mapping writes a .strm that streams from the source through both servers, while copies already there stay copies, and history matches the link in both directions."""
     local, a = apis["local"], apis["source-a"]
     lu, au = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"]
     # Jellyfin derives an item's id from its path, and a pool that keeps removed rows would hand a
@@ -2256,6 +2294,7 @@ def scenario_links(creds, apis):
     shutil.rmtree(folder, ignore_errors=True)
 
     def forget_film():
+        """Removes the film from source-a and local."""
         shutil.rmtree(os.path.join(STATE, "media", "source-a", "Movies", title), ignore_errors=True)
         shutil.rmtree(folder, ignore_errors=True)
         rescan_until(a, "Movie", needle, False, "source-a no longer lists the linked film")
@@ -2272,6 +2311,7 @@ def scenario_links(creds, apis):
     update_item(a, find_item(a, "Movie", needle), {"Overview": plot, "Genres": ["Drama"], "ProductionYear": 2024})
 
     def row():
+        """Returns the content sync row for the film."""
         return content_rows(local).get(f"{title}.mp4")
 
     try:
@@ -2365,6 +2405,7 @@ def scenario_links(creds, apis):
         viewer.post("/Sessions/Playing", play, expect=204)
 
         def playing_on_a():
+            """Returns the sessions on source-a playing the film as Server Sync."""
             return [x for x in a.get("/Sessions") if x.get("Client") == "Server Sync"
                     and (x.get("NowPlayingItem") or {}).get("Id", "").replace("-", "") == source_item["Id"].replace("-", "")]
         wait_until(lambda: len(playing_on_a()) == 1, 30, "playing the link shows on source-a as a Server Sync session")
@@ -2382,7 +2423,9 @@ def scenario_links(creds, apis):
                    "pressing Stop on source-a reaches the viewer's session on local")
         viewer.post("/Sessions/Playing/Stopped", dict(play, PositionTicks=runtime), expect=204)
         wait_until(lambda: user_data(a, av, source_item["Id"])["Played"], 30, "stopping at the end marks the source's file played")
-        wait_until(lambda: not playing_on_a(), 30, "the session on source-a ends when playback stops")
+        wait_until(lambda: not playing_on_a(), 30, "the playback on source-a ends when playback stops")
+        expect(any(x.get("Client") == "Server Sync" and not x.get("NowPlayingItem") for x in a.get("/Sessions")),
+               "the stopped session stays listed as idle, so source-a's dashboard shows it stop")
         expect(user_data(a, av, source_item["Id"]).get("PlayCount") == 1, "the source counts the play once")
 
         links = local.get("/Sync/Peer/Links")["Links"]
@@ -2452,8 +2495,7 @@ def in_local(*args):
 
 
 def wait_scans_idle(api, timeout=300):
-    """Waits until the server is not scanning its libraries, so a scenario does not start on top of the
-    last one's clean up."""
+    """Waits until the server is not scanning its libraries, so a scenario does not start on top of the last one's clean up."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if all(t.get("State") != "Running" for t in api.get("/ScheduledTasks") if t.get("Key") in ("RefreshLibrary", "ServerSyncUpdateTables", "ServerSyncDownloadContent")):
@@ -2465,6 +2507,7 @@ class LinkedFilm:
     """A film on source-a held on local as a link, for one scenario. Leaves the pool as it found it."""
 
     def __init__(self, creds, apis, needle=None, seconds=2, size="64x64", local_flags=None):
+        """Initializes the film, its title, and the flags local runs with."""
         self.creds, self.apis = creds, apis
         self.a, self.local = apis["source-a"], apis["local"]
         self.lu = creds["servers"]["local"]["userId"]
@@ -2477,6 +2520,7 @@ class LinkedFilm:
         self.local_flags = dict(dict(FullScanIntervalHours=0, MissingContentAction="Keep", DeleteMissingContentMode="Disabled"), **(local_flags or {}))
 
     def setup(self, write=True):
+        """Prepares the source and local, and writes the link when asked."""
         wait_scans_idle(self.local)
         wait_scans_idle(self.a)
         make_film("source-a", self.title, self.seconds, self.size)
@@ -2490,29 +2534,35 @@ class LinkedFilm:
         return self
 
     def configure(self, **flags):
+        """Configures local to link source-a's Movies library with the given flags."""
         configure_local(self.creds, self.local, ["source-a"], **dict(self.local_flags, **flags))
         set_storage(self.local, "source-a", "Movies", "Link")
 
     def write(self):
+        """Runs the tasks that write the link."""
         run_task(self.local, "ServerSyncUpdateTables")
         run_task(self.local, "ServerSyncDownloadContent")
         wait_until(lambda: find_item(self.local, "Movie", self.needle) is not None, 150, f"local lists {self.needle}")
         self.item = find_item(self.local, "Movie", self.needle)
 
     def row(self):
+        """Returns the content sync row for the film."""
         return content_rows(self.local).get(f"{self.title}.mp4")
 
     def play_info(self, api=None, user=None):
+        """Asks for playback info for the film and returns the status and body."""
         api = api or self.local
         status, body = api.call("POST", f"/Items/{self.item['Id']}/PlaybackInfo?userId={user or self.lu}", {}, raw=True)
         self.source = json.loads(body)["MediaSources"][0] if status == 200 else None
         return status, body
 
     def original(self):
+        """Returns the source file's bytes."""
         with open(self.source_file, "rb") as f:
             return f.read()
 
     def teardown(self):
+        """Removes the source entry and the source files."""
         configure_server(self.creds, self.a, "source-a", [])
         shutil.rmtree(self.source_folder, ignore_errors=True)
         shutil.rmtree(self.folder, ignore_errors=True)
@@ -2549,8 +2599,7 @@ def scenario_link_ranges(creds, apis):
 
 
 def scenario_link_care(creds, apis):
-    """The source gives a link its media info and trickplay images, a speed limit leaves the bytes
-    unchanged, direct play streams for the user who asked, and the content sync flags a dead link."""
+    """The source gives a link its media info and trickplay images, a speed limit leaves the bytes unchanged, direct play streams for the user who asked, and the content sync flags a dead link."""
     film = LinkedFilm(creds, apis, seconds=25, size="320x240").setup(write=False)
     a, local = film.a, film.local
     av = creds["servers"]["source-a"]["viewerId"]
@@ -2572,6 +2621,7 @@ def scenario_link_care(creds, apis):
         expect({"Video", "Audio"} <= {s.get("Type") for s in streams}, "the link lists the file's video and audio streams")
         if made:
             def manifest():
+                """Returns the trickplay manifest of the link."""
                 return next(iter((local.get(f"/Items/{film.item['Id']}?userId={film.lu}&fields=Trickplay").get("Trickplay") or {}).values()), {})
             wait_until(lambda: bool(manifest()), 60, "the link has the trickplay images source-a made")
             width = next(iter(manifest()), None)
@@ -2627,9 +2677,7 @@ def scenario_link_care(creds, apis):
 
 
 def scenario_link_cache(creds, apis):
-    """A played link is cached, plays from the cache under local's own rules while the source refuses,
-    is not reported to the source while it plays from the cache, and the cache empties when it is
-    switched off. Keeping a cached link moves its file into the library, with the source refusing."""
+    """A played link is cached, plays from the cache under local's own rules while the source refuses, is not reported to the source while it plays from the cache, and the cache empties when it is switched off."""
     film = LinkedFilm(creds, apis, seconds=20, size="320x240", local_flags=dict(LinkCacheSizeGb=1, LinkCacheRetentionDays=0)).setup()
     a, local = film.a, film.local
     try:
@@ -2699,10 +2747,7 @@ def scenario_link_cache(creds, apis):
 
 
 def scenario_link_cache_rules(creds, apis):
-    """A user mapping's own stream limit applies to that user, starting an episode caches the next one
-    ahead, a library left out of the cache has its files dropped, a show picked to always keep becomes
-    full copies in the library, removing the pick turns them back into links with each copy moved into
-    the cache, and a copy kept by hand stays until it is turned back from the Storage tab."""
+    """A user mapping's own stream limit applies to that user, starting an episode caches the next one ahead, a library left out of the cache has its files dropped, a show picked to always keep becomes full copies in the library, removing the pick turns them back into links with each copy moved into the cache, and a copy kept by hand stays until it is turned back from the Storage tab."""
     local, b = apis["local"], apis["source-b"]
     lu, bu = creds["servers"]["local"]["userId"], creds["servers"]["source-b"]["userId"]
     needle = f"Cache Show {uuid.uuid4().hex[:6]}"
@@ -2715,19 +2760,23 @@ def scenario_link_cache_rules(creds, apis):
                "-t", "5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{show} - S01E0{number} - Part {number}.mp4")
 
     def episodes(api):
+        """Returns the episodes of the show, in order."""
         items = api.get("/Items?IncludeItemTypes=Episode&Recursive=true&Fields=Path")["Items"]
         return sorted((i for i in items if needle in (i.get("Path") or "")), key=lambda i: i.get("IndexNumber") or 0)
 
     def cached():
+        """Returns the episodes local has cached."""
         return sorted(re.search(r"S01E0\d", r["SourcePath"]).group(0) for r in all_rows(local) if needle in r["SourcePath"] and r.get("Cached"))
 
     def set_cap(streams):
+        """Sets the user mapping's stream limit on source-b."""
         config = plugin_config(b)
         mapping = next(m for e in config["Servers"] if e["Name"] == "local" for m in e["UserMappings"] if m["LocalUserId"] == bu)
         mapping["LinkMaxStreams"] = streams
         save_plugin_config(b, config)
 
     def play_info(item):
+        """Asks local for playback info of an item and returns the status, body, and first media source."""
         status, body = local.call("POST", f"/Items/{item['Id']}/PlaybackInfo?userId={lu}", {}, raw=True)
         return status, body, (json.loads(body)["MediaSources"][0] if status == 200 else None)
 
@@ -2751,7 +2800,7 @@ def scenario_link_cache_rules(creds, apis):
         expect(status == 200, f"the user's first stream is allowed under their own limit of one ({status})")
         http(local, "GET", f"/Videos/{first['Id']}/stream?static=true&mediaSourceId={source['Id']}")
         status, body, _ = play_info(second)
-        expect(status == 403 and b"allows your account 1 stream(s)" in body, f"a second stream is refused by the limit on the user's mapping ({status})")
+        expect(status == 403 and b"allows your account 1 stream at once" in body, f"a second stream is refused by the limit on the user's mapping ({status})")
         set_cap(None)
         status, _, _ = play_info(second)
         expect(status == 200, f"with the mapping's limit cleared, the server's own applies again ({status})")
@@ -2842,8 +2891,7 @@ def scenario_link_cache_rules(creds, apis):
 
 
 def scenario_link_speed(creds, apis):
-    """A speed set on the server entry, or on one user's mapping, slows that stream and leaves the
-    bytes unchanged, and another user's stream is not slowed by a limit on someone else's mapping."""
+    """A speed set on the server entry, or on one user's mapping, slows that stream and leaves the bytes unchanged, and another user's stream is not slowed by a limit on someone else's mapping."""
     local, a = apis["local"], apis["source-a"]
     lu, au, lv = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"], creds["servers"]["local"]["viewerId"]
     needle = f"Speed {uuid.uuid4().hex[:6]}"
@@ -2856,6 +2904,7 @@ def scenario_link_speed(creds, apis):
            "-t", "20", "-vf", "noise=alls=60:allf=t", "-c:v", "libx264", "-b:v", "1500k", "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{title}.mp4")
 
     def set_speed(server=0, admin=None):
+        """Sets the speed on the server entry or on the user's mapping."""
         config = plugin_config(a)
         entry = next(e for e in config["Servers"] if e["Name"] == "local")
         entry["LinkStreamSpeedMbps"] = server
@@ -2863,6 +2912,7 @@ def scenario_link_speed(creds, apis):
         save_plugin_config(a, config)
 
     def timed(api, path):
+        """Times a GET and returns the status, the body, and the seconds taken."""
         started = time.time()
         status, _, body = http(api, "GET", path, timeout=180)
         return status, body, time.time() - started
@@ -2913,8 +2963,7 @@ def scenario_link_speed(creds, apis):
 
 
 def scenario_link_versions(creds, apis):
-    """A film in two versions has a link for each, and a user the source holds to a bitrate between
-    them is offered, and plays, only the smaller."""
+    """A film in two versions has a link for each, and a user the source holds to a bitrate between them is offered, and plays, only the smaller."""
     local, a = apis["local"], apis["source-a"]
     lu, au, av, lv = creds["servers"]["local"]["userId"], creds["servers"]["source-a"]["userId"], creds["servers"]["source-a"]["viewerId"], creds["servers"]["local"]["viewerId"]
     needle = f"Versions {uuid.uuid4().hex[:6]}"
@@ -2929,11 +2978,13 @@ def scenario_link_versions(creds, apis):
     policy = a.get(f"/Users/{av}")["Policy"]
 
     def honor(on):
+        """Turns the link's bitrate limit on or off."""
         config = plugin_config(a)
         next(e for e in config["Servers"] if e["Name"] == "local")["LinkHonorBitrateLimit"] = on
         save_plugin_config(a, config)
 
     def listed(api):
+        """Returns the movies a server lists for the film."""
         return [i for i in api.get("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path")["Items"] if needle in (i.get("Path") or "")]
 
     try:
@@ -2998,9 +3049,7 @@ def scenario_link_versions(creds, apis):
 
 
 def scenario_link_hints(creds, apis):
-    """A film that appears on a source reaches a Link mapping on a hint alone, as a link for every
-    version and with the disk under its reserve, and a source that does not offer links leaves it for
-    later with that reason."""
+    """A film that appears on a source reaches a Link mapping on a hint alone, as a link for every version and with the disk under its reserve, and a source that does not offer links leaves it for later with that reason."""
     local, a = apis["local"], apis["source-a"]
     tag = uuid.uuid4().hex[:6]
     refused, wanted = f"Hint Refused {tag}", f"Hint Linked {tag}"
@@ -3009,13 +3058,16 @@ def scenario_link_hints(creds, apis):
     local_folders = [os.path.join(STATE, "media", "local", "Movies", t) for t in (refused_title, wanted_title)]
 
     def queues_empty():
+        """Returns whether local and source-a have no hint waiting, sent, or pending."""
         return all(not hints(api)["Outbound"] and not hints(api)["Inbound"] and hints(api)["Pending"] == 0 for api in (local, a))
 
     def local_log(since):
+        """Returns what local logged since a time."""
         result = run(["docker", "logs", "--since", since, "serversync-it-local"], capture=True, check=False)
         return result.stdout + result.stderr
 
     def listed(api, needle):
+        """Returns the movies a server lists for a needle."""
         return [i for i in api.get("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path")["Items"] if needle in (i.get("Path") or "")]
 
     try:
@@ -3051,6 +3103,7 @@ def scenario_link_hints(creds, apis):
         expected = [f"{wanted_title} - 1080p.strm", f"{wanted_title} - 480p.strm"]
 
         def links():
+            """Returns the link files in the second local folder."""
             return sorted(f for f in os.listdir(local_folders[1]) if f.endswith(".strm")) if os.path.isdir(local_folders[1]) else []
 
         wait_until(lambda: links() == expected, 150, "both versions of a film added on source-a are linked by local on a hint alone")
@@ -3076,9 +3129,7 @@ def scenario_link_hints(creds, apis):
 
 
 def scenario_link_hints_pool(creds, apis):
-    """With two sources sending to a Link mapping on local, a new episode arrives as a link on a hint
-    alone, and a film both sources add is linked once, from the source local lists first, with the
-    other's hint dropped for priority."""
+    """With two sources sending to a Link mapping on local, a new episode arrives as a link on a hint alone, and a film both sources add is linked once, from the source local lists first, with the other's hint dropped for priority."""
     local, a, b = apis["local"], apis["source-a"], apis["source-b"]
     tag = uuid.uuid4().hex[:6]
     show = f"Hinted Show {tag} (2024)"
@@ -3090,16 +3141,20 @@ def scenario_link_hints_pool(creds, apis):
     names = ("local", "source-a", "source-b")
 
     def queues_empty():
+        """Returns whether no server has a hint waiting, sent, or pending."""
         return all(not hints(apis[n])["Outbound"] and not hints(apis[n])["Inbound"] and hints(apis[n])["Pending"] == 0 for n in names)
 
     def local_log(since):
+        """Returns what local logged since a time."""
         result = run(["docker", "logs", "--since", since, "serversync-it-local"], capture=True, check=False)
         return result.stdout + result.stderr
 
     def strms(folder):
+        """Returns the link files in a folder."""
         return sorted(os.path.relpath(os.path.join(d, f), folder) for d, _, fs in os.walk(folder) for f in fs if f.endswith(".strm")) if os.path.isdir(folder) else []
 
     def videos(folder):
+        """Returns the video files in a folder."""
         return [f for _, _, fs in os.walk(folder) for f in fs if f.endswith(".mp4")] if os.path.isdir(folder) else []
 
     try:
@@ -3157,8 +3212,7 @@ def scenario_link_hints_pool(creds, apis):
 
 
 def scenario_link_not_reshared(creds, apis):
-    """A link is not the linking server's file to share. A third server that connects to it gets no
-    hint for the link, no copy of it, and no link to it, whether its mapping copies or links."""
+    """A link is not the linking server's file to share."""
     local, a, b = apis["local"], apis["source-a"], apis["source-b"]
     needle = f"Not Reshared {uuid.uuid4().hex[:6]}"
     title = f"{needle} (2024)"
@@ -3167,9 +3221,11 @@ def scenario_link_not_reshared(creds, apis):
     source_folder = None
 
     def b_rows():
+        """Returns the files source-b's rows hold for the film."""
         return [k for k in content_rows(b) if needle in k]
 
     def content_hints_to_b():
+        """Returns the content hints local holds for source-b about the film."""
         return [r for r in hints(local)["Outbound"]
                 if needle in (r.get("ItemPath") or "") and str(r.get("Kind")) in ("Content", "3") and r.get("PeerName") == "source-b"]
 
@@ -3460,9 +3516,11 @@ def scenario_link_full_disk(creds, apis):
     options = {"LibraryOptions": {"EnableInternetProviders": False, "EnableRealtimeMonitor": False, "SaveLocalMetadata": False}}
 
     def exists(path):
+        """Returns whether a file exists on local."""
         return run(["docker", "exec", "serversync-it-local", "test", "-f", path], check=False).returncode == 0
 
     def set_aside(rows):
+        """Ignores the rows this scenario left queued."""
         # This scenario's rows are copies queued on a full disk, which would hold back the next run.
         ids = [r["SourceItemId"] for r in rows if r["Status"] != "Ignored"]
         if ids:
@@ -3546,10 +3604,7 @@ def scenario_link_parallel_limit(creds, apis):
 
 
 def scenario_link_fallback(creds, apis):
-    """Both sources hold the same film and both allow linking. Local links it once, from source-a, its
-    first server. When source-a is down, refuses, or dies between PlaybackInfo and the stream, source-b
-    stands in with the same file, gets the playback report, and may control the session. A different file
-    at the same path on source-b is never used, and when nobody allows it the refusal names both."""
+    """Both sources hold the same film and both allow linking."""
     film = LinkedFilm(creds, apis, seconds=6, size="160x120")
     b = apis["source-b"]
     b_folder = os.path.join(STATE, "media", "source-b", "Movies", film.title)
@@ -3595,6 +3650,7 @@ def scenario_link_fallback(creds, apis):
         film.local.post("/Sessions/Playing", play, expect=204)
 
         def playing_on_b():
+            """Returns the sessions on source-b playing the film as Server Sync."""
             return [x for x in b.get("/Sessions") if x.get("Client") == "Server Sync"
                     and (x.get("NowPlayingItem") or {}).get("Id", "").replace("-", "") == source_item["Id"].replace("-", "")]
         wait_until(lambda: len(playing_on_b()) == 1, 30, "the fallback's playback shows on source-b as a Server Sync session")
@@ -3603,7 +3659,7 @@ def scenario_link_fallback(creds, apis):
             (lambda r: r.stdout + r.stderr)(run(["docker", "logs", "--since", since, "serversync-it-local"], capture=True, check=False))), 30,
             "source-b may control the viewer it streams to")
         film.local.post("/Sessions/Playing/Stopped", dict(play, PositionTicks=10_000_000), expect=204)
-        wait_until(lambda: not playing_on_b(), 30, "the session on source-b ends when playback stops")
+        wait_until(lambda: not playing_on_b(), 30, "the playback on source-b ends when playback stops")
     finally:
         run(["docker", "start", "serversync-it-source-a"])
         film.a.wait_ready(180)
@@ -3659,6 +3715,7 @@ def scenario_link_universal_audio(creds, apis):
     options = {"LibraryOptions": {"EnableInternetProviders": False, "EnableRealtimeMonitor": False, "SaveLocalMetadata": False}}
 
     def music_library(api):
+        """Returns the Music library, adding it when it is missing."""
         folder = next((f for f in api.get("/Library/VirtualFolders") if f["Name"] == "Music"), None)
         if folder is None:
             api.post("/Library/VirtualFolders?name=Music&collectionType=music&refreshLibrary=true&paths=%2Fmedia%2FMusic", options, expect=204)
@@ -3666,6 +3723,7 @@ def scenario_link_universal_audio(creds, apis):
         return folder["ItemId"]
 
     def find_track(api):
+        """Returns the audio track, or None when it is not listed."""
         items = api.get("/Items?IncludeItemTypes=Audio&Recursive=true&Fields=Path")["Items"]
         return next((i for i in items if track in (i.get("Name") or "") or track in (i.get("Path") or "")), None)
 
@@ -3723,8 +3781,7 @@ def now_stamp():
 
 
 def plugin_errors(container, since, allowed=()):
-    """Errors a server logged since a point in time, leaving out the browser's expired session and any the
-    scenario causes on purpose."""
+    """Errors a server logged since a point in time, leaving out the browser's expired session and any the scenario causes on purpose."""
     logs = run(["docker", "logs", "--since", since, container], capture=True, check=False)
     noise = ("Insufficient disk space", "pre-flight aborted", "Invalid token", "Token is required", "whitelist entry", "paused until", *allowed)
     return [l for l in (logs.stdout + logs.stderr).splitlines()
@@ -3732,6 +3789,7 @@ def plugin_errors(container, since, allowed=()):
 
 
 def healthy(api):
+    """Returns whether a server answers its public info route."""
     status, info = api.call("GET", "/System/Info/Public")
     return status == 200 and bool(info)
 
@@ -3928,8 +3986,7 @@ def scenario_chaos_fuzz_routes(creds, apis):
 
 
 def scenario_chaos_scale(creds, apis):
-    """Three hundred films linked at once: all written, all probed through the proxy, normal playback no
-    slower, and local's memory steady."""
+    """Three hundred films linked at once: all written, all probed through the proxy, normal playback no slower, and local's memory steady."""
     since = now_stamp()
     a, local = apis["source-a"], apis["local"]
     lu = creds["servers"]["local"]["userId"]
@@ -3945,18 +4002,22 @@ def scenario_chaos_scale(creds, apis):
 
     # Counted by path: Jellyfin's search does not promise every match, so it cannot count them.
     def bulk_items(api):
+        """Returns the bulk films a server lists."""
         items = api.get("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path")["Items"]
         return [i for i in items if f"/{tag} " in (i.get("Path") or "")]
 
     def listed(api):
+        """Returns how many bulk films a server lists."""
         return len(bulk_items(api))
 
     def memory():
+        """Returns the memory the local container uses, in megabytes."""
         out = run(["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", "serversync-it-local"], capture=True, check=False).stdout.split("/")[0].strip()
         number = float(re.sub(r"[^0-9.]", "", out) or 0)
         return number * (1024 if "GiB" in out else 1)
 
     def normal_play_ms(samples=20):
+        """Times playback info for a full copy and returns the average in milliseconds."""
         # A film held as a full copy, so this measures ordinary playback rather than a link.
         other = next(i for i in local.get("/Items?IncludeItemTypes=Movie,Episode&Recursive=true&Fields=Path")["Items"]
                      if not (i.get("Path") or "").endswith(".strm"))
@@ -3986,6 +4047,7 @@ def scenario_chaos_scale(creds, apis):
         wait_until(lambda: listed(local) >= count, 600, f"local lists all {count} links")
 
         def probed():
+            """Returns how many bulk films local has probed."""
             return sum(1 for i in bulk_items(local) if (i.get("RunTimeTicks") or 0) > 0)
         # The label is built before the wait, so the count is reported after it.
         try:
@@ -4011,8 +4073,7 @@ def scenario_chaos_scale(creds, apis):
 
 
 def scenario_link_embedded_subtitles(creds, apis):
-    """An MKV with subtitles inside it, held as a link: the tracks are listed, text extracts through the
-    link for a user who pressed play and not for one who did not, and a subtitle burns into a transcode."""
+    """An MKV with subtitles inside it, held as a link: the tracks are listed, text extracts through the link for a user who pressed play and not for one who did not, and a subtitle burns into a transcode."""
     a, local = apis["source-a"], apis["local"]
     lu = creds["servers"]["local"]["userId"]
     needle = f"Subbed {uuid.uuid4().hex[:6]}"
@@ -4144,6 +4205,7 @@ _checks = 0
 
 
 def expect(condition, message):
+    """Records one check and logs whether it passed."""
     global _checks
     _checks += 1
     if condition:
@@ -4190,6 +4252,7 @@ def run_scenarios(creds, apis):
 # --------------------------------------------------------------------------------------------------
 
 def plugin_fingerprint():
+    """Returns a hash of the built plugin DLL, or None when there is no build."""
     dll = os.path.join(PLUGIN_DIR, "Jellyfin.Plugin.ServerSync.dll")
     if not os.path.exists(dll):
         return None
@@ -4199,6 +4262,7 @@ def plugin_fingerprint():
 
 
 def cmd_up():
+    """Builds the plugin, starts the pool, and returns the credentials and a client for every server."""
     before = plugin_fingerprint()
     folder = build_plugin()
     os.makedirs(STATE, exist_ok=True)
@@ -4217,8 +4281,7 @@ def cmd_up():
 
 
 def run_api_tests(creds):
-    """Runs the plugin's live API tests against source-a, which the seeding gives an image, a
-    subtitle, and downloadable files."""
+    """Runs the plugin's live API tests against source-a, which the seeding gives an image, a subtitle, and downloadable files."""
     log("== API tests against source-a")
     env = dict(os.environ, SERVERSYNC_TEST_SERVER_URL=f"http://127.0.0.1:{SERVERS['source-a']['port']}",
                SERVERSYNC_TEST_API_KEY=creds["servers"]["source-a"]["apiKey"])
@@ -4234,6 +4297,7 @@ def run_api_tests(creds):
 
 
 def cmd_test():
+    """Starts the pool, runs every scenario, then the API tests."""
     creds, apis = cmd_up()
     scenarios = run_scenarios(creds, apis)
     api = run_api_tests(creds)
@@ -4241,6 +4305,7 @@ def cmd_test():
 
 
 def cmd_scenarios():
+    """Runs the scenarios against a pool that is already running."""
     creds = load_creds()
     apis = {}
     for name in SERVERS:
@@ -4253,10 +4318,12 @@ def cmd_scenarios():
 
 
 def cmd_down():
+    """Stops the pool and keeps its state."""
     compose("down", "--remove-orphans")
 
 
 def cmd_reset():
+    """Stops the pool and deletes its state, media, and credentials."""
     compose("down", "--remove-orphans", "-v")
     shutil.rmtree(STATE, ignore_errors=True)
     shutil.rmtree(PLUGIN_DIR, ignore_errors=True)
@@ -4265,6 +4332,7 @@ def cmd_reset():
 
 
 def main():
+    """Runs the command named on the command line."""
     command = sys.argv[1] if len(sys.argv) > 1 else "test"
     commands = {"test": cmd_test, "up": cmd_up, "down": cmd_down, "reset": cmd_reset, "scenarios": cmd_scenarios}
     if command not in commands:

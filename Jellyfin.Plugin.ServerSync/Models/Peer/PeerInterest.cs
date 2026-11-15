@@ -13,16 +13,27 @@ using Jellyfin.Plugin.ServerSync.Utilities;
 
 namespace Jellyfin.Plugin.ServerSync.Models.Peer;
 
+/// <summary>
+/// What this server wants to hear about from one peer, so the peer sends only hints that matter here.
+/// </summary>
 public class PeerInterest
 {
+    /// <summary>Gets or sets the kinds of hint this server accepts.</summary>
     public List<HintKind> Kinds { get; set; } = new();
 
+    /// <summary>Gets or sets the mapped libraries, by the peer's root folder.</summary>
     public List<PeerInterestLibrary> Libraries { get; set; } = new();
 
+    /// <summary>Gets or sets the mapped peer users, as 32 character hex ids.</summary>
     public List<string> Users { get; set; } = new();
 
+    /// <summary>Gets or sets a hash of the three lists, so a peer can tell when they changed.</summary>
     public string Revision { get; set; } = string.Empty;
 
+    /// <summary>Builds what this server wants from one peer, from the settings and that peer's entry.</summary>
+    /// <param name="config">The plugin settings.</param>
+    /// <param name="entry">The peer's server entry.</param>
+    /// <returns>The interest, with its revision set.</returns>
     public static PeerInterest For(PluginConfiguration config, SourceServer entry)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -53,6 +64,11 @@ public class PeerInterest
         return interest;
     }
 
+    /// <summary>Whether a change belongs to something this server wants to hear about.</summary>
+    /// <param name="kind">The kind of change.</param>
+    /// <param name="itemPath">The item's path on the peer, or null for a change with no item.</param>
+    /// <param name="userId">The peer user the change belongs to.</param>
+    /// <returns><c>true</c> when the peer should send it.</returns>
     public bool Wants(HintKind kind, string? itemPath, Guid userId)
     {
         if (!Kinds.Contains(kind))
@@ -93,13 +109,4 @@ public class PeerInterest
             || library.Filtered.Count == 0
             || !PathUtilities.IsItemFiltered(itemPath, library.Root, library.FilterMode, library.Filtered.Select(p => new FilteredItem { Path = p }).ToList());
     }
-}
-
-public class PeerInterestLibrary
-{
-    public string Root { get; set; } = string.Empty;
-
-    public LibraryFilterMode FilterMode { get; set; }
-
-    public List<string> Filtered { get; set; } = new();
 }

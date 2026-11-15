@@ -50,14 +50,16 @@ public partial class PeerController : ControllerBase
     /// </summary>
     public const long MaxRequestBytes = 4 * 1024 * 1024;
 
-    // A pairing call is one small request, so a peer that cannot answer it promptly is treated as unreachable.
+    /// <summary>
+    /// A pairing call is one small request, so a peer that cannot answer it promptly is treated as unreachable.
+    /// </summary>
     private static readonly TimeSpan PairTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerController"/> class.
     /// </summary>
     /// <param name="history">The history negotiation service.</param>
-    /// <param name="configManager">Plugin configuration manager.</param>
+    /// <param name="configManager">Reads and saves the plugin settings.</param>
     /// <param name="applicationHost">The server host, for this server's id.</param>
     /// <param name="inbound">The inbound hint store.</param>
     /// <param name="outbound">The outbound hint store. Not used by these routes.</param>
@@ -65,10 +67,10 @@ public partial class PeerController : ControllerBase
     /// <param name="inboundWorker">The worker that applies inbound hints.</param>
     /// <param name="outboundWorker">The delivery worker, which removes the hints a peer reports done.</param>
     /// <param name="pairings">The pairing secrets.</param>
-    /// <param name="clientFactory">Creates clients for the pairing calls.</param>
+    /// <param name="clientFactory">Builds the client for each source server.</param>
     /// <param name="triage">Decides what to do with each inbound hint.</param>
     /// <param name="lookup">Finds this server's item for a peer's description of one.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="logger">Writes log entries.</param>
     public PeerController(
         PeerHistoryService history,
         IPluginConfigurationManager configManager,
@@ -124,7 +126,7 @@ public partial class PeerController : ControllerBase
     /// listed as Pull or Sync, so a server about to turn on Send mode asks this first.
     /// </summary>
     /// <param name="serverId">The asking server's Jellyfin id.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The listing.</returns>
     [HttpGet("Link")]
     [RequireCompatibleProtocol]
@@ -164,9 +166,11 @@ public partial class PeerController : ControllerBase
         return Ok(response);
     }
 
-    // Hands an entry its secret by calling the entry's own address. The secret already issued is sent
-    // again when there is one, so a peer that lost its copy is whole again the moment it checks the link.
-    // Pairings with one entry run one at a time, so two checks at once send the same secret.
+    /// <summary>
+    /// Hands an entry its secret by calling the entry's own address. The secret already issued is sent
+    /// again when there is one, so a peer that lost its copy is whole again the moment it checks the link.
+    /// Pairings with one entry run one at a time, so two checks at once send the same secret.
+    /// </summary>
     private async Task<(bool Paired, string? Error)> PairAsync(Models.Configuration.SourceServer entry, CancellationToken cancellationToken)
     {
         var gate = _pairings.PairingLock(entry.Key);
@@ -229,14 +233,16 @@ public partial class PeerController : ControllerBase
         return (true, null);
     }
 
-    // The entry a request's sender claims to be, proven by the secret this server issued to that entry,
-    // or the answer to send back. An entry without a secret has never paired, so the sender pairs on
-    // hearing so and comes back.
+    /// <summary>
+    /// The entry a request's sender claims to be, proven by the secret this server issued to that entry,
+    /// or the answer to send back. An entry without a secret has never paired, so the sender pairs on
+    /// hearing so and comes back.
+    /// </summary>
     private (Models.Configuration.SourceServer? Entry, ActionResult? Refusal) Sender(string? senderServerId)
     {
         if (string.IsNullOrWhiteSpace(senderServerId))
         {
-            return (null, BadRequest("A SenderServerId is required"));
+            return (null, BadRequest("A SenderServerId is required."));
         }
 
         var entry = _configManager.Configuration.FindServerById(senderServerId);
@@ -277,12 +283,12 @@ public partial class PeerController : ControllerBase
     {
         if (request is null || request.Items is null || string.IsNullOrWhiteSpace(request.SenderServerId))
         {
-            return BadRequest("A request body with SenderServerId and Items is required");
+            return BadRequest("A request body with SenderServerId and Items is required.");
         }
 
         if (request.Items.Count > HintProtocol.MaxHintsPerRequest)
         {
-            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} hints per request");
+            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} hints per request.");
         }
 
         var (origin, refusal) = Sender(request.SenderServerId);
@@ -301,7 +307,7 @@ public partial class PeerController : ControllerBase
         // never takes the rest of the batch down with it.
         if (request.Items.Any(h => h is null || string.IsNullOrWhiteSpace(h.HintId) || h.HintId.Length > HintTriage.MaxIdLength))
         {
-            return BadRequest($"Every hint needs a HintId of at most {HintTriage.MaxIdLength} characters");
+            return BadRequest($"Every hint needs a HintId of at most {HintTriage.MaxIdLength} characters.");
         }
 
         // One origin cannot fill the queue without bound. A full queue answers "busy" so the sender waits
@@ -367,7 +373,7 @@ public partial class PeerController : ControllerBase
     {
         if (request is null || request.Items is null)
         {
-            return BadRequest("A request body with SenderServerId and Items is required");
+            return BadRequest("A request body with SenderServerId and Items is required.");
         }
 
         var (peer, refusal) = Sender(request.SenderServerId);
@@ -378,7 +384,7 @@ public partial class PeerController : ControllerBase
 
         if (request.Items.Count > HintProtocol.MaxHintsPerRequest || request.Items.Any(i => i is null))
         {
-            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} completions per request, none of them null");
+            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} completions per request, none of them null.");
         }
 
         // Only the rows queued for the peer that reports them, and never past this server's clock, so a
@@ -414,6 +420,9 @@ public partial class PeerController : ControllerBase
         });
     }
 
+    /// <summary>Says what this server reads from the sender, so the sender announces only what is wanted.</summary>
+    /// <param name="serverId">The sender's server id.</param>
+    /// <returns>What this server wants announced.</returns>
     [HttpGet("Interest")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -431,6 +440,11 @@ public partial class PeerController : ControllerBase
         return Ok(peer.Pulls ? PeerInterest.For(_configManager.Configuration, peer) : new PeerInterest { Revision = "none" });
     }
 
+    /// <summary>Lists the playlists the caller may read.</summary>
+    /// <param name="reader">The reader of local playlists.</param>
+    /// <param name="id">One playlist to read, or null for every one.</param>
+    /// <param name="serverId">The sender's server id.</param>
+    /// <returns>The playlists with their items, owners, and shares.</returns>
     [HttpGet("Playlists")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -445,6 +459,11 @@ public partial class PeerController : ControllerBase
         return Ok(reader.ReadAll(id, PeerCallerGuard.ScopedUser(HttpContext), owners));
     }
 
+    /// <summary>Finds the local item that matches a path, a name, or provider ids.</summary>
+    /// <param name="request">What to match on.</param>
+    /// <param name="userManager">Reads Jellyfin's users.</param>
+    /// <param name="libraryManager">Reads Jellyfin's library.</param>
+    /// <returns>The matching item, when there is one.</returns>
     [HttpPost("Lookup")]
     [RequireCompatibleProtocol]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -453,13 +472,13 @@ public partial class PeerController : ControllerBase
     {
         if (request is null || (string.IsNullOrWhiteSpace(request.Path) && string.IsNullOrWhiteSpace(request.Name) && request.ProviderIds is not { Count: > 0 } && request.SeriesProviderIds is not { Count: > 0 }))
         {
-            return BadRequest("A request body with a Path, a Name, or provider ids is required");
+            return BadRequest("A request body with a Path, a Name, or provider ids is required.");
         }
 
         if (request.Path?.Length > 4096 || request.Name?.Length > 512 || request.ItemType?.Length > 128
             || request.ProviderIds?.Count > PeerItemLookup.MaxProviderIds || request.SeriesProviderIds?.Count > PeerItemLookup.MaxProviderIds)
         {
-            return BadRequest("The Path, Name, or ItemType is too long");
+            return BadRequest("The Path, Name, or ItemType is too long.");
         }
 
         var found = _lookup.Find(request);
@@ -487,12 +506,12 @@ public partial class PeerController : ControllerBase
     {
         if (request is null || request.Keys is null)
         {
-            return BadRequest("A request body with Keys is required");
+            return BadRequest("A request body with Keys is required.");
         }
 
         if (request.Keys.Count > HintProtocol.MaxHintsPerRequest || request.Keys.Any(k => k is null))
         {
-            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} keys per request, none of them null");
+            return BadRequest($"At most {HintProtocol.MaxHintsPerRequest} keys per request, none of them null.");
         }
 
         var keys = request.Keys;
@@ -525,12 +544,12 @@ public partial class PeerController : ControllerBase
     {
         if (request is null || request.Items is null)
         {
-            return BadRequest("A request body with Items is required");
+            return BadRequest("A request body with Items is required.");
         }
 
         if (request.Items.Count > PeerHistoryNegotiator.MaxEntriesPerRequest || request.Items.Any(e => e is null))
         {
-            return BadRequest($"At most {PeerHistoryNegotiator.MaxEntriesPerRequest} entries per request, none of them null");
+            return BadRequest($"At most {PeerHistoryNegotiator.MaxEntriesPerRequest} entries per request, none of them null.");
         }
 
         // A sender this server lists is recorded against its own rows, so it has to prove it is that

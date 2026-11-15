@@ -14,7 +14,7 @@ namespace Jellyfin.Plugin.ServerSync.Services;
 public static class FileValidationService
 {
     /// <summary>
-    /// Returns true if a local file's byte count is close enough to the recorded source size
+    /// Returns <c>true</c> if a local file's byte count is close enough to the recorded source size
     /// to be considered the same file. Use this instead of strict equality whenever the
     /// "source size" comes from Jellyfin metadata rather than an HTTP Content-Length. A source size
     /// that is not known proves nothing about the local file, so it never counts as a match.
@@ -22,7 +22,7 @@ public static class FileValidationService
     /// <param name="localSize">Actual size of the local file in bytes.</param>
     /// <param name="sourceSize">Recorded source size in bytes.</param>
     /// <param name="toleranceBytes">Tolerance in bytes (0 = strict equality required).</param>
-    /// <returns>True if sizes are equal or within the drift tolerance.</returns>
+    /// <returns><c>true</c> if sizes are equal or within the drift tolerance.</returns>
     public static bool IsSizeWithinDriftTolerance(long localSize, long sourceSize, long toleranceBytes)
     {
         if (sourceSize <= 0)
@@ -48,6 +48,8 @@ public static class FileValidationService
         PluginConfiguration config,
         ContentSyncTableManager manager)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
         ArgumentNullException.ThrowIfNull(manager);
         if (string.IsNullOrEmpty(localPath))
         {
@@ -61,7 +63,6 @@ public static class FileValidationService
             return new PathValidationResult(false, "Path traversal detected - path escapes library boundaries");
         }
 
-        // Check for path collision
         if (manager.CheckPathCollision(localPath, sourceItemId))
         {
             return new PathValidationResult(false, "Path collision - another item is already using this path");
@@ -76,8 +77,13 @@ public static class FileValidationService
     /// Uses <see cref="Path.GetRelativePath"/> to ensure proper path boundary checking
     /// (prevents "/media/videos_evil" from matching library root "/media/videos").
     /// </summary>
+    /// <param name="path">The path to place.</param>
+    /// <param name="config">The plugin configuration that holds the library mappings.</param>
+    /// <returns>The root, or null.</returns>
     public static string? GetContainingLibraryRoot(string? path, PluginConfiguration config)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
         if (string.IsNullOrEmpty(path))
         {
             return null;
@@ -99,13 +105,16 @@ public static class FileValidationService
     }
 
     /// <summary>
-    /// Returns true when any DIRECTORY between the file and the library root
+    /// Returns <c>true</c> when any DIRECTORY between the file and the library root
     /// is a symlink/junction. The lexical containment check can't see that a
     /// linked directory points outside the library, so deleting "inside" the
     /// root would remove a physical file elsewhere. The file itself being a
     /// link is fine (deleting a link leaves the target intact). Errors count
     /// as linked, refusal is the safe direction for a deletion guard.
     /// </summary>
+    /// <param name="filePath">The file to check.</param>
+    /// <param name="libraryRootPath">The library root the file sits under.</param>
+    /// <returns><c>true</c> when a folder between them is a link, or the check failed.</returns>
     public static bool HasSymlinkedDirectoryComponent(string filePath, string libraryRootPath)
     {
         try
@@ -145,7 +154,7 @@ public static class FileValidationService
     /// </summary>
     /// <param name="path">Path to validate.</param>
     /// <param name="config">Plugin configuration containing library mappings.</param>
-    /// <returns>True if path is within a configured library.</returns>
+    /// <returns><c>true</c> if path is within a configured library.</returns>
     public static bool IsPathWithinLibrary(string? path, PluginConfiguration config)
         => GetContainingLibraryRoot(path, config) != null;
 
@@ -155,9 +164,11 @@ public static class FileValidationService
     /// <param name="item">Sync item to check.</param>
     /// <param name="sizeMatchToleranceBytes">Tolerance in bytes for size comparison (0 = strict).</param>
     /// <param name="skipReason">Output parameter with reason for skipping.</param>
-    /// <returns>True if download should be skipped.</returns>
+    /// <returns><c>true</c> if download should be skipped.</returns>
     public static bool ShouldSkipDownload(SyncItem item, long sizeMatchToleranceBytes, out string? skipReason)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
         skipReason = null;
 
         if (string.IsNullOrEmpty(item.LocalPath))
@@ -198,7 +209,7 @@ public static class FileValidationService
     /// Creates the directory if it doesn't exist.
     /// </summary>
     /// <param name="filePath">Target file path.</param>
-    /// <returns>True if write permission exists.</returns>
+    /// <returns><c>true</c> if write permission exists.</returns>
     public static bool HasWritePermission(string? filePath)
     {
         if (string.IsNullOrEmpty(filePath))

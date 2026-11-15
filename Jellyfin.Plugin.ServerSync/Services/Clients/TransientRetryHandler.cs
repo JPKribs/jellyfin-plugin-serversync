@@ -29,6 +29,9 @@ public sealed class TransientRetryHandler : DelegatingHandler
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly TimeSpan _attemptTimeout;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TransientRetryHandler"/> class.
+    /// </summary>
     public TransientRetryHandler()
         : this(Task.Delay, AttemptTimeout)
     {
@@ -45,7 +48,7 @@ public sealed class TransientRetryHandler : DelegatingHandler
 
     /// <summary>Whether a status means the server may answer if asked again shortly.</summary>
     /// <param name="status">The status.</param>
-    /// <returns>True for a timeout, throttling, or a gateway or availability failure.</returns>
+    /// <returns><c>true</c> for a timeout, throttling, or a gateway or availability failure.</returns>
     public static bool IsTransient(HttpStatusCode status)
         => status is HttpStatusCode.RequestTimeout
             or HttpStatusCode.TooManyRequests
@@ -59,6 +62,7 @@ public sealed class TransientRetryHandler : DelegatingHandler
     /// </summary>
     public static readonly HttpRequestOptionsKey<bool> NoRetry = new("ServerSync.NoRetry");
 
+    /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -109,12 +113,23 @@ public sealed class TransientRetryHandler : DelegatingHandler
     }
 
     // One second, then three, with up to a quarter more at random so many workers do not retry together.
+    /// <summary>
+    /// Gives how long to wait after a failed attempt, one second then three, with up to a quarter more at
+    /// random so many workers do not retry together.
+    /// </summary>
+    /// <param name="attempt">The attempt that just failed, counting from one.</param>
+    /// <returns>The time to wait.</returns>
     private static TimeSpan Backoff(int attempt)
     {
         var baseSeconds = attempt == 1 ? 1.0 : 3.0;
         return TimeSpan.FromSeconds(baseSeconds * (1 + (Random.Shared.NextDouble() / 4)));
     }
 
+    /// <summary>
+    /// Reads the wait a server asked for in Retry-After, capped at <see cref="MaxRetryAfter"/>.
+    /// </summary>
+    /// <param name="response">The response that asked for a retry.</param>
+    /// <returns>The wait, or null when the header is missing or not in the future.</returns>
     private static TimeSpan? RetryAfter(HttpResponseMessage response)
     {
         var header = response.Headers.RetryAfter;

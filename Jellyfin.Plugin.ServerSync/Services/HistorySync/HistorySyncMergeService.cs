@@ -36,7 +36,7 @@ public static class HistorySyncMergeService
         {
             // Before the servers have agreed once there is no way to tell which side changed, and
             // letting the source win would wipe every favorite that exists only here on the first
-            // two way run. Keeping both sides' favorites is the only safe first merge.
+            // run with a Sync server. Keeping both sides' favorites is the only safe first merge.
             item.MergedIsFavorite = (item.SourceIsFavorite ?? false) || (item.LocalIsFavorite ?? false);
         }
         else if (item.SourceIsFavorite.HasValue)
@@ -297,10 +297,11 @@ public static class HistorySyncMergeService
     /// Determines if there are meaningful changes to sync for this item.
     /// </summary>
     /// <param name="item">History sync item to check.</param>
-    /// <returns>True if there are changes that need to be synced to local.</returns>
+    /// <returns><c>true</c> if there are changes that need to be synced to local.</returns>
     public static bool HasChangesToSync(HistorySyncItem item)
     {
-        // Check if merged values differ from local values
+        ArgumentNullException.ThrowIfNull(item);
+
         if (item.MergedIsPlayed != item.LocalIsPlayed && item.MergedIsPlayed.HasValue)
         {
             return true;
@@ -339,7 +340,7 @@ public static class HistorySyncMergeService
             return true;
         }
 
-        // In two way mode the source can be the side that is behind. Without this, a change made
+        // With a Sync server the source can be the side that is behind. Without this, a change made
         // only on this server merges to the local value, looks like "nothing to do" here, and never
         // reaches the source.
         return item.NegotiateWithSource && SourceDiffersFromMerged(item);
@@ -350,7 +351,7 @@ public static class HistorySyncMergeService
     /// a reading for.
     /// </summary>
     /// <param name="item">History sync item to check.</param>
-    /// <returns>True when the source would need a write to hold the merged state.</returns>
+    /// <returns><c>true</c> when the source would need a write to hold the merged state.</returns>
     public static bool SourceDiffersFromMerged(HistorySyncItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -396,7 +397,7 @@ public static class HistorySyncMergeService
     /// </summary>
     /// <param name="a">First timestamp.</param>
     /// <param name="b">Second timestamp.</param>
-    /// <returns>True when both are null or both land in the same second.</returns>
+    /// <returns><c>true</c> when both are null or both land in the same second.</returns>
     public static bool SameInstantToSecond(DateTime? a, DateTime? b)
     {
         if (!a.HasValue && !b.HasValue)
@@ -427,6 +428,8 @@ public static class HistorySyncMergeService
     /// <returns>Human-readable summary of changes.</returns>
     public static string GetChangeSummary(HistorySyncItem item)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
         var changes = new List<string>();
 
         if (item.MergedIsPlayed != item.LocalIsPlayed && item.MergedIsPlayed.HasValue)

@@ -50,6 +50,18 @@ public sealed class LinkCacheFiller : BackgroundService
     // Per link, the sessions playing it now. A file someone is watching is never dropped to make room.
     private readonly Dictionary<string, HashSet<string>> _playing = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LinkCacheFiller"/> class.
+    /// </summary>
+    /// <param name="cache">The link cache.</param>
+    /// <param name="links">The link registry.</param>
+    /// <param name="services">Resolves services on demand.</param>
+    /// <param name="configManager">Reads the plugin configuration.</param>
+    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="applicationHost">Names this server.</param>
+    /// <param name="sessionManager">Session manager.</param>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="logger">Logger instance.</param>
     public LinkCacheFiller(
         LinkCache cache,
         ILinkRegistry links,
@@ -102,6 +114,9 @@ public sealed class LinkCacheFiller : BackgroundService
     }
 
     /// <summary>The library mapping a link row came through, or null when it is no longer set up.</summary>
+    /// <param name="config">The plugin configuration that holds the mappings.</param>
+    /// <param name="row">The link's row.</param>
+    /// <returns>The mapping, or null.</returns>
     public static LibraryMapping? MappingFor(PluginConfiguration config, SyncItem row)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -171,7 +186,11 @@ public sealed class LinkCacheFiller : BackgroundService
         _cache.MakeRoom(0, Playing());
     }
 
-    /// <summary>Queues a link's file to be cached. False when it is cached or waiting already.</summary>
+    /// <summary>Queues a link's file to be cached. <c>false</c> when it is cached or waiting already.</summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <param name="reason">Why the file is cached.</param>
+    /// <param name="userId">The user whose play asked for it, or null.</param>
+    /// <returns><c>true</c> when the file was queued.</returns>
     public bool Enqueue(string linkId, CacheReason reason, Guid? userId)
     {
         if (!_cache.Enabled || _cache.Holds(linkId) || !_waiting.TryAdd(linkId, 0))

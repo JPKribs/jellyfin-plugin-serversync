@@ -8,8 +8,18 @@ using MediaBrowser.Model.Entities;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
+/// <summary>
+/// Writes the fields of a metadata sync blob onto a local item.
+/// </summary>
 public static class MetadataFieldWriter
 {
+    /// <summary>Writes the blob's fields onto the item. A field the blob lacks is left alone.</summary>
+    /// <param name="localItem">The item to change.</param>
+    /// <param name="metadataJson">The metadata blob, as JSON.</param>
+    /// <param name="syncGenres">Whether to write genres.</param>
+    /// <param name="syncTags">Whether to write tags.</param>
+    /// <param name="syncLocks">Whether to write the lock flags.</param>
+    /// <returns><c>true</c> when the item changed.</returns>
     public static bool Apply(BaseItem localItem, string? metadataJson, bool syncGenres, bool syncTags, bool syncLocks = true)
     {
         ArgumentNullException.ThrowIfNull(localItem);
@@ -155,6 +165,9 @@ public static class MetadataFieldWriter
         return hasChanges;
     }
 
+    /// <summary>Reads the people a sync blob lists, in order, skipping any with no name.</summary>
+    /// <param name="peopleJson">The people blob, as JSON.</param>
+    /// <returns>The people.</returns>
     public static List<PersonInfo> ReadPeople(string? peopleJson)
     {
         var people = new List<PersonInfo>();
@@ -191,6 +204,9 @@ public static class MetadataFieldWriter
         return people;
     }
 
+    /// <summary>Reads the studios a sync blob lists.</summary>
+    /// <param name="studiosJson">The studios blob, as JSON.</param>
+    /// <returns>The studio names.</returns>
     public static string[] ReadStudios(string? studiosJson)
         => string.IsNullOrEmpty(studiosJson) ? Array.Empty<string>() : (JsonSerializer.Deserialize<List<string>>(studiosJson) ?? new List<string>()).ToArray();
 

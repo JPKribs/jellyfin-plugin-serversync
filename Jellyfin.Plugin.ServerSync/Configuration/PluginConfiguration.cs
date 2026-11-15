@@ -17,20 +17,19 @@ namespace Jellyfin.Plugin.ServerSync.Configuration;
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
-    // ===== Servers =====
-
     /// <summary>
-    /// Gets or sets the configured peer servers in priority order. Index zero wins whenever two servers
+    /// Gets or sets the configured peer servers in rank order. Index zero wins whenever two servers
     /// offer the same item, and each later entry only adds what every earlier entry lacks.
     /// </summary>
     public List<SourceServer> Servers { get; set; } = new();
 
-    // ===== Content Sync Configuration =====
-
+    /// <summary>Gets or sets a value indicating whether Content sync is on.</summary>
     public bool EnableContentSync { get; set; }
 
+    /// <summary>Gets or sets the folder files download into before they move to their library. Empty uses a folder under Jellyfin's cache path.</summary>
     public string? TempDownloadPath { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether subtitles and other companion files download with a file.</summary>
     public bool IncludeCompanionFiles { get; set; } = true;
 
     /// <summary>
@@ -53,8 +52,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public int LinkMaxStreamsTotal { get; set; }
 
     /// <summary>
-    /// How much disk the link cache may use. Unset, as a configuration saved before this setting
-    /// existed is, the cache is off at a size of 0 and holds up to <see cref="LinkCacheSizeGb"/> otherwise.
+    /// How much disk the link cache may use. Unset, the cache is off at a size of 0 and holds up to
+    /// <see cref="LinkCacheSizeGb"/> otherwise.
     /// </summary>
     public LinkCacheSizing? LinkCacheSizing { get; set; }
 
@@ -120,6 +119,7 @@ public class PluginConfiguration : BasePluginConfiguration
         };
     }
 
+    /// <summary>Gets or sets how many files download at once, clamped 1 to 10.</summary>
     public int MaxConcurrentDownloads { get; set; } = 2;
 
     /// <summary>
@@ -129,8 +129,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxDownloadSpeed { get; set; } = 0;
 
     /// <summary>
-    /// Gets or sets the unit <see cref="MaxDownloadSpeed"/> is in. Always <see cref="Mbps"/> once the
-    /// configuration is loaded: a value from before 12.4.12.0 in KB, MB, or GB per second is converted.
+    /// Gets or sets the unit <see cref="MaxDownloadSpeed"/> is in. Always <see cref="Mbps"/> after
+    /// <see cref="SanitizeValues"/>, which converts a speed kept in KB, MB, or GB per second.
     /// </summary>
     public string DownloadSpeedUnit { get; set; } = Mbps;
 
@@ -181,9 +181,7 @@ public class PluginConfiguration : BasePluginConfiguration
             return false;
         }
 
-        // Equal start and end reads as "all day", not "never". The general
-        // same-day branch evaluates to `hour >= X && hour < X`, which is always
-        // false, so a schedule of 3 to 3 would silently do nothing.
+        // Equal start and end means all day, since the same-day branch would never match.
         return ScheduledStartHour == ScheduledEndHour
             || (ScheduledStartHour < ScheduledEndHour
                 ? currentHour >= ScheduledStartHour && currentHour < ScheduledEndHour
@@ -191,20 +189,21 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// Controls how new content (items on source that don't exist locally) is handled.
+    /// Controls how new content (items on the source that do not exist on this server) is handled.
     /// </summary>
     public ApprovalMode DownloadNewContentMode { get; set; } = ApprovalMode.Enabled;
 
     /// <summary>
-    /// Controls how updated content (items that differ from local version) is handled.
+    /// Controls how updated content (items that differ from this server's version) is handled.
     /// </summary>
     public ApprovalMode ReplaceExistingContentMode { get; set; } = ApprovalMode.Enabled;
 
     /// <summary>
-    /// Controls how missing content (items on local that don't exist on source) is handled.
+    /// Controls how missing content (items on this server that do not exist on the source) is handled.
     /// </summary>
     public ApprovalMode DeleteMissingContentMode { get; set; } = ApprovalMode.Disabled;
 
+    /// <summary>Gets or sets what happens to a local file once its item is gone from the source. Null reads the value from <see cref="DeleteMissingContentMode"/>.</summary>
     public MissingContentAction? MissingContentAction { get; set; }
 
     [XmlIgnore]
@@ -309,8 +308,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// Gets or sets a value indicating whether items watched by every user in
     /// <see cref="WatchedFilterUserIds"/> are skipped during content sync. It follows the list: on
-    /// while any user is picked, off while none is. A list kept from before 12.4.12.0 with the switch
-    /// off is cleared, so nothing starts skipping on the update.
+    /// while any user is picked, off while none is. A list with the switch off is cleared.
     /// </summary>
     public bool SkipWatchedByAllUsers { get; set; }
 
@@ -320,8 +318,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public List<string> WatchedFilterUserIds { get; set; } = new();
 
-
-    // ===== History Sync Configuration =====
 
     /// <summary>
     /// Enable watch history synchronization between servers.
@@ -368,14 +364,11 @@ public class PluginConfiguration : BasePluginConfiguration
     public DateTime? LastHistorySyncTime { get; set; }
 
     /// <summary>
-    /// Gets or sets the history negotiation switch from before 12.4.12.0, which applied to every
-    /// server. It is read once, when the configuration loads, and moved onto every library mapping
-    /// (see <see cref="Models.Configuration.LibraryMapping.NegotiateHistory"/>), which negotiates only
-    /// for a Sync server. Always false afterwards.
+    /// Gets or sets a switch that turns history negotiation on for every server. <see cref="SanitizeValues"/>
+    /// moves it onto every library mapping (see <see cref="Models.Configuration.LibraryMapping.NegotiateHistory"/>),
+    /// which negotiates only for a Sync server, and sets it to false.
     /// </summary>
     public bool HistorySyncNegotiate { get; set; }
-
-    // ===== User Sync Configuration =====
 
     /// <summary>
     /// Enable user settings synchronization between servers.
@@ -412,8 +405,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Timestamp when the last user sync completed.
     /// </summary>
     public DateTime? LastUserSyncTime { get; set; }
-
-    // ===== Metadata Sync Configuration =====
 
     /// <summary>
     /// Enable metadata synchronization between servers.
@@ -467,8 +458,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public DateTime? LastMetadataSyncTime { get; set; }
 
-    // ===== People Sync Configuration =====
-
     /// <summary>
     /// Enable people entity synchronization between servers.
     /// Syncs person metadata (biography, provider IDs, images) by matching people by name.
@@ -490,17 +479,15 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public DateTime? LastPeopleSyncTime { get; set; }
 
-    // ===== Processing Configuration =====
-
     /// <summary>
     /// Concurrent items processed during the Metadata and People refresh
     /// build phases. Higher values finish refreshes faster but use more CPU
     /// for the duration. The build work is mostly CPU-bound (blob
-    /// serialization, hashing, comparison) now that image sizes carry
-    /// forward. Default 8, the historical behavior. Clamped 1 to 16.
+    /// serialization, hashing, comparison). Default 8. Clamped 1 to 16.
     /// </summary>
     public int RefreshParallelism { get; set; } = 8;
 
+    /// <summary>Gets or sets how many hours pass between full scans, clamped 0 to 720. At 0 every scan is a full scan.</summary>
     public int FullScanIntervalHours { get; set; } = 24;
 
     /// <summary>
@@ -542,11 +529,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public int HintRefusedMaxRetries { get; set; }
 
+    /// <summary>Gets or sets the Whitelist of users and locations that may call this server's sync routes.</summary>
     public List<PeerCallerGrant> PeerCallerGrants { get; set; } = new();
 
     /// <summary>
     /// Verify source image sizes with live HTTP calls on every refresh, even
-    /// for images whose tag hasn't changed. Applies to all sync modules.
+    /// for images whose tag has not changed. Applies to all sync modules.
     /// Catches the rare case of an image file replaced on the source's disk
     /// without a metadata rescan, at the cost of one GET plus one HEAD per
     /// image per item per refresh. Off by default, unchanged tags reuse the
@@ -563,8 +551,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool MirrorSyncedCollections { get; set; } = true;
 
+    /// <summary>Gets or sets a value indicating whether Playlists sync is on.</summary>
     public bool EnablePlaylistSync { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether a playlist's shares are copied with it.</summary>
     public bool PlaylistSyncShares { get; set; } = true;
 
     /// <summary>
@@ -579,220 +569,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public PlaylistRemovedAction PlaylistRemovedAction { get; set; } = PlaylistRemovedAction.Delete;
 
     /// <summary>
-    /// Validates configuration values and returns a list of validation errors.
-    /// </summary>
-    /// <returns>List of validation error messages.</returns>
-    public List<string> ValidateConfiguration()
-    {
-        var errors = new List<string>();
-
-        // Validate each server entry
-        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var server in Servers)
-        {
-            var label = server.DisplayName;
-            if (string.IsNullOrWhiteSpace(server.Key) || !seenKeys.Add(server.Key))
-            {
-                errors.Add($"Server '{label}' has a missing or duplicate key");
-            }
-
-            if (!string.IsNullOrWhiteSpace(server.Url)
-                && (!Uri.TryCreate(server.Url, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https")))
-            {
-                errors.Add($"Server '{label}' URL must be a valid HTTP or HTTPS URL");
-            }
-
-            if (server.IsEnabled && string.IsNullOrWhiteSpace(server.Url))
-            {
-                errors.Add($"Server '{label}' is enabled but has no URL");
-            }
-
-            if (server.IsEnabled && string.IsNullOrWhiteSpace(server.ApiKey))
-            {
-                errors.Add($"Server '{label}' is enabled but has no API key");
-            }
-        }
-
-        var scanServers = this.GetPullServers();
-        if (EnableContentSync && scanServers.Count == 0)
-        {
-            errors.Add("At least one enabled server in Pull or Sync mode is required when content sync is enabled");
-        }
-
-        // Validate numeric ranges
-        if (MaxConcurrentDownloads < 1 || MaxConcurrentDownloads > 10)
-        {
-            errors.Add("Max concurrent downloads must be between 1 and 10");
-        }
-
-        if (MaxDownloadSpeed < 0)
-        {
-            errors.Add("Max download speed cannot be negative");
-        }
-
-        if (MinimumFreeDiskSpaceGb < 0 || MinimumFreeDiskSpaceGb > 1000)
-        {
-            errors.Add("Minimum free disk space must be between 0 and 1000 GB");
-        }
-
-        // Validate bandwidth scheduling
-        if (EnableBandwidthScheduling)
-        {
-            if (ScheduledStartHour < 0 || ScheduledStartHour > 23)
-            {
-                errors.Add("Scheduled start hour must be between 0 and 23");
-            }
-
-            if (ScheduledEndHour < 0 || ScheduledEndHour > 24)
-            {
-                errors.Add("Scheduled end hour must be between 0 and 24");
-            }
-
-            if (ScheduledDownloadSpeed < 0)
-            {
-                errors.Add("Scheduled download speed cannot be negative");
-            }
-        }
-
-        // Validate library mappings
-        foreach (var mapping in this.GetEnabledLibraryMappings())
-        {
-            if (string.IsNullOrWhiteSpace(mapping.SourceLibraryId))
-            {
-                errors.Add($"Library mapping '{mapping.SourceLibraryName}' is missing source library ID");
-            }
-
-            if (string.IsNullOrWhiteSpace(mapping.LocalRootPath))
-            {
-                errors.Add($"Library mapping '{mapping.SourceLibraryName}' is missing local root path");
-            }
-            else if (mapping.LocalRootPath.Contains("..", StringComparison.Ordinal))
-            {
-                errors.Add($"Library mapping '{mapping.SourceLibraryName}' local root path must not contain path traversal sequences (..)");
-            }
-        }
-
-        // Validate user mappings
-        foreach (var mapping in this.GetEnabledUserMappings())
-        {
-            if (string.IsNullOrWhiteSpace(mapping.SourceUserId))
-            {
-                errors.Add($"User mapping '{mapping.SourceUserName}' is missing source user ID");
-            }
-
-            if (string.IsNullOrWhiteSpace(mapping.LocalUserId))
-            {
-                errors.Add($"User mapping '{mapping.SourceUserName}' is missing local user ID");
-            }
-        }
-
-        // Validate path safety
-        if (!string.IsNullOrWhiteSpace(TempDownloadPath))
-        {
-            var normalizedTemp = Path.GetFullPath(TempDownloadPath);
-            if (normalizedTemp != TempDownloadPath && TempDownloadPath.Contains("..", StringComparison.Ordinal))
-            {
-                errors.Add("Temp download path must not contain path traversal sequences (..)");
-            }
-        }
-
-        // Validate recycling bin settings
-        if (EnableRecyclingBin)
-        {
-            if (string.IsNullOrWhiteSpace(RecyclingBinPath))
-            {
-                errors.Add("Recycling bin path is required when recycling bin is enabled");
-            }
-            else
-            {
-                var normalizedBin = Path.GetFullPath(RecyclingBinPath);
-                if (normalizedBin != RecyclingBinPath && RecyclingBinPath.Contains("..", StringComparison.Ordinal))
-                {
-                    errors.Add("Recycling bin path must not contain path traversal sequences (..)");
-                }
-            }
-
-            if (RecyclingBinRetentionDays < 1 || RecyclingBinRetentionDays > 365)
-            {
-                errors.Add("Recycling bin retention must be between 1 and 365 days");
-            }
-        }
-
-        // Validate history sync settings. History is the one module that also travels as hints, so a
-        // server that only sends is a valid setup for it.
-        if (EnableHistorySync)
-        {
-            // All() is true for an empty list, so with no active server the two mapping checks would add
-            // errors that only restate the first one. They run only when there is a server to check.
-            var activeServers = this.GetActiveServers();
-            if (activeServers.Count == 0)
-            {
-                errors.Add("At least one enabled server in Pull, Push, or Sync mode is required when history sync is enabled");
-            }
-            else
-            {
-                if (activeServers.All(s => s.GetEnabledUserMappings().Count == 0))
-                {
-                    errors.Add("At least one user mapping must be enabled for history sync");
-                }
-
-                if (activeServers.All(s => s.GetEnabledLibraryMappings().Count == 0))
-                {
-                    errors.Add("At least one library mapping must be enabled for history sync");
-                }
-            }
-        }
-
-        // Validate user sync settings
-        if (EnableUserSync)
-        {
-            if (scanServers.Count == 0)
-            {
-                errors.Add("At least one enabled server in Pull or Sync mode is required when user sync is enabled");
-            }
-
-            var enabledUserMappings = this.GetEnabledUserMappings();
-            if (enabledUserMappings.Count == 0)
-            {
-                errors.Add("At least one user mapping must be enabled for user sync");
-            }
-
-            if (!UserSyncPolicy && !UserSyncConfiguration && !UserSyncProfileImage)
-            {
-                errors.Add("At least one user sync option (Policy, Configuration, or Profile Image) must be enabled");
-            }
-        }
-
-        // Validate metadata sync settings
-        if (EnableMetadataSync)
-        {
-            if (scanServers.Count == 0)
-            {
-                errors.Add("At least one enabled server in Pull or Sync mode is required when metadata sync is enabled");
-            }
-
-            var enabledLibraryMappings = this.GetEnabledLibraryMappings();
-            if (enabledLibraryMappings.Count == 0)
-            {
-                errors.Add("At least one library mapping must be enabled for metadata sync");
-            }
-
-            if (!MetadataSyncMetadata && !MetadataSyncImages && !MetadataSyncPeople && !MetadataSyncStudios && !MetadataSyncGenres && !MetadataSyncTags)
-            {
-                errors.Add("At least one metadata sync option (Metadata, Images, People, Studios, Genres, or Tags) must be enabled");
-            }
-        }
-
-        return errors;
-    }
-
-    /// <summary>
-    /// Returns true if the configuration passes validation.
-    /// </summary>
-    /// <returns>True if valid.</returns>
-    public bool IsValid() => ValidateConfiguration().Count == 0;
-
-    /// <summary>
     /// Clamps configuration values to valid ranges.
     /// </summary>
     public void SanitizeValues()
@@ -803,10 +579,6 @@ public class PluginConfiguration : BasePluginConfiguration
         LinkCacheSizeGb = Math.Clamp(LinkCacheSizeGb, 0, 1_000_000);
         LinkCachePercent = Math.Clamp(LinkCachePercent, 1, 100);
         LinkMaxStreamsTotal = Math.Clamp(LinkMaxStreamsTotal, 0, 1000);
-        foreach (var server in Servers ?? new List<SourceServer>())
-        {
-            server.LinkTakeMaxStreams = Math.Clamp(server.LinkTakeMaxStreams, 0, 1000);
-        }
         LinkCacheRetentionDays = Math.Clamp(LinkCacheRetentionDays, 0, 3650);
         LinkCachePreCacheEpisodes = Math.Clamp(LinkCachePreCacheEpisodes, 0, 50);
         LinkCachePath = (LinkCachePath ?? string.Empty).Trim();
@@ -832,8 +604,8 @@ public class PluginConfiguration : BasePluginConfiguration
         foreach (var server in Servers)
         {
             server.LinkMaxStreams = Math.Clamp(server.LinkMaxStreams, 0, 1000);
-            // A per user limit is set on each user mapping now. The old server wide one is copied onto
-            // the mappings that set none, so no user gets more streams than before.
+            server.LinkTakeMaxStreams = Math.Clamp(server.LinkTakeMaxStreams, 0, 1000);
+            // The per user limit lives on each user mapping, so a server wide one is copied onto mappings that set none.
             if (server.LinkMaxStreamsPerUser > 0)
             {
                 foreach (var mapping in server.UserMappings ?? new List<UserMapping>())
@@ -849,7 +621,7 @@ public class PluginConfiguration : BasePluginConfiguration
         LastRunFailures ??= new List<SyncRunFailure>();
         WatchedFilterUserIds ??= new List<string>();
 
-        // Every speed is in Mbps. One kept in KB, MB, or GB per second before 12.4.12.0 is converted.
+        // Every speed is kept in Mbps, so one in KB, MB, or GB per second is converted.
         MaxDownloadSpeed = RateUtilities.ToMbps(MaxDownloadSpeed, DownloadSpeedUnit);
         ScheduledDownloadSpeed = RateUtilities.ToMbps(ScheduledDownloadSpeed, ScheduledDownloadSpeedUnit);
         DownloadSpeedUnit = Mbps;
@@ -863,8 +635,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
         SkipWatchedByAllUsers = WatchedFilterUserIds.Count > 0;
 
-        // History negotiation is chosen per library now. The old switch, when on, turns it on for every
-        // library, where it applies to Sync servers.
+        // History negotiation is chosen per library, so the server wide switch is copied onto each mapping.
         if (HistorySyncNegotiate)
         {
             foreach (var mapping in Servers.SelectMany(s => s.LibraryMappings ?? new List<LibraryMapping>()))
@@ -875,8 +646,7 @@ public class PluginConfiguration : BasePluginConfiguration
             HistorySyncNegotiate = false;
         }
 
-        // What happens to a removed file is one value. A configuration from before 12.4.12.0 kept
-        // deleting after approval as Delete plus an approval mode, and an older one only the mode.
+        // What happens to a removed file is one value, so it is derived from the action and the approval mode.
         MissingContentAction = EffectiveMissingContentAction;
         DeleteMissingContentMode = MissingContentAction switch
         {
@@ -931,10 +701,7 @@ public class PluginConfiguration : BasePluginConfiguration
             }
         }
 
-        // Normalize filesystem paths to remove traversal sequences. An
-        // unparseable path (embedded NUL, absurd length) is dropped rather
-        // than allowed to throw: SanitizeValues runs inside every save,
-        // including the settings page's, and a throw would 500 the save.
+        // An unparseable path is dropped because a throw would fail every save, including the settings page's.
         TempDownloadPath = NormalizePathOrNull(TempDownloadPath);
         RecyclingBinPath = NormalizePathOrNull(RecyclingBinPath);
     }
@@ -964,176 +731,9 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// Normalizes a speed unit string to one of the valid values (KB, MB, GB).
-    /// Returns "MB" for unrecognized values.
-    /// </summary>
-    /// <summary>
     /// Most-recent run failure per module, surfaced in the dashboard.
     /// Stored as a list (not a dictionary) because Jellyfin's XML serialization
-    /// doesn't round-trip <see cref="Dictionary{TKey, TValue}"/> reliably.
+    /// does not round-trip <see cref="Dictionary{TKey, TValue}"/> reliably.
     /// </summary>
     public List<SyncRunFailure> LastRunFailures { get; set; } = new();
-}
-
-/// <summary>
-/// Failure record for a sync run that aborted before normal completion.
-/// </summary>
-public sealed class SyncRunFailure
-{
-    /// <summary>
-    /// Gets or sets when this failure was first recorded for its module and phase. A run that fails
-    /// again keeps it, so it says how long the module has been failing, not when it last did.
-    /// </summary>
-    public DateTime? FirstSeen { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether the administrator has been told about this failure.</summary>
-    public bool Reported { get; set; }
-
-    /// <summary>
-    /// Module mutex key, "Content", "History", "Metadata", "People", or "User".
-    /// </summary>
-    public string ModuleKey { get; set; } = string.Empty;
-
-    /// <summary>"Refresh" or "Sync".</summary>
-    public string Phase { get; set; } = string.Empty;
-
-    /// <summary>One-line human-readable reason. Surfaced in the UI.</summary>
-    public string Reason { get; set; } = string.Empty;
-
-    /// <summary>UTC timestamp when the failure was recorded.</summary>
-    public DateTime Timestamp { get; set; }
-}
-
-/// <summary>
-/// Helpers over the server list: which servers scan, which entry a row belongs to, and the mappings
-/// across every scan server in priority order.
-/// </summary>
-public static class PluginConfigurationExtensions
-{
-    /// <summary>
-    /// Returns the servers this installation scans, in priority order: enabled, with a URL and key, and in
-    /// Pull or Sync mode. Never returns null.
-    /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The scan servers, highest priority first.</returns>
-    public static List<SourceServer> GetPullServers(this PluginConfiguration config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return config.Servers?.Where(s => s.Pulls).ToList() ?? new List<SourceServer>();
-    }
-
-    /// <summary>
-    /// Returns the servers this installation sends hints to: enabled, with a URL and key, and in Push or
-    /// Sync mode. Never returns null.
-    /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The send servers, in list order.</returns>
-    public static List<SourceServer> GetPushServers(this PluginConfiguration config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return config.Servers?.Where(s => s.Pushes).ToList() ?? new List<SourceServer>();
-    }
-
-    /// <summary>Returns every server that takes part in sync in any direction. Never returns null.</summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The active servers, in list order.</returns>
-    public static List<SourceServer> GetActiveServers(this PluginConfiguration config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return config.Servers?.Where(s => s.Pulls || s.Pushes).ToList() ?? new List<SourceServer>();
-    }
-
-    /// <summary>Finds a server entry by key, or null.</summary>
-    /// <param name="config">The configuration.</param>
-    /// <param name="key">The entry key carried on a sync row.</param>
-    /// <returns>The entry, or null when no entry has that key.</returns>
-    /// <summary>
-    /// Whether watch history for a row of this server and library is negotiated: written back to that
-    /// server as well. Only a Sync server negotiates, and only for a library mapping that chose to.
-    /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <param name="serverKey">The row's server.</param>
-    /// <param name="sourceLibraryId">The row's library on that server.</param>
-    /// <returns><c>true</c> when negotiated.</returns>
-    public static bool NegotiatesHistory(this PluginConfiguration config, string? serverKey, string? sourceLibraryId)
-        => config.FindServer(serverKey) is { IsEnabled: true, Mode: ServerMode.Sync } server
-            && (server.LibraryMappings ?? new List<LibraryMapping>()).Any(m => m.IsEnabled && m.NegotiateHistory
-                && string.Equals(m.SourceLibraryId, sourceLibraryId, StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>Whether any library of any Sync server negotiates watch history.</summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns><c>true</c> when one does.</returns>
-    public static bool NegotiatesAnyHistory(this PluginConfiguration config)
-        => (config.Servers ?? new List<SourceServer>()).Any(s => s.IsEnabled && s.Mode == ServerMode.Sync
-            && (s.LibraryMappings ?? new List<LibraryMapping>()).Any(m => m.IsEnabled && m.NegotiateHistory));
-
-    public static SourceServer? FindServer(this PluginConfiguration config, string? key)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        if (string.IsNullOrEmpty(key))
-        {
-            return null;
-        }
-
-        return config.Servers?.FirstOrDefault(s => string.Equals(s.Key, key, StringComparison.OrdinalIgnoreCase));
-    }
-
-    /// <summary>Finds a server entry by the server's own id, or null.</summary>
-    /// <param name="config">The configuration.</param>
-    /// <param name="serverId">The Jellyfin server id, as a peer names itself.</param>
-    /// <returns>The entry, or null when no entry has that id.</returns>
-    public static SourceServer? FindServerById(this PluginConfiguration config, string? serverId)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        if (string.IsNullOrEmpty(serverId))
-        {
-            return null;
-        }
-
-        return config.Servers?.FirstOrDefault(s => string.Equals(s.ServerId, serverId, StringComparison.OrdinalIgnoreCase));
-    }
-
-    /// <summary>
-    /// Resolves the server a sync row came from. A row that carries no key belongs to the first scan server.
-    /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <param name="key">The entry key carried on the row, or null.</param>
-    /// <returns>The entry, or null when none applies.</returns>
-    public static SourceServer? ResolveServer(this PluginConfiguration config, string? key)
-        => config.FindServer(key) ?? config.GetPullServers().FirstOrDefault();
-
-    /// <summary>
-    /// Returns the enabled library mappings of every scan server, in priority order. Never returns null.
-    /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The enabled mappings across all scan servers.</returns>
-    public static List<LibraryMapping> GetEnabledLibraryMappings(this PluginConfiguration config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return config.GetPullServers().SelectMany(s => s.GetEnabledLibraryMappings()).ToList();
-    }
-
-    /// <summary>
-    /// Returns the enabled user mappings of every scan server, in priority order. Never returns null.
-    /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The enabled mappings across all scan servers.</returns>
-    public static List<UserMapping> GetEnabledUserMappings(this PluginConfiguration config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return config.GetPullServers().SelectMany(s => s.GetEnabledUserMappings()).ToList();
-    }
-
-    /// <summary>
-    /// Returns every library mapping of every server, enabled or not, in priority order. For code that
-    /// only cares about local folders, such as disk space and recycling, where a disabled mapping's
-    /// folder still exists.
-    /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>All library mappings.</returns>
-    public static List<LibraryMapping> GetAllLibraryMappings(this PluginConfiguration config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return config.Servers?.SelectMany(s => s.LibraryMappings ?? new List<LibraryMapping>()).ToList() ?? new List<LibraryMapping>();
-    }
 }

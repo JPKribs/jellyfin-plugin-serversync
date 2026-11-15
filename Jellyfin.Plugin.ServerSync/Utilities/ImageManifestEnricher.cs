@@ -34,6 +34,15 @@ public static class ImageManifestEnricher
     /// <paramref name="deepVerification"/> catches: an image file replaced on
     /// the source's disk without a metadata rescan (same Tag, different bytes).
     /// </summary>
+    /// <param name="freshManifestJson">The image manifest the source reports now, as JSON.</param>
+    /// <param name="priorSourceManifestJson">The manifest the row held before this scan, as JSON.</param>
+    /// <param name="sourceItemId">The item's id on the source.</param>
+    /// <param name="client">The client for the source server.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="logContext">Names the item in log entries.</param>
+    /// <param name="deepVerification">Whether to measure every image again even when its tag is unchanged.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>The manifest with sizes filled in.</returns>
     public static async Task<string?> EnrichWithCarryForwardAsync(
         string? freshManifestJson,
         string? priorSourceManifestJson,
@@ -98,6 +107,13 @@ public static class ImageManifestEnricher
     /// <summary>
     /// Returns the enriched manifest JSON, or the input unchanged on any failure.
     /// </summary>
+    /// <param name="sourceManifestJson">The image manifest the source reports, as JSON.</param>
+    /// <param name="sourceItemId">The item's id on the source.</param>
+    /// <param name="client">The client for the source server.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="logContext">Names the item in log entries.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>The enriched manifest, or the input unchanged when enrichment failed.</returns>
     public static async Task<string?> EnrichAsync(
         string? sourceManifestJson,
         Guid sourceItemId,
@@ -194,6 +210,9 @@ public static class ImageManifestEnricher
     /// changed Tag is a real new image and is left tag-only so the change is
     /// still detected.
     /// </summary>
+    /// <param name="newManifestJson">The manifest to fill in sizes for, as JSON.</param>
+    /// <param name="oldManifestJson">The manifest whose measured sizes are reused, as JSON.</param>
+    /// <returns>The new manifest with the old sizes filled in.</returns>
     public static string? CarryForwardSizes(string? newManifestJson, string? oldManifestJson)
     {
         if (string.IsNullOrEmpty(newManifestJson) || string.IsNullOrEmpty(oldManifestJson))

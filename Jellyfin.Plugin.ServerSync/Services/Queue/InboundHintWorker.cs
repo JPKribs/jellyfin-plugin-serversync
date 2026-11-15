@@ -132,7 +132,7 @@ public sealed class InboundHintWorker : IHostedService, IDisposable
     /// it hears that it is done and does not send it again.
     /// </summary>
     /// <param name="id">The row id.</param>
-    /// <returns>True when the row was there and is gone.</returns>
+    /// <returns><c>true</c> when the row was there and is gone.</returns>
     public bool Dismiss(long id) => _inbound.Get(id) is { } row && Dismiss(row);
 
     /// <summary>Discards every row whose apply has failed at least once, as <see cref="Dismiss(long)"/> does one.</summary>

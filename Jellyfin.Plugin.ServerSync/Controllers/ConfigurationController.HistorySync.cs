@@ -20,6 +20,7 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets paginated history sync items from the database with optional search and filter.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="search">Optional search term.</param>
     /// <param name="status">Optional status filter.</param>
     /// <param name="sourceUserId">Optional source user ID filter.</param>
@@ -59,6 +60,7 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets history sync status counts.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <returns>History sync status response with counts.</returns>
     [HttpGet("HistoryStatus")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -83,6 +85,7 @@ public partial class ConfigurationController
     /// Moves history items to Queued status. With no ids and a Status, queues every row in that
     /// status, which is how "Retry errors" reaches every errored row.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Bulk history items request.</param>
     /// <returns>Action result with updated count.</returns>
     [HttpPost("HistoryItems/Queue")]
@@ -104,6 +107,7 @@ public partial class ConfigurationController
     /// <summary>
     /// Marks history items as ignored.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Bulk history items request.</param>
     /// <returns>Action result with updated count.</returns>
     [HttpPost("HistoryItems/Ignore")]
@@ -117,8 +121,10 @@ public partial class ConfigurationController
         return UpdateHistoryItemsStatus(manager, request, SyncStatus.Ignored, "IgnoreHistoryItems", "ignore");
     }
 
-    // The shared body of the history Queue and Ignore endpoints. Ids are the preferred way to name
-    // rows. The composite key list is kept for older clients.
+    /// <summary>
+    /// The shared body of the history Queue and Ignore endpoints. Ids are the preferred way to name
+    /// rows. The composite key list is kept for older clients.
+    /// </summary>
     private ActionResult UpdateHistoryItemsStatus(
         HistorySyncTableManager manager,
         BulkHistoryItemsRequest? request,
@@ -130,7 +136,7 @@ public partial class ConfigurationController
         var hasItems = request?.Items is { Count: > 0 };
         if (request is null || (!hasIds && !hasItems))
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         if (hasIds)
@@ -143,7 +149,7 @@ public partial class ConfigurationController
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to {Verb} history items by IDs", verb);
-                return StatusCode(500, new { Error = $"Bulk {verb} failed. See server log" });
+                return StatusCode(500, new { Error = $"Could not {verb} the items. See the server log." });
             }
         }
 

@@ -12,6 +12,8 @@ public static class MediaItemUtilities
     /// <summary>
     /// Returns the size of the first media source, or 0 when unavailable.
     /// </summary>
+    /// <param name="item">The source item.</param>
+    /// <returns>The size in bytes.</returns>
     public static long GetItemSize(BaseItemDto item)
         => item.MediaSources is { Count: > 0 } sources ? sources[0].Size ?? 0 : 0;
 
@@ -19,6 +21,8 @@ public static class MediaItemUtilities
     /// Unwraps a Kiota <c>AdditionalData</c> value to its underlying primitive string,
     /// using <see cref="CultureInfo.InvariantCulture"/> for numeric forms.
     /// </summary>
+    /// <param name="value">The value to read.</param>
+    /// <returns>The value as text, or null.</returns>
     public static string? UnwrapKiotaPrimitive(object? value)
     {
         if (value == null)

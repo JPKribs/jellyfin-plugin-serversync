@@ -1,3 +1,4 @@
+using System;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
 using Jellyfin.Plugin.ServerSync.Models.PeopleSync;
@@ -15,6 +16,8 @@ public static class PeopleSyncItemExtensions
     /// <returns>The DTO representation.</returns>
     public static PeopleSyncItemDto ToDto(this PeopleSyncItem item, string? sourceServerUrl)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
         return new PeopleSyncItemDto
         {
             Id = item.Id,

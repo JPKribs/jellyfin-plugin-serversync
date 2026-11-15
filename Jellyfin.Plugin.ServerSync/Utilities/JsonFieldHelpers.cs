@@ -16,6 +16,10 @@ public static class JsonFieldHelpers
     /// Reads a string field. Skips when the key is absent. Otherwise passes the value
     /// (which may be null) to <paramref name="assign"/>.
     /// </summary>
+    /// <param name="metadata">The item's metadata fields by name.</param>
+    /// <param name="key">The field name to read.</param>
+    /// <param name="assign">Receives the value, which is null when the field is null, and returns whether it changed the item.</param>
+    /// <returns><c>true</c> when <paramref name="assign"/> changed the item.</returns>
     public static bool AssignString(Dictionary<string, JsonElement> metadata, string key, Func<string?, bool> assign)
     {
         ArgumentNullException.ThrowIfNull(metadata);
@@ -28,6 +32,10 @@ public static class JsonFieldHelpers
     /// <summary>
     /// Reads a nullable float field. Same skip-when-absent semantics as <see cref="AssignString"/>.
     /// </summary>
+    /// <param name="metadata">The item's metadata fields by name.</param>
+    /// <param name="key">The field name to read.</param>
+    /// <param name="assign">Receives the value, which is null when the field is null, and returns whether it changed the item.</param>
+    /// <returns><c>true</c> when <paramref name="assign"/> changed the item.</returns>
     public static bool AssignFloat(Dictionary<string, JsonElement> metadata, string key, Func<float?, bool> assign)
     {
         ArgumentNullException.ThrowIfNull(metadata);
@@ -41,6 +49,10 @@ public static class JsonFieldHelpers
     /// <summary>
     /// Reads a nullable int field. Same skip-when-absent semantics as <see cref="AssignString"/>.
     /// </summary>
+    /// <param name="metadata">The item's metadata fields by name.</param>
+    /// <param name="key">The field name to read.</param>
+    /// <param name="assign">Receives the value, which is null when the field is null, and returns whether it changed the item.</param>
+    /// <returns><c>true</c> when <paramref name="assign"/> changed the item.</returns>
     public static bool AssignInt(Dictionary<string, JsonElement> metadata, string key, Func<int?, bool> assign)
     {
         ArgumentNullException.ThrowIfNull(metadata);
@@ -55,6 +67,8 @@ public static class JsonFieldHelpers
     /// Parses an ISO 8601 date string with <see cref="DateTimeStyles.RoundtripKind"/>.
     /// Returns null on missing, non-string, or unparseable input.
     /// </summary>
+    /// <param name="v">The JSON value.</param>
+    /// <returns>The date, or null.</returns>
     public static DateTime? ParseNullableDate(JsonElement v)
     {
         if (v.ValueKind != JsonValueKind.String) return null;
@@ -67,6 +81,8 @@ public static class JsonFieldHelpers
     /// Reads a string array. Returns an empty array for missing or non-array input,
     /// and drops non-string entries.
     /// </summary>
+    /// <param name="v">The JSON value.</param>
+    /// <returns>The strings.</returns>
     public static string[] ReadStringArray(JsonElement v)
     {
         if (v.ValueKind != JsonValueKind.Array)
@@ -91,6 +107,8 @@ public static class JsonFieldHelpers
     /// Reads an enum array. Returns an empty array for missing or non-array input,
     /// and drops unparseable entries.
     /// </summary>
+    /// <param name="v">The JSON value.</param>
+    /// <returns>The values that parsed.</returns>
     public static T[] ReadEnumArray<T>(JsonElement v) where T : struct, Enum
     {
         if (v.ValueKind != JsonValueKind.Array)
@@ -125,6 +143,8 @@ public static class JsonFieldHelpers
     /// Reads a Jellyfin-style ProviderIds object as a case-insensitive string dictionary.
     /// Empty-string values are dropped.
     /// </summary>
+    /// <param name="v">The JSON value.</param>
+    /// <returns>The provider ids by provider name.</returns>
     public static Dictionary<string, string> ReadProviderIds(JsonElement v)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

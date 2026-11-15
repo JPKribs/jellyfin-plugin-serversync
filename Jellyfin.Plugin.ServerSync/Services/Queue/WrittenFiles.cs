@@ -36,7 +36,7 @@ public static class WrittenFiles
 
     /// <summary>Whether a file was written by a sync within the last day.</summary>
     /// <param name="path">The file's local path.</param>
-    /// <returns>True when it was.</returns>
+    /// <returns><c>true</c> when it was.</returns>
     public static bool WasWritten(string? path)
         => !string.IsNullOrEmpty(path)
            && Paths.TryGetValue(Normalize(path), out var at)

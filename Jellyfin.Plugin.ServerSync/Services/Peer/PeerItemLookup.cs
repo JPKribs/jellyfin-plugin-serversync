@@ -11,20 +11,32 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
+/// <summary>
+/// Finds the local item a peer asks about, by path, then provider ids, then series and index, then name.
+/// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerItemLookup
 {
+    /// <summary>The most provider ids a request may carry.</summary>
     public const int MaxProviderIds = 16;
 
     private readonly ILibraryManager _libraryManager;
     private readonly ILocalItems _localItems;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PeerItemLookup"/> class.
+    /// </summary>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="localItems">Finds local items by path.</param>
     public PeerItemLookup(ILibraryManager libraryManager, ILocalItems localItems)
     {
         _libraryManager = libraryManager;
         _localItems = localItems;
     }
 
+    /// <summary>Drops provider ids that are empty or too long, and keeps no more than <see cref="MaxProviderIds"/>.</summary>
+    /// <param name="ids">The ids a peer sent, or null.</param>
+    /// <returns>The ids to use, or null when none are left.</returns>
     public static Dictionary<string, string>? CleanIds(Dictionary<string, string>? ids)
     {
         if (ids is null)
@@ -39,6 +51,9 @@ public sealed class PeerItemLookup
         return clean.Count == 0 ? null : clean;
     }
 
+    /// <summary>Finds the item a peer asks about.</summary>
+    /// <param name="request">What to find.</param>
+    /// <returns>The item's id and type when found.</returns>
     public PeerLookupResponse Find(PeerLookupRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);

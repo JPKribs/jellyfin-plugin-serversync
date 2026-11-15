@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.ServerSync.Utilities;
+using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
@@ -12,6 +13,7 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Utilities;
 /// The stall watchdog shared by every copy of a response body read past HttpClient's timeout: media
 /// downloads, and the image copies of Metadata, People, and User sync.
 /// </summary>
+[Collection(RealTimeCollection.Name)]
 public class StallWatchdogStreamTests
 {
     /// <summary>Sends its prefix, then nothing until the read is cancelled, or a byte every interval.</summary>

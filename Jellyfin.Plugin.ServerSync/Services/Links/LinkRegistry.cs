@@ -18,17 +18,23 @@ public interface ILinkRegistry
     /// <summary>
     /// The link standing in for a copy that would sit at <paramref name="copiedPath"/>, or null.
     /// </summary>
+    /// <param name="copiedPath">The path the copy would have.</param>
+    /// <returns>The link's path, or null.</returns>
     string? LinkPathFor(string copiedPath);
 
     /// <summary>
     /// The path a full copy would have where <paramref name="linkPath"/> sits, with the source file's
     /// extension, or null when <paramref name="linkPath"/> is not one of this server's links.
     /// </summary>
+    /// <param name="linkPath">The link's path.</param>
+    /// <returns>The copy's path, or null.</returns>
     string? CopiedPathFor(string linkPath);
 
     /// <summary>
     /// The link at <paramref name="linkPath"/>, or null when that path is not one of this server's links.
     /// </summary>
+    /// <param name="linkPath">The path to look up.</param>
+    /// <returns>The link, or null.</returns>
     LinkEntry? Find(string linkPath) => null;
 
     /// <summary>Forgets what was read, so a link just written or removed is seen on the next lookup.</summary>
@@ -48,13 +54,17 @@ public sealed record LinkEntry(string LinkPath, string CopiedPath, string LinkId
 /// </summary>
 public sealed class NoLinks : ILinkRegistry
 {
+    /// <inheritdoc />
     public string? LinkPathFor(string copiedPath) => null;
 
+    /// <inheritdoc />
     public string? CopiedPathFor(string linkPath) => null;
 }
 
+/// <summary>Paths of links and of the copies they stand in for.</summary>
 public static class LinkPaths
 {
+    /// <summary>The extension of a link, with its dot.</summary>
     public const string Extension = ".strm";
 
     /// <summary>
@@ -62,6 +72,8 @@ public static class LinkPaths
     /// an audio or book .strm as a plain file, which would hand a player the link's text, secret and
     /// all, so only video is ever linked.
     /// </summary>
+    /// <param name="item">The source item.</param>
+    /// <returns><c>true</c> when it can be a link.</returns>
     public static bool CanLink(BaseItemDto item)
         => item?.Type is BaseItemDto_Type.Movie
             or BaseItemDto_Type.Episode
@@ -123,6 +135,8 @@ public static class LinkPaths
     /// Where a link for <paramref name="copiedPath"/> would sit, or null when the path has no extension
     /// to swap or is already a .strm.
     /// </summary>
+    /// <param name="copiedPath">The path the copy would have, or null.</param>
+    /// <returns>The link's path, or null.</returns>
     public static string? LinkPathFor(string? copiedPath)
     {
         if (string.IsNullOrEmpty(copiedPath))
@@ -140,6 +154,8 @@ public static class LinkPaths
     /// The path a full copy would have where a link row's .strm sits: the .strm path with the source
     /// file's extension. Null when the row has no local path.
     /// </summary>
+    /// <param name="row">The link's row.</param>
+    /// <returns>The copy's path, or null.</returns>
     public static string? CopiedPathOf(Models.ContentSync.SyncItem row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -150,6 +166,9 @@ public static class LinkPaths
     /// The path a table row records for a local item. A link records the path its copy would have, the
     /// same path a refresh translates from the source, so rows from either agree on which file they cover.
     /// </summary>
+    /// <param name="localPath">The local item's path.</param>
+    /// <param name="links">The link registry.</param>
+    /// <returns>The path the row records.</returns>
     public static string RowPathFor(string localPath, ILinkRegistry links)
         => links.CopiedPathFor(localPath) ?? localPath;
 
@@ -157,6 +176,11 @@ public static class LinkPaths
     /// Translates a local path back to the source. A link translates as the copy it stands in for, so it
     /// keeps the source file's real extension and the peer matches its own file by path.
     /// </summary>
+    /// <param name="localPath">The local item's path.</param>
+    /// <param name="localRoot">The local library root.</param>
+    /// <param name="sourceRoot">The source library root.</param>
+    /// <param name="links">The link registry.</param>
+    /// <returns>The source path.</returns>
     public static string SourcePathFor(string localPath, string localRoot, string sourceRoot, ILinkRegistry links)
         => PathUtilities.TranslatePath(RowPathFor(localPath, links), localRoot, sourceRoot);
 
@@ -165,6 +189,8 @@ public static class LinkPaths
     /// path translated to this server finds it. An alias never replaces a path already in the index, so
     /// a real file always wins over a link standing in for the same name.
     /// </summary>
+    /// <param name="index">The index of local items by path.</param>
+    /// <param name="links">The link registry.</param>
     public static void AddAliases(Dictionary<string, BaseItem> index, ILinkRegistry links)
     {
         foreach (var (path, item) in index.ToList())

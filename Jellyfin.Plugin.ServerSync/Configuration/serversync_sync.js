@@ -1,17 +1,18 @@
-// ============================================
-// SERVER SYNC PLUGIN - UNIFIED SYNC PAGE CONTROLLER
-// ============================================
+// serversync_sync.js
+// The Sync tab: picks the sync type to show and builds each view from the page context.
 
+// serversync_sync
+// Builds the Sync tab. It sets the tabs, loads the page's modules, switches between the sync type views, and
+// stops every task poller, queue refresh, and table observer when the page hides.
+//
+// Inputs
+// view [HTMLElement]: The page the dashboard passes to the controller.
 export default function (view) {
     'use strict';
 
-    // ============================================
-    // TAB NAVIGATION (local copy for synchronous access)
-    // ============================================
-
-    // The Storage tab shows only while content sync is on. The last known answer is kept per browser
-    // and refreshed whenever the shared module loads or saves the config (see serversync_shared.js).
-    // An unknown answer shows the tab.
+    // storageTabShown
+    // Tells whether the Storage tab shows. The last known answer is kept per browser and refreshed whenever
+    // the shared module loads or saves the config (see serversync_shared.js). An unknown answer shows the tab.
     function storageTabShown() {
         try {
             return window.localStorage.getItem('serversync.storageTab') !== '0';
@@ -20,6 +21,11 @@ export default function (view) {
         }
     }
 
+    // getTabs
+    // Lists the dashboard tabs in order.
+    //
+    // Output
+    // [object[]]: Each tab's href and name.
     function getTabs() {
         var tabs = [
             { href: 'configurationpage?name=serversync_sync', name: 'Sync' },
@@ -29,10 +35,6 @@ export default function (view) {
         tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
         return tabs;
     }
-
-    // ============================================
-    // EVENT LISTENERS (registered FIRST to avoid missing viewshow)
-    // ============================================
 
     var _pageReady = false;
 
@@ -62,9 +64,6 @@ export default function (view) {
         });
     });
 
-    // ============================================
-    // SHARED AND PAGE MODULE IMPORTS (deferred)
-    // ============================================
     // The shared helpers and each part of this page live in their own resource. Every part is built
     // from one context once all of them have loaded, and everything that needs them waits on
     // _sharedPromise.
@@ -103,6 +102,7 @@ export default function (view) {
             shared: ServerSyncShared,
             createPaginatedTable: shared.createPaginatedTable,
             bindDialog: shared.bindDialog,
+            confirmDialog: shared.confirmDialog,
             activePollIntervals: _activePollIntervals
         };
         var kit = loaded[1].createSyncTableKit(ctx);
@@ -116,10 +116,6 @@ export default function (view) {
         PeopleSyncTableModule = loaded[6].createPeopleSyncTableModule(ctx, kit);
         QueueModule = loaded[7].createQueueModule(ctx);
     });
-
-    // ============================================
-    // SYNC VIEW MANAGER
-    // ============================================
 
     var SyncViewManager = {
         currentView: null,     // Currently active view name ('content', 'history', etc.)
@@ -193,7 +189,7 @@ export default function (view) {
                 var opt = options[i];
                 var configKey = opt.getAttribute('data-config-key');
                 var isEnabled = !configKey || (config && config[configKey]);
-                opt.style.display = isEnabled ? '' : 'none';
+                opt.classList.toggle('hidden', !isEnabled);
                 opt.disabled = !isEnabled;
             }
 
@@ -256,7 +252,7 @@ export default function (view) {
                 outgoingModule.table.disconnectObserver();
             }
 
-            var views = view.querySelectorAll('.syncView');
+            var views = view.querySelectorAll('.serversync-sync-view');
             for (var i = 0; i < views.length; i++) {
                 views[i].classList.add('hidden');
             }
@@ -293,11 +289,11 @@ export default function (view) {
             if (descEl) {
                 var descriptions = {
                     content: 'Media files copied or linked into mapped libraries from your Pull and Sync servers.',
-                    history: 'Watch state of mapped users: played status, play count, resume position, last played date, and favorites.',
+                    history: 'Watch state of mapped users, such as played status, play count, resume position, last played date, and favorites.',
                     metadata: 'Item metadata and images, copied onto local items matched by file path.',
                     people: 'Biographies, provider IDs, and photos of people, matched by name.',
                     users: 'Permissions, preferences, and profile images of mapped users. Library permissions follow your library mappings.',
-                    queue: 'Changes sent between servers as they happen. Outbound rows wait for a Push or Sync server to finish them; inbound rows wait to be applied here.'
+                    queue: 'Changes sent between servers as they happen. Outbound rows wait for a Push or Sync server to finish them, and inbound rows wait to be applied here.'
                 };
                 descEl.textContent = descriptions[viewName] || '';
             }
@@ -340,9 +336,6 @@ export default function (view) {
         }
     };
 
-    // ============================================
-    // INITIAL PAGE SETUP
-    // ============================================
     // viewshow may have fired before this module ran, so the first load sets the tabs and
     // initializes right away.
 

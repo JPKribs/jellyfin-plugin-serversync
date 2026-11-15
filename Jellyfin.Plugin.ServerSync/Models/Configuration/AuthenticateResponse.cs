@@ -5,6 +5,7 @@ namespace Jellyfin.Plugin.ServerSync.Models.Configuration;
 /// </summary>
 public class AuthenticateResponse
 {
+    /// <summary>Gets or sets a value indicating whether the sign in worked.</summary>
     public bool Success { get; set; }
 
     /// <summary>
@@ -25,10 +26,13 @@ public class AuthenticateResponse
     /// <summary>Gets or sets a value indicating whether the signed in user is an administrator there.</summary>
     public bool? IsAdministrator { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the signed in user may download files there, or null when unknown.</summary>
     public bool? CanDownload { get; set; }
 
+    /// <summary>Gets or sets the result code of the sync access check, such as Allowed or NotInstalled.</summary>
     public string? SyncAccess { get; set; }
 
+    /// <summary>Gets or sets the message that explains <see cref="SyncAccess"/>.</summary>
     public string? SyncAccessMessage { get; set; }
 
     /// <summary>

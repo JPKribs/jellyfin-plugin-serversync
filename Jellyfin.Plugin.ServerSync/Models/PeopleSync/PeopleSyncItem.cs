@@ -38,8 +38,6 @@ public class PeopleSyncItem : SyncRecord
     /// </summary>
     public SyncableValue<string> Images { get; } = new() { Comparator = new ImageManifestComparator() };
 
-    // ===== Computed change detection =====
-
     /// <summary>
     /// Gets a value indicating whether the metadata blob has changes worth syncing.
     /// </summary>
@@ -64,13 +62,14 @@ public class PeopleSyncItem : SyncRecord
         Images.MarkSynced();
     }
 
-    // ===== Image manifest helper =====
     // Used by apply paths that need to look up specific image entries.
 
     /// <summary>
     /// Tries to deserialize <see cref="Images"/>.<see cref="SyncableValue{T}.Source"/>
     /// as an image manifest. Returns false if missing or malformed.
     /// </summary>
+    /// <param name="manifest">The parsed manifest, set when the method returns true.</param>
+    /// <returns><c>true</c> when the row holds a manifest that could be read.</returns>
     public bool TryGetSourceImageManifest(out Dictionary<string, List<ImageInfoDto>>? manifest)
     {
         manifest = null;

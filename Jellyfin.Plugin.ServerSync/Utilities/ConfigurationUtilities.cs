@@ -17,6 +17,8 @@ public static class ConfigurationUtilities
     /// <summary>
     /// True when at least one configured server entry is one this server pulls from.
     /// </summary>
+    /// <param name="config">The plugin settings.</param>
+    /// <returns><c>true</c> when a scan server is set up with a Server URL and API Key.</returns>
     public static bool HasValidAuthConfiguration(PluginConfiguration config)
         => config.GetPullServers().Count > 0;
 
@@ -25,6 +27,9 @@ public static class ConfigurationUtilities
     /// why the URL was rejected for SSRF reasons. Loopback and RFC1918/ULA addresses
     /// are allowed when <paramref name="allowPrivateNetwork"/> is true.
     /// </summary>
+    /// <param name="url">The address to check.</param>
+    /// <param name="allowPrivateNetwork">Whether a loopback or private address is acceptable.</param>
+    /// <returns>Null when the URL is acceptable, else why not.</returns>
     public static string? ValidateServerUrlForSsrf(string url, bool allowPrivateNetwork = true)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -69,8 +74,12 @@ public static class ConfigurationUtilities
         return null;
     }
 
+    /// <summary>The reason a plain HTTP address to a public host is refused.</summary>
     public const string PlainHttpRefusal = "Plain HTTP sends the API key unencrypted, so it only reaches loopback and private network addresses. Use an https:// URL for this server";
 
+    /// <summary>Whether plain HTTP may be used for an address, which only a loopback or private one allows.</summary>
+    /// <param name="address">The address the name resolves to.</param>
+    /// <returns><c>true</c> when the address is loopback or private.</returns>
     public static bool AllowsPlainHttp(IPAddress address)
     {
         ArgumentNullException.ThrowIfNull(address);
@@ -98,9 +107,9 @@ public static class ConfigurationUtilities
     /// a host name and classifies every address it points at, so "localhost" or a LAN name is refused
     /// the same way its address would be. Used when an entry is saved or tested, not on every call.
     /// </summary>
-    /// <param name="url">The URL.</param>
+    /// <param name="url">The Server URL to check.</param>
     /// <param name="allowPrivateNetwork">Whether private and loopback addresses are allowed.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>Null when acceptable, else why not.</returns>
     public static async Task<string?> ValidateServerUrlForSsrfAsync(string url, bool allowPrivateNetwork, CancellationToken cancellationToken = default)
     {
@@ -149,11 +158,18 @@ public static class ConfigurationUtilities
     /// to a loopback or private address fails here the way the address itself fails the URL check.
     /// </summary>
     /// <param name="context">The connection the handler wants.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The connected stream.</returns>
     public static ValueTask<Stream> ConnectPublicOnlyAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         => ConnectCheckedAsync(context, allowPrivateNetwork: false, cancellationToken);
 
+    /// <summary>
+    /// Connects for the client whose entries allow private networks, after the same address checks as
+    /// <see cref="ConnectPublicOnlyAsync"/> apart from the private network ban.
+    /// </summary>
+    /// <param name="context">The connection the handler wants.</param>
+    /// <param name="cancellationToken">Cancels the connection.</param>
+    /// <returns>The connected stream.</returns>
     public static ValueTask<Stream> ConnectPrivateAllowedAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         => ConnectCheckedAsync(context, allowPrivateNetwork: true, cancellationToken);
 

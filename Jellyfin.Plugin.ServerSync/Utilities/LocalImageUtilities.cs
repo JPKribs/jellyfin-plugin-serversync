@@ -24,21 +24,23 @@ public static class LocalImageUtilities
     /// <param name="imageType">Image type to clear.</param>
     /// <param name="logger">Logger for per image failures.</param>
     /// <param name="context">Item name or id, used in log messages.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>The number of images actually removed.</returns>
-    // BaseItem.RemoveImage only drops the in memory entry and leaves the file
-    // where it is. Multi image types make that a problem. Jellyfin names
-    // backdrops deterministically as backdrop.jpg, backdrop1.jpg and so on,
-    // so a local set of five replaced by a source set of two leaves
-    // backdrop2 through backdrop4 on disk. The next library scan re-adopts
-    // them, the manifest reads five again, and the row sits in a permanent
-    // "source has 2, local has 5" variance that re-pulls every image on every
-    // run. Deleting the files makes the local set genuinely match the source
-    // set, so the next refresh sees no variance.
-    //
-    // Deletion runs highest index first. Images are addressed by their
-    // ordinal within the type, so clearing index 0 first shifts everything
-    // down and an ascending loop would skip every other image.
+    /// <remarks>
+    /// BaseItem.RemoveImage only drops the in memory entry and leaves the file
+    /// where it is. Multi image types make that a problem. Jellyfin names
+    /// backdrops deterministically as backdrop.jpg, backdrop1.jpg and so on,
+    /// so a local set of five replaced by a source set of two leaves
+    /// backdrop2 through backdrop4 on disk. The next library scan re-adopts
+    /// them, the manifest reads five again, and the row sits in a permanent
+    /// "source has 2, local has 5" variance that re-pulls every image on every
+    /// run. Deleting the files makes the local set genuinely match the source
+    /// set, so the next refresh sees no variance.
+    ///
+    /// Deletion runs highest index first. Images are addressed by their
+    /// ordinal within the type, so clearing index 0 first shifts everything
+    /// down and an ascending loop would skip every other image.
+    /// </remarks>
     public static async Task<int> ClearImagesAsync(
         BaseItem item,
         ImageType imageType,
@@ -131,12 +133,14 @@ public static class LocalImageUtilities
     /// </summary>
     /// <param name="work">Image type plus the source index, which may be null.</param>
     /// <returns>The same images with a target slot assigned, in write order.</returns>
-    // Multi image types need this. Jellyfin's SaveImage appends when the
-    // target slot does not exist yet, so writing Backdrop slot 2 into an
-    // empty set lands it at position 0 and the following write to slot 0
-    // overwrites it. Three source backdrops collapse into one. Sequential
-    // slots also line up with the local manifest, which numbers images by
-    // position, so a source whose indexes are sparse or null still verifies.
+    /// <remarks>
+    /// Multi image types need this. Jellyfin's SaveImage appends when the
+    /// target slot does not exist yet, so writing Backdrop slot 2 into an
+    /// empty set lands it at position 0 and the following write to slot 0
+    /// overwrites it. Three source backdrops collapse into one. Sequential
+    /// slots also line up with the local manifest, which numbers images by
+    /// position, so a source whose indexes are sparse or null still verifies.
+    /// </remarks>
     public static List<(string ImageType, int? SourceIndex, int TargetIndex)> AssignSequentialSlots(
         IEnumerable<(string ImageType, int? ImageIndex)> work)
     {

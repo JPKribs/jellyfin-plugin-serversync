@@ -22,10 +22,12 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets paginated sync items from the database with optional search and filter.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="search">Optional search term.</param>
     /// <param name="status">Optional status filter.</param>
     /// <param name="pendingType">Optional pending type filter.</param>
     /// <param name="cached">Only links whose file is in the link cache.</param>
+    /// <param name="storage">The storage to list, Copy or Link, or null for both.</param>
     /// <param name="skip">Number of items to skip (default 0).</param>
     /// <param name="take">Maximum items to return (default 50, max 200).</param>
     /// <returns>Paginated result of sync item DTOs.</returns>
@@ -117,6 +119,7 @@ public partial class ConfigurationController
     /// <summary>
     /// Gets sync status counts.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <returns>Sync status response with counts.</returns>
     [HttpGet("Status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -146,6 +149,7 @@ public partial class ConfigurationController
     /// Gets the total size of pending items to be synced.
     /// Calculates: PendingDownload + PendingReplacement + Queued - PendingDeletion
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <returns>Pending size response with breakdown.</returns>
     [HttpGet("PendingSize")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -178,6 +182,7 @@ public partial class ConfigurationController
     /// <summary>
     /// Resets errored items for retry.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Optional request with specific item IDs.</param>
     /// <returns>Action result with success status.</returns>
     [HttpPost("RetryErroredItems")]
@@ -211,6 +216,7 @@ public partial class ConfigurationController
     /// <summary>
     /// Marks multiple items as ignored.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Bulk items request.</param>
     /// <returns>Action result with updated count.</returns>
     [HttpPost("IgnoreItems")]
@@ -223,7 +229,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         // Count the rows the update actually touched. Counting every posted id reported ids with no
@@ -236,13 +242,14 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to ignore {Count} content item(s)", request.SourceItemIds.Count);
-            return StatusCode(500, new { Error = "Bulk ignore failed. See server log" });
+            return StatusCode(500, new { Error = "Could not ignore the items. See the server log." });
         }
     }
 
     /// <summary>
     /// Moves items to Queued status (works for Pending, Ignored, Errored, and Synced items).
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Bulk items request.</param>
     /// <returns>Action result with updated count.</returns>
     [HttpPost("QueueItems")]
@@ -255,7 +262,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         // Count the rows the update actually touched. Counting every posted id reported ids with no
@@ -268,7 +275,7 @@ public partial class ConfigurationController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to queue {Count} content item(s)", request.SourceItemIds.Count);
-            return StatusCode(500, new { Error = "Bulk queue failed. See server log" });
+            return StatusCode(500, new { Error = "Could not queue the items. See the server log." });
         }
     }
 
@@ -333,7 +340,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(cache);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         var promoted = 0;
@@ -455,7 +462,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.Ids is not { Count: > 0 })
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         var config = _configManager.Configuration;
@@ -510,6 +517,7 @@ public partial class ConfigurationController
     /// Use this to resolve items that are stuck in Queued/Errored status
     /// when the local file is already present.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Bulk items request.</param>
     /// <returns>Action result with synced and not-found counts.</returns>
     [HttpPost("MarkSynced")]
@@ -522,7 +530,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         var syncedCount = 0;
@@ -570,6 +578,7 @@ public partial class ConfigurationController
     /// <summary>
     /// Deletes items' files from the LOCAL server only. Each handled row is kept as Ignored.
     /// </summary>
+    /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="request">Bulk items request.</param>
     /// <returns>Action result with deletion counts.</returns>
     [HttpPost("DeleteLocalItems")]
@@ -582,7 +591,7 @@ public partial class ConfigurationController
         ArgumentNullException.ThrowIfNull(manager);
         if (request?.SourceItemIds == null || request.SourceItemIds.Count == 0)
         {
-            return BadRequest("No items specified");
+            return BadRequest("Select the items.");
         }
 
         var config = _configManager.Configuration;

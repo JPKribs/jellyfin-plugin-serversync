@@ -35,6 +35,11 @@ public class SyncDatabase : IDisposable
     // instead of being handed out again.
     private int _generation;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SyncDatabase"/> class and opens the database.
+    /// </summary>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="dataPath">Jellyfin's data folder, which holds the database's own folder.</param>
     public SyncDatabase(ILogger<SyncDatabase> logger, string dataPath)
     {
         _logger = logger;
@@ -256,7 +261,6 @@ public class SyncDatabase : IDisposable
         {
             connection.Open();
 
-            // Set pragmas for reliability in multi-threaded environments
             using var pragmaCmd = connection.CreateCommand();
             pragmaCmd.CommandText = @"
                 PRAGMA journal_mode=WAL;
@@ -480,10 +484,6 @@ public class SyncDatabase : IDisposable
         }
     }
 
-    // ============================================
-    // Shared Database Operations
-    // ============================================
-
     /// <summary>
     /// Drops all data and recreates the database with the latest schema.
     /// </summary>
@@ -506,16 +506,17 @@ public class SyncDatabase : IDisposable
         }
     }
 
-    // ============================================
-    // Dispose Pattern
-    // ============================================
-
+    /// <inheritdoc />
     public void Dispose()
     {
         Dispose(true);
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Closes the connections once.
+    /// </summary>
+    /// <param name="disposing"><c>true</c> when called from <see cref="Dispose()"/>.</param>
     protected virtual void Dispose(bool disposing)
     {
         if (!_disposed && disposing)
