@@ -5,9 +5,8 @@ using System.Linq;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// The files this server wrote itself while syncing content. Jellyfin picks such a file up in a later
-/// library scan, outside any apply guard, and the change observer would announce it to every peer as a
-/// new file, its origin included. The observer checks here and stays quiet about files it wrote.
+/// Remembers the files this server wrote while syncing content, so the change observer stays quiet about them.
+/// Jellyfin picks such a file up outside any apply guard, and it would be announced to every peer as a new file.
 /// </summary>
 public static class WrittenFiles
 {
@@ -42,5 +41,6 @@ public static class WrittenFiles
            && Paths.TryGetValue(Normalize(path), out var at)
            && DateTime.UtcNow - at < Remembered;
 
+    /// <summary>Writes a path with forward slashes so both separators compare equal.</summary>
     private static string Normalize(string path) => path.Replace('\\', '/');
 }

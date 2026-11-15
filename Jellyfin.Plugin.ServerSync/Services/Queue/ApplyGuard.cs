@@ -6,9 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Remembers which objects are being written right now because a peer asked for it. Jellyfin raises
-/// its save events on the writing thread, so the change observer can ask the guard whether an event
-/// is the echo of an apply and stay quiet. Nothing here outlives the write.
+/// Remembers which objects are being written because a peer asked for it.
+/// The change observer asks the guard whether a save event is the echo of an apply, and stays quiet when it is.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class ApplyGuard
@@ -18,10 +17,9 @@ public sealed class ApplyGuard
     private readonly ConcurrentDictionary<string, int> _active = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Whether an apply of this object, or of its whole kind, ended within the window. Kept across
-    /// guard instances so a late save event still reads as the echo of an apply.
+    /// Whether an apply of this object, or of its whole kind, ended within the window.
     /// </summary>
-    /// <param name="guardKey">The guard key.</param>
+    /// <param name="guardKey">The guard key of the object the save event names.</param>
     /// <param name="window">How far back an apply counts.</param>
     /// <returns><c>true</c> when an apply ended within the window.</returns>
     public static bool AppliedRecently(string guardKey, TimeSpan window)
@@ -38,7 +36,7 @@ public sealed class ApplyGuard
             && DateTime.UtcNow - all < window;
     }
 
-    /// <summary>Registers an apply of one object. Dispose the result when the write is done.</summary>
+    /// <summary>Registers an apply of one object until the result is disposed.</summary>
     /// <param name="guardKey">The guard key, see <see cref="HintProtocol.GuardKey"/>.</param>
     /// <returns>A handle that ends the registration.</returns>
     public IDisposable Enter(string guardKey)
@@ -49,7 +47,7 @@ public sealed class ApplyGuard
     }
 
     /// <summary>Whether an apply of this object is in progress.</summary>
-    /// <param name="guardKey">The guard key.</param>
+    /// <param name="guardKey">The guard key of the object the save event names.</param>
     /// <returns><c>true</c> during an apply.</returns>
     public bool IsApplying(string guardKey)
     {
@@ -59,11 +57,12 @@ public sealed class ApplyGuard
             return true;
         }
 
-        // A registration for a whole kind, see HintProtocol.GuardAllKey, covers every key of that kind.
+        // A registration for a whole kind covers every key of that kind.
         var split = guardKey.IndexOf(':', StringComparison.Ordinal);
         return split > 0 && _active.ContainsKey(string.Concat(guardKey.AsSpan(0, split + 1), "*"));
     }
 
+    /// <summary>Ends one registration and remembers when the apply ended.</summary>
     private void Leave(string guardKey)
     {
         RecentApplies[guardKey] = DateTime.UtcNow;
@@ -94,18 +93,23 @@ public sealed class ApplyGuard
         }
     }
 
+    /// <summary>Ends a registration once when disposed.</summary>
     private sealed class Exit : IDisposable
     {
         private readonly ApplyGuard _guard;
         private readonly string _key;
         private bool _done;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Exit"/> class.
+        /// </summary>
         public Exit(ApplyGuard guard, string key)
         {
             _guard = guard;
             _key = key;
         }
 
+        /// <inheritdoc />
         public void Dispose()
         {
             if (!_done)

@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Clients;
@@ -14,9 +15,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Applies a playlist hint: reads the playlist from the origin and copies it here the way the scheduled
-/// playlist sync would, or deletes the local copy when the origin deleted its own. Unless the origin
-/// is a Pull server, a newer edit made here is kept and announced instead.
+/// Applies a playlist hint by copying the playlist from the origin, or deleting the local copy when the origin deleted its own.
+/// Unless the origin is a Pull server, a newer edit made here is kept and announced instead.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PlaylistHintHandler
@@ -30,13 +30,19 @@ public sealed class PlaylistHintHandler
     /// <summary>
     /// Initializes a new instance of the <see cref="PlaylistHintHandler"/> class.
     /// </summary>
-    /// <param name="configManager">Plugin configuration.</param>
+    /// <param name="configManager">Reads the Playlists settings.</param>
     /// <param name="mirror">Reads, copies, and deletes playlists.</param>
-    /// <param name="resolver">The version resolver.</param>
+    /// <param name="resolver">Reads and records playlist stamps.</param>
     /// <param name="publisher">Publishes this server's winning values.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="logger">Writes a playlist that could not be read.</param>
     public PlaylistHintHandler(IPluginConfigurationManager configManager, PlaylistMirror mirror, VersionConflictResolver resolver, LocalHintPublisher publisher, ILogger<PlaylistHintHandler> logger)
     {
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(mirror);
+        ArgumentNullException.ThrowIfNull(resolver);
+        ArgumentNullException.ThrowIfNull(publisher);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _configManager = configManager;
         _mirror = mirror;
         _resolver = resolver;
@@ -45,11 +51,11 @@ public sealed class PlaylistHintHandler
     }
 
     /// <summary>Applies one playlist hint, waiting briefly for the scheduled playlist sync to finish.</summary>
-    /// <param name="hint">The inbound row.</param>
-    /// <param name="origin">The configured entry for the origin.</param>
-    /// <param name="client">A client bound to the origin.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The outcome.</returns>
+    /// <param name="hint">The hint that names the playlist.</param>
+    /// <param name="origin">The server entry of the origin, whose user mappings apply.</param>
+    /// <param name="client">Reads the playlist from the origin.</param>
+    /// <param name="cancellationToken">Cancels the wait and the apply.</param>
+    /// <returns>How the hint ended.</returns>
     public async Task<HintApplyResult> ApplyAsync(InboundHint hint, SourceServer origin, SourceServerClient client, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(hint);
@@ -84,6 +90,7 @@ public sealed class PlaylistHintHandler
         }
     }
 
+    /// <summary>Applies one playlist hint while the Playlists lock is held.</summary>
     private async Task<HintApplyResult> ApplyLockedAsync(InboundHint hint, SourceServer origin, SourceServerClient client, string rootKey, bool senderIsOriginal, Guid senderId, CancellationToken cancellationToken)
     {
         var config = _configManager.Configuration;
@@ -117,8 +124,7 @@ public sealed class PlaylistHintHandler
                 return HintApplyResult.Kept(HintCode.NotMapped, "the local copy belongs to another user, so it is kept");
             }
 
-            // The deletion is recorded either way, so the playlist is not handed back to the server
-            // that deleted it and only an edit made after the deletion brings it back there.
+            // Recording the deletion keeps the playlist from going back to the server that deleted it.
             if (config.PlaylistRemovedAction == PlaylistRemovedAction.Keep)
             {
                 _resolver.Record(incoming);
@@ -136,13 +142,9 @@ public sealed class PlaylistHintHandler
         {
             source = (await _mirror.ReadAsync(origin, client, users, senderId, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Could not read playlist {Id} from '{Origin}'", senderId, origin.DisplayName);
+            _logger.LogDebug(ex, "Could not read playlist {Id} from '{Origin}'", senderId, FormatUtilities.SanitizeForLog(origin.DisplayName));
             return HintApplyResult.RetryLater($"could not read the playlist: {ex.Message}");
         }
 

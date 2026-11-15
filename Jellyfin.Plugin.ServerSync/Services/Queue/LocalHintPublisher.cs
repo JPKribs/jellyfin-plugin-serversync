@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.Configuration;
@@ -12,9 +13,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Turns one local change into outbound rows, one per peer this server sends to that maps the object,
-/// records the version the change carries, and wakes the delivery worker. Used by the change observer
-/// for edits made here and by the inbound handlers for merges that moved past what the origin had.
+/// Turns one local change into a hint for each peer this server sends to that maps the object.
+/// It also records the stamp the change carries and wakes the delivery worker.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class LocalHintPublisher
@@ -31,14 +31,14 @@ public sealed class LocalHintPublisher
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalHintPublisher"/> class.
     /// </summary>
-    /// <param name="configManager">Plugin configuration.</param>
-    /// <param name="outbound">The outbound store.</param>
-    /// <param name="versions">The version store.</param>
+    /// <param name="configManager">Lists the server entries to send to.</param>
+    /// <param name="outbound">Holds the hints waiting to be sent.</param>
+    /// <param name="versions">Records the stamp of each hand made edit.</param>
     /// <param name="worker">The delivery worker to wake.</param>
-    /// <param name="applicationHost">The server host, for this server's id.</param>
-    /// <param name="logger">Logger.</param>
-    /// <param name="links">The link registry, so a link goes out under its copy's path, or null.</param>
-    /// <param name="content">The content table, so a file synced from a peer is not announced as new, or null.</param>
+    /// <param name="applicationHost">Gives this server's id.</param>
+    /// <param name="logger">Writes a hint that could not be queued or was held.</param>
+    /// <param name="links">Gives a link the path its copy would have, or null.</param>
+    /// <param name="content">Tells a file synced from a peer from a new one, or null.</param>
     public LocalHintPublisher(
         IPluginConfigurationManager configManager,
         OutboundHintStore outbound,
@@ -60,13 +60,13 @@ public sealed class LocalHintPublisher
     }
 
     /// <summary>Publishes a metadata change for a library item.</summary>
-    /// <param name="localItemId">The local item.</param>
+    /// <param name="localItemId">The local item that changed.</param>
     /// <param name="itemPath">The local path of the item.</param>
-    /// <param name="version">The version the change carries.</param>
+    /// <param name="version">The stamp the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
-    /// <param name="recorded">Whether the change was made by hand. Provider work is sent marked and records no version here.</param>
+    /// <param name="recorded">Whether the change was made by hand. Provider work records no stamp here.</param>
     /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
-    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
+    /// <returns>How many peers were queued a hint, or -1 when the change is held.</returns>
     public int PublishMetadata(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, bool recorded = true, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -86,10 +86,10 @@ public sealed class LocalHintPublisher
     /// <summary>Publishes a change to a person's own metadata or images.</summary>
     /// <param name="name">The person's name.</param>
     /// <param name="localPersonId">The local person item.</param>
-    /// <param name="version">The version the change carries.</param>
+    /// <param name="version">The stamp the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
-    /// <param name="recorded">Whether the change was made by hand. Provider work is sent marked and records no version here.</param>
-    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
+    /// <param name="recorded">Whether the change was made by hand. Provider work records no stamp here.</param>
+    /// <returns>How many peers were queued a hint, or -1 when the change is held.</returns>
     public int PublishPeople(string name, Guid localPersonId, ObjectVersion version, string? excludePeerKey, bool recorded = true)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -105,47 +105,42 @@ public sealed class LocalHintPublisher
             recorded);
     }
 
-    // A link goes out under the path its copy would have, so a peer matches the file it stands in for,
-    // whatever version of Server Sync it runs.
+    /// <summary>Gives a link the path its copy would have, so a peer matches the file it stands in for.</summary>
     private string SentPath(string itemPath)
         => _links is null || string.IsNullOrEmpty(itemPath) ? itemPath : LinkPaths.RowPathFor(itemPath, _links);
 
     /// <summary>Publishes a media file that appeared here.</summary>
-    /// <param name="localItemId">The local item.</param>
+    /// <param name="localItemId">The local item that changed.</param>
     /// <param name="itemPath">The local path of the file.</param>
-    /// <param name="version">The version the change carries.</param>
+    /// <param name="version">The stamp the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the file, or null.</param>
     /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
-    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
+    /// <returns>How many peers were queued a hint, or -1 when the change is held.</returns>
     public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
         => PublishContent(localItemId, itemPath, version, excludePeerKey, itemType, removed: false);
 
     /// <summary>
-    /// Publishes a media file that appeared here, or one that left. A removal goes out under the same
-    /// key as the file's arrival did and says that it is one. The peer still asks for the item before
-    /// acting, and settles what it held of it only on finding it gone. A file this server was given by a peer is announced when it leaves, though not when
-    /// it arrives, since a server that links to this one's copy has nobody else to hear it from.
+    /// Publishes a media file that appeared here, or one that left, under the same key.
+    /// A file a peer gave this server is announced when it leaves but not when it arrives, since a linking server hears it from nobody else.
     /// </summary>
-    /// <param name="localItemId">The local item.</param>
+    /// <param name="localItemId">The local item that changed.</param>
     /// <param name="itemPath">The local path of the file.</param>
-    /// <param name="version">The version the change carries.</param>
+    /// <param name="version">The stamp the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
     /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
     /// <param name="removed">Whether the file left.</param>
-    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
+    /// <returns>How many peers were queued a hint, or -1 when the change is held.</returns>
     public int PublishContent(Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType, bool removed)
     {
         ArgumentNullException.ThrowIfNull(version);
 
-        // A link is not a file a peer can copy, and neither is any other .strm, which points at a file
-        // elsewhere. Their history and metadata still go out as usual.
+        // A link or any other .strm is not a file a peer can copy.
         if (itemPath?.EndsWith(LinkPaths.Extension, StringComparison.OrdinalIgnoreCase) == true || _links?.Find(itemPath!) is not null)
         {
             return 0;
         }
 
-        // A file the sync downloaded from a peer is that peer's to announce, not this server's. The
-        // in-memory mark of the sync's writes is gone after a restart, so the content table is asked too.
+        // A file synced from a peer is that peer's to announce.
         if (!removed && !string.IsNullOrEmpty(itemPath) && _content?.GetByLocalPath(itemPath) is not null)
         {
             return 0;
@@ -168,12 +163,12 @@ public sealed class LocalHintPublisher
     /// <param name="rootKey">The playlist key, shared by the original and its copies.</param>
     /// <param name="name">The playlist's name.</param>
     /// <param name="ownerId">The local owner.</param>
-    /// <param name="version">The version the change carries.</param>
+    /// <param name="version">The stamp the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change, or null.</param>
     /// <param name="recorded">Whether the change was made by hand.</param>
     /// <param name="deleted">Whether the playlist was deleted.</param>
     /// <param name="copy">Whether the playlist is a copy of another server's.</param>
-    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
+    /// <returns>How many peers were queued a hint, or -1 when the change is held.</returns>
     public int PublishPlaylist(Guid localPlaylistId, string rootKey, string name, Guid ownerId, ObjectVersion version, string? excludePeerKey, bool recorded, bool deleted, bool copy)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -199,20 +194,20 @@ public sealed class LocalHintPublisher
             deletion: deleted);
     }
 
+    /// <summary>Records the stamp, checks whether the change is held, and queues a hint for each peer that wants it.</summary>
     private int Publish(HintKind kind, string localKey, ObjectVersion version, string? excludePeerKey, Func<SourceServer, bool> mapped, Func<OutboundHint> rowFor, bool recorded = true, string? itemPath = null, Guid userId = default, bool deletion = false)
     {
         version.Kind = kind;
         version.Key = localKey;
+        // Provider work leaves no stamp, so a hand made edit anywhere in the pool beats it.
         if (recorded)
         {
-            // Only a hand made edit is a version of this server's own. Provider work leaves none, so a
-            // recorded edit anywhere in the pool still beats it.
             _versions.Set(version);
         }
 
         if (!deletion && ApplyGuard.AppliedRecently(HintProtocol.GuardKey(kind, localKey), LoopBreaker.Window) && LoopBreaker.Trips(kind, localKey, DateTime.UtcNow))
         {
-            _logger.LogWarning("{Kind} {Key} was announced more than {Limit} times in {Minutes} minutes, which looks like two servers echoing one change. It is not announced again until things settle, and the scheduled task carries it", kind, localKey, LoopBreaker.Limit, LoopBreaker.Window.TotalMinutes);
+            _logger.LogWarning("{Kind} {Key} was announced more than {Limit} times in {Minutes} minutes, which looks like two servers echoing one change. It is not announced again until things settle, and the scheduled task carries it", kind, FormatUtilities.SanitizeForLog(localKey), LoopBreaker.Limit, LoopBreaker.Window.TotalMinutes);
             return -1;
         }
 
@@ -233,32 +228,31 @@ public sealed class LocalHintPublisher
                 _outbound.Enqueue(row, _applicationHost.SystemId);
                 queued++;
             }
+            // One peer's row failing must not stop the others or reach Jellyfin's event.
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Could not queue a {Kind} hint for '{Peer}'", kind, peer.DisplayName);
+                _logger.LogError(ex, "Could not queue a {Kind} hint for '{Peer}'", kind, FormatUtilities.SanitizeForLog(peer.DisplayName));
             }
         }
 
         if (queued > 0)
         {
-            _logger.LogDebug("Queued a {Kind} hint for {Count} peer(s): {Key}", kind, queued, localKey);
+            _logger.LogDebug("Queued a {Kind} hint for {Count} peer(s): {Key}", kind, queued, FormatUtilities.SanitizeForLog(localKey));
             _worker.Wake();
         }
 
         return queued;
     }
 
-    /// <summary>
-    /// Publishes a history change. The version is recorded whether or not any peer is told.
-    /// </summary>
+    /// <summary>Publishes a history change, recording its stamp whether or not any peer is told.</summary>
     /// <param name="localUserId">The local user.</param>
     /// <param name="userName">The local username.</param>
-    /// <param name="localItemId">The local item.</param>
+    /// <param name="localItemId">The local item that changed.</param>
     /// <param name="itemPath">The local path of the item.</param>
-    /// <param name="version">The version the change carries.</param>
+    /// <param name="version">The stamp the change carries.</param>
     /// <param name="excludePeerKey">A peer that already holds the change and needs no hint, or null.</param>
     /// <param name="itemType">The item's Jellyfin type, for the queue view.</param>
-    /// <returns>How many peers were queued a hint, or -1 when the loop breaker held it back.</returns>
+    /// <returns>How many peers were queued a hint, or -1 when the change is held.</returns>
     public int PublishHistory(Guid localUserId, string? userName, Guid localItemId, string itemPath, ObjectVersion version, string? excludePeerKey, string? itemType = null)
     {
         ArgumentNullException.ThrowIfNull(version);

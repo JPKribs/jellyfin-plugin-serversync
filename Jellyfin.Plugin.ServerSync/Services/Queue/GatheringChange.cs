@@ -4,7 +4,7 @@ using Jellyfin.Plugin.ServerSync.Models.Queue;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>One change still gathering before it becomes a hint.</summary>
-/// <param name="Kind">The kind.</param>
+/// <param name="Kind">The sync type the change belongs to.</param>
 /// <param name="UserId">The local user, for history.</param>
 /// <param name="ItemId">The local item.</param>
 /// <param name="EditedAt">When it was last edited, in UTC.</param>

@@ -7,18 +7,18 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
-/// <summary>Bulk upkeep statements over the sync tables, for the maintenance service.</summary>
+/// <summary>Runs bulk upkeep statements over the sync tables for the maintenance service.</summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class MaintenanceStore : QueueStoreBase
 {
-    // Content keeps its own retry rules, since its applies download files and delete them.
+    /// <summary>The tables given fresh retries. Content keeps its own rules, since its applies download and delete files.</summary>
     private static readonly string[] RetriedTables = { "HistorySyncItems", "UserSyncItems", "PeopleSyncItems", "MetadataSyncItems" };
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MaintenanceStore"/> class.
     /// </summary>
-    /// <param name="databaseProvider">Database provider.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="databaseProvider">Opens the database the sync tables are in.</param>
+    /// <param name="logger">Writes database failures.</param>
     public MaintenanceStore(ISyncDatabaseProvider databaseProvider, ILogger<MaintenanceStore> logger)
         : base(databaseProvider, logger)
     {
@@ -30,11 +30,8 @@ public sealed class MaintenanceStore : QueueStoreBase
     };
 
     /// <summary>
-    /// Notes every row that is failing now, keeps the time each first failed, and forgets the rows
-    /// that have settled since. A row that is queued for another try is still failing as far as this
-    /// goes: only a row that is no longer queued or errored has settled. Returns the rows that first
-    /// failed before the cutoff and have not been reported, and marks them reported, so each failing
-    /// row is raised once.
+    /// Notes every row that is failing, keeps when each first failed, and forgets rows that are no longer queued or errored.
+    /// Rows that first failed before the cutoff are returned and marked reported, so each is raised once.
     /// </summary>
     /// <param name="now">The time to record for a row seen failing for the first time.</param>
     /// <param name="failingSince">Rows that first failed before this are due to be reported.</param>
@@ -87,11 +84,10 @@ public sealed class MaintenanceStore : QueueStoreBase
     }
 
     /// <summary>
-    /// Gives errored rows that have sat for longer than the cutoff a fresh set of retries. A peer that
-    /// restarted or a network that dropped burns every retry in minutes, and nothing would try the row
-    /// again. A row that keeps failing now fails once a day rather than never being tried.
+    /// Gives errored rows older than the cutoff a fresh set of retries.
+    /// A peer that restarted burns every retry in minutes, and nothing else would try the row again.
     /// </summary>
-    /// <param name="erroredBefore">The cutoff.</param>
+    /// <param name="erroredBefore">Rows that errored before this are queued again.</param>
     /// <returns>How many rows were queued again.</returns>
     public int RequeueErrored(DateTime erroredBefore)
     {

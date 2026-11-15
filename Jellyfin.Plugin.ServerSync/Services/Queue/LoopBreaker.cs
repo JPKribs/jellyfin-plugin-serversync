@@ -6,8 +6,7 @@ using Jellyfin.Plugin.ServerSync.Models.Queue;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Stops announcing an object that keeps changing right after applies, which looks like two servers
-/// echoing one change back and forth.
+/// Stops announcing an object that keeps changing right after applies, which looks like two servers sending one echo back and forth.
 /// </summary>
 public static class LoopBreaker
 {
@@ -20,12 +19,13 @@ public static class LoopBreaker
     private static readonly ConcurrentDictionary<string, Queue<DateTime>> Announced = new(StringComparer.Ordinal);
 
     /// <summary>Counts an announcement of an object and says whether it is one too many.</summary>
-    /// <param name="kind">The kind.</param>
-    /// <param name="localKey">This server's key.</param>
-    /// <param name="utcNow">The current time.</param>
+    /// <param name="kind">The sync type of the object.</param>
+    /// <param name="localKey">This server's key for the object.</param>
+    /// <param name="utcNow">The time the announcement is counted at.</param>
     /// <returns><c>true</c> when the object was announced too often and this one is held back.</returns>
     public static bool Trips(HintKind kind, string localKey, DateTime utcNow)
     {
+        ArgumentNullException.ThrowIfNull(localKey);
         var times = Announced.GetOrAdd(HintProtocol.GuardKey(kind, localKey), _ => new Queue<DateTime>());
         lock (times)
         {

@@ -11,28 +11,28 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// The version each tracked object carries on this server. See <see cref="ObjectVersion"/>.
+/// Stores the stamp each tracked object carries on this server.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class VersionStore : QueueStoreBase
 {
-    // Well under SQLite's parameter limit, with room for the kind.
+    /// <summary>The most keys in one statement, which stays well under SQLite's parameter limit.</summary>
     private const int ChunkSize = 400;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VersionStore"/> class.
     /// </summary>
-    /// <param name="databaseProvider">The database provider.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="databaseProvider">Opens the database the stamps are stored in.</param>
+    /// <param name="logger">Writes database failures.</param>
     public VersionStore(ISyncDatabaseProvider databaseProvider, ILogger<VersionStore> logger)
         : base(databaseProvider, logger)
     {
     }
 
-    /// <summary>Reads the version of one object, or null when none is recorded.</summary>
+    /// <summary>Reads the stamp of one object.</summary>
     /// <param name="kind">The kind.</param>
     /// <param name="key">This server's key.</param>
-    /// <returns>The version, or null.</returns>
+    /// <returns>The stamp, or null when none is recorded.</returns>
     public ObjectVersion? Get(HintKind kind, string key) => Read(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -49,12 +49,11 @@ public sealed class VersionStore : QueueStoreBase
     });
 
     /// <summary>
-    /// Reads the versions of several objects in one statement per chunk, rather than one per key, since
-    /// a peer may ask for hundreds at once. Keys with no version are left out.
+    /// Reads the stamps of several objects in one statement per chunk, since a peer may ask for hundreds at once.
     /// </summary>
     /// <param name="kind">The kind.</param>
-    /// <param name="keys">This server's keys.</param>
-    /// <returns>The versions found.</returns>
+    /// <param name="keys">This server's keys for the objects.</param>
+    /// <returns>The stamps found, without keys that have none.</returns>
     public IList<ObjectVersion> GetMany(HintKind kind, IEnumerable<string> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
@@ -90,12 +89,10 @@ public sealed class VersionStore : QueueStoreBase
     }
 
     /// <summary>
-    /// Records the version of one object when it is newer than the one held, by time and then by server
-    /// id, the same order every decision uses. A version never moves backwards, so a retried older hint
-    /// or a late copy cannot undo a newer edit. A timestamp ahead of this server's clock is stored as now,
-    /// so no stored version can outrank every later edit made here.
+    /// Records the stamp of one object when it is newer than the one held, by time and then by server id.
+    /// A stamp never moves backwards, and a time ahead of this server's clock is stored as the current time.
     /// </summary>
-    /// <param name="version">The version.</param>
+    /// <param name="version">The stamp to record.</param>
     /// <returns><c>true</c> when it was stored, <c>false</c> when the one held is at least as new.</returns>
     public bool Set(ObjectVersion version)
     {
@@ -103,7 +100,6 @@ public sealed class VersionStore : QueueStoreBase
         var at = HintProtocol.BoundVersion(version.Timestamp, DateTime.UtcNow);
         return Write(conn =>
         {
-            // Stamps are fixed width UTC text, so text order is time order.
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 INSERT INTO ObjectVersions (Kind, Key, ServerId, Timestamp) VALUES (@kind, @key, @server, @at)
@@ -118,11 +114,10 @@ public sealed class VersionStore : QueueStoreBase
     }
 
     /// <summary>
-    /// Keeps the version a peer held for a value the scan read from it, until that value is applied
-    /// here. The scan reads values and versions together, so the version recorded after the apply is
-    /// the one that belongs to the value written, not whatever the peer holds by then.
+    /// Keeps the stamp a peer held for a value the scan read from it, until that value is applied here.
+    /// The stamp recorded after the apply then belongs to the value written, not to whatever the peer holds by then.
     /// </summary>
-    /// <param name="version">The peer's version, keyed by this server's key.</param>
+    /// <param name="version">The peer's stamp, keyed by this server's key.</param>
     public void SetPending(ObjectVersion version)
     {
         ArgumentNullException.ThrowIfNull(version);
@@ -142,7 +137,7 @@ public sealed class VersionStore : QueueStoreBase
         });
     }
 
-    /// <summary>Forgets a pending version, for a value the scan read with no version or kept here.</summary>
+    /// <summary>Forgets a pending stamp, for a value the scan read with no stamp or kept here.</summary>
     /// <param name="kind">The kind.</param>
     /// <param name="key">This server's key.</param>
     public void ClearPending(HintKind kind, string key) => Write(conn =>
@@ -155,12 +150,11 @@ public sealed class VersionStore : QueueStoreBase
     });
 
     /// <summary>
-    /// Records the pending version of a value that was just applied, and forgets it. Nothing happens
-    /// when no version was pending, since the value then came from a source that never recorded an edit.
+    /// Records the pending stamp of a value that was applied, and forgets it.
     /// </summary>
     /// <param name="kind">The kind.</param>
     /// <param name="key">This server's key.</param>
-    /// <returns><c>true</c> when a pending version existed.</returns>
+    /// <returns><c>true</c> when a stamp was pending, or <c>false</c> when the source never recorded an edit.</returns>
     public bool PromotePending(HintKind kind, string key)
     {
         var pending = Read(conn =>
@@ -182,8 +176,8 @@ public sealed class VersionStore : QueueStoreBase
         return true;
     }
 
-    /// <summary>Removes pending versions read longer ago than the cutoff, whose values never applied.</summary>
-    /// <param name="readBefore">The cutoff.</param>
+    /// <summary>Removes pending stamps read before the cutoff, whose values never applied.</summary>
+    /// <param name="readBefore">Pending stamps read before this are removed.</param>
     /// <returns>How many were removed.</returns>
     public int PrunePending(DateTime readBefore) => Write(conn =>
     {
@@ -193,7 +187,7 @@ public sealed class VersionStore : QueueStoreBase
         return cmd.ExecuteNonQuery();
     });
 
-    /// <summary>Lists the keys held for one kind, for pruning versions of objects that no longer exist.</summary>
+    /// <summary>Lists the keys held for one kind, for pruning stamps of objects that no longer exist.</summary>
     /// <param name="kind">The kind.</param>
     /// <returns>The keys.</returns>
     public IList<string> GetKeys(HintKind kind) => Read(conn =>
@@ -211,9 +205,9 @@ public sealed class VersionStore : QueueStoreBase
         return keys;
     });
 
-    /// <summary>Removes the versions of objects that no longer exist here.</summary>
+    /// <summary>Removes the stamps of objects that no longer exist here.</summary>
     /// <param name="kind">The kind.</param>
-    /// <param name="keys">The keys to remove.</param>
+    /// <param name="keys">This server's keys for the objects that are gone.</param>
     /// <returns>How many were removed.</returns>
     public int Remove(HintKind kind, IEnumerable<string> keys)
     {

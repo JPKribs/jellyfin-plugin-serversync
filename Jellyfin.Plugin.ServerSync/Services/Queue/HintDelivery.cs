@@ -4,13 +4,11 @@ using System.Text.Json;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
-/// <summary>
-/// Maps the peer's HTTP answer to what the sender does, in one place so the rule can be read and tested.
-/// </summary>
+/// <summary>Maps the peer's HTTP answer to what the sender does.</summary>
 public static class HintDelivery
 {
-    /// <summary>Classifies a status code. Zero means no answer at all.</summary>
-    /// <param name="statusCode">The HTTP status, or zero.</param>
+    /// <summary>Classifies a status code.</summary>
+    /// <param name="statusCode">The HTTP status, or zero when the peer gave no answer.</param>
     /// <returns>The outcome.</returns>
     public static DeliveryOutcome Classify(int statusCode) => statusCode switch
     {
@@ -21,9 +19,8 @@ public static class HintDelivery
     };
 
     /// <summary>
-    /// Sorts the sent rows a peer was asked about. A hint the peer finished is completed here, a hint the
-    /// peer still holds is left to wait, and a hint the peer neither holds nor finished was lost and is sent
-    /// again.
+    /// Sorts the sent rows a peer was asked about into those it finished and those it lost.
+    /// A hint the peer still holds is left to wait.
     /// </summary>
     /// <param name="sentHintIds">The hint ids of the rows that waited past the grace period.</param>
     /// <param name="heldByPeer">The hint ids in the peer's inbound queue.</param>
@@ -54,11 +51,12 @@ public static class HintDelivery
         return (complete, resend);
     }
 
-    /// <summary>The reason shown when the peer refused this server's key, with the peer's own message when it sent one.</summary>
+    /// <summary>Words the reason shown when the peer refused this server's API Key, with the peer's own message when it sent one.</summary>
     /// <param name="body">The peer's answer body.</param>
     /// <returns>The reason.</returns>
     public static string RefusalReason(string body)
     {
+        ArgumentNullException.ThrowIfNull(body);
         try
         {
             using var doc = JsonDocument.Parse(body);
@@ -67,6 +65,7 @@ public static class HintDelivery
                 return "the peer refused this server's key: " + text + ". Add this server or its user to the whitelist there";
             }
         }
+        // A body that is not JSON carries no message, so the plain reason is used.
         catch (JsonException)
         {
         }
@@ -74,7 +73,7 @@ public static class HintDelivery
         return "the peer refused this server's key. Add this server or its user to the whitelist there, and check the key on this server entry";
     }
 
-    /// <summary>The reason shown for a paused peer, by status.</summary>
+    /// <summary>Words the reason shown for a paused peer, by status.</summary>
     /// <param name="statusCode">The HTTP status.</param>
     /// <param name="body">The peer's answer body, trimmed.</param>
     /// <returns>The reason.</returns>

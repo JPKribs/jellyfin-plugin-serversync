@@ -8,8 +8,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Remembers the objects a peer said it will not take, for example an unmapped path, so they are not
-/// sent to it again for a day, or until the peer's settings change.
+/// Remembers the objects a peer said it will not take, such as an unmapped path.
+/// They are not sent to it again for a day, or until the peer's settings change.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class HintSuppression
@@ -25,9 +25,10 @@ public sealed class HintSuppression
     /// <summary>Gets how many objects are held back.</summary>
     public int Count => _held.Count;
 
-    // NoLocalItem is not held back: the item may still arrive after the peer stopped waiting for it,
-    // and holding the key would silence its first real edits there for a whole day.
-    /// <summary>Whether a peer's answer means it will not take the object until its settings change.</summary>
+    /// <summary>
+    /// Whether a peer's answer means it will not take the object until its settings change.
+    /// A missing local item does not count, since the item may still arrive there.
+    /// </summary>
     /// <param name="code">The peer's answer.</param>
     /// <returns><c>true</c> when the object is held back.</returns>
     public static bool Suppresses(HintCode code) => code is HintCode.NotMapped
@@ -39,11 +40,11 @@ public sealed class HintSuppression
 
     /// <summary>Holds an object back from a peer when the peer's answer declines it.</summary>
     /// <param name="peerKey">The peer's entry key.</param>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="key">This server's key for the object.</param>
     /// <param name="code">The peer's answer.</param>
     /// <param name="revision">The revision of the peer's settings the answer was given under.</param>
-    /// <param name="utcNow">The current time.</param>
+    /// <param name="utcNow">The time the hold is measured from.</param>
     /// <returns><c>true</c> when the object is now held back.</returns>
     public bool Note(string peerKey, HintKind kind, string key, HintCode code, string? revision, DateTime utcNow)
     {
@@ -71,10 +72,10 @@ public sealed class HintSuppression
 
     /// <summary>Whether an object is held back from a peer, at the peer's current settings.</summary>
     /// <param name="peerKey">The peer's entry key.</param>
-    /// <param name="kind">The kind.</param>
+    /// <param name="kind">The sync type of the object.</param>
     /// <param name="key">This server's key for the object.</param>
     /// <param name="revision">The revision of the peer's current settings.</param>
-    /// <param name="utcNow">The current time.</param>
+    /// <param name="utcNow">The time the hold is measured from.</param>
     /// <returns><c>true</c> when the hint should not be sent.</returns>
     public bool IsHeld(string peerKey, HintKind kind, string key, string? revision, DateTime utcNow)
     {
@@ -114,6 +115,7 @@ public sealed class HintSuppression
         return removed;
     }
 
+    /// <summary>Builds the key an object is held under for one peer.</summary>
     private static string Name(string peerKey, HintKind kind, string key)
         => peerKey + "|" + ((int)kind).ToString(CultureInfo.InvariantCulture) + "|" + (kind == HintKind.People ? HintProtocol.PeopleKey(key) : key);
 }

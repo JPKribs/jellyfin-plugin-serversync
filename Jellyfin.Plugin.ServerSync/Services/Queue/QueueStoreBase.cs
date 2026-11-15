@@ -8,9 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Shared plumbing for the queue tables. Every write runs under the sync database's one write lock,
-/// the same way the sync table managers do, so the workers and the controllers never interleave
-/// statements on the write connection. Reads use read connections of their own.
+/// Runs reads and writes for the queue tables, with every write under the sync database's one write lock.
+/// The workers and the controllers therefore never interleave statements on the write connection.
 /// </summary>
 public abstract class QueueStoreBase
 {
@@ -19,18 +18,19 @@ public abstract class QueueStoreBase
     /// <summary>
     /// Initializes a new instance of the <see cref="QueueStoreBase"/> class.
     /// </summary>
-    /// <param name="databaseProvider">The database provider.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="databaseProvider">Opens the sync database on first use.</param>
+    /// <param name="logger">Writes the store's log entries.</param>
     protected QueueStoreBase(ISyncDatabaseProvider databaseProvider, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(databaseProvider);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _databaseProvider = databaseProvider;
         Logger = logger;
     }
 
     /// <summary>
-    /// Gets the database. It is opened on first use, never while a store is being built, so a database
-    /// that cannot be opened fails the call that needs it and not the start of everything that holds a store.
+    /// Gets the database, which opens on first use so one that cannot be opened fails the call that needs it.
     /// </summary>
     protected SyncDatabase Database => _databaseProvider.Database;
 
@@ -39,7 +39,7 @@ public abstract class QueueStoreBase
 
     /// <summary>Runs a read on a read connection, beside any write in progress.</summary>
     /// <typeparam name="T">The result type.</typeparam>
-    /// <param name="read">The read.</param>
+    /// <param name="read">The statements to run on the read connection.</param>
     /// <returns>The result.</returns>
     protected T Read<T>(Func<SqliteConnection, T> read)
     {
@@ -49,7 +49,7 @@ public abstract class QueueStoreBase
 
     /// <summary>Runs a write that returns a value, such as a count of deleted rows, under the write lock.</summary>
     /// <typeparam name="T">The result type.</typeparam>
-    /// <param name="write">The write.</param>
+    /// <param name="write">The statements to run on the write connection.</param>
     /// <returns>Its result.</returns>
     protected T Write<T>(Func<SqliteConnection, T> write)
     {
@@ -61,7 +61,7 @@ public abstract class QueueStoreBase
     }
 
     /// <summary>Runs a write under the write lock.</summary>
-    /// <param name="write">The write.</param>
+    /// <param name="write">The statements to run on the write connection.</param>
     protected void Write(Action<SqliteConnection> write)
     {
         ArgumentNullException.ThrowIfNull(write);
@@ -71,8 +71,8 @@ public abstract class QueueStoreBase
         }
     }
 
-    /// <summary>Formats a UTC time the way every table stores it.</summary>
-    /// <param name="value">The time.</param>
+    /// <summary>Formats a UTC time the way every table stores it, as fixed width text whose order is time order.</summary>
+    /// <param name="value">The UTC time to format.</param>
     /// <returns>The ISO 8601 text.</returns>
     protected static string Stamp(DateTime value) => Utilities.UtcTime.Format(value);
 
@@ -82,8 +82,8 @@ public abstract class QueueStoreBase
     protected static DateTime Unstamp(string value) => Utilities.UtcTime.Parse(value);
 
     /// <summary>Reads a nullable text column.</summary>
-    /// <param name="reader">The reader.</param>
-    /// <param name="column">The column.</param>
+    /// <param name="reader">The row to read from.</param>
+    /// <param name="column">The name of the column.</param>
     /// <returns>The text, or null.</returns>
     protected static string? Text(IDataRecord reader, string column)
     {
@@ -93,8 +93,8 @@ public abstract class QueueStoreBase
     }
 
     /// <summary>Reads a nullable time column.</summary>
-    /// <param name="reader">The reader.</param>
-    /// <param name="column">The column.</param>
+    /// <param name="reader">The row to read from.</param>
+    /// <param name="column">The name of the column.</param>
     /// <returns>The time, or null.</returns>
     protected static DateTime? Time(IDataRecord reader, string column)
     {
@@ -103,9 +103,9 @@ public abstract class QueueStoreBase
     }
 
     /// <summary>Adds a parameter that may be null.</summary>
-    /// <param name="cmd">The command.</param>
+    /// <param name="cmd">The command the parameter is added to.</param>
     /// <param name="name">The parameter name.</param>
-    /// <param name="value">The value.</param>
+    /// <param name="value">The value, or null for a database null.</param>
     protected static void Add(SqliteCommand cmd, string name, object? value)
     {
         ArgumentNullException.ThrowIfNull(cmd);

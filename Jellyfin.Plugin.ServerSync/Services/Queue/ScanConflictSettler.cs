@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Tasks.Common;
@@ -12,12 +13,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Settles the rows a full scan queued against peers that carry versions. For a Sync server the scan
-/// does not simply take the source's value: a row whose value was edited here more recently than on
-/// the peer stays as it is, marked synced with the reason, and a peer this server sends to is told to
-/// pull this server's value. Any peer that carries versions is asked, whatever its direction, since
-/// the question is about the value and not the direction. Rows from peers that carry no versions stay
-/// queued and take the source's value.
+/// Settles the rows a scan queued against peers that keep stamps, so a value edited here more recently stays and is announced.
+/// Rows from peers that keep no stamps stay queued and take the source's value.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class ScanConflictSettler
@@ -28,26 +25,29 @@ public sealed class ScanConflictSettler
     /// <summary>
     /// Initializes a new instance of the <see cref="ScanConflictSettler"/> class.
     /// </summary>
-    /// <param name="resolver">The version resolver.</param>
+    /// <param name="resolver">Reads the stamps on both sides and decides between them.</param>
     /// <param name="publisher">Publishes this server's winning values to the peers.</param>
     public ScanConflictSettler(VersionConflictResolver resolver, LocalHintPublisher publisher)
     {
+        ArgumentNullException.ThrowIfNull(resolver);
+        ArgumentNullException.ThrowIfNull(publisher);
+
         _resolver = resolver;
         _publisher = publisher;
     }
 
-    /// <summary>Settles one module's queued rows.</summary>
+    /// <summary>Settles the queued rows of one sync type.</summary>
     /// <typeparam name="TRecord">The row type.</typeparam>
     /// <param name="queued">The rows the scan queued.</param>
     /// <param name="sources">The connected peers.</param>
-    /// <param name="kind">The kind.</param>
-    /// <param name="localKeyOf">This server's key for a row.</param>
-    /// <param name="peerKeyOf">The peer's key for a row.</param>
-    /// <param name="localObjectOf">The local item id and the path or name needed to publish a hint.</param>
+    /// <param name="kind">The sync type of the rows.</param>
+    /// <param name="localKeyOf">Gives this server's key for a row.</param>
+    /// <param name="peerKeyOf">Gives the peer's key for a row.</param>
+    /// <param name="localObjectOf">Gives the local item id and the path or name needed to publish a hint.</param>
     /// <param name="store">Stores a row changed here.</param>
-    /// <param name="logger">The calling task's logger.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A task.</returns>
+    /// <param name="logger">Writes how many values were kept or held, under the calling task's name.</param>
+    /// <param name="cancellationToken">Cancels the requests to the peers.</param>
+    /// <returns>A task that ends when every row is settled.</returns>
     public async Task SettleAsync<TRecord>(
         IList<TRecord> queued,
         IReadOnlyList<ScanSource> sources,
@@ -76,9 +76,7 @@ public sealed class ScanConflictSettler
                 continue;
             }
 
-            // A peer that answers it keeps no versions is scanned the way it always was, the source
-            // winning. One that could not be asked, or whose versions could not be read, is not taken to
-            // have none: its rows that would overwrite an edit recorded here wait for the next scan.
+            // Only a peer that answers it keeps no stamps lets the source win.
             var carries = await _resolver.PeerCarriesVersionsAsync(source, cancellationToken).ConfigureAwait(false);
             if (carries == false)
             {
@@ -88,6 +86,7 @@ public sealed class ScanConflictSettler
             var peerVersions = carries == true
                 ? await _resolver.PeerVersionsAsync(source, kind, rows.Select(peerKeyOf).Distinct(StringComparer.Ordinal).ToList(), cancellationToken).ConfigureAwait(false)
                 : null;
+            // A peer that could not be asked is not taken to have no stamps.
             if (peerVersions is null)
             {
                 Hold(rows, source, kind, localKeyOf, store, logger);
@@ -108,8 +107,7 @@ public sealed class ScanConflictSettler
                 peerVersions.TryGetValue(peerKeyOf(row), out var peerVersion);
                 if (_resolver.Decide(kind, localKey, peerVersion) != VersionDecision.Keep)
                 {
-                    // The value was read together with this version, so the version is recorded once the
-                    // value applies, rather than whatever the peer holds by then.
+                    // The stamp read with the value is kept until the value applies.
                     if (peerVersion is null)
                     {
                         _resolver.ClearPending(kind, localKey);
@@ -132,8 +130,7 @@ public sealed class ScanConflictSettler
                     continue;
                 }
 
-                // Only an edit made here is announced from here. A newer value this server holds from a
-                // third server is that server's to announce, and repeating it would loop between peers.
+                // A value held from a third server is that server's to announce.
                 var version = _resolver.Recorded(kind, localKey);
                 if (version is null || !_resolver.IsThisServer(version))
                 {
@@ -152,15 +149,15 @@ public sealed class ScanConflictSettler
 
             if (kept > 0)
             {
-                logger.LogInformation("Kept {Count} local {Kind} value(s) that are newer than '{Peer}'", kept, kind, source.Name);
+                logger.LogInformation("Kept {Count} local {Kind} value(s) that are newer than '{Peer}'", kept, kind, FormatUtilities.SanitizeForLog(source.Name));
             }
         }
     }
 
-    /// <summary>The connected servers that keep versions, so their offers can be weighed on who edited last.</summary>
-    /// <param name="sources">The connected servers.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The entry keys of the servers that keep versions.</returns>
+    /// <summary>Lists the connected servers that keep stamps, so their offers can be weighed on who edited last.</summary>
+    /// <param name="sources">The connected servers to ask.</param>
+    /// <param name="cancellationToken">Cancels the requests.</param>
+    /// <returns>The entry keys of the servers that keep stamps.</returns>
     public async Task<HashSet<string>> ServersWithVersionsAsync(IReadOnlyList<ScanSource> sources, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(sources);
@@ -177,19 +174,16 @@ public sealed class ScanConflictSettler
     }
 
     /// <summary>
-    /// Chooses, for each thing several servers offer, the server that holds the newest recorded edit of
-    /// it. Rank still decides whenever nothing says otherwise: when the highest ranked server offering
-    /// it keeps no versions, when no server has recorded an edit of it, when two servers hold the same
-    /// edit, and when a server's versions cannot be read. A lower ranked server is only heard over the
-    /// ones ranked above it that keep versions too.
+    /// Chooses, for each thing several servers offer, the server that holds the newest stamp of it.
+    /// Rank still decides when the highest ranked server keeps no stamps, no stamp exists, two stamps match, or a server cannot be read.
     /// </summary>
-    /// <typeparam name="TSource">The offer type.</typeparam>
+    /// <typeparam name="TSource">The type of one server's offer.</typeparam>
     /// <param name="contested">The offers of each contested key, highest ranked first.</param>
-    /// <param name="kind">The kind.</param>
-    /// <param name="versioned">The servers that keep versions, as <see cref="ServersWithVersionsAsync"/> gives them.</param>
-    /// <param name="sourceOf">The server an offer came from.</param>
-    /// <param name="peerKeyOf">The key the offering server knows the thing by.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="kind">The sync type of the offers.</param>
+    /// <param name="versioned">The servers that keep stamps, as <see cref="ServersWithVersionsAsync"/> gives them.</param>
+    /// <param name="sourceOf">Gives the server an offer came from.</param>
+    /// <param name="peerKeyOf">Gives the key the offering server knows the thing by.</param>
+    /// <param name="cancellationToken">Cancels the requests to the servers.</param>
     /// <returns>The winning offer for each key rank does not decide.</returns>
     public async Task<IReadOnlyDictionary<string, TSource>> NewestOffersAsync<TSource>(
         IReadOnlyDictionary<string, IReadOnlyList<TSource>> contested,
@@ -205,10 +199,10 @@ public sealed class ScanConflictSettler
         ArgumentNullException.ThrowIfNull(peerKeyOf);
         var winners = new Dictionary<string, TSource>(StringComparer.OrdinalIgnoreCase);
 
-        // Only the offers that can be weighed: the run of servers from the top of each list that keep versions.
         var weighed = new Dictionary<string, List<TSource>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, offers) in contested)
         {
+            // Only the run of servers from the top that keep stamps can be weighed.
             var run = offers.TakeWhile(o => versioned.Contains(sourceOf(o).Key)).ToList();
             if (run.Count > 1)
             {
@@ -235,7 +229,7 @@ public sealed class ScanConflictSettler
 
         foreach (var (key, offers) in weighed)
         {
-            // A server whose versions could not be read cannot be weighed, so rank decides this key.
+            // A server whose stamps could not be read cannot be weighed, so rank decides.
             if (offers.Any(o => !versions.ContainsKey(sourceOf(o).Key)))
             {
                 continue;
@@ -270,9 +264,10 @@ public sealed class ScanConflictSettler
             => peerKeyOf(offer) is { Length: > 0 } peerKey && versions[sourceOf(offer).Key].TryGetValue(peerKey, out var version) ? version : null;
     }
 
-    // Rows whose local value carries a recorded edit are left alone this scan, since nothing can say
-    // whether the peer's value is newer. Their stored hash is not touched, so the next scan queues them
-    // again and decides once the versions can be read.
+    /// <summary>
+    /// Leaves rows whose local value carries a stamp alone for this scan, since nothing can say whether the peer's value is newer.
+    /// Their stored hash is not touched, so the next scan queues them again.
+    /// </summary>
     private void Hold<TRecord>(IList<TRecord> rows, ScanSource source, HintKind kind, Func<TRecord, string> localKeyOf, Action<TRecord> store, ILogger logger)
         where TRecord : SyncRecord
     {
@@ -292,7 +287,7 @@ public sealed class ScanConflictSettler
 
         if (held > 0)
         {
-            logger.LogWarning("Held {Count} {Kind} value(s) that carry an edit here, since the versions on '{Peer}' could not be read. The next scan decides", held, kind, source.Name);
+            logger.LogWarning("Held {Count} {Kind} value(s) that carry an edit here, since the versions on '{Peer}' could not be read. The next scan decides", held, kind, FormatUtilities.SanitizeForLog(source.Name));
         }
     }
 }

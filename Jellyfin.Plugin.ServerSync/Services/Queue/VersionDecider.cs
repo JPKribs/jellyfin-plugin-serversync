@@ -5,10 +5,8 @@ using Jellyfin.Plugin.ServerSync.Utilities;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Decides between a local value and one offered by a peer on origin versions, never on saved dates.
-/// Content equality is checked first because it ends most loops on its own: a copy that already
-/// matches needs no write and raises no hint. When the values differ the newer origin timestamp wins,
-/// and a tie breaks on the origin server id so two servers always reach the same answer.
+/// Decides between a local value and one a peer offers by their stamps, never by saved dates.
+/// Equal values end most echoes without a write, the newer stamp wins otherwise, and the server id breaks a tie.
 /// </summary>
 public static class VersionDecider
 {
@@ -31,9 +29,7 @@ public static class VersionDecider
             return VersionDecision.Apply;
         }
 
-        // Both sides claim the same edit but hold different values: one copy drifted, through provider
-        // work, a field the apply cannot write, or an image that compares differently. Keeping would
-        // leave each side sending the same version to the other forever, so the copy arriving wins.
+        // Same edit with different values means a copy drifted, so the arrival wins.
         if (SameVersion(local, incoming))
         {
             return VersionDecision.Apply;
@@ -42,9 +38,9 @@ public static class VersionDecider
         return IsNewer(incoming, local) ? VersionDecision.Apply : VersionDecision.Keep;
     }
 
-    /// <summary>Whether two versions name the same edit: the same server at the same instant.</summary>
-    /// <param name="a">One version.</param>
-    /// <param name="b">The other.</param>
+    /// <summary>Whether two stamps name the same edit, which is the same server at the same instant.</summary>
+    /// <param name="a">One stamp to compare.</param>
+    /// <param name="b">The stamp to compare it with.</param>
     /// <returns><c>true</c> when they are the same edit.</returns>
     public static bool SameVersion(ObjectVersion a, ObjectVersion b)
     {

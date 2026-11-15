@@ -7,16 +7,14 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Finds the mapping a hint travels through. On the sending side a local user and path are matched to
-/// the entry's local ids and local roots, so only objects the operator mapped to that peer raise hints.
-/// On the receiving side the origin's user id and path are matched to the entry's source ids and
-/// source roots, the same mappings the scan uses, so a hint and a scan land on the same local object.
+/// Finds the mapping a hint travels through, by local ids and roots when sending and by source ids and roots when receiving.
+/// These are the mappings the scan uses, so a hint and a scan land on the same local object.
 /// </summary>
 public static class HintMapping
 {
     /// <summary>Finds the enabled user mapping for a local user, on the sending side.</summary>
-    /// <param name="peer">The peer entry.</param>
-    /// <param name="localUserId">The local user id.</param>
+    /// <param name="peer">The server entry whose user mappings are searched.</param>
+    /// <param name="localUserId">The local user to find a mapping for.</param>
     /// <returns>The mapping, or null.</returns>
     public static UserMapping? FindByLocalUser(SourceServer peer, Guid localUserId)
     {
@@ -25,8 +23,8 @@ public static class HintMapping
     }
 
     /// <summary>Finds the enabled library mapping whose local root holds a local path, on the sending side.</summary>
-    /// <param name="peer">The peer entry.</param>
-    /// <param name="localPath">The local path.</param>
+    /// <param name="peer">The server entry whose library mappings are searched.</param>
+    /// <param name="localPath">The local path a root must hold.</param>
     /// <returns>The mapping, or null.</returns>
     public static LibraryMapping? FindByLocalPath(SourceServer peer, string? localPath)
     {
@@ -37,7 +35,7 @@ public static class HintMapping
     }
 
     /// <summary>Finds the enabled user mapping for a user id on the origin, on the receiving side.</summary>
-    /// <param name="origin">The origin entry.</param>
+    /// <param name="origin">The server entry of the origin, whose user mappings are searched.</param>
     /// <param name="originUserId">The origin's user id.</param>
     /// <returns>The mapping, or null.</returns>
     public static UserMapping? FindBySourceUser(SourceServer origin, Guid originUserId)
@@ -47,7 +45,7 @@ public static class HintMapping
     }
 
     /// <summary>Finds the enabled library mapping whose source root holds a path on the origin, on the receiving side.</summary>
-    /// <param name="origin">The origin entry.</param>
+    /// <param name="origin">The server entry of the origin, whose library mappings are searched.</param>
     /// <param name="originPath">The path on the origin.</param>
     /// <returns>The mapping, or null.</returns>
     public static LibraryMapping? FindBySourcePath(SourceServer origin, string? originPath)
@@ -59,8 +57,8 @@ public static class HintMapping
     }
 
     /// <summary>Whether a path lies under a root, with either separator and in any case.</summary>
-    /// <param name="path">The path.</param>
-    /// <param name="root">The root.</param>
+    /// <param name="path">The path to test.</param>
+    /// <param name="root">The root folder it may lie under.</param>
     /// <returns><c>true</c> when the path is the root or inside it.</returns>
     public static bool IsUnder(string path, string? root)
     {
@@ -80,12 +78,13 @@ public static class HintMapping
             || normalPath.StartsWith(normalRoot + "/", StringComparison.OrdinalIgnoreCase);
     }
 
-    // Mappings can overlap, a whole drive and a folder on it. The deepest root that holds the path is the
-    // one meant for it, whatever order the mappings were added in.
+    /// <summary>Picks the mapping with the deepest root, since mappings can overlap and the deepest is the one meant.</summary>
     private static LibraryMapping? MostSpecific(IEnumerable<LibraryMapping> matches, Func<LibraryMapping, string?> rootOf)
         => matches.OrderByDescending(m => Normalize(rootOf(m) ?? string.Empty).TrimEnd('/').Length).FirstOrDefault();
 
+    /// <summary>Writes a path with forward slashes so both separators compare equal.</summary>
     private static string Normalize(string path) => path.Replace(Path.DirectorySeparatorChar, '/').Replace('\\', '/');
 
+    /// <summary>Whether a stored id parses to the given id.</summary>
     private static bool SameId(string? stored, Guid id) => Guid.TryParse(stored, out var parsed) && parsed == id;
 }

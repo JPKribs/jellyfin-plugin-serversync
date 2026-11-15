@@ -15,10 +15,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// Writes the change queue's events to Jellyfin's activity log. Changes from peers are summed into one
-/// entry per outcome, as "12 Items Synced", so a busy sync never floods the log. Every entry follows one
-/// shape: a short title case name, and an overview sentence naming the servers. A change that was
-/// already satisfied writes nothing, since nothing happened.
+/// Writes the Change Queue's events to the Activity page.
+/// Changes from peers are summed into one entry for each outcome, such as "12 Items Synced", so a busy sync never floods it.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class HintActivityLog : IDisposable
@@ -29,15 +27,16 @@ public sealed class HintActivityLog : IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="HintActivityLog"/> class.
     /// </summary>
-    /// <param name="activity">The shared writer for Jellyfin's activity log.</param>
+    /// <param name="activity">Writes entries to the Activity page.</param>
     public HintActivityLog(ActivityLogger activity)
     {
+        ArgumentNullException.ThrowIfNull(activity);
         _activity = activity;
         _summary = new ActivitySummary(activity);
     }
 
-    /// <summary>A short description of what a hint concerns, for logs and the dashboard.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <summary>Describes what a hint concerns, for logs and the dashboard.</summary>
+    /// <param name="kind">The sync type the hint belongs to.</param>
     /// <param name="itemPath">The item's path, when the kind concerns an item.</param>
     /// <param name="userName">The username, when the kind concerns a user.</param>
     /// <param name="key">The key, as a fallback.</param>
@@ -57,8 +56,8 @@ public sealed class HintActivityLog : IDisposable
         };
     }
 
-    /// <summary>The subject of a hint as a short title, such as "Metadata for Only A (2021)".</summary>
-    /// <param name="kind">The kind.</param>
+    /// <summary>Words the subject of a hint as a short title, such as "Metadata for Only A (2021)".</summary>
+    /// <param name="kind">The sync type the hint belongs to.</param>
     /// <param name="itemPath">The item's path, when the kind concerns an item.</param>
     /// <param name="userName">The username, when the kind concerns a user.</param>
     /// <param name="key">The key, as a fallback.</param>
@@ -66,8 +65,8 @@ public sealed class HintActivityLog : IDisposable
     public static string Subject(HintKind kind, string? itemPath, string? userName, string key)
         => SubjectOf(kind, NameOf(kind, itemPath, userName, key), userName);
 
-    /// <summary>The subject of a hint around a name already chosen, such as a Jellyfin title.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <summary>Words the subject of a hint around a name already chosen, such as a Jellyfin title.</summary>
+    /// <param name="kind">The sync type the hint belongs to.</param>
     /// <param name="name">The item's, person's, or user's name.</param>
     /// <param name="userName">The username, when watch history is concerned.</param>
     /// <returns>The subject.</returns>
@@ -82,8 +81,8 @@ public sealed class HintActivityLog : IDisposable
         _ => name
     };
 
-    /// <summary>The bare name of what a hint concerns: the file, the person, or the user.</summary>
-    /// <param name="kind">The kind.</param>
+    /// <summary>Picks the bare name of what a hint concerns, which is the file, the person, or the user.</summary>
+    /// <param name="kind">The sync type the hint belongs to.</param>
     /// <param name="itemPath">The item's path, when the kind concerns an item.</param>
     /// <param name="userName">The username, when the kind concerns a user.</param>
     /// <param name="key">The key, as a fallback.</param>
@@ -99,13 +98,11 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer was applied here. Applied hints are written together, as
-    /// "12 Items Synced" over "12 items were synced from source-a (9), source-b (3)", once the queue has
-    /// been quiet for a while, so a busy sync leaves one entry rather than one per item.
+    /// Records that a hint from a peer was applied here, written together with the others as "12 Items Synced".
     /// </summary>
-    /// <param name="hint">The hint.</param>
-    /// <param name="originName">The peer's display name.</param>
-    /// <param name="result">The apply result.</param>
+    /// <param name="hint">The hint that was applied.</param>
+    /// <param name="originName">The name the entry gives the origin.</param>
+    /// <param name="result">How the apply ended.</param>
     /// <returns>A completed task.</returns>
     public Task AppliedAsync(InboundHint hint, string originName, HintApplyResult result = default)
     {
@@ -115,12 +112,10 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer could not apply here and was dropped, written together with the
-    /// others as "3 Items Not Synced" over "3 items from source-a (2) and source-b (1) were not synced:
-    /// filtered out (2), ignored here (1)".
+    /// Records that a hint from a peer was dropped here, written together with the others as "3 Items Not Synced".
     /// </summary>
-    /// <param name="hint">The hint.</param>
-    /// <param name="originName">The peer's display name.</param>
+    /// <param name="hint">The hint that was dropped.</param>
+    /// <param name="originName">The name the entry gives the origin.</param>
     /// <param name="code">Why it was dropped.</param>
     /// <returns>A completed task.</returns>
     public Task DroppedAsync(InboundHint hint, string originName, HintCode code)
@@ -131,13 +126,12 @@ public sealed class HintActivityLog : IDisposable
     }
 
     /// <summary>
-    /// Records that a hint from a peer keeps failing here, on its second and sixth try, written together
-    /// with the others as "4 Items Retrying". The first failure is often a passing one, and giving up
-    /// writes its own line.
+    /// Records that a hint from a peer keeps failing here, on its second and sixth try, as "4 Items Retrying".
+    /// The first failure is often a passing one, so it writes nothing.
     /// </summary>
-    /// <param name="hint">The hint.</param>
-    /// <param name="originName">The peer's display name.</param>
-    /// <param name="reason">Why, for the server log only.</param>
+    /// <param name="hint">The hint that failed, whose attempts decide whether to write.</param>
+    /// <param name="originName">The name the entry gives the origin.</param>
+    /// <param name="reason">Why it failed, for the server log only.</param>
     /// <returns>A completed task.</returns>
     public Task RetryingAsync(InboundHint hint, string originName, string? reason)
     {
@@ -152,10 +146,10 @@ public sealed class HintActivityLog : IDisposable
 
     /// <summary>Records that delivery to a peer is paused.</summary>
     /// <param name="peerName">The peer's display name.</param>
-    /// <param name="reason">Why.</param>
+    /// <param name="reason">Why the peer cannot take changes.</param>
     /// <param name="waiting">The changes waiting to go to the peer.</param>
     /// <param name="until">When delivery resumes.</param>
-    /// <returns>A task.</returns>
+    /// <returns>A task that ends when the entry is written.</returns>
     public Task PausedAsync(string peerName, string reason, IReadOnlyList<OutboundHint> waiting, DateTime until)
     {
         ArgumentNullException.ThrowIfNull(waiting);
@@ -170,8 +164,8 @@ public sealed class HintActivityLog : IDisposable
     /// <summary>Records that a peer rejected a whole request, once for the batch.</summary>
     /// <param name="peerName">The peer's display name.</param>
     /// <param name="rows">The hints the request carried.</param>
-    /// <param name="reason">Why.</param>
-    /// <returns>A task.</returns>
+    /// <param name="reason">Why the peer could not read the request.</param>
+    /// <returns>A task that ends when the entry is written.</returns>
     public Task RejectedBatchAsync(string peerName, IReadOnlyList<OutboundHint> rows, string reason)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -185,7 +179,7 @@ public sealed class HintActivityLog : IDisposable
     /// <summary>Records that a peer lost hints and they were sent again.</summary>
     /// <param name="peerName">The peer's display name.</param>
     /// <param name="rows">The hints sent again.</param>
-    /// <returns>A task.</returns>
+    /// <returns>A task that ends when the entry is written.</returns>
     public Task ResentAsync(string peerName, IReadOnlyList<OutboundHint> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -196,8 +190,7 @@ public sealed class HintActivityLog : IDisposable
             LogLevel.Warning);
     }
 
-    // Changes from peers are summed by Base's ActivitySummary: one entry per outcome once the queue is
-    // quiet, at least every few minutes during a long burst, and whatever is waiting on shutdown.
+    /// <summary>The summed entry for applied changes, written once the queue is quiet and every few minutes in a long burst.</summary>
     private static readonly ActivityOutcome Synced = new(
         "ServerSync.HintsApplied",
         "Synced",
@@ -217,10 +210,10 @@ public sealed class HintActivityLog : IDisposable
     /// <inheritdoc />
     public void Dispose() => _summary.Dispose();
 
-    /// <summary>Writes whatever summaries are waiting. Called on its own once the queue is quiet.</summary>
+    /// <summary>Writes whatever summaries are waiting.</summary>
     public void Flush() => _summary.Flush();
 
-    /// <summary>A short reason a change was not synced, for the summary.</summary>
+    /// <summary>Words a short reason a change was not synced, for the summary.</summary>
     /// <param name="code">The code it was dropped with.</param>
     /// <returns>The reason.</returns>
     public static string ReasonOf(HintCode code) => code switch
@@ -240,7 +233,7 @@ public sealed class HintActivityLog : IDisposable
     };
 
     /// <summary>Lists the subjects of some changes in a sentence, naming at most a few and counting the rest.</summary>
-    /// <param name="rows">The changes.</param>
+    /// <param name="rows">The changes whose subjects are listed.</param>
     /// <param name="shown">How many subjects to name.</param>
     /// <returns>The list.</returns>
     public static string Changes(IReadOnlyList<OutboundHint> rows, int shown = 5)
@@ -262,7 +255,7 @@ public sealed class HintActivityLog : IDisposable
         return names.Count > shown ? $"{string.Join(", ", listed)}, and {names.Count - shown} more" : text;
     }
 
-    // Never throws, and cuts the text to what the activity log keeps.
+    /// <summary>Writes one entry, cut to what the Activity page keeps, without ever throwing.</summary>
     private Task WriteAsync(string name, string type, string? overview, LogLevel severity)
         => _activity.LogAndWaitAsync(name, type, ActivityText.Sentence(overview), severity);
 }

@@ -1,3 +1,4 @@
+using System;
 using Jellyfin.Plugin.ServerSync.Services.Links;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -15,10 +16,13 @@ public sealed class LocalItems : ILocalItems
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalItems"/> class.
     /// </summary>
-    /// <param name="libraryManager">The library.</param>
-    /// <param name="links">The link registry.</param>
+    /// <param name="libraryManager">Finds items by path and people by name.</param>
+    /// <param name="links">Names the link that stands in for a source file.</param>
     public LocalItems(ILibraryManager libraryManager, ILinkRegistry links)
     {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(links);
+
         _libraryManager = libraryManager;
         _links = links;
     }
@@ -34,7 +38,7 @@ public sealed class LocalItems : ILocalItems
             return null;
         }
 
-        // The exact path always wins, so every match that worked before a link existed still returns the same item.
+        // An item at the exact path always wins over a link standing in for it.
         var item = _libraryManager.FindByPath(path, isFolder);
         if (item is not null || isFolder == true)
         {

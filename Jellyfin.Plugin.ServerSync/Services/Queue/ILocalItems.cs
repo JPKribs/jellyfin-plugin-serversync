@@ -10,10 +10,7 @@ public interface ILocalItems
     /// <returns>The item, or null.</returns>
     BaseItem? FindByPath(string path);
 
-    /// <summary>
-    /// Finds the local item at <paramref name="path"/>. When nothing is there and the path is a file,
-    /// finds this server's link standing in for it instead.
-    /// </summary>
+    /// <summary>Finds the local item at a path, or this server's link standing in for it when the path is a file.</summary>
     /// <param name="path">The local path.</param>
     /// <param name="isFolder">Whether the item is a folder, or null when either will do.</param>
     /// <returns>The item, or null.</returns>

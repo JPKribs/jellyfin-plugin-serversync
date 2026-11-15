@@ -5,9 +5,8 @@ using System.Linq;
 namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 
 /// <summary>
-/// The items and people this server's peer metadata provider just filled in. Jellyfin saves that work
-/// as provider work, and the change observer checks here so a value copied from a peer is not
-/// announced back to the pool.
+/// Remembers the items and people this server's metadata provider filled from a source.
+/// The change observer checks here so a value copied from a source is not announced back to the pool.
 /// </summary>
 public static class ProviderFills
 {
@@ -27,7 +26,7 @@ public static class ProviderFills
     /// <summary>Whether the provider filled the item at a path, or the person, within the remembered time.</summary>
     /// <param name="path">The item's local path.</param>
     /// <param name="personName">The person's name, for a person.</param>
-    /// <param name="utcNow">The current time.</param>
+    /// <param name="utcNow">The time the fill is measured against.</param>
     /// <returns><c>true</c> when it was.</returns>
     public static bool WasFilled(string? path, string? personName, DateTime utcNow)
         => Was(string.IsNullOrEmpty(path) ? null : "path:" + path.Replace('\\', '/'), utcNow)
@@ -36,6 +35,7 @@ public static class ProviderFills
     /// <summary>Forgets every fill.</summary>
     public static void Clear() => Keys.Clear();
 
+    /// <summary>Remembers a key, and drops expired keys once the list grows large.</summary>
     private static void Mark(string? key)
     {
         if (key is null)
@@ -54,6 +54,7 @@ public static class ProviderFills
         }
     }
 
+    /// <summary>Whether a key was marked within the remembered time.</summary>
     private static bool Was(string? key, DateTime utcNow)
         => key is not null && Keys.TryGetValue(key, out var at) && utcNow - at < Remembered;
 }
