@@ -17,8 +17,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
 /// <summary>
 /// Decides whether a caller may use this server's peer routes, by the Whitelist of users and locations.
-/// An administrator or API key also passes from the address of a server entry that is turned on. A name
-/// in the Whitelist is looked up again when its address has moved.
+/// An administrator or API Key also passes from the address of a server entry that is turned on.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerCallerPolicy
@@ -39,9 +38,12 @@ public sealed class PeerCallerPolicy
     /// Initializes a new instance of the <see cref="PeerCallerPolicy"/> class.
     /// </summary>
     /// <param name="configManager">Reads the plugin configuration.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes Whitelist lookups that failed or moved.</param>
     public PeerCallerPolicy(IPluginConfigurationManager configManager, ILogger<PeerCallerPolicy> logger)
     {
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _configManager = configManager;
         _logger = logger;
     }
@@ -57,12 +59,10 @@ public sealed class PeerCallerPolicy
         _ => "Allowed"
     };
 
-    /// <summary>
-    /// Checks a caller against the Whitelist.
-    /// </summary>
+    /// <summary>Checks a caller against the Whitelist.</summary>
     /// <param name="caller">The address the call came from, or null when it is unknown.</param>
-    /// <param name="principal">The authenticated user or API key.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="principal">The authenticated user or API Key.</param>
+    /// <param name="cancellationToken">Cancels a name lookup.</param>
     /// <returns>The decision.</returns>
     public async Task<PeerCallerVerdict> CheckAsync(IPAddress? caller, ClaimsPrincipal principal, CancellationToken cancellationToken)
     {
@@ -113,10 +113,11 @@ public sealed class PeerCallerPolicy
     }
 
     /// <summary>Reads the host out of a Whitelist entry, which may be an address, a range, or a URL.</summary>
-    /// <param name="entry">The entry.</param>
+    /// <param name="entry">The Whitelist entry to read.</param>
     /// <returns>The host, or null when the entry names none.</returns>
     public static string? HostOf(string entry)
     {
+        ArgumentNullException.ThrowIfNull(entry);
         var value = entry.Trim();
         if (value.Length == 0)
         {
@@ -159,6 +160,7 @@ public sealed class PeerCallerPolicy
     /// <returns><c>true</c> when the text is a range.</returns>
     public static bool TryParseRange(string value, out IPNetwork network)
     {
+        ArgumentNullException.ThrowIfNull(value);
         network = default;
         var slash = value.IndexOf('/', StringComparison.Ordinal);
         if (slash <= 0
@@ -185,12 +187,15 @@ public sealed class PeerCallerPolicy
         return true;
     }
 
+    /// <summary>Lowers a user id and strips its dashes so two spellings compare equal.</summary>
     private static string NormalizeId(string? id)
         => (id ?? string.Empty).Trim().Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
 
+    /// <summary>Maps an IPv4 address written as IPv6 back to IPv4.</summary>
     private static IPAddress Normalize(IPAddress address)
         => address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
 
+    /// <summary>Whether any entry matches the caller, looking a name up again when its address has moved.</summary>
     private async Task<bool> AnyMatchAsync(IReadOnlyList<string> entries, IPAddress caller, CancellationToken cancellationToken)
     {
         var names = new List<string>();
@@ -242,6 +247,7 @@ public sealed class PeerCallerPolicy
         return false;
     }
 
+    /// <summary>Resolves a host name, remembering the answer and falling back to the last one when the lookup fails.</summary>
     private async Task<IPAddress[]> ResolveAsync(string host, bool fresh, CancellationToken cancellationToken)
     {
         var known = _resolved.TryGetValue(host, out var cached);

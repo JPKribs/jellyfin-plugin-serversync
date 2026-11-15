@@ -9,9 +9,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
 /// <summary>
-/// Receiving side of history negotiation. Each entry is handled as one compare and set: read the live
-/// state, decide, write, read back. The three steps run under one gate so two callers proposing
-/// writes for the same user and item cannot both pass the expectation check and overwrite each other.
+/// Answers a peer's history negotiation by handling each entry as one compare and set.
+/// The steps run under one gate, so two callers cannot both pass the expectation check and overwrite each other.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerHistoryService
@@ -26,18 +25,21 @@ public sealed class PeerHistoryService
     /// Initializes a new instance of the <see cref="PeerHistoryService"/> class.
     /// </summary>
     /// <param name="store">The history store to read and write through.</param>
-    /// <param name="logger">Logger.</param>
-    /// <param name="guard">The apply guard, so a write made for a peer raises no hint back to it. Optional for tests.</param>
-    /// <param name="recorder">Records what the two servers agreed on in this server's own row for the sender. Optional for tests.</param>
+    /// <param name="logger">Writes a count of what each request applied.</param>
+    /// <param name="guard">Keeps a write made for a peer from raising a hint back to it, or null.</param>
+    /// <param name="recorder">Records each agreement in this server's row for the sender, or null.</param>
     public PeerHistoryService(IUserHistoryStore store, ILogger<PeerHistoryService> logger, ApplyGuard? guard = null, HistoryAgreementRecorder? recorder = null)
     {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _store = store;
         _logger = logger;
         _guard = guard;
         _recorder = recorder;
     }
 
-    /// <summary>Handles a whole request, one result per entry in request order.</summary>
+    /// <summary>Handles a whole request, giving one result for each entry in request order.</summary>
     /// <param name="request">The proposed writes.</param>
     /// <returns>The outcomes.</returns>
     public PeerHistoryResponse Negotiate(PeerHistoryRequest request)
@@ -111,8 +113,7 @@ public sealed class PeerHistoryService
                 return result;
             }
 
-            // Only the parts History Sync copies on this server are taken from the caller. The rest of
-            // what it proposes is neither written here nor held against it.
+            // Parts of History turned off here are neither written nor held against the caller.
             entry.Proposed = PeerHistoryNegotiator.EnabledPartOf(entry.Proposed);
             result.Current = current;
             result.Outcome = PeerHistoryNegotiator.Decide(current, entry.Expected, entry.Proposed);

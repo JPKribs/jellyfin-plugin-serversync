@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
 /// <summary>
-/// <see cref="IUserHistoryStore"/> backed by this server's library through <see cref="LocalServerClient"/>.
+/// Reads and writes user history in this server's library.
 /// </summary>
 [PluginService(ServiceLifetime.Transient, ServiceType = typeof(IUserHistoryStore))]
 public sealed class LocalUserHistoryStore : IUserHistoryStore
@@ -16,9 +16,10 @@ public sealed class LocalUserHistoryStore : IUserHistoryStore
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalUserHistoryStore"/> class.
     /// </summary>
-    /// <param name="localClient">Client for this server's library and user data.</param>
+    /// <param name="localClient">Reads and writes this server's user data.</param>
     public LocalUserHistoryStore(LocalServerClient localClient)
     {
+        ArgumentNullException.ThrowIfNull(localClient);
         _localClient = localClient;
     }
 

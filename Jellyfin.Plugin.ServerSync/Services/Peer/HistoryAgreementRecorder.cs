@@ -17,12 +17,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
 /// <summary>
-/// Keeps this server's own history row for a peer in step with what the two servers just agreed on
-/// through the negotiation endpoint. Without this only the server that proposed the state would
-/// remember the agreement, and the next change coming the other way would be merged against a base
-/// that is out of date, which lets an older play outrank a newer unmark. A row that does not exist yet
-/// is created from the sender's ids and this server's mappings for it, so a first contact from either
-/// side leaves both with a base.
+/// Keeps this server's history row for a peer in step with what the two servers agreed on, creating the row when it is missing.
+/// Without it the next change the other way would merge against a stale base, and an older play could outrank a newer unmark.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class HistoryAgreementRecorder
@@ -36,11 +32,11 @@ public sealed class HistoryAgreementRecorder
     /// <summary>
     /// Initializes a new instance of the <see cref="HistoryAgreementRecorder"/> class.
     /// </summary>
-    /// <param name="configManager">Plugin configuration.</param>
-    /// <param name="table">The history table.</param>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="links">The link registry, so a row for a link records the path its copy would have.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="configManager">Finds the server entry for the sender.</param>
+    /// <param name="table">Holds the history rows the agreement is written to.</param>
+    /// <param name="libraryManager">Finds the local item when a row must be created.</param>
+    /// <param name="links">Gives a row for a link the path its copy would have.</param>
+    /// <param name="logger">Writes a warning when an agreement cannot be recorded.</param>
     public HistoryAgreementRecorder(
         IPluginConfigurationManager configManager,
         HistorySyncTableManager table,
@@ -48,6 +44,12 @@ public sealed class HistoryAgreementRecorder
         ILinkRegistry links,
         ILogger<HistoryAgreementRecorder> logger)
     {
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(links);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _configManager = configManager;
         _table = table;
         _libraryManager = libraryManager;
@@ -105,12 +107,14 @@ public sealed class HistoryAgreementRecorder
             row.MarkApplied(now);
             _table.Upsert(row);
         }
+        // The peer already holds the agreed state, so a failed record must not fail its request.
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not record the history agreement with {Sender} for user {User}, item {Item}", FormatUtilities.SanitizeForLog(senderServerId), userId, itemId);
         }
     }
 
+    /// <summary>Builds a new row from the sender's ids and this server's mappings, or null when either is missing.</summary>
     private HistorySyncItem? Build(Models.Configuration.SourceServer peer, Guid userId, Guid itemId, string localItemId, string? senderUserId, string? senderItemId)
     {
         if (string.IsNullOrWhiteSpace(senderUserId) || string.IsNullOrWhiteSpace(senderItemId))

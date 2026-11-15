@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
@@ -12,7 +13,7 @@ using MediaBrowser.Model.Providers;
 
 namespace Jellyfin.Plugin.ServerSync.Services.Providers;
 
-/// <summary>Offers the images of the server this one pulls from for an item.</summary>
+/// <summary>Offers the images the sources hold for an item.</summary>
 public sealed class PeerImageProvider : IRemoteImageProvider, IHasOrder
 {
     private static readonly ImageType[] Supported =
@@ -35,9 +36,10 @@ public sealed class PeerImageProvider : IRemoteImageProvider, IHasOrder
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerImageProvider"/> class.
     /// </summary>
-    /// <param name="source">Finds items and reads them from the other server.</param>
+    /// <param name="source">Finds items on the sources and reads their images.</param>
     public PeerImageProvider(PeerMetadataSource source)
     {
+        ArgumentNullException.ThrowIfNull(source);
         _source = source;
     }
 

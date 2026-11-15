@@ -26,10 +26,13 @@ public sealed class PeerItemLookup
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerItemLookup"/> class.
     /// </summary>
-    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="libraryManager">Finds local items by provider id, index, and name.</param>
     /// <param name="localItems">Finds local items by path.</param>
     public PeerItemLookup(ILibraryManager libraryManager, ILocalItems localItems)
     {
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(localItems);
+
         _libraryManager = libraryManager;
         _localItems = localItems;
     }
@@ -52,7 +55,7 @@ public sealed class PeerItemLookup
     }
 
     /// <summary>Finds the item a peer asks about.</summary>
-    /// <param name="request">What to find.</param>
+    /// <param name="request">The path, ids, index, and name the peer knows the item by.</param>
     /// <returns>The item's id and type when found.</returns>
     public PeerLookupResponse Find(PeerLookupRequest request)
     {
@@ -63,6 +66,7 @@ public sealed class PeerItemLookup
             : new PeerLookupResponse { Found = true, ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture), ItemType = item.GetType().Name };
     }
 
+    /// <summary>Finds the item by path, then provider ids, then series and index, then name.</summary>
     private BaseItem? FindItem(PeerLookupRequest request)
     {
         if (!string.IsNullOrWhiteSpace(request.Path))
@@ -111,6 +115,7 @@ public sealed class PeerItemLookup
         };
     }
 
+    /// <summary>Returns the first item of a kind that a narrowed query matches.</summary>
     private BaseItem? Query(BaseItemKind kind, Action<InternalItemsQuery> narrow)
     {
         var query = new InternalItemsQuery

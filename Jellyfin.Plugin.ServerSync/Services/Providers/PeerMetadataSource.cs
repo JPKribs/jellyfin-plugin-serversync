@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using JPKribs.Jellyfin.Base;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.MetadataSync;
 using Jellyfin.Plugin.ServerSync.Models.Peer;
@@ -24,8 +25,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Providers;
 
 /// <summary>
-/// Finds an item on the servers this one pulls from, and reads its metadata and images, for the
-/// metadata and image providers.
+/// Finds an item on the sources and reads its metadata and images for the providers.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerMetadataSource
@@ -72,20 +72,25 @@ public sealed class PeerMetadataSource
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerMetadataSource"/> class.
     /// </summary>
-    /// <param name="parents">Lists the servers this one pulls from.</param>
-    /// <param name="clientFactory">Builds clients for other servers.</param>
-    /// <param name="libraryManager">Library manager.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="parents">Lists the sources that can answer a lookup.</param>
+    /// <param name="clientFactory">Builds the client that reads from each source.</param>
+    /// <param name="libraryManager">Resolves the people a source names.</param>
+    /// <param name="logger">Writes why an item had no match.</param>
     public PeerMetadataSource(ParentDirectory parents, ISourceServerClientFactory clientFactory, ILibraryManager libraryManager, ILogger<PeerMetadataSource> logger)
     {
+        ArgumentNullException.ThrowIfNull(parents);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _parents = parents;
         _clientFactory = clientFactory;
         _libraryManager = libraryManager;
         _logger = logger;
     }
 
-    /// <summary>Translates a local path to the path the item has on a server.</summary>
-    /// <param name="parent">The server entry.</param>
+    /// <summary>Translates a local path to the path the item has on a source.</summary>
+    /// <param name="parent">The source whose library mappings translate the path.</param>
     /// <param name="localPath">The local path, or null.</param>
     /// <returns>The path there, or null when no library mapping holds the path.</returns>
     public static string? ToParentPath(SourceServer parent, string? localPath)
@@ -103,15 +108,15 @@ public sealed class PeerMetadataSource
         return relative.Length == 0 ? sourceRoot : sourceRoot + separator + relative.Replace('/', separator).Replace('\\', separator);
     }
 
-    /// <summary>Builds the request that asks a server for an item.</summary>
-    /// <param name="parent">The server entry.</param>
+    /// <summary>Builds the request that asks a source for an item.</summary>
+    /// <param name="parent">The source that will be asked.</param>
     /// <param name="keys">What identifies the item.</param>
     /// <returns>The request, or null when nothing in the keys can be matched there.</returns>
     public static PeerLookupRequest? LookupFor(SourceServer parent, PeerItemKeys keys)
     {
         ArgumentNullException.ThrowIfNull(parent);
-
         ArgumentNullException.ThrowIfNull(keys);
+
         var parentPath = ToParentPath(parent, keys.LocalPath);
         var byName = ByName.Contains(keys.ItemType) && !string.IsNullOrWhiteSpace(keys.Name);
         var ids = Peer.PeerItemLookup.CleanIds(keys.ProviderIds);
@@ -133,10 +138,10 @@ public sealed class PeerMetadataSource
         };
     }
 
-    /// <summary>Finds an item on one server, trying the server it was pinned to first.</summary>
+    /// <summary>Finds an item on one source, trying the source it was pinned to first.</summary>
     /// <param name="keys">What identifies the item.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The match, or null.</returns>
+    /// <param name="cancellationToken">Cancels the lookup.</param>
+    /// <returns>The match, which the caller disposes, or null.</returns>
     public async Task<PeerMatch?> FindAsync(PeerItemKeys keys, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(keys);
@@ -152,10 +157,10 @@ public sealed class PeerMetadataSource
         return (await FindAllAsync(keys, firstOnly: true, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
     }
 
-    /// <summary>Finds an item on the servers this one pulls from.</summary>
+    /// <summary>Finds an item on the sources.</summary>
     /// <param name="keys">What identifies the item.</param>
-    /// <param name="firstOnly"><c>true</c> to stop at the first server that has it.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="firstOnly"><c>true</c> to stop at the first source that has it.</param>
+    /// <param name="cancellationToken">Cancels the lookup.</param>
     /// <returns>The matches, which the caller disposes.</returns>
     public async Task<List<PeerMatch>> FindAllAsync(PeerItemKeys keys, bool firstOnly, CancellationToken cancellationToken)
     {
@@ -169,7 +174,7 @@ public sealed class PeerMetadataSource
         var parents = await _parents.ParentsAsync(cancellationToken).ConfigureAwait(false);
         if (parents.Count == 0)
         {
-            _logger.LogInformation("Server Sync has no match for {Item}: no server this one pulls from answers as Server Sync {Version}", keys.Describe(), _parents.Version);
+            _logger.LogInformation("Server Sync has no match for {Item}: no server this one pulls from answers as Server Sync {Version}", FormatUtilities.SanitizeForLog(keys.Describe()), _parents.Version);
             return matches;
         }
 
@@ -212,7 +217,8 @@ public sealed class PeerMetadataSource
 
                 throw;
             }
-            catch (Exception ex)
+            // One source that cannot be asked must not hide the others.
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 misses.Add($"'{parent.DisplayName}' could not be asked: {ex.Message}");
             }
@@ -224,17 +230,17 @@ public sealed class PeerMetadataSource
 
         if (matches.Count == 0)
         {
-            _logger.LogInformation("Server Sync has no match for {Item}: {Reasons}", keys.Describe(), string.Join(". ", misses));
+            _logger.LogInformation("Server Sync has no match for {Item}: {Reasons}", FormatUtilities.SanitizeForLog(keys.Describe()), FormatUtilities.SanitizeForLog(string.Join(". ", misses), 300 * misses.Count));
         }
 
         return matches;
     }
 
-    /// <summary>Offers the items found on other servers as search results.</summary>
+    /// <summary>Offers the items found on the sources as search results.</summary>
     /// <param name="itemType">The item's type name.</param>
-    /// <param name="info">The lookup info.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The search results.</returns>
+    /// <param name="info">The lookup info that identifies the item.</param>
+    /// <param name="cancellationToken">Cancels the search.</param>
+    /// <returns>One result for each source that has the item.</returns>
     public async Task<IEnumerable<RemoteSearchResult>> GetSearchResultsAsync(string itemType, ItemLookupInfo info, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(info);
@@ -251,13 +257,9 @@ public sealed class PeerMetadataSource
                     deadline.CancelAfter(LookupTimeout);
                     dto = (await match.Client.GetItemsByIdsAsync(new[] { match.ItemId }, Fields, cancellationToken: deadline.Token).ConfigureAwait(false)).FirstOrDefault();
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Could not read {Item} from '{Parent}'", info.Path ?? info.Name, match.Parent.DisplayName);
+                    _logger.LogDebug(ex, "Could not read {Item} from '{Parent}'", FormatUtilities.SanitizeForLog(info.Path ?? info.Name), FormatUtilities.SanitizeForLog(match.Parent.DisplayName));
                     continue;
                 }
 
@@ -289,11 +291,11 @@ public sealed class PeerMetadataSource
         return results;
     }
 
-    /// <summary>Reads an item's metadata from the first server that has it.</summary>
-    /// <typeparam name="TItem">The kind of item.</typeparam>
-    /// <param name="info">The lookup info.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The metadata, with <c>HasMetadata</c> <c>false</c> when no server has the item.</returns>
+    /// <summary>Reads an item's metadata from the first source that has it.</summary>
+    /// <typeparam name="TItem">The kind of item to fill.</typeparam>
+    /// <param name="info">The lookup info that identifies the item.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The metadata, with <c>HasMetadata</c> <c>false</c> when no source has the item.</returns>
     public async Task<MetadataResult<TItem>> GetMetadataAsync<TItem>(ItemLookupInfo info, CancellationToken cancellationToken)
         where TItem : BaseItem, new()
     {
@@ -314,13 +316,9 @@ public sealed class PeerMetadataSource
             deadline.CancelAfter(LookupTimeout);
             dto = (await match.Client.GetItemsByIdsAsync(new[] { match.ItemId }, Fields, cancellationToken: deadline.Token).ConfigureAwait(false)).FirstOrDefault();
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Could not read {Item} from '{Parent}'", info.Path ?? info.Name, match.Parent.DisplayName);
+            _logger.LogDebug(ex, "Could not read {Item} from '{Parent}'", FormatUtilities.SanitizeForLog(info.Path ?? info.Name), FormatUtilities.SanitizeForLog(match.Parent.DisplayName));
             return result;
         }
 
@@ -348,14 +346,14 @@ public sealed class PeerMetadataSource
         result.HasMetadata = true;
 
         MarkFilled(info.Path, item is Person ? info.Name : null);
-        _logger.LogDebug("Filled {Type} '{Item}' from '{Parent}'", typeof(TItem).Name, info.Path ?? info.Name, match.Parent.DisplayName);
+        _logger.LogDebug("Filled {Type} '{Item}' from '{Parent}'", typeof(TItem).Name, FormatUtilities.SanitizeForLog(info.Path ?? info.Name), FormatUtilities.SanitizeForLog(match.Parent.DisplayName));
         return result;
     }
 
-    /// <summary>Lists the images other servers hold for an item.</summary>
-    /// <param name="item">The item.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The images, with the pinned server's first.</returns>
+    /// <summary>Lists the images the sources hold for an item.</summary>
+    /// <param name="item">The local item to find images for.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The images, with the pinned source's first.</returns>
     public async Task<IEnumerable<RemoteImageInfo>> GetImagesAsync(BaseItem item, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -376,13 +374,9 @@ public sealed class PeerMetadataSource
                     deadline.CancelAfter(LookupTimeout);
                     images = await match.Client.GetItemImageInfoAsync(match.ItemId, deadline.Token).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Could not read the images of {Item} from '{Parent}'", item.Path ?? item.Name, match.Parent.DisplayName);
+                    _logger.LogDebug(ex, "Could not read the images of {Item} from '{Parent}'", FormatUtilities.SanitizeForLog(item.Path ?? item.Name), FormatUtilities.SanitizeForLog(match.Parent.DisplayName));
                     continue;
                 }
 
@@ -415,9 +409,9 @@ public sealed class PeerMetadataSource
         return found;
     }
 
-    /// <summary>Fetches an image from a server this one pulls from.</summary>
-    /// <param name="url">The image's address.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <summary>Fetches an image from a source.</summary>
+    /// <param name="url">The image's address, which must be under a source's Server URL.</param>
+    /// <param name="cancellationToken">Cancels the fetch.</param>
     /// <returns>The response, which the caller disposes.</returns>
     public async Task<HttpResponseMessage> GetImageResponseAsync(string url, CancellationToken cancellationToken)
     {
@@ -428,8 +422,8 @@ public sealed class PeerMetadataSource
         return await client.GetAuthorizedAsync(url, deadline.Token).ConfigureAwait(false);
     }
 
-    /// <summary>Builds the value that pins an item to a server.</summary>
-    /// <param name="parent">The server entry.</param>
+    /// <summary>Builds the value that pins an item to a source.</summary>
+    /// <param name="parent">The source the item is pinned to.</param>
     /// <param name="itemId">The item's id on that server.</param>
     /// <returns>The value.</returns>
     public static string PinValue(SourceServer parent, Guid itemId)
@@ -438,6 +432,7 @@ public sealed class PeerMetadataSource
         return parent.Key + ":" + itemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    /// <summary>Reads the source and item an item is pinned to from its provider ids.</summary>
     private static (string ServerKey, Guid ItemId)? Pinned(Dictionary<string, string>? ids)
     {
         if (ids is null || !ids.TryGetValue(PinnedProviderKey, out var value) || string.IsNullOrWhiteSpace(value))
@@ -449,6 +444,7 @@ public sealed class PeerMetadataSource
         return split > 0 && Guid.TryParse(value[(split + 1)..], out var itemId) ? (value[..split], itemId) : null;
     }
 
+    /// <summary>Records that the provider filled an item, so its save is not announced as a local edit.</summary>
     private static void MarkFilled(string? path, string? personName)
     {
         ProviderFills.MarkPath(path);

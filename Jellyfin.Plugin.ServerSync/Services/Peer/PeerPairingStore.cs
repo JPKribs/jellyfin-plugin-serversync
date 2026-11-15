@@ -14,8 +14,7 @@ namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
 /// <summary>
 /// Holds the pairing secrets that tie a peer's requests to the server entry they claim to come from.
-/// A key alone cannot say which peer is calling. A pairing secret can: this server issues one to a peer over its own connection to
-/// that peer, and the peer presents it on every request that names it as the sender.
+/// This server issues one to a peer over its own connection, and the peer presents it on every request that names it as the sender.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class PeerPairingStore : QueueStoreBase
@@ -24,8 +23,7 @@ public sealed class PeerPairingStore : QueueStoreBase
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _pairing = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// The lock that keeps pairings with one entry from running at once. Two at once would each mint a
-    /// secret, and the two sides could keep different ones.
+    /// Gets the lock that keeps two pairings with one entry from each minting a secret the other side does not keep.
     /// </summary>
     /// <param name="peerKey">The server entry's key.</param>
     /// <returns>The entry's lock.</returns>
@@ -34,21 +32,21 @@ public sealed class PeerPairingStore : QueueStoreBase
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerPairingStore"/> class.
     /// </summary>
-    /// <param name="databaseProvider">Database provider.</param>
+    /// <param name="databaseProvider">Opens the database the secrets are stored in.</param>
     /// <param name="secrets">Protects the secrets at rest.</param>
-    /// <param name="logger">Logger.</param>
+    /// <param name="logger">Writes database failures.</param>
     public PeerPairingStore(ISyncDatabaseProvider databaseProvider, SecretProtector secrets, ILogger<PeerPairingStore> logger)
         : base(databaseProvider, logger)
     {
+        ArgumentNullException.ThrowIfNull(secrets);
         _secrets = secrets;
     }
 
     private readonly ConcurrentDictionary<string, int> _expected = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Notes that this server is asking an entry to pair, until the result is disposed. The entry
-    /// answers by handing over its secret while the question is still open, so a secret that arrives
-    /// at any other time was not asked for and is refused.
+    /// Notes that this server is asking an entry to pair, until the result is disposed.
+    /// A secret that arrives at any other time was not asked for and is refused.
     /// </summary>
     /// <param name="peerKey">The server entry's key.</param>
     /// <returns>Ends the wait when disposed.</returns>
@@ -63,8 +61,8 @@ public sealed class PeerPairingStore : QueueStoreBase
     /// <returns><c>true</c> while a question to it is open.</returns>
     public bool Expecting(string peerKey) => _expected.TryGetValue(peerKey, out var open) && open > 0;
 
-    /// <summary>Whether a value has the shape of a secret from <see cref="NewSecret"/>: URL safe text, which is also all a header can carry.</summary>
-    /// <param name="secret">The value.</param>
+    /// <summary>Whether a value has the shape of a secret from <see cref="NewSecret"/>, which is URL safe text a header can carry.</summary>
+    /// <param name="secret">The value a peer handed over.</param>
     /// <returns><c>true</c> when it could be a pairing secret.</returns>
     public static bool WellFormed(string? secret)
     {
@@ -114,12 +112,12 @@ public sealed class PeerPairingStore : QueueStoreBase
 
     /// <summary>Stores the secret a peer must present to this server.</summary>
     /// <param name="peerKey">The server entry's key.</param>
-    /// <param name="secret">The secret.</param>
+    /// <param name="secret">The secret this server issued.</param>
     public void SetInbound(string peerKey, string secret) => Upsert(peerKey, "InboundSecret", secret);
 
     /// <summary>Stores the secret this server presents to a peer.</summary>
     /// <param name="peerKey">The server entry's key.</param>
-    /// <param name="secret">The secret.</param>
+    /// <param name="secret">The secret the peer issued.</param>
     public void SetOutbound(string peerKey, string secret) => Upsert(peerKey, "OutboundSecret", secret);
 
     /// <summary>Forgets both secrets for a server entry, for when the entry is removed.</summary>
@@ -132,18 +130,23 @@ public sealed class PeerPairingStore : QueueStoreBase
         cmd.ExecuteNonQuery();
     });
 
+    /// <summary>One open question to an entry, which closes when disposed.</summary>
     private sealed class Expectation : IDisposable
     {
         private readonly PeerPairingStore _store;
         private readonly string _peerKey;
         private int _done;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Expectation"/> class.
+        /// </summary>
         public Expectation(PeerPairingStore store, string peerKey)
         {
             _store = store;
             _peerKey = peerKey;
         }
 
+        /// <inheritdoc />
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _done, 1) == 0)
@@ -153,14 +156,14 @@ public sealed class PeerPairingStore : QueueStoreBase
         }
     }
 
-    // A secret that can no longer be decrypted, after the protection key changed, reads as no secret, so
-    // the next pairing issues a fresh one rather than sending an empty one forever.
+    /// <summary>Decrypts a stored secret, reading one that cannot be decrypted as none so the next pairing issues a fresh one.</summary>
     private string? Unprotect(string? stored)
     {
         var plain = string.IsNullOrEmpty(stored) ? null : _secrets.Unprotect(stored);
         return string.IsNullOrEmpty(plain) ? null : plain;
     }
 
+    /// <summary>Reads one secret column for an entry.</summary>
     private string? ReadColumn(string peerKey, string column) => Read(conn =>
     {
         using var cmd = conn.CreateCommand();
@@ -170,6 +173,7 @@ public sealed class PeerPairingStore : QueueStoreBase
         return value is string text ? text : null;
     });
 
+    /// <summary>Encrypts a secret and stores it in one column for an entry.</summary>
     private void Upsert(string peerKey, string column, string secret)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(peerKey);

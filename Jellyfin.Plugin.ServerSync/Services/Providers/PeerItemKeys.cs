@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Providers;
@@ -23,9 +24,12 @@ public sealed record PeerItemKeys(
 {
     /// <summary>Builds the keys from the lookup info Jellyfin gives a provider.</summary>
     /// <param name="itemType">The item's type name.</param>
-    /// <param name="info">The lookup info.</param>
+    /// <param name="info">The lookup info the path, name, and ids are read from.</param>
     /// <returns>The keys.</returns>
-    public static PeerItemKeys FromInfo(string itemType, ItemLookupInfo info) => new(
+    public static PeerItemKeys FromInfo(string itemType, ItemLookupInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        return new(
         itemType,
         info.Path,
         info.Name,
@@ -38,11 +42,15 @@ public sealed record PeerItemKeys(
         },
         info.IndexNumber,
         info.ParentIndexNumber);
+    }
 
     /// <summary>Builds the keys from a local item.</summary>
-    /// <param name="item">The item.</param>
+    /// <param name="item">The local item the path, name, and ids are read from.</param>
     /// <returns>The keys.</returns>
-    public static PeerItemKeys FromItem(BaseItem item) => new(
+    public static PeerItemKeys FromItem(BaseItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return new(
         item.GetType().Name,
         item.Path,
         item.Name,
@@ -55,6 +63,7 @@ public sealed record PeerItemKeys(
         },
         item.IndexNumber,
         item.ParentIndexNumber);
+    }
 
     /// <summary>Names the item for a log line.</summary>
     /// <returns>The path, or the type and name when there is no path.</returns>

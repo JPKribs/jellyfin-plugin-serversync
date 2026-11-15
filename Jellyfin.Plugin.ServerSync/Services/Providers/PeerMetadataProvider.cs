@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
@@ -9,9 +10,9 @@ using MediaBrowser.Model.Providers;
 namespace Jellyfin.Plugin.ServerSync.Services.Providers;
 
 /// <summary>
-/// Fills an item's metadata from the server this one pulls from.
+/// Fills an item's metadata from a source.
 /// </summary>
-/// <typeparam name="TItem">The kind of item.</typeparam>
+/// <typeparam name="TItem">The kind of item this provider fills.</typeparam>
 /// <typeparam name="TInfo">The lookup info for that kind.</typeparam>
 public abstract class PeerMetadataProvider<TItem, TInfo> : IRemoteMetadataProvider<TItem, TInfo>, IHasOrder
     where TItem : BaseItem, IHasLookupInfo<TInfo>, new()
@@ -22,9 +23,10 @@ public abstract class PeerMetadataProvider<TItem, TInfo> : IRemoteMetadataProvid
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerMetadataProvider{TItem, TInfo}"/> class.
     /// </summary>
-    /// <param name="source">Finds items and reads them from the other server.</param>
+    /// <param name="source">Finds items on the sources and reads them.</param>
     protected PeerMetadataProvider(PeerMetadataSource source)
     {
+        ArgumentNullException.ThrowIfNull(source);
         _source = source;
     }
 

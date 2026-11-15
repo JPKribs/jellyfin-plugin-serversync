@@ -7,18 +7,15 @@ using MediaBrowser.Controller.Entities;
 namespace Jellyfin.Plugin.ServerSync.Services.Peer;
 
 /// <summary>
-/// The pure decision logic behind the peer history endpoint. Kept free of Jellyfin services so the
-/// compare and set rule can be tested on its own.
+/// Holds the compare and set rule behind the peer history route, free of Jellyfin services.
 /// </summary>
 public static class PeerHistoryNegotiator
 {
-    /// <summary>Hard cap on entries per request, so an elevated caller cannot queue unbounded work.</summary>
+    /// <summary>The most entries one request may carry, so a caller cannot queue unbounded work.</summary>
     public const int MaxEntriesPerRequest = 500;
 
     /// <summary>
-    /// Decides what to do with one entry given the receiver's live state. The receiver writes only when
-    /// its live state matches what the sender expected, and skips the write when it already holds the
-    /// proposal.
+    /// Decides what to do with one entry, writing only when the receiver's live state matches what the sender expected.
     /// </summary>
     /// <param name="current">The receiver's live state.</param>
     /// <param name="expected">What the sender believed the receiver held, or null when it had no reading.</param>
@@ -34,8 +31,7 @@ public static class PeerHistoryNegotiator
             return PeerHistoryOutcome.Unchanged;
         }
 
-        // A sender with no reading of this server cannot know whether it is overwriting anything, so
-        // it is told the live state and asked again. A reading with no fields at all is no reading.
+        // A sender with no reading cannot know what it overwrites, so it is asked again.
         if (expected is null || IsEmpty(expected) || !StatesMatch(current, expected))
         {
             return PeerHistoryOutcome.Stale;
@@ -45,7 +41,7 @@ public static class PeerHistoryNegotiator
     }
 
     /// <summary>Whether a state carries no field at all.</summary>
-    /// <param name="state">The state.</param>
+    /// <param name="state">The state to check.</param>
     /// <returns><c>true</c> when every field is null.</returns>
     public static bool IsEmpty(PeerHistoryState state)
     {
@@ -58,10 +54,8 @@ public static class PeerHistoryNegotiator
     }
 
     /// <summary>
-    /// Sender side: turns the peer's answer for one row into the next step. A stale answer that
-    /// carries the peer's live state is folded into the row (source fields replaced, merge rerun, source
-    /// bundle refreshed) so the caller can offer the row once more. Anything else either proceeds to
-    /// the local write or fails with the peer's reason.
+    /// Turns the peer's answer for one row into the sender's next step.
+    /// A stale answer that carries the peer's live state is merged into the row so the caller can offer it once more.
     /// </summary>
     /// <param name="record">The history row that was offered.</param>
     /// <param name="result">The peer's answer.</param>
@@ -71,9 +65,8 @@ public static class PeerHistoryNegotiator
         => ResolveOutcome(record, result, allowRetry, remerge: null);
 
     /// <summary>
-    /// Like <see cref="ResolveOutcome(HistorySyncItem, PeerHistoryResult, bool)"/>, with a step that runs
-    /// after a stale answer is merged again, so a caller that decided the merge some other way, such as
-    /// by edit versions, keeps that decision on the retry.
+    /// Turns the peer's answer for one row into the sender's next step, running a step after a stale answer is merged again.
+    /// A caller that decided the merge another way, such as by stamps, keeps that decision on the retry.
     /// </summary>
     /// <param name="record">The row being negotiated.</param>
     /// <param name="result">The peer's answer.</param>
@@ -111,12 +104,11 @@ public static class PeerHistoryNegotiator
     }
 
     /// <summary>
-    /// Compares two states field by field. A null on either side of a field counts as a match, since
-    /// null means "no opinion" rather than a value, and dates compare at second resolution because
-    /// Jellyfin does not keep sub second precision.
+    /// Compares two states field by field, where a null on either side matches because it means no opinion.
+    /// Dates compare to the second because Jellyfin keeps no finer precision.
     /// </summary>
-    /// <param name="a">First state.</param>
-    /// <param name="b">Second state.</param>
+    /// <param name="a">One state to compare.</param>
+    /// <param name="b">The state to compare it with.</param>
     /// <returns><c>true</c> when no field holds two different values.</returns>
     public static bool StatesMatch(PeerHistoryState a, PeerHistoryState b)
     {
@@ -130,9 +122,9 @@ public static class PeerHistoryNegotiator
             && DatesMatch(a, b);
     }
 
-    // A state that carries a played flag has a real reading of the date, so a null there means "no
-    // date", which is how Jellyfin stores an item marked unplayed. Only a state with no played flag
-    // at all is treated as having no opinion about the date.
+    /// <summary>
+    /// Compares the dates of two states. A null date beside a played flag means no date, and only a state with no played flag has no opinion.
+    /// </summary>
     private static bool DatesMatch(PeerHistoryState a, PeerHistoryState b)
     {
         if (!a.Played.HasValue || !b.Played.HasValue)
@@ -145,7 +137,7 @@ public static class PeerHistoryNegotiator
     }
 
     /// <summary>Reads a Jellyfin user data row into the wire shape.</summary>
-    /// <param name="data">The user data row.</param>
+    /// <param name="data">The user data row to read.</param>
     /// <returns>The equivalent peer state.</returns>
     public static PeerHistoryState FromUserData(UserItemData data)
     {
@@ -161,7 +153,7 @@ public static class PeerHistoryNegotiator
     }
 
     /// <summary>Builds the state the local server believes the source currently holds.</summary>
-    /// <param name="item">The history row.</param>
+    /// <param name="item">The history row to read.</param>
     /// <returns>The source side of the row as a peer state.</returns>
     public static PeerHistoryState SourceStateOf(HistorySyncItem item)
     {
@@ -177,7 +169,7 @@ public static class PeerHistoryNegotiator
     }
 
     /// <summary>Builds the merged state the local server wants both servers to hold.</summary>
-    /// <param name="item">The history row.</param>
+    /// <param name="item">The history row to read.</param>
     /// <returns>The merged side of the row as a peer state.</returns>
     public static PeerHistoryState MergedStateOf(HistorySyncItem item)
     {
@@ -192,15 +184,14 @@ public static class PeerHistoryNegotiator
         };
     }
 
-    /// <summary>Writes a peer's live state back onto the source side of a history row.</summary>
+    /// <summary>Writes a peer's live state onto the source side of a history row, keeping any part the state does not carry.</summary>
     /// <param name="item">The history row to update.</param>
     /// <param name="state">The peer's live state.</param>
     public static void ApplySourceState(HistorySyncItem item, PeerHistoryState state)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(state);
-        // A part the state does not carry, such as one switched off in the History settings, leaves
-        // the row's reading of it as it was.
+
         item.SourceIsPlayed = state.Played ?? item.SourceIsPlayed;
         item.SourcePlayCount = state.PlayCount ?? item.SourcePlayCount;
         item.SourcePlaybackPositionTicks = state.PlaybackPositionTicks ?? item.SourcePlaybackPositionTicks;
@@ -209,7 +200,7 @@ public static class PeerHistoryNegotiator
     }
 
     /// <summary>Builds the state this server holds, as the history row records it.</summary>
-    /// <param name="item">The history row.</param>
+    /// <param name="item">The history row to read.</param>
     /// <returns>The local state.</returns>
     public static PeerHistoryState LocalStateOf(HistorySyncItem item)
     {
@@ -225,7 +216,7 @@ public static class PeerHistoryNegotiator
     }
 
     /// <summary>Builds the state the two servers last agreed on.</summary>
-    /// <param name="item">The history row.</param>
+    /// <param name="item">The history row to read.</param>
     /// <returns>The negotiated state.</returns>
     public static PeerHistoryState NegotiatedStateOf(HistorySyncItem item)
     {
@@ -242,7 +233,7 @@ public static class PeerHistoryNegotiator
 
     /// <summary>Writes a state onto the local side of a history row.</summary>
     /// <param name="item">The history row to update.</param>
-    /// <param name="state">The state.</param>
+    /// <param name="state">The state this server holds.</param>
     public static void ApplyLocalState(HistorySyncItem item, PeerHistoryState state)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -256,7 +247,7 @@ public static class PeerHistoryNegotiator
 
     /// <summary>Writes a state as the merged result of a history row.</summary>
     /// <param name="item">The history row to update.</param>
-    /// <param name="state">The state.</param>
+    /// <param name="state">The state both servers should hold.</param>
     public static void ApplyMergedState(HistorySyncItem item, PeerHistoryState state)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -269,8 +260,8 @@ public static class PeerHistoryNegotiator
         HistorySyncMergeService.KeepEnabledFields(item);
     }
 
-    /// <summary>A copy of a state with every part that is switched off in the History settings removed.</summary>
-    /// <param name="state">The state.</param>
+    /// <summary>Copies a state without the parts that are turned off in the History settings.</summary>
+    /// <param name="state">The state to copy.</param>
     /// <returns>The state this server may write or propose.</returns>
     public static PeerHistoryState EnabledPartOf(PeerHistoryState state)
     {
@@ -286,9 +277,9 @@ public static class PeerHistoryNegotiator
         };
     }
 
-    // The date a state gives a row. A state with a date gives that date. One without gives no date
-    // when it really has none: the date is in use and the state carries a played mark, or the item
-    // is unplayed. Otherwise it says nothing about the date and the row keeps its own.
+    /// <summary>
+    /// Picks the date a state gives a row. A state without one clears the date only when it carries a played mark or is unplayed.
+    /// </summary>
     private static DateTime? DateOf(PeerHistoryState state, DateTime? kept)
     {
         if (state.LastPlayedDate.HasValue)
@@ -300,6 +291,7 @@ public static class PeerHistoryNegotiator
         return dated || state.Played == false ? null : kept;
     }
 
+    /// <summary>Whether two optional values agree, where a missing value agrees with anything.</summary>
     private static bool Same<T>(T? a, T? b)
         where T : struct
         => !a.HasValue || !b.HasValue || a.Value.Equals(b.Value);

@@ -17,8 +17,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.Providers;
 
 /// <summary>
-/// Lists the servers this one pulls from whose Server Sync can answer a metadata lookup. Each is asked
-/// once and the answer is remembered for a while.
+/// Lists the sources whose Server Sync can answer a metadata lookup, remembering each answer for a while.
 /// </summary>
 [PluginService(ServiceLifetime.Singleton)]
 public sealed class ParentDirectory
@@ -44,19 +43,24 @@ public sealed class ParentDirectory
     /// Initializes a new instance of the <see cref="ParentDirectory"/> class.
     /// </summary>
     /// <param name="configManager">Reads the plugin configuration.</param>
-    /// <param name="clientFactory">Builds clients for other servers.</param>
+    /// <param name="clientFactory">Builds the client that asks each source.</param>
     /// <param name="applicationHost">Names this server.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes why a source will not be asked.</param>
     public ParentDirectory(IPluginConfigurationManager configManager, ISourceServerClientFactory clientFactory, IServerApplicationHost applicationHost, ILogger<ParentDirectory> logger)
     {
+        ArgumentNullException.ThrowIfNull(configManager);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(applicationHost);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _configManager = configManager;
         _clientFactory = clientFactory;
         _applicationHost = applicationHost;
         _logger = logger;
     }
 
-    /// <summary>Lists the servers this one pulls from that run a Server Sync able to answer.</summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <summary>Lists the sources that run a Server Sync able to answer.</summary>
+    /// <param name="cancellationToken">Stops waiting for the sources to answer.</param>
     /// <returns>The server entries.</returns>
     public async Task<IReadOnlyList<SourceServer>> ParentsAsync(CancellationToken cancellationToken)
     {
@@ -71,7 +75,7 @@ public sealed class ParentDirectory
     }
 
     /// <summary>Finds the server entry an address belongs to.</summary>
-    /// <param name="url">The address.</param>
+    /// <param name="url">The address to match against each Server URL.</param>
     /// <returns>The entry with the longest matching server URL, or null.</returns>
     public SourceServer? FindByUrl(string url)
     {
@@ -98,6 +102,7 @@ public sealed class ParentDirectory
         }
     }
 
+    /// <summary>Returns the remembered answer for a source, or asks it when the answer is stale.</summary>
     private Task<bool> RunsServerSync(SourceServer server)
     {
         var now = DateTime.UtcNow;
@@ -117,6 +122,7 @@ public sealed class ParentDirectory
         }
     }
 
+    /// <summary>Asks a source and marks it failed when it does not qualify.</summary>
     private async Task<bool> ProbeAsync(SourceServer server)
     {
         var runs = await AskAsync(server).ConfigureAwait(false);
@@ -128,6 +134,7 @@ public sealed class ParentDirectory
         return runs;
     }
 
+    /// <summary>Asks a source whether it runs a compatible Server Sync that is not this server.</summary>
     private async Task<bool> AskAsync(SourceServer server)
     {
         try
@@ -137,7 +144,7 @@ public sealed class ParentDirectory
             var capabilities = await client.GetPeerCapabilitiesAsync(deadline.Token).ConfigureAwait(false);
             if (capabilities is null)
             {
-                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: Server Sync is not installed there", server.DisplayName);
+                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: Server Sync is not installed there", FormatUtilities.SanitizeForLog(server.DisplayName));
                 return false;
             }
 
@@ -149,12 +156,13 @@ public sealed class ParentDirectory
 
             if (string.Equals(capabilities.ServerId, _applicationHost.SystemId, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: it reports this server's own id", server.DisplayName);
+                _logger.LogInformation("Server Sync will not ask '{Server}' for metadata: it reports this server's own id", FormatUtilities.SanitizeForLog(server.DisplayName));
                 return false;
             }
 
             return true;
         }
+        // A faulted probe would be remembered, so every failure counts as unreachable.
         catch (Exception ex)
         {
             _logger.LogInformation("Server Sync will not ask '{Server}' for metadata for now: it could not be reached ({Error})", FormatUtilities.SanitizeForLog(server.DisplayName), FormatUtilities.SanitizeForLog(ex.Message, 300));
