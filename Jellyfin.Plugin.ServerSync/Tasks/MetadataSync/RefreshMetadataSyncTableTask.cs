@@ -22,9 +22,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks.MetadataSync;
 
 /// <summary>
-/// Refresh phase for Metadata sync. Walks every enabled library, fetches
-/// items (with optional folder-items pass) from each, and builds a
-/// <see cref="MetadataSyncItem"/> per (library, item) pair.
+/// Scans Metadata: walks every enabled library, fetches its items and, when folder items are on, its folders, and builds a <see cref="MetadataSyncItem"/> for each.
 /// </summary>
 public class RefreshMetadataSyncTableTask
     : RefreshSyncTaskBase<MetadataSyncItem, MetadataWork, (string SourceLibraryId, string SourceItemId)>
@@ -37,7 +35,7 @@ public class RefreshMetadataSyncTableTask
     /// </summary>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="clientFactory">Builds the client for each source.</param>
     /// <param name="metadataService">Builds and compares metadata sync rows.</param>
     /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="conflicts">Settles which server speaks for an item both sides changed.</param>
@@ -79,8 +77,7 @@ public class RefreshMetadataSyncTableTask
     }
 
     /// <summary>
-    /// Against a peer that carries versions, a queued row whose local value was edited here more
-    /// recently than on the peer is kept, and the peer is told to pull it instead.
+    /// Settles conflicts against a peer that keeps stamps: a queued row whose local value was edited here more recently is kept, and the peer is told to pull it.
     /// </summary>
     /// <inheritdoc />
     protected override Task ResolveConflictsAsync(IList<MetadataSyncItem> queued, CancellationToken cancellationToken)
@@ -117,8 +114,7 @@ public class RefreshMetadataSyncTableTask
             cancellationToken);
 
     /// <summary>
-    /// On a run that lists only what changed, a change on a lower ranked server that keeps versions is
-    /// weighed against this server's value by ResolveConflictsAsync, not dropped for its rank.
+    /// Lets a change on a lower ranked server that keeps stamps be weighed against this server's value by ResolveConflictsAsync, on a run that lists only what changed.
     /// </summary>
     /// <inheritdoc />
     protected override bool MayOutrankOwner(MetadataSyncItem record)
@@ -140,9 +136,8 @@ public class RefreshMetadataSyncTableTask
     protected override string ModuleMutexKey => "Metadata";
 
     /// <summary>
-    /// The build loop is mostly CPU-bound, so this is effectively how much CPU a refresh may use. The
-    /// default of 8 finishes fastest but can saturate a typical host for the build phase. Lower it to
-    /// leave headroom for playback and transcoding.
+    /// Gets how many rows are built at once, which is in effect how much CPU a scan may use, since the build is mostly CPU bound.
+    /// Lower it to leave room for playback and transcoding.
     /// </summary>
     /// <inheritdoc />
     protected override int BuildRecordParallelism => Math.Clamp(ConfigManager.Configuration.RefreshParallelism, 1, 16);
@@ -154,26 +149,13 @@ public class RefreshMetadataSyncTableTask
         if (!config.EnableMetadataSync) return false;
         if (config.GetPullServers().Count == 0) return false;
         if (config.GetEnabledLibraryMappings().Count == 0) return false;
-        // At least one category enabled.
         return config.MetadataSyncMetadata || config.MetadataSyncImages
             || config.MetadataSyncPeople || config.MetadataSyncStudios;
     }
 
     /// <summary>
-    /// Light discovery, then a heavy fetch, instead of "bulk-fetch everything heavy":
-    ///   <list type="number">
-    ///   <item>Enumerate local items per library and build a path lookup.</item>
-    ///   <item>Light source discovery, paginate every library asking for
-    ///   only <c>Path</c> + <c>Id</c>. Per-page payload is tiny.</item>
-    ///   <item>Filter source items to those whose translated path exists
-    ///   locally, that's the actual sync set.</item>
-    ///   <item>Heavy fetch by IDs, only request full metadata fields for
-    ///   matched items, batched.</item>
-    ///   </list>
-    /// On a typical install where local is a subset of source, this
-    /// dramatically reduces both bytes-over-wire and the build phase's
-    /// work, since full metadata is not fetched for tens of thousands
-    /// of source items the user doesn't have.
+    /// Lists one server's items with a light pass and then a heavy one: page every library for paths and ids only, keep the items whose translated path exists here, then fetch full metadata for those in batches.
+    /// Full metadata is never fetched for source items this server does not hold.
     /// </summary>
     /// <inheritdoc />
     protected override async Task<IList<MetadataWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
@@ -199,8 +181,6 @@ public class RefreshMetadataSyncTableTask
 
         progress.Report(2);
 
-        // Phase 1: enumerate local items per library. This is in-process and
-        // fast, Jellyfin's library DB is already loaded.
         var localByLibrary = new Dictionary<string, (Dictionary<string, BaseItem> Leaves, Dictionary<string, BaseItem> Folders)>();
         foreach (var mapping in enabledMappings)
         {
@@ -211,17 +191,9 @@ public class RefreshMetadataSyncTableTask
 
         progress.Report(8);
 
-        // Phase 2: lightweight discovery, find the source IDs of items whose
-        // translated paths exist locally, collected per mapping and split
-        // into leaves and folders. The source-side metadata isn't materialized yet.
         var matchedLeavesByMapping = new ConcurrentDictionary<string, ConcurrentBag<Guid>>();
         var matchedFoldersByMapping = new ConcurrentDictionary<string, ConcurrentBag<Guid>>();
 
-        // Per-page discovery reporting. Without it the bar sat frozen at 8%
-        // for the whole discovery pagination, minutes on big libraries.
-        // Totals come from each pagination's first-page TotalRecordCount, so
-        // the denominator firms up as pages land. Clamp keeps the band's end
-        // reserved for actual completion.
         var discoveryProgress = new ConcurrentDictionary<string, (long Fetched, long Total)>(StringComparer.Ordinal);
         void ReportDiscovery(string key, long fetched, long total)
         {
@@ -271,42 +243,17 @@ public class RefreshMetadataSyncTableTask
             return Array.Empty<MetadataWork>();
         }
 
-        // Phase 3: batch-fetch full metadata only for matched IDs. Each
-        // library's matched IDs are batched independently so each batch
-        // keeps track of the mapping it belongs to.
         var work = new ConcurrentBag<MetadataWork>();
         var fetched = 0;
         var heavyDenominator = Math.Max(totalMatched, 1);
 
-        // Drive batching from here (rather than inside GetItemsByIdsAsync) so
-        // progress ticks after every page lands instead of only after the
-        // whole mapping finishes, the original implementation appeared
-        // frozen at ~24% on libraries with tens of thousands of matched
-        // items because no callback fired during the multi-minute serial
-        // chunk loop.
-        //
-        // Batch size capped at 50 (matches the SDK default). Bumping it to
-        // 200 to cut round-trip count produced HTTP 414
-        // (URI Too Long) on real-world setups, many reverse proxies (nginx
-        // default large_client_header_buffers, IIS request filtering, etc.)
-        // cap header size at 4 to 8KB, and 200 IDs × 32 hex chars + Fields=
-        // and other query overhead pushes past that. 50 IDs ≈ 1.6KB of
-        // ?Ids= content plus ~500 bytes of other query string, comfortably
-        // under any reasonable proxy limit.
-        //
-        // Within a single mapping, run the chunk fetches in parallel
-        // (bounded). Combined with the outer 4-way mapping parallelism this
-        // gives up to 16 concurrent requests against the source. Most
-        // self-hosted Jellyfin servers handle that fine. If it ever turns
-        // out to overwhelm a weak source, the per-mapping cap is the easy
-        // knob to lower.
+        // Fifty ids keep the URL under common reverse proxy header limits.
         const int heavyBatchSize = 50;
         const int chunksPerMappingParallelism = 4;
         async Task FetchHeavyAsync(LibraryMapping mapping, IReadOnlyList<Guid> ids, bool isFolder, CancellationToken ct)
         {
             if (ids.Count == 0) return;
 
-            // Pre-slice into chunks so Parallel.ForEachAsync can drive them.
             var chunks = new List<IReadOnlyList<Guid>>((ids.Count + heavyBatchSize - 1) / heavyBatchSize);
             for (var i = 0; i < ids.Count; i += heavyBatchSize)
             {
@@ -358,10 +305,9 @@ public class RefreshMetadataSyncTableTask
     }
 
     /// <summary>
-    /// Phase-2 discovery helper: paginate the source library asking only for
-    /// item paths, translate each to a local path, and add the source IDs
-    /// whose translated path exists in <paramref name="localPaths"/> to the
-    /// shared bag.
+    /// <summary>
+    /// Pages the source library for item paths and adds the ids whose translated path exists in <paramref name="localPaths"/> to the shared bag.
+    /// On a run that lists only what changed, it keeps the changed ids and the ids with no row yet.
     /// </summary>
     private async Task DiscoverForRunAsync(
         ScanSource source,
@@ -392,6 +338,7 @@ public class RefreshMetadataSyncTableTask
         }
     }
 
+    /// <summary>Pages one source library for paths and collects the ids that match a local path.</summary>
     private async Task DiscoverMatchingIdsAsync(
         SourceServerClient client,
         LibraryMapping mapping,
@@ -422,26 +369,18 @@ public class RefreshMetadataSyncTableTask
             {
                 page = await client.GetLibraryItemPathsAsync(sourceLibraryId, includeTypes, startIndex, pageSize, changedSince, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 page = null;
                 pageError = ex;
             }
 
-            // A missing page is a failed page, not the end of the library. Only
-            // an answer with no items ends the walk.
+            // A missing page is a failed page, not the end of the library.
             if (page is null)
             {
                 Logger.LogWarning(pageError, "Discovery page failed for library {Library} at index {Index}", mapping.SourceLibraryName, startIndex);
 
-                // Any source error means this run can't be sure it enumerated
-                // every item, so the whole run skips pruning. Keep trying a few
-                // more pages before giving up the library so reachable items
-                // still upsert.
+                // A source error skips the prune, and a few more pages are still tried.
                 MarkSourceUnavailable($"source server unavailable during '{mapping.SourceLibraryName}' discovery");
 
                 if (++consecutiveErrors >= maxConsecutiveErrors)
@@ -476,8 +415,7 @@ public class RefreshMetadataSyncTableTask
                     continue;
                 }
 
-                // A file a higher ranked server already described this run is its to describe, so its
-                // details are not fetched from this one only to be dropped.
+                // A higher ranked server already described this file, so it is not fetched again.
                 var localPath = PathUtilities.TranslatePath(item.Path, mapping.SourceRootPath, mapping.LocalRootPath);
                 if (localPaths.ContainsKey(localPath) && !ClaimedByHigherServer(localPath))
                 {
@@ -499,24 +437,24 @@ public class RefreshMetadataSyncTableTask
         }
     }
 
-    /// <summary>Whether an item type is one the metadata module treats as a folder.</summary>
-    /// <param name="type">The item type.</param>
+    /// <summary>Says whether an item type is one Metadata treats as a folder.</summary>
+    /// <param name="type">The item type the source reports.</param>
     /// <returns><c>true</c> for series, seasons, albums, artists, and box sets.</returns>
     public static bool IsFolderType(BaseItemDto_Type? type) => type is BaseItemDto_Type.Series or BaseItemDto_Type.Season or BaseItemDto_Type.MusicAlbum or BaseItemDto_Type.MusicArtist or BaseItemDto_Type.BoxSet;
 
     /// <summary>
-    /// Builds the minimum <see cref="ItemFields"/> set that satisfies the
-    /// user's enabled metadata categories. Skipping unused fields (notably
-    /// <see cref="ItemFields.People"/>, which can dominate the response on
-    /// movie/episode libraries) drops the per-page payload substantially.
+    /// Builds the smallest <see cref="ItemFields"/> set that covers the metadata categories that are on.
+    /// Leaving out unused fields, <see cref="ItemFields.People"/> above all, makes each page much smaller.
     /// </summary>
-    /// <param name="config">The configuration.</param>
-    /// <returns>The fields.</returns>
+    /// <param name="config">The plugin settings that say which categories are on.</param>
+    /// <returns>The fields to request from the source.</returns>
     public static ItemFields[] BuildRequestedFields(PluginConfiguration config)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
         var fields = new List<ItemFields>
         {
-            // Always required for path matching and identification.
+            // Path matching and identification always need these.
             ItemFields.Path,
             ItemFields.DateCreated,
             ItemFields.ProviderIds
@@ -566,9 +504,7 @@ public class RefreshMetadataSyncTableTask
 
         var config = ConfigManager.Configuration;
 
-        // Look up the previous row first: its source image manifest feeds the
-        // carry-forward path that skips per-item image enrichment HTTP when
-        // tags are unchanged.
+        // The prior row's image manifest lets unchanged images skip their HTTP calls.
         var sourceItemId = source.SourceItem.Id!.Value.ToString("N", CultureInfo.InvariantCulture);
         existing.TryGetValue((source.LibraryMapping.SourceLibraryId, sourceItemId), out var priorRecord);
 
@@ -594,12 +530,7 @@ public class RefreshMetadataSyncTableTask
 
         fresh.ServerKey = source.Source.Key;
 
-        // Carry forward Synced* fields from the existing row so the hash
-        // short-circuit (SourceHash == SyncedHash) can skip the deep JSON
-        // compare on later refreshes. The service builds a fresh record with
-        // null SyncedHash. The DB-side preserves SyncedHash via a CASE clause
-        // in Upsert SQL, but the in-memory record is what HasChanges and
-        // DecideStatus look at.
+        // Without the synced values carried over, every scan would discard the baseline.
         var key = (fresh.SourceLibraryId, fresh.SourceItemId);
         if (existing.TryGetValue(key, out var prev))
         {
@@ -644,9 +575,8 @@ public class RefreshMetadataSyncTableTask
     }
 
     /// <summary>
-    /// In scope when the row's library mapping is currently enabled. Disabling
-    /// a mapping preserves its metadata rows so the user's Ignored overrides
-    /// survive a toggle.
+    /// Says whether the row's library mapping is on.
+    /// Turning a mapping off keeps its metadata rows, so Ignored rows survive it.
     /// </summary>
     /// <inheritdoc />
     protected override bool IsInScope(MetadataSyncItem record)
