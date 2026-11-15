@@ -85,19 +85,8 @@ public static class FileValidationService
             return null;
         }
 
-        var normalizedPath = Path.GetFullPath(path);
-        foreach (var mapping in config.GetEnabledLibraryMappings().Where(m => !string.IsNullOrEmpty(m.LocalRootPath)))
-        {
-            var normalizedLibraryPath = Path.GetFullPath(mapping.LocalRootPath);
-            var relativePath = Path.GetRelativePath(normalizedLibraryPath, normalizedPath);
-            if (!relativePath.StartsWith("..", StringComparison.Ordinal)
-                && !Path.IsPathRooted(relativePath))
-            {
-                return mapping.LocalRootPath;
-            }
-        }
-
-        return null;
+        var roots = config.GetEnabledLibraryMappings().Where(m => !string.IsNullOrEmpty(m.LocalRootPath)).Select(m => m.LocalRootPath);
+        return PathContainment.FirstRootUnder(path, roots, deepest: false);
     }
 
     /// <summary>
@@ -111,15 +100,11 @@ public static class FileValidationService
     {
         try
         {
-            var root = Path.GetFullPath(libraryRootPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
 
             while (!string.IsNullOrEmpty(dir))
             {
-                var normalized = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (string.Equals(normalized, root, StringComparison.OrdinalIgnoreCase)
-                    || !normalized.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                if (!PathContainment.IsStrictlyUnder(dir, libraryRootPath))
                 {
                     break;
                 }

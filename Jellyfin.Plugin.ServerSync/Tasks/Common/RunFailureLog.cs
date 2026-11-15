@@ -43,13 +43,14 @@ internal static class RunFailureLog
                 var failures = configManager.Configuration.LastRunFailures;
                 var before = failures.FirstOrDefault(f => Matches(f, moduleKey, phase));
                 failures.RemoveAll(f => Matches(f, moduleKey, phase));
+                var now = DateTime.UtcNow;
                 failures.Add(new SyncRunFailure
                 {
                     ModuleKey = moduleKey,
                     Phase = phase,
                     Reason = reason,
-                    Timestamp = DateTime.UtcNow,
-                    FirstSeen = before?.FirstSeen ?? before?.Timestamp ?? DateTime.UtcNow,
+                    Timestamp = now,
+                    FirstSeen = before?.FirstSeen ?? before?.Timestamp ?? now,
                     Reported = before?.Reported ?? false
                 });
                 configManager.SaveConfiguration();

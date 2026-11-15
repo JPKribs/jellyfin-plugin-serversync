@@ -234,12 +234,7 @@ public static class RecyclingBinService
                 continue;
             }
 
-            var root = Path.GetFullPath(mapping.LocalRootPath);
-            var binFromRoot = Path.GetRelativePath(root, bin);
-            var rootFromBin = Path.GetRelativePath(bin, root);
-            var binInRoot = !binFromRoot.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(binFromRoot);
-            var rootInBin = !rootFromBin.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(rootFromBin);
-            if (binInRoot || rootInBin)
+            if (PathContainment.IsUnderAny(bin, new[] { mapping.LocalRootPath }) || PathContainment.IsUnderAny(mapping.LocalRootPath, new[] { bin }))
             {
                 return true;
             }

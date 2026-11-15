@@ -113,4 +113,37 @@ public class RecyclingBinServiceTests
         var config = ConfigWithRoot(P("/", "media", "movies"));
         Assert.False(RecyclingBinService.OverlapsLibraryRoot(string.Empty, config));
     }
+
+    /// <summary>
+    /// A Recycling Bin overlaps a root folder when either holds the other or they are the same folder, and not when they only share a prefix.
+    /// True: a bin inside a library, or a library inside the bin, is refused, and a neighbouring folder is allowed.
+    /// False: recycled files would be scanned back in as media, or a safe folder would be refused.
+    /// </summary>
+    [Theory]
+    [InlineData("/media/movies/.bin", true)]
+    [InlineData("/media/movies", true)]
+    [InlineData("/media", true)]
+    [InlineData("/media/movies2", false)]
+    [InlineData("/media/bin", false)]
+    public void OverlapsLibraryRoot_BoundsByWholeFolderNames(string bin, bool expected)
+    {
+        var config = ConfigWithRoots("/media/movies");
+
+        var overlaps = RecyclingBinService.OverlapsLibraryRoot(bin, config);
+
+        Assert.Equal(expected, overlaps);
+    }
+
+    private static PluginConfiguration ConfigWithRoots(params string[] roots)
+    {
+        var server = new SourceServer { Key = "a", Url = "http://a", ApiKey = "k", IsEnabled = true };
+        foreach (var root in roots)
+        {
+            server.LibraryMappings.Add(new LibraryMapping { SourceLibraryId = "s", LocalLibraryId = "l", SourceRootPath = "/src", LocalRootPath = root, IsEnabled = true });
+        }
+
+        var config = new PluginConfiguration();
+        config.Servers.Add(server);
+        return config;
+    }
 }

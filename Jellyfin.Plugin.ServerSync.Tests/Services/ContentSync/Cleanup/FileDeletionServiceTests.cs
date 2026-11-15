@@ -592,4 +592,33 @@ public sealed class FileDeletionServiceTests : IDisposable
             File.SetUnixFileMode(_movieDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
     }
+
+    /// <summary>
+    /// Empty folders are removed up to the root folder and never the root folder itself, and a folder outside the root is left alone.
+    /// True: cleaning up after a delete cannot remove the library's own folder or climb out of it.
+    /// False: an emptied library would lose its root folder, or a neighbouring folder would be removed.
+    /// </summary>
+    [Fact]
+    public void TryRemoveEmptyFolders_StopsAtTheRootAndStaysInside()
+    {
+        var top = Path.Combine(Path.GetTempPath(), "serversync-bounds-" + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(top, "movies");
+        var title = Path.Combine(root, "Film", "Extras");
+        var sibling = Path.Combine(top, "movies2", "Other");
+        Directory.CreateDirectory(title);
+        Directory.CreateDirectory(sibling);
+        try
+        {
+            FileDeletionService.TryRemoveEmptyFolders(title, NullLogger.Instance, root);
+            FileDeletionService.TryRemoveEmptyFolders(sibling, NullLogger.Instance, root);
+
+            Assert.False(Directory.Exists(Path.Combine(root, "Film")));
+            Assert.True(Directory.Exists(root));
+            Assert.True(Directory.Exists(sibling));
+        }
+        finally
+        {
+            Directory.Delete(top, recursive: true);
+        }
+    }
 }

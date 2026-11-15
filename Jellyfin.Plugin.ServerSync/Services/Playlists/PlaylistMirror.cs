@@ -487,11 +487,9 @@ public sealed class PlaylistMirror
             return null;
         }
 
-        var normalized = sourcePath.Replace('\\', '/');
         foreach (var mapping in mappings)
         {
-            var root = (mapping.SourceRootPath ?? string.Empty).Replace('\\', '/').TrimEnd('/');
-            if (root.Length == 0 || !normalized.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase))
+            if (!PathContainment.IsUnderForeign(sourcePath, mapping.SourceRootPath))
             {
                 continue;
             }

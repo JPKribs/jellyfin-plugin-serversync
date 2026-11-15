@@ -177,4 +177,26 @@ public sealed class FileValidationServiceTests : IDisposable
 
         Assert.False(FileValidationService.HasSymlinkedDirectoryComponent(link, lib));
     }
+
+    /// <summary>
+    /// A path is placed in a root folder only when it is that folder or inside it, and the first root in order wins.
+    /// True: a folder that only shares the root's first letters is never taken for part of the library.
+    /// False: a delete in /media/movies2 would pass as a delete inside /media/movies.
+    /// </summary>
+    [Theory]
+    [InlineData("/media/movies/Film/film.mkv", "/media/movies")]
+    [InlineData("/media/movies", "/media/movies")]
+    [InlineData("/media/movies/", "/media/movies")]
+    [InlineData("/media/movies2/Film/film.mkv", null)]
+    [InlineData("/media/movie", null)]
+    [InlineData("/media", null)]
+    [InlineData("/media/movies/kids/Film/film.mkv", "/media/movies")]
+    public void GetContainingLibraryRoot_BoundsByWholeFolderNames(string path, string? expected)
+    {
+        var config = ConfigWithRoots("/media/movies", "/media/movies/kids");
+
+        var root = FileValidationService.GetContainingLibraryRoot(path, config);
+
+        Assert.Equal(expected, root);
+    }
 }

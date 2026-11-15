@@ -139,15 +139,11 @@ public static class FileDeletionService
 
         try
         {
-            var normalizedRoot = Path.GetFullPath(libraryRootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
             var currentDir = directoryPath;
 
             while (!string.IsNullOrEmpty(currentDir) && Directory.Exists(currentDir))
             {
-                var normalizedCurrent = Path.GetFullPath(currentDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (string.Equals(normalizedCurrent, normalizedRoot, StringComparison.OrdinalIgnoreCase)
-                    || !normalizedCurrent.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                if (!PathContainment.IsStrictlyUnder(currentDir, libraryRootPath))
                 {
                     break;
                 }
@@ -251,9 +247,7 @@ public static class FileDeletionService
 
         try
         {
-            var root = Path.GetFullPath(libraryRootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var full = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            if (!PathContainment.IsStrictlyUnder(folder, libraryRootPath))
             {
                 return;
             }
