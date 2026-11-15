@@ -11,11 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.PeopleSync;
 
 /// <summary>
-/// Per-modal helpers for People Sync. The build/merge logic lives in
-/// <see cref="PeopleSyncMergeService"/>. This service owns operations that
-/// need <see cref="ILibraryManager"/> or per-modal HTTP, refreshing the
-/// local snapshot for the UI, and enriching the source image manifest with
-/// real sizes.
+/// Refreshes one person row's local side and source image sizes for the dashboard.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public class PeopleSyncTableService
@@ -26,32 +22,30 @@ public class PeopleSyncTableService
     /// <summary>
     /// Initializes a new instance of the <see cref="PeopleSyncTableService"/> class.
     /// </summary>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="libraryManager">Finds the local person.</param>
     public PeopleSyncTableService(
         ILogger<PeopleSyncTableService> logger,
         ILibraryManager libraryManager)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(libraryManager);
         _logger = logger;
         _libraryManager = libraryManager;
     }
 
     /// <summary>
-    /// Re-reads the local side of a person record so the modal shows live
-    /// data rather than the snapshot captured at the last people refresh.
-    /// Call this from per-item endpoints, without it, a successful Sync
-    /// apply updates local state in Jellyfin but the modal keeps showing
-    /// the pre-sync local blob until the user re-runs the full Refresh.
-    /// Source-side fields (and all hashes) are left untouched.
+    /// Reads the local side of a person row again, so the dashboard shows live values and not those of the last scan.
+    /// The source side and every hash are left alone.
     /// </summary>
-    /// <param name="record">The record whose local side is re-read.</param>
+    /// <param name="record">The row whose local blobs are replaced.</param>
     /// <param name="syncImages"><c>true</c> to re-read the images.</param>
     public void RefreshLocalSnapshot(PeopleSyncItem record, bool syncImages)
     {
         ArgumentNullException.ThrowIfNull(record);
         if (string.IsNullOrEmpty(record.PersonName)) return;
 
-        // Id first, see SyncMissingPeopleTask.ResolveLocalPerson.
+        // The stored id finds the person even when the name's casing differs.
         var localPerson = Guid.TryParse(record.LocalPersonId, out var knownId)
             ? _libraryManager.GetItemById(knownId)
             : null;
@@ -74,16 +68,13 @@ public class PeopleSyncTableService
     }
 
     /// <summary>
-    /// Enriches the source-side image manifest with real Size / Width /
-    /// Height fetched from the source server. The refresh builds the
-    /// manifest from <c>BaseItemDto.ImageTags</c> (tag-only) for
-    /// performance, so without enrichment the People modal renders Source
-    /// as "1 (0 B)", looks like a sync failure even when nothing's wrong.
-    /// One HTTP call per modal open.
+    /// Adds each image's size and dimensions to a row's source manifest with one call to the source.
+    /// A scan stores tags alone, which the dashboard would show as a size of 0.
     /// </summary>
-    /// <param name="record">The record whose source images are enriched.</param>
-    /// <param name="client">The client for the source server.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="record">The row whose source image manifest is sized.</param>
+    /// <param name="client">The client for the source server that holds the images.</param>
+    /// <param name="cancellationToken">Cancels the call to the source.</param>
+    /// <returns>A task that completes when the manifest is sized.</returns>
     public async Task EnrichSourceImageSizesAsync(
         PeopleSyncItem record,
         SourceServerClient client,

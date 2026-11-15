@@ -7,16 +7,14 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Services.UserSync;
 
 /// <summary>
-/// Combines two servers' versions of one user's permissions when both changed since they last agreed,
-/// one permission at a time: the more generous of the two for <see cref="UserConflictRule.Permissive"/>,
-/// the stricter for <see cref="UserConflictRule.Restrictive"/>. Both servers reach the same answer from
-/// the same two values, whichever of them does the combining. A permission with no more and no less,
-/// and any this class does not know, takes the other server's value. A disabled user stays disabled
-/// under either rule, so a lockout on one server is never undone by the other.
+/// Combines two servers' versions of a user's permissions one at a time, taking the more generous or the stricter by the conflict rule.
+/// A disabled user stays disabled under either rule, and a permission with no more and no less takes the other server's value.
 /// </summary>
 public static class UserPolicyCombiner
 {
-    // Switches that grant something when on.
+    /// <summary>
+    /// The switches that grant something when on.
+    /// </summary>
     private static readonly HashSet<string> GrantsWhenOn = new(StringComparer.OrdinalIgnoreCase)
     {
         "EnableUserPreferenceAccess", "EnableRemoteControlOfOtherUsers", "EnableSharedDeviceControl", "EnableRemoteAccess",
@@ -26,13 +24,17 @@ public static class UserPolicyCombiner
         "EnableSubtitleManagement", "EnableLyricManagement"
     };
 
-    // Switches that take something away when on.
+    /// <summary>
+    /// The switches that take something away when on.
+    /// </summary>
     private static readonly HashSet<string> RestrictsWhenOn = new(StringComparer.OrdinalIgnoreCase)
     {
         "IsHidden", "ForceRemoteSourceTranscoding"
     };
 
-    // Limits where a higher number allows more, with the value that means no limit at all.
+    /// <summary>
+    /// The limits where a higher number allows more, each with the value that means no limit.
+    /// </summary>
     private static readonly Dictionary<string, long?> Limits = new(StringComparer.OrdinalIgnoreCase)
     {
         ["MaxActiveSessions"] = 0,
@@ -42,16 +44,24 @@ public static class UserPolicyCombiner
         ["MaxParentalSubRating"] = null
     };
 
-    // Lists of what is blocked: a longer list allows less.
+    /// <summary>
+    /// The lists of what is blocked, where a longer list allows less.
+    /// </summary>
     private static readonly HashSet<string> BlockLists = new(StringComparer.OrdinalIgnoreCase) { "BlockedTags", "BlockUnratedItems" };
 
-    // Lists of the only things allowed: an empty list allows everything.
+    /// <summary>
+    /// The lists of the only things allowed, where an empty list allows everything.
+    /// </summary>
     private static readonly HashSet<string> AllowLists = new(StringComparer.OrdinalIgnoreCase) { "AllowedTags" };
 
-    // Choices where a lower number allows more.
+    /// <summary>
+    /// The choices where a lower number allows more.
+    /// </summary>
     private static readonly HashSet<string> LowerAllowsMore = new(StringComparer.OrdinalIgnoreCase) { "SyncPlayAccess" };
 
-    /// <summary>Combines two policies.</summary>
+    /// <summary>
+    /// Combines two policies so both servers reach the same answer from the same two values.
+    /// </summary>
     /// <param name="other">The other server's policy, in this server's terms, as JSON.</param>
     /// <param name="mine">This server's policy as JSON.</param>
     /// <param name="rule">Which rule settles a permission both servers changed.</param>
@@ -90,6 +100,9 @@ public static class UserPolicyCombiner
         return JsonSerializer.Serialize(combined);
     }
 
+    /// <summary>
+    /// Combines one permission by its kind, or takes the other server's value for a kind that is not known.
+    /// </summary>
     private static object? CombineOne(string name, JsonElement theirs, JsonElement ours, bool generous)
     {
         if (string.Equals(name, "IsDisabled", StringComparison.OrdinalIgnoreCase) && IsBool(theirs) && IsBool(ours))
@@ -113,9 +126,9 @@ public static class UserPolicyCombiner
             var b = Number(ours);
             var aUnlimited = a == unlimited;
             var bUnlimited = b == unlimited;
+            // No limit is the most generous value.
             if (aUnlimited || bUnlimited)
             {
-                // No limit is the most generous value, so it wins for Permissive and loses for Restrictive.
                 return generous ? unlimited : (aUnlimited ? b : a);
             }
 
@@ -136,9 +149,9 @@ public static class UserPolicyCombiner
         {
             var theirsEmpty = theirs.GetArrayLength() == 0;
             var oursEmpty = ours.GetArrayLength() == 0;
+            // An empty list allows everything.
             if (theirsEmpty || oursEmpty)
             {
-                // An empty list allows everything.
                 return generous ? Array.Empty<JsonElement>() : (theirsEmpty ? ours : theirs);
             }
 
@@ -154,7 +167,9 @@ public static class UserPolicyCombiner
 
     private static long? Number(JsonElement value) => value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number) ? number : null;
 
-    // What is in either list, in a stable order so both servers write the same list.
+    /// <summary>
+    /// Gets what is in either list, in a stable order so both servers write the same list.
+    /// </summary>
     private static List<JsonElement> Either(JsonElement a, JsonElement b)
         => a.EnumerateArray().Concat(b.EnumerateArray())
             .GroupBy(e => e.GetRawText(), StringComparer.Ordinal)
@@ -162,7 +177,9 @@ public static class UserPolicyCombiner
             .OrderBy(e => e.GetRawText(), StringComparer.Ordinal)
             .ToList();
 
-    // What is in both lists, in a stable order.
+    /// <summary>
+    /// Gets what is in both lists, in a stable order.
+    /// </summary>
     private static List<JsonElement> Both(JsonElement a, JsonElement b)
     {
         var inB = new HashSet<string>(b.EnumerateArray().Select(e => e.GetRawText()), StringComparer.Ordinal);

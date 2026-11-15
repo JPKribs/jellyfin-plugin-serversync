@@ -17,25 +17,19 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.MetadataSync;
 
 /// <summary>
-/// Per-category merge logic for Metadata Sync. Each method extracts the
-/// comparable representation of one category (Metadata / Images / People /
-/// Studios) and writes it onto the <see cref="MetadataSyncItem"/>. Source-wins
-/// per category. Static class, cross-cutting dependencies are passed in.
+/// Builds the comparable source and local form of each metadata category on a <see cref="MetadataSyncItem"/>, where the source wins.
 /// </summary>
 public static class MetadataSyncMergeService
 {
     /// <summary>
-    /// Builds the source-side and local-side metadata blobs (text/number
-    /// fields, provider IDs, locked fields, etc.) on <paramref name="item"/>.
-    /// Genres and Tags are gated on the corresponding config flags so the
-    /// hash short-circuit stays honest: what you sync = what you compare =
-    /// what you hash.
+    /// Builds the source and local metadata blobs, holding only fields that sync so the compare and the hash match what is written.
+    /// SortName is left out because each server derives it from Name, dates are calendar dates, and lists are sorted so both sides serialize alike.
     /// </summary>
-    /// <param name="item">The record whose blobs are built.</param>
+    /// <param name="item">The row whose metadata blobs are built.</param>
     /// <param name="sourceItem">The item as the source returned it.</param>
     /// <param name="localItem">The matching local item, or null when there is none.</param>
-    /// <param name="syncGenres"><c>true</c> to include genres.</param>
-    /// <param name="syncTags"><c>true</c> to include tags.</param>
+    /// <param name="syncGenres"><c>true</c> to include genres in both blobs.</param>
+    /// <param name="syncTags"><c>true</c> to include tags in both blobs.</param>
     public static void MergeMetadataFields(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
@@ -46,75 +40,38 @@ public static class MetadataSyncMergeService
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(sourceItem);
 
-        // Extract provider IDs as a simple dictionary (external IDs like IMDB, TMDB).
-        // Sort by key to ensure consistent ordering for comparison.
-        // UnwrapKiotaPrimitive is required: AdditionalData values are Kiota
-        // UntypedNode wrappers, and a naive .ToString() yields the type name
-        // instead of the wrapped value, producing permanent IMDB/TMDB desyncs.
         var sourceProviderIds = JsonFieldHelpers.CollapseProviderIds(sourceItem.ProviderIds?.AdditionalData?
             .Select(kvp => new KeyValuePair<string, string>(kvp.Key, MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value) ?? string.Empty)));
 
-        // Extract only simple metadata fields that can be directly copied.
-        // Excluded fields that can't be synced:
-        //   - DateCreated: Read-only, set when item first added to database
         var sourceMetadata = new Dictionary<string, object?>
         {
-            // Core info
             ["Name"] = sourceItem.Name,
             ["OriginalTitle"] = sourceItem.OriginalTitle,
-            // SortName intentionally excluded, servers normalize SortName
-            // from Name independently, so cross-server comparison always
-            // diffs. ForcedSortName (user override) is still synced.
             ["ForcedSortName"] = sourceItem.ForcedSortName,
             ["Overview"] = sourceItem.Overview,
-
-            // Tagline: the source has an array, but only the first is kept since local is singular
             ["Tagline"] = sourceItem.Taglines?.FirstOrDefault(),
-
-            // Ratings
             ["OfficialRating"] = sourceItem.OfficialRating,
             ["CustomRating"] = sourceItem.CustomRating,
             ["CommunityRating"] = sourceItem.CommunityRating,
             ["CriticRating"] = sourceItem.CriticRating,
-
-            // Dates, stored date-only: the apply step syncs these as
-            // calendar dates (DateOnlyEquals), so the blobs must not carry
-            // time-of-day or comparison and apply disagree forever.
             ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(sourceItem.PremiereDate),
             ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(sourceItem.EndDate),
             ["ProductionYear"] = sourceItem.ProductionYear,
-
-            // External provider IDs
             ["ProviderIds"] = sourceProviderIds,
-
-            // Series/Episode info
             ["IndexNumber"] = sourceItem.IndexNumber,
             ["ParentIndexNumber"] = sourceItem.ParentIndexNumber,
-
-            // Language preferences
             ["PreferredMetadataCountryCode"] = sourceItem.PreferredMetadataCountryCode,
             ["PreferredMetadataLanguage"] = sourceItem.PreferredMetadataLanguage,
-
-            // Display/format properties
             ["AspectRatio"] = sourceItem.AspectRatio,
             ["Video3DFormat"] = sourceItem.Video3DFormat?.ToString(),
-
-            // Lock settings (prevents metadata providers from overwriting).
-            // Sort LockedFields so source/local serialize identically, the
-            // JSON comparator compares arrays element-by-element, so an
-            // unsorted source vs an alphabetised local would diff every refresh.
             ["LockedFields"] = sourceItem.LockedFields?.Select(f => f.ToString())
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
-            ["LockData"] = sourceItem.LockData ?? false  // IsLocked - lock this item to prevent future changes
+            ["LockData"] = sourceItem.LockData ?? false
         };
 
         if (syncGenres)
         {
-            // Normalize collapses null / [] / [""] into a single canonical
-            // null on both sides so Jellyfin's storage normalization (which
-            // can return [""] for what was written as []) doesn't produce a
-            // permanent verification mismatch.
             sourceMetadata["Genres"] = StringNormalizationUtility.NormalizeStringArray(sourceItem.Genres);
         }
 
@@ -132,23 +89,18 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Builds the source-side and local-side image manifest blobs. Source-side
-    /// is built from <c>BaseItemDto</c> image tags (free in the bulk list
-    /// response), then sized via carry-forward from
-    /// <paramref name="priorSourceManifestJson"/> when tags are unchanged, or
-    /// a per-item HTTP enrichment call when they aren't, so the
-    /// <see cref="ImageManifestComparator"/> has honest numbers to compare
-    /// against the sized local manifest without paying one GET + one HEAD per
-    /// image on every unchanged item every refresh.
+    /// Builds the source and local image manifests, with the source side read from the item's image tags.
+    /// Sizes carry over from <paramref name="priorSourceManifestJson"/> while the tags match, so only a changed item costs a call to the source.
     /// </summary>
-    /// <param name="item">The record whose manifests are built.</param>
+    /// <param name="item">The row whose image manifests are built.</param>
     /// <param name="sourceItem">The item as the source returned it.</param>
     /// <param name="localItem">The matching local item, or null when there is none.</param>
     /// <param name="client">The client for the source server, or null to skip sizing.</param>
-    /// <param name="priorSourceManifestJson">The last refresh's source manifest, or null.</param>
+    /// <param name="priorSourceManifestJson">The last scan's source manifest, or null.</param>
     /// <param name="deepVerification"><c>true</c> to read each image's size from the source.</param>
-    /// <param name="logger">Logger for operation output.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="logger">Writes a debug entry when sizing fails.</param>
+    /// <param name="cancellationToken">Cancels the calls that size the source images.</param>
+    /// <returns>A task that completes when both manifests are set.</returns>
     public static async Task MergeImagesAsync(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
@@ -161,6 +113,7 @@ public static class MetadataSyncMergeService
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(sourceItem);
+        ArgumentNullException.ThrowIfNull(logger);
 
         var sourceImagesByType = new Dictionary<string, List<ImageInfoDto>>();
         PopulateSourceImagesFromTags(sourceItem, sourceImagesByType);
@@ -185,19 +138,13 @@ public static class MetadataSyncMergeService
                     deepVerification,
                     cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            // Sizing is optional, so any failure but cancellation falls back to tags alone.
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "Source image enrichment failed for {ItemName}. Comparator will fall back to tag-only", item.ItemName);
+                logger.LogDebug(ex, "Source image enrichment failed for {ItemName}. Comparator will fall back to tag-only", FormatUtilities.SanitizeForLog(item.ItemName));
             }
         }
 
-        // UpdateSource recomputes the hash via ImageManifestComparator over
-        // the (now sized) manifest, so the SourceHash short-circuit remains
-        // stable across refreshes.
         item.Images.UpdateSource(sourceManifestJson);
 
         if (localItem != null)
@@ -207,17 +154,13 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Builds the source-side and local-side people blobs (actors, directors,
-    /// writers). Compares by Name + Role + Type rather than GUID so syncing
-    /// across servers with different person IDs still matches. Both sides
-    /// keep billing order: the source DTO already arrives in display order,
-    /// and the local side is put through the same ordering so the apply can
-    /// carry the cast order across instead of alphabetising it.
+    /// Builds the source and local people blobs by name, role, and type, since person ids differ between servers.
+    /// Both sides keep billing order so the cast order syncs too.
     /// </summary>
-    /// <param name="item">The record whose blobs are built.</param>
+    /// <param name="item">The row whose people blobs are built.</param>
     /// <param name="sourceItem">The item as the source returned it.</param>
     /// <param name="localItem">The matching local item, or null when there is none.</param>
-    /// <param name="libraryManager">Reads the local item's people.</param>
+    /// <param name="libraryManager">Reads the local item's people, and is unused when there is no local item.</param>
     public static void MergePeople(
         MetadataSyncItem item,
         BaseItemDto sourceItem,
@@ -272,12 +215,10 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Builds the source-side and local-side studios blobs. Compares by
-    /// studio name only so syncing across servers with different studio IDs
-    /// still matches. Both sides filter null/whitespace symmetrically to
-    /// avoid permanent false-positive diffs.
+    /// Builds the source and local studios blobs by name, since studio ids differ between servers.
+    /// Both sides drop blank names so they never differ on one.
     /// </summary>
-    /// <param name="item">The record whose blobs are built.</param>
+    /// <param name="item">The row whose studios blobs are built.</param>
     /// <param name="sourceItem">The item as the source returned it.</param>
     /// <param name="localItem">The matching local item, or null when there is none.</param>
     public static void MergeStudios(
@@ -317,13 +258,10 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Rebuilds the local-side metadata blob on <paramref name="item"/> from
-    /// the live <paramref name="localItem"/>. Also used by RefreshLocalSnapshot to
-    /// show fresh local state in the modal after a sync apply without re-
-    /// running the full Refresh task.
+    /// Rebuilds the local metadata blob from the live local item, with the same fields as the source blob.
     /// </summary>
-    /// <param name="item">The record to update.</param>
-    /// <param name="localItem">The live local item.</param>
+    /// <param name="item">The row whose local metadata blob is replaced.</param>
+    /// <param name="localItem">The live local item to read.</param>
     /// <param name="syncGenres"><c>true</c> to include genres.</param>
     /// <param name="syncTags"><c>true</c> to include tags.</param>
     public static void RebuildLocalMetadataBlob(MetadataSyncItem item, BaseItem localItem, bool syncGenres, bool syncTags)
@@ -337,7 +275,6 @@ public static class MetadataSyncMergeService
         {
             ["Name"] = localItem.Name,
             ["OriginalTitle"] = localItem.OriginalTitle,
-            // SortName excluded, see source-side comment in MergeMetadataFields.
             ["ForcedSortName"] = localItem.ForcedSortName,
             ["Overview"] = localItem.Overview,
             ["Tagline"] = localItem.Tagline,
@@ -345,7 +282,6 @@ public static class MetadataSyncMergeService
             ["CustomRating"] = localItem.CustomRating,
             ["CommunityRating"] = localItem.CommunityRating,
             ["CriticRating"] = localItem.CriticRating,
-            // Date-only, see source-side comment in MergeMetadataFields.
             ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.PremiereDate),
             ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(localItem.EndDate),
             ["ProductionYear"] = localItem.ProductionYear,
@@ -376,9 +312,10 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Rebuilds the local-side image manifest blob on <paramref name="item"/>
-    /// from on-disk images for <paramref name="localItem"/>.
+    /// Rebuilds the local image manifest from the local item's image files.
     /// </summary>
+    /// <param name="item">The row whose local image manifest is replaced.</param>
+    /// <param name="localItem">The live local item whose images are read.</param>
     public static void RebuildLocalImagesBlob(MetadataSyncItem item, BaseItem localItem)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -412,9 +349,9 @@ public static class MetadataSyncMergeService
                     {
                         fileSize = new System.IO.FileInfo(img.Path).Length;
                     }
+                    // An unreadable image keeps a size of 0.
                     catch (System.IO.IOException)
                     {
-                        // Ignore, leave size at 0
                     }
                 }
 
@@ -437,10 +374,10 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Rebuilds the local-side people blob on <paramref name="item"/>.
+    /// Rebuilds the local people blob in the order the source lists people.
     /// </summary>
-    /// <param name="item">The record to update.</param>
-    /// <param name="localItem">The live local item.</param>
+    /// <param name="item">The row whose local people blob is replaced.</param>
+    /// <param name="localItem">The live local item whose people are read.</param>
     /// <param name="libraryManager">Reads the local item's people.</param>
     public static void RebuildLocalPeopleBlob(MetadataSyncItem item, BaseItem localItem, ILibraryManager libraryManager)
     {
@@ -468,10 +405,10 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Rebuilds the local-side studios blob on <paramref name="item"/>.
+    /// Rebuilds the local studios blob from the local item's studio names.
     /// </summary>
-    /// <param name="item">The record to update.</param>
-    /// <param name="localItem">The live local item.</param>
+    /// <param name="item">The row whose local studios blob is replaced.</param>
+    /// <param name="localItem">The live local item whose studios are read.</param>
     public static void RebuildLocalStudiosBlob(MetadataSyncItem item, BaseItem localItem)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -494,29 +431,15 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Populates the source-side image manifest from <see cref="BaseItemDto"/>
-    /// tags. Tags are returned in the bulk list response for free. Using them
-    /// avoids the per-item HTTP call to <c>/Items/{id}/Images</c>.
+    /// Fills the source image manifest from the image tags the item list already carries, which saves a call per item.
     /// </summary>
     private static void PopulateSourceImagesFromTags(BaseItemDto sourceItem, Dictionary<string, List<ImageInfoDto>> sourceImagesByType)
     {
-        // Process single image types from ImageTags. The values are Kiota
-        // UntypedString wrappers, naive .ToString() returns the type name,
-        // not the tag. Unwrap properly so per-item Tag is the real hash.
         if (sourceItem.ImageTags?.AdditionalData != null)
         {
             foreach (var kvp in sourceItem.ImageTags.AdditionalData)
             {
-                // Skip image types that this sync path can't apply to its
-                // targets. Metadata sync only operates on Movie/Series/Season/
-                // Episode/Album/Artist/BoxSet, never Person, so a Profile
-                // tag in the source DTO (sometimes present on TMDB-imported
-                // metadata for actors associated with a Movie record) cannot
-                // be saved on the local item. Jellyfin's repository drops
-                // such writes silently. Including them here would put the
-                // Profile entry in the source manifest, fail the post-apply
-                // verification ("Profile present on source but missing on
-                // local"), and pin the row in Errored forever.
+                // Jellyfin drops a Profile image on a media item, so tracking one would error forever.
                 if (string.Equals(kvp.Key, "Profile", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -547,9 +470,7 @@ public static class MetadataSyncMergeService
     }
 
     /// <summary>
-    /// Orders local credits the way Jellyfin's DtoService orders the People
-    /// array it returns from the source: SortOrder first, then a fixed person
-    /// type rank, stable over the stored list order.
+    /// Orders local people the way Jellyfin orders the people a source returns, by sort order and then by a fixed rank of person type.
     /// </summary>
     private static IEnumerable<PersonInfo> OrderLikeSourceDto(IReadOnlyList<PersonInfo> people)
     {

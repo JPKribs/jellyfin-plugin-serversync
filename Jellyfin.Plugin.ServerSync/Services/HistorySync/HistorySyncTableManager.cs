@@ -16,10 +16,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.HistorySync;
 
 /// <summary>
-/// Per-table manager for <see cref="HistorySyncItem"/>. Natural key is the
-/// composite (SourceUserId, SourceItemId), one row per source-side
-/// (user, item) pair, regardless of which local user it maps to (the local
-/// side is informational, not part of the key).
+/// Manages the History sync table, with one row for each source user and source item.
+/// The key has two columns, so every key route is overridden and <see cref="KeyColumn"/> goes unused.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public sealed class HistorySyncTableManager
@@ -31,8 +29,8 @@ public sealed class HistorySyncTableManager
     /// Initializes a new instance of the <see cref="HistorySyncTableManager"/> class.
     /// </summary>
     /// <param name="databaseProvider">Gives the sync database.</param>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="configManager">Reads whether a source that is behind counts as work, or null.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="configManager">Reads whether a source that is behind counts as work for each row read, or null.</param>
     public HistorySyncTableManager(
         ISyncDatabaseProvider databaseProvider,
         ILogger<HistorySyncTableManager> logger,
@@ -42,20 +40,12 @@ public sealed class HistorySyncTableManager
         _configManager = configManager;
     }
 
-    // Whether rows should count a source that is behind as work. Not stored on the row, since it is
-    // a property of the current configuration, so every row read from the database is stamped with
-    // the live setting. The dashboard and the sync task then see the same answer the refresh did.
-
     /// <inheritdoc />
     protected override string TableName => "HistorySyncItems";
 
-    // Sentinel, unused, since UpdateStatusByKey is overridden directly to
-    // handle the composite (SourceUserId, SourceItemId) key.
     /// <inheritdoc />
     protected override string KeyColumn => "SourceItemId";
 
-    // History has no Pending status: rows are either Queued or Synced.
-    // Order: Errored, Queued, Ignored, Synced.
     /// <inheritdoc />
     protected override string StatusPriorityOrderBy => @"
         CASE Status
@@ -166,10 +156,9 @@ public sealed class HistorySyncTableManager
     /// <inheritdoc />
     public override void Upsert(HistorySyncItem record)
     {
-        // The negotiated base never moves backwards. A refresh that read the row before a hint or a
-        // negotiation recorded a newer base would otherwise write its older copy over it. The base only
-        // changes to one agreed at least as recently, and a write that carries no base keeps the one held.
         ArgumentNullException.ThrowIfNull(record);
+
+        // The agreed base never moves back, so a scan cannot overwrite a newer one.
         const string NewerBase = "@p_NegotiatedAt IS NOT NULL AND (HistorySyncItems.NegotiatedAt IS NULL OR @p_NegotiatedAt >= HistorySyncItems.NegotiatedAt)";
         var upsert = new UpsertBuilder(TableName)
             .Key("SourceUserId", record.SourceUserId)
@@ -209,12 +198,11 @@ public sealed class HistorySyncTableManager
     }
 
     /// <summary>
-    /// Returns the rows one peer holds for a local item, across local users. Used when that peer
-    /// reports agreement on an item so this server's own row for it can record the agreed base.
+    /// Gets the rows one peer holds for a local item, across local users, so an agreed base can be recorded on each.
     /// </summary>
-    /// <param name="serverKey">The peer's entry key.</param>
+    /// <param name="serverKey">The key of the peer's server entry.</param>
     /// <param name="localItemId">The local item id as stored, without dashes.</param>
-    /// <returns>The rows.</returns>
+    /// <returns>The matching rows, or none.</returns>
     public IList<HistorySyncItem> GetByLocalItem(string serverKey, string localItemId) => ExecuteRead(
         conn =>
         {
@@ -227,11 +215,10 @@ public sealed class HistorySyncTableManager
         Array.Empty<HistorySyncItem>());
 
     /// <summary>
-    /// Returns all history rows for a given user mapping, regardless of
-    /// library, used by the controller to scope queries by user.
+    /// Gets every history row for one user mapping, across libraries.
     /// </summary>
-    /// <param name="sourceUserId">The source user's id.</param>
-    /// <param name="localUserId">The local user's id.</param>
+    /// <param name="sourceUserId">The mapped user's id on the source.</param>
+    /// <param name="localUserId">The mapped user's id on this server.</param>
     /// <returns>The user's history rows.</returns>
     public IList<HistorySyncItem> GetByUserMapping(string sourceUserId, string localUserId) => ExecuteRead(
         conn =>
@@ -245,16 +232,14 @@ public sealed class HistorySyncTableManager
         fallback: Array.Empty<HistorySyncItem>());
 
     /// <summary>
-    /// Searches history items with optional filters. Adds a SourceUserId
-    /// filter beyond what <see cref="Paginate"/> exposes, used by the
-    /// admin UI which can scope the list to a single source user.
+    /// Gets one page of history rows, filtered by text, status, and source user.
     /// </summary>
     /// <param name="searchTerm">Text to find in the item name or source path, or null.</param>
     /// <param name="status">Only rows with this status, or null.</param>
     /// <param name="sourceUserId">Only this source user's rows, or null.</param>
-    /// <param name="skip">Rows to skip.</param>
-    /// <param name="take">Rows to return.</param>
-    /// <returns>The page and the total.</returns>
+    /// <param name="skip">How many matching rows to pass over.</param>
+    /// <param name="take">The most rows to return.</param>
+    /// <returns>The page of rows and the count of every matching row.</returns>
     public (IList<HistorySyncItem> Items, int TotalCount) SearchHistoryItemsPaginated(
         string? searchTerm = null,
         SyncStatus? status = null,
@@ -309,12 +294,18 @@ public sealed class HistorySyncTableManager
         return new PagedResult<HistorySyncItem>((IReadOnlyList<HistorySyncItem>)items, total, skip, pageSize);
     }
 
+    /// <summary>
+    /// Reads a 0 or 1 column as a flag, or null when the column is empty.
+    /// </summary>
     private static bool? ReadNullableBool(IDataRecord reader, string column)
     {
         var ord = reader.GetOrdinal(column);
         return reader.IsDBNull(ord) ? null : reader.GetInt32(ord) == 1;
     }
 
+    /// <summary>
+    /// Binds the parameters of each filter that is set.
+    /// </summary>
     private static void BindFilters(SqliteCommand cmd, string? searchTerm, SyncStatus? status, string? sourceUserId)
     {
         if (!string.IsNullOrWhiteSpace(searchTerm))

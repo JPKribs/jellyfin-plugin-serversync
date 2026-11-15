@@ -8,19 +8,19 @@ using Jellyfin.Plugin.ServerSync.Models.Configuration;
 namespace Jellyfin.Plugin.ServerSync.Services.UserSync;
 
 /// <summary>
-/// Service for merging user data using a source-wins strategy.
+/// Picks which user settings sync and builds the value to apply, where the source wins.
 /// </summary>
 public static class UserSyncMergeService
 {
     /// <summary>
-    /// Translates library IDs from source server to local server using library mappings.
-    /// Used for EnabledFolders and EnableContentDeletionFromFolders properties.
+    /// Translates source library ids to local ones through the enabled library mappings, leaving out any with no mapping.
     /// </summary>
-    /// <param name="sourceLibraryIds">Array of source library IDs.</param>
-    /// <param name="libraryMappings">Available library mappings.</param>
-    /// <returns>Translated local library IDs.</returns>
+    /// <param name="sourceLibraryIds">The library ids as the source holds them, or null for none.</param>
+    /// <param name="libraryMappings">The library mappings that pair each source library with a local one.</param>
+    /// <returns>The local library ids.</returns>
     public static string[] TranslateLibraryIds(string[] sourceLibraryIds, List<LibraryMapping> libraryMappings)
     {
+        ArgumentNullException.ThrowIfNull(libraryMappings);
         if (sourceLibraryIds == null || sourceLibraryIds.Length == 0)
         {
             return Array.Empty<string>();
@@ -37,14 +37,13 @@ public static class UserSyncMergeService
             {
                 localIds.Add(mapping.LocalLibraryId!);
             }
-            // If no mapping found, skip this library (user won't have access)
         }
 
         return localIds.ToArray();
     }
 
     /// <summary>
-    /// Properties that require library ID translation.
+    /// The properties that hold library ids and need translating.
     /// </summary>
     public static readonly HashSet<string> LibraryIdProperties = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -53,74 +52,47 @@ public static class UserSyncMergeService
     };
 
     /// <summary>
-    /// Properties that should NOT be synced (server-specific).
-    /// <para>
-    /// Guid-typed identifiers are rejected by <see cref="IsGuidBearingType"/>
-    /// and don't need naming here. This list exists for the ones reflection
-    /// cannot recognize: identifiers Jellyfin models as <c>string</c>, plus
-    /// runtime state and local-only security settings.
-    /// </para>
+    /// The policy properties that never sync and that <see cref="IsGuidBearingType(Type)"/> cannot spot, such as ids held as strings and local state.
+    /// The "all" switches stay local with the id lists they qualify, and administrator rights stay local so no server grants them on another.
     /// </summary>
     public static readonly HashSet<string> ExcludedPolicyProperties = new(StringComparer.OrdinalIgnoreCase)
     {
-        "EnabledChannels",        // Channel IDs differ (also Guid-typed)
-        "EnabledDevices",         // Device IDs are server-specific (string[])
-        // The "all" switches only mean something next to the id lists above,
-        // and those lists stay local. Copying EnableAllFolders=false onto a
-        // user whose local EnabledFolders is empty locks them out of every
-        // library, and copying true overrides a local restriction.
+        "EnabledChannels",
+        "EnabledDevices",
         "EnableAllFolders",
         "EnableAllChannels",
         "EnableAllDevices",
-        // Library IDs held as strings, so the type walker can't see them.
-        // Untranslated they name libraries that don't exist locally, and
-        // translating them silently drops any library without a mapping,
-        // which revokes local deletion rights the operator never touched.
         "EnableContentDeletionFromFolders",
-        // Administrator rights are granted on each server by its own administrator. Copied, an
-        // administrator of one server, or anyone who can change what that server answers, would
-        // make a mapped user an administrator of this one.
         "IsAdministrator",
-        "InvalidLoginAttemptCount", // Runtime state
-        "AuthenticationProviderId", // Provider-specific
-        "PasswordResetProviderId"   // Provider-specific
+        "InvalidLoginAttemptCount",
+        "AuthenticationProviderId",
+        "PasswordResetProviderId"
     };
 
     /// <summary>
-    /// Properties that should NOT be synced from Configuration.
+    /// The configuration properties that never sync because they hold ids or settings that belong to one server or device.
     /// </summary>
     public static readonly HashSet<string> ExcludedConfigurationProperties = new(StringComparer.OrdinalIgnoreCase)
     {
-        "GroupedFolders",        // UI-specific, IDs differ
-        "OrderedViews",          // UI-specific, IDs differ
-        "LatestItemsExcludes",   // UI-specific, IDs differ
-        "MyMediaExcludes",       // UI-specific, IDs differ
-        "EnableLocalPassword",   // Security, local-only
-        "CastReceiverId"         // Device-specific
+        "GroupedFolders",
+        "OrderedViews",
+        "LatestItemsExcludes",
+        "MyMediaExcludes",
+        "EnableLocalPassword",
+        "CastReceiverId"
     };
 
     /// <summary>
-    /// <c>true</c> when a type carries a Jellyfin identifier: a <see cref="Guid"/>, a
-    /// nullable Guid, a collection of either, or a complex type with a Guid
-    /// anywhere inside it.
-    /// <para>
-    /// Identifiers are per-install. A source server's library, channel, or user
-    /// GUID names nothing on the local server, so copying one into a local
-    /// user's policy either silently grants no access or writes a dangling
-    /// reference. <c>BlockedMediaFolders</c> and <c>BlockedChannels</c> are
-    /// plain <c>Guid[]</c>, and <c>AccessSchedules</c> embeds the source user's
-    /// own <c>UserId</c>, none of which a name-based blocklist caught.
-    /// </para>
-    /// <para>
-    /// Driven by type rather than by name so a future Jellyfin release that
-    /// adds a Guid-bearing field is excluded automatically instead of silently
-    /// syncing until someone notices.
-    /// </para>
+    /// Determines whether a type holds a <see cref="Guid"/> anywhere inside it, since an id from one server names nothing on another.
+    /// The check goes by type and not by name, so a Guid field Jellyfin adds later is left out without a change here.
     /// </summary>
-    /// <param name="type">Property type to inspect.</param>
-    /// <returns><c>true</c> when the type can carry a server-specific identifier.</returns>
+    /// <param name="type">The property type to inspect.</param>
+    /// <returns><c>true</c> when the type can carry an id that belongs to one server.</returns>
     public static bool IsGuidBearingType(Type type) => IsGuidBearingType(type, new HashSet<Type>());
 
+    /// <summary>
+    /// Walks a type for a <see cref="Guid"/>, visiting each type once so a type that refers to itself ends.
+    /// </summary>
     private static bool IsGuidBearingType(Type? type, HashSet<Type> visited)
     {
         if (type == null || !visited.Add(type))
@@ -134,7 +106,6 @@ public static class UserSyncMergeService
             return true;
         }
 
-        // Leaf types can't contain anything.
         if (underlying.IsPrimitive
             || underlying.IsEnum
             || underlying == typeof(string)
@@ -146,7 +117,7 @@ public static class UserSyncMergeService
             return false;
         }
 
-        // Collections: inspect what they hold, not the collection's own members.
+        // A collection is judged by what it holds, not by its own members.
         if (typeof(System.Collections.IEnumerable).IsAssignableFrom(underlying))
         {
             if (underlying.IsArray)
@@ -165,8 +136,6 @@ public static class UserSyncMergeService
             return false;
         }
 
-        // Complex type, one Guid property anywhere makes the whole value unsafe
-        // to copy across servers (AccessSchedule.UserId).
         foreach (var property in underlying.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (IsGuidBearingType(property.PropertyType, visited))
@@ -179,34 +148,32 @@ public static class UserSyncMergeService
     }
 
     /// <summary>
-    /// Checks if a policy property should be synced, by name only. Prefer the
-    /// <see cref="PropertyInfo"/> overload, it also rejects Guid-bearing types.
+    /// Determines whether a policy property syncs, by name alone, which misses a property that holds a Guid.
     /// </summary>
-    /// <param name="propertyName">The property's name.</param>
-    /// <returns><c>true</c> when the property is synced.</returns>
+    /// <param name="propertyName">The property name to look up among the excluded ones.</param>
+    /// <returns><c>true</c> when the property syncs.</returns>
     public static bool ShouldSyncPolicyProperty(string propertyName)
     {
+        ArgumentNullException.ThrowIfNull(propertyName);
         return !ExcludedPolicyProperties.Contains(propertyName);
     }
 
     /// <summary>
-    /// Checks if a configuration property should be synced, by name only.
-    /// Prefer the <see cref="PropertyInfo"/> overload.
+    /// Determines whether a configuration property syncs, by name alone, which misses a property that holds a Guid.
     /// </summary>
-    /// <param name="propertyName">The property's name.</param>
-    /// <returns><c>true</c> when the property is synced.</returns>
+    /// <param name="propertyName">The property name to look up among the excluded ones.</param>
+    /// <returns><c>true</c> when the property syncs.</returns>
     public static bool ShouldSyncConfigurationProperty(string propertyName)
     {
+        ArgumentNullException.ThrowIfNull(propertyName);
         return !ExcludedConfigurationProperties.Contains(propertyName);
     }
 
     /// <summary>
-    /// Checks if a policy property should be synced: not on the name blocklist
-    /// (which covers identifiers Jellyfin models as strings, so reflection
-    /// can't see them) and not carrying a Guid.
+    /// Determines whether a policy property syncs, which needs a name that is not excluded and a type that holds no Guid.
     /// </summary>
-    /// <param name="property">The property to check.</param>
-    /// <returns><c>true</c> when the property is synced.</returns>
+    /// <param name="property">The policy property whose name and type are checked.</param>
+    /// <returns><c>true</c> when the property syncs.</returns>
     public static bool ShouldSyncPolicyProperty(PropertyInfo property)
     {
         ArgumentNullException.ThrowIfNull(property);
@@ -214,11 +181,10 @@ public static class UserSyncMergeService
     }
 
     /// <summary>
-    /// Checks if a configuration property should be synced. See
-    /// <see cref="ShouldSyncPolicyProperty(PropertyInfo)"/>.
+    /// Determines whether a configuration property syncs, which needs a name that is not excluded and a type that holds no Guid.
     /// </summary>
-    /// <param name="property">The property to check.</param>
-    /// <returns><c>true</c> when the property is synced.</returns>
+    /// <param name="property">The configuration property whose name and type are checked.</param>
+    /// <returns><c>true</c> when the property syncs.</returns>
     public static bool ShouldSyncConfigurationProperty(PropertyInfo property)
     {
         ArgumentNullException.ThrowIfNull(property);
@@ -226,19 +192,20 @@ public static class UserSyncMergeService
     }
 
     /// <summary>
-    /// Checks if a property requires library ID translation.
+    /// Determines whether a property holds library ids that need translating.
     /// </summary>
-    /// <param name="propertyName">The property's name.</param>
+    /// <param name="propertyName">The property name to look up.</param>
     /// <returns><c>true</c> when the property holds library ids.</returns>
     public static bool RequiresLibraryTranslation(string propertyName)
     {
+        ArgumentNullException.ThrowIfNull(propertyName);
         return LibraryIdProperties.Contains(propertyName);
     }
 
     /// <summary>
-    /// Extracts syncable policy properties from a policy object and returns as JSON.
+    /// Reads the policy properties that sync into JSON.
     /// </summary>
-    /// <param name="policy">The policy object, or null.</param>
+    /// <param name="policy">The policy object to read, or null.</param>
     /// <returns>The JSON, or null when there is no policy.</returns>
     public static string? ExtractPolicyJson(object? policy)
     {
@@ -251,13 +218,12 @@ public static class UserSyncMergeService
         {
             try
             {
-                // Library id fields are Guid typed and excluded above, so nothing read here needs
-                // translating. ComputeMergedPolicy translates the merged value instead.
                 syncableProps[prop.Name] = prop.GetValue(policy);
             }
+
+            // A property whose getter throws is left out.
             catch (TargetInvocationException)
             {
-                // Skip properties that throw during read
             }
         }
 
@@ -265,9 +231,9 @@ public static class UserSyncMergeService
     }
 
     /// <summary>
-    /// Extracts syncable configuration properties from a config object and returns as JSON.
+    /// Reads the configuration properties that sync into JSON.
     /// </summary>
-    /// <param name="config">The configuration object, or null.</param>
+    /// <param name="config">The configuration object to read, or null.</param>
     /// <returns>The JSON, or null when there is no configuration.</returns>
     public static string? ExtractConfigurationJson(object? config)
     {
@@ -282,9 +248,10 @@ public static class UserSyncMergeService
             {
                 syncableProps[prop.Name] = prop.GetValue(config);
             }
+
+            // A property whose getter throws is left out.
             catch (TargetInvocationException)
             {
-                // Skip properties that throw during read
             }
         }
 
@@ -292,11 +259,11 @@ public static class UserSyncMergeService
     }
 
     /// <summary>
-    /// Computes merged policy JSON (source-wins, with library ID translation).
+    /// Builds the policy to apply from the source's, with its library ids translated to local ones.
     /// </summary>
     /// <param name="sourcePolicy">The source's policy JSON, or empty.</param>
     /// <param name="libraryMappings">The library mappings that translate library ids.</param>
-    /// <returns>The merged JSON, or null when the source policy is empty.</returns>
+    /// <returns>The merged JSON, the source policy unchanged when it cannot be read, or null when it is empty.</returns>
     public static string? ComputeMergedPolicy(string? sourcePolicy, List<LibraryMapping> libraryMappings)
     {
         ArgumentNullException.ThrowIfNull(libraryMappings);
@@ -322,7 +289,6 @@ public static class UserSyncMergeService
                 }
                 else
                 {
-                    // Source-wins: use source value directly
                     mergedDict[kvp.Key] = kvp.Value;
                 }
             }

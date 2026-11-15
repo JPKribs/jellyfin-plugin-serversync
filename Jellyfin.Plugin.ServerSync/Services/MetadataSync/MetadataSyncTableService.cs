@@ -18,13 +18,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.MetadataSync;
 
 /// <summary>
-/// Build orchestration for Metadata Sync records. Owns the shell of a
-/// <see cref="MetadataSyncItem"/> (IDs, paths, library mapping) and delegates
-/// per-category source/local blob building to <see cref="MetadataSyncMergeService"/>.
-/// Also exposes per-modal helpers (<see cref="RefreshLocalSnapshot"/>,
-/// <see cref="EnrichSourceImageSizesAsync"/>) and the per-library local
-/// enumeration the refresh task uses to skip source items with no local
-/// correlate.
+/// Builds <see cref="MetadataSyncItem"/> rows from source items, and refreshes one row's local side and image sizes for the dashboard.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public class MetadataSyncTableService
@@ -37,8 +31,8 @@ public class MetadataSyncTableService
     /// <summary>
     /// Initializes a new instance of the <see cref="MetadataSyncTableService"/> class.
     /// </summary>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="libraryManager">Reads local items and their people.</param>
     /// <param name="localItems">Finds local items by path.</param>
     /// <param name="links">Tells which local files are links.</param>
     public MetadataSyncTableService(
@@ -47,6 +41,10 @@ public class MetadataSyncTableService
         ILocalItems localItems,
         ILinkRegistry links)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(libraryManager);
+        ArgumentNullException.ThrowIfNull(localItems);
+        ArgumentNullException.ThrowIfNull(links);
         _logger = logger;
         _libraryManager = libraryManager;
         _localItems = localItems;
@@ -54,15 +52,10 @@ public class MetadataSyncTableService
     }
 
     /// <summary>
-    /// Re-reads the local side of a record so the modal shows live data
-    /// rather than the snapshot captured at the last metadata refresh. Call
-    /// this from per-item endpoints, without it, a successful Sync apply
-    /// updates local state in Jellyfin but the modal keeps showing the
-    /// pre-sync local blob until the user re-runs the full Refresh task.
-    /// Source-side fields (and all hashes) are left untouched, so this is
-    /// a read-only refresh of the displayed Local columns.
+    /// Reads the local side of a row again, so the dashboard shows live values and not those of the last scan.
+    /// The source side and every hash are left alone.
     /// </summary>
-    /// <param name="item">The record whose local side is re-read.</param>
+    /// <param name="item">The row whose local blobs are replaced.</param>
     /// <param name="syncMetadata"><c>true</c> to re-read the metadata.</param>
     /// <param name="syncImages"><c>true</c> to re-read the images.</param>
     /// <param name="syncPeople"><c>true</c> to re-read the people.</param>
@@ -106,16 +99,13 @@ public class MetadataSyncTableService
     }
 
     /// <summary>
-    /// Enriches the source-side image manifest in <paramref name="item"/>
-    /// with Size / Width / Height fetched from the source server. The refresh
-    /// task builds the source manifest from <c>BaseItemDto.ImageTags</c> for
-    /// performance, tag-only with Size=0, so the modal would otherwise
-    /// render source-side as "0 B" while local has a real KB value. This
-    /// per-modal-open helper compensates with one HTTP call.
+    /// Adds each image's size and dimensions to a row's source manifest with one call to the source.
+    /// A scan may store tags alone, which the dashboard would show as a size of 0.
     /// </summary>
-    /// <param name="item">The record whose source images are enriched.</param>
-    /// <param name="client">The client for the source server.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="item">The row whose source image manifest is sized.</param>
+    /// <param name="client">The client for the source server that holds the images.</param>
+    /// <param name="cancellationToken">Cancels the call to the source.</param>
+    /// <returns>A task that completes when the manifest is sized.</returns>
     public async Task EnrichSourceImageSizesAsync(
         MetadataSyncItem item,
         SourceServerClient client,
@@ -136,13 +126,10 @@ public class MetadataSyncTableService
     }
 
     /// <summary>
-    /// Builds a path → <see cref="BaseItem"/> lookup for the given local
-    /// library folder. Used by the refresh task to skip over source items
-    /// that have no local correlate without paying for a heavy bulk fetch
-    /// of source metadata first. Folders and leaves are returned in
-    /// separate dictionaries so callers can match by item type.
+    /// Builds lookups of a local library's files and folders by path, so a scan can skip source items with no local match.
+    /// Each link is also listed under its source path, and folders are not because their paths match on every server.
     /// </summary>
-    /// <param name="localLibraryId">The local library to read.</param>
+    /// <param name="localLibraryId">The id of the local library to read.</param>
     /// <returns>The leaves and the folders, each by path.</returns>
     public (Dictionary<string, BaseItem> Leaves, Dictionary<string, BaseItem> Folders) GetLocalItemsByPath(Guid localLibraryId)
     {
@@ -171,20 +158,13 @@ public class MetadataSyncTableService
             }
         }
 
-        // Folders keep the same path on every server, so only files can be links.
         LinkPaths.AddAliases(leaves, _links);
         return (leaves, folders);
     }
 
     /// <summary>
-    /// Builds a <see cref="MetadataSyncItem"/> from a source item, or null if
-    /// the source path is missing, the library filter excludes it, or no
-    /// local item matches by translated path. Category flags gate which
-    /// blobs are populated. <paramref name="syncGenres"/> / <paramref name="syncTags"/>
-    /// gate the corresponding subfields inside the metadata blob.
-    /// <paramref name="priorSourceImagesJson"/> is the previous refresh's
-    /// source image manifest for this key, image sizes carry forward from it
-    /// when tags are unchanged, skipping the per-item enrichment HTTP call.
+    /// Builds the metadata row for a source item, with the blobs of each category that is turned on.
+    /// Returns null when the item has no path, the Library Filter leaves it out, or no local item matches its path.
     /// </summary>
     /// <param name="libraryMapping">The library mapping the item came through.</param>
     /// <param name="sourceItem">The item as the source returned it.</param>
@@ -195,11 +175,11 @@ public class MetadataSyncTableService
     /// <param name="syncStudios"><c>true</c> to build the studio blobs.</param>
     /// <param name="syncGenres"><c>true</c> to include genres in the metadata.</param>
     /// <param name="syncTags"><c>true</c> to include tags in the metadata.</param>
-    /// <param name="priorSourceImagesJson">The last refresh's source image manifest for this key, or null.</param>
+    /// <param name="priorSourceImagesJson">The last scan's source image manifest for this key, whose sizes carry over while the tags match, or null.</param>
     /// <param name="deepImageVerification"><c>true</c> to read each image's size from the source.</param>
-    /// <param name="client">The client for the source server.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The record, or null when the item is not to be tracked.</returns>
+    /// <param name="client">The client for the source server, used to size its images.</param>
+    /// <param name="cancellationToken">Cancels the calls that size the source images.</param>
+    /// <returns>The row, or null when the item is not to be tracked.</returns>
     public async Task<MetadataSyncItem?> BuildRecordAsync(
         LibraryMapping libraryMapping,
         BaseItemDto sourceItem,
@@ -219,15 +199,13 @@ public class MetadataSyncTableService
         ArgumentNullException.ThrowIfNull(sourceItem);
 
         var sourcePath = sourceItem.Path;
+        // A virtual season or artist has no path to match locally.
         if (string.IsNullOrEmpty(sourcePath))
         {
-            // Folder items occasionally lack a path (virtual Seasons,
-            // some MusicArtists). They can't be path-matched locally.
             return null;
         }
 
-        // Library-filter exclusion. Returning null causes the base's prune
-        // pass to delete any pre-existing row for this key.
+        // A filtered item returns null so the scan prunes any row it had.
         if (libraryMapping.FilterMode != LibraryFilterMode.AllowAll
             && libraryMapping.FilteredItems?.Count > 0
             && PathUtilities.IsItemFiltered(sourcePath, libraryMapping.SourceRootPath, libraryMapping.FilterMode, libraryMapping.FilteredItems))
@@ -241,8 +219,6 @@ public class MetadataSyncTableService
         var localItem = _localItems.FindByPath(localPath, isFolder: isFolder);
         if (localItem == null)
         {
-            // No local match, skip. If a row existed previously the base
-            // class will prune it.
             return null;
         }
 

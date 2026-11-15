@@ -7,6 +7,7 @@ using Jellyfin.Plugin.ServerSync.Services.Clients;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
 using Jellyfin.Plugin.ServerSync.Utilities;
 using Jellyfin.Sdk.Generated.Models;
+using JPKribs.Jellyfin.Base;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -14,11 +15,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.HistorySync;
 
 /// <summary>
-/// Builder helpers for <see cref="HistorySyncItem"/> records. Translates a
-/// source <see cref="BaseItemDto"/> + (user, library) mapping context into
-/// a fully-populated record with merged target state. Used by the Refresh
-/// task and by inbound history hints. The Sync task applies the merged values
-/// via <see cref="LocalServerClient"/>.
+/// Builds a <see cref="HistorySyncItem"/> with its merged state from a source item, for a scan or an inbound hint.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public class HistorySyncTableService
@@ -31,9 +28,9 @@ public class HistorySyncTableService
     /// <summary>
     /// Initializes a new instance of the <see cref="HistorySyncTableService"/> class.
     /// </summary>
-    /// <param name="logger">Logger instance.</param>
-    /// <param name="userManager">Finds the local user.</param>
-    /// <param name="userDataManager">Reads the local user data.</param>
+    /// <param name="logger">Writes log entries.</param>
+    /// <param name="userManager">Finds the local user of a mapping.</param>
+    /// <param name="userDataManager">Reads the local user's history for an item.</param>
     /// <param name="localItems">Finds local items by path.</param>
     public HistorySyncTableService(
         ILogger<HistorySyncTableService> logger,
@@ -41,6 +38,10 @@ public class HistorySyncTableService
         IUserDataManager userDataManager,
         ILocalItems localItems)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(userManager);
+        ArgumentNullException.ThrowIfNull(userDataManager);
+        ArgumentNullException.ThrowIfNull(localItems);
         _logger = logger;
         _userManager = userManager;
         _userDataManager = userDataManager;
@@ -50,14 +51,14 @@ public class HistorySyncTableService
     /// <summary>
     /// Finds the local user a mapping points at, and logs why when there is none.
     /// </summary>
-    /// <param name="userMapping">The user mapping.</param>
+    /// <param name="userMapping">The user mapping whose local user is wanted.</param>
     /// <returns>The user, or null when the id is invalid or the user is gone.</returns>
     public User? FindLocalUser(UserMapping userMapping)
     {
         ArgumentNullException.ThrowIfNull(userMapping);
         if (!Guid.TryParse(userMapping.LocalUserId, out var localUserId))
         {
-            _logger.LogWarning("Skipping history record: invalid local user ID {Id}", userMapping.LocalUserId);
+            _logger.LogWarning("Skipping history record: invalid local user ID {Id}", FormatUtilities.SanitizeForLog(userMapping.LocalUserId));
             return null;
         }
 
@@ -71,15 +72,13 @@ public class HistorySyncTableService
     }
 
     /// <summary>
-    /// Builds a <see cref="HistorySyncItem"/> from a source item under the
-    /// given mapping context. Returns null when the source path is missing,
-    /// the local user is unknown, the library filter excludes the path, or
-    /// the local item can't be found by translated path.
+    /// Builds the history row for a source item under one user mapping and one library mapping.
+    /// Returns null when the item has no path, the Library Filter leaves it out, or the local user or local item is missing.
     /// </summary>
     /// <param name="userMapping">The user mapping the item is read under.</param>
     /// <param name="libraryMapping">The library mapping the item came through.</param>
     /// <param name="sourceItem">The item as the source returned it, with its user data.</param>
-    /// <param name="sourceItemId">The item's id on the source.</param>
+    /// <param name="sourceItemId">The item's id on the source, stored as half of the row's key.</param>
     /// <param name="negotiateWithSource"><c>true</c> to settle a conflict with the source, not only with this server.</param>
     /// <param name="findUser">Finds the local user for a mapping, or null to look the user up here. A run that builds many rows passes one that remembers its answers.</param>
     /// <returns>The row, or null when the item is not to be tracked.</returns>
@@ -94,6 +93,7 @@ public class HistorySyncTableService
         ArgumentNullException.ThrowIfNull(userMapping);
         ArgumentNullException.ThrowIfNull(libraryMapping);
         ArgumentNullException.ThrowIfNull(sourceItem);
+        ArgumentNullException.ThrowIfNull(sourceItemId);
 
         var sourcePath = sourceItem.Path;
         if (string.IsNullOrEmpty(sourcePath))
@@ -101,9 +101,7 @@ public class HistorySyncTableService
             return null;
         }
 
-        // Library-filter exclusion, items matching the filter are not
-        // tracked. Returning null here causes the base's prune pass to
-        // delete any pre-existing row for this key.
+        // A filtered item returns null so the scan prunes any row it had.
         if (libraryMapping.FilterMode != LibraryFilterMode.AllowAll
             && libraryMapping.FilteredItems?.Count > 0
             && PathUtilities.IsItemFiltered(sourcePath, libraryMapping.SourceRootPath, libraryMapping.FilterMode, libraryMapping.FilteredItems))

@@ -14,10 +14,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.UserSync;
 
 /// <summary>
-/// Per-record build helpers for User Sync. Builds one
-/// <see cref="UserSyncItem"/> for one (mapping, category) tuple, preserving
-/// LastSyncTime and Ignored status from any existing record. No DB writes:
-/// the caller (the Refresh task base) upserts.
+/// Builds one <see cref="UserSyncItem"/> for one user mapping and category, on top of the stored row when there is one.
+/// It writes nothing, since the scan stores the row.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public class UserSyncTableService
@@ -27,27 +25,25 @@ public class UserSyncTableService
     /// <summary>
     /// Initializes a new instance of the <see cref="UserSyncTableService"/> class.
     /// </summary>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     public UserSyncTableService(ILogger<UserSyncTableService> logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
     }
 
     /// <summary>
-    /// Builds a <see cref="UserSyncItem"/> for one (mapping, category) tuple.
-    /// Returns null for an unknown category. The category-specific helpers
-    /// are private, callers go through this single entry point so adding a
-    /// category is a switch-arm addition rather than a new public method.
+    /// Builds the row for one user mapping and one category.
     /// </summary>
-    /// <param name="mapping">The user mapping.</param>
+    /// <param name="mapping">The user mapping the row belongs to.</param>
     /// <param name="category">The property category: Policy, Configuration, or ProfileImage.</param>
     /// <param name="sourceUser">The user as the source returned it.</param>
-    /// <param name="localUserDto">The local user as Jellyfin's API shows it.</param>
-    /// <param name="localUser">The local user's entity.</param>
-    /// <param name="sourceClient">The client for the source server.</param>
-    /// <param name="config">The plugin configuration.</param>
-    /// <param name="existingItem">The stored row, or null.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="localUserDto">The local user as Jellyfin's API shows it, read for its policy and configuration.</param>
+    /// <param name="localUser">The local user's entity, read for its profile image.</param>
+    /// <param name="sourceClient">The client for the source server, used to read the source profile image.</param>
+    /// <param name="config">The plugin configuration, read for library mappings when none are passed.</param>
+    /// <param name="existingItem">The stored row to build on, or null.</param>
+    /// <param name="cancellationToken">Cancels the read of the source profile image.</param>
     /// <param name="libraryMappings">The enabled library mappings, or null to read them from the configuration.</param>
     /// <param name="bothWays">The conflict rule for a Sync server, or null.</param>
     /// <returns>The row, or null for an unknown category.</returns>
@@ -65,7 +61,10 @@ public class UserSyncTableService
         UserConflictRule? bothWays = null)
     {
         ArgumentNullException.ThrowIfNull(mapping);
+        ArgumentNullException.ThrowIfNull(category);
         ArgumentNullException.ThrowIfNull(sourceUser);
+        ArgumentNullException.ThrowIfNull(localUserDto);
+        ArgumentNullException.ThrowIfNull(localUser);
         ArgumentNullException.ThrowIfNull(sourceClient);
         ArgumentNullException.ThrowIfNull(config);
         libraryMappings ??= config.GetEnabledLibraryMappings();
@@ -79,6 +78,9 @@ public class UserSyncTableService
         };
     }
 
+    /// <summary>
+    /// Builds the Policy row, with the source's library ids translated and a Sync server's conflict settled by the rule.
+    /// </summary>
     private static UserSyncItem BuildPolicyItem(
         UserMapping mapping,
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
@@ -107,10 +109,6 @@ public class UserSyncTableService
         item.LocalUserName = localUserDto.Name;
         item.SourceValue = sourcePolicy;
         item.LocalValue = localPolicy;
-        // UpdateMergedValue stores MergedValue (the value to apply) on the
-        // backing SyncableValue and recomputes the source-hash via the
-        // comparator. SyncedHash matches that format after a successful sync,
-        // so the fast-path skip on the next Refresh stays consistent.
         item.UpdateMergedValue(mergedPolicy);
         item.KeepAgreedValue = keep;
         item.StatusDate = DateTime.UtcNow;
@@ -118,16 +116,13 @@ public class UserSyncTableService
     }
 
     /// <summary>
-    /// Decides what one category of a user's settings becomes between this server and a server it
-    /// syncs with, from which of the two changed it since they last agreed. Only the other server
-    /// changed it: its value applies. Only this server changed it: this server's value stays, and the
-    /// other server takes it on its own scan. Both changed it: <paramref name="combine"/> decides.
-    /// Before the two have ever agreed, the other server's value applies.
+    /// Decides what one category becomes between this server and a Sync server, from which of the two changed it since they last agreed.
+    /// The side that changed alone wins, <paramref name="combine"/> decides when both changed, and the other server wins before any agreement.
     /// </summary>
     /// <param name="seen">The stored row, as the last scan left it, or null.</param>
     /// <param name="theirs">The other server's value in this server's terms.</param>
-    /// <param name="mine">This server's value now.</param>
-    /// <param name="combine">Combines the two when both changed.</param>
+    /// <param name="mine">This server's value as it stands.</param>
+    /// <param name="combine">Combines the other server's value with this server's when both changed.</param>
     /// <returns>The value to apply, and whether it is this server's own value being kept.</returns>
     public static (string? Value, bool Keep) SettleBothWays(UserSyncItem? seen, string? theirs, string? mine, Func<string?, string?> combine)
     {
@@ -138,23 +133,22 @@ public class UserSyncTableService
             return (theirs, false);
         }
 
-        // The value to apply is built the same way from the same settings on every scan, so the
-        // fingerprint taken when the two agreed still matches until the other server changes them.
         var theyChanged = !string.Equals(comparator.ComputeHash(theirs), agreed, StringComparison.Ordinal);
         if (!theyChanged)
         {
             return (mine, true);
         }
 
-        // This server changed it too when the last scan already kept a value of its own, or when
-        // its value has moved since that scan. A kept value is a settled row that holds something
-        // other than what the two agreed on. A change still waiting to be applied is neither.
+        // A synced row that differs from the agreed value is one this server kept.
         var keptBefore = seen.Status == Models.Common.SyncStatus.Synced
             && !string.Equals(comparator.ComputeHash(seen.MergedValue), agreed, StringComparison.Ordinal);
         var iChanged = keptBefore || !comparator.Equals(seen.LocalValue, mine);
         return (iChanged ? combine(theirs) : theirs, false);
     }
 
+    /// <summary>
+    /// Builds the Configuration row, where the other server's value stands when both servers changed it.
+    /// </summary>
     private static UserSyncItem BuildConfigurationItem(
         UserMapping mapping,
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
@@ -168,7 +162,6 @@ public class UserSyncTableService
         var keep = false;
         if (bothWays is not null)
         {
-            // Preferences have no more and no less, so when both servers changed them the other server's stand.
             (applied, keep) = SettleBothWays(existingItem, sourceConfig, localConfig, other => other);
         }
 
@@ -189,6 +182,10 @@ public class UserSyncTableService
         return item;
     }
 
+    /// <summary>
+    /// Builds the ProfileImage row from the hash and size of each server's image.
+    /// A source image that cannot be read keeps its last known hash, and with none to keep the error fails the row.
+    /// </summary>
     private async Task<UserSyncItem> BuildProfileImageItemAsync(
         UserMapping mapping,
         Jellyfin.Sdk.Generated.Models.UserDto sourceUser,
@@ -209,22 +206,13 @@ public class UserSyncTableService
             {
                 (sourceImageHash, sourceImageSize) = await sourceClient.GetUserImageHashAndSizeAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            // A null hash would read as a removed image and clear the local one.
+            catch (Exception ex) when (ex is not OperationCanceledException && !string.IsNullOrEmpty(existingItem?.SourceImageHash))
             {
-                throw;
-            }
-            catch (Exception ex) when (!string.IsNullOrEmpty(existingItem?.SourceImageHash))
-            {
-                // The source says the user has an image but it could not be read. A null hash here
-                // would read as "the source removed its image" and the sync would clear the local
-                // one, so keep what the last good read recorded and let the next refresh try again.
-                _logger.LogWarning(ex, "ProfileImage: could not read the source image for {User}, keeping the last known hash", sourceUser.Name);
+                _logger.LogWarning(ex, "ProfileImage: could not read the source image for {User}, keeping the last known hash", FormatUtilities.SanitizeForLog(sourceUser.Name));
                 sourceImageHash = existingItem!.SourceImageHash;
                 sourceImageSize = existingItem.SourceImageSize;
             }
-
-            // With no earlier hash there is nothing to keep, so the exception fails this row and the
-            // refresh skips its prune for the run.
         }
 
         if (localUser.ProfileImage != null && !string.IsNullOrEmpty(localUser.ProfileImage.Path))
@@ -238,9 +226,9 @@ public class UserSyncTableService
                     localImageHash = HashUtilities.ComputeSha256Hash(fileStream);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning(ex, "ProfileImage: failed to compute local hash for {User}", localUser.Username);
+                _logger.LogWarning(ex, "ProfileImage: failed to compute local hash for {User}", FormatUtilities.SanitizeForLog(localUser.Username));
             }
         }
 

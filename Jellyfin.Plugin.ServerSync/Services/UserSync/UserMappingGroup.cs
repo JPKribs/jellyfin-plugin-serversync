@@ -4,20 +4,17 @@ using Jellyfin.Plugin.ServerSync.Models.UserSync;
 namespace Jellyfin.Plugin.ServerSync.Services.UserSync;
 
 /// <summary>
-/// One user mapping with its grouped category items, returned by
-/// <see cref="UserSyncTableManager.PaginateUserMappings"/>. The user-grouping
-/// UI displays all three categories (Policy, Configuration, ProfileImage)
-/// per user as one logical row. This DTO is that shape.
+/// One user mapping with the rows of each of its categories, shown as one row on the Users sync table.
 /// </summary>
 public sealed class UserMappingGroup
 {
     /// <summary>
-    /// Gets the source server user ID.
+    /// Gets the user's id on the source.
     /// </summary>
     public required string SourceUserId { get; init; }
 
     /// <summary>
-    /// Gets the local server user ID.
+    /// Gets the user's id on this server.
     /// </summary>
     public required string LocalUserId { get; init; }
 
@@ -32,8 +29,7 @@ public sealed class UserMappingGroup
     public string? LocalUserName { get; init; }
 
     /// <summary>
-    /// Gets all category items for this mapping (typically up to 3:
-    /// Policy, Configuration, ProfileImage).
+    /// Gets the mapping's rows, one for each of Policy, Configuration, and ProfileImage that is tracked.
     /// </summary>
     public required IList<UserSyncItem> Items { get; init; }
 }

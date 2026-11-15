@@ -6,18 +6,14 @@ using Jellyfin.Plugin.ServerSync.Models.HistorySync;
 namespace Jellyfin.Plugin.ServerSync.Services.HistorySync;
 
 /// <summary>
-/// Merges watch history from the source and local servers. Before the two servers have agreed on
-/// a state, the favorite comes from the source when it has one, the play count is the higher of the
-/// two, and the played group follows the side played most recently. Once they have agreed, each part
-/// is merged against that agreed base instead.
+/// Merges history from the source and this server, against the agreed base once the two have agreed on one.
 /// </summary>
 public static class HistorySyncMergeService
 {
     /// <summary>
-    /// Merges source and local history data to produce the target merged state, then clears every
-    /// part that is switched off.
+    /// Merges source and local history into the merged state, then clears every part that is turned off.
     /// </summary>
-    /// <param name="item">History sync item to update with merged values.</param>
+    /// <param name="item">The history row whose merged values are set.</param>
     public static void MergeHistoryData(HistorySyncItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -29,14 +25,9 @@ public static class HistorySyncMergeService
             return;
         }
 
-        // IsFavorite: take source when it has an opinion, otherwise keep
-        // local. A null source value can mean the response carried no user
-        // data, which must not wipe a local favorite.
+        // Before any agreed base, a source win would wipe favorites held only here.
         if (item.NegotiateWithSource && (item.SourceIsFavorite.HasValue || item.LocalIsFavorite.HasValue))
         {
-            // Before the servers have agreed once there is no way to tell which side changed, and
-            // letting the source win would wipe every favorite that exists only here on the first
-            // run with a Sync server. Keeping both sides' favorites is the only safe first merge.
             item.MergedIsFavorite = (item.SourceIsFavorite ?? false) || (item.LocalIsFavorite ?? false);
         }
         else if (item.SourceIsFavorite.HasValue)
@@ -45,34 +36,35 @@ public static class HistorySyncMergeService
         }
         else
         {
+            // A source with no reading must not wipe a local favorite.
             item.MergedIsFavorite = item.LocalIsFavorite;
         }
 
-        // PlayCount: Take the maximum of Source and Local
         item.MergedPlayCount = Math.Max(item.SourcePlayCount ?? 0, item.LocalPlayCount ?? 0);
-
-        // Played, Position, and LastPlayedDate: Negotiated based on most recent LastPlayedDate
         MergeNegotiatedHistory(item);
         KeepEnabledFields(item);
     }
 
     /// <summary>
-    /// Reads which parts of history may be copied, from the History settings. Every merge, every
-    /// comparison and every state proposed to another server goes by it.
+    /// Gets or sets the reader of which parts of history the History settings allow to sync.
     /// </summary>
     public static Func<HistoryFields> EnabledFields { get; set; } = static () => HistoryFields.All;
 
+    /// <summary>
+    /// The parts held for the calling flow by <see cref="WithFields"/>.
+    /// </summary>
     private static readonly AsyncLocal<HistoryFields?> ScopedFields = new();
 
-    /// <summary>The parts of history that may be copied right now.</summary>
+    /// <summary>
+    /// Gets the parts of history that may sync for the calling flow.
+    /// </summary>
     /// <returns>The enabled parts.</returns>
     public static HistoryFields CurrentFields() => ScopedFields.Value ?? EnabledFields();
 
     /// <summary>
-    /// Holds the enabled parts to a given set for the calling flow until the result is disposed, so
-    /// one piece of work sees one answer whatever the settings do meanwhile.
+    /// Holds the enabled parts to a given set for the calling flow until the result is disposed, so one piece of work sees one answer.
     /// </summary>
-    /// <param name="fields">The parts to copy.</param>
+    /// <param name="fields">The parts to sync while the scope is held.</param>
     /// <returns>Restores the previous answer when disposed.</returns>
     public static IDisposable WithFields(HistoryFields fields)
     {
@@ -81,20 +73,27 @@ public static class HistorySyncMergeService
         return new FieldScope(before);
     }
 
+    /// <summary>
+    /// Restores the previous scoped parts when disposed.
+    /// </summary>
     private sealed class FieldScope : IDisposable
     {
         private readonly HistoryFields? _before;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FieldScope"/> class.
+        /// </summary>
+        /// <param name="before">The scoped parts to restore on dispose.</param>
         public FieldScope(HistoryFields? before) => _before = before;
 
+        /// <inheritdoc/>
         public void Dispose() => ScopedFields.Value = _before;
     }
 
     /// <summary>
-    /// Clears the merged value of every part that is switched off. A merged value that is empty is
-    /// written nowhere and compared with nothing, on this server and on the other.
+    /// Clears the merged value of every part that is turned off, so it is written nowhere and compared with nothing.
     /// </summary>
-    /// <param name="item">The history row.</param>
+    /// <param name="item">The history row whose merged values are cleared.</param>
     public static void KeepEnabledFields(HistorySyncItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -126,11 +125,8 @@ public static class HistorySyncMergeService
     }
 
     /// <summary>
-    /// Three way merge used once the two servers have agreed on a state at least once. Each field, or
-    /// the played group as a whole, is compared against that agreed base. A side that still matches
-    /// the base has not moved and loses to a side that has, which is what lets a favorite removed or an
-    /// item marked unplayed on either server reach the other. When both sides moved the old rules
-    /// break the tie. A null on a side is treated as "no reading" rather than a change.
+    /// Merges each part against the agreed base, so a side that still matches the base loses to a side that moved.
+    /// A null on a side is no reading, not a change, and the first merge rules break a tie when both sides moved.
     /// </summary>
     private static void MergeAgainstBase(HistorySyncItem item)
     {
@@ -150,8 +146,6 @@ public static class HistorySyncMergeService
         }
         else
         {
-            // Neither side moved, so each holds the agreed value or nothing: with no agreed value, a side
-            // holding one would count as moved.
             item.MergedIsFavorite = item.NegotiatedIsFavorite;
         }
 
@@ -171,13 +165,9 @@ public static class HistorySyncMergeService
         }
         else
         {
-            // As for the favorite: with no agreed count, neither side holds one either.
             item.MergedPlayCount = item.NegotiatedPlayCount ?? 0;
         }
 
-        // A part that is switched off has no agreed value, since it is never written to either side.
-        // It is left out of the question of which side moved, or every such part would read as moved
-        // on both sides and a change made on one server alone could never win.
         var fields = CurrentFields();
         bool? Mark(bool? played) => fields.HasFlag(HistoryFields.Played) ? played : null;
         long? Spot(long? position) => fields.HasFlag(HistoryFields.Position) ? position : null;
@@ -215,8 +205,8 @@ public static class HistorySyncMergeService
     }
 
     /// <summary>
-    /// Whether one side's played group differs from the agreed base. A side with no readings at all
-    /// has not moved. A side with readings is compared field by field, with dates at second resolution.
+    /// Whether one side's played group differs from the agreed base, with dates compared to the second.
+    /// Callers pass null for a part that is turned off, since it has no agreed value and would read as moved on both sides.
     /// </summary>
     private static bool PlayGroupMoved(
         bool? played, long? position, DateTime? lastPlayed,
@@ -237,26 +227,23 @@ public static class HistorySyncMergeService
             return true;
         }
 
-        // A side that has a date differing from the base moved. A side whose date is null while the
-        // base has one also moved, since clearing the date is how Jellyfin marks an item unplayed.
         if (lastPlayed.HasValue)
         {
             return !SameInstantToSecond(lastPlayed, baseLastPlayed);
         }
 
+        // Clearing the date is how Jellyfin marks an item unplayed.
         return baseLastPlayed.HasValue && played.HasValue;
     }
 
     /// <summary>
-    /// Merges negotiated history fields (Played, Position, LastPlayedDate) based on
-    /// which server has the more recent LastPlayedDate.
+    /// Takes the played mark, position, and last played date from the side played most recently.
     /// </summary>
     private static void MergeNegotiatedHistory(HistorySyncItem item)
     {
         var sourceDate = item.SourceLastPlayedDate;
         var localDate = item.LocalLastPlayedDate;
 
-        // If neither has a date, use source values if available
         if (!sourceDate.HasValue && !localDate.HasValue)
         {
             item.MergedIsPlayed = item.SourceIsPlayed ?? item.LocalIsPlayed;
@@ -265,28 +252,24 @@ public static class HistorySyncMergeService
         }
         else if (sourceDate.HasValue && !localDate.HasValue)
         {
-            // Only source has a date, use source values
             item.MergedIsPlayed = item.SourceIsPlayed;
             item.MergedLastPlayedDate = sourceDate;
             item.MergedPlaybackPositionTicks = item.SourcePlaybackPositionTicks;
         }
         else if (!sourceDate.HasValue)
         {
-            // Only local has a date, use local values
             item.MergedIsPlayed = item.LocalIsPlayed;
             item.MergedLastPlayedDate = localDate;
             item.MergedPlaybackPositionTicks = item.LocalPlaybackPositionTicks;
         }
         else if (sourceDate.Value >= localDate!.Value)
         {
-            // Both have dates - source was more recently played, use source values
             item.MergedIsPlayed = item.SourceIsPlayed;
             item.MergedLastPlayedDate = sourceDate;
             item.MergedPlaybackPositionTicks = item.SourcePlaybackPositionTicks;
         }
         else
         {
-            // Both have dates - local was more recently played, use local values
             item.MergedIsPlayed = item.LocalIsPlayed;
             item.MergedLastPlayedDate = localDate;
             item.MergedPlaybackPositionTicks = item.LocalPlaybackPositionTicks;
@@ -294,10 +277,10 @@ public static class HistorySyncMergeService
     }
 
     /// <summary>
-    /// Determines if there are meaningful changes to sync for this item.
+    /// Determines whether the merged state asks for a write on this server or on a Sync source.
     /// </summary>
-    /// <param name="item">History sync item to check.</param>
-    /// <returns><c>true</c> if there are changes that need to be synced to local.</returns>
+    /// <param name="item">The history row whose merged and local values are compared.</param>
+    /// <returns><c>true</c> when there is a change to sync.</returns>
     public static bool HasChangesToSync(HistorySyncItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -322,35 +305,27 @@ public static class HistorySyncMergeService
             return true;
         }
 
-        // Second resolution, not exact equality. Jellyfin does not round-trip
-        // sub-second precision through its user-data store, so an exact
-        // comparison reports a difference on the value just written and the
-        // row requeues on every run forever. The post-apply verifier truncates
-        // to seconds for the same reason, and the two have to agree.
+        // Jellyfin drops fractions of a second, so an exact compare would requeue forever.
         if (item.MergedLastPlayedDate.HasValue
             && !SameInstantToSecond(item.MergedLastPlayedDate, item.LocalLastPlayedDate))
         {
             return true;
         }
 
-        // An item merged to unplayed with no date must lose a lingering local date, since that is
-        // how Jellyfin itself records a mark as unplayed.
+        // Jellyfin records an unplayed mark by clearing the date, so a local date must go.
         if (item.MergedIsPlayed == false && !item.MergedLastPlayedDate.HasValue && item.LocalLastPlayedDate.HasValue)
         {
             return true;
         }
 
-        // With a Sync server the source can be the side that is behind. Without this, a change made
-        // only on this server merges to the local value, looks like "nothing to do" here, and never
-        // reaches the source.
+        // A change made only on this server must still reach a Sync source.
         return item.NegotiateWithSource && SourceDiffersFromMerged(item);
     }
 
     /// <summary>
-    /// Whether the source's last read state differs from the merged state in any field the source has
-    /// a reading for.
+    /// Determines whether the source's last read state differs from the merged state in any part the source has a reading for.
     /// </summary>
-    /// <param name="item">History sync item to check.</param>
+    /// <param name="item">The history row whose merged and source values are compared.</param>
     /// <returns><c>true</c> when the source would need a write to hold the merged state.</returns>
     public static bool SourceDiffersFromMerged(HistorySyncItem item)
     {
@@ -377,11 +352,7 @@ public static class HistorySyncMergeService
             return true;
         }
 
-        // Only compare dates when the source has a reading of the item at all. A source with a
-        // played flag but no date really has no date, so a merged date counts as a difference.
-        // With the date switched off the merged date is empty by design, which says nothing about the
-        // source's. Only an item merged to unplayed still asks the source to drop its date, since
-        // that is part of the unplayed mark.
+        // With the date turned off, only an unplayed mark asks the source to drop its date.
         if (!CurrentFields().HasFlag(HistoryFields.LastPlayed))
         {
             return item.MergedIsPlayed == false && item.SourceLastPlayedDate.HasValue;
@@ -391,12 +362,10 @@ public static class HistorySyncMergeService
     }
 
     /// <summary>
-    /// Compares two nullable timestamps at second resolution. The single
-    /// definition of "the same instant" for history sync, used by both the
-    /// change detector and the post-apply verifier so they can never disagree.
+    /// Compares two timestamps to the second, the one definition of the same instant for history sync.
     /// </summary>
-    /// <param name="a">First timestamp.</param>
-    /// <param name="b">Second timestamp.</param>
+    /// <param name="a">The first timestamp, or null for no date.</param>
+    /// <param name="b">The second timestamp, or null for no date.</param>
     /// <returns><c>true</c> when both are null or both land in the same second.</returns>
     public static bool SameInstantToSecond(DateTime? a, DateTime? b)
     {
@@ -416,16 +385,16 @@ public static class HistorySyncMergeService
     /// <summary>
     /// Drops sub-second precision, preserving <see cref="DateTime.Kind"/>.
     /// </summary>
-    /// <param name="value">Timestamp to truncate.</param>
+    /// <param name="value">The timestamp to cut down to whole seconds.</param>
     /// <returns>The timestamp with milliseconds and ticks removed.</returns>
     public static DateTime TruncateToSecond(DateTime value)
         => new DateTime(value.Year, value.Month, value.Day, value.Hour, value.Minute, value.Second, value.Kind);
 
     /// <summary>
-    /// Creates a summary of changes for logging/display purposes.
+    /// Describes the changes the merged state makes to this server, for logs and the dashboard.
     /// </summary>
-    /// <param name="item">History sync item.</param>
-    /// <returns>Human-readable summary of changes.</returns>
+    /// <param name="item">The history row whose local and merged values are compared.</param>
+    /// <returns>A readable list of changes, or "No changes".</returns>
     public static string GetChangeSummary(HistorySyncItem item)
     {
         ArgumentNullException.ThrowIfNull(item);

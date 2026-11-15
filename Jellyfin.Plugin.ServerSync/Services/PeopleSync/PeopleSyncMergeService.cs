@@ -16,18 +16,12 @@ using MediaBrowser.Controller.Entities;
 namespace Jellyfin.Plugin.ServerSync.Services.PeopleSync;
 
 /// <summary>
-/// Per-category merge logic for People Sync. Builds the comparable
-/// representations of a person's metadata + images on the source and local
-/// sides so the <see cref="SyncableValue{T}"/> comparators have honest
-/// inputs. Static class matching <see cref="HistorySyncMergeService"/>,
-/// <see cref="MetadataSyncMergeService"/>, and <see cref="UserSyncMergeService"/>.
+/// Builds the comparable source and local form of a person's metadata and images.
 /// </summary>
 public static class PeopleSyncMergeService
 {
     /// <summary>
-    /// Local image types read into a person's manifest. Primary is the usual
-    /// case, and Backdrop is here because it is the one type a person can
-    /// hold several of.
+    /// The local image types read into a person's manifest, with Backdrop because a person can hold several.
     /// </summary>
     private static readonly LocalImageType[] LocalImageTypes =
     {
@@ -36,44 +30,23 @@ public static class PeopleSyncMergeService
     };
 
     /// <summary>
-    /// Builds a metadata JSON blob from a source <see cref="BaseItemDto"/>
-    /// (person). Mirrors <see cref="MetadataSyncMergeService.MergeMetadataFields"/>'s
-    /// shape so source and local blobs serialize identically (sorted arrays,
-    /// unwrapped Kiota primitives, normalized strings).
+    /// Builds the metadata blob of a source person, with lists sorted and dates as calendar dates so both sides serialize alike.
+    /// Name is left out because it is the match key and Jellyfin recreates a person whose casing is rewritten, and SortName because each server derives it.
     /// </summary>
     /// <param name="sourcePerson">The person as the source returned it.</param>
-    /// <returns>The blob.</returns>
+    /// <returns>The metadata as JSON.</returns>
     public static string BuildSourceMetadata(BaseItemDto sourcePerson)
     {
         ArgumentNullException.ThrowIfNull(sourcePerson);
 
-        // Unwrap Kiota's UntypedNode wrappers. Calling .ToString() directly on
-        // an AdditionalData entry yields the type name, not the wrapped value,
-        // so every provider id would read as "UntypedString" and never match.
         var sourceProviderIds = JsonFieldHelpers.CollapseProviderIds(sourcePerson.ProviderIds?.AdditionalData?
             .Select(kvp => new KeyValuePair<string, string>(kvp.Key, MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value) ?? string.Empty)));
 
-        // Sort all order-insensitive arrays so source and local serialize
-        // identically. The JSON comparator compares element-by-element and
-        // would otherwise flag differently-ordered-but-same-content arrays
-        // as "changed" forever, even after a successful apply.
-        // Name is deliberately absent. It is the match key, compared without
-        // case, so the two sides only ever differ by casing. Writing the
-        // source casing onto the local Person item does not stick: Jellyfin
-        // resolves people by the name held in its credits table, finds the
-        // item path no longer matches, and recreates the item blank under the
-        // old casing. The row then diffs again on every refresh.
         var metadata = new Dictionary<string, object?>
         {
             ["OriginalTitle"] = sourcePerson.OriginalTitle,
-            // SortName excluded, server-derived from Name, never matches
-            // across servers. ForcedSortName is the user override and IS
-            // synced.
             ["ForcedSortName"] = sourcePerson.ForcedSortName,
             ["Overview"] = sourcePerson.Overview,
-            // Birth/death dates stored date-only: the apply step syncs these
-            // as calendar dates (DateOnlyEquals), so the blobs must not carry
-            // time-of-day or comparison and apply disagree forever.
             ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(sourcePerson.PremiereDate),
             ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(sourcePerson.EndDate),
             ["ProductionYear"] = sourcePerson.ProductionYear,
@@ -90,12 +63,10 @@ public static class PeopleSyncMergeService
     }
 
     /// <summary>
-    /// Builds a metadata JSON blob from a local <see cref="BaseItem"/>
-    /// (person). Symmetric with <see cref="BuildSourceMetadata"/>, same
-    /// keys, same sort order, same normalization.
+    /// Builds the metadata blob of a local person, with the same keys and ordering as <see cref="BuildSourceMetadata"/>.
     /// </summary>
-    /// <param name="localPerson">The local person.</param>
-    /// <returns>The blob.</returns>
+    /// <param name="localPerson">The local person to read.</param>
+    /// <returns>The metadata as JSON.</returns>
     public static string BuildLocalMetadata(BaseItem localPerson)
     {
         ArgumentNullException.ThrowIfNull(localPerson);
@@ -105,10 +76,8 @@ public static class PeopleSyncMergeService
         var metadata = new Dictionary<string, object?>
         {
             ["OriginalTitle"] = localPerson.OriginalTitle,
-            // SortName excluded, see source-side comment.
             ["ForcedSortName"] = localPerson.ForcedSortName,
             ["Overview"] = localPerson.Overview,
-            // Date-only, see source-side comment in BuildSourceMetadata.
             ["PremiereDate"] = JsonComparisonUtility.ToDateOnlyString(localPerson.PremiereDate),
             ["EndDate"] = JsonComparisonUtility.ToDateOnlyString(localPerson.EndDate),
             ["ProductionYear"] = localPerson.ProductionYear,
@@ -125,10 +94,7 @@ public static class PeopleSyncMergeService
     }
 
     /// <summary>
-    /// Builds the source side and local side image manifests for a person.
-    /// Source side reads <see cref="BaseItemDto.ImageTags"/> and
-    /// <see cref="BaseItemDto.BackdropImageTags"/>, and local side reads the
-    /// on disk size and dimensions for the same types.
+    /// Builds a person's source image manifest from its image tags, and its local one from the image files.
     /// </summary>
     /// <param name="sourcePerson">The person as the source returned it, or null.</param>
     /// <param name="localPerson">The local person, or null.</param>
@@ -165,13 +131,7 @@ public static class PeopleSyncMergeService
                 }
             }
 
-            // Backdrops arrive as their own tag list, not as an ImageTags
-            // entry, and there can be more than one. This sits outside the
-            // ImageTags guard because a person whose only images are
-            // backdrops has no ImageTags at all, and skipping them there
-            // would leave the manifest null and the backdrops permanently
-            // unsynced. It is assigned last so it wins over any stray single
-            // tag Backdrop entry above.
+            // A person with only backdrops has no ImageTags, so this stands apart.
             if (sourcePerson.BackdropImageTags?.Count > 0)
             {
                 sourceImagesByType["Backdrop"] = sourcePerson.BackdropImageTags
@@ -185,9 +145,6 @@ public static class PeopleSyncMergeService
             }
         }
 
-        // Local images. People usually carry only a Primary, but Backdrop
-        // has to be read too. Otherwise a source with several backdrops has
-        // nothing to compare against and the apply can never be verified.
         if (localPerson != null)
         {
             var localImagesByType = new Dictionary<string, List<ImageInfoDto>>();
@@ -211,9 +168,9 @@ public static class PeopleSyncMergeService
                         {
                             fileSize = new FileInfo(img.Path).Length;
                         }
+                        // An unreadable image keeps a size of 0.
                         catch (IOException)
                         {
-                            // Ignore file access errors
                         }
                     }
 

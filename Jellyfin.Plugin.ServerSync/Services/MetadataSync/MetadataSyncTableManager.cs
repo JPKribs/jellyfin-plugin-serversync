@@ -14,12 +14,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.MetadataSync;
 
 /// <summary>
-/// Per-table manager for <see cref="MetadataSyncItem"/>. Natural key is the
-/// composite (SourceLibraryId, SourceItemId), one row per source-side item
-/// with four parallel <see cref="SyncableValue{T}"/> categories
-/// (Metadata, Images, People, Studios), each with its own
-/// Source/SyncedHash columns to drive the per-category short-circuit on
-/// Refresh.
+/// Manages the Metadata sync table, with one row for each source library and source item and a hash pair for each category.
+/// The key has two columns, so every key route is overridden and <see cref="KeyColumn"/> goes unused.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public sealed class MetadataSyncTableManager
@@ -29,14 +25,15 @@ public sealed class MetadataSyncTableManager
     /// Initializes a new instance of the <see cref="MetadataSyncTableManager"/> class.
     /// </summary>
     /// <param name="databaseProvider">Gives the sync database.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     public MetadataSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<MetadataSyncTableManager> logger)
         : base(databaseProvider, logger)
     {
     }
 
-    // Queuing a row clears every category's synced hash, so the next Sync run applies each category
-    // again instead of skipping the ones it last recorded as applied.
+    /// <summary>
+    /// Clears every category's synced hash when a row is queued, so the next run applies each category again.
+    /// </summary>
     private static readonly string[] _queueClearsSyncedHashes =
     {
         "SyncedMetadataHash = NULL",
@@ -51,12 +48,9 @@ public sealed class MetadataSyncTableManager
     /// <inheritdoc />
     protected override IReadOnlyList<string> OperatorQueueClauses => _queueClearsSyncedHashes;
 
-    // Sentinel, UpdateStatusByKey is overridden directly to handle the
-    // composite key.
     /// <inheritdoc />
     protected override string KeyColumn => "SourceItemId";
 
-    // Order: Errored, Queued, Ignored, Synced. No Pending in this table.
     /// <inheritdoc />
     protected override string StatusPriorityOrderBy => @"
         CASE Status
@@ -93,9 +87,6 @@ public sealed class MetadataSyncTableManager
             item.IsFolder = reader.GetInt32(isFolderOrd) != 0;
         }
 
-        // Bridge property setters recompute the source hash. Bypass them by
-        // setting the underlying SyncableValue fields so the stored hash is
-        // preserved as-written.
         item.Metadata.Source = ReadNullableString(reader, "SourceMetadataValue");
         item.Metadata.Local = ReadNullableString(reader, "LocalMetadataValue");
         item.Metadata.SourceHash = ReadNullableString(reader, "SourceMetadataHash");
@@ -198,18 +189,15 @@ public sealed class MetadataSyncTableManager
     }
 
     /// <summary>
-    /// Searches metadata items with optional filters. Loads the full record
-    /// including the <c>Source*Value</c> / <c>Local*Value</c> JSON blobs so the
-    /// per-category change flags deep-compare to the same result the modal and
-    /// the Compare phase produce. The DTO mapper drops the blobs from the
-    /// response (they aren't shipped to the UI). Only the flags are.
+    /// Gets one page of metadata rows, filtered by text, status, and source library.
+    /// Each row carries its source and local blobs, so its change flags compare the way the scan does.
     /// </summary>
-    /// <param name="searchTerm">Text to find in the item name or paths, or null.</param>
+    /// <param name="searchTerm">Text to find in the item name or source path, or null.</param>
     /// <param name="status">Only rows with this status, or null.</param>
     /// <param name="sourceLibraryId">Only rows from this source library, or null.</param>
-    /// <param name="skip">Rows to skip.</param>
-    /// <param name="take">Rows to return.</param>
-    /// <returns>The page and the total.</returns>
+    /// <param name="skip">How many matching rows to pass over.</param>
+    /// <param name="take">The most rows to return.</param>
+    /// <returns>The page of rows and the count of every matching row.</returns>
     public (IList<MetadataSyncItem> Items, int TotalCount) SearchMetadataSyncItemsPaginated(
         string? searchTerm = null,
         SyncStatus? status = null,
@@ -273,18 +261,12 @@ public sealed class MetadataSyncTableManager
     }
 
     /// <summary>
-    /// Updates the status of many items by primary-key Id in one transaction.
-    /// When transitioning to <see cref="SyncStatus.Queued"/>, also clears all
-    /// four <c>Synced*Hash</c> columns so the next Sync run is forced to
-    /// re-apply each category. Reports the per-call breakdown: rows updated,
-    /// plus the input IDs that didn't match (typically: row was deleted between the user's click and the
-    /// request landing). Bulk endpoints call this so the UI can surface
-    /// "5 of 10 items updated. 5 not found" instead of silently swallowing
-    /// the partial failure.
+    /// Sets the status of many rows by id in one transaction, and reports the ids that matched no row.
+    /// Moving to <see cref="SyncStatus.Queued"/> also clears every synced hash, so the next run applies each category again.
     /// </summary>
-    /// <param name="ids">The primary-key ids to update.</param>
-    /// <param name="status">The new status.</param>
-    /// <param name="reason">The reason, for a status that carries one.</param>
+    /// <param name="ids">The row ids to update.</param>
+    /// <param name="status">The status to move each row to.</param>
+    /// <param name="reason">The reason to store, for a status that carries one.</param>
     /// <returns>How many rows were updated, and the ids that were not found.</returns>
     public (int Updated, IReadOnlyList<long> NotFoundIds) BatchUpdateStatusByIdsWithDetails(
         IEnumerable<long> ids,
@@ -327,6 +309,9 @@ public sealed class MetadataSyncTableManager
         return (count, notFound);
     }
 
+    /// <summary>
+    /// Binds the parameters of each filter that is set.
+    /// </summary>
     private static void BindFilters(SqliteCommand cmd, string? searchTerm, SyncStatus? status, string? sourceLibraryId)
     {
         if (!string.IsNullOrWhiteSpace(searchTerm))

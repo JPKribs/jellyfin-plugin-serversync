@@ -13,8 +13,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.PeopleSync;
 
 /// <summary>
-/// Per-table manager for <see cref="PeopleSyncItem"/>. Natural key is the
-/// person's name.
+/// Manages the People sync table, with one row for each person name.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem, string>
@@ -23,7 +22,7 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
     /// Initializes a new instance of the <see cref="PeopleSyncTableManager"/> class.
     /// </summary>
     /// <param name="databaseProvider">Gives the sync database.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     public PeopleSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<PeopleSyncTableManager> logger)
         : base(databaseProvider, logger)
     {
@@ -50,8 +49,6 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
         item.SourcePersonId = ReadNullableString(reader, "SourcePersonId");
         item.LocalPersonId = ReadNullableString(reader, "LocalPersonId");
 
-        // Bridge property setters are skipped to avoid recomputing hashes from
-        // stored values, so the underlying SyncableValue fields are set directly.
         item.Metadata.Source = ReadNullableString(reader, "SourceMetadataValue");
         item.Metadata.Local = ReadNullableString(reader, "LocalMetadataValue");
         item.Metadata.SourceHash = ReadNullableString(reader, "SourceMetadataHash");
@@ -94,11 +91,6 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
     public override void Upsert(PeopleSyncItem record)
     {
         ArgumentNullException.ThrowIfNull(record);
-
-        // Ignored is sticky: an existing Ignored row is preserved against
-        // automatic transitions from Refresh/Compare/Sync. Reason is also
-        // preserved on Ignored rows so the user-entered reason isn't blown
-        // away by the next cycle.
         var upsert = new UpsertBuilder(TableName)
             .Key("PersonName", record.PersonName)
             .Set("SourcePersonId", record.SourcePersonId)
@@ -125,13 +117,12 @@ public sealed class PeopleSyncTableManager : SyncTableManagerBase<PeopleSyncItem
     }
 
     /// <summary>
-    /// Returns the rows starting at an offset. Paging by offset rather than page number keeps a skip
-    /// that is not a multiple of the page size on the rows the caller asked for.
+    /// Gets the rows starting at an offset, so a skip that is not a multiple of the page size still lands on the rows asked for.
     /// </summary>
-    /// <param name="searchTerm">Optional person name search.</param>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="skip">Rows to skip.</param>
-    /// <param name="take">Rows to return, at most 200.</param>
+    /// <param name="searchTerm">Text to find in the person name, or null.</param>
+    /// <param name="status">Only rows with this status, or null.</param>
+    /// <param name="skip">How many matching rows to pass over.</param>
+    /// <param name="take">The most rows to return, capped at 200.</param>
     /// <returns>The page of rows.</returns>
     public PagedResult<PeopleSyncItem> SearchPaginated(string? searchTerm, SyncStatus? status, int skip, int take)
     {

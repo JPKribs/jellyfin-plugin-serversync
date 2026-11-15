@@ -14,9 +14,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Services.UserSync;
 
 /// <summary>
-/// Per-table manager for <see cref="UserSyncItem"/>. Natural key is the
-/// composite (SourceUserId, LocalUserId, PropertyCategory), three rows per
-/// user mapping (one each for Policy, Configuration, ProfileImage).
+/// Manages the Users sync table, with one row for each user mapping and each of Policy, Configuration, and ProfileImage.
+/// The key has three columns, so every key route is overridden and <see cref="KeyColumn"/> goes unused.
 /// </summary>
 [PluginService(ServiceLifetime.Transient)]
 public sealed class UserSyncTableManager
@@ -26,7 +25,7 @@ public sealed class UserSyncTableManager
     /// Initializes a new instance of the <see cref="UserSyncTableManager"/> class.
     /// </summary>
     /// <param name="databaseProvider">Gives the sync database.</param>
-    /// <param name="logger">Logger instance.</param>
+    /// <param name="logger">Writes log entries.</param>
     public UserSyncTableManager(ISyncDatabaseProvider databaseProvider, ILogger<UserSyncTableManager> logger)
         : base(databaseProvider, logger)
     {
@@ -35,8 +34,6 @@ public sealed class UserSyncTableManager
     /// <inheritdoc />
     protected override string TableName => "UserSyncItems";
 
-    // Sentinel, UpdateStatusByKey is overridden directly to handle the
-    // composite (SourceUserId, LocalUserId, PropertyCategory) key.
     /// <inheritdoc />
     protected override string KeyColumn => "SourceUserId";
 
@@ -124,12 +121,9 @@ public sealed class UserSyncTableManager
     });
 
     /// <summary>
-    /// Counts distinct user mappings (SourceUserId, LocalUserId pairs) that
-    /// have at least one category row in <paramref name="status"/>. A mapping
-    /// with one category Queued and another Errored counts in both buckets,
-    /// matching how the row is rendered by worst-case status.
+    /// Counts the user mappings with at least one row in a status, so a mapping with rows in two statuses counts under both.
     /// </summary>
-    /// <param name="status">The status to count.</param>
+    /// <param name="status">The status a mapping needs a row in to be counted.</param>
     /// <returns>The number of user mappings.</returns>
     public int CountUserMappingsByStatus(SyncStatus status) => ExecuteRead(
         conn =>
@@ -148,13 +142,11 @@ public sealed class UserSyncTableManager
         fallback: 0);
 
     /// <summary>
-    /// Returns all rows (all categories) for a given user mapping. Used by
-    /// the user-grouping UI which displays all three categories per user as
-    /// one logical row.
+    /// Gets every category's row for one user mapping.
     /// </summary>
-    /// <param name="sourceUserId">The source user's id.</param>
-    /// <param name="localUserId">The local user's id.</param>
-    /// <returns>The user's rows.</returns>
+    /// <param name="sourceUserId">The mapped user's id on the source.</param>
+    /// <param name="localUserId">The mapped user's id on this server.</param>
+    /// <returns>The mapping's rows, ordered by category.</returns>
     public IList<UserSyncItem> GetByUserMapping(string sourceUserId, string localUserId) => ExecuteRead(
         conn =>
         {
@@ -170,11 +162,10 @@ public sealed class UserSyncTableManager
         fallback: Array.Empty<UserSyncItem>());
 
     /// <summary>
-    /// Returns one page of distinct user mappings, each with its grouped
-    /// category items. Used by the user-grouping UI.
+    /// Gets one page of user mappings, each with the rows of its categories.
     /// </summary>
     /// <param name="request">The page, search, and status filter asked for.</param>
-    /// <returns>The page.</returns>
+    /// <returns>The page of mappings.</returns>
     public PagedResult<UserMappingGroup> PaginateUserMappings(PaginationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -184,14 +175,13 @@ public sealed class UserSyncTableManager
     }
 
     /// <summary>
-    /// Returns the distinct user mappings starting at an offset, each with its grouped category
-    /// items. Paging by offset rather than page number keeps a skip that is not a multiple of the
-    /// page size on the rows the caller asked for.
+    /// Gets the user mappings starting at an offset, each with the rows of its categories.
+    /// The page's rows come from one query and are grouped in memory, which keeps the database lock short.
     /// </summary>
-    /// <param name="searchTerm">Optional user name search.</param>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="skip">Mappings to skip.</param>
-    /// <param name="take">Mappings to return, at most 200.</param>
+    /// <param name="searchTerm">Text to find in either user name, or null.</param>
+    /// <param name="status">Only mappings with a row in this status, or null.</param>
+    /// <param name="skip">How many matching mappings to pass over.</param>
+    /// <param name="take">The most mappings to return, capped at 200.</param>
     /// <returns>The page of mappings.</returns>
     public PagedResult<UserMappingGroup> SearchUserMappingsPaginated(string? searchTerm, SyncStatus? status, int skip, int take)
     {
@@ -264,9 +254,6 @@ public sealed class UserSyncTableManager
                     }
                 }
 
-                // Fetch all rows for the entire page in one query, then group
-                // in memory, rather than one GetByUserMapping per mapping (up
-                // to 200 SELECTs holding the global write-lock).
                 var groups = new List<UserMappingGroup>();
                 if (mappings.Count == 0)
                 {
@@ -329,12 +316,11 @@ public sealed class UserSyncTableManager
     }
 
     /// <summary>
-    /// Updates status for all categories of multiple user mappings in one
-    /// transaction. Returns the count of rows updated.
+    /// Sets the status of every category of many user mappings in one transaction.
     /// </summary>
-    /// <param name="mappings">The source and local user ids of each mapping.</param>
-    /// <param name="status">The new status.</param>
-    /// <param name="reason">The reason, for a status that carries one.</param>
+    /// <param name="mappings">The source and local user ids of each mapping to update.</param>
+    /// <param name="status">The status to move each row to.</param>
+    /// <param name="reason">The reason to store, for a status that carries one.</param>
     /// <returns>How many rows were updated.</returns>
     public int BulkUpdateStatusByMappings(
         IEnumerable<(string SourceUserId, string LocalUserId)> mappings,
@@ -369,11 +355,10 @@ public sealed class UserSyncTableManager
     }
 
     /// <summary>
-    /// Deletes all rows for a given user mapping (all three categories).
-    /// Returns the number of rows deleted.
+    /// Deletes every category's row for one user mapping.
     /// </summary>
-    /// <param name="sourceUserId">The source user's id.</param>
-    /// <param name="localUserId">The local user's id.</param>
+    /// <param name="sourceUserId">The mapped user's id on the source.</param>
+    /// <param name="localUserId">The mapped user's id on this server.</param>
     /// <returns>How many rows were deleted.</returns>
     public int DeleteByUserMapping(string sourceUserId, string localUserId)
     {
@@ -426,16 +411,14 @@ public sealed class UserSyncTableManager
     }
 
     /// <summary>
-    /// Returns the rows starting at an offset, filtered in the query. Every filter is applied before
-    /// paging, so the total counts the rows that match and each page is full. Filtering a page
-    /// afterwards would shrink pages and leave the total counting rows the filter excluded.
+    /// Gets the rows starting at an offset, with every filter applied in the query so each page is full and the total counts only matches.
     /// </summary>
-    /// <param name="searchTerm">Optional user name search.</param>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="sourceUserId">Optional source user id, matched without regard to case.</param>
-    /// <param name="propertyCategory">Optional category, matched without regard to case.</param>
-    /// <param name="skip">Rows to skip.</param>
-    /// <param name="take">Rows to return, at most 200.</param>
+    /// <param name="searchTerm">Text to find in either user name, or null.</param>
+    /// <param name="status">Only rows with this status, or null.</param>
+    /// <param name="sourceUserId">Only this source user's rows, matched without regard to case, or null.</param>
+    /// <param name="propertyCategory">Only rows of this category, matched without regard to case, or null.</param>
+    /// <param name="skip">How many matching rows to pass over.</param>
+    /// <param name="take">The most rows to return, capped at 200.</param>
     /// <returns>The page of rows.</returns>
     public PagedResult<UserSyncItem> SearchPaginated(
         string? searchTerm,
