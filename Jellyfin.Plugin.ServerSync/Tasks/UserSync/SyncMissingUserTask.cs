@@ -488,7 +488,7 @@ public class SyncMissingUserTask
         {
             using (var fileStream = File.Create(tempPath))
             {
-                await StallWatchdogStream.CopyAsync(new CappedReadStream(imageStream, StreamCaps.MaxSyncedImageBytes), fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
+                await StreamUtilities.CopyWithIdleTimeoutAsync(new CappedReadStream(imageStream, StreamCaps.MaxSyncedImageBytes), fileStream, StreamUtilities.DefaultIdleTimeout, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
 
             string downloadedHash;

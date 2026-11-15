@@ -31,7 +31,7 @@ public class DownloadService
     /// <summary>
     /// How long a download may go without receiving a byte before it counts as stalled.
     /// </summary>
-    public static readonly TimeSpan DefaultStallTimeout = StallWatchdogStream.DefaultIdleTimeout;
+    public static readonly TimeSpan DefaultStallTimeout = StreamUtilities.DefaultIdleTimeout;
 
     /// <summary>
     /// The size of the buffer a copy reads in, which the stall window has to outlast at the speed limit.
@@ -43,9 +43,8 @@ public class DownloadService
     /// </summary>
     private const int MaxSharers = 10;
 
-    private static readonly TimeSpan RateCheckEvery = TimeSpan.FromSeconds(30);
-    private static readonly object SpeedLock = new();
-    private static SpeedBucket? _sharedSpeed;
+    /// <summary>The one speed every Content download draws from, so the limit is the total across Downloads At Once.</summary>
+    private static readonly SpeedBucket SharedSpeed = new(1, StreamCaps.BurstSeconds);
 
     /// <summary>
     /// The most bytes a subtitle from the source may hold, well above the tens of megabytes an image based subtitle runs to.
@@ -518,70 +517,12 @@ public class DownloadService
             }
         }
 
-        await StallWatchdogStream.CopyAsync(
+        await StreamUtilities.CopyWithIdleTimeoutAsync(
             source,
             destination,
             window,
-            (watched, to, token) => CopyAtSharedSpeedAsync(watched, to, Rate, token),
+            (watched, to, token) => StreamUtilities.CopyThrottledAsync(watched, to, SharedSpeed, Rate, cancellationToken: token),
             cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Copies under the one speed all Content downloads share, so the limit is the total across Downloads At Once.
-    /// The speed is read again as the copy runs, so a long download follows the scheduled hours.
-    /// </summary>
-    private static async Task CopyAtSharedSpeedAsync(Stream source, Stream destination, Func<long> rate, CancellationToken cancellationToken)
-    {
-        var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(CopyBufferBytes);
-        try
-        {
-            var bucket = SharedSpeed(rate());
-            var readAt = System.Diagnostics.Stopwatch.GetTimestamp();
-            int read;
-            while ((read = await source.ReadAsync(buffer.AsMemory(0, CopyBufferBytes), cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                if (System.Diagnostics.Stopwatch.GetElapsedTime(readAt) > RateCheckEvery)
-                {
-                    bucket = SharedSpeed(rate());
-                    readAt = System.Diagnostics.Stopwatch.GetTimestamp();
-                }
-
-                if (bucket is not null && bucket.Take(read) is { } wait && wait > TimeSpan.Zero)
-                {
-                    await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
-                }
-            }
-        }
-        finally
-        {
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
-    /// <summary>
-    /// Gets the bucket all downloads draw their speed from, set to the given rate, or null when there is no limit.
-    /// </summary>
-    private static SpeedBucket? SharedSpeed(long bytesPerSecond)
-    {
-        if (bytesPerSecond <= 0)
-        {
-            return null;
-        }
-
-        lock (SpeedLock)
-        {
-            if (_sharedSpeed is null)
-            {
-                _sharedSpeed = new SpeedBucket(bytesPerSecond, StreamCaps.BurstSeconds);
-            }
-            else
-            {
-                _sharedSpeed.SetRate(bytesPerSecond);
-            }
-
-            return _sharedSpeed;
-        }
     }
 
     /// <summary>

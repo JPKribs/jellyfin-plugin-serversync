@@ -329,7 +329,7 @@ public sealed class LinkMediaInfo
                 var file = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
                 await using (file.ConfigureAwait(false))
                 {
-                    await StallWatchdogStream.CopyAsync(new CappedReadStream(body, MaxImageBytes), file, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
+                    await StreamUtilities.CopyWithIdleTimeoutAsync(new CappedReadStream(body, MaxImageBytes), file, StreamUtilities.DefaultIdleTimeout, cancellationToken: cancellationToken).ConfigureAwait(false);
                     if (file.Length == 0 || file.Length > MaxImageBytes)
                     {
                         return false;

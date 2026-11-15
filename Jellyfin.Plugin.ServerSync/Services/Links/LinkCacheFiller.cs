@@ -410,10 +410,10 @@ public sealed class LinkCacheFiller : BackgroundService
                 await using (file.ConfigureAwait(false))
                 {
                     var speed = config.GetEffectiveDownloadSpeedBytes();
-                    await StallWatchdogStream.CopyAsync(
+                    await StreamUtilities.CopyWithIdleTimeoutAsync(
                         new CappedReadStream(body, row.SourceSize),
                         file,
-                        StallWatchdogStream.DefaultIdleTimeout,
+                        StreamUtilities.DefaultIdleTimeout,
                         (from, to, token) => StreamUtilities.CopyWithSpeedLimitAsync(from, to, speed, token),
                         cancellationToken).ConfigureAwait(false);
                 }
