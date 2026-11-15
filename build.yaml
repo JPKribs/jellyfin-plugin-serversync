@@ -42,10 +42,16 @@ changelog:
   - A watch history refresh looked up the same user for every item. A refresh that took 40.5 seconds takes 17.2 on the same data
   - The refusal to save a server whose Server Sync cannot talk to this one showed as a pop up. It shows beside the Save button
   - A settings file with an empty server entry stopped the settings from loading
+  - A server entry asked for with its key in another letter case was sent no pairing secret. The secret is read under the key the entry was saved with
+  - A thumbnail from a server entry that could not be called failed with an error. It shows as no image
+  - An image's size could read 1,5 KB on a server set to a language that writes decimals with a comma
   - The History detail on a phone ran off the side of the screen
   developer:
   - The guides in starthere.md and skills cover naming, style, code, testing, profiling, documentation, review, and release, and docs/Architecture.md maps the parts
   - Tests mirror the source folders, shared fakes live in Fakes, and the tests that measure real time or disk space run in one serial collection
+  - Every source file that holds logic has a test file of its own, the controllers included, and each route is checked for the authorization or peer guard it must carry. The suite grows from 1,264 tests to 4,177
+  - Every namespace matches its folder and every type has a file named after it
+  - Comments follow the code guide. A catch names the exceptions it expects or filters out a cancelled run, and each one left broad says why
   - The image proxy asks the source through SourceServerClientFactory, as every other call does
   - A history fetch no longer asks the source for media sources, which it never read
   - Values another server or a request supplies pass through SanitizeForLog in the link, provider, and whitelist log lines
