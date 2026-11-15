@@ -168,7 +168,7 @@ public abstract class SyncQueueTaskBase<TRecord, TKey> : IScheduledTask, IConfig
 
     /// <summary>
     /// Records why the pre-flight is aborting, so the dashboard shows the real cause instead of the
-    /// generic abort message. Call before returning false from <see cref="BeforeRunAsync"/>.
+    /// generic abort message. Call before returning <c>false</c> from <see cref="BeforeRunAsync"/>.
     /// </summary>
     /// <param name="reason">The cause, in words an operator can act on.</param>
     protected void FailPreflight(string reason)

@@ -6,7 +6,7 @@ using Jellyfin.Sdk.Generated.Models;
 namespace Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
 
 /// <summary>
-/// Source side work item for the Content refresh task, which <see cref="UpdateSyncTablesTask"/> turns into a sync row.
+/// Source side work item for the Content scan task, which <see cref="UpdateSyncTablesTask"/> turns into a sync row.
 /// </summary>
 /// <param name="Source">The server the item came from.</param>
 /// <param name="Mapping">The library mapping the item belongs to.</param>

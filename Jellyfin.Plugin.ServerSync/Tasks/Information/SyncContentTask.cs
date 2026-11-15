@@ -23,7 +23,7 @@ public class SyncContentTask : IScheduledTask, IConfigurableScheduledTask
     /// <summary>
     /// Initializes a new instance of the <see cref="SyncContentTask"/> class.
     /// </summary>
-    /// <param name="services">The service provider the module tasks are built from.</param>
+    /// <param name="services">The service provider the sync type tasks are built from.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
     /// <param name="logger">Writes log entries.</param>
     public SyncContentTask(IServiceProvider services, IPluginConfigurationManager configManager, ILogger<SyncContentTask> logger)

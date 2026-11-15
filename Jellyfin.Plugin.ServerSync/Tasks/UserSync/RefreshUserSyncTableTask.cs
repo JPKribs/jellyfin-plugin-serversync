@@ -17,10 +17,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks.UserSync;
 
 /// <summary>
-/// Refresh phase for User Sync. Expands each enabled user mapping into one
-/// work item per enabled category (Policy / Configuration / ProfileImage),
-/// then builds one <see cref="UserSyncItem"/> per work item. The base handles
-/// upsert, status decision, and pruning.
+/// Scans Users: turns each enabled user mapping into one work item for each category that is on, then builds a <see cref="UserSyncItem"/> for each.
 /// </summary>
 public class RefreshUserSyncTableTask
     : RefreshSyncTaskBase<UserSyncItem, UserCategoryWork, (string SourceUserId, string LocalUserId, string PropertyCategory)>
@@ -33,7 +30,7 @@ public class RefreshUserSyncTableTask
     /// </summary>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="clientFactory">Builds the client for each source.</param>
     /// <param name="userManager">Reads Jellyfin's users.</param>
     /// <param name="builder">Builds user sync rows.</param>
     /// <param name="manager">Reads and writes the sync table.</param>
@@ -100,9 +97,7 @@ public class RefreshUserSyncTableTask
                 var sourceUser = await client.GetUserAsync(sourceUserId, cancellationToken).ConfigureAwait(false);
                 if (sourceUser == null)
                 {
-                    // Source user fetch returned null (a transient API failure and a
-                    // genuinely missing user look the same). Skip pruning this run
-                    // so a network blip doesn't delete the mapping's rows.
+                    // A failed fetch and a missing user look alike, so the prune is skipped.
                     MarkSourceUnavailable($"source server unavailable, source user '{mapping.SourceUserName}' not returned");
                     Logger.LogWarning("Source user {Id} not found. Skipping mapping {Source} -> {Local}",
                         mapping.SourceUserId, mapping.SourceUserName, mapping.LocalUserName);
@@ -112,8 +107,7 @@ public class RefreshUserSyncTableTask
                 var localUser = _userManager.GetUserById(localUserId);
                 if (localUser == null)
                 {
-                    // Local target gone, so this mapping can't be enumerated. Skip
-                    // pruning this run rather than treat its rows as deleted.
+                    // The mapping cannot be listed, so its rows are not treated as removed.
                     MarkSourceUnavailable($"local user '{mapping.LocalUserName}' not found. Mapping rows cannot be re-confirmed");
                     Logger.LogWarning("Local user {Id} not found. Skipping mapping {Source} -> {Local}",
                         mapping.LocalUserId, mapping.SourceUserName, mapping.LocalUserName);
@@ -161,14 +155,9 @@ public class RefreshUserSyncTableTask
                     });
                 }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                // Guid.Parse or GetUserAsync threw. Skip pruning this run so the
-                // mapping's rows survive until the next run confirms source state.
+                // The prune is skipped, so the mapping's rows last until a clean run.
                 MarkSourceUnavailable($"source server unavailable preparing mapping '{mapping.SourceUserName}' -> '{mapping.LocalUserName}'");
                 Logger.LogError(ex, "Error preparing work for mapping {Source} -> {Local}",
                     mapping.SourceUserName, mapping.LocalUserName);
@@ -213,20 +202,19 @@ public class RefreshUserSyncTableTask
         return record;
     }
 
+    /// <summary>Whether the newest change, and not rank, decides which server speaks for a user.</summary>
     private bool Newest => ConfigManager.Configuration.UserSyncPrecedence == SyncPrecedence.Newest;
 
     /// <summary>
-    /// Settings go both ways with a Sync server: a change made here stays until that server takes it.
-    /// From a Pull server they only ever arrive.
+    /// Gets the rule for settings that go both ways with a Sync server, where a change made here stays until that server takes it.
+    /// From a Pull server settings only ever arrive, so there is no rule.
     /// </summary>
     private UserConflictRule? BothWaysRule(SourceServer server)
         => Newest && server.Mode == ServerMode.Sync ? ConfigManager.Configuration.UserSyncConflict : null;
 
     /// <summary>
-    /// One server speaks for a local user's settings on each run: the highest ranked one that changed
-    /// them since this server last looked. When none has, the server whose settings were applied last
-    /// goes on speaking, so a lower ranked server's change is not undone by a higher one that has
-    /// nothing new. Rank decides before anything has been applied.
+    /// Picks the server that speaks for a local user's settings this run: the highest ranked one that changed them since this server last looked, or else the one whose settings were applied last.
+    /// Rank decides before anything has been applied.
     /// </summary>
     /// <inheritdoc />
     protected override Task<IReadOnlyDictionary<string, UserCategoryWork>> ContestAsync(IReadOnlyDictionary<string, IReadOnlyList<UserCategoryWork>> contested, CancellationToken cancellationToken)
@@ -253,8 +241,8 @@ public class RefreshUserSyncTableTask
     }
 
     /// <summary>
-    /// A server passed over before this server has ever looked at it is recorded, so the next run can
-    /// tell whether it has changed since. One already recorded and unchanged needs nothing.
+    /// Records a server passed over before this server has ever looked at it, so the next run can tell whether it has changed since.
+    /// One already recorded needs nothing.
     /// </summary>
     /// <inheritdoc />
     protected override UserCategoryWork? ObservedOffer(UserCategoryWork passedOver, UserCategoryWork speaking)
@@ -281,7 +269,7 @@ public class RefreshUserSyncTableTask
     protected override bool MayOutrankOwner(UserSyncItem record) => Newest;
 
     /// <summary>
-    /// Each server's row records what was last seen of it, which is how it is known to have changed.
+    /// Keeps each server's row when the newest change decides, since the row records what was last seen of that server.
     /// </summary>
     /// <inheritdoc />
     protected override bool CanRetire(UserSyncItem record) => !Newest && base.CanRetire(record);
@@ -308,9 +296,11 @@ public class RefreshUserSyncTableTask
         }
     }
 
+    /// <summary>Gets the stored row for an offer, which holds what was last seen of its server.</summary>
     private UserSyncItem? Seen(UserCategoryWork offer)
         => ExistingRows.TryGetValue((offer.Mapping.SourceUserId, offer.Mapping.LocalUserId, offer.Category), out var row) ? row : null;
 
+    /// <summary>Says whether a server's settings differ from what this server last saw of them.</summary>
     private bool HasChangedSinceSeen(UserCategoryWork offer)
     {
         if (Seen(offer) is not { } seen)
@@ -344,9 +334,8 @@ public class RefreshUserSyncTableTask
         => (record.SourceUserId, record.LocalUserId, record.PropertyCategory);
 
     /// <summary>
-    /// In scope when the row's user mapping is currently enabled. Disabling a
-    /// mapping preserves its rows (including Ignored overrides) instead of
-    /// pruning them.
+    /// Says whether the row's user mapping is on.
+    /// Turning a mapping off keeps its rows, Ignored ones included.
     /// </summary>
     /// <inheritdoc />
     protected override bool IsInScope(UserSyncItem record)

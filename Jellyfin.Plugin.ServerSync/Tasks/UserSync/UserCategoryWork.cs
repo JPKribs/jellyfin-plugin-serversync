@@ -4,7 +4,7 @@ using Jellyfin.Plugin.ServerSync.Tasks.Common;
 namespace Jellyfin.Plugin.ServerSync.Tasks.UserSync;
 
 /// <summary>
-/// One unit of refresh work for Users, a single mapping and category pairing that carries the data
+/// One unit of scan work for Users, a single mapping and category pairing that carries the data
 /// fetched from the source for one source user, so the network calls stay at one per source user.
 /// </summary>
 public sealed class UserCategoryWork

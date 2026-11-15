@@ -5,7 +5,7 @@ using Jellyfin.Sdk.Generated.Models;
 namespace Jellyfin.Plugin.ServerSync.Tasks.MetadataSync;
 
 /// <summary>
-/// Source side work item for the Metadata refresh task, which <see cref="RefreshMetadataSyncTableTask"/> turns into a sync row.
+/// Source side work item for the Metadata scan task, which <see cref="RefreshMetadataSyncTableTask"/> turns into a sync row.
 /// </summary>
 /// <param name="Source">The server the item came from.</param>
 /// <param name="LibraryMapping">The library mapping the item belongs to.</param>

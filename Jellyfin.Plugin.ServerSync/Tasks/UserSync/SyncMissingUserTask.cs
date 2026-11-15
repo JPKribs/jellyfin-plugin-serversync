@@ -22,11 +22,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ServerSync.Tasks.UserSync;
 
 /// <summary>
-/// Sync phase for User. Reads Queued rows and applies the per-category
-/// change (Policy / Configuration / ProfileImage) directly to local users.
-/// On success, mutates the in-memory record so the base's MarkSynced
-/// short-circuit fires next refresh. On failure, throws so the base records
-/// the reason and transitions to <see cref="Models.Common.SyncStatus.Errored"/>.
+/// Applies queued Users rows, one category each, straight to the local user.
+/// A failure throws, so the base stores the reason and makes the row <see cref="Models.Common.SyncStatus.Errored"/>.
 /// </summary>
 public class SyncMissingUserTask
     : SyncQueueTaskBase<UserSyncItem, (string SourceUserId, string LocalUserId, string PropertyCategory)>
@@ -40,12 +37,12 @@ public class SyncMissingUserTask
     /// </summary>
     /// <param name="logger">Writes log entries.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
-    /// <param name="clientFactory">Builds the client for each source server.</param>
+    /// <param name="clientFactory">Builds the client for each source.</param>
     /// <param name="userManager">Reads Jellyfin's users.</param>
     /// <param name="providerManager">Refreshes an item's metadata and images.</param>
     /// <param name="serverConfigurationManager">Reads and saves Jellyfin's server settings.</param>
     /// <param name="manager">Reads and writes the sync table.</param>
-    /// <param name="applied">Records the version each applied value carries, or null when versions are not kept.</param>
+    /// <param name="applied">Records the stamp each applied value carries, or null when stamps are not kept.</param>
     public SyncMissingUserTask(
         ILogger<SyncMissingUserTask> logger,
         IPluginConfigurationManager configManager,
@@ -67,7 +64,7 @@ public class SyncMissingUserTask
         => _applied?.Enter(Models.Queue.HintKind.Users, Guid.TryParse(record?.LocalUserId, out var id) ? HintProtocol.UsersKey(id) : string.Empty);
 
     /// <summary>
-    /// The version is recorded once per user.
+    /// Records the stamp the applied settings carry, once for each user.
     /// </summary>
     /// <inheritdoc />
     protected override async Task AfterApplySucceededAsync(UserSyncItem record, CancellationToken cancellationToken)
@@ -96,9 +93,7 @@ public class SyncMissingUserTask
     public override string Category => "User Sync";
 
     /// <summary>
-    /// The row holds what this server held when it was scanned. Once the other server's settings are
-    /// applied, that is what this server holds, and the next scan tells a change made here by
-    /// comparing against it.
+    /// Stores the applied settings as what this server holds, so the next scan can tell a change made here by comparing against it.
     /// </summary>
     /// <inheritdoc />
     protected override void OnApplySucceeded(UserSyncItem record)
@@ -138,9 +133,6 @@ public class SyncMissingUserTask
                 break;
 
             case UserPropertyCategory.ProfileImage:
-                // ApplyProfileImageAsync already updates Local* fields with the
-                // hash of the bytes it just wrote so VerifyAfterApplyAsync can
-                // compare Local* against Source* in the standard way.
                 await ApplyProfileImageAsync(localUser, record, RequireSource(record).Client, cancellationToken).ConfigureAwait(false);
                 break;
 
@@ -178,6 +170,7 @@ public class SyncMissingUserTask
         return Task.CompletedTask;
     }
 
+    /// <summary>Finds the row's local user, or throws naming the user.</summary>
     private (Guid LocalUserId, User LocalUser) ResolveLocalUser(UserSyncItem record)
     {
         var localUserId = Guid.Parse(record.LocalUserId);
@@ -186,6 +179,7 @@ public class SyncMissingUserTask
         return (localUserId, localUser);
     }
 
+    /// <summary>Reads the policy back and throws naming up to five properties that did not land.</summary>
     private void VerifyPolicyApplied(Guid localUserId, UserSyncItem record)
     {
         var freshUser = _userManager.GetUserById(localUserId)
@@ -235,6 +229,7 @@ public class SyncMissingUserTask
         }
     }
 
+    /// <summary>Reads the configuration back and throws naming up to five properties that did not land.</summary>
     private void VerifyConfigurationApplied(Guid localUserId, UserSyncItem record)
     {
         var freshUser = _userManager.GetUserById(localUserId)
@@ -284,15 +279,13 @@ public class SyncMissingUserTask
         }
     }
 
+    /// <summary>Confirms the row's local image matches the source's, or is gone when the source has none.</summary>
     private static void VerifyProfileImageApplied(UserSyncItem record)
     {
-        // ApplyProfileImageAsync already wrote the downloaded hash into
-        // LocalImageHash. Verifying = confirming Local matches Source.
         var sourceHasNoImage = string.IsNullOrEmpty(record.SourceImageHash)
             && (!record.SourceImageSize.HasValue || record.SourceImageSize <= 0);
         if (sourceHasNoImage)
         {
-            // Apply is "remove local image", verify local has no image.
             var localHasImage = !string.IsNullOrEmpty(record.LocalImageHash)
                 || (record.LocalImageSize.HasValue && record.LocalImageSize > 0);
             if (localHasImage)
@@ -319,11 +312,11 @@ public class SyncMissingUserTask
         }
     }
 
+    /// <summary>Compares two property values, and collections by their JSON.</summary>
     private static bool ScalarEquals(object? a, object? b)
     {
         if (a == null && b == null) return true;
         if (a == null || b == null) return false;
-        // Reflection comparison, for collections, fall back to JSON.
         if (a is System.Collections.IEnumerable ea && b is System.Collections.IEnumerable eb
             && a is not string && b is not string)
         {
@@ -340,6 +333,7 @@ public class SyncMissingUserTask
         config.LastUserSyncTime = utcNow;
     }
 
+    /// <summary>Applies the merged policy to the local user.</summary>
     private Task ApplyPolicyChangesAsync(User localUser, UserSyncItem item)
         => ApplyJsonPropertyChangesAsync(
             localUser,
@@ -349,6 +343,7 @@ public class SyncMissingUserTask
             getTarget: dto => dto.Policy,
             persistAsync: (id, policy) => _userManager.UpdatePolicyAsync(id, policy));
 
+    /// <summary>Applies the merged configuration to the local user.</summary>
     private Task ApplyConfigurationChangesAsync(User localUser, UserSyncItem item)
         => ApplyJsonPropertyChangesAsync(
             localUser,
@@ -359,11 +354,7 @@ public class SyncMissingUserTask
             persistAsync: (id, config) => _userManager.UpdateConfigurationAsync(id, config));
 
     /// <summary>
-    /// Shared apply path for Policy and Configuration: deserialize the merged
-    /// JSON blob, reflect each key onto the typed target object, log unknown
-    /// fields, and call the category-specific persist delegate. Both
-    /// categories had near-identical bodies, this collapses them so a fix
-    /// to the apply loop lands in one place.
+    /// Applies Policy or Configuration: reads the merged JSON, sets each property that may be copied on the typed target, and saves it through the category's own save.
     /// </summary>
     private async Task ApplyJsonPropertyChangesAsync<T>(
         User localUser,
@@ -401,8 +392,7 @@ public class SyncMissingUserTask
             try
             {
                 var property = targetType.GetProperty(kvp.Key);
-                // The merged value is read back from the table, so the rule for what may be copied is
-                // applied again here. A row may hold a property that is not copied.
+                // The merged value comes from the table, so the copy rule is applied again.
                 if (property == null || !property.CanWrite || !maySync(property))
                 {
                     skippedProperties.Add(kvp.Key);
@@ -414,38 +404,36 @@ public class SyncMissingUserTask
                 modified = true;
                 appliedProperties.Add(kvp.Key);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException or InvalidOperationException or System.Reflection.TargetInvocationException or System.Reflection.AmbiguousMatchException)
             {
-                Logger.LogWarning(ex, "{Category}: failed to apply property {Property} for {User}", categoryLabel, kvp.Key, localUser.Username);
+                Logger.LogWarning(ex, "{Category}: failed to apply property {Property} for {User}", categoryLabel, FormatUtilities.SanitizeForLog(kvp.Key), localUser.Username);
             }
         }
 
         if (skippedProperties.Count > 0)
         {
-            // Source server's schema has fields that don't exist (or aren't
-            // settable) on local, cross-Jellyfin-version drift. Surface so
-            // the operator can see what didn't make it across.
+            // Jellyfin versions differ in their settings, so the skipped ones are logged.
             Logger.LogDebug("{Category}: skipped {Count} unknown/unsettable propert(ies) for {User}: {Properties}",
-                categoryLabel, skippedProperties.Count, localUser.Username, string.Join(", ", skippedProperties));
+                categoryLabel, skippedProperties.Count, localUser.Username, FormatUtilities.SanitizeForLog(string.Join(", ", skippedProperties), 300));
         }
 
         if (modified)
         {
             Logger.LogDebug("{Category}: applying {Count} changes for {User}: {Properties}",
-                categoryLabel, appliedProperties.Count, localUser.Username, string.Join(", ", appliedProperties));
+                categoryLabel, appliedProperties.Count, localUser.Username, FormatUtilities.SanitizeForLog(string.Join(", ", appliedProperties), 300));
             await persistAsync(localUser.Id, target).ConfigureAwait(false);
         }
 
         item.LocalValue = item.MergedValue;
     }
 
+    /// <summary>Replaces the local profile image with the source's, staging the download beside the old image so it stays in place until the new one is ready.</summary>
     private async Task ApplyProfileImageAsync(
         User localUser,
         UserSyncItem item,
         SourceServerClient sourceClient,
         CancellationToken cancellationToken)
     {
-        // Already in sync (hash match), populate synced fields and return.
         if (!string.IsNullOrEmpty(item.SourceImageHash)
             && string.Equals(item.SourceImageHash, item.LocalImageHash, StringComparison.OrdinalIgnoreCase))
         {
@@ -454,7 +442,6 @@ public class SyncMissingUserTask
             return;
         }
 
-        // Fallback size match.
         if (string.IsNullOrEmpty(item.SourceImageHash)
             && item.SourceImageSize.HasValue
             && item.LocalImageSize.HasValue
@@ -491,11 +478,7 @@ public class SyncMissingUserTask
             _serverConfigurationManager.ApplicationPaths.UserConfigurationDirectoryPath,
             localUser.Username);
         var profilePath = Path.Combine(userDataPath, "profile.jpg");
-        // Both the download buffer and the staging file live inside the user's
-        // profile directory (a Jellyfin folder), so nothing is written outside
-        // the data tree and File.Move stays intra-filesystem (atomic). Distinct
-        // sentinel names keep the existing profile.jpg working until the new
-        // image is verified and promoted.
+        // Both files sit in the profile folder, so the move stays on one filesystem.
         var stagingPath = Path.Combine(userDataPath, "profile.jpg.serversync.staging");
         var tempPath = Path.Combine(userDataPath, "profile.jpg.serversync.download");
         Directory.CreateDirectory(userDataPath);
@@ -503,8 +486,6 @@ public class SyncMissingUserTask
 
         try
         {
-            // Phase 1: download and hash. tempPath is a fresh temp file, so
-            // failures here don't touch local state.
             using (var fileStream = File.Create(tempPath))
             {
                 await StallWatchdogStream.CopyAsync(new CappedReadStream(imageStream, CappedReadStream.MaxSyncedImageBytes), fileStream, StallWatchdogStream.DefaultIdleTimeout, cancellationToken).ConfigureAwait(false);
@@ -523,15 +504,10 @@ public class SyncMissingUserTask
                     $"Downloaded profile image for {item.SourceUserName ?? item.SourceUserId} was empty (0 bytes)");
             }
 
-            // Phase 2: durably stage the new image inside the user's profile
-            // directory under a sentinel name. If anything below fails after
-            // the stage, the staging file is still present for the next sync
-            // run (or manual recovery) and the user's existing profile.jpg
-            // remains untouched.
+            // Staged first, so a later failure leaves the old image untouched.
             File.Copy(tempPath, stagingPath, overwrite: true);
 
-            // Phase 3: clear the existing image (DB row + file). Safe now
-            // because the new image is already staged on disk.
+            // Safe to clear, since the new image is already staged.
             if (localUser.ProfileImage != null)
             {
                 await _userManager.ClearProfileImageAsync(localUser).ConfigureAwait(false);
@@ -539,15 +515,10 @@ public class SyncMissingUserTask
                     ?? throw new InvalidOperationException("User disappeared after clearing profile image");
             }
 
-            // Phase 4: atomically promote staging → profile.jpg. Single FS
-            // operation, overwrite is safe because Phase 3 just removed
-            // the old profile.jpg.
             File.Move(stagingPath, profilePath, overwrite: true);
             promoted = true;
 
-            // Phase 5: update the DB pointer. Even if this throws, the file
-            // is in place. The next refresh will see source == local on the
-            // file and reconcile the DB row.
+            // The file is in place even if this throws, and the next scan reconciles.
             localUser.ProfileImage = new ImageInfo(profilePath);
             await _userManager.UpdateUserAsync(localUser).ConfigureAwait(false);
 
@@ -571,14 +542,10 @@ public class SyncMissingUserTask
             }
             catch (IOException)
             {
-                // Best-effort cleanup of the in-profile download buffer.
+                // Cleanup is best effort.
             }
 
-            // The staging file is removed only after a successful promotion,
-            // where the move has normally consumed it already. When the move
-            // never happened it is kept, so the new image survives for manual
-            // recovery even if Phase 3 already cleared the old one. The next
-            // sync run overwrites it with a fresh download.
+            // Kept when the move never happened, so the new image can be recovered.
             if (promoted)
             {
                 try
@@ -590,7 +557,7 @@ public class SyncMissingUserTask
                 }
                 catch (IOException)
                 {
-                    // Best-effort cleanup.
+                    // Cleanup is best effort.
                 }
             }
             else if (File.Exists(stagingPath))
