@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.14.1"
+version: "12.4.15.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -38,6 +38,7 @@ changelog:
   - The Storage tab charts how many of the picked server's synced files are copies, links, and cached links, and shows how much of the link cache is used while the cache is on
   - The Whitelist rows are drawn with Base's row editor
   - Skip Items Watched By is a searchable list of checkboxes
+  - An empty Queue shows its message in a box, as the other empty lists do
   - A thumbnail in the Content and History tables is always upright, so an episode still is cropped to fit
   - Addresses in 100.64.0.0/10, the range Tailscale uses, count as a private network. A server entry at such an address needs Allow Private Network Address on, which it is by default
   fixed:

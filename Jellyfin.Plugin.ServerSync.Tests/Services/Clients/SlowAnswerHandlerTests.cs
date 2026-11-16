@@ -16,6 +16,9 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Services.Clients;
 /// </summary>
 public sealed class SlowAnswerHandlerTests
 {
+    /// <summary>How long the slow source takes when it does answer, well past the 50 ms limits used here.</summary>
+    private static readonly TimeSpan Answering = TimeSpan.FromMilliseconds(300);
+
     /// <summary>
     /// The list of every person reaches the source with the retry turned off.
     /// True: the mark set on the SDK request is read from the HTTP request.
@@ -57,7 +60,7 @@ public sealed class SlowAnswerHandlerTests
     public async Task SendAsync_PersonListSlowerThanTheAttemptLimit_AnswersOnce()
     {
         var server = new ClientStubServer().OnJson("/Persons", ClientJson.Page(1, ClientJson.Item(Guid.NewGuid(), "Person", name: "Ada")));
-        using var client = Client(Chain(server));
+        using var client = Client(Chain(server, Answering));
 
         var people = await client.GetAllPersonsAsync();
 
@@ -107,7 +110,7 @@ public sealed class SlowAnswerHandlerTests
     public async Task SendAsync_PersonListPastTheOrdinaryLimit_Answers()
     {
         var server = new ClientStubServer().OnJson("/Persons", ClientJson.Page(0));
-        using var client = Client(new SlowAnswerHandler(TimeSpan.FromMilliseconds(50)) { InnerHandler = new Slow { InnerHandler = server } });
+        using var client = Client(new SlowAnswerHandler(TimeSpan.FromMilliseconds(50)) { InnerHandler = new Slow(Answering) { InnerHandler = server } });
 
         var people = await client.GetAllPersonsAsync();
 
@@ -142,8 +145,8 @@ public sealed class SlowAnswerHandlerTests
     private static SourceServerClient Client(HttpMessageHandler handler)
         => new(NullLogger<SourceServerClient>.Instance, new HttpClient(handler), ClientStubServer.Url, "key", "test", "1.2.3.4");
 
-    /// <summary>Builds the plugin's handler order over a source that takes 300 ms to answer, with a 50 ms attempt limit.</summary>
-    private static SlowAnswerHandler Chain(ClientStubServer server)
+    /// <summary>Builds the plugin's handler order over a slow source, with a 50 ms attempt limit.</summary>
+    private static SlowAnswerHandler Chain(ClientStubServer server, TimeSpan? wait = null)
     {
         var retry = new JpkRetryHandler(new JpkRetryOptions
         {
@@ -152,18 +155,25 @@ public sealed class SlowAnswerHandlerTests
             Delay = (_, _) => Task.CompletedTask
         })
         {
-            InnerHandler = new Slow { InnerHandler = server }
+            InnerHandler = new Slow(wait) { InnerHandler = server }
         };
         return new SlowAnswerHandler { InnerHandler = retry };
     }
 
-    /// <summary>Waits before passing a request on, as a source building a large answer does.</summary>
+    /// <summary>
+    /// Waits before passing a request on, as a source building a large answer does.
+    /// With no wait given it never answers, so only a cancellation ends the request and no test rests on which timer fires first.
+    /// </summary>
     private sealed class Slow : DelegatingHandler
     {
+        private readonly TimeSpan _wait;
+
+        public Slow(TimeSpan? wait = null) => _wait = wait ?? Timeout.InfiniteTimeSpan;
+
         /// <inheritdoc />
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken).ConfigureAwait(false);
+            await Task.Delay(_wait, cancellationToken).ConfigureAwait(false);
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
     }

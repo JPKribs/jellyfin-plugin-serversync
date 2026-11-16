@@ -3,10 +3,10 @@
 Releases use a four part version, `JJ.JJ.F.B`. It matches the supported Jellyfin version, followed by the plugin's own feature and bug count:
 
 ```
-12.4.14.0
+12.4.15.0
 └┬─┘ └┬┘└
  │    │ └ 0 = Plugin bug release within that feature
- │    └─── 14 = Plugin feature release
+ │    └─── 15 = Plugin feature release
  └──────── 12.4 = Jellyfin version this build is released for
 ```
 
@@ -20,13 +20,13 @@ A server that reports no protocol is compatible only when it runs exactly the sa
 
 ## Updating From an Older Release
 
-Version 12.4.14.0 carries no upgrade steps for anything older than 12.4.13.0. It opens the database and settings that 12.4.13.0 leaves behind, and nothing before them.
+Version 12.4.15.0 carries no upgrade steps for anything older than 12.4.13.0. It opens the database and settings that 12.4.13.0 leaves behind, and nothing before them.
 
 To update a server that runs a release before 12.4.13.0:
 
 1. Install 12.4.13.0 and restart Jellyfin.
 2. Leave it running for a day. It converts the database and the settings when it starts, and marks the copies it already tracks during its upkeep, which waits for a moment when no content task is running.
-3. Update to 12.4.14.0 and restart Jellyfin.
+3. Update to 12.4.15.0 and restart Jellyfin.
 
 A server already on 12.4.13.0 or later updates directly.
 
