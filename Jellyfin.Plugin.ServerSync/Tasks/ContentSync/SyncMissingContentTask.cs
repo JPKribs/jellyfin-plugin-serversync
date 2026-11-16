@@ -309,27 +309,7 @@ public class SyncMissingContentTask
     /// It returns <c>false</c> when there are too many for that to be cheaper than one full scan, which the caller then runs.
     /// </summary>
     private bool RefreshChangedFolders()
-    {
-        var folders = ChangedFolders.For(_changedFiles);
-        if (folders.Count == 0 || folders.Count > ChangedFolders.MaxTargeted)
-        {
-            return false;
-        }
-
-        if (!ChangedFolders.AllReachable(folders, IsLibraryFolder))
-        {
-            Logger.LogInformation("Jellyfin has not yet scanned the library folder for a changed file, as happens on a first sync into an empty library, so the whole library is scanned");
-            return false;
-        }
-
-        foreach (var folder in folders)
-        {
-            _libraryMonitor.ReportFileSystemChanged(folder);
-        }
-
-        Logger.LogInformation("Asked Jellyfin to refresh {Count} changed folder(s)", folders.Count);
-        return true;
-    }
+        => ChangedFolders.Report(_changedFiles, _libraryMonitor.ReportFileSystemChanged, IsLibraryFolder, Logger);
 
     /// <summary>
     /// Weighs a row by its file size, so the run's progress follows bytes moved and not files finished.

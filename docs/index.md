@@ -27,7 +27,7 @@ When several servers are set up, their order on the **Servers** tab is their ran
 | `/media/Movies/Film (2020)/Film (2020).mkv` | `/data/Movies/Film/Film.mkv` | No, the names differ |
 
 * A library must be a single folder.
-* A renamed file on the source is usually downloaded again under its new name, and the old one follows **Removed files**.
+* A file renamed or given a new container on the source follows to its new name here when it stays in the same folder. A file moved to another folder is downloaded again, and the old one follows **Removed files**.
 * A download that drops partway resumes on retry when the source supports it. One cut off by a cancelled run or a restart starts over.
 * A changed file is found by its size.
 * Servers in a pool need compatible Server Sync protocols, not the same version. A server whose protocol does not overlap is left alone until it does.

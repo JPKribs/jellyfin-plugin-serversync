@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using JPKribs.Jellyfin.Base;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.ServerSync.Utilities;
 
@@ -42,6 +44,54 @@ public static class ChangedFolders
         }
 
         return kept;
+    }
+
+    /// <summary>
+    /// Tells Jellyfin which folders changed, so it refreshes those and nothing else. A folder that is gone is reported as the nearest folder above it that is still there.
+    /// It returns <c>false</c> when there are too many for that to be cheaper than one full scan, or Jellyfin does not know a folder yet, and the caller then scans.
+    /// </summary>
+    /// <param name="changedFiles">The files written, moved, or removed.</param>
+    /// <param name="report">Reports one folder to Jellyfin.</param>
+    /// <param name="isLibraryFolder">Whether Jellyfin holds a library folder at a path.</param>
+    /// <param name="logger">Writes how many folders were reported.</param>
+    /// <returns><c>true</c> when every folder was reported.</returns>
+    public static bool Report(IEnumerable<string> changedFiles, Action<string> report, Func<string, bool> isLibraryFolder, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(isLibraryFolder);
+        ArgumentNullException.ThrowIfNull(logger);
+        var folders = For(For(changedFiles).Select(ExistingFolder).Where(f => f is not null).Select(f => Path.Combine(f!, "x")));
+        if (folders.Count == 0 || folders.Count > MaxTargeted)
+        {
+            return false;
+        }
+
+        if (!AllReachable(folders, isLibraryFolder))
+        {
+            logger.LogInformation("Jellyfin has not yet scanned the library folder for a changed file, as happens on a first sync into an empty library, so the whole library is scanned");
+            return false;
+        }
+
+        foreach (var folder in folders)
+        {
+            report(folder);
+        }
+
+        logger.LogInformation("Asked Jellyfin to refresh {Folders}", FormatUtilities.SanitizeForLog(string.Join(", ", folders), 500));
+        return true;
+    }
+
+    /// <summary>Finds the folder itself, or the nearest folder above it that still exists, or null when none does.</summary>
+    private static string? ExistingFolder(string folder)
+    {
+        var path = folder;
+        while (!string.IsNullOrEmpty(path) && !Directory.Exists(path))
+        {
+            var parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(path));
+            path = string.Equals(parent, path, StringComparison.Ordinal) ? null : parent;
+        }
+
+        return string.IsNullOrEmpty(path) ? null : path;
     }
 
     /// <summary>

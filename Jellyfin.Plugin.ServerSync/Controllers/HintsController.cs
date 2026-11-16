@@ -513,17 +513,20 @@ public class HintsController : ControllerBase
 
         foreach (var change in _observer.Gathering().Take(OverviewRows))
         {
-            var item = change.ItemId == Guid.Empty ? null : _libraryManager.GetItemById(change.ItemId);
+            // A file whose removal is held is gone from the library, so it is named from its path.
+            var item = change.ItemId == Guid.Empty || change.RemovedPath is not null ? null : _libraryManager.GetItemById(change.ItemId);
             var userName = change.UserId == Guid.Empty ? null : _userManager.GetUserById(change.UserId)?.Username;
             var name = change.Kind is HintKind.People or HintKind.Playlists ? item?.Name : userName;
-            var (title, subtitle) = DisplayOf(item, change.Kind, name);
+            var (title, subtitle) = change.RemovedPath is { } removedPath
+                ? (System.IO.Path.GetFileNameWithoutExtension(removedPath), (string?)null)
+                : DisplayOf(item, change.Kind, name);
             overview.Gathering.Add(new GatheringDto
             {
                 Kind = change.Kind,
-                Change = HintActivityLog.Subject(change.Kind, item?.Path, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N")),
+                Change = HintActivityLog.Subject(change.Kind, item?.Path ?? change.RemovedPath, name, change.ItemId == Guid.Empty ? change.UserId.ToString("N") : change.ItemId.ToString("N")),
                 Title = title,
                 Subtitle = subtitle,
-                ItemType = item?.GetType().Name,
+                ItemType = change.RemovedPath is not null ? HintProtocol.ContentRemoved : item?.GetType().Name,
                 ItemId = change.ItemId == Guid.Empty ? null : change.ItemId.ToString("N"),
                 UserId = change.UserId == Guid.Empty ? null : change.UserId.ToString("N"),
                 UserName = userName,

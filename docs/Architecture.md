@@ -144,7 +144,7 @@ Peer routes need a signed in caller and the whitelist. Operator routes need an a
 
 A change travels as a hint that says what changed, never the value. The receiver pulls the value itself.
 
-1. **Observe.** `Services/Queue/LocalChangeObserver` listens to Jellyfin's user data and library events. It stays quiet for a write Server Sync made itself, a file it downloaded, a metadata fill from another server, and anything no peer wants.
+1. **Observe.** `Services/Queue/LocalChangeObserver` listens to Jellyfin's user data and library events. It stays quiet for a write Server Sync made itself, a file it downloaded, a metadata fill from another server, and anything no peer wants. A file rewritten in place is told by a file time newer than its Content stamp. A file that leaves the library is held for `HintProtocol.RemovalHold` before it is published, so the new file of a rename goes first.
 2. **Stamp.** A hand made edit is stamped at once in `ObjectVersions` with this server and the time. History is also stamped by part, played or favorite, as `HistoryParts` names them.
 3. **Gather.** The change waits until the item has gone untouched for **Send Changes After**.
 4. **Publish.** `LocalHintPublisher` writes one `OutboundHints` row per server that this one pushes to and that wants it. `LoopBreaker` holds a change that keeps coming back.
@@ -156,7 +156,7 @@ A change travels as a hint that says what changed, never the value. The receiver
     | :--- | :--- |
     | History | `HistoryHintHandler` merges three way and writes. When the agreed base cannot be used, it takes only the parts the hint names, each by its own stamp |
     | Metadata, People | `ItemHintHandler` decides with `VersionDecider` and applies through the apply task |
-    | Content | `ContentHintHandler` downloads a new file. For a file that left the source, it moves the link to another holder with `LinkRehomer`, or removes it |
+    | Content | `ContentHintHandler` downloads a new file. A new id in the folder of a gone file is paired with its row by `RenameMatcher` and re-keyed, so the file moves or is replaced. Every change to a linked file writes the link again. For a file that left the source, it moves the link to another holder with `LinkRehomer`, or removes it, and applies Removed files to a copy at once |
     | Playlists | `PlaylistHintHandler` mirrors through `PlaylistMirror`, and deletes or keeps a copy by **Removed Playlists** |
 
     A history hint names its parts in its item type, such as `Movie+Played`, written by `HintProtocol.HistoryItemType`.

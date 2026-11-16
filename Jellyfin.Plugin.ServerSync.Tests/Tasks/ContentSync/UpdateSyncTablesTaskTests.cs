@@ -773,11 +773,11 @@ public sealed class UpdateSyncTablesTaskTests : IDisposable
 
     /// <summary>
     /// A scheduled link is deleted even with Keep and the recycling bin on: the .strm, the files beside
-    /// it, its folder, and the show's folder once that holds only artwork and an nfo. A copy scheduled
-    /// earlier is left alone with Keep, and a folder that still holds something stays.
-    /// True: a dead link leaves nothing behind, and nothing else is touched.
-    /// False: empty show folders and stray nfo files are left in the library, links fill the recycling
-    /// bin, or a kept copy is deleted.
+    /// it, and its folder. The show's folder stays while it holds artwork and an nfo Server Sync did not
+    /// write. A copy scheduled earlier is left alone with Keep, and a folder that still holds something stays.
+    /// True: a dead link leaves nothing of its own behind, and nothing else is touched.
+    /// False: the show's own artwork is deleted, empty season folders are left in the library, links fill
+    /// the recycling bin, or a kept copy is deleted.
     /// </summary>
     [Fact]
     public void PendingDeletions_WithKeep_RemoveLinksAndTheirFolders_NotCopies()
@@ -805,7 +805,9 @@ public sealed class UpdateSyncTablesTaskTests : IDisposable
 
         Assert.Equal(2, deleted);
         Assert.Equal(0, failed);
-        Assert.False(Directory.Exists(show));
+        Assert.False(Directory.Exists(season));
+        Assert.True(File.Exists(Path.Combine(show, "poster.jpg")));
+        Assert.True(File.Exists(Path.Combine(show, "tvshow.nfo")));
         Assert.False(File.Exists(sharedLink.LocalPath));
         Assert.True(File.Exists(Path.Combine(shared, "other.mkv")));
         Assert.True(Directory.Exists(_localRoot));

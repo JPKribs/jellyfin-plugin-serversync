@@ -407,10 +407,11 @@ public sealed class OutboundHintWorker : IHostedService, IDisposable
         return kept;
     }
 
-    /// <summary>Whether the object a row names still exists here, where a playlist deletion always counts.</summary>
+    /// <summary>Whether the object a row names still exists here, where a playlist deletion and a file's removal always count, since their object is gone by design.</summary>
     private bool Exists(OutboundHint row)
     {
-        if (row.Kind == HintKind.Playlists && HintProtocol.IsPlaylistDeletion(row.ItemType))
+        if ((row.Kind == HintKind.Playlists && HintProtocol.IsPlaylistDeletion(row.ItemType))
+            || (row.Kind == HintKind.Content && HintProtocol.IsContentRemoval(row.ItemType)))
         {
             return true;
         }

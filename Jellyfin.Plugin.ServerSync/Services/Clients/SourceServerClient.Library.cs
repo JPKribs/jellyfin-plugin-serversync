@@ -597,7 +597,7 @@ public partial class SourceServerClient
             config =>
             {
                 config.QueryParameters.Ids = new Guid?[] { itemId };
-                config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources, ItemFields.MediaStreams };
+                config.QueryParameters.Fields = new[] { ItemFields.Path, ItemFields.DateCreated, ItemFields.MediaSources, ItemFields.MediaStreams, ItemFields.ProviderIds };
             },
             cancellationToken: cancellationToken).ConfigureAwait(false);
         await ApplyPeerLinksAsync(result?.Items, cancellationToken).ConfigureAwait(false);

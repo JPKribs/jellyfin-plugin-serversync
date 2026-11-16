@@ -480,6 +480,25 @@ public sealed class OutboundHintWorkerTests : IDisposable
     }
 
     /// <summary>
+    /// A file's removal is sent although its item is gone here, which it always is by the time the hold ends.
+    /// True: a server holding a copy or a link of a deleted file hears that it is gone.
+    /// False: every held removal is dropped unsent, and copies and links of deleted files stay until a scan.
+    /// </summary>
+    [Fact]
+    public async Task DeliverAsync_ContentRemovalOfAGoneItem_IsSent()
+    {
+        AddPeer();
+        var gone = Guid.NewGuid().ToString("N");
+        var removal = Queue(gone, kind: HintKind.Content, itemId: gone, itemType: HintProtocol.ContentRemoved);
+        Answers(_factory.Peer("peer"), HintCode.Queued);
+
+        await _worker.DeliverAsync(CancellationToken.None);
+
+        var request = QueuePeerHandler.Read<QueueRequest>(_factory.Peer("peer").LastBody(QueuePath)!);
+        Assert.Equal(removal.HintId, Assert.Single(request.Items).HintId);
+    }
+
+    /// <summary>
     /// Rows for a server that left the configuration, or no longer takes changes, are removed.
     /// True: removing a server, or setting it to Pull, leaves nothing queued for it.
     /// False: its rows stay forever and nothing ever delivers them.

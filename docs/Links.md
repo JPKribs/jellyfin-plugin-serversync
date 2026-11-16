@@ -235,10 +235,10 @@ The check also keeps each link's recorded size current, which is how another ser
 
 ## When the File Is Gone
 
-A link holds nothing a download would bring back, so **Removed files** does not apply to it. When the server a link streams from says the file has left it, by an announcement or on the next scan, the other servers this one pulls from are asked whether they hold the file. The link moves to the first that does, in the order of the **Servers** tab. When none does, the link is removed:
+A link holds nothing a download would bring back, so **Removed files** does not apply to it. When the server a link streams from says the file has left it, by an announcement ten minutes after the file left or on the next scan, the other servers this one pulls from are asked whether they hold the file. The link moves to the first that does, in the order of the **Servers** tab. When none does, the link is removed:
 
 * The `.strm` goes, with every file beside it under the same name, which means its `.nfo`, subtitles, images, and trickplay.
-* Each folder this leaves holding nothing but title artwork and `.nfo` files goes too, up to the library root, so a show's folder goes with its last episode. A folder that still holds anything else stays, with its artwork.
+* Each folder this leaves holding nothing but files Server Sync wrote for the link goes too, up to the library root. A folder that still holds anything else, such as a show's own artwork and `.nfo`, stays.
 * Nothing is moved to the recycling bin, and nothing waits for approval, whatever **Removed files**, **Enable Recycling Bin**, and **Remove Empty Folders** are set to.
 
 While another server still offers the file at the same place, the link is kept and streams from that server instead. A server that did not answer on a run, or whose mapped library answered with no items at all, has none of its links removed on that run. The links of the servers that did answer are removed as usual.
@@ -333,7 +333,9 @@ The link cache logs why a file was not cached:
 * **No transcoding on the source.** A link streams the file as it is. A user over their bitrate limit is refused rather than transcoded on the source. The linking server can still transcode.
 * **Trickplay and chapter images** are only what the source made. Jellyfin makes none for a link. They need **Take Link Images From the Source** on.
 * **Only video is linked.** Audio and books in a Link mapping are copied.
-* **Renames on the source** give the file a new id there, so the new name is linked as a new file and the old link is removed.
+* **Renames on the source** give the file a new id there. A rename or a new container in the same folder moves the link to the new name, with a new `.nfo`. A file moved to another folder is linked as a new file, and the old link is removed.
+* **A file deleted on the source fails to play for up to ten minutes.** The source holds a removal back that long, so a rename can arrive first, and the link moves or goes once the removal arrives.
+* **A file rewritten on the source is linked again.** Any change the source announces writes the link and its `.nfo` again, so a link always carries the source's current details.
 
 ## Upgrades and Downgrades
 

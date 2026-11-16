@@ -1308,6 +1308,36 @@ public class UpdateSyncTablesTask
         return changed;
     }
 
+    /// <summary>
+    /// Applies Removed files at once to one copy whose file left its source, the way the next scan would.
+    /// Keep leaves it, Ignore hides its title once every file in the title is gone, and Delete marks it for deletion, at once or after approval.
+    /// </summary>
+    /// <param name="row">The copy's row.</param>
+    /// <returns>What happened, as a phrase for the hint's outcome.</returns>
+    public string SettleGoneCopy(SyncItem row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var config = ConfigManager.Configuration;
+        var manager = (ContentSyncTableManager)Manager;
+        switch (config.EffectiveMissingContentAction)
+        {
+            case MissingContentAction.Keep:
+                return "the copy here stays, since Removed files keeps it";
+            case MissingContentAction.Ignore:
+                var mappingById = MappingsByKey(config.GetPullServers(), enabledOnly: true);
+                var hidden = HideGoneTitles(manager, manager.GetAllStrict(), new List<SyncItem> { row }, new HashSet<string>(StringComparer.OrdinalIgnoreCase), mappingById);
+                return hidden > 0 ? "its title here was hidden with a .ignore file" : "the copy here stays until the rest of its title is gone";
+            default:
+                var result = SyncStateService.ProcessMissingItem(manager, row, config.DeletionApproval, Logger);
+                return row.Status switch
+                {
+                    SyncStatus.Deleting => "the copy here is deleted",
+                    SyncStatus.Pending => "the copy here waits for approval to be deleted",
+                    _ => result.Message ?? "the copy here was settled"
+                };
+        }
+    }
+
     /// <summary>Hides each title folder whose every file is gone from the source with a .ignore file, and shows the titles that came back.</summary>
     private int HideGoneTitles(ContentSyncTableManager manager, IList<SyncItem> current, List<SyncItem> stale, HashSet<string> returned, Dictionary<string, LibraryMapping> mappingById)
     {

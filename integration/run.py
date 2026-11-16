@@ -3128,6 +3128,143 @@ def scenario_link_hints(creds, apis):
         run_task(local, "ServerSyncUpdateTables")
 
 
+def scenario_file_changes(creds, apis, storage):
+    """A rename, a new container, a new file time, a rewrite in place, and a removal on source-a reach local's copy or link on hints alone, driven the way Kelp Manager reports them."""
+    local, a = apis["local"], apis["source-a"]
+    tag = uuid.uuid4().hex[:6]
+    titles = {k: f"Change {k} {tag} (2024)" for k in ("R", "X", "T", "W", "D")}
+    titles["X"] = f"Change X {tag} (2024) [imdbid-tt9{int(tag, 16) % 1000000:06d}]"
+    src = {k: os.path.join(STATE, "media", "source-a", "Movies", t) for k, t in titles.items()}
+    dst = {k: os.path.join(STATE, "media", "local", "Movies", t) for k, t in titles.items()}
+    link = storage == "Link"
+    kind = "links" if link else "copies"
+
+    def queues_empty():
+        """Returns whether local and source-a have no hint waiting, sent, or pending."""
+        return all(not hints(api)["Outbound"] and not hints(api)["Inbound"] and hints(api)["Pending"] == 0 for api in (local, a))
+
+    def settled():
+        """Returns whether nothing is in flight but removals source-a holds back on purpose."""
+        return all(not hints(api)["Outbound"] and not hints(api)["Inbound"]
+                   and all(g.get("ItemType") == "Removed" for g in hints(api).get("Gathering") or []) for api in (local, a))
+
+    def local_log(since):
+        """Returns what local logged since a time."""
+        result = run(["docker", "logs", "--since", since, "serversync-it-local"], capture=True, check=False)
+        return result.stdout + result.stderr
+
+    def held(key, name):
+        """Returns the local file for a title and file name, a .strm for a link."""
+        stem, _ = os.path.splitext(name)
+        return os.path.join(dst[key], stem + ".strm" if link else name)
+
+    def source_id(key):
+        """Returns source-a's id for a title, or None."""
+        item = find_item(a, "Movie", titles[key])
+        return item["Id"] if item else None
+
+    def report(*updates):
+        """Tells source-a about changed paths, as Kelp Manager does."""
+        a.post("/Library/Media/Updated", {"Updates": [{"Path": "/media/Movies/" + path, "UpdateType": kind} for path, kind in updates]}, expect=204)
+
+    def mtime(path):
+        """Returns a file's modified time, or 0 when it is missing."""
+        return os.path.getmtime(path) if os.path.exists(path) else 0
+
+    try:
+        wait_scans_idle(local)
+        wait_scans_idle(a)
+        configure_server(creds, a, "source-a", ["local"], {"local": "Sync"})
+        configure_server(creds, local, "local", ["source-a"], {"source-a": "Sync"},
+                         EnableContentSync=True, DownloadNewContentMode="Enabled", ReplaceExistingContentMode="Enabled",
+                         DeleteMissingContentMode="Enabled", MissingContentAction="Delete", RemoveEmptyFoldersOnDelete=True, LinkCacheSizeGb=0, MinimumFreeDiskSpaceGb=0)
+        set_storage(local, "source-a", "Movies", storage)
+        if link:
+            set_linking(a, "local", True)
+        wait_until(queues_empty, 60, "the pool is quiet before the test")
+
+        for key, title in titles.items():
+            make_film("source-a", title)
+        a.post("/Library/Refresh", None, expect=204)
+        wait_until(lambda: all(os.path.exists(held(k, t + ".mp4")) for k, t in titles.items()), 240,
+                   f"five films added on source-a arrive on local as {kind} on hints alone")
+        wait_until(queues_empty, 90, "every queue drained after the films arrived")
+        old_ids = {k: source_id(k) for k in titles}
+        before = {k: (mtime(held(k, titles[k] + ".mp4")), mtime(os.path.splitext(held(k, titles[k] + ".mp4"))[0] + ".nfo")) for k in titles}
+        time.sleep(2)
+
+        # Each change is made on disk and reported the way Kelp Manager reports it.
+        since = f"{int(time.time()) - 2}"
+        r_old, r_new = titles["R"] + ".mp4", titles["R"] + " Remastered.mp4"
+        os.rename(os.path.join(src["R"], r_old), os.path.join(src["R"], r_new))
+        x_old, x_new = titles["X"] + ".mp4", titles["X"] + ".mkv"
+        ffmpeg(src["X"], "-i", f"/out/{x_old}", "-c", "copy", f"/out/{x_new}")
+        os.remove(os.path.join(src["X"], x_old))
+        t_file = os.path.join(src["T"], titles["T"] + ".mp4")
+        os.utime(t_file, None)
+        w_file = titles["W"] + ".mp4"
+        w_size = os.path.getsize(os.path.join(src["W"], w_file))
+        ffmpeg(src["W"], "-f", "lavfi", "-i", "testsrc=duration=4:size=96x96:rate=10", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+               "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", f"/out/{w_file}")
+        os.remove(os.path.join(src["D"], titles["D"] + ".mp4"))
+        report((f"{titles['R']}/{r_old}", "Deleted"), (f"{titles['R']}/{r_new}", "Created"),
+               (f"{titles['X']}/{x_old}", "Deleted"), (f"{titles['X']}/{x_new}", "Created"),
+               (f"{titles['T']}/{titles['T']}.mp4", "Modified"), (f"{titles['W']}/{w_file}", "Modified"),
+               (f"{titles['D']}/{titles['D']}.mp4", "Deleted"))
+
+        # A rename: the row follows the file, which moves here without a download.
+        wait_until(lambda: os.path.exists(held("R", r_new)) and not os.path.exists(held("R", r_old)), 300,
+                   f"a renamed file's {storage.lower()} moves to the new name and the old one is gone")
+        expect(f"became {r_new} on 'source-a', so the row here follows it" in local_log(since), "the renamed file is paired with its old row")
+        if link:
+            expect(source_id("R") in open(held("R", r_new), encoding="utf-8").read(), "the renamed link streams from the new item")
+            expect(not os.path.exists(os.path.splitext(held("R", r_old))[0] + ".nfo"), "the old link's .nfo is gone")
+        else:
+            expect(f"DOWNLOADED: {r_new}" not in local_log(since), "the renamed copy is moved, not downloaded")
+
+        # A new container: the old file is replaced under Changed Files, and nothing is left beside it.
+        x_target = os.path.join(src["X"], x_new)
+        if link:
+            wait_until(lambda: source_id("X") and source_id("X") in open(held("X", x_new), encoding="utf-8").read(), 300,
+                       "a link whose file changed container streams from the new item")
+        else:
+            wait_until(lambda: os.path.exists(held("X", x_new)) and os.path.getsize(held("X", x_new)) == os.path.getsize(x_target)
+                       and not os.path.exists(held("X", x_old)), 300, "a copy whose file changed container is replaced and the old file is gone")
+        expect(f"became {x_new} on 'source-a', so the row here follows it" in local_log(since), "the new container is paired with its old row by its identity")
+
+        # A rewrite in place: a copy is replaced, and a link is written again.
+        if link:
+            wait_until(lambda: mtime(os.path.splitext(held("W", w_file))[0] + ".nfo") > before["W"][1], 300, "a link whose file was rewritten has its .nfo written again")
+            wait_until(lambda: mtime(os.path.splitext(held("T", titles["T"] + ".mp4"))[0] + ".nfo") > before["T"][1], 300,
+                       "a link whose file only has a new time has its .nfo written again")
+        else:
+            wait_until(lambda: os.path.getsize(held("W", w_file)) == os.path.getsize(os.path.join(src["W"], w_file)) != w_size, 300,
+                       "a copy whose file was rewritten in place is replaced")
+            wait_until(settled, 120, "every queue drained after the changes but the held removals")
+            expect(mtime(held("T", titles["T"] + ".mp4")) == before["T"][0], "a copy whose file only has a new time is left alone")
+        expect(all(f"/media/Movies/{titles[k]}" in local_log(since) for k in ("R", "X", "W")), "each changed title's own folder is refreshed")
+
+        # A removal waits out the hold on the sender, then goes here.
+        wait_until(lambda: not os.path.exists(dst["D"]), HINT_REMOVAL_HOLD + 300,
+                   f"a file deleted on source-a takes its {storage.lower()} and its folder once its removal is announced")
+        expect(all(old_ids[k] not in json.dumps(hints(a)) for k in ("R", "X")), "the held removals of the renamed files settled")
+        wait_until(queues_empty, 120, "every queue drained after the removals")
+        expect(all(os.path.isdir(dst[k]) for k in ("R", "X", "T", "W")), "the other titles keep their folders")
+    finally:
+        configure_server(creds, a, "source-a", [])
+        for folder in list(src.values()) + list(dst.values()):
+            shutil.rmtree(folder, ignore_errors=True)
+        a.post("/Library/Refresh", None, expect=204)
+        wait_until(lambda: not find_item(a, "Movie", f"Change R {tag}"), 150, "source-a no longer lists the changed films")
+        local.post("/Library/Refresh", None, expect=204)
+        configure_local(creds, local, ["source-a", "source-b"], MissingContentAction=None)
+        run_task(local, "ServerSyncUpdateTables")
+
+
+# How long a removal waits on the sender before it is announced, as HintProtocol.RemovalHold.
+HINT_REMOVAL_HOLD = 600
+
+
 def scenario_link_hints_pool(creds, apis):
     """With two sources sending to a Link mapping on local, a new episode arrives as a link on a hint alone, and a film both sources add is linked once, from the source local lists first, with the other's hint dropped for priority."""
     local, a, b = apis["local"], apis["source-a"], apis["source-b"]
@@ -4156,6 +4293,8 @@ SCENARIOS = [
     ("history: a base made stale by a third server does not revert a newer edit", scenario_history_stale_base),
     ("metadata and people hints, newest edit wins, scan keeps newer local", scenario_item_hints),
     ("content hints across the pool, user settings by task", scenario_content_and_user_hints),
+    ("file changes: renames, new containers, rewrites, and removals reach a copy", lambda c, a: scenario_file_changes(c, a, "Copy")),
+    ("file changes: renames, new containers, rewrites, and removals reach a link", lambda c, a: scenario_file_changes(c, a, "Link")),
     ("peer and operator endpoints require Jellyfin authentication", scenario_peer_endpoint_auth),
     ("check link judges the pairing by direction", scenario_check_link_by_direction),
     ("push responses: paused peers, declined hints, activity entries", scenario_push_responses),

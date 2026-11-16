@@ -20,6 +20,9 @@ namespace Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 [PluginService(ServiceLifetime.Transient)]
 public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, string>
 {
+    /// <summary>The separators a source path may use.</summary>
+    private static readonly char[] PathSeparators = { '/', '\\' };
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ContentSyncTableManager"/> class.
     /// </summary>
@@ -167,6 +170,59 @@ public sealed class ContentSyncTableManager : SyncTableManagerBase<SyncItem, str
             return reader.Read() ? MapFromReader(reader) : null;
         },
         fallback: null);
+
+    /// <summary>
+    /// Returns the rows of one server and library mapping whose source file sits directly in a source folder.
+    /// </summary>
+    /// <param name="serverKey">The server the rows came from.</param>
+    /// <param name="sourceLibraryId">The source library of the mapping.</param>
+    /// <param name="sourceFolder">The folder on the source, without a trailing separator.</param>
+    /// <returns>The rows, or an empty list when the table cannot be read.</returns>
+    public IList<SyncItem> GetInSourceFolder(string serverKey, string sourceLibraryId, string sourceFolder) => ExecuteRead<IList<SyncItem>>(
+        conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM SyncItems WHERE ServerKey = @server COLLATE NOCASE AND SourceLibraryId = @library AND substr(SourcePath, 1, @length) = @prefix";
+            var prefix = sourceFolder + (sourceFolder.Contains('\\', StringComparison.Ordinal) && !sourceFolder.Contains('/', StringComparison.Ordinal) ? "\\" : "/");
+            cmd.Parameters.AddWithValue("@server", serverKey);
+            cmd.Parameters.AddWithValue("@library", sourceLibraryId);
+            cmd.Parameters.AddWithValue("@length", prefix.Length);
+            cmd.Parameters.AddWithValue("@prefix", prefix);
+            var rows = new List<SyncItem>();
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var row = MapFromReader(reader);
+                // Only files directly in the folder, not in a folder below it.
+                if (row.SourcePath.IndexOfAny(PathSeparators, prefix.Length) < 0)
+                {
+                    rows.Add(row);
+                }
+            }
+
+            return rows;
+        },
+        fallback: Array.Empty<SyncItem>());
+
+    /// <summary>
+    /// Moves a row to a new source item, as when a file was renamed or given a new container on the source, which gives it a new id there.
+    /// </summary>
+    /// <param name="oldSourceItemId">The source item the row tracked.</param>
+    /// <param name="newSourceItemId">The source item that replaced it.</param>
+    /// <returns><c>true</c> when the row moved, and <c>false</c> when there was no row or the new item already has one.</returns>
+    public bool Rekey(string oldSourceItemId, string newSourceItemId)
+    {
+        var moved = false;
+        ExecuteWrite(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE SyncItems SET SourceItemId = @new WHERE SourceItemId = @old AND NOT EXISTS (SELECT 1 FROM SyncItems WHERE SourceItemId = @new)";
+            cmd.Parameters.AddWithValue("@old", oldSourceItemId);
+            cmd.Parameters.AddWithValue("@new", newSourceItemId);
+            moved = cmd.ExecuteNonQuery() == 1;
+        });
+        return moved;
+    }
 
     /// <summary>
     /// Marks the database as readable only by builds that know links, so an older build sets it aside instead of downloading over a link.

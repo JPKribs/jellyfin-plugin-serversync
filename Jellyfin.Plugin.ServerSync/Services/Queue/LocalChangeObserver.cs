@@ -42,6 +42,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly IServerApplicationHost _applicationHost;
     private readonly ILogger<LocalChangeObserver> _logger;
     private readonly ConcurrentDictionary<string, PendingChange> _pending = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<Guid, HeldRemoval> _heldRemovals = new();
     private CancellationTokenSource? _stopping;
     private Task? _flushLoop;
 
@@ -116,8 +117,8 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _logger = logger;
     }
 
-    /// <summary>Gets how many objects are waiting out Send Changes After.</summary>
-    public int PendingCount => _pending.Count;
+    /// <summary>Gets how many objects are waiting out Send Changes After, and files whose removal is held.</summary>
+    public int PendingCount => _pending.Count + _heldRemovals.Count;
 
     /// <summary>
     /// Gets how many objects changed here since start that no Push or Sync server mapped, so nothing was sent.
@@ -134,7 +135,10 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     /// <summary>Lists the changes still gathering, newest edit first, for the dashboard.</summary>
     /// <returns>A snapshot of the gathering changes.</returns>
     public IReadOnlyList<GatheringChange> Gathering()
-        => _pending.Values.Select(c => new GatheringChange(c.Kind, c.UserId, c.ItemId, c.EditedAt, c.Due, c.Recorded)).OrderByDescending(c => c.EditedAt).ToList();
+        => _pending.Values.Select(c => new GatheringChange(c.Kind, c.UserId, c.ItemId, c.EditedAt, c.Due, c.Recorded))
+            .Concat(_heldRemovals.Values.Select(r => new GatheringChange(HintKind.Content, Guid.Empty, r.ItemId, r.RemovedAt, r.Due, true, r.Path)))
+            .OrderByDescending(c => c.EditedAt)
+            .ToList();
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -217,8 +221,62 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
             }
         }
 
+        foreach (var held in _heldRemovals.ToArray())
+        {
+            if (held.Value.Due > utcNow || !_heldRemovals.TryRemove(held))
+            {
+                continue;
+            }
+
+            try
+            {
+                var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = held.Value.RemovedAt };
+                _publisher.PublishContent(held.Value.ItemId, held.Value.Path, version, excludePeerKey: null, itemType: held.Value.ItemType, removed: true);
+                raised++;
+            }
+            // One removal that cannot be announced must not stop the rest of the flush.
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not announce that {Path} left the library", FormatUtilities.SanitizeForLog(held.Value.Path));
+            }
+        }
+
         return raised;
     }
+
+    /// <summary>
+    /// Says whether an item update is a media file rewritten in place, which keeps its id, so its new file time is announced.
+    /// A file announced before is announced again only when its time is newer than that announcement, and a file never announced only when its time is recent, so a first scan does not announce a whole library.
+    /// </summary>
+    /// <param name="item">The updated item.</param>
+    /// <param name="reason">The flags Jellyfin saved the item with.</param>
+    /// <param name="stamp">The stamp of the last announcement of the file, or null.</param>
+    /// <param name="utcNow">The current time.</param>
+    /// <returns><c>true</c> for a rewrite to announce.</returns>
+    public static bool IsRewrite(BaseItem item, ItemUpdateType reason, ObjectVersion? stamp, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if ((reason & ItemUpdateType.MetadataImport) == 0 || !IsMediaFile(item))
+        {
+            return false;
+        }
+
+        var fileTime = UtcTime.AsUtc(item.DateModified);
+        if (fileTime == default)
+        {
+            return false;
+        }
+
+        return stamp is not null
+            ? fileTime > UtcTime.AsUtc(stamp.Timestamp)
+            : utcNow - fileTime <= HintProtocol.UnstampedRewriteWindow;
+    }
+
+    /// <summary>Says whether an item is a media file a peer can copy, which leaves out folders, virtual items, and any .strm.</summary>
+    private static bool IsMediaFile(BaseItem item)
+        => item is not Folder && !item.IsVirtualItem && !string.IsNullOrEmpty(item.Path)
+            && !item.Path.EndsWith(Links.LinkPaths.Extension, StringComparison.OrdinalIgnoreCase)
+            && item is MediaBrowser.Controller.Entities.Movies.Movie or MediaBrowser.Controller.Entities.TV.Episode or MediaBrowser.Controller.Entities.Audio.Audio or MediaBrowser.Controller.Entities.Video;
 
     /// <inheritdoc />
     public void Dispose()
@@ -287,6 +345,14 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
+            // A file rewritten in place keeps its id, so only its new file time tells it changed.
+            if (!WrittenFiles.WasWritten(e.Item.Path)
+                && !ProviderFills.WasFilled(e.Item.Path, null, DateTime.UtcNow)
+                && IsRewrite(e.Item, e.UpdateReason, _versions.Get(HintKind.Content, HintProtocol.MetadataKey(e.Item.Id)), DateTime.UtcNow))
+            {
+                Note(HintKind.Content, HintProtocol.MetadataKey(e.Item.Id), Guid.Empty, e.Item.Id, itemPath: e.Item.Path);
+            }
+
             var origin = Classify(e.UpdateReason, _httpContext.HttpContext is not null);
             if (origin == ChangeOrigin.None)
             {
@@ -343,6 +409,12 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
+            // A file back at the same path within the hold was replaced, not removed.
+            if (_heldRemovals.TryRemove(e.Item.Id, out _))
+            {
+                _logger.LogDebug("{Path} is back in the library, so its removal is not announced", FormatUtilities.SanitizeForLog(e.Item.Path));
+            }
+
             if (e.Item is Person added && !string.IsNullOrWhiteSpace(added.Name))
             {
                 _inboundWorker.WakeParked(HintTriage.PersonParkKey(added.Name));
@@ -373,7 +445,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
                 return;
             }
 
-            if (e.Item is not (MediaBrowser.Controller.Entities.Movies.Movie or MediaBrowser.Controller.Entities.TV.Episode or MediaBrowser.Controller.Entities.Audio.Audio or MediaBrowser.Controller.Entities.Video))
+            if (!IsMediaFile(e.Item))
             {
                 return;
             }
@@ -390,22 +462,19 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
     private readonly RemovedItemsStore? _removed;
 
     /// <summary>
-    /// Writes down a media file that left the library and announces it, so links to it move or go without waiting for a scan.
-    /// It is announced even when Content is off here, since a server that only gives still has servers linking to its files.
+    /// Writes down a media file that left the library and holds its announcement for <see cref="HintProtocol.RemovalHold"/>, so links to it move or go without waiting for a scan.
+    /// The hold lets the new file of a rename or a new container reach a receiver first. It is announced even when Content is off here, since a server that only gives still has servers linking to its files.
     /// </summary>
     private void NoteMediaRemoved(BaseItem item)
     {
-        if (item is Folder || item.IsVirtualItem || string.IsNullOrEmpty(item.Path)
-            || item.Path.EndsWith(Links.LinkPaths.Extension, StringComparison.OrdinalIgnoreCase)
-            || item is not (MediaBrowser.Controller.Entities.Movies.Movie or MediaBrowser.Controller.Entities.TV.Episode or MediaBrowser.Controller.Entities.Audio.Audio or MediaBrowser.Controller.Entities.Video))
+        if (!IsMediaFile(item))
         {
             return;
         }
 
         var now = DateTime.UtcNow;
         _removed?.Note(item.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture), now);
-        var version = new ObjectVersion { ServerId = _applicationHost.SystemId, Timestamp = now };
-        _publisher.PublishContent(item.Id, item.Path, version, excludePeerKey: null, itemType: item.GetType().Name, removed: true);
+        _heldRemovals[item.Id] = new HeldRemoval(item.Id, item.Path, item.GetType().Name, now, now + HintProtocol.RemovalHold);
     }
 
     /// <summary>Notes a media file leaving the library, and announces a playlist someone deleted.</summary>
@@ -507,7 +576,7 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (!_pending.IsEmpty)
+            if (!_pending.IsEmpty || !_heldRemovals.IsEmpty)
             {
                 Flush(DateTime.UtcNow);
             }
@@ -607,6 +676,9 @@ public sealed class LocalChangeObserver : IHostedService, IDisposable
         _unmatched[HintProtocol.GuardKey(change.Kind, change.LocalKey)] = new UnmatchedChange(change, description, DateTime.UtcNow);
         _logger.LogDebug("A local change matched no mapping on any Push or Sync server: {Change}", FormatUtilities.SanitizeForLog(description));
     }
+
+    /// <summary>A file that left the library, with when it left and when its removal is announced.</summary>
+    private sealed record HeldRemoval(Guid ItemId, string Path, string ItemType, DateTime RemovedAt, DateTime Due);
 
     /// <summary>A change that matched no mapping, with its description and when it was raised.</summary>
     private sealed record UnmatchedChange(PendingChange Change, string Description, DateTime At);

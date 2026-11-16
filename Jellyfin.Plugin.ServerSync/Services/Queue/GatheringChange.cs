@@ -10,4 +10,5 @@ namespace Jellyfin.Plugin.ServerSync.Services.Queue;
 /// <param name="EditedAt">When it was last edited, in UTC.</param>
 /// <param name="Due">When it is sent unless edited again, in UTC.</param>
 /// <param name="Recorded">Whether a hand made edit is among the gathered changes.</param>
-public sealed record GatheringChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded);
+/// <param name="RemovedPath">The path of a file that left the library and whose removal is held, or null.</param>
+public sealed record GatheringChange(HintKind Kind, Guid UserId, Guid ItemId, DateTime EditedAt, DateTime Due, bool Recorded, string? RemovedPath = null);

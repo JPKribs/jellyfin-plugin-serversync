@@ -45,8 +45,10 @@ public static class FileDeletionService
     /// <param name="logger">Records each file deleted and each failure.</param>
     /// <param name="removeEmptyFolders">Whether to remove parent folders the deletion leaves empty.</param>
     /// <param name="libraryRootPath">The root folder bounding the empty folder cleanup, or null to skip it.</param>
+    /// <param name="ownedNames">The names of the files Server Sync wrote beside the main file, the only leftovers the cleanup may delete, or null for none.</param>
+    /// <param name="clearTitleFiles"><c>true</c> when someone deleted the title by hand, so its artwork and nfo files go too, as with Jellyfin's own delete.</param>
     /// <returns><c>true</c> when the main file was deleted.</returns>
-    public static bool DeleteWithCompanions(string filePath, ILogger logger, bool removeEmptyFolders = false, string? libraryRootPath = null)
+    public static bool DeleteWithCompanions(string filePath, ILogger logger, bool removeEmptyFolders = false, string? libraryRootPath = null, IReadOnlyCollection<string>? ownedNames = null, bool clearTitleFiles = false)
     {
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -76,10 +78,18 @@ public static class FileDeletionService
         DeleteCompanionFiles(filePath, logger);
         DeleteItemArtifacts(filePath, logger);
 
-        // A folder left with only title artwork and nfo files counts as empty.
+        // A folder left with only files Server Sync wrote counts as empty, and so does a title someone deleted by hand.
         if (removeEmptyFolders && mainDeleted && !string.IsNullOrEmpty(parentDirectory))
         {
-            DeleteTitleArtifacts(parentDirectory, Path.GetFileNameWithoutExtension(filePath), logger, libraryRootPath);
+            if (clearTitleFiles)
+            {
+                DeleteTitleArtifacts(parentDirectory, Path.GetFileNameWithoutExtension(filePath), logger, libraryRootPath);
+            }
+            else
+            {
+                DeleteOwnLeftovers(parentDirectory, ownedNames, logger, libraryRootPath);
+            }
+
             TryRemoveEmptyFolders(parentDirectory, logger, libraryRootPath);
         }
 
@@ -87,23 +97,23 @@ public static class FileDeletionService
     }
 
     /// <summary>
-    /// Deletes a link with everything beside it under the same name, then every folder that leaves
-    /// holding only title artwork and nfo files, up to the root folder. A link never goes to the
+    /// Deletes a link with everything beside it under the same name, then each folder that leaves
+    /// holding nothing Server Sync did not write, up to the root folder. A link never goes to the
     /// Recycling Bin and its folders always go, whatever the settings for copies say.
     /// </summary>
     /// <param name="linkPath">The link's .strm file.</param>
     /// <param name="logger">Records each file and folder deleted.</param>
     /// <param name="libraryRootPath">The root folder, which bounds the folders removed.</param>
+    /// <param name="ownedNames">The names of the files Server Sync wrote beside the link, or null for none.</param>
     /// <returns><c>true</c> when the .strm was deleted.</returns>
-    public static bool DeleteLinkWithFolders(string linkPath, ILogger logger, string? libraryRootPath)
+    public static bool DeleteLinkWithFolders(string linkPath, ILogger logger, string? libraryRootPath, IReadOnlyCollection<string>? ownedNames = null)
     {
-        if (!DeleteWithCompanions(linkPath, logger, removeEmptyFolders: true, libraryRootPath))
+        if (!DeleteWithCompanions(linkPath, logger, removeEmptyFolders: true, libraryRootPath, ownedNames))
         {
             return false;
         }
 
-        // A folder is cleared only once the folder below it has gone.
-        var stem = Path.GetFileNameWithoutExtension(linkPath);
+        // A folder is cleared only once the folder below it has gone, and only while it is empty.
         var folder = Path.GetDirectoryName(linkPath);
         while (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
         {
@@ -113,11 +123,21 @@ public static class FileDeletionService
                 continue;
             }
 
-            DeleteTitleArtifacts(folder, stem, logger, libraryRootPath);
             TryRemoveEmptyFolders(folder, logger, libraryRootPath);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Reads the names of the files a row records that Server Sync wrote beside its file, such as its .nfo and subtitles.
+    /// </summary>
+    /// <param name="row">The row whose files are read.</param>
+    /// <returns>The file names.</returns>
+    public static IReadOnlyCollection<string> OwnedNames(SyncItem row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return row.CompanionFiles?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
     }
 
     /// <summary>
@@ -225,6 +245,48 @@ public static class FileDeletionService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             logger.LogWarning(ex, "Failed to delete trickplay folder: {Folder}", FormatUtilities.SanitizeForLog(trickplay));
+        }
+    }
+
+    /// <summary>
+    /// Deletes the files left in a folder strictly inside the root folder once every one of them is a file Server Sync wrote.
+    /// A file or subfolder Server Sync did not write means the folder still holds something, and then nothing is deleted.
+    /// </summary>
+    /// <param name="folder">The folder the deleted file was in.</param>
+    /// <param name="ownedNames">The names of the files Server Sync wrote there, or null for none.</param>
+    /// <param name="logger">Records each file deleted and each failure.</param>
+    /// <param name="libraryRootPath">The root folder bounding the cleanup, or null to skip it.</param>
+    public static void DeleteOwnLeftovers(string folder, IReadOnlyCollection<string>? ownedNames, ILogger logger, string? libraryRootPath)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (string.IsNullOrEmpty(libraryRootPath) || ownedNames is not { Count: > 0 } || !Directory.Exists(folder))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!PathContainment.IsStrictlyUnder(folder, libraryRootPath) || Directory.EnumerateDirectories(folder).Any())
+            {
+                return;
+            }
+
+            var owned = new HashSet<string>(ownedNames, StringComparer.OrdinalIgnoreCase);
+            var files = Directory.EnumerateFiles(folder).ToList();
+            if (!files.All(f => owned.Contains(Path.GetFileName(f))))
+            {
+                return;
+            }
+
+            foreach (var file in files)
+            {
+                TryDeleteFile(file, logger);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogDebug(ex, "Could not clean the files Server Sync wrote in {Folder}", FormatUtilities.SanitizeForLog(folder));
         }
     }
 
@@ -420,7 +482,7 @@ public static class FileDeletionService
                     return recycleResult;
                 }
             }
-            else if (!DeleteWithCompanions(path!, logger, config.RemoveEmptyFoldersOnDelete, FileValidationService.GetContainingLibraryRoot(path, config)))
+            else if (!DeleteWithCompanions(path!, logger, config.RemoveEmptyFoldersOnDelete, FileValidationService.GetContainingLibraryRoot(path, config), clearTitleFiles: true))
             {
                 return new DeletionResult(false, "Failed to delete file");
             }
@@ -591,7 +653,7 @@ public static class FileDeletionService
                 DeletionResult result;
                 if (item.StorageMode.IsLink() && LinkFiles.IsOwnLink(localPath))
                 {
-                    result = new DeletionResult(DeleteLinkWithFolders(localPath, logger, containingRoot));
+                    result = new DeletionResult(DeleteLinkWithFolders(localPath, logger, containingRoot, OwnedNames(item)));
                 }
                 else if (item.StorageMode.IsLink())
                 {
@@ -606,7 +668,7 @@ public static class FileDeletionService
                 else
                 {
                     libraryRootLookup.TryGetValue(item.SourceLibraryId, out var libraryRoot);
-                    result = new DeletionResult(DeleteWithCompanions(localPath, logger, config.RemoveEmptyFoldersOnDelete, libraryRoot));
+                    result = new DeletionResult(DeleteWithCompanions(localPath, logger, config.RemoveEmptyFoldersOnDelete, libraryRoot, OwnedNames(item)));
                 }
 
                 if (result.Success)

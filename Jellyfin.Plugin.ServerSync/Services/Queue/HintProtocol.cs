@@ -407,6 +407,15 @@ public static class HintProtocol
     /// </summary>
     public const string ContentRemoved = "Removed";
 
+    /// <summary>
+    /// How long a file that left the library waits before its removal is announced.
+    /// A rename or a new container announces the new file first, so a receiver can move or replace its copy instead of deleting it.
+    /// </summary>
+    public static readonly TimeSpan RemovalHold = TimeSpan.FromMinutes(10);
+
+    /// <summary>How recent a file's time must be for a rewrite to be announced when no stamp says when the file was last announced.</summary>
+    public static readonly TimeSpan UnstampedRewriteWindow = TimeSpan.FromDays(1);
+
     /// <summary>Whether a content hint says its file left the library.</summary>
     /// <param name="itemType">The item type the hint carries.</param>
     /// <returns><c>true</c> for a removal.</returns>

@@ -1,6 +1,6 @@
 # Live Changes
 
-Servers that both run Server Sync tell each other about changes as they happen. A change is sent as a hint that says what changed, never the value, and the other server pulls the value itself. Hints wait until an item has gone untouched for **Send Changes After (seconds)**, are retried until delivered, and show on the **Queue** view.
+Servers that both run Server Sync tell each other about changes as they happen. A change is sent as a hint that says what changed, never the value, and the other server pulls the value itself. Hints wait until an item has gone untouched for **Send Changes After (seconds)**, are retried until delivered, and show on the **Queue** view. A file that leaves the library waits ten minutes instead, so the new file of a rename or a new container goes first, and shows in the queue as Removed meanwhile.
 
 | Change Queue | Change Queue on a phone |
 | :---: | :---: |

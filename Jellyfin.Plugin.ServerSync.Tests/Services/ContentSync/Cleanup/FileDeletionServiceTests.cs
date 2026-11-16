@@ -191,8 +191,8 @@ public sealed class FileDeletionServiceTests : IDisposable
     }
 
     /// <summary>
-    /// The same folder with Remove empty folders on: the title files go and the folder with them.
-    /// True: switching the setting on is what removes a title's leftovers.
+    /// The same folder with Remove empty folders on, deleted by hand: the title files go and the folder with them.
+    /// True: switching the setting on is what removes a title's leftovers when someone deletes it.
     /// False: a folder holding only a poster and an nfo stays behind.
     /// </summary>
     [Fact]
@@ -202,9 +202,69 @@ public sealed class FileDeletionServiceTests : IDisposable
         Write("poster.jpg");
         Write("movie.nfo");
 
-        Assert.True(FileDeletionService.DeleteWithCompanions(moviePath, NullLogger.Instance, removeEmptyFolders: true, libraryRootPath: _root));
+        Assert.True(FileDeletionService.DeleteWithCompanions(moviePath, NullLogger.Instance, removeEmptyFolders: true, libraryRootPath: _root, clearTitleFiles: true));
 
         Assert.False(Directory.Exists(_movieDir));
+    }
+
+    /// <summary>
+    /// A file removed by a sync keeps its folder while the folder holds anything Server Sync did not write, such as Jellyfin's poster and nfo.
+    /// True: a sync never removes a folder holding files someone else put there.
+    /// False: a removal from the source deletes the user's own artwork and folder.
+    /// </summary>
+    [Fact]
+    public void DeleteWithCompanions_SyncRemoval_KeepsAFolderWithFilesItDidNotWrite()
+    {
+        var moviePath = Write("Title (2020).mkv", "movie");
+        var poster = Write("poster.jpg");
+        var nfo = Write("movie.nfo");
+
+        Assert.True(FileDeletionService.DeleteWithCompanions(moviePath, NullLogger.Instance, removeEmptyFolders: true, libraryRootPath: _root, ownedNames: new[] { "Title (2020).en.srt" }));
+
+        Assert.False(File.Exists(moviePath));
+        Assert.True(File.Exists(poster));
+        Assert.True(File.Exists(nfo));
+    }
+
+    /// <summary>
+    /// A file removed by a sync takes its folder when everything left there is a file Server Sync wrote.
+    /// True: a title Server Sync brought leaves no folder behind once it is gone from the source.
+    /// False: folders holding only Server Sync's own files pile up under the library.
+    /// </summary>
+    [Fact]
+    public void DeleteWithCompanions_SyncRemoval_RemovesAFolderLeftWithOnlyItsOwnFiles()
+    {
+        var moviePath = Write("Title (2020).mkv", "movie");
+        Write("Title (2020).en.srt");
+        Write("poster.jpg");
+
+        Assert.True(FileDeletionService.DeleteWithCompanions(moviePath, NullLogger.Instance, removeEmptyFolders: true, libraryRootPath: _root, ownedNames: new[] { "Title (2020).en.srt", "POSTER.JPG" }));
+
+        Assert.False(Directory.Exists(_movieDir));
+        Assert.True(Directory.Exists(_root));
+    }
+
+    /// <summary>
+    /// A removed link takes its folders up the tree while they are empty, and stops at a folder holding a file Server Sync did not write.
+    /// True: an episode link's season folder goes, and the show folder with the user's artwork stays.
+    /// False: the show's artwork is deleted, or empty season folders pile up.
+    /// </summary>
+    [Fact]
+    public void DeleteLinkWithFolders_StopsAtAFolderWithFilesItDidNotWrite()
+    {
+        var show = Path.Combine(_root, "Show");
+        var season = Path.Combine(show, "Season 01");
+        Directory.CreateDirectory(season);
+        var link = Path.Combine(season, "Show - S01E01.strm");
+        File.WriteAllText(link, "http://localhost/Sync/Link/x");
+        File.WriteAllText(Path.Combine(season, "Show - S01E01.nfo"), "<episodedetails/>");
+        var poster = Path.Combine(show, "poster.jpg");
+        File.WriteAllText(poster, "x");
+
+        Assert.True(FileDeletionService.DeleteLinkWithFolders(link, NullLogger.Instance, _root, new[] { "Show - S01E01.nfo" }));
+
+        Assert.False(Directory.Exists(season));
+        Assert.True(File.Exists(poster));
     }
 
     /// <summary>
@@ -270,7 +330,7 @@ public sealed class FileDeletionServiceTests : IDisposable
         Write("FanArt.PNG");
         Write("MOVIE.NFO");
 
-        Assert.True(FileDeletionService.DeleteWithCompanions(moviePath, NullLogger.Instance, removeEmptyFolders: true, libraryRootPath: _root));
+        Assert.True(FileDeletionService.DeleteWithCompanions(moviePath, NullLogger.Instance, removeEmptyFolders: true, libraryRootPath: _root, clearTitleFiles: true));
 
         Assert.False(Directory.Exists(_movieDir));
     }
@@ -297,7 +357,7 @@ public sealed class FileDeletionServiceTests : IDisposable
         File.WriteAllText(Path.Combine(show, "tvshow.nfo"), "x");
         File.WriteAllText(Path.Combine(show, "poster.jpg"), "x");
 
-        Assert.True(FileDeletionService.DeleteWithCompanions(episode, NullLogger.Instance, removeEmptyFolders: true, libraryRootPath: _root));
+        Assert.True(FileDeletionService.DeleteWithCompanions(episode, NullLogger.Instance, removeEmptyFolders: true, libraryRootPath: _root, clearTitleFiles: true));
 
         Assert.False(Directory.Exists(season1));
         Assert.True(File.Exists(Path.Combine(season2, "Show - S02E01.mkv")));

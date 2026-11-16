@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,12 @@ using Jellyfin.Plugin.ServerSync.Models.ContentSync;
 using Jellyfin.Plugin.ServerSync.Models.Queue;
 using Jellyfin.Plugin.ServerSync.Services.ContentSync.Tables;
 using Jellyfin.Plugin.ServerSync.Services.Queue;
+using Jellyfin.Plugin.ServerSync.Services.Database;
+using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Services.Configuration;
+using Jellyfin.Plugin.ServerSync.Tasks.ContentSync;
+using Jellyfin.Plugin.ServerSync.Models.ContentSync.Configuration;
+using MediaBrowser.Controller.Library;
 using Jellyfin.Plugin.ServerSync.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Kiota.Abstractions;
@@ -244,5 +251,66 @@ public sealed class ContentHintHandlerTests : IDisposable
         await cancelled.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _handler.ApplyAsync(Hint(), QueueSamples.Server(), client, cancelled.Token));
+    }
+    /// <summary>
+    /// A Removed hint for a copy applies Removed files at once. Delete removes the file and its row, and Keep leaves both.
+    /// True: a file deleted on the source goes here as soon as the source says so, and only when Removed files deletes.
+    /// False: the copy waits for the next scan, or a server that keeps removed files loses one.
+    /// </summary>
+    [Theory]
+    [InlineData(MissingContentAction.Delete, false)]
+    [InlineData(MissingContentAction.Keep, true)]
+    public async Task ApplyAsync_RemovedCopy_FollowsRemovedFilesAtOnce(MissingContentAction action, bool kept)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "serversync-removed-" + Guid.NewGuid().ToString("N"));
+        var file = Path.Combine(root, "Film (2020)", "Film (2020).mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "film");
+        try
+        {
+            var origin = QueueSamples.Server();
+            origin.LibraryMappings[0].LocalRootPath = root;
+            _config.Configuration.Servers.Add(origin);
+            _config.Configuration.MissingContentAction = action;
+            _table.Upsert(new SyncItem
+            {
+                SourceItemId = QueueSamples.ItemId.ToString("N"),
+                SourceLibraryId = "lib",
+                LocalLibraryId = "local",
+                SourcePath = "/media/movies/Film (2020)/Film (2020).mkv",
+                SourceSize = 4,
+                LocalPath = file,
+                ServerKey = origin.Key,
+                Status = SyncStatus.Synced,
+                StatusDate = DateTime.UtcNow
+            });
+            _peer.On("/Items", _ => QueuePeerHandler.JsonText(QueueSamples.NoItemsJson));
+            var handler = HandlerWithScanTask();
+
+            using var client = _peer.Client();
+            var result = await handler.ApplyAsync(Hint("/media/movies/Film (2020)/Film (2020).mkv", itemType: HintProtocol.ContentRemoved), origin, client, CancellationToken.None);
+
+            Assert.Equal(HintCode.SourceGone, result.Code);
+            Assert.Equal(kept, File.Exists(file));
+            Assert.Equal(kept, _table.GetByKey(QueueSamples.ItemId.ToString("N")) is not null);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>Builds a handler whose services can build the Sync Content scan task.</summary>
+    private ContentHintHandler HandlerWithScanTask()
+    {
+        var (library, _) = InterfaceStub.Create<ILibraryManager>();
+        var services = new QueueServices()
+            .Add<Microsoft.Extensions.Logging.ILogger<UpdateSyncTablesTask>>(NullLogger<UpdateSyncTablesTask>.Instance)
+            .Add<IPluginConfigurationManager>(_config)
+            .Add(_table)
+            .Add<ISourceServerClientFactory>(new FakeClientFactory())
+            .Add(library)
+            .Add(new ScanWatermarkStore(_db.Provider, NullLogger<ScanWatermarkStore>.Instance));
+        return new ContentHintHandler(services, _config, _table, library, NullLogger<ContentHintHandler>.Instance);
     }
 }

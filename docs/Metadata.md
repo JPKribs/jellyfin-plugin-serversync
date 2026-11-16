@@ -9,7 +9,7 @@ Metadata syncing copies item details from a source Jellyfin server onto matching
 * **Genres** syncs item genres.
 * **Tags** syncs item tags.
 * **Studios** syncs item studios.
-* **People** syncs who appears in each item. It can be slow.
+* **People** syncs who appears in each item. A full scan reads an item's cast only when the item is new, the source saved it since the last scan, or its other details changed, since building a cast is most of the source's work. An edit announced as a live change always reads it.
 * **Images** syncs item images such as posters and backdrops.
 * **Folder Items** also syncs metadata for container items such as series and seasons.
 * **Precedence** chooses which server is heard for an item that several servers hold, either the one whose edit is newest or always the highest ranked. See [Several Servers](SyncTypes.md#several-servers).
@@ -22,7 +22,7 @@ When an item's images differ from the source, this server downloads the full sou
 
 A scan tells whether an image changed from the tag the source gives it, which changes whenever the source writes the image again. Once an image here has been matched to the source's, an unchanged tag means no change, and a new tag means the image is fetched. An image that has never been matched is compared by file size, so images already on both servers are matched without being downloaded.
 
-**Refresh Parallelism** and **Deep Image Verification** apply to Metadata and People and live under **Settings > Processing**. Deep Image Verification measures every source image on every scan and compares by size, which also catches an image file swapped on the source's disk before the source has noticed.
+**Refresh Parallelism** and **Deep Image Verification** apply to Metadata and People and live under **Settings > Processing**. Refresh Parallelism also sets how many requests a Metadata scan sends to a server at once, so lower it for a slow server. Deep Image Verification measures every source image on every scan and compares by size, which also catches an image file swapped on the source's disk before the source has noticed.
 
 ## Live Changes Between Servers
 

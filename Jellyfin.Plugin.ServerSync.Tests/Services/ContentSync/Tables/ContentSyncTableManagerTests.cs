@@ -65,6 +65,47 @@ public sealed class ContentSyncTableManagerTests : IDisposable
         return _table.GetBySourceItemId(id)!;
     }
 
+    /// <summary>
+    /// A row moves to a new source item, and stays where it is when that item already has a row or there is no row to move.
+    /// True: a renamed file keeps its row, its status, and its local file under the new id.
+    /// False: a rename leaves a dangling row, or merges two rows into one.
+    /// </summary>
+    [Fact]
+    public void Rekey_MovesTheRowOnlyWhenTheNewIdIsFree()
+    {
+        Add("old", "/l/a.mkv");
+        Add("taken", "/l/b.mkv");
+
+        var moved = _table.Rekey("old", "new");
+        var refused = _table.Rekey("new", "taken");
+        var missing = _table.Rekey("none", "other");
+
+        Assert.Equal((true, false, false), (moved, refused, missing));
+        Assert.Null(_table.GetBySourceItemId("old"));
+        Assert.Equal("/l/a.mkv", _table.GetBySourceItemId("new")!.LocalPath);
+        Assert.Equal("/l/b.mkv", _table.GetBySourceItemId("taken")!.LocalPath);
+    }
+
+    /// <summary>
+    /// The rows in a source folder are the ones of that server and library whose file sits directly in it.
+    /// True: a rename is paired only with files beside it.
+    /// False: a file in a subfolder, another library, or from another server is taken for the renamed one.
+    /// </summary>
+    [Fact]
+    public void GetInSourceFolder_ReturnsOnlyFilesDirectlyInTheFolder()
+    {
+        Add("in");
+        var nested = Add("nested");
+        nested.SourcePath = "/src/sub/nested.mkv";
+        _table.Upsert(nested);
+        Add("other-server", serverKey: "elsewhere");
+        Add("other-library", library: "lib2");
+
+        var rows = _table.GetInSourceFolder("SERVER", "lib", "/src");
+
+        Assert.Equal(new[] { "in" }, Ids(rows));
+    }
+
     private static string[] Ids(IEnumerable<SyncItem> rows) => rows.Select(r => r.SourceItemId).OrderBy(i => i, StringComparer.Ordinal).ToArray();
 
     /// <summary>

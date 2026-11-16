@@ -86,6 +86,7 @@ public sealed class ContentHintHandler
         if (dto is null || !dto.Id.HasValue)
         {
             var held = _table.GetByKey(originItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture));
+            var removedPaths = new List<string>();
 
             // A link holds nothing, so it is settled without the scan's safety limits.
             if (held is { StorageMode: StorageMode.Link }
@@ -97,15 +98,33 @@ public sealed class ContentHintHandler
                 var movedTo = await rehomer.SettleGoneAsync(held, cancellationToken).ConfigureAwait(false);
                 if (movedTo is not null)
                 {
+                    RefreshFolders(new[] { held.LocalPath });
                     return HintApplyResult.Dropped(HintCode.SourceGone, $"the file left '{origin.DisplayName}', so its link here now streams from '{movedTo}'");
                 }
 
-                FileDeletionService.ProcessPendingDeletions(_table, config, _logger, new List<string>(), cancellationToken);
+                FileDeletionService.ProcessPendingDeletions(_table, config, _logger, removedPaths, cancellationToken);
+                RefreshFolders(removedPaths);
                 return HintApplyResult.Dropped(HintCode.SourceGone, $"the file left '{origin.DisplayName}' and no other server holds it, so its link here was removed");
             }
 
+            // A copy follows Removed files as soon as its source says the file left, without waiting for a scan.
+            if (HintProtocol.IsContentRemoval(hint.ItemType)
+                && held is { StorageMode: StorageMode.Copy }
+                && string.Equals(held.ServerKey, origin.Key, StringComparison.OrdinalIgnoreCase)
+                && held.Status is not (SyncStatus.Ignored or SyncStatus.Deleting))
+            {
+                var outcome = ActivatorUtilities.CreateInstance<UpdateSyncTablesTask>(_services).SettleGoneCopy(held);
+                if (held.Status == SyncStatus.Deleting)
+                {
+                    FileDeletionService.ProcessPendingDeletions(_table, config, _logger, removedPaths, cancellationToken);
+                }
+
+                RefreshFolders(removedPaths.Append(held.LocalPath));
+                return HintApplyResult.Dropped(HintCode.SourceGone, $"the file left '{origin.DisplayName}', so {outcome}");
+            }
+
             return HintApplyResult.Dropped(HintCode.SourceGone, HintProtocol.IsContentRemoval(hint.ItemType)
-                ? $"the file left '{origin.DisplayName}'. A copy of it here is settled by the next scan"
+                ? $"the file left '{origin.DisplayName}', and nothing here tracks it"
                 : $"the item no longer exists on '{origin.DisplayName}'");
         }
 
@@ -155,7 +174,27 @@ public sealed class ContentHintHandler
         var source = new ScanSource(origin, client, Math.Max(0, originIndex));
         var refresh = ActivatorUtilities.CreateInstance<UpdateSyncTablesTask>(_services);
 
+        // A new id may be an old file renamed or given a new container, so its row follows the file instead of a second copy arriving.
+        var key = originItemId.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
+        var existing = _table.GetByKey(key) ?? await PairWithReplacedRowAsync(origin, client, mapping, dto, key, cancellationToken).ConfigureAwait(false);
+        var pathBefore = existing?.LocalPath;
+
         var record = await refresh.RefreshOneAsync(new ContentRefreshWork(source, mapping, dto, watchedByAll), cancellationToken).ConfigureAwait(false);
+
+        // A link follows every change on its source, so its .strm and .nfo are written again.
+        if (existing is not null && record is { Status: SyncStatus.Synced } && StorageModes.IsLink(record.StorageMode))
+        {
+            record.Status = SyncStatus.Queued;
+            record.StatusDate = DateTime.UtcNow;
+            _table.Upsert(record);
+        }
+
+        // A followed rename moved the file without a download, so both folders are refreshed here.
+        if (record is not null && pathBefore is not null && !string.Equals(pathBefore, record.LocalPath, StringComparison.Ordinal))
+        {
+            RefreshFolders(new[] { pathBefore, record.LocalPath });
+        }
+
         // When the hinted item is passed over, its other versions are passed over too.
         if (record is null)
         {
@@ -214,6 +253,96 @@ public sealed class ContentHintHandler
 
         var first = applied[0];
         return HintApplyResult.AppliedTo(string.IsNullOrEmpty(first.LocalPath) ? null : _libraryManager.FindByPath(first.LocalPath, false));
+    }
+
+    /// <summary>
+    /// Finds the row of the file a new source file replaced, and moves it to the new file's id. It is the one row from the same server and library mapping whose file sat in the same source folder, is gone from the source, and had the same size or is the same episode or film.
+    /// With no such row, or more than one, nothing moves and the file arrives as a new one.
+    /// </summary>
+    /// <returns>The moved row, or null.</returns>
+    private async Task<SyncItem?> PairWithReplacedRowAsync(SourceServer origin, SourceServerClient client, LibraryMapping mapping, Jellyfin.Sdk.Generated.Models.BaseItemDto dto, string key, CancellationToken cancellationToken)
+    {
+        var folder = System.IO.Path.GetDirectoryName(dto.Path);
+        if (string.IsNullOrEmpty(folder))
+        {
+            return null;
+        }
+
+        var size = MediaItemUtilities.GetItemSize(dto);
+        var fitting = new List<SyncItem>();
+        foreach (var row in _table.GetInSourceFolder(origin.Key, mapping.SourceLibraryId, folder))
+        {
+            if (string.Equals(row.SourceItemId, key, StringComparison.OrdinalIgnoreCase)
+                || row.Status == SyncStatus.Ignored
+                || !RenameMatcher.Fits(dto, size, row, LocalItemOf(row))
+                || !Guid.TryParse(row.SourceItemId, out var oldId))
+            {
+                continue;
+            }
+
+            // A file still on the source is a sibling, not the one replaced.
+            if (await client.FindItemDetailsAsync(oldId, cancellationToken).ConfigureAwait(false) is null)
+            {
+                fitting.Add(row);
+            }
+        }
+
+        if (RenameMatcher.Single(fitting) is not { } replaced)
+        {
+            if (fitting.Count > 1)
+            {
+                _logger.LogInformation("{Path} on '{Origin}' could be any of {Count} files that left its folder, so it arrives as a new file", FormatUtilities.SanitizeForLog(dto.Path), FormatUtilities.SanitizeForLog(origin.DisplayName), fitting.Count);
+            }
+
+            return null;
+        }
+
+        if (!_table.Rekey(replaced.SourceItemId, key))
+        {
+            return null;
+        }
+
+        FollowInLinkCache(replaced, key, size);
+        _logger.LogInformation("{Old} became {New} on '{Origin}', so the row here follows it", FormatUtilities.SanitizeForLog(System.IO.Path.GetFileName(replaced.SourcePath)), FormatUtilities.SanitizeForLog(System.IO.Path.GetFileName(dto.Path)), FormatUtilities.SanitizeForLog(origin.DisplayName));
+        return _table.GetByKey(key);
+    }
+
+    /// <summary>Finds this server's item for a row, by its id or else its path, or null.</summary>
+    private MediaBrowser.Controller.Entities.BaseItem? LocalItemOf(SyncItem row)
+        => (Guid.TryParse(row.LocalItemId, out var id) ? _libraryManager.GetItemById(id) : null)
+            ?? (string.IsNullOrEmpty(row.LocalPath) ? null : _libraryManager.FindByPath(row.LocalPath, false));
+
+    /// <summary>Carries a cached link over to the new id when the bytes are the same, and drops it when they changed.</summary>
+    private void FollowInLinkCache(SyncItem replaced, string newKey, long newSize)
+    {
+        if (!StorageModes.IsLink(replaced.StorageMode) || _services.GetService<Links.LinkCache>() is not { } cache || cache.PathFor(replaced.SourceItemId) is not { } cached)
+        {
+            return;
+        }
+
+        if (newSize <= 0 || replaced.SourceSize != newSize || !cache.Adopt(newKey, cached, newSize))
+        {
+            cache.Remove(replaced.SourceItemId);
+        }
+    }
+
+    /// <summary>
+    /// Asks Jellyfin to refresh only the folders that hold files this handler changed, and to scan the library when that is not possible.
+    /// </summary>
+    private void RefreshFolders(IEnumerable<string?> changedFiles)
+    {
+        var files = changedFiles.Where(f => !string.IsNullOrEmpty(f)).Select(f => f!).ToList();
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        var monitor = _services.GetService<ILibraryMonitor>();
+        if (monitor is null
+            || !ChangedFolders.Report(files, monitor.ReportFileSystemChanged, path => _libraryManager.FindByPath(path, true) is MediaBrowser.Controller.Entities.Folder and not MediaBrowser.Controller.Entities.AggregateFolder and not MediaBrowser.Controller.Entities.UserRootFolder and not MediaBrowser.Controller.Entities.CollectionFolder, _logger))
+        {
+            _libraryManager.QueueLibraryScan();
+        }
     }
 
     /// <summary>Names the first server ranked above the origin that already provides the file at this path, or null when none does.</summary>
