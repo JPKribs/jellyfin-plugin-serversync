@@ -40,6 +40,7 @@ public class RefreshMetadataSyncTableTask
     /// <param name="manager">Reads and writes the sync table.</param>
     /// <param name="conflicts">Settles which server speaks for an item both sides changed.</param>
     /// <param name="watermarks">Holds when each source was last scanned, or null when scans are never incremental.</param>
+    /// <param name="statistics">Keeps what each scan found for the Statistics tab, or null to keep nothing.</param>
     public RefreshMetadataSyncTableTask(
         ILogger<RefreshMetadataSyncTableTask> logger,
         IPluginConfigurationManager configManager,
@@ -47,8 +48,9 @@ public class RefreshMetadataSyncTableTask
         MetadataSyncTableService metadataService,
         MetadataSyncTableManager manager,
         ScanConflictSettler conflicts,
-        ScanWatermarkStore watermarks)
-        : base(logger, manager, clientFactory, configManager, watermarks)
+        ScanWatermarkStore watermarks,
+        SyncStatisticsStore? statistics = null)
+        : base(logger, manager, clientFactory, configManager, watermarks, statistics)
     {
         _metadataService = metadataService;
         _conflicts = conflicts;

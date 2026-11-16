@@ -34,14 +34,16 @@ public class RefreshUserSyncTableTask
     /// <param name="userManager">Reads Jellyfin's users.</param>
     /// <param name="builder">Builds user sync rows.</param>
     /// <param name="manager">Reads and writes the sync table.</param>
+    /// <param name="statistics">Keeps what each scan found for the Statistics tab, or null to keep nothing.</param>
     public RefreshUserSyncTableTask(
         ILogger<RefreshUserSyncTableTask> logger,
         IPluginConfigurationManager configManager,
         ISourceServerClientFactory clientFactory,
         IUserManager userManager,
         UserSyncTableService builder,
-        UserSyncTableManager manager)
-        : base(logger, manager, clientFactory, configManager)
+        UserSyncTableManager manager,
+        Services.Database.SyncStatisticsStore? statistics = null)
+        : base(logger, manager, clientFactory, configManager, statistics: statistics)
     {
         _userManager = userManager;
         _builder = builder;

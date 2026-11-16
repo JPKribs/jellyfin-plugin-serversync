@@ -144,6 +144,7 @@ public class UpdateSyncTablesTask
     /// <param name="linkFiles">Reads and writes link files, or null when linking is not available.</param>
     /// <param name="applicationHost">Gives this server's id and name.</param>
     /// <param name="rehomer">Points links at another server, or null when linking is not available.</param>
+    /// <param name="statistics">Keeps what each scan found for the Statistics tab, or null to keep nothing.</param>
     public UpdateSyncTablesTask(
         ILogger<UpdateSyncTablesTask> logger,
         IPluginConfigurationManager configManager,
@@ -153,8 +154,9 @@ public class UpdateSyncTablesTask
         ScanWatermarkStore watermarks,
         LinkFiles? linkFiles = null,
         MediaBrowser.Controller.IServerApplicationHost? applicationHost = null,
-        LinkRehomer? rehomer = null)
-        : base(logger, manager, clientFactory, configManager, watermarks)
+        LinkRehomer? rehomer = null,
+        SyncStatisticsStore? statistics = null)
+        : base(logger, manager, clientFactory, configManager, watermarks, statistics)
     {
         _libraryManager = libraryManager;
         _linkFiles = linkFiles;

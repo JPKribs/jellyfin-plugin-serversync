@@ -1,6 +1,6 @@
 # Setup
 
-The plugin has four tabs. **Sync** shows each sync type's table and the change queue. **Servers** holds the one time setup of the servers this one syncs with. **Storage**, shown while content, history, or metadata sync is on, holds how each mapped library keeps its files and which items it syncs. **Settings** holds the options.
+The plugin has five tabs. **Sync** shows each sync type's table and the change queue. **Servers** holds the one time setup of the servers this one syncs with. **Storage**, shown while content, history, or metadata sync is on, holds how each mapped library keeps its files and which items it syncs. **Statistics** charts what the last scans found. **Settings** holds the options.
 
 ## Servers
 
@@ -71,6 +71,22 @@ The **Storage** tab shows while content, history, or metadata sync is on. Pick a
 | Negotiate History | For a Sync server, while history sync is on, whether merged watch history is written back to that server. See [History](History.md) |
 
 Below the cards, **Permanent Copies** lists the full copies held in that server's Link libraries and why each is a copy. **Turn Back Into Links** makes the selected copies links again. The link is written, then the copy moves into the link cache, or is removed when the cache is off or full. The source must still have the file. A copy covered by an Always Keep pick stays a copy until the pick is removed.
+
+## Statistics
+
+![Statistics](screenshots/Statistics.png)
+
+The **Statistics** tab has one section for each sync type that is on. Each charts what the last 10 scans of that sync type found:
+
+| Bar | Counts |
+| :--- | :--- |
+| New | Items the scan tracked for the first time |
+| Updated | Items that were in step and that the scan found changed on a source |
+| Removed | Items the scan stopped tracking, since no source holds them any more |
+
+A scan of a sync type runs from its scheduled task or from **Refresh** on the **Sync** tab. An item that is already waiting to sync is not counted again by a later scan.
+
+While content sync is on and a server may link to this one, the **Content** section also charts **Link Streams**: how many streams this server started for each such server on each of the last 30 days, one line for each server. A film counts once however often its player seeks. See [Links](Links.md).
 
 ## Settings
 

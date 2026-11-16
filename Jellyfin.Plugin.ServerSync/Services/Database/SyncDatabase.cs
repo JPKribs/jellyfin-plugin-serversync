@@ -423,7 +423,11 @@ public class SyncDatabase : IDisposable
             SyncSchema.CurrentSchemaVersion,
             SyncSchema.MinReaderFor(connection),
             c => SyncSchema.Create((SqliteConnection)c),
-            (_, fromVersion) => throw new SchemaTooOldException(fromVersion));
+            (c, fromVersion) =>
+            {
+                SyncSchema.Upgrade((SqliteConnection)c, fromVersion);
+                return true;
+            });
 
     /// <summary>
     /// Closes the database, moves it aside as a timestamped backup with its journal, and creates a fresh one.

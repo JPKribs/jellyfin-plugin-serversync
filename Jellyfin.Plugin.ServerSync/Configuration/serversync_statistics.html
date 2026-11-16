@@ -1,0 +1,37 @@
+<!-- serversync_statistics.html -->
+<!-- The Statistics tab, what the last scans of each sync type found, and the link streams served each day. -->
+
+<div id="ServerSyncStatisticsPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs"
+     data-require="emby-button"
+     data-controller="__plugin/serversync_statistics.js">
+    <div data-role="content">
+        <div class="content-primary">
+            <!-- The form holds the page to the width of the other tabs. It has no fields and is never sent. -->
+            <form id="ServerSyncStatisticsForm">
+                <div class="verticalSection verticalSection-extrabottompadding">
+
+                    <!-- Statistics Header -->
+
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h1 class="sectionTitle">Statistics</h1>
+                    </div>
+                    <div class="fieldDescription serversync-mb-md">Shows what the last 10 scans of each sync type found. A sync type that is off is not shown.</div>
+
+                    <div id="statisticsStatus" class="base-status-text" role="status"></div>
+                    <div id="statisticsDisabled" class="base-neutral serversync-mb-md hidden">Every sync type is off, so there is nothing to show. Turn one on under Settings.</div>
+
+                    <!-- Sync Types -->
+                    <!-- One section for each sync type that is on, drawn by the page controller. -->
+
+                    <div id="statisticsSections"></div>
+
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="configurationpage?name=serversync_jpkribs_shared.css">
+    <link rel="stylesheet" href="configurationpage?name=serversync_shared.css">
+
+</div>

@@ -14,7 +14,13 @@ public static class SyncSchema
     /// <summary>
     /// The schema version. Raise it when the schema changes.
     /// </summary>
-    public const int CurrentSchemaVersion = 36;
+    public const int CurrentSchemaVersion = 37;
+
+    /// <summary>
+    /// The oldest schema version this release brings forward itself, which is the one <see cref="OldestUpgradableRelease"/> writes.
+    /// Each version since then only added tables, so <see cref="Upgrade"/> creates what is missing and changes nothing else.
+    /// </summary>
+    public const int OldestUpgradableSchema = 36;
 
     /// <summary>
     /// The release whose database this one opens as it is. Anything older has to be started once on
@@ -53,7 +59,7 @@ public static class SyncSchema
     /// <summary>Whether a stored version is one an older release wrote and this release cannot read.</summary>
     /// <param name="storedVersion">The version read from the database, or null.</param>
     /// <returns><c>true</c> when the database needs <see cref="OldestUpgradableRelease"/> first.</returns>
-    public static bool IsTooOld(int? storedVersion) => storedVersion is > 0 and < CurrentSchemaVersion;
+    public static bool IsTooOld(int? storedVersion) => storedVersion is > 0 and < OldestUpgradableSchema;
 
     /// <summary>
     /// The oldest schema version whose code can still use a database at <see cref="CurrentSchemaVersion"/>, written into the database so an older build can tell.
@@ -106,6 +112,24 @@ public static class SyncSchema
         CreatePeopleTable(connection);
         CreateMetadataTable(connection);
         CreateSharedTables(connection);
+        CreateStatisticsTables(connection);
+    }
+
+    /// <summary>
+    /// Brings a database from <see cref="OldestUpgradableSchema"/> or later up to <see cref="CurrentSchemaVersion"/> by creating the tables added since. No stored row is changed.
+    /// </summary>
+    /// <param name="connection">The open database to bring forward.</param>
+    /// <param name="fromVersion">The schema version the database holds.</param>
+    /// <exception cref="SchemaTooOldException">Thrown when the database is older than <see cref="OldestUpgradableSchema"/>.</exception>
+    public static void Upgrade(SqliteConnection connection, int fromVersion)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        if (fromVersion < OldestUpgradableSchema)
+        {
+            throw new SchemaTooOldException(fromVersion);
+        }
+
+        CreateStatisticsTables(connection);
     }
 
     /// <summary>
@@ -451,6 +475,33 @@ public static class SyncSchema
             CREATE TABLE IF NOT EXISTS RemovedItemsLog (StartedAt TEXT NOT NULL);
             INSERT INTO RemovedItemsLog (StartedAt) SELECT @now WHERE NOT EXISTS (SELECT 1 FROM RemovedItemsLog);";
         cmd.Parameters.AddWithValue("@now", JPKribs.Jellyfin.Base.UtcTime.Format(DateTime.UtcNow));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Creates the tables the Statistics tab reads, added in schema 37: the last scans of each sync type, and the link streams started for each server on each day.
+    /// Both hold counts only, and each write trims them to what the charts show.
+    /// </summary>
+    private static void CreateStatisticsTables(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS ScanRuns (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Module TEXT NOT NULL,
+                FinishedAt TEXT NOT NULL,
+                Added INTEGER NOT NULL DEFAULT 0,
+                Updated INTEGER NOT NULL DEFAULT 0,
+                Removed INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_scan_runs_module ON ScanRuns(Module, Id);
+
+            CREATE TABLE IF NOT EXISTS LinkStreamDays (
+                Day TEXT NOT NULL,
+                ServerKey TEXT NOT NULL,
+                Streams INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(Day, ServerKey)
+            );";
         cmd.ExecuteNonQuery();
     }
 }

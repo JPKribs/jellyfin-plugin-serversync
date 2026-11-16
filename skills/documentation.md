@@ -54,7 +54,7 @@ Remove compatibility notes for peers the plugin no longer supports. The plugin r
 
 * Write a label exactly as the page shows it, in bold. **Send Changes After (seconds)**.
 * Write a path through the UI with `>` between the steps, in bold. **Dashboard > Plugins > Server Sync > Settings**.
-* Write a tab as its label, in bold. **Sync**, **Servers**, **Storage**, **Settings**.
+* Write a tab as its label, in bold. **Sync**, **Servers**, **Storage**, **Statistics**, **Settings**.
 * Quote activity log names and on-screen messages in double quotes. "Server Sync Needs Attention".
 * Write routes, files, settings keys, and values in code. `POST /Sync/Tasks/{taskKey}/Run`.
 

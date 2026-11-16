@@ -20,7 +20,7 @@ A server that reports no protocol is compatible only when it runs exactly the sa
 
 ## Updating From an Older Release
 
-Version 12.4.16.0 carries no upgrade steps for anything older than 12.4.13.0. It opens the database and settings that 12.4.13.0 leaves behind, and nothing before them.
+Version 12.4.16.0 carries no upgrade steps for anything older than 12.4.13.0. It opens the database and settings that 12.4.13.0 leaves behind, and nothing before them. On its first start it adds the two tables the **Statistics** tab reads to that database and changes nothing else in it.
 
 To update a server that runs a release before 12.4.13.0:
 

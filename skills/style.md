@@ -255,7 +255,7 @@ Every config page uses Jellyfin's page shell.
 * One registered page per tab, wired with `createConfigPage` and `setTabs`.
 * Tab names are one Title Case word.
 * Keep the tab list in one place, the plugin's shared module, never copied into each page.
-* Order tabs from what is used most to what is set once. ServerSync is **Sync**, **Servers**, **Storage**, **Settings**.
+* Order tabs from what is used most to what is set once. ServerSync is **Sync**, **Servers**, **Storage**, **Statistics**, **Settings**.
 
 ### Sections
 

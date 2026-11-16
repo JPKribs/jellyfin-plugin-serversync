@@ -20,9 +20,9 @@ namespace Jellyfin.Plugin.ServerSync.Tests.Services.Database;
 /// </summary>
 public sealed class SyncSchemaTests : IDisposable
 {
-    // The fingerprint of every table, column, and index at schema v36. A change to the schema changes
+    // The fingerprint of every table, column, and index at schema v37. A change to the schema changes
     // it, which is the moment to raise SyncSchema.CurrentSchemaVersion and decide what older files do.
-    private const string SchemaFingerprint = "36A1A4E0702BD17BABFF5F49C9AA3406478CE91A6AB7B6E941751494C3FB943B";
+    private const string SchemaFingerprint = "70C50BD8CCDE215ED9F64E74430F5A00F857DB2B2A098BCD152E08A0064F8F91";
 
     private readonly string _dataPath;
     private readonly string _dbPath;
@@ -61,8 +61,8 @@ public sealed class SyncSchemaTests : IDisposable
         Assert.Equal(
             new[]
             {
-                "HistorySyncItems", "InboundHints", "MetadataSyncItems", "ObjectVersions", "OutboundHints", "PeerPairings",
-                "PendingVersions", "PeopleSyncItems", "PlaylistCopies", "RemovedItems", "RemovedItemsLog", "ScanWatermarks",
+                "HistorySyncItems", "InboundHints", "LinkStreamDays", "MetadataSyncItems", "ObjectVersions", "OutboundHints", "PeerPairings",
+                "PendingVersions", "PeopleSyncItems", "PlaylistCopies", "RemovedItems", "RemovedItemsLog", "ScanRuns", "ScanWatermarks",
                 "SyncAttention", "SyncItems", "UserSyncItems"
             },
             tables);
@@ -102,7 +102,7 @@ public sealed class SyncSchemaTests : IDisposable
             File.WriteAllText(dump, described);
         }
 
-        Assert.Equal(36, SyncSchema.CurrentSchemaVersion);
+        Assert.Equal(37, SyncSchema.CurrentSchemaVersion);
         Assert.Equal(SchemaFingerprint, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(described))));
     }
 
@@ -118,17 +118,58 @@ public sealed class SyncSchemaTests : IDisposable
         using (var conn = Raw())
         {
             Exec(conn, "CREATE TABLE Marker (Id INTEGER); INSERT INTO Marker VALUES (7);");
-            DatabaseSchema.SetVersion(conn, SyncSchema.CurrentSchemaVersion - 1);
+            DatabaseSchema.SetVersion(conn, SyncSchema.OldestUpgradableSchema - 1);
         }
 
         var refused = Assert.Throws<SchemaTooOldException>(() => new SyncDatabase(NullLogger<SyncDatabase>.Instance, _dataPath));
-        Assert.Equal(SyncSchema.CurrentSchemaVersion - 1, refused.FoundVersion);
+        Assert.Equal(SyncSchema.OldestUpgradableSchema - 1, refused.FoundVersion);
         Assert.Contains(SyncSchema.OldestUpgradableRelease, refused.Message, StringComparison.Ordinal);
 
         using var after = Raw();
-        Assert.Equal(SyncSchema.CurrentSchemaVersion - 1, DatabaseSchema.GetVersion(after));
+        Assert.Equal(SyncSchema.OldestUpgradableSchema - 1, DatabaseSchema.GetVersion(after));
         Assert.Equal(7L, Scalar(after, "SELECT Id FROM Marker"));
         Assert.Single(Directory.GetFiles(Path.GetDirectoryName(_dbPath)!), f => !f.EndsWith("-wal", StringComparison.Ordinal) && !f.EndsWith("-shm", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A database from the oldest release this one reads is brought forward: the tables added since are created, and every stored row is left as it was.
+    /// True: a server updating from that release keeps its tracking and gains the new tables.
+    /// False: the update would hold the plugin, or drop what the server had tracked.
+    /// </summary>
+    [Fact]
+    public void DatabaseAtTheOldestUpgradableSchema_GainsTheNewTablesAndKeepsItsRows()
+    {
+        new SyncDatabase(NullLogger<SyncDatabase>.Instance, _dataPath).Dispose();
+        using (var conn = Raw())
+        {
+            Exec(conn, "DROP TABLE ScanRuns; DROP TABLE LinkStreamDays; CREATE TABLE Marker (Id INTEGER); INSERT INTO Marker VALUES (7);");
+            DatabaseSchema.SetVersion(conn, SyncSchema.OldestUpgradableSchema);
+        }
+
+        SqliteConnection.ClearAllPools();
+        Assert.False(SyncSchema.IsTooOld(SyncSchema.StoredVersion(_dataPath)));
+        new SyncDatabase(NullLogger<SyncDatabase>.Instance, _dataPath).Dispose();
+
+        using var after = Raw();
+        Assert.Equal(SyncSchema.CurrentSchemaVersion, DatabaseSchema.GetVersion(after));
+        Assert.Equal(SyncSchema.MinReaderVersion, DatabaseSchema.GetMinReaderVersion(after));
+        Assert.Equal(7L, Scalar(after, "SELECT Id FROM Marker"));
+        Assert.Equal(2L, Scalar(after, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('ScanRuns', 'LinkStreamDays')"));
+    }
+
+    /// <summary>
+    /// The upgrade refuses a schema older than the oldest it brings forward.
+    /// True: an older database is never opened against tables it does not have.
+    /// False: an old database would be stamped as current with half its tables missing.
+    /// </summary>
+    [Fact]
+    public void Upgrade_OlderThanTheOldestUpgradableSchema_Throws()
+    {
+        using var conn = Memory();
+
+        var refused = Assert.Throws<SchemaTooOldException>(() => SyncSchema.Upgrade(conn, SyncSchema.OldestUpgradableSchema - 1));
+
+        Assert.Equal(SyncSchema.OldestUpgradableSchema - 1, refused.FoundVersion);
     }
 
     /// <summary>
@@ -171,6 +212,8 @@ public sealed class SyncSchemaTests : IDisposable
         Assert.Equal(SyncSchema.CurrentSchemaVersion, SyncSchema.StoredVersion(_dataPath));
         Assert.False(SyncSchema.IsTooOld(SyncSchema.StoredVersion(_dataPath)));
         Assert.False(SyncSchema.IsTooOld(SyncSchema.CurrentSchemaVersion + 1));
+        Assert.False(SyncSchema.IsTooOld(SyncSchema.OldestUpgradableSchema));
+        Assert.True(SyncSchema.IsTooOld(SyncSchema.OldestUpgradableSchema - 1));
 
         using (var conn = Raw())
         {

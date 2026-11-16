@@ -38,7 +38,7 @@ test('the Servers tab is the second tab', async function () {
 
 test('the Servers tab leaves out Storage while it is hidden and still marks itself', async function () {
     var opened = await openPage({ storage: { 'serversync.storageTab': '0' } });
-    assert.deepEqual(opened.calls[0].tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Settings']);
+    assert.deepEqual(opened.calls[0].tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Statistics', 'Settings']);
 });
 
 test('a config that cannot be loaded shows an error on the server list status and never opens an alert', async function () {

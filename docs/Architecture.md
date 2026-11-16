@@ -207,7 +207,7 @@ While the plugin is held, a lookup finds nothing.
 
 * `CurrentSchemaVersion` is the schema this release writes.
 * `MinReaderVersion` is the oldest schema version that can read it. It rises to `LinkReaderVersion` once the database holds a link, and to `UnkeepReaderVersion` once a copy is going back to a link.
-* `OldestUpgradableRelease` is `12.4.13.0`, the oldest release this one upgrades from.
+* `OldestUpgradableRelease` is `12.4.13.0`, the oldest release this one upgrades from, and `OldestUpgradableSchema` is the schema it writes. `SyncSchema.Upgrade` brings a database from there forward by creating the tables added since, and changes no stored row.
 
 | Table | Holds | Store |
 | :--- | :--- | :--- |
@@ -225,6 +225,8 @@ While the plugin is held, a lookup finds nothing.
 | `ScanWatermarks` | Where each incremental scan left off | `ScanWatermarkStore` |
 | `SyncAttention` | When each failing row first failed | `MaintenanceStore` |
 | `RemovedItems`, `RemovedItemsLog` | Media removed from the library in the last 30 days | `RemovedItemsStore` |
+| `ScanRuns` | What each of the last 10 scans of a sync type found | `SyncStatisticsStore` |
+| `LinkStreamDays` | Link streams started for each server on each of the last 30 days | `SyncStatisticsStore` |
 
 The five sync table managers extend `SyncTableManagerBase`, and every other store extends `QueueStoreBase`. Both write under the database's one write lock, and neither opens the database until it is first used.
 
@@ -237,6 +239,7 @@ Each tab is a page in `Configuration/` with a script of the same name. Each page
 | **Sync** | `serversync_sync.html` and the `serversync_sync_*.js` modules | Each sync table's routes, `Tasks/{taskKey}/Run`, and the `Hints` routes |
 | **Servers** | `serversync_servers.html` | `TestConnection`, `Authenticate`, `GetSourceLibraries`, `GetSourceUsers`, `Hints/CheckPeer`, `Servers/{key}/Rows` |
 | **Storage** | `serversync_storage.html` | `SourceLibraryItems`, `KeptCopies`, `KeptCopies/Unkeep` |
+| **Statistics** | `serversync_statistics.html` | `Statistics` |
 | **Settings** | `serversync_settings.html` | `GetSourceUsers`, `LinkCache`, `LinkCache/Clear`, `Reset/{table}` |
 
 ## Rules That Hold Everywhere

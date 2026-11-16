@@ -29,13 +29,13 @@ test('the Sync tab sets the four tabs, with itself first, while the Storage tab 
     var first = opened.calls[0];
     assert.equal(first.key, 'serversync');
     assert.equal(first.index, 0);
-    assert.deepEqual(first.tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Storage', 'Settings']);
+    assert.deepEqual(first.tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Storage', 'Statistics', 'Settings']);
     assert.equal(first.tabs[0].href, 'configurationpage?name=serversync_sync');
 });
 
 test('the Sync tab leaves the Storage tab out once the stored answer says it is hidden', async function () {
     var opened = await openPage({ 'serversync.storageTab': '0' });
-    assert.deepEqual(opened.calls[0].tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Settings']);
+    assert.deepEqual(opened.calls[0].tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Statistics', 'Settings']);
 });
 
 test('the Sync tab shows the Storage tab when storage is blocked', async function () {
@@ -47,7 +47,7 @@ test('the Sync tab shows the Storage tab when storage is blocked', async functio
     var mod = await loadScript('serversync_sync.js');
     mod.default(view);
     view.dispatch('viewshow');
-    assert.equal(calls[0].tabs.length, 4);
+    assert.equal(calls[0].tabs.length, 5);
 });
 
 test('the Sync tab registers for viewshow and viewhide', async function () {

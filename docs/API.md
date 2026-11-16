@@ -482,6 +482,25 @@ What the [link cache](Links.md#the-link-cache) holds now. The **Settings** tab s
 
 `Sizing` is `Off`, `All`, `Fixed`, or `Percent`, and `LimitBytes` is what that comes to now. A cache sized by its disk has a limit that moves with the disk. `Waiting` counts files queued to be cached. With the cache off, `Enabled` is false and the counts are 0.
 
+### GET /Sync/Statistics
+
+What the **Statistics** tab charts.
+
+```json
+{
+  "Types": [
+    { "Key": "Content", "Runs": [ { "FinishedAt": "2026-11-16T17:54:42Z", "Added": 3, "Updated": 1, "Removed": 0 } ] },
+    { "Key": "People", "Runs": [] }
+  ],
+  "LinkStreams": {
+    "Days": ["2026-10-18", "2026-10-19"],
+    "Servers": [ { "Key": "ec76f4c0", "Name": "Den", "Streams": [4, 0] } ]
+  }
+}
+```
+
+`Types` lists only the sync types that are on, as `Content`, `History`, `Metadata`, `People`, and `User`, each with up to its last 10 scans, oldest first. `LinkStreams` is null unless content sync is on and a server entry may link to this server. It holds 30 days, oldest first and in this server's own time, and one entry for each such server with a count for every day.
+
 ### POST /Sync/LinkCache/Clear
 
 Deletes every cached file, as **Empty the Cache** does. Links keep playing from their sources. Answers `204`.

@@ -33,7 +33,7 @@ async function openPage(opts) {
 test('the Storage tab always lists itself, even while the stored answer says it is hidden', async function () {
     var opened = await openPage({ storage: { 'serversync.storageTab': '0' } });
     assert.equal(opened.calls[0].index, 2);
-    assert.deepEqual(opened.calls[0].tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Storage', 'Settings']);
+    assert.deepEqual(opened.calls[0].tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Storage', 'Statistics', 'Settings']);
 });
 
 test('a config that cannot be loaded shows an error on the page status and never opens an alert', async function () {

@@ -64,13 +64,22 @@ public sealed class LinkSessions
     /// <param name="userId">The user streaming.</param>
     /// <param name="itemId">The item streamed.</param>
     /// <returns>Ends the request when disposed.</returns>
-    public IDisposable Open(string peerKey, Guid userId, Guid itemId)
+    public IDisposable Open(string peerKey, Guid userId, Guid itemId) => Open(peerKey, userId, itemId, out _);
+
+    /// <summary>Marks a request for a stream as open until the returned handle is disposed, and says whether it began a new stream.</summary>
+    /// <param name="peerKey">The linking server's key.</param>
+    /// <param name="userId">The user streaming.</param>
+    /// <param name="itemId">The item streamed.</param>
+    /// <param name="started">Whether no stream of this item was running for this server and user, so this request began one.</param>
+    /// <returns>Ends the request when disposed.</returns>
+    public IDisposable Open(string peerKey, Guid userId, Guid itemId, out bool started)
     {
         ArgumentNullException.ThrowIfNull(peerKey);
         var key = (peerKey.ToUpperInvariant(), userId, itemId);
         lock (_lock)
         {
-            if (!_streams.TryGetValue(key, out var stream))
+            started = !_streams.TryGetValue(key, out var stream);
+            if (stream is null)
             {
                 stream = new Stream();
                 _streams[key] = stream;
@@ -95,9 +104,24 @@ public sealed class LinkSessions
     /// <param name="userElsewhere">Streams the user holds outside links, counted toward their limit.</param>
     /// <returns>The handle, or null.</returns>
     public IDisposable? TryOpen(string peerKey, Guid userId, Guid itemId, int maxForPeer, int maxForUser, int userElsewhere)
+        => TryOpen(peerKey, userId, itemId, maxForPeer, maxForUser, userElsewhere, out _);
+
+    /// <summary>
+    /// Opens a request for a stream as <see cref="TryOpen(string, Guid, Guid, int, int, int)"/> does, and says whether it began a new stream.
+    /// </summary>
+    /// <param name="peerKey">The calling server's entry key.</param>
+    /// <param name="userId">The user streamed as.</param>
+    /// <param name="itemId">The item streamed.</param>
+    /// <param name="maxForPeer">The calling server's limit, or 0 for none.</param>
+    /// <param name="maxForUser">The user's limit, or 0 for none.</param>
+    /// <param name="userElsewhere">Streams the user holds outside links, counted toward their limit.</param>
+    /// <param name="started">Whether this request began a stream that was not already running.</param>
+    /// <returns>The handle, or null.</returns>
+    public IDisposable? TryOpen(string peerKey, Guid userId, Guid itemId, int maxForPeer, int maxForUser, int userElsewhere, out bool started)
     {
         ArgumentNullException.ThrowIfNull(peerKey);
         var peer = peerKey.ToUpperInvariant();
+        started = false;
         lock (_lock)
         {
             Prune();
@@ -108,7 +132,7 @@ public sealed class LinkSessions
                 return null;
             }
 
-            return Open(peerKey, userId, itemId);
+            return Open(peerKey, userId, itemId, out started);
         }
     }
 

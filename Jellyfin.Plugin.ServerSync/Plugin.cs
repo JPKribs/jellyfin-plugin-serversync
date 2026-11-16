@@ -345,6 +345,18 @@ public sealed class Plugin : PluginBase<Plugin, PluginConfiguration>
 
         yield return new PluginPageInfo
         {
+            Name = "serversync_statistics",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_statistics.html"
+        };
+
+        yield return new PluginPageInfo
+        {
+            Name = "serversync_statistics.js",
+            EmbeddedResourcePath = $"{ns}.Configuration.serversync_statistics.js"
+        };
+
+        yield return new PluginPageInfo
+        {
             Name = "serversync_settings",
             EmbeddedResourcePath = $"{ns}.Configuration.serversync_settings.html"
         };

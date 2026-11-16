@@ -41,14 +41,14 @@ function posts(opened) {
 
 test('the Settings tab is the last tab, after Storage when that shows', async function () {
     var opened = await openPage();
-    assert.equal(opened.calls[0].index, 3);
-    assert.equal(opened.calls[0].tabs[3].name, 'Settings');
+    assert.equal(opened.calls[0].index, 4);
+    assert.equal(opened.calls[0].tabs[4].name, 'Settings');
 });
 
 test('the Settings tab moves up one place when the Storage tab is hidden', async function () {
     var opened = await openPage({ storage: { 'serversync.storageTab': '0' } });
-    assert.equal(opened.calls[0].index, 2);
-    assert.deepEqual(opened.calls[0].tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Settings']);
+    assert.equal(opened.calls[0].index, 3);
+    assert.deepEqual(opened.calls[0].tabs.map(function (t) { return t.name; }), ['Sync', 'Servers', 'Statistics', 'Settings']);
 });
 
 test('a config that cannot be loaded shows an error on the page status and never opens an alert', async function () {

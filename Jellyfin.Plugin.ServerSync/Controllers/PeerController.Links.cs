@@ -33,6 +33,7 @@ public partial class PeerController
     /// <param name="policy">Decides whether the server and user may stream the file.</param>
     /// <param name="sessions">Counts the open link streams against the limits.</param>
     /// <param name="userManager">Finds the user a standard caller is held to.</param>
+    /// <param name="statistics">Counts a stream that starts, for the Statistics tab.</param>
     /// <returns>The file, or 403 or 429 with the reason.</returns>
     [HttpGet("Stream/{itemId}")]
     [HttpHead("Stream/{itemId}")]
@@ -49,7 +50,8 @@ public partial class PeerController
         [FromQuery] bool fill,
         [FromServices] LinkPolicy policy,
         [FromServices] LinkSessions sessions,
-        [FromServices] IUserManager userManager)
+        [FromServices] IUserManager userManager,
+        [FromServices] Services.Database.SyncStatisticsStore? statistics = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -70,10 +72,15 @@ public partial class PeerController
         if (verdict.UserId is { } user && !fill)
         {
             // The limits are checked again under the lock that opens the stream.
-            var handle = sessions.TryOpen(peer.Key, user, verdict.Item.Id, peer.LinkMaxStreams, peer.GetLinkMaxStreamsFor(user), policy.OwnPlayback(user, peer.LinkCountOwnSessions));
+            var handle = sessions.TryOpen(peer.Key, user, verdict.Item.Id, peer.LinkMaxStreams, peer.GetLinkMaxStreamsFor(user), policy.OwnPlayback(user, peer.LinkCountOwnSessions), out var started);
             if (handle is null)
             {
                 return StatusCode(StatusCodes.Status403Forbidden, "the source's link stream limit is reached");
+            }
+
+            if (started)
+            {
+                CountLinkStream(statistics, peer.Key);
             }
 
             HttpContext.Response.RegisterForDispose(handle);
@@ -122,6 +129,21 @@ public partial class PeerController
             EnableRangeProcessing = true,
             LastModified = System.IO.File.GetLastWriteTimeUtc(verdict.Item.Path)
         };
+    }
+
+    /// <summary>
+    /// Counts a link stream that just started toward today, for the Statistics tab. A failure to count is logged and never fails the stream.
+    /// </summary>
+    private void CountLinkStream(Services.Database.SyncStatisticsStore? statistics, string serverKey)
+    {
+        try
+        {
+            statistics?.CountLinkStream(DateOnly.FromDateTime(DateTime.Now), serverKey);
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException)
+        {
+            _logger.LogDebug(ex, "Could not count a link stream for the Statistics tab");
+        }
     }
 
     /// <summary>

@@ -15,6 +15,8 @@ import {
     createChoiceGroup,
     createCheckboxList,
     createPieChart,
+    createBarChart,
+    createLineChart,
     createUsageMeter,
     createRepeater,
     generateGuid,
@@ -27,7 +29,7 @@ import {
 
 // Re-exports
 // The Base builders and the kept secret sentinel, so a page takes everything from this one module.
-export { createPaginatedTable, createSortableCardList, createChoiceGroup, createCheckboxList, createPieChart, createUsageMeter, createRepeater, generateGuid, bindDialog, confirmDialog, SECRET_KEPT };
+export { createPaginatedTable, createSortableCardList, createChoiceGroup, createCheckboxList, createPieChart, createBarChart, createLineChart, createUsageMeter, createRepeater, generateGuid, bindDialog, confirmDialog, SECRET_KEPT };
 
 var PLUGIN_ID = 'ebd650b5-6f4c-4ccb-b10d-23dffb3a7286';
 
@@ -76,6 +78,7 @@ export function serverSyncTabs(alwaysStorage) {
         { href: 'configurationpage?name=serversync_servers', name: 'Servers' }
     ];
     if (alwaysStorage || readStorageTabFlag() !== '0') tabs.push({ href: 'configurationpage?name=serversync_storage', name: 'Storage' });
+    tabs.push({ href: 'configurationpage?name=serversync_statistics', name: 'Statistics' });
     tabs.push({ href: 'configurationpage?name=serversync_settings', name: 'Settings' });
     return tabs;
 }

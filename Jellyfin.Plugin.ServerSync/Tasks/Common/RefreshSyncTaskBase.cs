@@ -33,6 +33,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     private readonly ISourceServerClientFactory _clientFactory;
     private readonly IPluginConfigurationManager _configManager;
     private readonly ScanWatermarkStore? _watermarks;
+    private readonly SyncStatisticsStore? _statistics;
     private readonly Dictionary<string, DateTime> _changedSince = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _runStartedAt;
 
@@ -47,12 +48,14 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
     /// <param name="clientFactory">Builds the client for each source.</param>
     /// <param name="configManager">Reads and saves the plugin settings.</param>
     /// <param name="watermarks">Holds when each source was last scanned, or null when scans are never incremental.</param>
+    /// <param name="statistics">Keeps what each scan found for the Statistics tab, or null to keep nothing.</param>
     protected RefreshSyncTaskBase(
         ILogger logger,
         ISyncTableManager<TRecord, TKey> manager,
         ISourceServerClientFactory clientFactory,
         IPluginConfigurationManager configManager,
-        ScanWatermarkStore? watermarks = null)
+        ScanWatermarkStore? watermarks = null,
+        SyncStatisticsStore? statistics = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(manager);
@@ -63,6 +66,7 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         _clientFactory = clientFactory;
         _configManager = configManager;
         _watermarks = watermarks;
+        _statistics = statistics;
     }
 
     /// <summary>Gets a value indicating whether the sync type can scan only what changed since the last scan, which is off unless overridden.</summary>
@@ -856,6 +860,27 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         progress.Report(100);
 
         ReportRunOutcome(run, pruned);
+        RecordStatistics(run, pruned);
+    }
+
+    /// <summary>
+    /// Keeps what this scan found for the Statistics tab. A failure to keep it is logged and never fails the scan.
+    /// </summary>
+    private void RecordStatistics(RefreshRun run, int pruned)
+    {
+        if (_statistics is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _statistics.RecordRun(ModuleMutexKey, new ScanRun(DateTime.UtcNow, run.Added, run.Updated, pruned));
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException)
+        {
+            Logger.LogDebug(ex, "{Task}: could not record the scan for the Statistics tab", Name);
+        }
     }
 
     /// <summary>Decides whether this run lists everything or only what changed since each source's last scan.</summary>
@@ -1128,11 +1153,16 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
                 run.SeenPriorityKeys.TryAdd(priorityKey, 0);
             }
 
+            // Read before the status is decided, since a stored row is often the same object as the built one.
+            var held = run.Existing.TryGetValue(key, out var stored);
+            var wasSynced = held && stored!.Status == SyncStatus.Synced;
             DecideStatus(record);
             if (record.Status == SyncStatus.Queued)
             {
                 run.QueuedThisRun.Add(record);
             }
+
+            run.CountChange(!held, wasSynced && record.Status is not (SyncStatus.Synced or SyncStatus.Ignored) ? record : null);
 
             run.PendingWrites.Enqueue(record);
             if (run.PendingWrites.Count >= WriteBatchSize)
@@ -1454,6 +1484,8 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
         private int _processed;
         private int _buildFailures;
         private int _persistFailures;
+        private int _added;
+        private readonly ConcurrentBag<TRecord> _leftSynced = new();
 
         /// <summary>Initializes a new instance of the <see cref="RefreshRun"/> class.</summary>
         /// <param name="existing">The rows stored when the run started, by key.</param>
@@ -1537,6 +1569,30 @@ public abstract class RefreshSyncTaskBase<TRecord, TSource, TKey> : IScheduledTa
 
         /// <summary>Counts one row that could not be written.</summary>
         public void CountPersistFailure() => Interlocked.Increment(ref _persistFailures);
+
+        /// <summary>Gets how many items the run tracked for the first time.</summary>
+        public int Added => Volatile.Read(ref _added);
+
+        /// <summary>
+        /// Gets how many items already in step the run found changed.
+        /// It is read once conflicts are settled, since a row whose local edit is kept goes back to Synced and is no change.
+        /// </summary>
+        public int Updated => _leftSynced.Count(record => record.Status is not (SyncStatus.Synced or SyncStatus.Ignored));
+
+        /// <summary>Counts a built row as new to the table, or keeps one that was in step and no longer is.</summary>
+        /// <param name="added">Whether the table held no row for the item.</param>
+        /// <param name="leftSynced">The row when it was Synced and now waits to sync, or null.</param>
+        public void CountChange(bool added, TRecord? leftSynced)
+        {
+            if (added)
+            {
+                Interlocked.Increment(ref _added);
+            }
+            else if (leftSynced is not null)
+            {
+                _leftSynced.Add(leftSynced);
+            }
+        }
 
         /// <summary>
         /// Says whether a stored row belongs to a higher ranked server that did not answer this run, so a lower ranked one does not take it over for the outage.

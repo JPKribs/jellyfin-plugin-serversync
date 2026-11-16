@@ -54,6 +54,28 @@ public sealed class LinkSessionsTests
     }
 
     /// <summary>
+    /// The first request of a stream says it began one, and a further request of the same stream does not. A refused request began nothing.
+    /// True: the Statistics tab counts a film once however many range requests its player makes.
+    /// False: every seek would count as another stream.
+    /// </summary>
+    [Fact]
+    public void TryOpen_SaysWhetherTheRequestBeganAStream()
+    {
+        var sessions = Sessions();
+
+        using var first = sessions.TryOpen("peer", User, Item, 1, 0, 0, out var began);
+        using var again = sessions.TryOpen("peer", User, Item, 1, 0, 0, out var beganAgain);
+        var refused = sessions.TryOpen("peer", User, Item2, 1, 0, 0, out var beganRefused);
+        using var other = sessions.Open("other", User, Item, out var beganOther);
+
+        Assert.True(began);
+        Assert.False(beganAgain);
+        Assert.Null(refused);
+        Assert.False(beganRefused);
+        Assert.True(beganOther);
+    }
+
+    /// <summary>
     /// A server at its limit is refused a new stream, while a further request of a running stream still opens.
     /// True: the limit counts streams, so seeking or buffering never trips it.
     /// False: a player's second range request would be refused mid film.

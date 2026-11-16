@@ -80,8 +80,8 @@ public sealed class RefreshPeopleSyncTableTaskTests : IDisposable
 
     private sealed class Probe : RefreshPeopleSyncTableTask
     {
-        public Probe(RefreshPeopleSyncTableTaskTests test)
-            : base(NullLogger<RefreshPeopleSyncTableTask>.Instance, test._library, test._factory, test._config, test._manager, null!)
+        public Probe(RefreshPeopleSyncTableTaskTests test, Jellyfin.Plugin.ServerSync.Services.Database.SyncStatisticsStore? statistics = null)
+            : base(NullLogger<RefreshPeopleSyncTableTask>.Instance, test._library, test._factory, test._config, test._manager, null!, statistics)
         {
         }
 
@@ -375,6 +375,32 @@ public sealed class RefreshPeopleSyncTableTaskTests : IDisposable
         Assert.Null(_manager.GetByKey("Gone Person"));
         Assert.NotNull(_manager.GetByKey("Alice Smith"));
         Assert.NotNull(_config.Configuration.LastPeopleSyncTime);
+    }
+
+    /// <summary>
+    /// A scan records how many people it tracked for the first time, how many it found changed, and how many it stopped tracking.
+    /// True: the Statistics tab charts what each scan found.
+    /// False: the chart would stay empty, or count a person already waiting to sync again on every scan.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_RecordsWhatTheScanFound()
+    {
+        var statistics = new Jellyfin.Plugin.ServerSync.Services.Database.SyncStatisticsStore(new FixedProvider(_database), NullLogger<Jellyfin.Plugin.ServerSync.Services.Database.SyncStatisticsStore>.Instance);
+        LocalPerson("Alice Smith", overview: "from source");
+        LocalPerson("Bob Jones", overview: "local text");
+        LocalPerson("New Person", overview: "from source");
+        SourceHolds("Alice Smith", "Bob Jones", "New Person");
+        Track("Alice Smith");
+        Track("Bob Jones");
+        Track("Gone Person");
+
+        await new Probe(this, statistics).ExecuteAsync(new TaskProgress(), CancellationToken.None);
+        await new Probe(this, statistics).ExecuteAsync(new TaskProgress(), CancellationToken.None);
+
+        var runs = statistics.Runs("People");
+        Assert.Equal(2, runs.Count);
+        Assert.Equal((1, 1, 1), (runs[0].Added, runs[0].Updated, runs[0].Removed));
+        Assert.Equal((0, 0, 0), (runs[1].Added, runs[1].Updated, runs[1].Removed));
     }
 
     /// <summary>
