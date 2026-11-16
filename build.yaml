@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.15.0"
+version: "12.4.16.0"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -30,43 +30,19 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   changed:
-  - The third step of a server entry is named Linking, the metadata option for who appears in an item is named People, and a synced copy on the Sync tab reads Synced
-  - Descriptions and messages across the pages are shorter and end with a period, and the hint above the server list says how rank works
-  - The reasons a link stream is refused name the count plainly, as in 1 stream or 2 link streams
-  - The scheduled steps that Sync Content and Sync Information run are named for what they do in the log and on the Activity page, such as Scan Content and Copy Content
-  - The pages are drawn with the new Base components. Buttons, numbered steps, count cards, and status messages look a little different, a status message carries an icon, and a file size reads 2 KB where it read 2.00 KB
-  - The Storage tab charts how many of the picked server's synced files are copies, links, and cached links, and shows how much of the link cache is used while the cache is on
-  - The Whitelist rows are drawn with Base's row editor
-  - Skip Items Watched By is a searchable list of checkboxes
-  - An empty Queue shows its message in a box, as the other empty lists do
-  - A thumbnail in the Content and History tables is always upright, so an episode still is cropped to fit
-  - Addresses in 100.64.0.0/10, the range Tailscale uses, count as a private network. A server entry at such an address needs Allow Private Network Address on, which it is by default
+  - A scan compares Metadata and People images by the source's image tag. An image already matched is fetched when its tag changes, and an image never matched is compared by size once, so images already on both servers are matched without a download
+  - A scan asks a source for image sizes only for an image it has never matched. An item or person with no image here costs no call, and neither does one whose tags are unchanged
+  - A user's profile image is downloaded from the source only when its tag changes. Every scan downloaded it before
+  - Deep Image Verification still measures every source image on every scan and compares by size, and with it on every scan still downloads each user's profile image
+  - The People refresh lists every person item a source holds, which can be a few more than before
   fixed:
-  - A viewer who stopped a link stayed on the source's dashboard as still playing, and pressing Stop there answered that the session was not found. The session now goes idle when playback stops and leaves the dashboard 20 minutes later
-  - Saving a server entry with an empty Server URL was accepted and dropped its stored API Key. The save is refused and the key is kept
-  - A user that had never synced showed a last sync of 739934 days ago. It reads Never
-  - A deep page of a large Sync tab table took about a second to load. It sorts the page before reading its rows
-  - A watch history refresh looked up the same user for every item. A refresh that took 40.5 seconds takes 17.2 on the same data
-  - The refusal to save a server whose Server Sync cannot talk to this one showed as a pop up. It shows beside the Save button
-  - A settings file with an empty server entry stopped the settings from loading
-  - A link showed no subtitles on players that ask for them with no token, such as webOS. A subtitle or attachment request that names no user is read while a viewer is playing the link
-  - A People refresh against a source with a large catalog failed on every run, since the source took longer than 90 seconds to start listing its people. The list is asked for once and may take thirty minutes
-  - A server entry asked for with its key in another letter case was sent no pairing secret. The secret is read under the key the entry was saved with
-  - A thumbnail from a server entry that could not be called failed with an error. It shows as no image
-  - An image's size could read 1,5 KB on a server set to a language that writes decimals with a comma
-  - The History detail on a phone ran off the side of the screen
+  - A People refresh against a source with a large catalog rested on one long request. The people are read 2,000 at a time and each page is retried by itself
+  - A source image replaced by one of the same file size was never synced. Its tag changes, so it is fetched
+  - A Metadata image a source served with no bytes could replace the image here. It counts as a failed download and the image here is kept
+  - A Metadata scan that could not ask a source for image sizes dropped the sizes it already held. It keeps them
   developer:
-  - The guides in starthere.md and skills cover naming, style, code, testing, profiling, documentation, review, and release, and docs/Architecture.md maps the parts
-  - Tests mirror the source folders, shared fakes live in Fakes, and the tests that measure real time or disk space run in one serial collection
-  - Every source file that holds logic has a test file of its own, the controllers included, and each route is checked for the authorization or peer guard it must carry. The suite grows from 1,264 tests to 4,193
-  - Every namespace matches its folder and every type has a file named after it
-  - Comments follow the code guide. A catch names the exceptions it expects or filters out a cancelled run, and each one left broad says why
-  - The image proxy asks the source through SourceServerClientFactory, as every other call does
-  - A history fetch no longer asks the source for media sources, which it never read
-  - Values another server or a request supplies pass through SanitizeForLog in the link, provider, and whitelist log lines
-  - PluginConfiguration.ValidateConfiguration and IsValid, which nothing called, are removed
-  - Uses JPKribs.Jellyfin.Base 2026.11.20. Its speed bucket, throttled and capped streams, stalled copy detection, retry and redirect handlers, path containment, hashing, size constants, address guard with its HTTPS rule, atomic file writes, and secret compare replace the local copies
-  - The link key file is written for its owner only from the first byte
-  - GET /Sync/Items takes serverKey to list one server entry's rows
-  - The pages use Base's base- classes and tokens, and each is built with createConfigPage through createServerSyncPage in serversync_shared.js, which also holds the tab list
-  - Table thumbnails come from a column image loader that reads the image proxy, which replaces the three local thumbnail builders
+  - ImageUtilities holds every image action and comparison for Metadata, People, and user pictures. It replaces ImageManifestEnricher, LocalImageUtilities, the manifest builders in both merge services, and four copies of the profile image rule
+  - A local image entry in LocalImagesValue carries Tag, a mark of its file and when it was written, and SyncedTag, the source tag it was matched to. A ProfileImage row holds the source's image tag in SourceValueHash. The database schema is unchanged
+  - GetAllPersonsAsync pages /Items for Person items, asks /Persons/{name} for a name a source holds twice, and falls back to the unpaged /Persons when the paged list is empty
+  - The wire protocol is unchanged, so this release works alongside 12.4.15.0 one server at a time
+  - The suite grows from 4,193 tests to 4,251
