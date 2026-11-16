@@ -7,6 +7,7 @@ using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services.Clients;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -73,7 +74,7 @@ public class UserSyncTableService
         {
             UserPropertyCategory.Policy => BuildPolicyItem(mapping, sourceUser, localUserDto, libraryMappings, existingItem, bothWays),
             UserPropertyCategory.Configuration => BuildConfigurationItem(mapping, sourceUser, localUserDto, existingItem, bothWays),
-            UserPropertyCategory.ProfileImage => await BuildProfileImageItemAsync(mapping, sourceUser, localUser, sourceClient, existingItem, cancellationToken).ConfigureAwait(false),
+            UserPropertyCategory.ProfileImage => await BuildProfileImageItemAsync(mapping, sourceUser, localUser, sourceClient, existingItem, config.DeepImageVerification, cancellationToken).ConfigureAwait(false),
             _ => null
         };
     }
@@ -184,6 +185,7 @@ public class UserSyncTableService
 
     /// <summary>
     /// Builds the ProfileImage row from the hash and size of each server's image.
+    /// A source image whose tag is unchanged keeps the hash already read, and the deep check reads it again whatever the tag says.
     /// A source image that cannot be read keeps its last known hash, and with none to keep the error fails the row.
     /// </summary>
     private async Task<UserSyncItem> BuildProfileImageItemAsync(
@@ -192,15 +194,23 @@ public class UserSyncTableService
         Jellyfin.Database.Implementations.Entities.User localUser,
         SourceServerClient sourceClient,
         UserSyncItem? existingItem,
+        bool deepVerification,
         CancellationToken cancellationToken)
     {
         var sourceUserId = Guid.Parse(mapping.SourceUserId);
+        var sourceImageTag = sourceUser.PrimaryImageTag;
         string? sourceImageHash = null;
         long? sourceImageSize = null;
         string? localImageHash = null;
         long? localImageSize = null;
 
-        if (!string.IsNullOrEmpty(sourceUser.PrimaryImageTag))
+        if (!deepVerification && ImageUtilities.PictureTagUnchanged(sourceImageTag, existingItem?.SourceValueHash, existingItem?.SourceImageHash))
+        {
+            // The tag changes whenever the source's image is written, so an unchanged tag keeps the hash already read and saves the download.
+            sourceImageHash = existingItem!.SourceImageHash;
+            sourceImageSize = existingItem.SourceImageSize;
+        }
+        else if (!string.IsNullOrEmpty(sourceImageTag))
         {
             try
             {
@@ -212,6 +222,9 @@ public class UserSyncTableService
                 _logger.LogWarning(ex, "ProfileImage: could not read the source image for {User}, keeping the last known hash", FormatUtilities.SanitizeForLog(sourceUser.Name));
                 sourceImageHash = existingItem!.SourceImageHash;
                 sourceImageSize = existingItem.SourceImageSize;
+
+                // The old tag stays with the old hash, so the next scan reads the image again.
+                sourceImageTag = existingItem.SourceValueHash;
             }
         }
 
@@ -221,9 +234,7 @@ public class UserSyncTableService
             {
                 if (File.Exists(localUser.ProfileImage.Path))
                 {
-                    localImageSize = new FileInfo(localUser.ProfileImage.Path).Length;
-                    using var fileStream = File.OpenRead(localUser.ProfileImage.Path);
-                    localImageHash = (await HashUtilities.ComputeSha256HashAsync(fileStream, cancellationToken).ConfigureAwait(false)).Hash;
+                    (localImageHash, localImageSize) = await ImageUtilities.HashFileAsync(localUser.ProfileImage.Path, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -260,6 +271,9 @@ public class UserSyncTableService
         item.LocalValue = localDisplay;
         item.MergedValue = sourceDisplay;
         item.SourceImageHash = sourceImageHash;
+
+        // A ProfileImage row has no value to fingerprint, so this holds the source's image tag the hash was read under.
+        item.SourceValueHash = sourceImageTag;
         item.LocalImageHash = localImageHash;
         item.SyncedImageHash = syncedImageHash;
         item.SourceImageSize = sourceImageSize;

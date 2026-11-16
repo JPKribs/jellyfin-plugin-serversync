@@ -20,7 +20,9 @@ The library filter on the **Storage** tab applies to metadata as it does to cont
 
 When an item's images differ from the source, this server downloads the full source set for that image type, then replaces its own set for that type with it. If a download fails, the existing images are kept and the row is marked Errored. The whole set is replaced because an item can hold several of them. A source with two backdrops over a local five has to remove the extra three files. Otherwise the next library scan picks them up again and the difference comes straight back.
 
-**Refresh Parallelism** and **Deep Image Verification** apply to Metadata and People and live under **Settings > Processing**.
+A scan tells whether an image changed from the tag the source gives it, which changes whenever the source writes the image again. Once an image here has been matched to the source's, an unchanged tag means no change, and a new tag means the image is fetched. An image that has never been matched is compared by file size, so images already on both servers are matched without being downloaded.
+
+**Refresh Parallelism** and **Deep Image Verification** apply to Metadata and People and live under **Settings > Processing**. Deep Image Verification measures every source image on every scan and compares by size, which also catches an image file swapped on the source's disk before the source has noticed.
 
 ## Live Changes Between Servers
 

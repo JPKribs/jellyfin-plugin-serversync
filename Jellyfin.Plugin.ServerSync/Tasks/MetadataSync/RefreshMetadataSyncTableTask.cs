@@ -519,6 +519,7 @@ public class RefreshMetadataSyncTableTask
             syncGenres: config.MetadataSyncGenres,
             syncTags: config.MetadataSyncTags,
             priorSourceImagesJson: priorRecord?.Images.Source,
+            priorLocalImagesJson: priorRecord?.Images.Local,
             deepImageVerification: config.DeepImageVerification,
             source.Source.Client,
             cancellationToken).ConfigureAwait(false);

@@ -132,7 +132,10 @@ public sealed class RefreshPeopleSyncTableTaskTests : IDisposable
     private void SourceHolds(params string[] names)
     {
         var items = names.Select((name, i) => "{\"Id\":\"aaaaaaaa-1111-0000-0000-00000000000" + (i + 1) + "\",\"Name\":" + (name.Length == 0 ? "null" : "\"" + name + "\"") + ",\"Type\":\"Person\",\"Overview\":\"from source\"}");
-        _factory.HandlerFor(ServerKey).OnJson("/Persons", "{\"Items\":[" + string.Join(",", items) + "],\"TotalRecordCount\":" + names.Length + "}");
+        var body = "{\"Items\":[" + string.Join(",", items) + "],\"TotalRecordCount\":" + names.Length + "}";
+
+        // The paged list is asked first, and an empty one sends the scan to the unpaged list.
+        _factory.HandlerFor(ServerKey).OnJson("/Items", body).OnJson("/Persons", body);
     }
 
     private int LibraryReads => _libraryStub.Calls.Count(c => c.Name == nameof(ILibraryManager.GetItemList));
@@ -191,6 +194,7 @@ public sealed class RefreshPeopleSyncTableTaskTests : IDisposable
         var work = await new Probe(this).List(Source());
 
         Assert.Empty(work);
+        Assert.Equal(0, _factory.HandlerFor(ServerKey).CountOf("/Items"));
         Assert.Equal(0, _factory.HandlerFor(ServerKey).CountOf("/Persons"));
     }
 
@@ -207,7 +211,7 @@ public sealed class RefreshPeopleSyncTableTaskTests : IDisposable
         LocalPerson("Alice Smith");
         if (error)
         {
-            _factory.HandlerFor(ServerKey).On("/Persons", _ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+            _factory.HandlerFor(ServerKey).On("/Items", _ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
         }
         else
         {
@@ -392,7 +396,7 @@ public sealed class RefreshPeopleSyncTableTaskTests : IDisposable
                 break;
             case "source-error":
                 LocalPerson("Alice Smith");
-                _factory.HandlerFor(ServerKey).On("/Persons", _ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+                _factory.HandlerFor(ServerKey).On("/Items", _ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
                 break;
             default:
                 LocalPerson("Alice Smith");

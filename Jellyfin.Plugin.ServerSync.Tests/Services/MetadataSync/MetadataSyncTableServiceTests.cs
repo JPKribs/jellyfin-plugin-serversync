@@ -76,7 +76,7 @@ public sealed class MetadataSyncTableServiceTests
         => new(NullLogger<SourceServerClient>.Instance, new HttpClient(handler), "https://source.example", "key", "test", "0.0.0-test");
 
     private Task<MetadataSyncItem?> Build(LibraryMapping library, BaseItemDto source, bool isFolder = false, bool metadata = false, bool studios = false, bool people = false)
-        => _service.BuildRecordAsync(library, source, isFolder, metadata, syncImages: false, people, studios, syncGenres: true, syncTags: true, priorSourceImagesJson: null, deepImageVerification: false, client: null!, CancellationToken.None);
+        => _service.BuildRecordAsync(library, source, isFolder, metadata, syncImages: false, people, studios, syncGenres: true, syncTags: true, priorSourceImagesJson: null, priorLocalImagesJson: null, deepImageVerification: false, client: null!, CancellationToken.None);
 
     /// <summary>
     /// Each dependency is required.

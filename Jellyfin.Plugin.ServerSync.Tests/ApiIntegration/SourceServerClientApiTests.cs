@@ -188,15 +188,16 @@ public class SourceServerClientApiTests
     }
 
     // =====================================================================
-    // Persons, the client must return the complete /Persons catalog in one
-    // call: no duplicates, nothing missing versus the raw endpoint. /Persons
-    // (not /Items?recursive) is load-bearing here: recursive Items queries
-    // scope to the requesting user's libraries and return an empty 200 for
-    // non-admin tokens, which is how 10.11.64.0 wiped the People table.
+    // Persons, the client must return everyone the raw /Persons endpoint
+    // lists: no person twice, no name twice, nothing missing. The client
+    // pages /Items, which also lists Person items /Persons leaves out, so
+    // it may return more. A source that answers /Items with no one is asked
+    // through /Persons, since 10.11 hid Person items from a standard
+    // user's key, which is how 10.11.64.0 wiped the People table.
     // =====================================================================
 
     [ApiFact]
-    public async Task GetAllPersons_MatchesRawPersonsEndpoint()
+    public async Task GetAllPersons_CoversRawPersonsEndpoint()
     {
         var persons = await _fx.Client.GetAllPersonsAsync();
 
@@ -217,7 +218,11 @@ public class SourceServerClientApiTests
         var clientIdSet = clientIds.Select(g => g.ToString("N")).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missingFromClient = personsEndpoint.Keys.Where(id => !clientIdSet.Contains(id)).Take(5).ToList();
         Assert.True(missingFromClient.Count == 0, $"Persons missing from GetAllPersonsAsync: {string.Join(", ", missingFromClient)}");
-        Assert.Equal(personsEndpoint.Count, persons.Count);
+        Assert.True(persons.Count >= personsEndpoint.Count, $"The client returned {persons.Count} people and /Persons lists {personsEndpoint.Count}");
+
+        // No name twice, so the scan reads one person for each name.
+        var names = persons.Where(p => !string.IsNullOrWhiteSpace(p.Name)).Select(p => p.Name!).ToList();
+        Assert.Equal(names.Count, names.Distinct(StringComparer.Ordinal).Count());
     }
 
     // =====================================================================

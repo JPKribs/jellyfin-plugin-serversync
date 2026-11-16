@@ -62,8 +62,7 @@ public class PeopleSyncTableService
 
         if (syncImages)
         {
-            var (_, localImg) = PeopleSyncMergeService.PopulateImageData(null, localPerson);
-            record.Images.Local = localImg;
+            record.Images.Local = ImageUtilities.BuildLocalManifest(localPerson, PeopleSyncMergeService.ImageTypes, record.Images.Local);
         }
     }
 
@@ -85,7 +84,7 @@ public class PeopleSyncTableService
         ArgumentNullException.ThrowIfNull(record);
         if (!Guid.TryParse(record.SourcePersonId, out var sourcePersonId)) return;
 
-        record.Images.Source = await ImageManifestEnricher.EnrichAsync(
+        record.Images.Source = await ImageUtilities.EnrichAsync(
             record.Images.Source,
             sourcePersonId,
             client,

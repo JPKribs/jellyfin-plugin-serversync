@@ -159,8 +159,7 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
     }
 
     /// <summary>
-    /// Lists the local Person items, fetches the source's whole person catalog in one call, and matches the two by name in memory.
-    /// The persons route is the only one that works for every kind of key, since Person items live outside library folders.
+    /// Lists the local Person items, reads the source's whole person catalog a page at a time, and matches the two by name in memory.
     /// </summary>
     /// <inheritdoc />
     protected override async Task<IList<PersonWork>> GetListAsync(ScanSource source, IProgress<double> progress, CancellationToken cancellationToken)
@@ -285,30 +284,19 @@ public class RefreshPeopleSyncTableTask : RefreshSyncTaskBase<PeopleSyncItem, Pe
         var config = ConfigManager.Configuration;
         if (config.PeopleSyncImages)
         {
-            var (sourceImg, localImg) = PeopleSyncMergeService.PopulateImageData(source, localPerson);
-
-            // Without sizes on the source manifest, every row would queue on every scan.
-            if (!string.IsNullOrEmpty(record.SourcePersonId)
-                && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
-            {
-                try
-                {
-                    sourceImg = await ImageManifestEnricher.EnrichWithCarryForwardAsync(
-                        sourceImg,
-                        record.Images.Source,
-                        sourcePersonGuid,
-                        work.Source.Client,
-                        Logger,
-                        source.Name,
-                        config.DeepImageVerification,
-                        cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-                {
-                    Logger.LogDebug(ex, "Source image enrichment failed for {PersonName}. Comparator will fall back to tag-only", FormatUtilities.SanitizeForLog(source.Name));
-                    sourceImg = ImageManifestEnricher.CarryForwardSizes(sourceImg, record.Images.Source);
-                }
-            }
+            var (sourceImg, localImg) = await ImageUtilities.ReadManifestsAsync(
+                source,
+                localPerson,
+                PeopleSyncMergeService.ImageTypes,
+                record.Images.Source,
+                record.Images.Local,
+                Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid) ? sourcePersonGuid : null,
+                work.Source.Client,
+                config.DeepImageVerification,
+                null,
+                Logger,
+                source.Name,
+                cancellationToken).ConfigureAwait(false);
 
             record.Images.UpdateSource(sourceImg);
             record.Images.Local = localImg;

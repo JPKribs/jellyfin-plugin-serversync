@@ -207,7 +207,7 @@ public static class SyncSchema
 
     /// <summary>
     /// Creates the Users sync table, one row for each user mapping and each of Policy, Configuration, and ProfileImage.
-    /// The value hashes let a scan skip an unchanged row, and the image hashes compare the profile image.
+    /// The value hashes let a scan skip an unchanged row, and the image hashes compare the profile image. On a ProfileImage row, SourceValueHash holds the source's image tag.
     /// </summary>
     private static void CreateUserTable(SqliteConnection connection)
     {

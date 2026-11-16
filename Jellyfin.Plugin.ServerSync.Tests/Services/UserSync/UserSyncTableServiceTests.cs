@@ -1,8 +1,16 @@
+using System;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Jellyfin.Plugin.ServerSync.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Configuration;
 using Jellyfin.Plugin.ServerSync.Models.UserSync;
 using Jellyfin.Plugin.ServerSync.Services.UserSync;
+using Jellyfin.Plugin.ServerSync.Tests.Fakes;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Jellyfin.Plugin.ServerSync.Tests.Services.UserSync;
@@ -55,5 +63,41 @@ public class UserSyncTableServiceTests
 
         // The other server's change is still waiting to be applied here: that is not a change of this server's.
         Assert.Equal((other, false), UserSyncTableService.SettleBothWays(Agreed(agreed, agreed, SyncStatus.Queued, mergedSeen: changed), other, agreed, Combined));
+    }
+
+    /// <summary>
+    /// A source picture is downloaded once and its hash is kept while the source's tag for it is unchanged. A new tag, or the deep check, reads it again.
+    /// True: a regular scan downloads no picture that has not changed.
+    /// False: every scan would download every user's picture, or a new picture would never be seen.
+    /// </summary>
+    [Fact]
+    public async Task BuildRecordAsync_ProfileImage_DownloadsOnlyWhenTheTagChangesOrTheCheckIsDeep()
+    {
+        var sourceId = Guid.NewGuid();
+        var route = "/Users/" + sourceId + "/Images/Primary";
+        var server = new ClientStubServer().On(route, _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 1, 2, 3 }) });
+        using var client = server.Client();
+        var service = new UserSyncTableService(NullLogger<UserSyncTableService>.Instance);
+        var local = new Jellyfin.Database.Implementations.Entities.User("alice", "provider", "reset");
+        var mapping = new UserMapping { SourceUserId = sourceId.ToString("N"), LocalUserId = local.Id.ToString("N") };
+        var config = new PluginConfiguration();
+        Task<UserSyncItem?> Scan(string tag, UserSyncItem? existing)
+            => service.BuildRecordAsync(mapping, UserPropertyCategory.ProfileImage, new Jellyfin.Sdk.Generated.Models.UserDto { Id = sourceId, Name = "alice", PrimaryImageTag = tag }, new MediaBrowser.Model.Dto.UserDto(), local, client, config, existing, CancellationToken.None);
+
+        // The scan builds on the row it is given, so each value is read before the next scan changes it.
+        var first = await Scan("tag-1", null);
+        var (afterFirst, firstHash) = (server.To(route).Count, first!.SourceImageHash);
+        var second = await Scan("tag-1", first);
+        var (afterSecond, secondTag, secondHash, secondSize) = (server.To(route).Count, second!.SourceValueHash, second.SourceImageHash, second.SourceImageSize);
+        var changed = await Scan("tag-2", second);
+        var (afterChanged, changedTag) = (server.To(route).Count, changed!.SourceValueHash);
+        config.DeepImageVerification = true;
+        var deep = await Scan("tag-2", changed);
+
+        Assert.Equal((1, 1, 2, 3), (afterFirst, afterSecond, afterChanged, server.To(route).Count));
+        Assert.Equal(("tag-1", "tag-2"), (secondTag, changedTag));
+        Assert.Equal(firstHash, secondHash);
+        Assert.Equal(3, secondSize);
+        Assert.True(deep!.HasChanges);
     }
 }

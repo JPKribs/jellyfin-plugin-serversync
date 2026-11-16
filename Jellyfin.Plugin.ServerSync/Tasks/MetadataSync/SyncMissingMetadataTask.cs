@@ -429,147 +429,37 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             throw new InvalidOperationException($"Invalid source item ID for image sync: {item.SourceItemId}");
         }
 
-        var anyChanged = false;
-        // Collected so the row errors when only some image types landed.
-        var perTypeErrors = new List<string>();
-
-        foreach (var kvp in sourceImagesByType)
+        var work = new List<ImageToApply>();
+        foreach (var (imageTypeName, sourceImages) in sourceImagesByType)
         {
-            var imageTypeName = kvp.Key;
-            var sourceImages = kvp.Value;
-
-            if (!Enum.TryParse<ImageType>(imageTypeName, out var imageType))
+            for (var i = 0; i < sourceImages.Count; i++)
             {
-                Logger.LogWarning("Unknown image type: {ImageType}", FormatUtilities.SanitizeForLog(imageTypeName));
-                perTypeErrors.Add($"{imageTypeName}: unknown image type");
-                continue;
-            }
-
-            // One failed image fails its type, and the other types still go on.
-            var tempFiles = new List<(int Index, string TempPath, string ContentType)>();
-            var typeErrors = new List<string>();
-            try
-            {
-                for (int i = 0; i < sourceImages.Count; i++)
-                {
-                    int? imageIndex = (imageType == ImageType.Backdrop || sourceImages.Count > 1) ? i : null;
-
-                    try
-                    {
-                        var (imageStream, contentType) = await sourceClient.DownloadItemImageAsync(
-                            sourceItemGuid, imageTypeName, imageIndex, cancellationToken).ConfigureAwait(false);
-
-                        if (imageStream == null)
-                        {
-                            Logger.LogWarning("Failed to download image {ImageType}/{Index} for {ItemName}",
-                                FormatUtilities.SanitizeForLog(imageTypeName), i, localItem.Name);
-                            typeErrors.Add($"download index {i}: returned null");
-                            continue;
-                        }
-
-                        var tempDir = Path.Combine(ConfigManager.GetTempDownloadPath(), "metadata-images");
-                        Directory.CreateDirectory(tempDir);
-                        var tempPath = Path.Combine(tempDir, Guid.NewGuid().ToString("N"));
-                        try
-                        {
-                            using (imageStream)
-                            {
-                                // What is saved is named by its type, so only an image is taken.
-                                if (contentType is not null && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    throw new InvalidOperationException($"the source answered {contentType}, which is not an image");
-                                }
-
-                                using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 81920);
-                                await StreamUtilities.CopyWithIdleTimeoutAsync(new CappedReadStream(imageStream, StreamCaps.MaxSyncedImageBytes), fileStream, StreamUtilities.DefaultIdleTimeout, cancellationToken: cancellationToken).ConfigureAwait(false);
-                            }
-
-                            tempFiles.Add((i, tempPath, contentType ?? "image/jpeg"));
-                        }
-                        catch
-                        {
-                            try { File.Delete(tempPath); } catch (IOException) { }
-                            throw;
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-                    {
-                        Logger.LogWarning(ex, "Error downloading {ImageType}/{Index} image for {ItemName}",
-                            FormatUtilities.SanitizeForLog(imageTypeName), i, localItem.Name);
-                        typeErrors.Add($"download index {i}: {ex.Message}");
-                    }
-                }
-
-                // A failed download keeps the existing images, so no type is half replaced.
-                if (typeErrors.Count > 0)
-                {
-                    Logger.LogWarning(
-                        "Not all {ImageType} downloads succeeded for {ItemName} ({Downloaded}/{Total}), keeping existing local images",
-                        FormatUtilities.SanitizeForLog(imageTypeName), localItem.Name, tempFiles.Count, sourceImages.Count);
-                    perTypeErrors.Add($"{imageTypeName}: {string.Join("; ", typeErrors)} (kept existing local images)");
-                    continue;
-                }
-
-                if (tempFiles.Count == 0)
-                {
-                    // Every download was empty, so nothing failed and nothing changes.
-                    continue;
-                }
-
-                // The type is wiped first, or leftover extra images would be adopted again.
-                var cleared = await LocalImageUtilities.ClearImagesAsync(
-                    localItem, imageType, Logger, localItem.Name ?? item.ItemName ?? localItem.Id.ToString(), cancellationToken).ConfigureAwait(false);
-                if (cleared > 0)
-                {
-                    anyChanged = true;
-                }
-
-                foreach (var (index, tempPath, contentType) in tempFiles)
-                {
-                    try
-                    {
-                        using var fileStream = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                        await _providerManager.SaveImage(
-                            localItem,
-                            fileStream,
-                            contentType,
-                            imageType,
-                            index,
-                            cancellationToken).ConfigureAwait(false);
-                        anyChanged = true;
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-                    {
-                        Logger.LogWarning(ex, "Error saving {ImageType}/{Index} image for {ItemName}",
-                            FormatUtilities.SanitizeForLog(imageTypeName), index, localItem.Name);
-                        typeErrors.Add($"save index {index}: {ex.Message}");
-                    }
-                }
-
-                if (typeErrors.Count > 0)
-                {
-                    perTypeErrors.Add($"{imageTypeName}: {string.Join("; ", typeErrors)}");
-                }
-            }
-            finally
-            {
-                foreach (var (_, tempPath, _) in tempFiles)
-                {
-                    try { File.Delete(tempPath); } catch (IOException) { }
-                }
+                // The source takes no index for a type that holds one image, backdrops aside.
+                var indexed = sourceImages.Count > 1 || string.Equals(imageTypeName, nameof(ImageType.Backdrop), StringComparison.OrdinalIgnoreCase);
+                work.Add(new ImageToApply(imageTypeName, indexed ? i : null, i));
             }
         }
 
-        if (anyChanged)
+        var result = await ImageUtilities.ReplaceAsync(
+            localItem,
+            work,
+            (image, ct) => sourceClient.DownloadItemImageAsync(sourceItemGuid, image.ImageType, image.SourceIndex, ct),
+            _providerManager,
+            Path.Combine(ConfigManager.GetTempDownloadPath(), "metadata-images"),
+            Logger,
+            localItem.Name ?? item.ItemName ?? localItem.Id.ToString(),
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.Changed)
         {
             await localItem.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, cancellationToken).ConfigureAwait(false);
         }
 
         // Without the throw, a half applied image set would be marked synced.
-        if (perTypeErrors.Count > 0)
+        if (result.Errors.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Image apply incomplete for {item.ItemName}: {string.Join(" | ", perTypeErrors)}");
+                $"Image apply incomplete for {item.ItemName}: {string.Join(" | ", result.Errors)}");
         }
     }
 
@@ -680,47 +570,15 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
     {
         _metadataService.RefreshLocalSnapshot(record, syncMetadata: false, syncImages: true, syncPeople: false, syncStudios: false, syncGenres: false, syncTags: false);
 
-        // Scan manifests carry no sizes, so the source side gets real sizes here.
-        string? enrichedSource = record.Images.Source;
-        var imageSource = SourceFor(record);
-        if (imageSource != null && Guid.TryParse(record.SourceItemId, out var sourceItemGuid))
-        {
-            try
-            {
-                enrichedSource = await ImageManifestEnricher.EnrichAsync(
-                    record.Images.Source,
-                    sourceItemGuid,
-                    imageSource.Client,
-                    Logger,
-                    record.ItemName ?? record.SourceItemId,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                Logger.LogWarning(ex, "Source image enrichment for verify failed for {ItemName}. Falling back to tag-only comparison", FormatUtilities.SanitizeForLog(record.ItemName));
-            }
-        }
-
         // Profile images cannot be saved on these items, so they are left out.
-        var sanitizedSource = StripUnsyncableImageTypes(enrichedSource);
-
-        if (record.Images.Comparator is Models.Common.Comparators.ImageManifestComparator imagesComparator)
-        {
-            var diff = imagesComparator.DescribeDifference(sanitizedSource, record.Images.Local);
-            if (diff == null)
-            {
-                return (true, null);
-            }
-
-            return (false, $"image manifest after apply does not match source manifest: {diff}");
-        }
-
-        if (record.Images.Comparator.Equals(sanitizedSource, record.Images.Local))
-        {
-            return (true, null);
-        }
-
-        return (false, "image manifest after apply does not match source manifest (count or per-type tag/size mismatch)");
+        return await ImageUtilities.VerifyAsync(
+            record.Images,
+            Guid.TryParse(record.SourceItemId, out var sourceItemGuid) ? sourceItemGuid : null,
+            SourceFor(record)?.Client,
+            Logger,
+            record.ItemName ?? record.SourceItemId,
+            manifest => ImageUtilities.WithoutTypes(manifest, MetadataSyncMergeService.UnsavableImageTypes),
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Rebuilds the local cast and compares it with the source's.</summary>
@@ -770,30 +628,6 @@ public class SyncMissingMetadataTask : SyncQueueTaskBase<MetadataSyncItem, (stri
             "Season" or "MusicAlbum" or "BoxSet" => 1,
             _ => 2
         };
-    }
-
-    /// <summary>
-    /// Removes Profile, the image type that cannot be written to an item that is not a person.
-    /// Jellyfin drops Profile writes on those items, so the entry would hold the row in Errored over a difference that can never sync.
-    /// </summary>
-    private static string? StripUnsyncableImageTypes(string? sourceManifest)
-    {
-        if (string.IsNullOrEmpty(sourceManifest)) return sourceManifest;
-        try
-        {
-            var map = JsonSerializer.Deserialize<Dictionary<string, List<ImageInfoDto>>>(sourceManifest);
-            if (map == null || map.Count == 0) return sourceManifest;
-            var removed = map.Keys
-                .Where(k => string.Equals(k, "Profile", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (removed.Count == 0) return sourceManifest;
-            foreach (var key in removed) map.Remove(key);
-            return JsonSerializer.Serialize(map);
-        }
-        catch (JsonException)
-        {
-            return sourceManifest;
-        }
     }
 
     private static bool ArraysEqualOrdinal(string[]? a, string[]? b)

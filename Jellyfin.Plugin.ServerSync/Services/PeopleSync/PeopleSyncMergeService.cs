@@ -23,7 +23,7 @@ public static class PeopleSyncMergeService
     /// <summary>
     /// The local image types read into a person's manifest, with Backdrop because a person can hold several.
     /// </summary>
-    private static readonly LocalImageType[] LocalImageTypes =
+    public static readonly IReadOnlyList<LocalImageType> ImageTypes = new[]
     {
         LocalImageType.Primary,
         LocalImageType.Backdrop
@@ -91,108 +91,5 @@ public static class PeopleSyncMergeService
         };
 
         return JsonSerializer.Serialize(metadata);
-    }
-
-    /// <summary>
-    /// Builds a person's source image manifest from its image tags, and its local one from the image files.
-    /// </summary>
-    /// <param name="sourcePerson">The person as the source returned it, or null.</param>
-    /// <param name="localPerson">The local person, or null.</param>
-    /// <returns>The source and local manifests, each null when its person is null.</returns>
-    public static (string? SourceImagesValue, string? LocalImagesValue) PopulateImageData(
-        BaseItemDto? sourcePerson,
-        BaseItem? localPerson)
-    {
-        string? sourceImagesValue = null;
-        string? localImagesValue = null;
-
-        if (sourcePerson != null)
-        {
-            var sourceImagesByType = new Dictionary<string, List<ImageInfoDto>>();
-            if (sourcePerson.ImageTags?.AdditionalData != null)
-            {
-                foreach (var kvp in sourcePerson.ImageTags.AdditionalData)
-                {
-                    var tag = MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value);
-                    if (string.IsNullOrEmpty(tag))
-                    {
-                        continue;
-                    }
-
-                    sourceImagesByType[kvp.Key] = new List<ImageInfoDto>
-                    {
-                        new ImageInfoDto
-                        {
-                            ImageType = kvp.Key,
-                            ImageIndex = 0,
-                            Tag = tag
-                        }
-                    };
-                }
-            }
-
-            // A person with only backdrops has no ImageTags, so this stands apart.
-            if (sourcePerson.BackdropImageTags?.Count > 0)
-            {
-                sourceImagesByType["Backdrop"] = sourcePerson.BackdropImageTags
-                    .Select((tag, idx) => new ImageInfoDto { ImageType = "Backdrop", ImageIndex = idx, Tag = tag })
-                    .ToList();
-            }
-
-            if (sourceImagesByType.Count > 0)
-            {
-                sourceImagesValue = JsonSerializer.Serialize(sourceImagesByType);
-            }
-        }
-
-        if (localPerson != null)
-        {
-            var localImagesByType = new Dictionary<string, List<ImageInfoDto>>();
-            foreach (var imageType in LocalImageTypes)
-            {
-                var images = localPerson.GetImages(imageType).ToList();
-                if (images.Count == 0)
-                {
-                    continue;
-                }
-
-                var imageInfoList = new List<ImageInfoDto>();
-                for (int idx = 0; idx < images.Count; idx++)
-                {
-                    var img = images[idx];
-                    long fileSize = 0;
-
-                    if (!string.IsNullOrEmpty(img.Path) && File.Exists(img.Path))
-                    {
-                        try
-                        {
-                            fileSize = new FileInfo(img.Path).Length;
-                        }
-                        // An unreadable image keeps a size of 0.
-                        catch (IOException)
-                        {
-                        }
-                    }
-
-                    imageInfoList.Add(new ImageInfoDto
-                    {
-                        ImageType = imageType.ToString(),
-                        ImageIndex = idx,
-                        Size = fileSize,
-                        Width = img.Width,
-                        Height = img.Height
-                    });
-                }
-
-                localImagesByType[imageType.ToString()] = imageInfoList;
-            }
-
-            if (localImagesByType.Count > 0)
-            {
-                localImagesValue = JsonSerializer.Serialize(localImagesByType);
-            }
-        }
-
-        return (sourceImagesValue, localImagesValue);
     }
 }

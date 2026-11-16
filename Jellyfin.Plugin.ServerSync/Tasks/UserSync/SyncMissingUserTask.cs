@@ -282,33 +282,10 @@ public class SyncMissingUserTask
     /// <summary>Confirms the row's local image matches the source's, or is gone when the source has none.</summary>
     private static void VerifyProfileImageApplied(UserSyncItem record)
     {
-        var sourceHasNoImage = string.IsNullOrEmpty(record.SourceImageHash)
-            && (!record.SourceImageSize.HasValue || record.SourceImageSize <= 0);
-        if (sourceHasNoImage)
+        var mismatch = ImageUtilities.DescribePictureMismatch(record.SourceImageHash, record.SourceImageSize, record.LocalImageHash, record.LocalImageSize);
+        if (mismatch != null)
         {
-            var localHasImage = !string.IsNullOrEmpty(record.LocalImageHash)
-                || (record.LocalImageSize.HasValue && record.LocalImageSize > 0);
-            if (localHasImage)
-            {
-                throw new InvalidOperationException("ProfileImage: local still has an image after apply intended to clear it");
-            }
-
-            return;
-        }
-
-        if (!string.IsNullOrEmpty(record.SourceImageHash)
-            && !string.Equals(record.SourceImageHash, record.LocalImageHash, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"ProfileImage: hash mismatch after apply (source {record.SourceImageHash}, local {record.LocalImageHash})");
-        }
-
-        if (string.IsNullOrEmpty(record.SourceImageHash)
-            && record.SourceImageSize.HasValue
-            && record.LocalImageSize != record.SourceImageSize)
-        {
-            throw new InvalidOperationException(
-                $"ProfileImage: size mismatch after apply (source {record.SourceImageSize}, local {record.LocalImageSize})");
+            throw new InvalidOperationException("ProfileImage: " + mismatch);
         }
     }
 
@@ -451,9 +428,7 @@ public class SyncMissingUserTask
             return;
         }
 
-        var sourceHasNoImage = string.IsNullOrEmpty(item.SourceImageHash)
-            && (!item.SourceImageSize.HasValue || item.SourceImageSize <= 0);
-        if (sourceHasNoImage)
+        if (!ImageUtilities.HasPicture(item.SourceImageHash, item.SourceImageSize))
         {
             if (localUser.ProfileImage != null)
             {
@@ -486,18 +461,8 @@ public class SyncMissingUserTask
 
         try
         {
-            using (var fileStream = File.Create(tempPath))
-            {
-                await StreamUtilities.CopyWithIdleTimeoutAsync(new CappedReadStream(imageStream, StreamCaps.MaxSyncedImageBytes), fileStream, StreamUtilities.DefaultIdleTimeout, cancellationToken: cancellationToken).ConfigureAwait(false);
-            }
-
-            string downloadedHash;
-            using (var verifyStream = File.OpenRead(tempPath))
-            {
-                downloadedHash = (await HashUtilities.ComputeSha256HashAsync(verifyStream, cancellationToken).ConfigureAwait(false)).Hash;
-            }
-
-            var downloadedSize = new FileInfo(tempPath).Length;
+            await ImageUtilities.WriteCappedAsync(imageStream, tempPath, cancellationToken).ConfigureAwait(false);
+            var (downloadedHash, downloadedSize) = await ImageUtilities.HashFileAsync(tempPath, cancellationToken).ConfigureAwait(false);
             if (downloadedSize <= 0)
             {
                 throw new InvalidOperationException(

@@ -20,19 +20,20 @@ public sealed class SlowAnswerHandlerTests
     private static readonly TimeSpan Answering = TimeSpan.FromMilliseconds(300);
 
     /// <summary>
-    /// The list of every person reaches the source with the retry turned off.
+    /// The unpaged list of every person reaches the source with the retry turned off, and the paged list before it keeps its retries.
     /// True: the mark set on the SDK request is read from the HTTP request.
     /// False: the list would still be cut off at the attempt limit on a large source.
     /// </summary>
     [Fact]
     public async Task SendAsync_PersonList_TurnsTheRetryOff()
     {
-        var server = new ClientStubServer().OnJson("/Persons", ClientJson.Page(0));
+        var server = NothingPaged().OnJson("/Persons", ClientJson.Page(0));
         using var client = Client(new SlowAnswerHandler { InnerHandler = server });
 
         await client.GetAllPersonsAsync();
 
-        Assert.True(Assert.Single(server.Seen).NoRetry);
+        Assert.True(Assert.Single(server.To("/Persons")).NoRetry);
+        Assert.False(Assert.Single(server.To("/Items")).NoRetry);
     }
 
     /// <summary>
@@ -59,13 +60,13 @@ public sealed class SlowAnswerHandlerTests
     [Fact]
     public async Task SendAsync_PersonListSlowerThanTheAttemptLimit_AnswersOnce()
     {
-        var server = new ClientStubServer().OnJson("/Persons", ClientJson.Page(1, ClientJson.Item(Guid.NewGuid(), "Person", name: "Ada")));
-        using var client = Client(Chain(server, Answering));
+        var server = NothingPaged().OnJson("/Persons", ClientJson.Page(1, ClientJson.Item(Guid.NewGuid(), "Person", name: "Ada")));
+        using var client = Client(Chain(server, Answering, "/Persons"));
 
         var people = await client.GetAllPersonsAsync();
 
         Assert.Equal("Ada", Assert.Single(people).Name);
-        Assert.Single(server.Seen);
+        Assert.Single(server.To("/Persons"));
     }
 
     /// <summary>
@@ -109,8 +110,8 @@ public sealed class SlowAnswerHandlerTests
     [Fact]
     public async Task SendAsync_PersonListPastTheOrdinaryLimit_Answers()
     {
-        var server = new ClientStubServer().OnJson("/Persons", ClientJson.Page(0));
-        using var client = Client(new SlowAnswerHandler(TimeSpan.FromMilliseconds(50)) { InnerHandler = new Slow(Answering) { InnerHandler = server } });
+        var server = NothingPaged().OnJson("/Persons", ClientJson.Page(0));
+        using var client = Client(new SlowAnswerHandler(TimeSpan.FromMilliseconds(50)) { InnerHandler = new Slow(Answering, "/Persons") { InnerHandler = server } });
 
         var people = await client.GetAllPersonsAsync();
 
@@ -146,7 +147,10 @@ public sealed class SlowAnswerHandlerTests
         => new(NullLogger<SourceServerClient>.Instance, new HttpClient(handler), ClientStubServer.Url, "key", "test", "1.2.3.4");
 
     /// <summary>Builds the plugin's handler order over a slow source, with a 50 ms attempt limit.</summary>
-    private static SlowAnswerHandler Chain(ClientStubServer server, TimeSpan? wait = null)
+    /// <summary>A source whose paged list holds no one, so the client goes on to the unpaged list these tests are about.</summary>
+    private static ClientStubServer NothingPaged() => new ClientStubServer().OnJson("/Items", ClientJson.Page(0));
+
+    private static SlowAnswerHandler Chain(ClientStubServer server, TimeSpan? wait = null, string? only = null)
     {
         var retry = new JpkRetryHandler(new JpkRetryOptions
         {
@@ -155,7 +159,7 @@ public sealed class SlowAnswerHandlerTests
             Delay = (_, _) => Task.CompletedTask
         })
         {
-            InnerHandler = new Slow(wait) { InnerHandler = server }
+            InnerHandler = new Slow(wait, only) { InnerHandler = server }
         };
         return new SlowAnswerHandler { InnerHandler = retry };
     }
@@ -163,17 +167,27 @@ public sealed class SlowAnswerHandlerTests
     /// <summary>
     /// Waits before passing a request on, as a source building a large answer does.
     /// With no wait given it never answers, so only a cancellation ends the request and no test rests on which timer fires first.
+    /// With a path given, only requests to that path wait.
     /// </summary>
     private sealed class Slow : DelegatingHandler
     {
         private readonly TimeSpan _wait;
+        private readonly string? _only;
 
-        public Slow(TimeSpan? wait = null) => _wait = wait ?? Timeout.InfiniteTimeSpan;
+        public Slow(TimeSpan? wait = null, string? only = null)
+        {
+            _wait = wait ?? Timeout.InfiniteTimeSpan;
+            _only = only;
+        }
 
         /// <inheritdoc />
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            await Task.Delay(_wait, cancellationToken).ConfigureAwait(false);
+            if (_only is null || request.RequestUri!.AbsolutePath == _only)
+            {
+                await Task.Delay(_wait, cancellationToken).ConfigureAwait(false);
+            }
+
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
     }

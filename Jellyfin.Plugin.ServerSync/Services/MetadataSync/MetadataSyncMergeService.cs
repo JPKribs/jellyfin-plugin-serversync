@@ -22,6 +22,25 @@ namespace Jellyfin.Plugin.ServerSync.Services.MetadataSync;
 public static class MetadataSyncMergeService
 {
     /// <summary>
+    /// The local image types read into an item's manifest.
+    /// </summary>
+    public static readonly IReadOnlyList<MediaBrowser.Model.Entities.ImageType> ImageTypes = new[]
+    {
+        MediaBrowser.Model.Entities.ImageType.Primary,
+        MediaBrowser.Model.Entities.ImageType.Backdrop,
+        MediaBrowser.Model.Entities.ImageType.Logo,
+        MediaBrowser.Model.Entities.ImageType.Thumb,
+        MediaBrowser.Model.Entities.ImageType.Banner,
+        MediaBrowser.Model.Entities.ImageType.Art,
+        MediaBrowser.Model.Entities.ImageType.Disc
+    };
+
+    /// <summary>
+    /// The source image types left out of an item's manifest. Jellyfin drops a Profile image on a media item, so tracking one would error forever.
+    /// </summary>
+    public static readonly IReadOnlyCollection<string> UnsavableImageTypes = new[] { "Profile" };
+
+    /// <summary>
     /// Builds the source and local metadata blobs, holding only fields that sync so the compare and the hash match what is written.
     /// SortName is left out because each server derives it from Name, dates are calendar dates, and lists are sorted so both sides serialize alike.
     /// </summary>
@@ -97,6 +116,7 @@ public static class MetadataSyncMergeService
     /// <param name="localItem">The matching local item, or null when there is none.</param>
     /// <param name="client">The client for the source server, or null to skip sizing.</param>
     /// <param name="priorSourceManifestJson">The last scan's source manifest, or null.</param>
+    /// <param name="priorLocalManifestJson">The last scan's local manifest, which holds the tags matched so far, or null.</param>
     /// <param name="deepVerification"><c>true</c> to read each image's size from the source.</param>
     /// <param name="logger">Writes a debug entry when sizing fails.</param>
     /// <param name="cancellationToken">Cancels the calls that size the source images.</param>
@@ -107,6 +127,7 @@ public static class MetadataSyncMergeService
         BaseItem? localItem,
         SourceServerClient? client,
         string? priorSourceManifestJson,
+        string? priorLocalManifestJson,
         bool deepVerification,
         ILogger logger,
         CancellationToken cancellationToken)
@@ -115,41 +136,25 @@ public static class MetadataSyncMergeService
         ArgumentNullException.ThrowIfNull(sourceItem);
         ArgumentNullException.ThrowIfNull(logger);
 
-        var sourceImagesByType = new Dictionary<string, List<ImageInfoDto>>();
-        PopulateSourceImagesFromTags(sourceItem, sourceImagesByType);
-
-        string? sourceManifestJson = sourceImagesByType.Count > 0
-            ? JsonSerializer.Serialize(sourceImagesByType)
-            : null;
-
-        if (sourceManifestJson != null
-            && client != null
-            && Guid.TryParse(item.SourceItemId, out var sourceItemGuid))
-        {
-            try
-            {
-                sourceManifestJson = await ImageManifestEnricher.EnrichWithCarryForwardAsync(
-                    sourceManifestJson,
-                    priorSourceManifestJson,
-                    sourceItemGuid,
-                    client,
-                    logger,
-                    item.ItemName ?? item.SourceItemId,
-                    deepVerification,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            // Sizing is optional, so any failure but cancellation falls back to tags alone.
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogDebug(ex, "Source image enrichment failed for {ItemName}. Comparator will fall back to tag-only", FormatUtilities.SanitizeForLog(item.ItemName));
-            }
-        }
+        var (sourceManifestJson, localManifestJson) = await ImageUtilities.ReadManifestsAsync(
+            sourceItem,
+            localItem,
+            ImageTypes,
+            priorSourceManifestJson,
+            priorLocalManifestJson,
+            Guid.TryParse(item.SourceItemId, out var sourceItemGuid) ? sourceItemGuid : null,
+            client,
+            deepVerification,
+            UnsavableImageTypes,
+            logger,
+            item.ItemName ?? item.SourceItemId,
+            cancellationToken).ConfigureAwait(false);
 
         item.Images.UpdateSource(sourceManifestJson);
 
         if (localItem != null)
         {
-            RebuildLocalImagesBlob(item, localItem);
+            item.Images.Local = localManifestJson;
         }
     }
 
@@ -321,56 +326,7 @@ public static class MetadataSyncMergeService
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(localItem);
 
-        var localImagesByType = new Dictionary<string, List<ImageInfoDto>>();
-        var imageTypes = new[]
-        {
-            MediaBrowser.Model.Entities.ImageType.Primary,
-            MediaBrowser.Model.Entities.ImageType.Backdrop,
-            MediaBrowser.Model.Entities.ImageType.Logo,
-            MediaBrowser.Model.Entities.ImageType.Thumb,
-            MediaBrowser.Model.Entities.ImageType.Banner,
-            MediaBrowser.Model.Entities.ImageType.Art,
-            MediaBrowser.Model.Entities.ImageType.Disc
-        };
-
-        foreach (var imageType in imageTypes)
-        {
-            var images = localItem.GetImages(imageType).ToList();
-            if (images.Count == 0) continue;
-
-            var imageInfoList = new List<ImageInfoDto>();
-            for (int idx = 0; idx < images.Count; idx++)
-            {
-                var img = images[idx];
-                long fileSize = 0;
-                if (!string.IsNullOrEmpty(img.Path) && System.IO.File.Exists(img.Path))
-                {
-                    try
-                    {
-                        fileSize = new System.IO.FileInfo(img.Path).Length;
-                    }
-                    // An unreadable image keeps a size of 0.
-                    catch (System.IO.IOException)
-                    {
-                    }
-                }
-
-                imageInfoList.Add(new ImageInfoDto
-                {
-                    ImageType = imageType.ToString(),
-                    ImageIndex = idx,
-                    Size = fileSize,
-                    Width = img.Width,
-                    Height = img.Height
-                });
-            }
-
-            localImagesByType[imageType.ToString()] = imageInfoList;
-        }
-
-        item.Images.Local = localImagesByType.Count > 0
-            ? JsonSerializer.Serialize(localImagesByType)
-            : null;
+        item.Images.Local = ImageUtilities.BuildLocalManifest(localItem, ImageTypes, item.Images.Local);
     }
 
     /// <summary>
@@ -428,45 +384,6 @@ public static class MetadataSyncMergeService
         item.Studios.Local = validStudios.Count > 0
             ? JsonSerializer.Serialize(validStudios)
             : "[]";
-    }
-
-    /// <summary>
-    /// Fills the source image manifest from the image tags the item list already carries, which saves a call per item.
-    /// </summary>
-    private static void PopulateSourceImagesFromTags(BaseItemDto sourceItem, Dictionary<string, List<ImageInfoDto>> sourceImagesByType)
-    {
-        if (sourceItem.ImageTags?.AdditionalData != null)
-        {
-            foreach (var kvp in sourceItem.ImageTags.AdditionalData)
-            {
-                // Jellyfin drops a Profile image on a media item, so tracking one would error forever.
-                if (string.Equals(kvp.Key, "Profile", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var tag = MediaItemUtilities.UnwrapKiotaPrimitive(kvp.Value);
-                if (!string.IsNullOrEmpty(tag))
-                {
-                    sourceImagesByType[kvp.Key] = new List<ImageInfoDto>
-                    {
-                        new ImageInfoDto
-                        {
-                            ImageType = kvp.Key,
-                            ImageIndex = 0,
-                            Tag = tag
-                        }
-                    };
-                }
-            }
-        }
-
-        if (sourceItem.BackdropImageTags?.Count > 0)
-        {
-            sourceImagesByType["Backdrop"] = sourceItem.BackdropImageTags
-                .Select((tag, idx) => new ImageInfoDto { ImageType = "Backdrop", ImageIndex = idx, Tag = tag })
-                .ToList();
-        }
     }
 
     /// <summary>

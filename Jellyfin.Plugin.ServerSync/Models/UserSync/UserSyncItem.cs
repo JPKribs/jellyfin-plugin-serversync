@@ -1,6 +1,7 @@
 using System;
 using Jellyfin.Plugin.ServerSync.Models.Common;
 using Jellyfin.Plugin.ServerSync.Models.Common.Comparators;
+using Jellyfin.Plugin.ServerSync.Utilities;
 using JPKribs.Jellyfin.Base;
 
 namespace Jellyfin.Plugin.ServerSync.Models.UserSync;
@@ -133,21 +134,8 @@ public class UserSyncItem : SyncRecord
         {
             if (PropertyCategory == UserPropertyCategory.ProfileImage)
             {
-                var sourceHasImage = !string.IsNullOrEmpty(SourceImageHash) || (SourceImageSize ?? 0) > 0;
-                var localHasImage = !string.IsNullOrEmpty(LocalImageHash) || (LocalImageSize ?? 0) > 0;
-
                 // An image the source removed but this server still holds is queued for removal.
-                if (!sourceHasImage)
-                {
-                    return localHasImage;
-                }
-
-                if (!string.IsNullOrEmpty(SourceImageHash))
-                {
-                    return !string.Equals(SourceImageHash, LocalImageHash, StringComparison.OrdinalIgnoreCase);
-                }
-
-                return SourceImageSize != LocalImageSize;
+                return ImageUtilities.PictureDiffers(SourceImageHash, SourceImageSize, LocalImageHash, LocalImageSize);
             }
 
             return Value.HasChanges;

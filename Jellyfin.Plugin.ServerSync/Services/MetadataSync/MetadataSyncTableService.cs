@@ -116,7 +116,7 @@ public class MetadataSyncTableService
         ArgumentNullException.ThrowIfNull(item);
         if (!Guid.TryParse(item.SourceItemId, out var sourceItemGuid)) return;
 
-        item.Images.Source = await ImageManifestEnricher.EnrichAsync(
+        item.Images.Source = await ImageUtilities.EnrichAsync(
             item.Images.Source,
             sourceItemGuid,
             client,
@@ -176,6 +176,7 @@ public class MetadataSyncTableService
     /// <param name="syncGenres"><c>true</c> to include genres in the metadata.</param>
     /// <param name="syncTags"><c>true</c> to include tags in the metadata.</param>
     /// <param name="priorSourceImagesJson">The last scan's source image manifest for this key, whose sizes carry over while the tags match, or null.</param>
+    /// <param name="priorLocalImagesJson">The last scan's local image manifest for this key, which holds the tags matched so far, or null.</param>
     /// <param name="deepImageVerification"><c>true</c> to read each image's size from the source.</param>
     /// <param name="client">The client for the source server, used to size its images.</param>
     /// <param name="cancellationToken">Cancels the calls that size the source images.</param>
@@ -191,6 +192,7 @@ public class MetadataSyncTableService
         bool syncGenres,
         bool syncTags,
         string? priorSourceImagesJson,
+        string? priorLocalImagesJson,
         bool deepImageVerification,
         SourceServerClient client,
         CancellationToken cancellationToken)
@@ -247,7 +249,7 @@ public class MetadataSyncTableService
         {
             await MetadataSyncMergeService.MergeImagesAsync(
                 item, sourceItem, localItem, client,
-                priorSourceImagesJson, deepImageVerification,
+                priorSourceImagesJson, priorLocalImagesJson, deepImageVerification,
                 _logger, cancellationToken).ConfigureAwait(false);
         }
 

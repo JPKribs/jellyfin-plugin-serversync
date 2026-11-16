@@ -440,174 +440,27 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
             return;
         }
 
-        var ordered = LocalImageUtilities.AssignSequentialSlots(work);
-
+        var ordered = ImageUtilities.AssignSequentialSlots(work)
+            .Select(slot => new ImageToApply(slot.ImageType, slot.SourceIndex, slot.TargetIndex))
+            .ToList();
         var personContext = record.PersonName ?? record.SourcePersonId ?? localPerson.Id.ToString();
-        var appliedAny = false;
-        var downloadFailures = 0;
-        var saveFailures = 0;
 
-        // Downloaded first, since the clear below is a hard delete.
-        var tempDir = Path.Combine(ConfigManager.GetTempDownloadPath(), "person-images");
-        Directory.CreateDirectory(tempDir);
-        var downloaded = new List<(string ImageType, int? SourceIndex, int TargetIndex, string TempPath, string ContentType, long Bytes)>();
-        var failedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = await ImageUtilities.ReplaceAsync(
+            localPerson,
+            ordered,
+            (image, ct) => imageClient.DownloadItemImageAsync(sourcePersonId, image.ImageType, image.SourceIndex, ct),
+            _providerManager,
+            Path.Combine(ConfigManager.GetTempDownloadPath(), "person-images"),
+            Logger,
+            personContext,
+            cancellationToken).ConfigureAwait(false);
 
-        try
-        {
-            foreach (var (imageType, imageIndex, targetIndex) in ordered)
-            {
-                var (stream, contentType) = await imageClient.DownloadItemImageAsync(
-                    sourcePersonId,
-                    imageType,
-                    imageIndex,
-                    cancellationToken).ConfigureAwait(false);
-
-                if (stream == null)
-                {
-                    downloadFailures++;
-                    failedTypes.Add(imageType);
-                    Logger.LogWarning(
-                        "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned null (404/timeout/network, see prior LogDebug for details). Source manifest claims this image exists. Source server may have stale ImageTags pointing at deleted image data.",
-                        FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(imageType), imageIndex, sourcePersonId);
-                    continue;
-                }
-
-                var tempPath = Path.Combine(tempDir, Guid.NewGuid().ToString("N"));
-                long tempBytes = 0;
-                var buffered = false;
-                try
-                {
-                    await using (stream.ConfigureAwait(false))
-                    {
-                        using var fileStream = File.Create(tempPath);
-                        await StreamUtilities.CopyWithIdleTimeoutAsync(new CappedReadStream(stream, StreamCaps.MaxSyncedImageBytes), fileStream, StreamUtilities.DefaultIdleTimeout, cancellationToken: cancellationToken).ConfigureAwait(false);
-                    }
-
-                    try { tempBytes = new FileInfo(tempPath).Length; } catch (IOException) { }
-
-                    if (tempBytes == 0)
-                    {
-                        // An empty body would save nothing silently, so it counts as failed.
-                        Logger.LogWarning(
-                            "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned 0 bytes (Content-Type: {Ct}). Source server delivered the response but had no image data, likely stale ImageTags pointing at deleted file.",
-                            FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(imageType), imageIndex, sourcePersonId, FormatUtilities.SanitizeForLog(contentType ?? "(none)"));
-                        downloadFailures++;
-                        failedTypes.Add(imageType);
-                        continue;
-                    }
-
-                    if (!string.IsNullOrEmpty(contentType)
-                        && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // A body that is not an image is an error page.
-                        Logger.LogWarning(
-                            "Image apply for {PersonName}: download of {Type}/{Index} from source id {Id} returned non-image Content-Type '{Ct}' ({Bytes} bytes). Refusing to save.",
-                            FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(imageType), imageIndex, sourcePersonId, FormatUtilities.SanitizeForLog(contentType), tempBytes);
-                        downloadFailures++;
-                        failedTypes.Add(imageType);
-                        continue;
-                    }
-
-                    if (!Enum.TryParse<ImageType>(imageType, true, out _))
-                    {
-                        Logger.LogWarning("Image apply for {PersonName}: unknown image type '{Type}' returned by source", FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(imageType));
-                        failedTypes.Add(imageType);
-                        continue;
-                    }
-
-                    downloaded.Add((imageType, imageIndex, targetIndex, tempPath, contentType ?? "image/jpeg", tempBytes));
-                    buffered = true;
-                }
-                finally
-                {
-                    if (!buffered)
-                    {
-                        try { File.Delete(tempPath); } catch (IOException) { }
-                    }
-                }
-            }
-
-            // The type is wiped first, or a leftover image would be adopted again.
-            foreach (var group in downloaded.GroupBy(d => d.ImageType, StringComparer.OrdinalIgnoreCase))
-            {
-                if (failedTypes.Contains(group.Key))
-                {
-                    // Partial set, so do not wipe what cannot be fully replaced.
-                    Logger.LogWarning(
-                        "Image apply for {PersonName}: not all {Type} downloads succeeded, keeping existing local images",
-                        FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(group.Key));
-                    continue;
-                }
-
-                if (!Enum.TryParse<ImageType>(group.Key, true, out var parsedImageType))
-                {
-                    continue;
-                }
-
-                await LocalImageUtilities.ClearImagesAsync(
-                    localPerson, parsedImageType, Logger, personContext, cancellationToken).ConfigureAwait(false);
-
-                foreach (var entry in group.OrderBy(d => d.TargetIndex))
-                {
-                    int beforeCount = 0;
-                    try { beforeCount = localPerson.GetImages(parsedImageType).Count(); }
-                    catch (InvalidOperationException) { }
-                    catch (IOException) { }
-
-                    using var fileStream = new FileStream(entry.TempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    try
-                    {
-                        await _providerManager.SaveImage(
-                            localPerson,
-                            fileStream,
-                            entry.ContentType,
-                            parsedImageType,
-                            entry.TargetIndex,
-                            cancellationToken).ConfigureAwait(false);
-
-                        appliedAny = true;
-
-                        int afterCount = 0;
-                        try { afterCount = localPerson.GetImages(parsedImageType).Count(); }
-                        catch (InvalidOperationException) { }
-                        catch (IOException) { }
-
-                        // A save that adds no image did nothing, which the log should show.
-                        if (afterCount <= beforeCount)
-                        {
-                            Logger.LogWarning(
-                                "Image apply for {PersonName}: SaveImage returned for {Type}/{Index} ({Bytes} bytes) but local count did not increase ({Before} → {After}). SaveImage silently no-op'd, likely an unsupported image type for Person items, a path issue, or a Jellyfin internal rejection.",
-                                FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(entry.ImageType), entry.TargetIndex, entry.Bytes, beforeCount, afterCount);
-                        }
-                        else
-                        {
-                            Logger.LogInformation(
-                                "Image apply for {PersonName}: SaveImage applied {Type}/{Index} ({Bytes} bytes). Local count {Before} → {After}",
-                                FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(entry.ImageType), entry.TargetIndex, entry.Bytes, beforeCount, afterCount);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-                    {
-                        saveFailures++;
-                        Logger.LogWarning(ex, "Image apply for {PersonName}: SaveImage threw for {Type}/{Index} ({Bytes} bytes)", FormatUtilities.SanitizeForLog(record.PersonName), FormatUtilities.SanitizeForLog(entry.ImageType), entry.TargetIndex, entry.Bytes);
-                    }
-                }
-            }
-        }
-        finally
-        {
-            foreach (var entry in downloaded)
-            {
-                try { File.Delete(entry.TempPath); } catch (IOException) { }
-            }
-        }
-
-        if (!appliedAny)
+        // What did not land is left to the verify step, which fails the row when the images still differ.
+        if (result.Saved == 0)
         {
             Logger.LogWarning(
                 "Image apply for {PersonName} produced no successful saves: {Total} attempted, {DownloadFails} download failures, {SaveFails} save failures, fellBack={FellBack}",
-                FormatUtilities.SanitizeForLog(record.PersonName), work.Count, downloadFailures, saveFailures, fellBack);
+                FormatUtilities.SanitizeForLog(record.PersonName), result.Attempted, result.DownloadFailures, result.SaveFailures, fellBack);
             return;
         }
 
@@ -655,48 +508,15 @@ public class SyncMissingPeopleTask : SyncQueueTaskBase<PeopleSyncItem, string>
         catch (InvalidOperationException) { }
         catch (IOException) { }
 
-        var (_, freshLocal) = PeopleSyncMergeService.PopulateImageData(null, freshPerson);
-        record.Images.Local = freshLocal;
+        record.Images.Local = ImageUtilities.BuildLocalManifest(freshPerson, PeopleSyncMergeService.ImageTypes, record.Images.Local);
 
-        // Scan manifests carry no sizes, so the source side gets real sizes here.
-        string? enrichedSource = record.Images.Source;
-        var verifySource = SourceFor(record);
-        if (verifySource != null
-            && !string.IsNullOrEmpty(record.SourcePersonId)
-            && Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid))
-        {
-            try
-            {
-                enrichedSource = await ImageManifestEnricher.EnrichAsync(
-                    record.Images.Source,
-                    sourcePersonGuid,
-                    verifySource.Client,
-                    Logger,
-                    record.PersonName ?? record.SourcePersonId,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                Logger.LogWarning(ex, "Source image enrichment for verify failed for person {PersonName}. Falling back to tag-only comparison", FormatUtilities.SanitizeForLog(record.PersonName));
-            }
-        }
-
-        if (record.Images.Comparator is Models.Common.Comparators.ImageManifestComparator imagesComparator)
-        {
-            var diff = imagesComparator.DescribeDifference(enrichedSource, freshLocal);
-            if (diff == null)
-            {
-                return (true, null);
-            }
-
-            return (false, $"image manifest after apply does not match source manifest: {diff}");
-        }
-
-        if (record.Images.Comparator.Equals(enrichedSource, freshLocal))
-        {
-            return (true, null);
-        }
-
-        return (false, "image manifest after apply does not match source manifest");
+        return await ImageUtilities.VerifyAsync(
+            record.Images,
+            Guid.TryParse(record.SourcePersonId, out var sourcePersonGuid) ? sourcePersonGuid : null,
+            SourceFor(record)?.Client,
+            Logger,
+            record.PersonName ?? record.SourcePersonId ?? freshPerson.Id.ToString(),
+            null,
+            cancellationToken).ConfigureAwait(false);
     }
 }
