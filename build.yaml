@@ -2,7 +2,7 @@
 name: "Server Sync"
 guid: "ebd650b5-6f4c-4ccb-b10d-23dffb3a7286"
 imageUrl: "https://raw.githubusercontent.com/JPKribs/jellyfin-plugin-serversync/refs/heads/master/Jellyfin.Plugin.ServerSync/Assets/Logo.png"
-version: "12.4.16.1"
+version: "12.4.16.2"
 targetAbi: "12.4.0.0"
 framework: "net10.0"
 overview: "Keep several Jellyfin servers in step: content, metadata, people, users, playlists, and watch history."
@@ -30,7 +30,8 @@ artifacts:
 - "Std.UriTemplate.dll"
 changelog:
   fixed:
-  - The Statistics tab showed no Link Streams on a server with content sync off, which is how a server that only serves links is set up. The chart shows whenever a server may link to this one, under Content when content sync is on and in a section of its own when it is off
+  - A link's session on the source showed the source's own Server Sync version. It shows the version of the server the viewer watches on
+  - The Statistics tab described sync type charts on a server with every sync type off. The description shows only while a sync type is on
   developer:
-  - GET /Sync/Statistics answers LinkStreams whenever a server entry may link here, whatever sync types are on
-  - The wire protocol and the database schema are unchanged, so this release works alongside 12.4.16.0 one server at a time
+  - POST /Sync/Peer/Playback reads the caller's X-ServerSync-Version for the session it opens, and falls back to this server's version when the header is empty
+  - The wire protocol and the database schema are unchanged, so this release works alongside 12.4.16.1 one server at a time
