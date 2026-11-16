@@ -58,7 +58,7 @@ changelog:
   developer:
   - The guides in starthere.md and skills cover naming, style, code, testing, profiling, documentation, review, and release, and docs/Architecture.md maps the parts
   - Tests mirror the source folders, shared fakes live in Fakes, and the tests that measure real time or disk space run in one serial collection
-  - Every source file that holds logic has a test file of its own, the controllers included, and each route is checked for the authorization or peer guard it must carry. The suite grows from 1,264 tests to 4,177
+  - Every source file that holds logic has a test file of its own, the controllers included, and each route is checked for the authorization or peer guard it must carry. The suite grows from 1,264 tests to 4,193
   - Every namespace matches its folder and every type has a file named after it
   - Comments follow the code guide. A catch names the exceptions it expects or filters out a cancelled run, and each one left broad says why
   - The image proxy asks the source through SourceServerClientFactory, as every other call does
