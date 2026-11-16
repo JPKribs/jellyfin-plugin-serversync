@@ -48,7 +48,8 @@ changelog:
   - A watch history refresh looked up the same user for every item. A refresh that took 40.5 seconds takes 17.2 on the same data
   - The refusal to save a server whose Server Sync cannot talk to this one showed as a pop up. It shows beside the Save button
   - A settings file with an empty server entry stopped the settings from loading
-  - A People refresh against a source with a large catalog failed on every run, since the source took longer than 90 seconds to start listing its people. The list is asked for once and may take five minutes
+  - A link showed no subtitles on players that ask for them with no token, such as webOS. A subtitle or attachment request that names no user is read while a viewer is playing the link
+  - A People refresh against a source with a large catalog failed on every run, since the source took longer than 90 seconds to start listing its people. The list is asked for once and may take thirty minutes
   - A server entry asked for with its key in another letter case was sent no pairing secret. The secret is read under the key the entry was saved with
   - A thumbnail from a server entry that could not be called failed with an error. It shows as no image
   - An image's size could read 1,5 KB on a server set to a language that writes decimals with a comma

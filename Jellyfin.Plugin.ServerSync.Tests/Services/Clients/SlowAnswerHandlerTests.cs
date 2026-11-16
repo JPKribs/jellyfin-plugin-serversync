@@ -81,6 +81,64 @@ public sealed class SlowAnswerHandlerTests
         Assert.Empty(server.Seen);
     }
 
+    /// <summary>
+    /// An unmarked request that takes longer than the ordinary limit is cut off, with the timeout the client itself would give.
+    /// True: raising the client's limit for the people list leaves every other request held to its own limit.
+    /// False: a source that never answers would hold every call for thirty minutes.
+    /// </summary>
+    [Fact]
+    public async Task SendAsync_UnmarkedRequestPastTheLimit_TimesOut()
+    {
+        var server = new ClientStubServer().OnJson("/any", "{}");
+        using var http = new HttpClient(new SlowAnswerHandler(TimeSpan.FromMilliseconds(50)) { InnerHandler = new Slow { InnerHandler = server } });
+
+        var failure = await Assert.ThrowsAsync<TaskCanceledException>(() => http.GetAsync(new Uri(ClientStubServer.Url + "/any")));
+
+        Assert.IsType<TimeoutException>(failure.InnerException);
+        Assert.Empty(server.Seen);
+    }
+
+    /// <summary>
+    /// A marked request is not held to the ordinary limit.
+    /// True: the people list may take longer than five minutes.
+    /// False: the list would be cut off at five minutes on a source that needs longer.
+    /// </summary>
+    [Fact]
+    public async Task SendAsync_PersonListPastTheOrdinaryLimit_Answers()
+    {
+        var server = new ClientStubServer().OnJson("/Persons", ClientJson.Page(0));
+        using var client = Client(new SlowAnswerHandler(TimeSpan.FromMilliseconds(50)) { InnerHandler = new Slow { InnerHandler = server } });
+
+        var people = await client.GetAllPersonsAsync();
+
+        Assert.Empty(people);
+    }
+
+    /// <summary>
+    /// A caller that cancels gets its own cancellation, not a timeout.
+    /// True: a stopped task ends as stopped.
+    /// False: a stopped task would be reported as a source that did not answer.
+    /// </summary>
+    [Fact]
+    public async Task SendAsync_CallerCancels_IsNotATimeout()
+    {
+        using var http = new HttpClient(new SlowAnswerHandler { InnerHandler = new Slow { InnerHandler = new ClientStubServer() } });
+        using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(30));
+
+        var failure = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => http.GetAsync(new Uri(ClientStubServer.Url + "/any"), stop.Token));
+
+        Assert.IsNotType<TimeoutException>(failure.InnerException);
+    }
+
+    /// <summary>
+    /// A limit of zero or less is refused.
+    /// True: a handler cannot be built that cuts every request off at once.
+    /// False: a mistyped limit would fail every call to a source.
+    /// </summary>
+    [Fact]
+    public void Constructor_LimitNotPositive_Throws()
+        => Assert.Throws<ArgumentOutOfRangeException>(() => new SlowAnswerHandler(TimeSpan.Zero));
+
     private static SourceServerClient Client(HttpMessageHandler handler)
         => new(NullLogger<SourceServerClient>.Instance, new HttpClient(handler), ClientStubServer.Url, "key", "test", "1.2.3.4");
 

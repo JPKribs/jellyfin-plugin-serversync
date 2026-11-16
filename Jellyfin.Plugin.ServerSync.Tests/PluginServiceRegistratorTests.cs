@@ -112,20 +112,21 @@ public sealed class PluginServiceRegistratorTests
     }
 
     /// <summary>
-    /// Both named clients to other servers allow five minutes for a call.
-    /// True: a large transfer is not cut off at the default hundred seconds.
-    /// False: long downloads would fail partway on every run.
+    /// Both named clients to other servers allow thirty minutes, the limit of a request marked as slow to answer.
+    /// True: the list of every person on a large source is not cut off by the client, and the handler holds every other request to five minutes.
+    /// False: a marked request would be cancelled at the client's limit however long the handler allowed.
     /// </summary>
     [Theory]
     [InlineData(SourceServerClient.HttpClientName)]
     [InlineData(SourceServerClient.PublicHttpClientName)]
-    public void RegisterServices_NamedClient_AllowsFiveMinutes(string name)
+    public void RegisterServices_NamedClient_AllowsTheSlowLimit(string name)
     {
         using var provider = Provider();
 
         using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(name);
 
-        Assert.Equal(TimeSpan.FromMinutes(5), client.Timeout);
+        Assert.Equal(TimeSpan.FromMinutes(30), client.Timeout);
+        Assert.Equal(TimeSpan.FromMinutes(5), SlowAnswerHandler.Limit);
     }
 
     /// <summary>

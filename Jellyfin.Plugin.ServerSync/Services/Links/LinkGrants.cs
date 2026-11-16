@@ -130,6 +130,21 @@ public sealed class LinkGrants
         }
     }
 
+    /// <summary>
+    /// Whether any user holds a live grant on a link, so somebody the source allowed is playing it now.
+    /// The probe's grant does not count, and nothing is marked as used.
+    /// </summary>
+    /// <param name="linkId">The link's id.</param>
+    /// <returns><c>true</c> when a user holds a live grant.</returns>
+    public bool HasViewer(string linkId)
+    {
+        ArgumentNullException.ThrowIfNull(linkId);
+        lock (_lock)
+        {
+            return _grants.TryGetValue(linkId, out var users) && users.Any(p => p.Key != Guid.Empty && !p.Value.Probe && Live(p.Value));
+        }
+    }
+
     /// <summary>Lets this server's own media probe read a link nobody is playing.</summary>
     /// <param name="linkId">The link's id.</param>
     public void GrantProbe(string linkId)

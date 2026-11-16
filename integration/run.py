@@ -4073,7 +4073,7 @@ def scenario_chaos_scale(creds, apis):
 
 
 def scenario_link_embedded_subtitles(creds, apis):
-    """An MKV with subtitles inside it, held as a link: the tracks are listed, text extracts through the link for a user who pressed play and not for one who did not, and a subtitle burns into a transcode."""
+    """An MKV with subtitles inside it, held as a link: the tracks are listed, text extracts through the link for a user who pressed play, for a player that sends no token while that play is live, and not for a user who did not press play, and a subtitle burns into a transcode."""
     a, local = apis["source-a"], apis["local"]
     lu = creds["servers"]["local"]["userId"]
     needle = f"Subbed {uuid.uuid4().hex[:6]}"
@@ -4119,6 +4119,13 @@ def scenario_link_embedded_subtitles(creds, apis):
         viewer.token = auth["AccessToken"]
         status, _, _ = http(viewer, "GET", f"/Videos/{item['Id']}/{source['Id']}/Subtitles/{srt.get('Index')}/0/Stream.srt")
         expect(status == 403, f"a user who never pressed play cannot have the link read for subtitles ({status})")
+
+        # Players such as webOS ask for a subtitle by its address alone, with no token.
+        nobody = Api("local-nobody-subs", SERVERS["local"]["port"], "nobody-subs")
+        status, _, text = http(nobody, "GET", f"/Videos/{item['Id']}/{source['Id']}/Subtitles/{srt.get('Index')}/Stream.vtt", timeout=120)
+        expect(status == 200 and b"Hello from inside the link" in text, f"a request with no user reads the subtitle while a viewer is playing the link ({status})")
+        status, _, _ = http(nobody, "GET", f"/Videos/{item['Id']}/stream?static=true&mediaSourceId={source['Id']}")
+        expect(status in (401, 403), f"a request with no user cannot read the video itself ({status})")
 
         query = (f"MediaSourceId={source['Id']}&VideoCodec=h264&AudioCodec=aac&VideoBitrate=200000&MaxWidth=320&SegmentContainer=ts"
                  f"&SubtitleStreamIndex={srt.get('Index')}&SubtitleMethod=Encode&PlaySessionId=it-subs-{uuid.uuid4().hex[:6]}")

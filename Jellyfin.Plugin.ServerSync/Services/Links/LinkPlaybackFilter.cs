@@ -36,6 +36,12 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
     /// <summary>The controllers where a user asks to play, which ask the source before the link is probed.</summary>
     private static readonly string[] PlayControllers = { "MediaInfo", "UniversalAudio" };
 
+    /// <summary>
+    /// The controllers Jellyfin answers with no user, which players ask by address alone.
+    /// A request with no user is let through on these while a viewer the source allowed is playing the link.
+    /// </summary>
+    private static readonly string[] SentWithoutAUser = { "Subtitle", "VideoAttachments" };
+
     /// <summary>The actions that hand out the item's file itself, which for a link is the .strm and its secret.</summary>
     private static readonly string[] FileActions = { "GetFile", "GetDownload" };
 
@@ -161,9 +167,18 @@ public sealed class LinkPlaybackFilter : IAsyncActionFilter, IAsyncResultFilter
                     context.ActionArguments["enableRedirection"] = false;
                 }
             }
+            else if (userId is null && SentWithoutAUser.Contains(controller, StringComparer.Ordinal) && _grants.HasViewer(links[0].Link.LinkId))
+            {
+                // Players such as webOS ask for these with no token, as Jellyfin allows for any item. They are read as the viewer playing the link now.
+            }
             else if (userId is not { } streaming || !_grants.Refresh(links[0].Link.LinkId, streaming))
             {
                 // A stream nobody asked to play would read the link as whoever last did.
+                _logger.LogInformation(
+                    "Refused a {Controller} request for the link {Path}, since {Who} holds no permission to play it",
+                    controller,
+                    FormatUtilities.SanitizeForLog(links[0].Link.LinkPath),
+                    userId is null ? "a request with no user" : "its user");
                 context.Result = Refused("press play again, so this server can ask the source");
                 return;
             }

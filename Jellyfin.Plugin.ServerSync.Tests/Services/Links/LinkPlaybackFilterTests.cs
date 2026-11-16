@@ -160,6 +160,61 @@ public sealed class LinkPlaybackFilterTests
     }
 
     /// <summary>
+    /// A subtitle or attachment request with no user goes through only while a viewer is playing the link, and nothing else does.
+    /// True: a player that sends no token, such as webOS, shows a link's subtitles during a play.
+    /// False: either those players get no subtitles, or a link's video or an idle link's subtitles open to anyone.
+    /// </summary>
+    /// <param name="controller">The request's controller.</param>
+    /// <param name="action">The request's action.</param>
+    /// <param name="viewer">Whether another user holds a live grant on the link.</param>
+    /// <param name="probe">Whether this server's probe holds a grant on the link.</param>
+    /// <param name="passes">Whether the request goes through.</param>
+    [Theory]
+    [InlineData("Subtitle", "GetSubtitle", true, false, true)]
+    [InlineData("Subtitle", "GetSubtitleWithTicks", true, false, true)]
+    [InlineData("VideoAttachments", "GetAttachment", true, false, true)]
+    [InlineData("Subtitle", "GetSubtitle", false, false, false)]
+    [InlineData("Subtitle", "GetSubtitle", false, true, false)]
+    [InlineData("Videos", "GetVideoStream", true, false, false)]
+    [InlineData("DynamicHls", "GetMasterHlsVideoPlaylist", true, false, false)]
+    public async Task OnActionExecutionAsync_RequestWithoutAUser_PassesOnlyForSubtitlesDuringAPlay(string controller, string action, bool viewer, bool probe, bool passes)
+    {
+        if (viewer)
+        {
+            _grants.Grant("aaaa", User);
+        }
+
+        if (probe)
+        {
+            _grants.GrantProbe("aaaa");
+        }
+
+        var context = Executing(controller, action, null);
+
+        var ran = await Run(Filter(), context);
+
+        Assert.Equal(passes, ran);
+        Assert.Equal(passes ? null : 403, (context.Result as ObjectResult)?.StatusCode);
+    }
+
+    /// <summary>
+    /// A signed in user who never pressed play is refused a link's subtitles, even while somebody else is playing it.
+    /// True: a named user reads a link only under their own permission.
+    /// False: one viewer's play would let every signed in user read the link's subtitles as them.
+    /// </summary>
+    [Fact]
+    public async Task OnActionExecutionAsync_SubtitleForAUserWithoutAGrant_IsRefused()
+    {
+        _grants.Grant("aaaa", User);
+        var context = Executing("Subtitle", "GetSubtitle", Guid.NewGuid());
+
+        var ran = await Run(Filter(), context);
+
+        Assert.False(ran);
+        Assert.Equal(403, Assert.IsType<ObjectResult>(context.Result).StatusCode);
+    }
+
+    /// <summary>
     /// A page of items loses the address of each link source and keeps every other source as it was.
     /// True: no client ever receives a link's loopback URL and its secret.
     /// False: a library listing would hand every link's secret to any signed in user.

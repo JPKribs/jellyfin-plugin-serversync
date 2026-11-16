@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.ServerSync;
 
 /// <summary>
 /// Registers every class marked with <see cref="PluginServiceAttribute"/>, the gated background services, and the secret protector.
-/// It also registers the two HTTP clients for other servers, each with a connect timeout, the address check, the redirect refusal, retries, and one long try for a slow answer.
+/// It also registers the two HTTP clients for other servers, each with a connect timeout, the address check, the redirect refusal, retries, and the limit on how long an answer may take to start.
 /// </summary>
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
@@ -50,7 +50,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection
             .AddHttpClient(SourceServerClient.HttpClientName, c =>
             {
-                c.Timeout = TimeSpan.FromMinutes(5);
+                c.Timeout = SlowAnswerHandler.SlowLimit;
             })
             .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
             {
@@ -66,7 +66,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection
             .AddHttpClient(SourceServerClient.PublicHttpClientName, c =>
             {
-                c.Timeout = TimeSpan.FromMinutes(5);
+                c.Timeout = SlowAnswerHandler.SlowLimit;
             })
             .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
             {

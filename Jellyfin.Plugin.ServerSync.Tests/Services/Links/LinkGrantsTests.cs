@@ -75,6 +75,55 @@ public sealed class LinkGrantsTests
     }
 
     /// <summary>
+    /// A link has a viewer only while a user holds a live grant on it.
+    /// True: a request with no user is let through only during somebody's play.
+    /// False: a lapsed play, or this server's own probe, would open a link's subtitles to anyone.
+    /// </summary>
+    /// <param name="user">Whether a user was granted.</param>
+    /// <param name="probe">Whether the probe was granted.</param>
+    /// <param name="secondsLater">How long after the grants the question is asked.</param>
+    /// <param name="expected">Whether the link has a viewer.</param>
+    [Theory]
+    [InlineData(true, false, 119, true)]
+    [InlineData(true, false, 120, false)]
+    [InlineData(false, true, 0, false)]
+    [InlineData(false, false, 0, false)]
+    public void HasViewer_OnlyALiveUserGrant_Counts(bool user, bool probe, int secondsLater, bool expected)
+    {
+        var grants = Grants();
+        if (user)
+        {
+            grants.Grant(Link, User);
+        }
+
+        if (probe)
+        {
+            grants.GrantProbe(Link);
+        }
+
+        _now = _now.AddSeconds(secondsLater);
+
+        Assert.Equal(expected, grants.HasViewer(Link));
+    }
+
+    /// <summary>
+    /// Asking whether a link has a viewer does not use the grant.
+    /// True: requests with no user cannot keep a play's grant alive past its window.
+    /// False: a player polling for subtitles would hold the link open for good.
+    /// </summary>
+    [Fact]
+    public void HasViewer_Asked_DoesNotExtendTheGrant()
+    {
+        var grants = Grants();
+        grants.Grant(Link, User);
+        _now = _now.AddSeconds(100);
+        Assert.True(grants.HasViewer(Link));
+        _now = _now.AddSeconds(20);
+
+        Assert.False(grants.HasViewer(Link));
+    }
+
+    /// <summary>
     /// A grant given again while its play is under way stays in use.
     /// True: a second PlaybackInfo during a film does not put the play back on the two minute window.
     /// False: a paused viewer whose client asked again would be cut off two minutes later.
