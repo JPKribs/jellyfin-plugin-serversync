@@ -62,7 +62,7 @@ changelog:
   - A history fetch no longer asks the source for media sources, which it never read
   - Values another server or a request supplies pass through SanitizeForLog in the link, provider, and whitelist log lines
   - PluginConfiguration.ValidateConfiguration and IsValid, which nothing called, are removed
-  - Uses JPKribs.Jellyfin.Base 2026.11.17. Its speed bucket, throttled and capped streams, stalled copy detection, retry and redirect handlers, path containment, hashing, size constants, address guard with its HTTPS rule, atomic file writes, and secret compare replace the local copies
+  - Uses JPKribs.Jellyfin.Base 2026.11.18. Its speed bucket, throttled and capped streams, stalled copy detection, retry and redirect handlers, path containment, hashing, size constants, address guard with its HTTPS rule, atomic file writes, and secret compare replace the local copies
   - The link key file is written for its owner only from the first byte
   - GET /Sync/Items takes serverKey to list one server entry's rows
   - The pages use Base's base- classes and tokens, and each is built with createConfigPage through createServerSyncPage in serversync_shared.js, which also holds the tab list
